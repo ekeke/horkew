@@ -148,6 +148,42 @@ describe('lynch statement', () => {
     })
   })
 
+  test('no execution: 処刑者なし', () => {
+    const result = S.parseLynchStatement('処刑者なし', 1)
+    assert.deepEqual(result, {
+      type: 'lynch',
+      line: 1,
+      target: null,
+    })
+  })
+
+  test('no execution: 吊りなし', () => {
+    const result = S.parseLynchStatement('吊りなし', 1)
+    assert.deepEqual(result, {
+      type: 'lynch',
+      line: 1,
+      target: null,
+    })
+  })
+
+  test('no execution: 処刑無し', () => {
+    const result = S.parseLynchStatement('処刑無し', 1)
+    assert.deepEqual(result, {
+      type: 'lynch',
+      line: 1,
+      target: null,
+    })
+  })
+
+  test('no execution: 吊ナシ with spaces', () => {
+    const result = S.parseLynchStatement('　　吊ナシ　', 1)
+    assert.deepEqual(result, {
+      type: 'lynch',
+      line: 1,
+      target: null,
+    })
+  })
+
   test('invalid lynch statement', () => {
     const result = S.parseLynchStatement('', 1)
     assert.equal(result, null)

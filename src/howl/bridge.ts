@@ -158,14 +158,16 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
 
       case 'lynch': {
         const s = stmt as LynchStatement
-        const targetSeat = resolveSeat(s.target)
-        const status = statuses.get(targetSeat)!
-        status.surviving = false
-        status.causeOfDeath = 'execution'
-        status.diedDay = day
-        const currentExec = executions.get(day) || []
-        currentExec.push(targetSeat)
-        executions.set(day, currentExec)
+        if (s.target !== null) {
+          const targetSeat = resolveSeat(s.target)
+          const status = statuses.get(targetSeat)!
+          status.surviving = false
+          status.causeOfDeath = 'execution'
+          status.diedDay = day
+          const currentExec = executions.get(day) || []
+          currentExec.push(targetSeat)
+          executions.set(day, currentExec)
+        }
         break
       }
 

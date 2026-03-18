@@ -126,16 +126,28 @@ Night kill(s). Advances the day counter.
 
 ### 5. Lynch (`lynch`)
 
-Daytime execution of a player.
+Daytime execution of a player, or declaration that no execution occurred.
 
-**Syntax**: `吊り` or `処刑` followed by delimiter and target.
+**Syntax**: `吊り` or `処刑` followed by delimiter and target, or followed by a "none" keyword.
 
 ```
 吊り Alice
 処刑：ボブ
 ```
 
-**Output**: `{ type: 'lynch', target: string }`
+To indicate no execution took place, append `なし`, `無し`, or `ナシ` (optionally preceded by `者`):
+
+```
+処刑者なし
+処刑なし
+吊りなし
+吊無し
+処刑ナシ
+```
+
+**Output**: `{ type: 'lynch', target: string | null }`
+
+When `target` is `null`, no player is executed on that day.
 
 ### 6. Revote (`revote`)
 

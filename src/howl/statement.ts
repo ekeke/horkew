@@ -44,7 +44,7 @@ export type AttackStatement = Statement & {
 
 export type LynchStatement = Statement & {
     type: 'lynch'  // Type of statement (e.g., 'lynch')
-    target: string  // Target player's name
+    target: string | null  // Target player's name, null if no execution
 }
 
 export type RevoteStatement = Statement & {
@@ -152,6 +152,10 @@ export function parseRevealStatement(text: string, line: number): RevealStatemen
 }
 
 export function parseLynchStatement(text: string, line: number): LynchStatement | null {
+  const noLynchRegex = new RegExp(`^${V.optionalSpace}${V.lynch}${V.none}${V.optionalSpace}$`)
+  if (noLynchRegex.test(text)) {
+    return { type: 'lynch', line, target: null }
+  }
   const lynchRegex = new RegExp(`^${V.optionalSpace}${V.lynch}${V.delimiter}(${V.possibleName})${V.optionalSpace}$`)
   const match = lynchRegex.exec(text)
   if (!match) return null
