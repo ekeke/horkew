@@ -3,6 +3,7 @@
   import { parse } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import { systemRoles } from '../src/types/index.ts'
+  import { stringifyStatements } from './stringify.ts'
   import type { RetarResponse, SeatResult } from './analysis.worker.ts'
   import type { SystemRole } from '../src/types/index.ts'
   import AnalysisWorker from './analysis.worker.ts?worker'
@@ -41,6 +42,7 @@
   let activeTitle = $state(localStorage.getItem(ACTIVE_KEY) ?? '')
   let input = $state(activeTitle ? loadText(activeTitle) : '')
   let rawStatements = $state('')
+  let parsedOutput = $state('')
   let statementLines: number[] = []
   let analysisSeats: SeatResult[] = $state([])
   let analysisError = $state('')
@@ -65,6 +67,7 @@
     input = loadText(title)
     localStorage.setItem(ACTIVE_KEY, title)
     rawStatements = ''
+    parsedOutput = ''
     analysisSeats = []
     analysisError = ''
   }
@@ -88,6 +91,7 @@
     }
     showModal = false
     rawStatements = ''
+    parsedOutput = ''
     analysisSeats = []
     analysisError = ''
   }
@@ -108,6 +112,7 @@
       localStorage.removeItem(ACTIVE_KEY)
     }
     rawStatements = ''
+    parsedOutput = ''
     analysisSeats = []
     analysisError = ''
   }
@@ -194,10 +199,12 @@
     analysisSeats = []
     analysisError = ''
     rawStatements = ''
+    parsedOutput = ''
 
     try {
       const { meta, statements } = parse(getInputUpToCursor())
       rawStatements = JSON.stringify(statements, null, 2)
+      parsedOutput = stringifyStatements(statements)
       statementLines = statements.map((s: any) => s.line as number)
 
       const { vs, setup, players: playersMap } = buildVillageStatus(statements, meta)
@@ -285,8 +292,8 @@
 
     <section class="pane">
       <div class="pane-header">Parsed</div>
-      <div class="pane-body pane-placeholder">
-        <span>未実装・建設予定地</span>
+      <div class="pane-body">
+        <pre class="output">{parsedOutput}</pre>
       </div>
     </section>
 
