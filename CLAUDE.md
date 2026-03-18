@@ -13,7 +13,16 @@ The `howl/` and `common/` directories are **reference implementations** extracte
 
 ## Commands
 
-### howl/
+### Root project (unified)
+```bash
+npm install
+npm test                                     # node:test + node:assert with coverage
+npm run build                                # tsc (typecheck only, noEmit)
+npm run typecheck                            # tsc --noEmit
+node --experimental-strip-types --test src/<file>.test.ts   # single test
+```
+
+### howl/ (reference)
 ```bash
 cd howl && npm install
 cd howl && npm test                          # node:test + node:assert with coverage
@@ -21,8 +30,8 @@ cd howl && npm run build                     # tsc + Vite lib build
 node --experimental-strip-types --test howl/test/<file>.ts   # single test
 ```
 
-### common/ (retar)
-No standalone build/test setup yet — these files were extracted as reference. Tests use Vitest patterns (expect/describe/it).
+### common/ (reference, retar)
+No standalone build/test setup — reference implementation. Tests use Vitest patterns (expect/describe/it).
 
 ## Architecture
 
