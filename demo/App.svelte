@@ -297,6 +297,8 @@
           {#each parsedLines as line}
             {#if line.type === 'blank'}
               <div class="parsed-blank">&nbsp;</div>
+            {:else if line.type === 'day'}
+              <div class="parsed-day">{line.text}</div>
             {:else if line.type === 'unknown'}
               <div class="parsed-unknown">{line.text}</div>
             {:else}
@@ -482,6 +484,13 @@
 
   .parsed-output {
     white-space: normal;
+  }
+
+  .parsed-day {
+    color: #cba6f7;
+    font-weight: 600;
+    font-size: 12px;
+    padding: 2px 0;
   }
 
   .parsed-unknown {

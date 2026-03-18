@@ -100,6 +100,63 @@ date: 2023-10-01
     assert.ok(parsed.meta)
     assert.ok(parsed.statements)
   })
+
+  test('assigns day numbers to statements', () => {
+    const parsed = parse(howl)
+    const stmts = parsed.statements
+
+    // All statements should have a day
+    for (const s of stmts) {
+      assert.ok(s.day !== undefined, `statement ${s.type} at line ${s.line} should have day`)
+    }
+
+    // join is day 1
+    assert.strictEqual(stmts[0].day, 1)
+
+    // First attack (噛み ルガ) advances to day 2
+    const firstAttack = stmts.find(s => s.type === 'attack')!
+    assert.strictEqual(firstAttack.day, 2)
+
+    // Statements after first attack but before next attack/peace are day 2
+    const firstAttackIdx = stmts.indexOf(firstAttack)
+    const nextBoundary = stmts.findIndex((s, i) => i > firstAttackIdx && (s.type === 'attack' || s.type === 'peace'))
+    for (let i = firstAttackIdx + 1; i < nextBoundary; i++) {
+      assert.strictEqual(stmts[i].day, 2, `statement ${stmts[i].type} at line ${stmts[i].line} should be day 2`)
+    }
+  })
+
+  test('multiple attacks in one night share the same day', () => {
+    const text = `+Alice,Bob,Charlie,Dave,Eve
+吊り Alice
+噛み Bob
+噛み Charlie
+Dave→Eve
+吊り Eve`
+    const stmts = parse(text).statements
+    // join, lynch = day 1
+    assert.strictEqual(stmts[0].day, 1) // join
+    assert.strictEqual(stmts[1].day, 1) // lynch Alice
+    // Both attacks = day 2 (single increment)
+    assert.strictEqual(stmts[2].day, 2) // attack Bob
+    assert.strictEqual(stmts[3].day, 2) // attack Charlie
+    // Next daytime statements = day 2
+    assert.strictEqual(stmts[4].day, 2) // vote
+    assert.strictEqual(stmts[5].day, 2) // lynch Eve
+  })
+
+  test('peace and attack do not double-increment', () => {
+    const text = `+Alice,Bob,Charlie
+吊り Alice
+平和
+Bob→Charlie
+吊り Charlie`
+    const stmts = parse(text).statements
+    assert.strictEqual(stmts[0].day, 1) // join
+    assert.strictEqual(stmts[1].day, 1) // lynch
+    assert.strictEqual(stmts[2].day, 2) // peace
+    assert.strictEqual(stmts[3].day, 2) // vote
+    assert.strictEqual(stmts[4].day, 2) // lynch
+  })
 })
 
 describe('fillMultiVoteVoters', () => {

@@ -78,17 +78,22 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     return Number(results[0])
   }
 
-  function nextDay() {
-    day++
-    for (const status of statuses.values()) {
-      if (!status.surviving) status.survivedDays++
-      status.voted = false
-      status.votedCount = 0
-      status.votedTarget = -1
+  function syncDay(stmt: Statement) {
+    if (stmt.day === undefined || stmt.day === day) return
+    const newDay = stmt.day
+    while (day < newDay) {
+      day++
+      for (const status of statuses.values()) {
+        if (!status.surviving) status.survivedDays++
+        status.voted = false
+        status.votedCount = 0
+        status.votedTarget = -1
+      }
     }
   }
 
   for (const stmt of statements) {
+    syncDay(stmt)
     switch (stmt.type) {
       case 'join': {
         const s = stmt as JoinStatement
@@ -137,7 +142,6 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
 
       case 'attack': {
         const s = stmt as AttackStatement
-        nextDay()
         for (const targetName of s.target) {
           const targetSeat = resolveSeat(targetName)
           const status = statuses.get(targetSeat)!
@@ -152,7 +156,6 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       }
 
       case 'peace': {
-        nextDay()
         break
       }
 
@@ -204,7 +207,8 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
               actorStatus.assertions.set(targetSeat, speciesMap[assertion.result]!)
             }
             if (assertion.action === 'guard') {
-              actorStatus.actions.set(day, targetSeat)
+              // Guard happened the previous night (reported on current day)
+              actorStatus.actions.set(day - 1, targetSeat)
             }
           }
         }

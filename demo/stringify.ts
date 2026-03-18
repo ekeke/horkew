@@ -28,7 +28,7 @@ function speciesLabel(species: string): string {
 
 export type StringifiedLine = {
   text: string
-  type: 'normal' | 'unknown' | 'blank'
+  type: 'normal' | 'unknown' | 'blank' | 'day'
 }
 
 export function stringifyStatements(statements: Statement[]): StringifiedLine[] {
@@ -48,7 +48,6 @@ export function stringifyStatements(statements: Statement[]): StringifiedLine[] 
   }
 
   const claimedRoles = new Map<string, string>()
-  const assertionCount = new Map<string, number>()
 
   const divineVerbs: Record<string, string> = {
     seer: '占った',
@@ -115,13 +114,11 @@ export function stringifyStatements(statements: Statement[]): StringifiedLine[] 
           claimedRoles.set(resolve(st.actor), claimAssertion.roles![0])
         }
         const role = claimedRoles.get(resolve(st.actor))
-        const actorKey = resolve(st.actor)
-        const prevCount = assertionCount.get(actorKey) ?? 0
         const history = st.assertions.filter(a => !a.roles)
+        const baseDay = (st.day ?? 1) - history.length
         for (let i = 0; i < history.length; i++) {
-          lines.push({ text: `  ${assertionToString(st.actor, role, history[i], prevCount + i + 1)}`, type: 'normal' })
+          lines.push({ text: `  ${assertionToString(st.actor, role, history[i], baseDay + i)}`, type: 'normal' })
         }
-        assertionCount.set(actorKey, prevCount + history.length)
         return lines
       }
       case 'peace':
@@ -141,8 +138,13 @@ export function stringifyStatements(statements: Statement[]): StringifiedLine[] 
 
   const result: StringifiedLine[] = []
   let prevLine = -1
+  let prevDay = -1
   for (const s of statements) {
-    if (prevLine >= 0 && s.line > prevLine + 1) {
+    if (s.day !== undefined && s.day !== prevDay) {
+      if (prevDay >= 0) result.push({ text: '', type: 'blank' })
+      result.push({ text: `${s.day}日目`, type: 'day' })
+      prevDay = s.day
+    } else if (prevLine >= 0 && s.line > prevLine + 1) {
       result.push({ text: '', type: 'blank' })
     }
     result.push(...stringifyOne(s))

@@ -210,6 +210,22 @@ function fillMediumTargets(statements: Statement[]): Statement[] {
   })
 }
 
+function assignDays(statements: Statement[]): Statement[] {
+  let day = 1
+  let inNight = false
+  return statements.map(s => {
+    if (s.type === 'attack' || s.type === 'peace') {
+      if (!inNight) {
+        day++
+        inNight = true
+      }
+      return { ...s, day }
+    }
+    inNight = false
+    return { ...s, day }
+  })
+}
+
 export function parse(text: string, options: ParseOptions = {}): { meta: any, statements: Statement[] } {
   const { meta, lines }: { meta: any; lines: Line[] } = preprocess(text)
   const mergedOptions: ParseOptions = {
@@ -230,6 +246,7 @@ export function parse(text: string, options: ParseOptions = {}): { meta: any, st
 
   statements = fillMultiVoteVoters(statements, mergedOptions)
   statements = fillMediumTargets(statements)
+  statements = assignDays(statements)
 
   return { meta, statements }
 }

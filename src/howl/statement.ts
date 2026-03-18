@@ -18,6 +18,7 @@ export type Assertion = {
 export type Statement = {
     type: StatementType  // Type of statement (e.g., 'join', 'vote', etc.)
     line: number  // Line number in the source code where the statement appears
+    day?: number  // Day number assigned during post-processing
 }
 
 export type JoinStatement = Statement & {
