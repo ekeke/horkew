@@ -121,7 +121,7 @@
     return input.slice(0, pos).split('\n').length
   }
 
-  function syncRawScroll() {
+  function scrollRawToCursor() {
     if (!rawBodyEl || statementLines.length === 0) return
     const cursorLine = getCursorLine()
 
@@ -153,6 +153,19 @@
     rawBodyEl.scrollTop = jsonLine * lineHeight
   }
 
+  function onCursorMove() {
+    run()
+    tick().then(scrollRawToCursor)
+  }
+
+  function getInputUpToCursor(): string {
+    if (!textareaEl) return input
+    const pos = textareaEl.selectionStart
+    // Include the full line the cursor is on
+    const nextNewline = input.indexOf('\n', pos)
+    return nextNewline === -1 ? input : input.slice(0, nextNewline)
+  }
+
   function run() {
     if (worker) {
       worker.terminate()
@@ -162,10 +175,9 @@
     rawStatements = ''
 
     try {
-      const { meta, statements } = parse(input)
+      const { meta, statements } = parse(getInputUpToCursor())
       rawStatements = JSON.stringify(statements, null, 2)
       statementLines = statements.map((s: any) => s.line as number)
-      tick().then(syncRawScroll)
       console.log('=== Parsed Statements ===', statements)
 
       const { vs, setup, players } = buildVillageStatus(statements, meta)
@@ -234,8 +246,8 @@
             class="input-editor"
             bind:value={input}
             bind:this={textareaEl}
-            onclick={syncRawScroll}
-            onkeyup={syncRawScroll}
+            onclick={onCursorMove}
+            onkeyup={onCursorMove}
           ></textarea>
         {:else}
           <div class="pane-placeholder"><span>New ボタンから開始してください</span></div>
