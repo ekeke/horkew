@@ -47,12 +47,24 @@ export function stringifyStatements(statements: Statement[]): StringifiedLine[] 
     return names.map(p).join(', ')
   }
 
-  function assertionToString(a: Assertion, dayIndex?: number): string {
+  const claimedRoles = new Map<string, string>()
+
+  const divineVerbs: Record<string, string> = {
+    seer: '占った',
+    medium: '霊視した',
+  }
+
+  function assertionToString(actor: string, role: string | undefined, a: Assertion, dayIndex?: number): string {
     const parts: string[] = []
     if (dayIndex !== undefined) parts.push(`${dayIndex}d`)
-    if (a.target) parts.push(p(a.target))
-    if (a.result) parts.push(speciesLabel(a.result))
-    if (a.action === 'guard') parts.push('護衛')
+    parts.push(p(actor))
+    if (a.target && a.result) {
+      const species = a.result === 'isWolf' ? '人狼' : '人間'
+      const verb = (role && divineVerbs[role]) ?? '主張した'
+      parts.push(`${p(a.target)}は${species}と${verb}`)
+    } else if (a.target && a.action === 'guard') {
+      parts.push(`${p(a.target)}を護衛した`)
+    }
     return parts.join(' ')
   }
 
@@ -99,10 +111,12 @@ export function stringifyStatements(statements: Statement[]): StringifiedLine[] 
         if (claimAssertion) {
           const roleNames = claimAssertion.roles!.map(r => roleLabels[r] ?? r).join('')
           lines.push({ text: `${p(st.actor)}が${roleNames}COしました。`, type: 'normal' })
+          claimedRoles.set(resolve(st.actor), claimAssertion.roles![0])
         }
+        const role = claimedRoles.get(resolve(st.actor))
         const history = st.assertions.filter(a => !a.roles)
         for (let i = 0; i < history.length; i++) {
-          lines.push({ text: `  ${assertionToString(history[i], i + 1)}`, type: 'normal' })
+          lines.push({ text: `  ${assertionToString(st.actor, role, history[i], i + 1)}`, type: 'normal' })
         }
         return lines
       }

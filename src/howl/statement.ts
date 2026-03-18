@@ -125,7 +125,7 @@ export function parseMultiVoteStatement(text: string, line: number): MultiVoteSt
 }
 
 export function parseAttackStatement(text: string, line: number): AttackStatement | null {
-  const attackRegex = new RegExp(`^${V.optionalSpace}${V.attack}${V.delimiter}(${V.possibleName}(?:${V.optionalSpace}${V.delimiter}${V.possibleName})*)${V.optionalSpace}$`)
+  const attackRegex = new RegExp(`^${V.optionalSpace}${V.attack}(?:${V.delimiter})?${V.optionalSpace}(${V.possibleName}(?:${V.optionalSpace}${V.delimiter}${V.possibleName})*)${V.optionalSpace}$`)
   const match = attackRegex.exec(text)
   if (match) {
     const targets = match[1].split(new RegExp(`(?:${V.delimiter})+?`)).map((target) => target.trim()).filter((target) => target.length > 0)
@@ -156,15 +156,14 @@ export function parseLynchStatement(text: string, line: number): LynchStatement 
   if (noLynchRegex.test(text)) {
     return { type: 'lynch', line, target: null }
   }
-  const lynchRegex = new RegExp(`^${V.optionalSpace}${V.lynch}${V.delimiter}(${V.possibleName})${V.optionalSpace}$`)
+  const lynchRegex = new RegExp(`^${V.optionalSpace}${V.lynch}(?:${V.delimiter})?${V.optionalSpace}(${V.possibleName})${V.optionalSpace}$`)
   const match = lynchRegex.exec(text)
-  if (!match) return null
-  const target = match[1].trim()
-  return {
-    type: 'lynch',
-    line,
-    target,
-  }
+  if (match) return { type: 'lynch', line, target: match[1].trim() }
+  // Reverse pattern: target+lynch (e.g. ボブ吊り)
+  const reverseRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})${V.lynch}${V.optionalSpace}$`)
+  const reverseMatch = reverseRegex.exec(text)
+  if (!reverseMatch) return null
+  return { type: 'lynch', line, target: reverseMatch[1].trim() }
 }
 
 export function parseRevoteStatement(text: string, line: number): RevoteStatement | null {
