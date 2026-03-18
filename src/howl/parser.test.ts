@@ -272,9 +272,11 @@ setup:
     assert.deepStrictEqual(mvs[3].voters, [])
   })
 
-  test('scenario: revoteCandidatesCanVote option allows candidates to vote', () => {
+  test('scenario: vote.final=revote allows candidates to vote', () => {
     const text = `---
 title: アルティメット人狼 5-3
+rules:
+  vote.final: revote
 ---
 
 + マドック、ダンカン、デイジー、メイソン、結、藤澤 仁、児玉　健、森本　茂樹、大野　聡、　伊藤　真吾、香川　愛生、村中　秀史、中田　功
@@ -298,7 +300,7 @@ title: アルティメット人狼 5-3
 藤澤←メイソン、結、森本、大野、香川
 村中←まど、伊藤、デイジー
 中田←`
-    const result = parse(text, { revoteCandidatesCanVote: true })
+    const result = parse(text)
     const mvs = result.statements
       .filter((s: any) => s.type === 'multiVote')
       .map((s: any) => ({ target: s.target, voters: s.voters }))

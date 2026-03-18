@@ -12,7 +12,7 @@ import {
 import { FlexibleDictionary } from './flexibleDictionary.ts'
 
 export type ParseOptions = {
-  revoteCandidatesCanVote?: boolean
+  rules?: Record<string, any>
 }
 
 function collectExplicitVoters(round: Statement[]): Set<string> {
@@ -55,9 +55,9 @@ function resolveNames(dict: FlexibleDictionary, names: Set<string>): Set<string>
 function fillRound(round: Statement[], alive: Set<string>, dict: FlexibleDictionary, isRevoteRound: boolean, options: ParseOptions): Statement[] {
   const explicitFull = resolveNames(dict, collectExplicitVoters(round))
 
-  // In revote rounds (default), candidates cannot vote
+  // In final vote rounds (default), candidates cannot vote. In revote mode, they can.
   const excludedFull = new Set(explicitFull)
-  if (isRevoteRound && !options.revoteCandidatesCanVote) {
+  if (isRevoteRound && options.rules?.['vote.final'] !== 'revote') {
     const targetsFull = resolveNames(dict, collectRoundTargets(round))
     for (const t of targetsFull) excludedFull.add(t)
   }
@@ -212,6 +212,10 @@ function fillMediumTargets(statements: Statement[]): Statement[] {
 
 export function parse(text: string, options: ParseOptions = {}): { meta: any, statements: Statement[] } {
   const { meta, lines }: { meta: any; lines: Line[] } = preprocess(text)
+  const mergedOptions: ParseOptions = {
+    ...options,
+    rules: { ...meta?.rules, ...options.rules },
+  }
   let statements: Statement[] = []
 
   for (const line of lines) {
@@ -224,7 +228,7 @@ export function parse(text: string, options: ParseOptions = {}): { meta: any, st
     }
   }
 
-  statements = fillMultiVoteVoters(statements, options)
+  statements = fillMultiVoteVoters(statements, mergedOptions)
   statements = fillMediumTargets(statements)
 
   return { meta, statements }

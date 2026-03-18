@@ -123,6 +123,24 @@ describe('attack statement', () => {
     })
   })
 
+  test('死亡 as attack alias', () => {
+    const result = S.parseAttackStatement('死亡　Alice', 1)
+    assert.deepEqual(result, {
+      type: 'attack',
+      line: 1,
+      target: ['Alice'],
+    })
+  })
+
+  test('reverse pattern with delimiter/space', () => {
+    assert.deepEqual(S.parseAttackStatement('bob　死亡', 1), {
+      type: 'attack', line: 1, target: ['bob'],
+    })
+    assert.deepEqual(S.parseAttackStatement('Alice 噛み', 1), {
+      type: 'attack', line: 1, target: ['Alice'],
+    })
+  })
+
   test('invalid attack statement', () => {
     const result = S.parseAttackStatement('', 1)
     assert.equal(result, null)

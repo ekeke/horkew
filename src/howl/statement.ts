@@ -132,7 +132,7 @@ export function parseAttackStatement(text: string, line: number): AttackStatemen
     return { type: 'attack', line, target: targets }
   }
   // Reverse pattern: target+attack (e.g. 星噛)
-  const reverseRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})${V.attack}${V.optionalSpace}$`)
+  const reverseRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})(?:${V.delimiter})?${V.optionalSpace}${V.attack}${V.optionalSpace}$`)
   const reverseMatch = reverseRegex.exec(text)
   if (!reverseMatch) return null
   return { type: 'attack', line, target: [reverseMatch[1].trim()] }
@@ -160,7 +160,7 @@ export function parseLynchStatement(text: string, line: number): LynchStatement 
   const match = lynchRegex.exec(text)
   if (match) return { type: 'lynch', line, target: match[1].trim() }
   // Reverse pattern: target+lynch (e.g. ボブ吊り)
-  const reverseRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})${V.lynch}${V.optionalSpace}$`)
+  const reverseRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})(?:${V.delimiter})?${V.optionalSpace}${V.lynch}${V.optionalSpace}$`)
   const reverseMatch = reverseRegex.exec(text)
   if (!reverseMatch) return null
   return { type: 'lynch', line, target: reverseMatch[1].trim() }
