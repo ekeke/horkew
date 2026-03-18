@@ -71,6 +71,8 @@
   let analysisSeats: SeatResult[] = $state([])
   let analysisError = $state('')
   let analyzing = $state(false)
+  let survivorInfo = $state({ alive: 0, total: 0 })
+  let deadSeats: Set<number> = $state(new Set())
   let players: Map<number, string> = $state(new Map())
   let worker: Worker | null = null
   let paneVisible: Record<PaneId, boolean> = $state(loadPaneVisibility())
@@ -215,14 +217,6 @@
     return systemRoles.get(role)?.shortName ?? role
   }
 
-  function formatAnalysis(): string {
-    if (analysisError) return `Error: ${analysisError}`
-    if (analysisSeats.length === 0) return ''
-    return analysisSeats.map(({ seat, roles }) => {
-      const name = players.get(seat) ?? `#${seat}`
-      return `${name}: ${roles.map(roleToShort).join('')}`
-    }).join('\n')
-  }
 
   function run() {
     if (worker) {
@@ -243,6 +237,9 @@
 
       const { vs, setup, players: playersMap } = buildVillageStatus(statements, meta)
       players = playersMap
+      const alive = [...vs.statuses.values()].filter(s => s.surviving).length
+      survivorInfo = { alive, total: vs.statuses.size }
+      deadSeats = new Set([...vs.statuses.entries()].filter(([, s]) => !s.surviving).map(([seat]) => seat))
 
       const workerPayload = {
         vs,
@@ -381,7 +378,9 @@
     <section class="pane">
       <div class="pane-header">Analysis</div>
       <div class="pane-body">
-        <pre class="output">{formatAnalysis()}</pre>
+        <pre class="output">{#if analysisError}Error: {analysisError}{:else if analysisSeats.length > 0}生存 {survivorInfo.alive}/{survivorInfo.total}
+{#each analysisSeats as { seat, roles }}<span class={deadSeats.has(seat) ? 'dead' : ''}>{players.get(seat) ?? `#${seat}`}: {roles.map(roleToShort).join('')}</span>
+{/each}{/if}</pre>
       </div>
     </section>
     {/if}
@@ -588,6 +587,10 @@
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-all;
+  }
+
+  .output .dead {
+    color: #585b70;
   }
 
   .parsed-output {
