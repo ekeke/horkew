@@ -199,13 +199,9 @@
       const { meta, statements } = parse(getInputUpToCursor())
       rawStatements = JSON.stringify(statements, null, 2)
       statementLines = statements.map((s: any) => s.line as number)
-      console.log('=== Parsed Statements ===', statements)
 
       const { vs, setup, players: playersMap } = buildVillageStatus(statements, meta)
       players = playersMap
-      console.log('=== VillageStatus ===', vs)
-      console.log('=== Setup ===', setup)
-      console.log('=== Players ===', playersMap)
 
       analyzing = true
       worker = new AnalysisWorker()
@@ -235,7 +231,6 @@
         players: [...playersMap],
       })
     } catch (e: any) {
-      console.error(e)
       analysisSeats = []
       analysisError = e.message
     }

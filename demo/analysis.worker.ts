@@ -50,7 +50,6 @@ self.onmessage = (e: MessageEvent<RetarRequest>) => {
 
     const retar = new VillageRetar(vs, setup, options)
     const result = retar.analyze()
-    console.log('=== Retar Result ===', result)
 
     const seats: SeatResult[] = []
     if (result && 'result' in result) {
@@ -61,7 +60,6 @@ self.onmessage = (e: MessageEvent<RetarRequest>) => {
 
     self.postMessage({ type: 'result', seats } satisfies RetarResponse)
   } catch (e: any) {
-    console.error(e)
     self.postMessage({ type: 'error', message: e.message } satisfies RetarResponse)
   }
 }
