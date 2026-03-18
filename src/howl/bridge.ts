@@ -118,8 +118,15 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         const s = stmt as MultiVoteStatement
         const targetSeat = resolveSeat(s.target)
         const target = statuses.get(targetSeat)!
-        for (const voterName of s.voters) {
-          const voterSeat = resolveSeat(voterName)
+
+        // Empty voters means "all surviving players who haven't voted yet"
+        const voterSeats = s.voters.length > 0
+          ? s.voters.map(resolveSeat)
+          : [...statuses.entries()]
+              .filter(([, st]) => st.surviving && !st.voted)
+              .map(([seat]) => seat)
+
+        for (const voterSeat of voterSeats) {
           const voter = statuses.get(voterSeat)!
           voter.voted = true
           voter.votedTarget = targetSeat

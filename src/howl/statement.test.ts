@@ -77,6 +77,26 @@ describe('multiVote statement', () => {
     })
   })
 
+  test('empty voters', () => {
+    const result = S.parseMultiVoteStatement('John←', 1)
+    assert.deepEqual(result, {
+      type: 'multiVote',
+      line: 1,
+      voters: [],
+      target: 'John',
+    })
+  })
+
+  test('empty voters with spaces', () => {
+    const result = S.parseMultiVoteStatement('　ポール　＜ー　', 1)
+    assert.deepEqual(result, {
+      type: 'multiVote',
+      line: 1,
+      voters: [],
+      target: 'ポール',
+    })
+  })
+
   test('invalid multiVote statement', () => {
     const result = S.parseMultiVoteStatement('', 1)
     assert.equal(result, null)

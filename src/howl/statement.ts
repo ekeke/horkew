@@ -109,13 +109,13 @@ export function parseVoteStatement(text: string, line: number): VoteStatement | 
 }
 
 // MultiVote statement: John <- Alice, Bob, Charlie
-const multiVoteRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})${V.optionalSpace}${V.leftArrow}${V.optionalSpace}(${V.possibleName}(?:${V.optionalSpace}${V.delimiter}${V.possibleName})*)${V.optionalSpace}$`)
+const multiVoteRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})${V.optionalSpace}${V.leftArrow}${V.optionalSpace}(${V.possibleName}(?:${V.optionalSpace}${V.delimiter}${V.possibleName})*)?${V.optionalSpace}$`)
 
 export function parseMultiVoteStatement(text: string, line: number): MultiVoteStatement | null {
   const match = multiVoteRegex.exec(text)
   if (!match) return null
   const target = match[1].trim()
-  const voters = match[2].split(new RegExp(`(?:${V.delimiter})+?`)).map((voter) => voter.trim()).filter((voter) => voter.length > 0)
+  const voters = match[2] ? match[2].split(new RegExp(`(?:${V.delimiter})+?`)).map((voter) => voter.trim()).filter((voter) => voter.length > 0) : []
   return {
     type: 'multiVote',
     line,
