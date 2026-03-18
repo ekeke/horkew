@@ -3,7 +3,7 @@
   import { parse } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import { systemRoles } from '../src/types/index.ts'
-  import { stringifyStatements } from './stringify.ts'
+  import { stringifyStatements, type StringifiedLine } from './stringify.ts'
   import type { RetarResponse, SeatResult } from './analysis.worker.ts'
   import type { SystemRole } from '../src/types/index.ts'
   import AnalysisWorker from './analysis.worker.ts?worker'
@@ -42,7 +42,7 @@
   let activeTitle = $state(localStorage.getItem(ACTIVE_KEY) ?? '')
   let input = $state(activeTitle ? loadText(activeTitle) : '')
   let rawStatements = $state('')
-  let parsedOutput = $state('')
+  let parsedLines: StringifiedLine[] = $state([])
   let statementLines: number[] = []
   let analysisSeats: SeatResult[] = $state([])
   let analysisError = $state('')
@@ -67,7 +67,7 @@
     input = loadText(title)
     localStorage.setItem(ACTIVE_KEY, title)
     rawStatements = ''
-    parsedOutput = ''
+    parsedLines = []
     analysisSeats = []
     analysisError = ''
   }
@@ -91,7 +91,7 @@
     }
     showModal = false
     rawStatements = ''
-    parsedOutput = ''
+    parsedLines = []
     analysisSeats = []
     analysisError = ''
   }
@@ -112,7 +112,7 @@
       localStorage.removeItem(ACTIVE_KEY)
     }
     rawStatements = ''
-    parsedOutput = ''
+    parsedLines = []
     analysisSeats = []
     analysisError = ''
   }
@@ -199,12 +199,12 @@
     analysisSeats = []
     analysisError = ''
     rawStatements = ''
-    parsedOutput = ''
+    parsedLines = []
 
     try {
       const { meta, statements } = parse(getInputUpToCursor())
       rawStatements = JSON.stringify(statements, null, 2)
-      parsedOutput = stringifyStatements(statements)
+      parsedLines = stringifyStatements(statements)
       statementLines = statements.map((s: any) => s.line as number)
 
       const { vs, setup, players: playersMap } = buildVillageStatus(statements, meta)
@@ -293,7 +293,17 @@
     <section class="pane">
       <div class="pane-header">Parsed</div>
       <div class="pane-body">
-        <pre class="output">{parsedOutput}</pre>
+        <div class="output parsed-output">
+          {#each parsedLines as line}
+            {#if line.type === 'blank'}
+              <div class="parsed-blank">&nbsp;</div>
+            {:else if line.type === 'unknown'}
+              <div class="parsed-unknown">{line.text}</div>
+            {:else}
+              <div>{line.text}</div>
+            {/if}
+          {/each}
+        </div>
       </div>
     </section>
 
@@ -468,6 +478,18 @@
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-all;
+  }
+
+  .parsed-output {
+    white-space: normal;
+  }
+
+  .parsed-unknown {
+    color: #585b70;
+  }
+
+  .parsed-blank {
+    height: 1.5em;
   }
 
   .modal-overlay {

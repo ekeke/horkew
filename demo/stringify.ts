@@ -4,6 +4,7 @@ import type {
   AssertStatement, PeaceStatement, RevealStatement, UnknownStatement,
   Assertion,
 } from '../src/howl/statement.ts'
+import { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
 
 const gameResultLabels: Record<string, string> = {
   villageWin: '村人陣営が勝利しました。',
@@ -21,89 +22,113 @@ const roleLabels: Record<string, string> = {
   nonVillage: '非村',
 }
 
-function p(name: string): string {
-  return `【${name}】`
-}
-
-function ps(names: string[]): string {
-  return names.map(p).join(', ')
-}
-
 function speciesLabel(species: string): string {
   return species === 'isWolf' ? '●' : '○'
 }
 
-function assertionToString(a: Assertion, dayIndex?: number): string {
-  const parts: string[] = []
-  if (dayIndex !== undefined) parts.push(`${dayIndex}d`)
-  if (a.target) parts.push(p(a.target))
-  if (a.result) parts.push(speciesLabel(a.result))
-  if (a.action === 'guard') parts.push('護衛')
-  return parts.join(' ')
+export type StringifiedLine = {
+  text: string
+  type: 'normal' | 'unknown' | 'blank'
 }
 
-function stringifyOne(s: Statement): string {
-  switch (s.type) {
-    case 'join': {
-      const st = s as JoinStatement
-      return `${ps(st.players)}が参加しました。`
-    }
-    case 'vote': {
-      const st = s as VoteStatement
-      return `${p(st.voter)}は${p(st.target)}に投票しました。`
-    }
-    case 'multiVote': {
-      const st = s as MultiVoteStatement
-      if (st.voters.length === 0) return `${p(st.target)}には誰も投票しませんでした。`
-      return `${ps(st.voters)}は${p(st.target)}に投票しました。`
-    }
-    case 'attack': {
-      const st = s as AttackStatement
-      return `${ps(st.target)}が襲撃されました。`
-    }
-    case 'lynch': {
-      const st = s as LynchStatement
-      if (st.target === null) return '処刑はありませんでした。'
-      return `${p(st.target)}が処刑されました。`
-    }
-    case 'revote': {
-      const st = s as RevoteStatement
-      if (st.targets.length === 0) return '再投票になりました。'
-      return `${ps(st.targets)}の決選投票になりました。`
-    }
-    case 'over': {
-      const st = s as OverStatement
-      return gameResultLabels[st.result] ?? st.result
-    }
-    case 'assert': {
-      const st = s as AssertStatement
-      const lines: string[] = []
-      const claimAssertion = st.assertions.find(a => a.roles)
-      if (claimAssertion) {
-        const roleNames = claimAssertion.roles!.map(r => roleLabels[r] ?? r).join('')
-        lines.push(`${p(st.actor)}が${roleNames}COしました。`)
-      }
-      const history = st.assertions.filter(a => !a.roles)
-      for (let i = 0; i < history.length; i++) {
-        lines.push(`  ${assertionToString(history[i], i + 1)}`)
-      }
-      return lines.join('\n')
-    }
-    case 'peace':
-      return '平和な朝を迎えました。'
-    case 'reveal': {
-      const st = s as RevealStatement
-      return `${p(st.player)}は${st.role}でした。`
-    }
-    case 'unknown': {
-      const st = s as UnknownStatement
-      return st.text
-    }
-    default:
-      return ''
+export function stringifyStatements(statements: Statement[]): StringifiedLine[] {
+  const dict = new FlexibleDictionary()
+
+  function resolve(name: string): string {
+    const results = dict.search(name)
+    return results.length > 0 ? results[0] : name
   }
-}
 
-export function stringifyStatements(statements: Statement[]): string {
-  return statements.map(stringifyOne).join('\n')
+  function p(name: string): string {
+    return `【${resolve(name)}】`
+  }
+
+  function ps(names: string[]): string {
+    return names.map(p).join(', ')
+  }
+
+  function assertionToString(a: Assertion, dayIndex?: number): string {
+    const parts: string[] = []
+    if (dayIndex !== undefined) parts.push(`${dayIndex}d`)
+    if (a.target) parts.push(p(a.target))
+    if (a.result) parts.push(speciesLabel(a.result))
+    if (a.action === 'guard') parts.push('護衛')
+    return parts.join(' ')
+  }
+
+  function stringifyOne(s: Statement): StringifiedLine[] {
+    switch (s.type) {
+      case 'join': {
+        const st = s as JoinStatement
+        for (const player of st.players) {
+          dict.add(player, [player])
+        }
+        return [{ text: `${ps(st.players)}が参加しました。`, type: 'normal' }]
+      }
+      case 'vote': {
+        const st = s as VoteStatement
+        return [{ text: `${p(st.voter)}は${p(st.target)}に投票しました。`, type: 'normal' }]
+      }
+      case 'multiVote': {
+        const st = s as MultiVoteStatement
+        if (st.voters.length === 0) return [{ text: `${p(st.target)}には誰も投票しませんでした。`, type: 'normal' }]
+        return [{ text: `${ps(st.voters)}は${p(st.target)}に投票しました。`, type: 'normal' }]
+      }
+      case 'attack': {
+        const st = s as AttackStatement
+        return [{ text: `${ps(st.target)}が襲撃されました。`, type: 'normal' }]
+      }
+      case 'lynch': {
+        const st = s as LynchStatement
+        if (st.target === null) return [{ text: '処刑はありませんでした。', type: 'normal' }]
+        return [{ text: `${p(st.target)}が処刑されました。`, type: 'normal' }]
+      }
+      case 'revote': {
+        const st = s as RevoteStatement
+        if (st.targets.length === 0) return [{ text: '再投票になりました。', type: 'normal' }]
+        return [{ text: `${ps(st.targets)}の決選投票になりました。`, type: 'normal' }]
+      }
+      case 'over': {
+        const st = s as OverStatement
+        return [{ text: gameResultLabels[st.result] ?? st.result, type: 'normal' }]
+      }
+      case 'assert': {
+        const st = s as AssertStatement
+        const lines: StringifiedLine[] = []
+        const claimAssertion = st.assertions.find(a => a.roles)
+        if (claimAssertion) {
+          const roleNames = claimAssertion.roles!.map(r => roleLabels[r] ?? r).join('')
+          lines.push({ text: `${p(st.actor)}が${roleNames}COしました。`, type: 'normal' })
+        }
+        const history = st.assertions.filter(a => !a.roles)
+        for (let i = 0; i < history.length; i++) {
+          lines.push({ text: `  ${assertionToString(history[i], i + 1)}`, type: 'normal' })
+        }
+        return lines
+      }
+      case 'peace':
+        return [{ text: '平和な朝を迎えました。', type: 'normal' }]
+      case 'reveal': {
+        const st = s as RevealStatement
+        return [{ text: `${p(st.player)}は${st.role}でした。`, type: 'normal' }]
+      }
+      case 'unknown': {
+        const st = s as UnknownStatement
+        return [{ text: st.text, type: 'unknown' }]
+      }
+      default:
+        return []
+    }
+  }
+
+  const result: StringifiedLine[] = []
+  let prevLine = -1
+  for (const s of statements) {
+    if (prevLine >= 0 && s.line > prevLine + 1) {
+      result.push({ text: '', type: 'blank' })
+    }
+    result.push(...stringifyOne(s))
+    prevLine = s.line
+  }
+  return result
 }

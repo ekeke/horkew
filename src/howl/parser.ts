@@ -135,7 +135,11 @@ function fillMultiVoteVoters(statements: Statement[], options: ParseOptions): St
         break
       }
       default: {
-        result.push(s)
+        if (round.length > 0) {
+          round.push(s)
+        } else {
+          result.push(s)
+        }
         break
       }
     }
