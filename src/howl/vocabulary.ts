@@ -32,7 +32,7 @@ export const peace  = `(?:平和)`
 
 export const villager    = `(?:村人?)`
 export const seer        = `(?:占い?師?|[預予]言?者?)`
-export const medium      = `(?:霊(?:(?:(?:媒)?師)?|(?:(?:能)?者)?))`
+export const medium      = `(?:霊(?:媒師?|能者?|))`
 export const bodyguard   = `(?:護(?:衛)?|狩(?:り|人)?)`
 export const mason       = `(?:共(?:有者?)?)`
 export const nekomata    = `(?:猫又?)`
