@@ -42,6 +42,7 @@
   let activeTitle = $state(localStorage.getItem(ACTIVE_KEY) ?? '')
   let input = $state(activeTitle ? loadText(activeTitle) : '')
   let rawStatements = $state('')
+  let analyzerJson = $state('')
   let parsedLines: StringifiedLine[] = $state([])
   let statementLines: number[] = []
   let analysisSeats: SeatResult[] = $state([])
@@ -91,6 +92,7 @@
     }
     showModal = false
     rawStatements = ''
+    analyzerJson = ''
     parsedLines = []
     analysisSeats = []
     analysisError = ''
@@ -112,6 +114,7 @@
       localStorage.removeItem(ACTIVE_KEY)
     }
     rawStatements = ''
+    analyzerJson = ''
     parsedLines = []
     analysisSeats = []
     analysisError = ''
@@ -199,6 +202,7 @@
     analysisSeats = []
     analysisError = ''
     rawStatements = ''
+    analyzerJson = ''
     parsedLines = []
 
     try {
@@ -209,6 +213,15 @@
 
       const { vs, setup, players: playersMap } = buildVillageStatus(statements, meta)
       players = playersMap
+
+      const workerPayload = {
+        vs,
+        setup: [...setup],
+        players: [...playersMap],
+      }
+      analyzerJson = JSON.stringify(workerPayload, (_key, value) =>
+        value instanceof Map ? Object.fromEntries(value) : value
+      , 2)
 
       analyzing = true
       worker = new AnalysisWorker()
@@ -232,11 +245,7 @@
         worker?.terminate()
         worker = null
       }
-      worker.postMessage({
-        vs,
-        setup: [...setup],
-        players: [...playersMap],
-      })
+      worker.postMessage(workerPayload)
     } catch (e: any) {
       analysisSeats = []
       analysisError = e.message
@@ -306,6 +315,13 @@
             {/if}
           {/each}
         </div>
+      </div>
+    </section>
+
+    <section class="pane">
+      <div class="pane-header">Analyzer Input</div>
+      <div class="pane-body">
+        <pre class="output">{analyzerJson}</pre>
       </div>
     </section>
 
