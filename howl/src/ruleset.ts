@@ -1,0 +1,116 @@
+type RuleBase = {
+  description: string,
+}
+
+type BooleanRule = RuleBase & {
+  type: "boolean"
+  default: boolean
+}
+
+type ChoiceRule = RuleBase & {
+  type: "choice"
+  choices: string[]
+  default: string
+}
+
+type NumericRule = RuleBase & {
+  type: "numeric"
+  default: number
+}
+
+type Rule = BooleanRule | ChoiceRule | NumericRule
+
+export const Rules: { [key: string]: Rule } = {
+  "general.countFirstDay": {
+    type: "boolean",
+    description: "Count the first day of the game story (the day before the day first vote has taken) as day 1.",
+    default: false,
+  },
+
+  "vote.style": {
+    type: "choice",
+    description: "The style of voting to use.",
+    choices: [
+      "free",
+      "ordered",
+      "concurrent",
+    ],
+    default: "free",
+  },
+
+  "vote.final": {
+    type: "choice",
+    description: "The final voting rule to use.",
+    choices: [
+      "revote",
+      "final",
+    ],
+    default: "final",
+  },
+
+  "vote.tiebreaker": {
+    type: "choice",
+    description: "The tiebreaker rule to use.",
+    choices: [
+      "random",
+      "no-lynch",
+    ],
+    default: "no-lynch",
+  },
+
+  "first-victim": {
+    type: "choice",
+    description: "The first victim of the game.",
+    choices: [
+      "none",
+      "random",
+      "first-vote",
+    ],
+    default: "none",
+  },
+
+  "role.seer.first-seek": {
+    type: "choice",
+    description: "The first night action of the seer.",
+    choices: [
+      "none",
+      "no-wolf",
+      "all",
+    ],
+    default: "none",
+  },
+
+  "role.bodyguard.allow-continuous-protection": {
+    type: "boolean",
+    description: "Whether the bodyguard can protect the same player on consecutive nights.",
+    default: false,
+  },
+
+  "role.nekomata.curse-target": {
+    type: "choice",
+    description: "The target of the curse.",
+    choices: [
+      "all-survivors",
+      "villager",
+    ],
+    default: "all-survivors",
+  },
+
+  "role.nekomata.curse-immediately": {
+    type: "boolean",
+    description: "Whether the nekomata's curse takes effect immediately. If false, it takes effect the next morning.",
+    default: true,
+  },
+
+  "role.immoralist.follow-immediately": {
+    type: "boolean",
+    description: "Whether the immoralist follows lynched werehamster immediately, (or, if false, next morning).",
+    default: true,
+  },
+
+  "role.immoralist.reveal-following": {
+    type: "boolean",
+    description: "Whether the immoralist reveals the role of the lynched werehamster.",
+    default: true,
+  },
+}

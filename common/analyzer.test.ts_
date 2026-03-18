@@ -1,0 +1,178 @@
+import { describe, it, expect, beforeEach } from 'vitest'
+import { VillageAnalyzer, AnalyzerOptions, selectOne, defaultOptions, selectCombinationsFromArray } from './analyzer'
+import type { VillageStatus, SystemRole, VillageEvent } from './village'
+import { createVillageStatusFromEvents } from './village'
+
+describe('selectCombinationsFromArray', () => {
+  it('should return all combinations', () => {
+    const res = new Set(selectCombinationsFromArray([1, 2, 3], 2,3))
+    expect(res).toStrictEqual(new Set([
+      [[1, 2],[3]],
+      [[2, 3],[1]],
+      [[1, 3],[2]],
+      [[1, 2, 3],[]],
+    ]))
+  })
+
+  it('should not return any combinations for wrong min/max', () => {
+    const res = new Set(selectCombinationsFromArray([1], 2,3))
+    expect(res).toStrictEqual(new Set([]))
+    let x = 1, y = 2
+    for ( [x,y] of selectCombinationsFromArray([1], 2,3) ) {
+      expect.fail('should not be called')
+    }
+  })
+
+})
+
+describe('VillageAnalyzer', () => {
+  let analyzer: VillageAnalyzer;
+
+  beforeEach(() => {
+  });
+
+  it('should expect werewolf based on seer result', () => {
+    const vs: VillageStatus = createVillageStatusFromEvents({
+      seats: [1, 2, 3, 4, 5],
+      beginningDay: 1,
+      events: [
+        { villageId: 1, id: 1, prevId: null, type: 'claim', actor: 1, role: 1 },
+        { villageId: 1, id: 2, prevId: 1, type: 'acted', actor: 1, target: 2, day: 0 },
+        { villageId: 1, id: 3, prevId: 2, type: 'assert', actor: 1, target: 2, targetWas: 'wolf' },
+      ],
+      roles: new Map([
+        [1, 'seer'],
+        [2, 'villager'],
+        [3, 'werewolf']
+      ]),
+    })
+    const setup: Map<SystemRole, number> = new Map([
+      ['villager', 3],
+      ['seer', 1],
+      ['werewolf', 1],
+    ])
+    const options: AnalyzerOptions = {
+      ...defaultOptions,
+    }
+    analyzer = new VillageAnalyzer(vs, setup, options)
+    const res = analyzer.analyze()
+    //console.dir(res, { depth: null })
+    expect(res.result).toStrictEqual(new Map([
+      [1, new Set(['seer'])],
+      [2, new Set(['werewolf'])],
+      [3, new Set(['villager'])],
+      [4, new Set(['villager'])],
+      [5, new Set(['villager'])],
+    ]))
+  });
+
+  it('should expect wrong result seer as werewolf', () => {
+    const vs: VillageStatus = createVillageStatusFromEvents({
+      seats: [1, 2, 3, 4, 5],
+      beginningDay: 1,
+      events: [
+        { villageId: 1, id: 1, prevId: null, type: 'claim', actor: 1, role: 1 },
+        { villageId: 1, id: 2, prevId: 1, type: 'acted', actor: 1, target: 2, day: 0 },
+        { villageId: 1, id: 3, prevId: 2, type: 'assert', actor: 1, target: 2, targetWas: 'human' },
+        { villageId: 1, id: 4, prevId: 3, type: 'claim', actor: 2, role: 1 },
+        { villageId: 1, id: 5, prevId: 4, type: 'acted', actor: 2, target: 3, day: 0 },
+        { villageId: 1, id: 6, prevId: 5, type: 'assert', actor: 2, target: 3, targetWas: 'human' },
+      ],
+      roles: new Map([
+        [1, 'seer'],
+        [2, 'villager'],
+        [3, 'werewolf']
+      ]),
+    })
+    const setup: Map<SystemRole, number> = new Map([
+      ['villager', 3],
+      ['seer', 1],
+      ['werewolf', 1],
+    ])
+    const options: AnalyzerOptions = {
+      ...defaultOptions,
+    }
+    analyzer = new VillageAnalyzer(vs, setup, options)
+    const res = analyzer.analyze()
+    //console.dir(res, { depth: null })
+    expect(res.result).toStrictEqual(new Map([
+      [1, new Set(['werewolf'])],
+      [2, new Set(['seer'])],
+      [3, new Set(['villager'])],
+      [4, new Set(['villager'])],
+      [5, new Set(['villager'])],
+    ]))
+  });
+
+});
+
+describe('sortRoles', () => {
+  it('can sort roles', () => {
+    const roles: SystemRole[] = [
+      'villager',
+      'seer',
+      'medium',
+      'werewolf',
+      'seer'
+    ]
+    const res = VillageAnalyzer.sortRoleByPriority(roles)
+    expect(res).toStrictEqual([
+      'seer',
+      'seer',
+      'medium',
+      'werewolf',
+      'villager',
+    ])
+  })
+})
+
+describe('selectOne', () => {
+  it('should return all combinations', () => {
+    return false
+    const res = new Set(selectOne([1, 2, 3]))
+    expect(res).toStrictEqual(new Set([
+      [1, [], [2,3]],
+      [2, [1], [3]],
+      [3, [1,2], [3]],
+    ]))
+  })
+})
+
+describe('seatVillagers2', () => {
+  it('should return all combinations', () => {
+    return
+    const roles: Map<SystemRole, number> = new Map([
+      ['villager', 6],
+      ['seer', 1],
+      ['medium', 1],
+      ['bodyguard', 1],
+      ['possessed', 1],
+      ['werewolf', 3],
+    ])
+    const totalSeats = Array.from(roles.values()).reduce((acc, count) => acc + count, 0);
+    const seats = Array.from({length: totalSeats}, (_, i) => i + 1);
+const t0 = performance.now()
+    const res = VillageAnalyzer.seatVillagers2(seats, roles)
+    console.log(`seatVillagers2 took ${performance.now() - t0} ms`)
+    expect(res).toBe(1441440)
+    console.dir(res, { depth: null })
+  })
+
+  it('should address all combinations for smaller seats', () => {
+    return
+    const roles: Map<SystemRole, number> = new Map([
+      ['villager', 2],
+      ['seer', 1],
+      ['medium', 1],
+      ['werewolf', 3],
+    ])
+    const totalSeats = Array.from(roles.values()).reduce((acc, count) => acc + count, 0);
+    const seats = [1,2, 3, 4]
+const t0 = performance.now()
+    const res = seatVillagers2(seats, roles)
+    console.log(`seatVillagers2 took ${performance.now() - t0} ms`)
+    expect(res).toBe(1441440)
+    console.dir(res, { depth: null })
+  })
+})
+

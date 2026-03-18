@@ -1,0 +1,493 @@
+{
+  "meta": {
+    "title": "Example Howl File",
+    "description": "Demonstrates various statement types in the Howl format",
+    "author": "aklas",
+    "date": "2023-10-01T00:00:00.000Z"
+  },
+  "statements": [
+    {
+      "type": "join",
+      "line": 8,
+      "players": [
+        "便ールガンカ",
+        "花京院",
+        "小梅ちゃん",
+        "ワンワン",
+        "ウルガー",
+        "ペガサス盛り",
+        "星刻",
+        "百面ダイス",
+        "ブルファンゴ",
+        "泣く女",
+        "ビスマス結晶",
+        "スレッタ",
+        "裁縫龍",
+        "グロ中尉"
+      ]
+    },
+    {
+      "type": "attack",
+      "line": 10,
+      "target": [
+        "ルガ"
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 12,
+      "actor": "百面ダイス",
+      "assertions": [
+        {
+          "player": "百面ダイス",
+          "roles": [
+            "seer"
+          ]
+        },
+        {
+          "player": "百面ダイス",
+          "target": "グロ",
+          "result": "isHuman"
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 13,
+      "actor": "グロ",
+      "assertions": [
+        {
+          "player": "グロ",
+          "roles": [
+            "seer"
+          ]
+        },
+        {
+          "player": "グロ",
+          "target": "小梅ちゃん",
+          "result": "isHuman"
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 14,
+      "actor": "泣く女",
+      "assertions": [
+        {
+          "player": "泣く女",
+          "roles": [
+            "seer"
+          ]
+        },
+        {
+          "player": "泣く女",
+          "target": "スレッタ",
+          "result": "isHuman"
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 16,
+      "actor": "星",
+      "assertions": [
+        {
+          "player": "星",
+          "roles": [
+            "medium"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 18,
+      "actor": "ペガサス",
+      "assertions": [
+        {
+          "player": "ペガサス",
+          "roles": [
+            "mason"
+          ]
+        },
+        {
+          "player": "裁縫龍",
+          "roles": [
+            "mason"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 20,
+      "actor": "百面ダイス",
+      "assertions": [
+        {
+          "player": "百面ダイス",
+          "target": "スレッタ",
+          "result": "isWolf"
+        }
+      ]
+    },
+    {
+      "type": "lynch",
+      "line": 22,
+      "target": "ダイス"
+    },
+    {
+      "type": "attack",
+      "line": 24,
+      "target": [
+        "グロ"
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 26,
+      "actor": "泣く",
+      "assertions": [
+        {
+          "player": "泣く",
+          "target": "花京院",
+          "result": "isHuman"
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 28,
+      "actor": "星",
+      "assertions": [
+        {
+          "player": "星",
+          "result": "isHuman"
+        }
+      ]
+    },
+    {
+      "type": "lynch",
+      "line": 30,
+      "target": "泣く女"
+    },
+    {
+      "type": "attack",
+      "line": 33,
+      "target": [
+        "ペガサス"
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 35,
+      "actor": "星",
+      "assertions": [
+        {
+          "player": "星",
+          "result": "isWolf"
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 37,
+      "actor": "ウルガー",
+      "assertions": [
+        {
+          "player": "ウルガー",
+          "roles": [
+            "bodyguard",
+            "nekomata"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 38,
+      "actor": "スレ",
+      "assertions": [
+        {
+          "player": "スレ",
+          "roles": [
+            "bodyguard",
+            "nekomata"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 39,
+      "actor": "ビス",
+      "assertions": [
+        {
+          "player": "ビス",
+          "roles": [
+            "bodyguard",
+            "nekomata"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "lynch",
+      "line": 41,
+      "target": "ブル"
+    },
+    {
+      "type": "attack",
+      "line": 43,
+      "target": [
+        "裁縫龍"
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 45,
+      "actor": "星",
+      "assertions": [
+        {
+          "player": "星",
+          "result": "isHuman"
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 47,
+      "actor": "ビスマス",
+      "assertions": [
+        {
+          "player": "ビスマス",
+          "roles": [
+            "nekomata"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 48,
+      "actor": "ウル",
+      "assertions": [
+        {
+          "player": "ウル",
+          "roles": [
+            "nekomata"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 50,
+      "actor": "スレ",
+      "assertions": [
+        {
+          "player": "スレ",
+          "roles": [
+            "bodyguard"
+          ]
+        },
+        {
+          "player": "スレ",
+          "target": "泣く女",
+          "action": "guard"
+        },
+        {
+          "player": "スレ",
+          "target": "星",
+          "action": "guard"
+        },
+        {
+          "player": "スレ",
+          "target": "星",
+          "action": "guard"
+        }
+      ]
+    },
+    {
+      "type": "lynch",
+      "line": 52,
+      "target": "ワン"
+    },
+    {
+      "type": "peace",
+      "line": 54
+    },
+    {
+      "type": "assert",
+      "line": 56,
+      "actor": "星",
+      "assertions": [
+        {
+          "player": "星",
+          "result": "isWolf"
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 58,
+      "actor": "スレ",
+      "assertions": [
+        {
+          "player": "スレ",
+          "target": "小梅",
+          "action": "guard"
+        }
+      ]
+    },
+    {
+      "type": "lynch",
+      "line": 60,
+      "target": "花京院"
+    },
+    {
+      "type": "attack",
+      "line": 62,
+      "target": [
+        "小梅"
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 64,
+      "actor": "星",
+      "assertions": [
+        {
+          "player": "星",
+          "result": "isHuman"
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 66,
+      "actor": "スレ",
+      "assertions": [
+        {
+          "player": "スレ",
+          "target": "星",
+          "action": "guard"
+        }
+      ]
+    },
+    {
+      "type": "assert",
+      "line": 68,
+      "actor": "ビスマス",
+      "assertions": [
+        {
+          "player": "ビスマス",
+          "roles": [
+            "nonVillage"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "lynch",
+      "line": 70,
+      "target": "ビスマス"
+    },
+    {
+      "type": "attack",
+      "line": 72,
+      "target": [
+        "星"
+      ]
+    },
+    {
+      "type": "over",
+      "line": 74,
+      "result": "wolfWin"
+    },
+    {
+      "type": "reveal",
+      "line": 76,
+      "player": "ダイス",
+      "role": "背徳"
+    },
+    {
+      "type": "reveal",
+      "line": 77,
+      "player": "グロ",
+      "role": "占い"
+    },
+    {
+      "type": "reveal",
+      "line": 78,
+      "player": "泣く",
+      "role": "人狼"
+    },
+    {
+      "type": "reveal",
+      "line": 79,
+      "player": "ペが",
+      "role": "共有"
+    },
+    {
+      "type": "reveal",
+      "line": 80,
+      "player": "ぶる",
+      "role": "村"
+    },
+    {
+      "type": "reveal",
+      "line": 81,
+      "player": "裁縫",
+      "role": "共有"
+    },
+    {
+      "type": "reveal",
+      "line": 82,
+      "player": "ワン",
+      "role": "人狼"
+    },
+    {
+      "type": "reveal",
+      "line": 83,
+      "player": "花京院",
+      "role": "狂信"
+    },
+    {
+      "type": "reveal",
+      "line": 84,
+      "player": "小梅",
+      "role": "村"
+    },
+    {
+      "type": "reveal",
+      "line": 85,
+      "player": "ビス",
+      "role": "狐"
+    },
+    {
+      "type": "reveal",
+      "line": 86,
+      "player": "星",
+      "role": "霊"
+    },
+    {
+      "type": "reveal",
+      "line": 87,
+      "player": "ウル",
+      "role": "猫"
+    },
+    {
+      "type": "reveal",
+      "line": 88,
+      "player": "スレ",
+      "role": "人狼"
+    },
+    {
+      "type": "reveal",
+      "line": 89,
+      "player": "初日",
+      "role": "狩り"
+    }
+  ]
+}
