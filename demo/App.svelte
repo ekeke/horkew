@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { parse } from '../src/howl/index.ts'
-  import { buildVillageStatus } from '../src/howl/bridge.ts'
-  import { VillageRetar } from '../src/retar/index.ts'
+  import type { AnalysisResponse } from './analysis.worker.ts'
+  import AnalysisWorker from './analysis.worker.ts?worker'
 
   const STORAGE_PREFIX = 'horkew:'
   const ACTIVE_KEY = 'horkew:__active__'
@@ -38,6 +37,8 @@
   let input = $state(activeTitle ? loadText(activeTitle) : '')
   let rawStatements = $state('')
   let analysisOutput = $state('')
+  let analyzing = $state(false)
+  let worker: Worker | null = null
   let showModal = $state(false)
   let newTitle = $state('')
   let modalInput: HTMLInputElement | undefined = $state()
@@ -108,48 +109,34 @@
   }
 
   function run() {
-    try {
-      const { meta, statements } = parse(input)
-      rawStatements = JSON.stringify(statements, null, 2)
-      console.log('=== Parsed Statements ===', statements)
-
-      const { vs, setup, players } = buildVillageStatus(statements, meta)
-      console.log('=== VillageStatus ===', vs)
-      console.log('=== Setup ===', setup)
-      console.log('=== Players ===', players)
-
-      const options = {
-        seerClaimingDueDate: 2,
-        mediumClaimingDueDate: 2,
-        bodyguardClaimingDueDate: 99,
-        masonClaimingDueDate: 2,
-        nekomataClaimingDueDate: 99,
-        dayCountFrom: 1,
-        hasFirstGhost: false,
-        assumptions: new Map(),
-        hocusPocus: new Map(),
-        id: 0,
-        batches: 1,
-        batch: 0,
-      }
-
-      const retar = new VillageRetar(vs, setup, options)
-      const result = retar.analyze()
-      console.log('=== Retar Result ===', result)
-
-      if (result && 'result' in result) {
-        const lines: string[] = []
-        for (const [seat, roles] of result.result) {
-          const name = players.get(seat) ?? `#${seat}`
-          lines.push(`${name}: ${[...roles].join(', ')}`)
-        }
-        analysisOutput = lines.join('\n')
-      }
-    } catch (e: any) {
-      console.error(e)
-      rawStatements = ''
-      analysisOutput = `Error: ${e.message}`
+    if (worker) {
+      worker.terminate()
     }
+
+    analysisOutput = ''
+    rawStatements = ''
+    analyzing = true
+
+    worker = new AnalysisWorker()
+    worker.onmessage = (e: MessageEvent<AnalysisResponse>) => {
+      analyzing = false
+      const data = e.data
+      if (data.type === 'result') {
+        rawStatements = data.rawStatements
+        analysisOutput = data.analysisOutput
+      } else {
+        analysisOutput = `Error: ${data.message}`
+      }
+      worker?.terminate()
+      worker = null
+    }
+    worker.onerror = (e) => {
+      analyzing = false
+      analysisOutput = `Worker error: ${e.message}`
+      worker?.terminate()
+      worker = null
+    }
+    worker.postMessage({ input })
   }
 </script>
 
@@ -173,7 +160,9 @@
 
     <div class="header-spacer"></div>
 
-    <button class="header-btn" onclick={run} disabled={!activeTitle}>Parse & Analyze</button>
+    <button class="header-btn" onclick={run} disabled={!activeTitle || analyzing}>
+      {analyzing ? 'Analyzing...' : 'Parse & Analyze'}
+    </button>
   </header>
 
   <div class="panes">
