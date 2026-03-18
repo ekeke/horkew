@@ -84,7 +84,8 @@ export function parseJoinStatement(text: string, line: number): JoinStatement | 
   const match = joinRegex.test(text)
   if (!match) return null
   text = text.replace(joinRegex, '') // Remove the + from the text
-  const players = text.split(new RegExp(`(?:${V.delimiter})+?`)).map((player) => player.trim()).filter((player) => player.length > 0)
+  const joinDelimiter = `[${V.delimiterClass}]${V.optionalSpace}`
+  const players = text.split(new RegExp(`(?:${joinDelimiter})+?`)).map((player) => player.trim()).filter((player) => player.length > 0)
   return {
     type: 'join',
     line,

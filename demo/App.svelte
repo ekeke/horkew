@@ -36,6 +36,7 @@
   let titles = $state(savedKeys())
   let activeTitle = $state(localStorage.getItem(ACTIVE_KEY) ?? '')
   let input = $state(activeTitle ? loadText(activeTitle) : '')
+  let rawStatements = $state('')
   let analysisOutput = $state('')
   let showModal = $state(false)
   let newTitle = $state('')
@@ -51,6 +52,7 @@
     activeTitle = title
     input = loadText(title)
     localStorage.setItem(ACTIVE_KEY, title)
+    rawStatements = ''
     analysisOutput = ''
   }
 
@@ -72,6 +74,7 @@
       titles = savedKeys()
     }
     showModal = false
+    rawStatements = ''
     analysisOutput = ''
   }
 
@@ -90,6 +93,7 @@
       input = ''
       localStorage.removeItem(ACTIVE_KEY)
     }
+    rawStatements = ''
     analysisOutput = ''
   }
 
@@ -106,6 +110,7 @@
   function run() {
     try {
       const { meta, statements } = parse(input)
+      rawStatements = JSON.stringify(statements, null, 2)
       console.log('=== Parsed Statements ===', statements)
 
       const { vs, setup, players } = buildVillageStatus(statements, meta)
@@ -142,6 +147,7 @@
       }
     } catch (e: any) {
       console.error(e)
+      rawStatements = ''
       analysisOutput = `Error: ${e.message}`
     }
   }
@@ -179,6 +185,13 @@
         {:else}
           <div class="pane-placeholder"><span>New ボタンから開始してください</span></div>
         {/if}
+      </div>
+    </section>
+
+    <section class="pane">
+      <div class="pane-header">Raw Statements</div>
+      <div class="pane-body">
+        <pre class="output">{rawStatements}</pre>
       </div>
     </section>
 
