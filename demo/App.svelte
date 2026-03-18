@@ -10,12 +10,35 @@
 
   const STORAGE_PREFIX = 'horkew:'
   const ACTIVE_KEY = 'horkew:__active__'
+  const PANES_KEY = 'horkew:__panes__'
+
+  const paneEntries = [
+    { id: 'rawStatements', label: 'Raw Statements' },
+    { id: 'parsed', label: 'Parsed' },
+    { id: 'analyzerInput', label: 'Analyzer Input' },
+    { id: 'analysis', label: 'Analysis' },
+  ] as const
+
+  type PaneId = typeof paneEntries[number]['id']
+
+  function loadPaneVisibility(): Record<PaneId, boolean> {
+    const defaults: Record<PaneId, boolean> = { rawStatements: true, parsed: true, analyzerInput: true, analysis: true }
+    try {
+      const stored = localStorage.getItem(PANES_KEY)
+      if (stored) return { ...defaults, ...JSON.parse(stored) }
+    } catch {}
+    return defaults
+  }
+
+  function savePaneVisibility(v: Record<PaneId, boolean>) {
+    localStorage.setItem(PANES_KEY, JSON.stringify(v))
+  }
 
   function savedKeys(): string[] {
     const keys: string[] = []
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)!
-      if (k.startsWith(STORAGE_PREFIX) && k !== ACTIVE_KEY) {
+      if (k.startsWith(STORAGE_PREFIX) && k !== ACTIVE_KEY && k !== PANES_KEY) {
         keys.push(k.slice(STORAGE_PREFIX.length))
       }
     }
@@ -50,6 +73,8 @@
   let analyzing = $state(false)
   let players: Map<number, string> = $state(new Map())
   let worker: Worker | null = null
+  let paneVisible: Record<PaneId, boolean> = $state(loadPaneVisibility())
+  let showPaneMenu = $state(false)
   let showModal = $state(false)
   let newTitle = $state('')
   let modalInput: HTMLInputElement | undefined = $state()
@@ -123,6 +148,11 @@
   function onSelectChange(e: Event) {
     const value = (e.target as HTMLSelectElement).value
     if (value) switchTo(value)
+  }
+
+  function togglePane(id: PaneId) {
+    paneVisible[id] = !paneVisible[id]
+    savePaneVisibility(paneVisible)
   }
 
   function onModalKeydown(e: KeyboardEvent) {
@@ -272,6 +302,22 @@
     <button class="header-btn" onclick={openNewModal}>New</button>
 
     <div class="header-spacer"></div>
+
+    <div class="pane-menu-wrap">
+      <button class="header-btn" onclick={() => showPaneMenu = !showPaneMenu}>Panes</button>
+      {#if showPaneMenu}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="pane-menu-backdrop" onclick={() => showPaneMenu = false}></div>
+        <div class="pane-menu">
+          {#each paneEntries as { id, label }}
+            <label class="pane-menu-item">
+              <input type="checkbox" checked={paneVisible[id]} onchange={() => togglePane(id)} />
+              {label}
+            </label>
+          {/each}
+        </div>
+      {/if}
+    </div>
   </header>
 
   <div class="panes">
@@ -292,13 +338,16 @@
       </div>
     </section>
 
+    {#if paneVisible.rawStatements}
     <section class="pane">
       <div class="pane-header">Raw Statements</div>
       <div class="pane-body" bind:this={rawBodyEl}>
         <pre class="output">{rawStatements}</pre>
       </div>
     </section>
+    {/if}
 
+    {#if paneVisible.parsed}
     <section class="pane">
       <div class="pane-header">Parsed</div>
       <div class="pane-body">
@@ -317,20 +366,25 @@
         </div>
       </div>
     </section>
+    {/if}
 
+    {#if paneVisible.analyzerInput}
     <section class="pane">
       <div class="pane-header">Analyzer Input</div>
       <div class="pane-body">
         <pre class="output">{analyzerJson}</pre>
       </div>
     </section>
+    {/if}
 
+    {#if paneVisible.analysis}
     <section class="pane">
       <div class="pane-header">Analysis</div>
       <div class="pane-body">
         <pre class="output">{formatAnalysis()}</pre>
       </div>
     </section>
+    {/if}
   </div>
 </div>
 
@@ -428,6 +482,44 @@
   .header-btn:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+
+  .pane-menu-wrap {
+    position: relative;
+  }
+
+  .pane-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+  }
+
+  .pane-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 11;
+    background: #1e1e2e;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    padding: 6px 0;
+    min-width: 160px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .pane-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: #cdd6f4;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .pane-menu-item:hover {
+    background: #313244;
   }
 
   .panes {
