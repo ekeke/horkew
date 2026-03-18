@@ -7,8 +7,13 @@ export type RetarRequest = {
   players: [number, string][]
 }
 
+export type SeatResult = {
+  seat: number
+  roles: SystemRole[]
+}
+
 export type RetarResponse =
-  | { type: 'result'; analysisOutput: string }
+  | { type: 'result'; seats: SeatResult[] }
   | { type: 'error'; message: string }
 
 self.onmessage = (e: MessageEvent<RetarRequest>) => {
@@ -47,17 +52,14 @@ self.onmessage = (e: MessageEvent<RetarRequest>) => {
     const result = retar.analyze()
     console.log('=== Retar Result ===', result)
 
-    let analysisOutput = ''
+    const seats: SeatResult[] = []
     if (result && 'result' in result) {
-      const lines: string[] = []
       for (const [seat, roles] of result.result) {
-        const name = players.get(seat) ?? `#${seat}`
-        lines.push(`${name}: ${[...roles].join(', ')}`)
+        seats.push({ seat, roles: [...roles] as SystemRole[] })
       }
-      analysisOutput = lines.join('\n')
     }
 
-    self.postMessage({ type: 'result', analysisOutput } satisfies RetarResponse)
+    self.postMessage({ type: 'result', seats } satisfies RetarResponse)
   } catch (e: any) {
     console.error(e)
     self.postMessage({ type: 'error', message: e.message } satisfies RetarResponse)

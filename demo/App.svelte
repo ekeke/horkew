@@ -2,7 +2,9 @@
   import { tick } from 'svelte'
   import { parse } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
-  import type { RetarResponse } from './analysis.worker.ts'
+  import { systemRoles } from '../src/types/index.ts'
+  import type { RetarResponse, SeatResult } from './analysis.worker.ts'
+  import type { SystemRole } from '../src/types/index.ts'
   import AnalysisWorker from './analysis.worker.ts?worker'
 
   const STORAGE_PREFIX = 'horkew:'
@@ -40,8 +42,10 @@
   let input = $state(activeTitle ? loadText(activeTitle) : '')
   let rawStatements = $state('')
   let statementLines: number[] = []
-  let analysisOutput = $state('')
+  let analysisSeats: SeatResult[] = $state([])
+  let analysisError = $state('')
   let analyzing = $state(false)
+  let players: Map<number, string> = $state(new Map())
   let worker: Worker | null = null
   let showModal = $state(false)
   let newTitle = $state('')
@@ -61,7 +65,8 @@
     input = loadText(title)
     localStorage.setItem(ACTIVE_KEY, title)
     rawStatements = ''
-    analysisOutput = ''
+    analysisSeats = []
+    analysisError = ''
   }
 
   function openNewModal() {
@@ -83,7 +88,8 @@
     }
     showModal = false
     rawStatements = ''
-    analysisOutput = ''
+    analysisSeats = []
+    analysisError = ''
   }
 
   function cancelNew() {
@@ -102,7 +108,8 @@
       localStorage.removeItem(ACTIVE_KEY)
     }
     rawStatements = ''
-    analysisOutput = ''
+    analysisSeats = []
+    analysisError = ''
   }
 
   function onSelectChange(e: Event) {
@@ -166,12 +173,26 @@
     return nextNewline === -1 ? input : input.slice(0, nextNewline)
   }
 
+  function roleToShort(role: SystemRole): string {
+    return systemRoles.get(role)?.shortName ?? role
+  }
+
+  function formatAnalysis(): string {
+    if (analysisError) return `Error: ${analysisError}`
+    if (analysisSeats.length === 0) return ''
+    return analysisSeats.map(({ seat, roles }) => {
+      const name = players.get(seat) ?? `#${seat}`
+      return `${name}: ${roles.map(roleToShort).join('')}`
+    }).join('\n')
+  }
+
   function run() {
     if (worker) {
       worker.terminate()
     }
 
-    analysisOutput = ''
+    analysisSeats = []
+    analysisError = ''
     rawStatements = ''
 
     try {
@@ -180,10 +201,11 @@
       statementLines = statements.map((s: any) => s.line as number)
       console.log('=== Parsed Statements ===', statements)
 
-      const { vs, setup, players } = buildVillageStatus(statements, meta)
+      const { vs, setup, players: playersMap } = buildVillageStatus(statements, meta)
+      players = playersMap
       console.log('=== VillageStatus ===', vs)
       console.log('=== Setup ===', setup)
-      console.log('=== Players ===', players)
+      console.log('=== Players ===', playersMap)
 
       analyzing = true
       worker = new AnalysisWorker()
@@ -191,27 +213,31 @@
         analyzing = false
         const data = e.data
         if (data.type === 'result') {
-          analysisOutput = data.analysisOutput
+          analysisSeats = data.seats
+          analysisError = ''
         } else {
-          analysisOutput = `Error: ${data.message}`
+          analysisSeats = []
+          analysisError = data.message
         }
         worker?.terminate()
         worker = null
       }
       worker.onerror = (e) => {
         analyzing = false
-        analysisOutput = `Worker error: ${e.message}`
+        analysisSeats = []
+        analysisError = `Worker error: ${e.message}`
         worker?.terminate()
         worker = null
       }
       worker.postMessage({
         vs,
         setup: [...setup],
-        players: [...players],
+        players: [...playersMap],
       })
     } catch (e: any) {
       console.error(e)
-      analysisOutput = `Error: ${e.message}`
+      analysisSeats = []
+      analysisError = e.message
     }
   }
 </script>
@@ -272,7 +298,7 @@
     <section class="pane">
       <div class="pane-header">Analysis</div>
       <div class="pane-body">
-        <pre class="output">{analysisOutput}</pre>
+        <pre class="output">{formatAnalysis()}</pre>
       </div>
     </section>
   </div>
