@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Horkew is a Werewolf/Mafia game analysis toolkit consisting of two components being consolidated into a single TypeScript library:
 
 - **Howl** (Horkew OutLine Log) — A parser for `.howl` shorthand notation (YAML frontmatter + compact game notation) that outputs structured game event data. Supports both Japanese and ASCII syntax.
-- **Analyzer** (formerly "Retar") — A logical deduction engine that takes game state and computes which roles each player could possibly hold, using constraint satisfaction and bitwise hypothesis testing.
+- **Retar** — A logical deduction engine that takes game state and computes which roles each player could possibly hold, using constraint satisfaction and bitwise hypothesis testing.
 
 The `howl/` and `common/` directories are **reference implementations** extracted from an external project. A new unified TypeScript project will be created at the repo root to consolidate them.
 
@@ -21,7 +21,7 @@ cd howl && npm run build                     # tsc + Vite lib build
 node --experimental-strip-types --test howl/test/<file>.ts   # single test
 ```
 
-### common/ (analyzer)
+### common/ (retar)
 No standalone build/test setup yet — these files were extracted as reference. Tests use Vitest patterns (expect/describe/it).
 
 ## Architecture
@@ -41,18 +41,18 @@ Key modules in `howl/src/`:
 - **flexibleDictionary.ts** — Fuzzy player name lookup (prefix, substring, 2-char omit)
 - **ruleset.ts** — Game variant configuration (15+ rules)
 
-### Analyzer
+### Retar
 ```
-Game events → VillageStatus (village.ts) → VillageAnalyzer (analyzer.ts) → Possibilities per seat
+Game events → VillageStatus (village.ts) → VillageRetar (retar.ts) → Possibilities per seat
 ```
 
 Key modules in `common/`:
 - **village.ts** — Event-driven state reconstruction; updaters for vote, claim, assert, kill, execute
-- **analyzer.ts** — Backtracking role assignment with bitmask-based possibility tracking
-- **analyzer/possibilities.ts** — `Possibilities` class using `Uint16Array` bitmasks for role sets
-- **analyzer/types.ts** — Core types: `SystemRole` (11 roles), `SeatStatus`, `VillageStatus`, `EnumSpecies`
+- **retar.ts** — Backtracking role assignment with bitmask-based possibility tracking
+- **retar/possibilities.ts** — `Possibilities` class using `Uint16Array` bitmasks for role sets
+- **retar/types.ts** — Core types: `SystemRole` (11 roles), `SeatStatus`, `VillageStatus`, `EnumSpecies`
 
-The pipeline connection: Howl parser output → (mapped to events) → VillageStatus → Analyzer → per-player role possibilities.
+The pipeline connection: Howl parser output → (mapped to events) → VillageStatus → Retar → per-player role possibilities.
 
 ## Coding Conventions
 
@@ -60,7 +60,7 @@ The pipeline connection: Howl parser output → (mapped to events) → VillageSt
 - ESM (`"type": "module"`)
 - TypeScript run directly via `node --experimental-strip-types` (no transpilation step for execution)
 - Howl tests: `node:test` + `node:assert` — do not introduce other test frameworks into howl/
-- Analyzer tests: Vitest patterns (expect/describe/it)
+- Retar tests: Vitest patterns (expect/describe/it)
 - Named regex capture groups used extensively in parsing
 - Discriminated unions keyed on `type` field for statement and event types
 

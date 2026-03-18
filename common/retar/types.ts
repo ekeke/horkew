@@ -1,7 +1,7 @@
 /**
- * Self-contained type definitions for the analyzer module.
+ * Self-contained type definitions for the retar module.
  * These types were extracted from external dependencies (Prisma, OpenAPI, village.ts)
- * to make the analyzer independently portable.
+ * to make retar independently portable.
  */
 
 export type SystemRole = 'werewolf' | 'possessed' | 'fanatic' | 'werehamster' | 'immoralist' | 'villager' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata'

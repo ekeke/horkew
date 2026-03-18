@@ -1,5 +1,5 @@
-import type { CauseOfDeath, EnumSpecies, VillageStatus, SeatStatus, SystemRole } from './analyzer/types'
-import { Possibilities } from './analyzer/possibilities'
+import type { CauseOfDeath, EnumSpecies, VillageStatus, SeatStatus, SystemRole } from './retar/types'
+import { Possibilities } from './retar/possibilities'
 
 /*
 組み合わせ生成器。０～M-1の整数からN個の数値の組み合わせを生成する。
@@ -263,7 +263,7 @@ const replacer = (k, v) => { // key, valueを受け取る
  */
 type AnalyzeOptionValue = 'no' | 'auto' | 'yes'
 
-export type AnalyzerOptions = {
+export type RetarOptions = {
   // システム設定
 
   // aggregate用の実行ID
@@ -361,7 +361,7 @@ type AnalyzeContext = {
   deathChronicle: Map<Day, DeathCounts>
 }
 
-export class VillageAnalyzer {
+export class VillageRetar {
   // 状況の初期値
   // 死因が明らかな場合や仮説が存在するなど、明確な条件が反映済みの値
   initialPossibilities: Possibilities

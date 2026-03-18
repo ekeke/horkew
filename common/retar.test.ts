@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { SystemRole } from './analyzer/types'
+import { SystemRole } from './retar/types'
 import * as inter from 'set.prototype.intersection'
 import * as diff from 'set.prototype.difference'
-import { backtrackForMatrix } from './analyzer';
+import { backtrackForMatrix } from './retar';
 
 inter.shim()
 diff.shim()
