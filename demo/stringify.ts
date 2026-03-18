@@ -54,6 +54,7 @@ function stringifyOne(s: Statement): string {
     }
     case 'multiVote': {
       const st = s as MultiVoteStatement
+      if (st.voters.length === 0) return `${p(st.target)}には誰も投票しませんでした。`
       return `${ps(st.voters)}は${p(st.target)}に投票しました。`
     }
     case 'attack': {
