@@ -7,6 +7,8 @@ import {
   type MultiVoteStatement,
   type AttackStatement,
   type LynchStatement,
+  type CurseStatement,
+  type FollowStatement,
   type AssertStatement,
 } from './statement.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
@@ -121,6 +123,16 @@ function fillMultiVoteVoters(statements: Statement[], options: ParseOptions): St
         for (const t of (s as AttackStatement).target) {
           alive.delete(resolveName(dict, t))
         }
+        result.push(s)
+        break
+      }
+      case 'curse': {
+        alive.delete(resolveName(dict, (s as CurseStatement).target))
+        result.push(s)
+        break
+      }
+      case 'follow': {
+        alive.delete(resolveName(dict, (s as FollowStatement).target))
         result.push(s)
         break
       }

@@ -534,3 +534,69 @@ Bob　霊CO　Charlie白
     }
   })
 })
+
+describe('curse and follow statements in parser', () => {
+  test('curse removes target from alive set', () => {
+    const howl = `+アリス、ボブ、チャーリー、デイブ
+
+吊り アリス
+道連れ ボブ
+
+チャーリー←
+吊り チャーリー`
+
+    const result = parse(howl)
+    const lynch1 = result.statements.find((s: any) => s.type === 'lynch' && s.target === 'アリス')
+    assert.ok(lynch1, 'first lynch exists')
+
+    const curse = result.statements.find((s: any) => s.type === 'curse')
+    assert.deepEqual(curse?.type, 'curse')
+    assert.deepEqual((curse as any).target, 'ボブ')
+
+    // After curse, multiVote should not include ボブ as voter
+    const multiVote = result.statements.find((s: any) => s.type === 'multiVote') as any
+    assert.ok(multiVote, 'multiVote exists')
+    assert.ok(!multiVote.voters.includes('ボブ'), 'curse victim excluded from voters')
+    assert.ok(!multiVote.voters.includes('アリス'), 'lynch victim excluded from voters')
+  })
+
+  test('follow removes target from alive set', () => {
+    const howl = `+アリス、ボブ、チャーリー、デイブ
+
+吊り アリス
+後追い ボブ
+
+チャーリー←
+吊り チャーリー`
+
+    const result = parse(howl)
+    const follow = result.statements.find((s: any) => s.type === 'follow')
+    assert.deepEqual(follow?.type, 'follow')
+    assert.deepEqual((follow as any).target, 'ボブ')
+
+    const multiVote = result.statements.find((s: any) => s.type === 'multiVote') as any
+    assert.ok(multiVote, 'multiVote exists')
+    assert.ok(!multiVote.voters.includes('ボブ'), 'follow victim excluded from voters')
+  })
+
+  test('curse and follow get correct day assignment', () => {
+    const howl = `+アリス、ボブ、チャーリー、デイブ、エミリー
+
+吊り アリス
+道連れ ボブ
+後追い チャーリー
+
+噛み デイブ`
+
+    const result = parse(howl)
+    const lynch = result.statements.find((s: any) => s.type === 'lynch') as any
+    const curse = result.statements.find((s: any) => s.type === 'curse') as any
+    const follow = result.statements.find((s: any) => s.type === 'follow') as any
+    const attack = result.statements.find((s: any) => s.type === 'attack') as any
+
+    assert.strictEqual(lynch.day, 1)
+    assert.strictEqual(curse.day, 1)
+    assert.strictEqual(follow.day, 1)
+    assert.strictEqual(attack.day, 2)
+  })
+})

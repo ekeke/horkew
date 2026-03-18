@@ -27,6 +27,8 @@ export const lynch  = `(?:吊り?|処刑)`
 export const revote = `(?:再投票|\-\-+|==+|ーー+|＝＝+)`
 export const guard  = `(?:護衛?|ガード)`
 export const peace  = `(?:平和)`
+export const curse  = `(?:道連れ|猫又の呪い)`
+export const follow = `(?:後追い)`
 export const none   = `(?:者?(?:なし|無し|ナシ))`
 
 // ********************************* Basic Roles

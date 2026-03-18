@@ -13,6 +13,8 @@ import type {
   MultiVoteStatement,
   AttackStatement,
   LynchStatement,
+  CurseStatement,
+  FollowStatement,
   OverStatement,
   AssertStatement,
 } from './statement.ts'
@@ -71,6 +73,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   let day = 1
   let finished = false
   let result: VillageResult = undefined
+  let lastDeathEvent: 'execution' | 'night_kill' = 'execution'
 
   function resolveSeat(name: string): number {
     const results = dict.search(name)
@@ -142,6 +145,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
 
       case 'attack': {
         const s = stmt as AttackStatement
+        lastDeathEvent = 'night_kill'
         for (const targetName of s.target) {
           const targetSeat = resolveSeat(targetName)
           const status = statuses.get(targetSeat)!
@@ -161,6 +165,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
 
       case 'lynch': {
         const s = stmt as LynchStatement
+        lastDeathEvent = 'execution'
         if (s.target !== null) {
           const targetSeat = resolveSeat(s.target)
           const status = statuses.get(targetSeat)!
@@ -171,6 +176,38 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           currentExec.push(targetSeat)
           executions.set(day, currentExec)
         }
+        break
+      }
+
+      case 'curse': {
+        const s = stmt as CurseStatement
+        const targetSeat = resolveSeat(s.target)
+        const status = statuses.get(targetSeat)!
+        status.surviving = false
+        status.causeOfDeath = lastDeathEvent === 'execution'
+          ? 'cursed_by_executed_nekomata'
+          : 'cursed_by_killed_nekomata'
+        status.diedDay = lastDeathEvent === 'execution' ? day : day - 1
+        const deathDay = status.diedDay
+        const currentKills = kills.get(deathDay) || []
+        currentKills.push(targetSeat)
+        kills.set(deathDay, currentKills)
+        break
+      }
+
+      case 'follow': {
+        const s = stmt as FollowStatement
+        const targetSeat = resolveSeat(s.target)
+        const status = statuses.get(targetSeat)!
+        status.surviving = false
+        status.causeOfDeath = lastDeathEvent === 'execution'
+          ? 'follow_executed_hamster'
+          : 'follow_killed_hamster'
+        status.diedDay = lastDeathEvent === 'execution' ? day : day - 1
+        const deathDay = status.diedDay
+        const currentKills = kills.get(deathDay) || []
+        currentKills.push(targetSeat)
+        kills.set(deathDay, currentKills)
         break
       }
 

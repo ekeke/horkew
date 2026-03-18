@@ -608,6 +608,13 @@ export class VillageRetar {
       }
       if (role === 'nekomata' && multipleVictims.length > 0) {
         unrevealedSeats.push(...multipleVictims)
+        // Also consider alive non-claiming seats: multiple night deaths can be
+        // explained by seer-killed werehamster without nekomata curse
+        for ( const [seat, status] of village.statuses.entries() ) {
+          if ( status.surviving && !status.claiming ) {
+            unrevealedSeats.push(seat)
+          }
+        }
       }
       const iter = selectCombinationsFromArray([...new Set([...claims[role], ...unrevealedSeats])], num, num)
       for ( const [selected, rest] of iter ) {
@@ -767,11 +774,22 @@ export class VillageRetar {
       if (self.surviving) maxSurviving = Infinity
       else if (maxSurviving < self.diedDay) maxSurviving = self.diedDay
 
-      for ( const [day,target] of self.actions.entries() ) {
-        seerTargets.set(day, [...(seerTargets.get(day) || []), target])
+      // Populate seerTargets from divination assertions (insertion order = chronological)
+      let assertionDay = this.options.dayCountFrom
+      for (const [targetSeat] of self.assertions) {
+        seerTargets.set(assertionDay, [...(seerTargets.get(assertionDay) || []), targetSeat])
+        assertionDay++
       }
+      // If seer died at night, they acted that night but result is unreported
       if (!self.surviving && self.causeOfDeath === 'night_kill') {
         seerTargets.set(self.diedDay, [...(seerTargets.get(self.diedDay) || []), 'unknown'])
+      }
+      // Add 'unknown' only for genuinely unreported nights beyond known assertions
+      const maxActiveDay = self.surviving ? this.vs.day - 1 : (self.causeOfDeath === 'night_kill' ? self.diedDay : self.diedDay - 1)
+      for (let d = assertionDay; d <= maxActiveDay; d++) {
+        if (!seerTargets.has(d)) {
+          seerTargets.set(d, ['unknown'])
+        }
       }
       for (const [targetSeat, species] of self.assertions) {
         const target = this.context.possibilities.get(targetSeat)
@@ -789,10 +807,9 @@ export class VillageRetar {
         }
         else if ( this.context.possibilities.isActualRole(targetSeat, 'werehamster') ) {
           const targetStatus = this.getStatus(targetSeat)
-//          console.log('testing seer for hamster')
           if ( targetStatus.surviving ) return false
-          if ( self.actions.get(targetStatus.diedDay) !== targetSeat ) return false
-//          console.log('passed')
+          const targetsOnDeathDay = seerTargets.get(targetStatus.diedDay) || []
+          if ( !targetsOnDeathDay.includes(targetSeat) && !targetsOnDeathDay.includes('unknown') ) return false
         }
         else {
           if ( ! this.context.possibilities.markAsHuman(targetSeat) ) return false
@@ -995,6 +1012,7 @@ export class VillageRetar {
           if ( targetStatus.surviving ) continue
           if (targetStatus.diedDay !== self.diedDay) continue
           if ( targetStatus.causeOfDeath === 'execution' ) continue
+          if ( targetStatus.causeOfDeath === 'follow_executed_hamster' || targetStatus.causeOfDeath === 'follow_killed_hamster' ) continue
           if (targetSeat === seat) continue
           // 別の死体がある
           if ( self.causeOfDeath === 'execution' ) {

@@ -1,6 +1,7 @@
 import type {
   Statement, JoinStatement, VoteStatement, MultiVoteStatement,
-  AttackStatement, LynchStatement, RevoteStatement, OverStatement,
+  AttackStatement, LynchStatement, CurseStatement, FollowStatement,
+  RevoteStatement, OverStatement,
   AssertStatement, PeaceStatement, RevealStatement, UnknownStatement,
   Assertion,
 } from '../src/howl/statement.ts'
@@ -120,6 +121,14 @@ export function stringifyStatements(statements: Statement[]): StringifiedLine[] 
           lines.push({ text: `  ${assertionToString(st.actor, role, history[i], baseDay + i)}`, type: 'normal' })
         }
         return lines
+      }
+      case 'curse': {
+        const st = s as CurseStatement
+        return [{ text: `${p(st.target)}が道連れになりました。`, type: 'normal' }]
+      }
+      case 'follow': {
+        const st = s as FollowStatement
+        return [{ text: `${p(st.target)}が後追いしました。`, type: 'normal' }]
       }
       case 'peace':
         return [{ text: '平和な朝を迎えました。', type: 'normal' }]

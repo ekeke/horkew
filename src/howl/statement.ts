@@ -1,6 +1,6 @@
 import * as V from './vocabulary.ts'
 
-export type StatementType = 'join' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'revote' | 'over' | 'assert' | 'peace' | 'reveal' | 'unknown'
+export type StatementType = 'join' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'curse' | 'follow' | 'revote' | 'over' | 'assert' | 'peace' | 'reveal' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf'
@@ -72,6 +72,16 @@ export type RevealStatement = Statement & {
     type: 'reveal'
     player: string
     role: string
+}
+
+export type CurseStatement = Statement & {
+    type: 'curse'
+    target: string
+}
+
+export type FollowStatement = Statement & {
+    type: 'follow'
+    target: string
 }
 
 export type UnknownStatement = Statement & {
@@ -165,6 +175,26 @@ export function parseLynchStatement(text: string, line: number): LynchStatement 
   const reverseMatch = reverseRegex.exec(text)
   if (!reverseMatch) return null
   return { type: 'lynch', line, target: reverseMatch[1].trim() }
+}
+
+export function parseCurseStatement(text: string, line: number): CurseStatement | null {
+  const curseRegex = new RegExp(`^${V.optionalSpace}${V.curse}(?:${V.delimiter})?${V.optionalSpace}(${V.possibleName})${V.optionalSpace}$`)
+  const match = curseRegex.exec(text)
+  if (match) return { type: 'curse', line, target: match[1].trim() }
+  const reverseRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})(?:${V.delimiter})?${V.optionalSpace}${V.curse}${V.optionalSpace}$`)
+  const reverseMatch = reverseRegex.exec(text)
+  if (!reverseMatch) return null
+  return { type: 'curse', line, target: reverseMatch[1].trim() }
+}
+
+export function parseFollowStatement(text: string, line: number): FollowStatement | null {
+  const followRegex = new RegExp(`^${V.optionalSpace}${V.follow}(?:${V.delimiter})?${V.optionalSpace}(${V.possibleName})${V.optionalSpace}$`)
+  const match = followRegex.exec(text)
+  if (match) return { type: 'follow', line, target: match[1].trim() }
+  const reverseRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})(?:${V.delimiter})?${V.optionalSpace}${V.follow}${V.optionalSpace}$`)
+  const reverseMatch = reverseRegex.exec(text)
+  if (!reverseMatch) return null
+  return { type: 'follow', line, target: reverseMatch[1].trim() }
 }
 
 export function parseRevoteStatement(text: string, line: number): RevoteStatement | null {
@@ -279,6 +309,8 @@ export function parseStatement (text: string, line: number): Statement {
     parseMultiVoteStatement,
     parseAttackStatement,
     parseLynchStatement,
+    parseCurseStatement,
+    parseFollowStatement,
     parseRevoteStatement,
     parseOverStatement,
     parsePeaceStatement,

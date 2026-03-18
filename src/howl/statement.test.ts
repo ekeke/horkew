@@ -431,3 +431,57 @@ describe('the parser function', () => {
     })
   })
 })
+
+describe('curse statement', () => {
+  test('道連れ keyword', () => {
+    const result = S.parseCurseStatement('道連れ ボブ', 1)
+    assert.deepEqual(result, { type: 'curse', line: 1, target: 'ボブ' })
+  })
+
+  test('猫又の呪い keyword', () => {
+    const result = S.parseCurseStatement('猫又の呪い　アリス', 1)
+    assert.deepEqual(result, { type: 'curse', line: 1, target: 'アリス' })
+  })
+
+  test('reverse pattern: target + 道連れ', () => {
+    const result = S.parseCurseStatement('ボブ 道連れ', 1)
+    assert.deepEqual(result, { type: 'curse', line: 1, target: 'ボブ' })
+  })
+
+  test('reverse pattern: target + 猫又の呪い', () => {
+    const result = S.parseCurseStatement('アリス　猫又の呪い', 1)
+    assert.deepEqual(result, { type: 'curse', line: 1, target: 'アリス' })
+  })
+
+  test('with delimiter', () => {
+    const result = S.parseCurseStatement('道連れ：ボブ', 1)
+    assert.deepEqual(result, { type: 'curse', line: 1, target: 'ボブ' })
+  })
+
+  test('invalid curse statement', () => {
+    assert.equal(S.parseCurseStatement('', 1), null)
+    assert.equal(S.parseCurseStatement('道連れ', 1), null)
+  })
+})
+
+describe('follow statement', () => {
+  test('後追い keyword', () => {
+    const result = S.parseFollowStatement('後追い アリス', 1)
+    assert.deepEqual(result, { type: 'follow', line: 1, target: 'アリス' })
+  })
+
+  test('reverse pattern: target + 後追い', () => {
+    const result = S.parseFollowStatement('チャーリー　後追い', 1)
+    assert.deepEqual(result, { type: 'follow', line: 1, target: 'チャーリー' })
+  })
+
+  test('with delimiter', () => {
+    const result = S.parseFollowStatement('後追い：アリス', 1)
+    assert.deepEqual(result, { type: 'follow', line: 1, target: 'アリス' })
+  })
+
+  test('invalid follow statement', () => {
+    assert.equal(S.parseFollowStatement('', 1), null)
+    assert.equal(S.parseFollowStatement('後追い', 1), null)
+  })
+})
