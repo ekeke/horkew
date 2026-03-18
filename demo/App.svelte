@@ -1,5 +1,8 @@
 <script lang="ts">
-  import type { AnalysisResponse } from './analysis.worker.ts'
+  import { tick } from 'svelte'
+  import { parse } from '../src/howl/index.ts'
+  import { buildVillageStatus } from '../src/howl/bridge.ts'
+  import type { RetarResponse } from './analysis.worker.ts'
   import AnalysisWorker from './analysis.worker.ts?worker'
 
   const STORAGE_PREFIX = 'horkew:'
@@ -36,16 +39,20 @@
   let activeTitle = $state(localStorage.getItem(ACTIVE_KEY) ?? '')
   let input = $state(activeTitle ? loadText(activeTitle) : '')
   let rawStatements = $state('')
+  let statementLines: number[] = []
   let analysisOutput = $state('')
   let analyzing = $state(false)
   let worker: Worker | null = null
   let showModal = $state(false)
   let newTitle = $state('')
   let modalInput: HTMLInputElement | undefined = $state()
+  let textareaEl: HTMLTextAreaElement | undefined = $state()
+  let rawBodyEl: HTMLElement | undefined = $state()
 
   $effect(() => {
     if (activeTitle && input !== undefined) {
       saveText(activeTitle, input)
+      run()
     }
   })
 
@@ -108,6 +115,44 @@
     if (e.key === 'Escape') cancelNew()
   }
 
+  function getCursorLine(): number {
+    if (!textareaEl) return 1
+    const pos = textareaEl.selectionStart
+    return input.slice(0, pos).split('\n').length
+  }
+
+  function syncRawScroll() {
+    if (!rawBodyEl || statementLines.length === 0) return
+    const cursorLine = getCursorLine()
+
+    // Find the last statement whose source line <= cursor line
+    let stmtIndex = 0
+    for (let i = 0; i < statementLines.length; i++) {
+      if (statementLines[i] <= cursorLine) stmtIndex = i
+      else break
+    }
+
+    // Find the JSON line of the stmtIndex-th top-level object
+    // In JSON.stringify(arr, null, 2), top-level objects start with "  {" after a newline
+    const jsonLines = rawStatements.split('\n')
+    let count = -1
+    let jsonLine = 0
+    for (let i = 0; i < jsonLines.length; i++) {
+      if (jsonLines[i].trimStart().startsWith('{') && jsonLines[i].startsWith('  {')) {
+        count++
+        if (count === stmtIndex) {
+          jsonLine = i
+          break
+        }
+      }
+    }
+
+    const pre = rawBodyEl.querySelector('pre')
+    if (!pre) return
+    const lineHeight = parseFloat(getComputedStyle(pre).lineHeight) || 19.5
+    rawBodyEl.scrollTop = jsonLine * lineHeight
+  }
+
   function run() {
     if (worker) {
       worker.terminate()
@@ -115,28 +160,47 @@
 
     analysisOutput = ''
     rawStatements = ''
-    analyzing = true
 
-    worker = new AnalysisWorker()
-    worker.onmessage = (e: MessageEvent<AnalysisResponse>) => {
-      analyzing = false
-      const data = e.data
-      if (data.type === 'result') {
-        rawStatements = data.rawStatements
-        analysisOutput = data.analysisOutput
-      } else {
-        analysisOutput = `Error: ${data.message}`
+    try {
+      const { meta, statements } = parse(input)
+      rawStatements = JSON.stringify(statements, null, 2)
+      statementLines = statements.map((s: any) => s.line as number)
+      tick().then(syncRawScroll)
+      console.log('=== Parsed Statements ===', statements)
+
+      const { vs, setup, players } = buildVillageStatus(statements, meta)
+      console.log('=== VillageStatus ===', vs)
+      console.log('=== Setup ===', setup)
+      console.log('=== Players ===', players)
+
+      analyzing = true
+      worker = new AnalysisWorker()
+      worker.onmessage = (e: MessageEvent<RetarResponse>) => {
+        analyzing = false
+        const data = e.data
+        if (data.type === 'result') {
+          analysisOutput = data.analysisOutput
+        } else {
+          analysisOutput = `Error: ${data.message}`
+        }
+        worker?.terminate()
+        worker = null
       }
-      worker?.terminate()
-      worker = null
+      worker.onerror = (e) => {
+        analyzing = false
+        analysisOutput = `Worker error: ${e.message}`
+        worker?.terminate()
+        worker = null
+      }
+      worker.postMessage({
+        vs,
+        setup: [...setup],
+        players: [...players],
+      })
+    } catch (e: any) {
+      console.error(e)
+      analysisOutput = `Error: ${e.message}`
     }
-    worker.onerror = (e) => {
-      analyzing = false
-      analysisOutput = `Worker error: ${e.message}`
-      worker?.terminate()
-      worker = null
-    }
-    worker.postMessage({ input })
   }
 </script>
 
@@ -159,10 +223,6 @@
     <button class="header-btn" onclick={openNewModal}>New</button>
 
     <div class="header-spacer"></div>
-
-    <button class="header-btn" onclick={run} disabled={!activeTitle || analyzing}>
-      {analyzing ? 'Analyzing...' : 'Parse & Analyze'}
-    </button>
   </header>
 
   <div class="panes">
@@ -170,7 +230,13 @@
       <div class="pane-header">Input</div>
       <div class="pane-body">
         {#if activeTitle}
-          <textarea class="input-editor" bind:value={input}></textarea>
+          <textarea
+            class="input-editor"
+            bind:value={input}
+            bind:this={textareaEl}
+            onclick={syncRawScroll}
+            onkeyup={syncRawScroll}
+          ></textarea>
         {:else}
           <div class="pane-placeholder"><span>New ボタンから開始してください</span></div>
         {/if}
@@ -179,7 +245,7 @@
 
     <section class="pane">
       <div class="pane-header">Raw Statements</div>
-      <div class="pane-body">
+      <div class="pane-body" bind:this={rawBodyEl}>
         <pre class="output">{rawStatements}</pre>
       </div>
     </section>

@@ -1,27 +1,32 @@
-import { parse } from '../src/howl/index.ts'
-import { buildVillageStatus } from '../src/howl/bridge.ts'
 import { VillageRetar } from '../src/retar/index.ts'
+import type { VillageStatus, SystemRole } from '../src/types/index.ts'
 
-export type AnalysisRequest = {
-  input: string
+export type RetarRequest = {
+  vs: VillageStatus
+  setup: [SystemRole, number][]
+  players: [number, string][]
 }
 
-export type AnalysisResponse =
-  | { type: 'result'; rawStatements: string; analysisOutput: string }
+export type RetarResponse =
+  | { type: 'result'; analysisOutput: string }
   | { type: 'error'; message: string }
 
-self.onmessage = (e: MessageEvent<AnalysisRequest>) => {
+self.onmessage = (e: MessageEvent<RetarRequest>) => {
   try {
-    const { input } = e.data
+    const { vs, players: playersArr } = e.data
+    const setup = new Map<SystemRole, number>(e.data.setup)
+    const players = new Map<number, string>(playersArr)
 
-    const { meta, statements } = parse(input)
-    const rawStatements = JSON.stringify(statements, null, 2)
-    console.log('=== Parsed Statements ===', statements)
-
-    const { vs, setup, players } = buildVillageStatus(statements, meta)
-    console.log('=== VillageStatus ===', vs)
-    console.log('=== Setup ===', setup)
-    console.log('=== Players ===', players)
+    // Reconstruct Maps from serialized VillageStatus
+    vs.statuses = new Map(vs.statuses as any)
+    vs.executions = new Map(vs.executions as any)
+    vs.kills = new Map(vs.kills as any)
+    vs.roles = new Map(vs.roles as any)
+    vs.claims = new Map(vs.claims as any)
+    for (const [seat, status] of vs.statuses) {
+      status.actions = new Map(status.actions as any)
+      status.assertions = new Map(status.assertions as any)
+    }
 
     const options = {
       seerClaimingDueDate: 2,
@@ -52,9 +57,9 @@ self.onmessage = (e: MessageEvent<AnalysisRequest>) => {
       analysisOutput = lines.join('\n')
     }
 
-    self.postMessage({ type: 'result', rawStatements, analysisOutput } satisfies AnalysisResponse)
+    self.postMessage({ type: 'result', analysisOutput } satisfies RetarResponse)
   } catch (e: any) {
     console.error(e)
-    self.postMessage({ type: 'error', message: e.message } satisfies AnalysisResponse)
+    self.postMessage({ type: 'error', message: e.message } satisfies RetarResponse)
   }
 }
