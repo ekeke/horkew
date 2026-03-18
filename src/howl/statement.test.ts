@@ -218,6 +218,24 @@ describe('revote statement', () => {
     })
   })
 
+  test('Accepts full-width long dash', () => {
+    const result = S.parseRevoteStatement('ーーー', 1)
+    assert.deepEqual(result, {
+      type: 'revote',
+      line: 1,
+      targets: [],
+    })
+  })
+
+  test('Accepts full-width equals', () => {
+    const result = S.parseRevoteStatement('＝＝＝', 1)
+    assert.deepEqual(result, {
+      type: 'revote',
+      line: 1,
+      targets: [],
+    })
+  })
+
   test('invalid revote statement', () => {
     const result = S.parseRevoteStatement('', 1)
     assert.equal(result, null)
