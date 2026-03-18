@@ -323,3 +323,155 @@ Eve←
     assert.deepStrictEqual(mvs[1].voters.sort(), ['Charlie'].sort())
   })
 })
+
+describe('fillMediumTargets', () => {
+  function findAsserts(text: string) {
+    return parse(text).statements
+      .filter((s: any) => s.type === 'assert')
+      .map((s: any) => ({ actor: s.actor, assertions: s.assertions }))
+  }
+
+  test('medium result without target is filled from lynch history', () => {
+    const text = `+Alice,Bob,Charlie,Dave
+噛み Alice
+Bob　霊CO　白
+吊り Charlie
+噛み Dave
+Bob　黒`
+    const asserts = findAsserts(text)
+    // Bob claims medium; first result (白) → Charlie (1st lynch)
+    assert.strictEqual(asserts[0].assertions[1].target, 'Charlie')
+    // Second statement: 黒 → no second lynch yet, but Charlie is 1st
+    // Wait: there's only one lynch (Charlie). Bob's 1st result is from CO statement.
+    // "Bob　霊CO　白" has role claim + one history entry (白, no target) → target = Charlie
+    assert.strictEqual(asserts[0].assertions.length, 2)
+    assert.strictEqual(asserts[0].assertions[1].target, 'Charlie')
+    assert.strictEqual(asserts[0].assertions[1].result, 'isHuman')
+  })
+
+  test('incremental medium reports match sequential lynches', () => {
+    const text = `+Alice,Bob,Charlie,Dave,Eve,Frank
+噛み Alice
+Bob　霊CO
+吊り Charlie
+噛み Dave
+Bob　白
+吊り Eve
+Bob　黒`
+    const asserts = findAsserts(text)
+    // Bob's 1st result (白) → Charlie (1st lynch)
+    assert.strictEqual(asserts[1].assertions[0].target, 'Charlie')
+    assert.strictEqual(asserts[1].assertions[0].result, 'isHuman')
+    // Bob's 2nd result (黒) → Eve (2nd lynch)
+    assert.strictEqual(asserts[2].assertions[0].target, 'Eve')
+    assert.strictEqual(asserts[2].assertions[0].result, 'isWolf')
+  })
+
+  test('medium claim after results — retroactive fill', () => {
+    const text = `+Alice,Bob,Charlie,Dave,Eve
+噛み Alice
+Bob　白
+吊り Charlie
+噛み Dave
+Bob　霊CO　黒`
+    const asserts = findAsserts(text)
+    // "Bob　白" before CO → still filled since Bob eventually claims medium
+    assert.strictEqual(asserts[0].assertions[0].target, 'Charlie')
+    assert.strictEqual(asserts[0].assertions[0].result, 'isHuman')
+    // "Bob　霊CO　黒" → 2nd result (黒), but only 1 lynch (Charlie) so far
+    // Wait: the CO has a role claim + history entry. The history entry is the 2nd result.
+    // But there's only 1 lynch. So target stays undefined.
+    assert.strictEqual(asserts[1].assertions[1].target, undefined)
+  })
+
+  test('non-medium assert is not affected', () => {
+    const text = `+Alice,Bob,Charlie,Dave
+噛み Alice
+Bob　占いCO　Charlie白
+吊り Dave`
+    const asserts = findAsserts(text)
+    // Bob is seer, not medium — target already specified as Charlie
+    assert.strictEqual(asserts[0].assertions[1].target, 'Charlie')
+    assert.strictEqual(asserts[0].assertions[1].result, 'isHuman')
+  })
+
+  test('medium with explicit target is not overwritten', () => {
+    const text = `+Alice,Bob,Charlie,Dave
+噛み Alice
+Bob　霊CO　Charlie白
+吊り Dave`
+    const asserts = findAsserts(text)
+    // Explicit target Charlie — should not be overwritten to Dave
+    assert.strictEqual(asserts[0].assertions[1].target, 'Charlie')
+  })
+
+  test('scenario: medium incremental reports in full game', () => {
+    const text = `+便ールガンカ、花京院、小梅ちゃん、ワンワン、ウルガー、ペガサス盛り、星刻、百面ダイス、ブルファンゴ、泣く女、ビスマス結晶、スレッタ、裁縫龍、グロ中尉
+
+噛み　ルガ
+
+百面ダイス　占いCO　グロ白
+グロ　占いCO　小梅ちゃん白
+泣く女　占いco　スレッタ○
+
+星　霊CO
+
+共有　ペガサス　裁縫龍
+
+百面ダイス　スレッタ黒
+
+吊り　ダイス
+
+噛み　グロ
+
+泣く　花京院白
+
+星　白
+
+吊り　泣く女
+
+噛み　ペガサス
+
+星　黒
+
+吊り　ブル
+
+噛み　裁縫龍
+
+星　白
+
+吊り　ワン
+
+平和
+
+星　黒
+
+吊り　花京院
+
+噛み　小梅
+
+星　白
+
+吊り　ビスマス
+
+星噛
+
+人狼勝利`
+    const result = parse(text)
+    const starAsserts = result.statements
+      .filter((s: any) => s.type === 'assert' && s.actor === '星')
+      .map((s: any) => s.assertions.filter((a: any) => !a.roles))
+      .flat()
+
+    // 星 claims medium. Lynch order: ダイス, 泣く女, ブル, ワン, 花京院, ビスマス
+    // 星 reports 5 results (attacked before reporting 6th)
+    const expectedTargets = ['百面ダイス', '泣く女', 'ブルファンゴ', 'ワンワン', '花京院']
+    const expectedResults = ['isHuman', 'isWolf', 'isHuman', 'isWolf', 'isHuman']
+
+    assert.strictEqual(starAsserts.length, 5)
+    for (let i = 0; i < 5; i++) {
+      assert.strictEqual(starAsserts[i].target, expectedTargets[i], `target at index ${i}`)
+      assert.strictEqual(starAsserts[i].result, expectedResults[i], `result at index ${i}`)
+    }
+  })
+})

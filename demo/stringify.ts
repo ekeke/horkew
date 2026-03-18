@@ -48,6 +48,7 @@ export function stringifyStatements(statements: Statement[]): StringifiedLine[] 
   }
 
   const claimedRoles = new Map<string, string>()
+  const assertionCount = new Map<string, number>()
 
   const divineVerbs: Record<string, string> = {
     seer: '占った',
@@ -114,10 +115,13 @@ export function stringifyStatements(statements: Statement[]): StringifiedLine[] 
           claimedRoles.set(resolve(st.actor), claimAssertion.roles![0])
         }
         const role = claimedRoles.get(resolve(st.actor))
+        const actorKey = resolve(st.actor)
+        const prevCount = assertionCount.get(actorKey) ?? 0
         const history = st.assertions.filter(a => !a.roles)
         for (let i = 0; i < history.length; i++) {
-          lines.push({ text: `  ${assertionToString(st.actor, role, history[i], i + 1)}`, type: 'normal' })
+          lines.push({ text: `  ${assertionToString(st.actor, role, history[i], prevCount + i + 1)}`, type: 'normal' })
         }
+        assertionCount.set(actorKey, prevCount + history.length)
         return lines
       }
       case 'peace':

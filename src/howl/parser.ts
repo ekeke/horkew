@@ -7,6 +7,7 @@ import {
   type MultiVoteStatement,
   type AttackStatement,
   type LynchStatement,
+  type AssertStatement,
 } from './statement.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
 
@@ -149,6 +150,66 @@ function fillMultiVoteVoters(statements: Statement[], options: ParseOptions): St
   return result
 }
 
+function fillMediumTargets(statements: Statement[]): Statement[] {
+  const dict = new FlexibleDictionary()
+  const lynchTargets: string[] = []
+  const claimedMediums = new Set<string>()
+
+  // First pass: collect join names, lynch targets, and medium claimants
+  for (const s of statements) {
+    if (s.type === 'join') {
+      for (const p of (s as JoinStatement).players) {
+        dict.add(p, [p])
+      }
+    } else if (s.type === 'lynch') {
+      const target = (s as LynchStatement).target
+      if (target) {
+        lynchTargets.push(resolveName(dict, target))
+      }
+    } else if (s.type === 'assert') {
+      const st = s as AssertStatement
+      if (st.assertions.some(a => a.roles?.includes('medium'))) {
+        claimedMediums.add(resolveName(dict, st.actor))
+      }
+    }
+  }
+
+  if (claimedMediums.size === 0 || lynchTargets.length === 0) return statements
+
+  // Second pass: fill missing targets for medium result assertions
+  const mediumResultCount = new Map<string, number>()
+  return statements.map(s => {
+    if (s.type !== 'assert') return s
+    const st = s as AssertStatement
+    const actorResolved = resolveName(dict, st.actor)
+    if (!claimedMediums.has(actorResolved)) return s
+
+    let count = mediumResultCount.get(actorResolved) ?? 0
+    let changed = false
+    const newAssertions = st.assertions.map(a => {
+      if (a.roles || a.action === 'guard') return a
+      if (!a.result) return a
+
+      if (a.target) {
+        count++
+        return a
+      }
+
+      // No target + has result + actor is medium → fill from lynch history
+      const lynchIndex = count
+      count++
+      if (lynchIndex < lynchTargets.length) {
+        changed = true
+        return { ...a, target: lynchTargets[lynchIndex] }
+      }
+      return a
+    })
+    mediumResultCount.set(actorResolved, count)
+    if (!changed) return s
+    return { ...st, assertions: newAssertions }
+  })
+}
+
 export function parse(text: string, options: ParseOptions = {}): { meta: any, statements: Statement[] } {
   const { meta, lines }: { meta: any; lines: Line[] } = preprocess(text)
   let statements: Statement[] = []
@@ -164,6 +225,7 @@ export function parse(text: string, options: ParseOptions = {}): { meta: any, st
   }
 
   statements = fillMultiVoteVoters(statements, options)
+  statements = fillMediumTargets(statements)
 
   return { meta, statements }
 }
