@@ -24,3 +24,17 @@ export type {
 export { FlexibleDictionary } from './flexibleDictionary.ts'
 export { Rules } from './ruleset.ts'
 export * as vocabulary from './vocabulary.ts'
+export type {
+  SystemRole,
+  EnumSpecies,
+  CauseOfDeath,
+  VillageResult,
+  PlayerAction,
+  Assertions,
+  Role as VillageRole,
+  SeatStatus,
+  VillageStatus,
+} from '../types/index.ts'
+export { systemRoles } from '../types/index.ts'
+export { buildVillageStatus } from './bridge.ts'
+export type { BridgeResult } from './bridge.ts'

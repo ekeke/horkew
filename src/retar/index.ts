@@ -1,6 +1,6 @@
 // @ts-nocheck
 // TODO: Fix type errors inherited from reference implementation
-import type { CauseOfDeath, EnumSpecies, VillageStatus, SeatStatus, SystemRole } from './types.ts'
+import type { CauseOfDeath, EnumSpecies, VillageStatus, SeatStatus, SystemRole } from '../types/index.ts'
 import { Possibilities } from './possibilities.ts'
 
 /*

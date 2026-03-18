@@ -1,5 +1,5 @@
-import type { SystemRole } from './types.ts'
-export type { SystemRole } from './types.ts'
+import type { SystemRole } from '../types/index.ts'
+export type { SystemRole } from '../types/index.ts'
 
 export type RolePossibility = number
 type Seat = number
