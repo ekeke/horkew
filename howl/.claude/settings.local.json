@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(wc -l /c/Users/aklas/dev/howl/test/*.ts)",
-      "Bash(git -C /c/Users/aklas/dev/howl log --oneline -20)"
-    ]
-  }
-}
