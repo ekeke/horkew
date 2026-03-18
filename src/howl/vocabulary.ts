@@ -52,6 +52,6 @@ export const anyAlignment = `(?:${village}|${wolf}|${hamster})` // Any alignment
 
 // ********************************* Races
 
-export const isHuman = `[白◯○]`
+export const isHuman = `[白◯○〇]`
 export const isWolf  = `[黒●]`
 export const race = `(?:${isHuman}|${isWolf})`
