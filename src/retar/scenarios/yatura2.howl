@@ -6,11 +6,11 @@ setup:
   seer: 1
   medium: 1
   bodyguard: 1
-  possessed: 1
+  fanatic: 1
   werewolf: 3
   mason: 2
   werehamster: 1
-  fanatic: 1
+  immoralist: 1
 ---
 
 ＋DIO,ヴァイト、どスケベ公、お嬢様、ミスド常連、伯爵、アイドル、ズバット、宅配サービス、屋根から滑り落ちる人、読書家、無惨、棺桶、初日犠牲者
@@ -23,7 +23,7 @@ setup:
 
 アイドル死亡
 屋根死亡
-
+# @expect アイドル: [nekomata...]
 宅配　占いCO　棺桶○　無惨黒
 
 棺桶　霊CO　白
@@ -47,7 +47,6 @@ setup:
 無惨処刑
 
 読書家死亡
-
 棺桶　黒
 
 ミスド常連処刑

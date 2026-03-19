@@ -26,11 +26,13 @@ const defaultOptions: AnalyzeOptions = {
   batch: 0,
 }
 
+type RoleExpectation = { roles: string[], partial: boolean }
+
 type Checkpoint = {
   lineNumber: number
   skip: boolean
   solve?: boolean
-  roles: Map<string, string[]>
+  roles: Map<string, RoleExpectation>
 }
 
 const expectPattern = /^#\s*@expect(?:-skip)?\s+(.+)$/
@@ -80,8 +82,11 @@ function parseDirective(checkpoint: Checkpoint, content: string) {
   if (key === 'solve') {
     checkpoint.solve = value === 'true'
   } else {
-    const roles = value.replace(/[\[\]]/g, '').split(',').map(r => r.trim()).filter(Boolean)
-    checkpoint.roles.set(key, roles)
+    const stripped = value.replace(/[\[\]]/g, '').trim()
+    const partial = stripped.endsWith('...')
+    const rolesStr = partial ? stripped.slice(0, -3) : stripped
+    const roles = rolesStr.split(',').map(r => r.trim()).filter(Boolean)
+    checkpoint.roles.set(key, { roles, partial })
   }
 }
 
@@ -134,8 +139,9 @@ function runCheckpoint(
       })
     }
 
-    for (const [playerName, expectedRoles] of checkpoint.roles) {
-      test(`${playerName}: [${expectedRoles.join(', ')}]`, testOpts, () => {
+    for (const [playerName, expectation] of checkpoint.roles) {
+      const suffix = expectation.partial ? ', ...' : ''
+      test(`${playerName}: [${expectation.roles.join(', ')}${suffix}]`, testOpts, () => {
         const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
         assert.ok(seat != null, `player "${playerName}" not found in game`)
 
@@ -143,9 +149,16 @@ function runCheckpoint(
         assert.ok(actualRoles, `no result for player "${playerName}" (seat ${seat})`)
 
         const actual = [...actualRoles].sort()
-        const expected = [...expectedRoles].sort()
-        assert.deepStrictEqual(actual, expected,
-          `${playerName}: expected [${expected}] but got [${actual}]`)
+        const expected = [...expectation.roles].sort()
+
+        if (expectation.partial) {
+          const missing = expected.filter(r => !actual.includes(r))
+          assert.deepStrictEqual(missing, [],
+            `${playerName}: expected at least [${expected}] but got [${actual}], missing [${missing}]`)
+        } else {
+          assert.deepStrictEqual(actual, expected,
+            `${playerName}: expected [${expected}] but got [${actual}]`)
+        }
       })
     }
   })
