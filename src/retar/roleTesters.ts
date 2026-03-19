@@ -29,6 +29,17 @@ export type RoleTesterEnv = {
   dayCountFrom: number
 }
 
+export function cloneContext(context: AnalyzeContext): AnalyzeContext {
+  return {
+    additionalLiars: structuredClone(context.additionalLiars),
+    hamstersKilledBySeer: structuredClone(context.hamstersKilledBySeer),
+    hamstersMaxSurvivingDay: context.hamstersMaxSurvivingDay,
+    requireOneOf: structuredClone(context.requireOneOf),
+    deathChronicle: structuredClone(context.deathChronicle),
+    possibilities: context.possibilities.clone(),
+  }
+}
+
 type RoleTester = (env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]) => boolean
 
 function getStatus(env: RoleTesterEnv, seat: Seat): SeatStatus {

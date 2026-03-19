@@ -3,10 +3,12 @@
 import type { CauseOfDeath, EnumSpecies, VillageStatus, SeatStatus, SystemRole } from '../types/index.ts'
 import { Possibilities } from './possibilities.ts'
 import { generateCombinations, backtrackForMatrix } from './combinatorics.ts'
-import { roleTesterMap } from './roleTesters.ts'
+import { roleTesterMap, cloneContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
 import { buildRoleTestPlan, LiarRoles } from './planBuilder.ts'
 import type { RoleTest } from './planBuilder.ts'
+import { finalize as runFinalize, validateDeathCounts } from './finalizer.ts'
+import type { DebugStash } from './finalizer.ts'
 
 export { selectCombinationsFromArray, selectOne, backtrackForMatrix } from './combinatorics.ts'
 
@@ -128,27 +130,7 @@ export class VillageRetar {
   options: AnalyzeOptions
   env: RoleTesterEnv
 
-  debugStash: {
-    finalizerRuns: number
-    finalizerMiddle: number
-    finalizerPasses: number
-    finalizerFails: number
-    seerTests: number
-    mediumTests: number
-    bodyguardTests: number
-    masonTests: number
-    nekomataTests: number
-    werehamsterTests: number
-    seerTestPasses: number
-    mediumTestPasses: number
-    bodyguardTestPasses: number
-    masonTestPasses: number
-    nekomataTestPasses: number
-    werehamsterTestPasses: number
-
-    preFinalizeTests: number
-    preFinalizePasses: number
-  } = {
+  debugStash: DebugStash = {
     finalizerRuns: 0,
     finalizerMiddle: 0,
     finalizerPasses: 0,
@@ -310,16 +292,6 @@ export class VillageRetar {
       hamstersMaxSurvivingDay: Infinity,
     }
 
-    const cloneContext = (context: AnalyzeContext): AnalyzeContext => {
-      return {
-        additionalLiars: structuredClone(context.additionalLiars),
-        hamstersKilledBySeer: structuredClone(context.hamstersKilledBySeer),
-        hamstersMaxSurvivingDay: context.hamstersMaxSurvivingDay,
-        requireOneOf: structuredClone(context.requireOneOf),
-        deathChronicle: structuredClone(context.deathChronicle),
-        possibilities: context.possibilities.clone(),
-      }
-    }
     const loop = backtrackForMatrix(this.roleTests, this.context)
     let testIter = loop.next([true, this.context])
 
@@ -354,40 +326,7 @@ export class VillageRetar {
 
       this.debugStash.preFinalizeTests++
       // 死体数の確認
-      DAY:
-      for ( const [day, killed] of this.nightKillsByDay.entries() ) {
-        if ( this.vs.day <= day ) continue DAY
-        const deathChronicle = this.context.deathChronicle.get(day)
-        let expected = 1
-        if ( deathChronicle ) expected += deathChronicle.add
-        const actual = killed.length
-        const immoralists = this.setup.get('immoralist') || 0
-        if ( actual === expected ) continue DAY
-        if ( expected + immoralists < actual ) {
-          testIter = loop.next([false, this.context])
-          continue TESTS
-        }
-        else if ( actual < expected - 1 ) {
-          testIter = loop.next([false, this.context])
-          continue TESTS
-        }
-        else if ( expected < actual && actual <= expected + immoralists ) {
-          for ( let i=0; i<immoralists; i++ ) {
-            this.context.requireOneOf.push( killed.map(seat => ({ seat, role: 'immoralist' })) )
-          }
-          continue DAY
-        }
-        else if (this.context.hamstersMaxSurvivingDay >= day) {
-          continue DAY
-        }
-        for ( const [seat, status] of this.vs.statuses.entries() ) {
-          if (
-            ( status.surviving || day <= status.diedDay)
-            && this.context.possibilities.hasRole(seat,'bodyguard')
-          ) {
-            continue DAY
-          }
-        }
+      if (!validateDeathCounts(this.context, this.vs, this.nightKillsByDay, this.setup)) {
         testIter = loop.next([false, this.context])
         continue TESTS
       }
@@ -432,141 +371,8 @@ export class VillageRetar {
     }
   }
 
-  checkPossibility(possibilities: Set<SystemRole>[], setup: {[key in SystemRole]?: number}, depth: number = 0) : boolean {
-    if ( depth === possibilities.length ) {
-      return true
-    }
-    const roles = possibilities[depth]
-    for ( const role of roles ) {
-      if ( setup[role] > 0 ) {
-        setup[role]--
-        if ( this.checkPossibility(possibilities, setup, depth + 1) ) {
-          return true
-        }
-        setup[role]++
-      }
-    }
-    return false
-  }
-
   finalize() {
-    this.debugStash.finalizerRuns++
-    // ここまで処理が終わったところで、襲撃死した人物は非狼とみなす
-    for ( const [seat, status] of this.vs.statuses.entries() ) {
-      if ( !status.surviving && status.causeOfDeath === 'night_kill' ) {
-        if ( this.context.possibilities.isFixed(seat) ) {
-          continue
-        }
-        if (!this.context.possibilities.markAsHuman(seat)) {
-          return
-        }
-      }
-    }
-
-    if (!this.context.possibilities.refix()) {
-      return
-    }
-    for (const [role, count] of this.setup.entries()) {
-      const candidates = this.context.possibilities.getPossibieSeatsForRole(role)
-      if (candidates.length < count) {
-        return
-      }
-      if ( candidates.length === count ) {
-        for ( const seat of candidates ) {
-          if ( !this.context.possibilities.fixRole(seat, role) ) {
-            return
-          }
-        }
-      }
-    }
-    if (!this.context.possibilities.refix()) {
-      return
-    }
-    this.debugStash.finalizerMiddle++
-
-    /*
-    TODO: ここで、同じ役職の組み合わせをまとめてテストを行う
-    const set = {}
-    for ( const [seat, possibilities] of remained.entries() ) {
-      const stringOfRoles = Array.from(possibilities).sort().join(',')
-      set[stringOfRoles] ??= []
-      set[stringOfRoles].push(seat)
-    }
-    */
-
-
-    const survivors = Array.from(this.vs.statuses.keys()).filter(seat => this.getStatus(seat).surviving)
-    const numSurvivingHamsters = survivors.filter(seat => this.context.possibilities.isActualRole(seat, 'werehamster')).length
-    const maxSurvivingWolves = Math.min(
-      this.setup.get('werewolf') || Infinity,
-      Math.floor((survivors.length - numSurvivingHamsters - 0.1) / 2)
-    )
-
-    const survivingMap = new Map(survivors.map(seat => [seat, true]))
-    const condition = {
-      minSurvivingWolves: 1,
-      maxSurvivingWolves,
-      minSurvivingHamsters: 0,
-      maxSurvivingHamsters: this.setup.get('werehamster') || 0,
-    }
-
-    // 村勝ちまたは狼勝ちの場合は、狼の生存数の条件を変更する
-    if ( this.vs.result === 'werewolf_won' ) {
-      condition.minSurvivingWolves = maxSurvivingWolves + 1
-      condition.maxSurvivingWolves = Infinity
-      condition.minSurvivingHamsters = 0
-      condition.maxSurvivingHamsters = 0
-    }
-    else if ( this.vs.result === 'villager_won' ) {
-      condition.minSurvivingWolves = 0
-      condition.maxSurvivingWolves = 0
-      condition.minSurvivingHamsters = 0
-      condition.maxSurvivingHamsters = 0
-    }
-
-    // 狐勝ちの場合だけは、狼全滅と飽和の両方を検証する
-    if ( this.vs.result === 'werehamster_won') {
-      const conclusion = this.context.possibilities.solvePossibilities(
-        survivingMap,
-        0,
-        0,
-        1,
-        Infinity,
-        this.setup
-      )
-      if (conclusion) {
-        this.debugStash.finalizerPasses++
-        this.conclusions.union(conclusion)
-      }
-      const conclusion2 = this.context.possibilities.solvePossibilities(
-        survivingMap,
-        maxSurvivingWolves + 1,
-        Infinity,
-        1,
-        Infinity,
-        this.setup
-      )
-      if (conclusion2) {
-        this.debugStash.finalizerPasses++
-        this.conclusions.union(conclusion2)
-      }
-    }
-    else {
-      const conclusion = this.context.possibilities.solvePossibilities(
-        survivingMap,
-        condition.minSurvivingWolves,
-        condition.maxSurvivingWolves,
-        condition.minSurvivingHamsters,
-        condition.maxSurvivingHamsters,
-        this.setup
-      )
-      if ( !conclusion ) {
-        this.debugStash.finalizerFails++
-        return
-      }
-      this.debugStash.finalizerPasses++
-      this.conclusions.union(conclusion)
-    }
+    runFinalize(this.context, this.vs, this.setup, this.conclusions, this.debugStash)
   }
 
   analyzeSafe() {
