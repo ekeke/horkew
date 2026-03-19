@@ -1,6 +1,4 @@
-// @ts-nocheck
-// TODO: Fix type errors inherited from reference implementation
-import type { CauseOfDeath, VillageStatus, SystemRole } from '../types/index.ts'
+import type { CauseOfDeath, SeatStatus, VillageStatus, SystemRole } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
 
 type Seat = number
@@ -33,8 +31,8 @@ export type RoleTesterEnv = {
 
 type RoleTester = (env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]) => boolean
 
-function getStatus(env: RoleTesterEnv, seat: Seat) {
-  return env.vs.statuses.get(seat)
+function getStatus(env: RoleTesterEnv, seat: Seat): SeatStatus {
+  return env.vs.statuses.get(seat)!
 }
 
 function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
@@ -56,21 +54,21 @@ function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat
     else {
       if ( status.causeOfDeath === 'night_kill' ) {
 
-        const deathChronicle = context.deathChronicle.get(self.diedDay)
+        const deathChronicle = context.deathChronicle.get(self.diedDay!)
         if ( !deathChronicle ) {
-          context.deathChronicle.set(self.diedDay, { add: 1, sub: 0 })
+          context.deathChronicle.set(self.diedDay!, { add: 1, sub: 0 })
         }
         else {
           deathChronicle.add += 1
         }
 
-        context.hamstersKilledBySeer.push({ day: status.diedDay, seat })
-        if ( seerKilledHamsterAt < status.diedDay ) {
-          seerKilledHamsterAt = status.diedDay
+        context.hamstersKilledBySeer.push({ day: status.diedDay!, seat })
+        if ( seerKilledHamsterAt < status.diedDay! ) {
+          seerKilledHamsterAt = status.diedDay!
         }
       }
-      if ( lastHamsterDiedAt < status.diedDay) {
-        lastHamsterDiedAt = status.diedDay
+      if ( lastHamsterDiedAt < status.diedDay!) {
+        lastHamsterDiedAt = status.diedDay!
         lastHamsterDiedBy = status.causeOfDeath
       }
     }
@@ -87,7 +85,7 @@ function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat
     context.possibilities.denyRole(seat, 'werehamster')
     if ( !livingHamsters ) {
       const status = getStatus(env, seat)
-      if ( status.surviving || lastHamsterDiedAt < status.diedDay ) {
+      if ( status.surviving || lastHamsterDiedAt < status.diedDay! ) {
         context.possibilities.denyRole(seat, 'immoralist')
       }
     }
@@ -123,13 +121,13 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
 
     if (!self.claiming) {
       for ( const [day, count] of unresolvedHamsterDeath.entries() ) {
-        if ( self.surviving || self.diedDay >= day ) {
+        if ( self.surviving || self.diedDay! >= day ) {
           unresolvedHamsterDeath.set(day, count - 1)
         }
       }
     }
     if (self.surviving) maxSurviving = Infinity
-    else if (maxSurviving < self.diedDay) maxSurviving = self.diedDay
+    else if (maxSurviving < self.diedDay!) maxSurviving = self.diedDay!
 
     // Populate seerTargets from divination assertions (insertion order = chronological)
     let assertionDay = env.dayCountFrom
@@ -139,24 +137,23 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
     }
     // If seer died at night, they acted that night but result is unreported
     if (!self.surviving && self.causeOfDeath === 'night_kill') {
-      seerTargets.set(self.diedDay, [...(seerTargets.get(self.diedDay) || []), 'unknown'])
+      seerTargets.set(self.diedDay!, [...(seerTargets.get(self.diedDay!) || []), 'unknown'])
     }
     // Add 'unknown' only for genuinely unreported nights beyond known assertions
-    const maxActiveDay = self.surviving ? env.vs.day - 1 : (self.causeOfDeath === 'night_kill' ? self.diedDay : self.diedDay - 1)
+    const maxActiveDay = self.surviving ? env.vs.day - 1 : (self.causeOfDeath === 'night_kill' ? self.diedDay! : self.diedDay! - 1)
     for (let d = assertionDay; d <= maxActiveDay; d++) {
       if (!seerTargets.has(d)) {
         seerTargets.set(d, ['unknown'])
       }
     }
     for (const [targetSeat, species] of self.assertions) {
-      const target = context.possibilities.get(targetSeat)
       if ( species === 'wolf' ) {
         if ( ! context.possibilities.fixRole(targetSeat,'werewolf') ) {
           return false
         }
         const targetStatus = getStatus(env, targetSeat)
         if ( !targetStatus.surviving && targetStatus.causeOfDeath === 'night_kill' ) {
-          const nightKillsAtDay = env.nightKillsByDay.get(targetStatus.diedDay)
+          const nightKillsAtDay = env.nightKillsByDay.get(targetStatus.diedDay!)
           if ( nightKillsAtDay && nightKillsAtDay.length <= 1 ) {
             return false
           }
@@ -165,7 +162,7 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
       else if ( context.possibilities.isActualRole(targetSeat, 'werehamster') ) {
         const targetStatus = getStatus(env, targetSeat)
         if ( targetStatus.surviving ) return false
-        const targetsOnDeathDay = seerTargets.get(targetStatus.diedDay) || []
+        const targetsOnDeathDay = seerTargets.get(targetStatus.diedDay!) || []
         if ( !targetsOnDeathDay.includes(targetSeat) && !targetsOnDeathDay.includes('unknown') ) return false
       }
       else {
@@ -227,7 +224,6 @@ function testMedium(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[
     const self = getStatus(env, seat)
 
     for (const [targetSeat, species] of self.assertions) {
-      const target = context.possibilities.get(targetSeat)
       if ( species === 'wolf' ) {
         if ( ! context.possibilities.fixRole(targetSeat, 'werewolf') ) {
           return false
@@ -267,7 +263,6 @@ function testMedium(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[
 function testBodyguard(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
   const bodyguards = new Set()
   for ( const seat of selected ) {
-    const self = getStatus(env, seat)
     bodyguards.add(seat)
     if ( !context.possibilities.fixRole(seat, 'bodyguard') ) {
       return false
@@ -351,10 +346,10 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
       }
     }
     if ( !self.surviving ) {
-      const deathChronicle = context.deathChronicle.get(self.diedDay)
+      const deathChronicle = context.deathChronicle.get(self.diedDay!)
       if ( self.causeOfDeath === 'night_kill' ) {
         if ( !deathChronicle ) {
-          context.deathChronicle.set(self.diedDay, { add: 1, sub: 0 })
+          context.deathChronicle.set(self.diedDay!, { add: 1, sub: 0 })
         }
         else {
           deathChronicle.add += 1
@@ -377,7 +372,6 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
         else {
           ok = true
           if ( targetStatus.causeOfDeath === 'cursed_by_killed_nekomata' ) {
-            const targetPossible = context.possibilities.get(targetSeat)
             if ( ! context.possibilities.fixRole(targetSeat, 'werewolf') ) {
               return false
             }
@@ -390,7 +384,7 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
   }
   if ( possibleCursed.length ) {
     context.requireOneOf.push(
-      possibleCursed.map(targetSeat => ({ seat: targetSeat, role: 'werewolf' }))
+      possibleCursed.map(targetSeat => ({ seat: targetSeat, role: 'werewolf' as SystemRole }))
     )
   }
 
