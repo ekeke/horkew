@@ -97,6 +97,13 @@ export class VillageRetar {
 
     const multipleVictims = this.buildNightKillMap(village)
 
+    // 単独の夜死体は狼襲撃によるものなので、被害者は人狼ではない
+    for ( const [, killed] of this.nightKillsByDay ) {
+      if ( killed.length === 1 ) {
+        this.initialPossibilities.denyRole(killed[0], 'werewolf')
+      }
+    }
+
     const plan = buildRoleTestPlan(village, setup, multipleVictims)
     this.roleTests = plan.roleTests
     this.totalLiarRoles = plan.totalLiarRoles
