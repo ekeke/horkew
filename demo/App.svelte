@@ -394,9 +394,27 @@
     <section class="pane">
       <div class="pane-header">Analysis</div>
       <div class="pane-body">
-        <pre class="output">{#if analysisError}Error: {analysisError}{:else if analysisSeats.length > 0}生存 {survivorInfo.alive}/{survivorInfo.total}
-{#each analysisSeats as { seat, roles }}<span class={deadSeats.has(seat) ? 'dead' : ''}>{players.get(seat) ?? `#${seat}`}: {roles.map(roleToShort).join('')}</span>
-{/each}{/if}</pre>
+        {#if analysisError}
+          <pre class="output">Error: {analysisError}</pre>
+        {:else if analysisSeats.length > 0}
+          {@const allRoles = [...new Set(analysisSeats.flatMap(s => s.roles))] as SystemRole[]}
+          {@const roleOrder = [...systemRoles.keys()] as SystemRole[]}
+          {@const columns = roleOrder.filter(r => allRoles.includes(r))}
+          <div class="analysis-table-wrap">
+            <table class="analysis-table">
+              <tbody>
+                {#each analysisSeats as { seat, roles }}
+                  <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
+                    <td class="analysis-name-col">{players.get(seat) ?? `#${seat}`}</td>
+                    {#each columns as role}
+                      <td class={roles.includes(role) ? 'role-possible' : 'role-impossible'}>{roleToShort(role)}</td>
+                    {/each}
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
       </div>
     </section>
     {/if}
@@ -673,6 +691,44 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
+  }
+
+  .analysis-table-wrap {
+    overflow: auto;
+    padding: 8px;
+  }
+
+  .analysis-table {
+    border-collapse: collapse;
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-size: 13px;
+  }
+
+  .analysis-table td {
+    text-align: center;
+    padding: 2px 4px;
+    border: 1px solid #313244;
+  }
+
+  .analysis-name-col {
+    text-align: left !important;
+    white-space: nowrap;
+    padding-right: 12px !important;
+    font-weight: 500;
+  }
+
+  .role-possible {
+    background: #45475a;
+    color: #cdd6f4;
+  }
+
+  .role-impossible {
+    background: #11111b;
+    color: #313244;
+  }
+
+  .dead-row .analysis-name-col {
+    color: #585b70;
   }
 
   .modal-confirm {
