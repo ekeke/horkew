@@ -13,7 +13,7 @@ setup:
   seer: 1
   medium: 1
   bodyguard: 1
-  possessed: 1
+  immoralist: 1
   werewolf: 3
   mason: 2
   werehamster: 1
@@ -30,7 +30,8 @@ setup:
 
 星　霊CO
 
-共有　ペガサス　裁縫龍
+共有　ペガサス　裁縫龍白
+共有　裁縫　ペガサス白　
 
 百面ダイス　スレッタ黒
 
@@ -87,8 +88,6 @@ setup:
 星噛
 
 人狼勝利
-
-# @expect solve: true
 
 ダイス＝背徳
 グロ＝占い

@@ -30,20 +30,22 @@ export function constrainByDeathCounts(
       return false
     }
     else if ( expected < actual && actual <= expected + immoralists ) {
-      for ( let i=0; i<immoralists; i++ ) {
-        context.requireOneOf.push( killed.map(seat => ({ seat, role: 'immoralist' })) )
-      }
-      continue DAY
-    }
-    else if (context.hamstersMaxSurvivingDay >= day) {
-      continue DAY
-    }
-    for ( const [seat, status] of vs.statuses.entries() ) {
-      if (
-        ( status.surviving || day <= status.diedDay!)
-        && context.possibilities.hasRole(seat,'bodyguard')
-      ) {
+      const hamsterDiedThisNight = context.hamstersKilledBySeer.some(h => h.day === day)
+      if ( hamsterDiedThisNight ) {
+        for ( let i=0; i<immoralists; i++ ) {
+          context.requireOneOf.push( killed.map(seat => ({ seat, role: 'immoralist' })) )
+        }
         continue DAY
+      }
+    }
+    if ( actual < expected ) {
+      for ( const [seat, status] of vs.statuses.entries() ) {
+        if (
+          ( status.surviving || day <= status.diedDay!)
+          && context.possibilities.hasRole(seat,'bodyguard')
+        ) {
+          continue DAY
+        }
       }
     }
     return false

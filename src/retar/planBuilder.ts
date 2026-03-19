@@ -91,12 +91,19 @@ export function buildRoleTestPlan(
       }
     }
     if (role === 'nekomata' && multipleVictims.length > 0) {
-      unrevealedSeats.push(...multipleVictims)
-      // Also consider alive non-claiming seats: multiple night deaths can be
-      // explained by seer-killed werehamster without nekomata curse
-      for ( const [seat, status] of village.statuses.entries() ) {
-        if ( status.surviving && !status.claiming ) {
+      for ( const seat of multipleVictims ) {
+        const status = village.statuses.get(seat)!
+        if ( (status.diedDay == null ? Infinity : status.diedDay) < minClaimDay[role] ) {
           unrevealedSeats.push(seat)
+        }
+      }
+      // Also consider alive non-claiming seats when no one has claimed nekomata:
+      // multiple night deaths can be explained by seer-killed werehamster without nekomata curse
+      if ( claims[role].length === 0 ) {
+        for ( const [seat, status] of village.statuses.entries() ) {
+          if ( status.surviving && !status.claiming ) {
+            unrevealedSeats.push(seat)
+          }
         }
       }
     }
