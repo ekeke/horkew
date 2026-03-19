@@ -40,9 +40,10 @@ export function constrainByDeathCounts(
     }
     if ( actual < expected ) {
       for ( const [seat, status] of vs.statuses.entries() ) {
+        if ( !status.surviving && status.diedDay! < day ) continue
         if (
-          ( status.surviving || day <= status.diedDay!)
-          && context.possibilities.hasRole(seat,'bodyguard')
+          context.possibilities.hasRole(seat, 'bodyguard')
+          || context.possibilities.hasRole(seat, 'werehamster')
         ) {
           continue DAY
         }
