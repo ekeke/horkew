@@ -172,8 +172,9 @@ export function buildAssertionTimeline(
       })
     }
   } else {
-    // Seer/Medium: assertions are target → species, use insertion order
-    let night = 1
+    // Seer: starts from column 1 (includes pre-game divination)
+    // Medium: starts from column 2 (first result is day 1 execution, reported day 2)
+    let night = row.claimingRole === 'medium' ? 2 : 1
     for (const [targetSeat, species] of row.assertions) {
       timeline.set(night, {
         targetSeat,

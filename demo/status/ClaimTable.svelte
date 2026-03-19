@@ -103,7 +103,6 @@
     border-collapse: collapse;
     font-size: 12px;
     font-family: 'Consolas', 'Menlo', monospace;
-    width: 100%;
   }
 
   th, td {
