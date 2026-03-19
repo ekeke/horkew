@@ -363,7 +363,7 @@
   <div class="panes">
     <section class="pane">
       <div class="pane-header">Input</div>
-      <div class="pane-body">
+      <div class="pane-body pane-body-input">
         {#if activeTitle}
           <textarea
             class="input-editor"
@@ -628,6 +628,10 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
+  }
+
+  .pane-body-input {
+    overflow: hidden;
   }
 
   .input-editor {
