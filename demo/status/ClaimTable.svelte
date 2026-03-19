@@ -8,6 +8,12 @@
     players: Map<number, string>
   } = $props()
 
+  const tableRoles = new Set(['seer', 'medium', 'bodyguard'])
+
+  let tableGroups = $derived(groups.filter(g => tableRoles.has(g.role)))
+  let masonGroup = $derived(groups.find(g => g.role === 'mason'))
+  let nekomataGroup = $derived(groups.find(g => g.role === 'nekomata'))
+
   // Column range: nights 1 to maxDay-1 (night N result reported on day N+1)
   let nights = $derived(
     Array.from({ length: Math.max(0, maxDay - 1) }, (_, i) => i + 1)
@@ -26,6 +32,43 @@
     }
     return assertion.targetName + speciesSymbol(assertion.species)
   }
+
+  /**
+   * Build mason pairs/groups from assertions.
+   * Each mason's assertions map contains partner seats.
+   * We use union-find to group connected masons.
+   */
+  function buildMasonGroups(group: ClaimGroup): { members: { name: string, dead: boolean }[] }[] {
+    const parent = new Map<number, number>()
+    function find(x: number): number {
+      if (!parent.has(x)) parent.set(x, x)
+      if (parent.get(x) !== x) parent.set(x, find(parent.get(x)!))
+      return parent.get(x)!
+    }
+    function union(a: number, b: number) {
+      parent.set(find(a), find(b))
+    }
+
+    for (const row of group.rows) {
+      parent.set(row.seat, row.seat)
+      for (const [targetSeat] of row.assertions) {
+        if (group.rows.some(r => r.seat === targetSeat)) {
+          union(row.seat, targetSeat)
+        }
+      }
+    }
+
+    const clusters = new Map<number, ClaimGroup['rows']>()
+    for (const row of group.rows) {
+      const root = find(row.seat)
+      if (!clusters.has(root)) clusters.set(root, [])
+      clusters.get(root)!.push(row)
+    }
+
+    return [...clusters.values()].map(rows => ({
+      members: rows.sort((a, b) => a.seat - b.seat).map(r => ({ name: r.name, dead: !r.surviving })),
+    }))
+  }
 </script>
 
 <div class="section">
@@ -33,7 +76,7 @@
   {#if groups.length === 0}
     <div class="empty">---</div>
   {:else}
-    {#each groups as group}
+    {#each tableGroups as group}
       <div class="group">
         <div class="group-header">{group.roleShortName}</div>
         <div class="table-wrap">
@@ -64,6 +107,28 @@
         </div>
       </div>
     {/each}
+
+    {#if masonGroup}
+      <div class="group">
+        <div class="group-header">{masonGroup.roleShortName}</div>
+        <div class="mason-groups">
+          {#each buildMasonGroups(masonGroup) as cluster}
+            <span class="mason-cluster">{#each cluster.members as member, i}{#if i > 0}<span class="mason-sep"> - </span>{/if}<span class:dead={member.dead}>{member.name}</span>{/each}</span>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    {#if nekomataGroup}
+      <div class="group">
+        <div class="group-header">{nekomataGroup.roleShortName}</div>
+        <div class="simple-claims">
+          {#each nekomataGroup.rows as row}
+            <span class="simple-name" class:dead={!row.surviving}>{row.name}</span>
+          {/each}
+        </div>
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -156,5 +221,35 @@
 
   tr.dead .data-cell {
     opacity: 0.6;
+  }
+
+  .mason-groups {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    font-size: 12px;
+    font-family: 'Consolas', 'Menlo', monospace;
+    color: #cdd6f4;
+  }
+
+  .mason-sep {
+    color: #585b70;
+  }
+
+  .simple-claims {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    font-size: 12px;
+    font-family: 'Consolas', 'Menlo', monospace;
+  }
+
+  .simple-name {
+    color: #cdd6f4;
+  }
+
+  .dead {
+    color: #585b70;
+    text-decoration: line-through;
   }
 </style>
