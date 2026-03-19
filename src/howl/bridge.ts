@@ -231,11 +231,13 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
             const role = assertion.roles[0]
             const sysRole = claimRoleToSystemRole[role]
             if (sysRole) {
-              actorStatus.claiming = true
-              actorStatus.claimingRole = sysRole
-              actorStatus.claimedAt = day
-              actorStatus.actions = new Map()
-              actorStatus.assertions = new Map()
+              if (!actorStatus.claiming) {
+                actorStatus.claiming = true
+                actorStatus.claimingRole = sysRole
+                actorStatus.claimedAt = day
+                actorStatus.actions = new Map()
+                actorStatus.assertions = new Map()
+              }
             }
           }
 

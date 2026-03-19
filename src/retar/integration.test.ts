@@ -28,11 +28,13 @@ const defaultOptions: AnalyzeOptions = {
 
 type Checkpoint = {
   lineNumber: number
+  skip: boolean
   solve?: boolean
   roles: Map<string, string[]>
 }
 
-const expectPattern = /^#\s*@expect\s+(.+)$/
+const expectPattern = /^#\s*@expect(?:-skip)?\s+(.+)$/
+const expectSkipPattern = /^#\s*@expect-skip\s/
 
 function extractCheckpoints(rawText: string) {
   const fmMatch = rawText.match(/^(---\n[\s\S]*?\n---\n)/)
@@ -49,7 +51,10 @@ function extractCheckpoints(rawText: string) {
 
     if (m) {
       if (current === null) {
-        current = { lineNumber: i, roles: new Map() }
+        current = { lineNumber: i, skip: false, roles: new Map() }
+      }
+      if (expectSkipPattern.test(line)) {
+        current.skip = true
       }
       parseDirective(current, m[1])
     } else {
@@ -105,6 +110,8 @@ function runCheckpoint(
   const retar = new VillageRetar(vs, setup, options)
   const result = retar.analyze()
 
+  const testOpts = checkpoint.skip ? { todo: 'not yet implemented' } : {}
+
   describe(label, () => {
     test('analyze completes without error', () => {
       assert.ok(result, 'analyze() should return a result')
@@ -112,7 +119,7 @@ function runCheckpoint(
     })
 
     if (checkpoint.solve !== undefined) {
-      test(`solve: ${checkpoint.solve}`, () => {
+      test(`solve: ${checkpoint.solve}`, testOpts, () => {
         if (checkpoint.solve) {
           assert.ok(
             retar.debugStash.finalizerPasses > 0,
@@ -128,7 +135,7 @@ function runCheckpoint(
     }
 
     for (const [playerName, expectedRoles] of checkpoint.roles) {
-      test(`${playerName}: [${expectedRoles.join(', ')}]`, () => {
+      test(`${playerName}: [${expectedRoles.join(', ')}]`, testOpts, () => {
         const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
         assert.ok(seat != null, `player "${playerName}" not found in game`)
 
@@ -175,27 +182,25 @@ if (scenarios.length === 0) {
       const tagLabel = tags.length > 0 ? ` [${tags.join(', ')}]` : ''
 
       describe(`${title}${tagLabel}`, () => {
-        if (checkpoints.length > 0) {
-          for (let i = 0; i < checkpoints.length; i++) {
-            const cp = checkpoints[i]
-            const partialText = frontmatter + bodyLines.slice(0, cp.lineNumber).join('\n')
-            const label = checkpoints.length === 1
-              ? `checkpoint (line ${cp.lineNumber + 1})`
-              : `checkpoint ${i + 1} (line ${cp.lineNumber + 1})`
-            runCheckpoint(partialText, meta, cp, label)
-          }
-        } else {
-          const options = buildOptions(meta)
-          const { statements } = parse(content)
-          const { vs, setup } = buildVillageStatus(statements, meta)
-          const retar = new VillageRetar(vs, setup, options)
-          const result = retar.analyze()
-
-          test('analyze completes without error', () => {
-            assert.ok(result, 'analyze() should return a result')
-            assert.ok(!result.error, `analyze() should not error: ${result.error}`)
-          })
+        for (let i = 0; i < checkpoints.length; i++) {
+          const cp = checkpoints[i]
+          const partialText = frontmatter + bodyLines.slice(0, cp.lineNumber).join('\n')
+          const label = checkpoints.length === 1
+            ? `checkpoint (line ${cp.lineNumber + 1})`
+            : `checkpoint ${i + 1} (line ${cp.lineNumber + 1})`
+          runCheckpoint(partialText, meta, cp, label)
         }
+
+        const options = buildOptions(meta)
+        const { statements } = parse(content)
+        const { vs, setup } = buildVillageStatus(statements, meta)
+        const retar = new VillageRetar(vs, setup, options)
+        const result = retar.analyze()
+
+        test('analyze completes without error', () => {
+          assert.ok(result, 'analyze() should return a result')
+          assert.ok(!result.error, `analyze() should not error: ${result.error}`)
+        })
       })
     }
   })

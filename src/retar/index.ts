@@ -592,12 +592,10 @@ export class VillageRetar {
 
       // 役職のCO数に基づいてプランを作成する。
       // COのタイミングより前に襲撃死した人数の分だけ乗っ取りの可能性を追加する
-      // XXX: バカ正直に全員追加しない方法はないか？
-      const unrevealedSeats = []
+      const unrevealedSeats: Seat[] = []
       for ( const [seat, status] of village.statuses.entries() ) {
         if (
           // 同じ役職の最初のCOがある日より前に、襲撃で死亡した人を候補に加える
-          // TODO: オプションから調整できるようにする
           !status.surviving
           && status.causeOfDeath !== 'execution'
           && !status.claiming
@@ -616,9 +614,45 @@ export class VillageRetar {
           }
         }
       }
-      const iter = selectCombinationsFromArray([...new Set([...claims[role], ...unrevealedSeats])], num, num)
-      for ( const [selected, rest] of iter ) {
-        testsOfRole.push({ role, selected, rest })
+      if (role === 'mason') {
+        // 共有の仮説生成: CO者のアサーション構造を尊重する
+        // CO者が相方を指名している場合、その指名と矛盾しない仮説のみを生成
+        const claimSeats = claims[role]
+        for ( const claimSeat of claimSeats ) {
+          const status = village.statuses.get(claimSeat)!
+          const assertedPartners: Seat[] = []
+          for ( const [targetSeat, species] of status.assertions ) {
+            if ( species === 'human' ) assertedPartners.push(targetSeat)
+          }
+          // CO者 + 指名相方を固定し、残りの枠をunrevealedSeatsから選ぶ
+          const fixed = new Set([claimSeat, ...assertedPartners])
+          const remainingSlots = num - fixed.size
+          if ( remainingSlots < 0 ) continue
+          if ( remainingSlots === 0 ) {
+            const rest = [...new Set([...claimSeats, ...unrevealedSeats])].filter(s => !fixed.has(s))
+            testsOfRole.push({ role, selected: [...fixed], rest })
+          } else {
+            const available = unrevealedSeats.filter(s => !fixed.has(s))
+            const iter = selectCombinationsFromArray(available, remainingSlots, remainingSlots)
+            for ( const [sel, rest] of iter ) {
+              testsOfRole.push({ role, selected: [...fixed, ...sel], rest: [...rest, ...claimSeats.filter(s => !fixed.has(s))] })
+            }
+          }
+        }
+        // 全CO者が偽の仮説: unrevealedSeatsのみから選ぶ
+        const nonClaimUnrevealed = unrevealedSeats.filter(s => !claimSeats.includes(s))
+        if ( nonClaimUnrevealed.length >= num ) {
+          const iter = selectCombinationsFromArray(nonClaimUnrevealed, num, num)
+          for ( const [selected, rest] of iter ) {
+            testsOfRole.push({ role, selected, rest: [...rest, ...claimSeats] })
+          }
+        }
+      } else {
+        const pool = [...new Set([...claims[role], ...unrevealedSeats])]
+        const iter = selectCombinationsFromArray(pool, num, num)
+        for ( const [selected, rest] of iter ) {
+          testsOfRole.push({ role, selected, rest })
+        }
       }
 
       this.roleTests.push(testsOfRole)
@@ -954,7 +988,6 @@ export class VillageRetar {
       const self = this.getStatus(seat)
 
       for (const [targetSeat, species] of self.assertions) {
-        const target = this.context.possibilities.get(targetSeat)
         if ( species === 'wolf' ) {
           // 仕様です。共有は相方に人間とアサーションします。
           return false
@@ -963,6 +996,7 @@ export class VillageRetar {
           if ( ! this.context.possibilities.fixRole(targetSeat, 'mason') ) {
             return false
           }
+          masons.add(targetSeat)
         }
       }
     }
