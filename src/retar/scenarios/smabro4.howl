@@ -17,7 +17,11 @@ setup:
 
 Mii死亡
 
-共有　カムイ,生存
+共有　カムイ
+# 対抗がいないので、カムイは共有で確定
+# @expect カムイ: [mason]
+# カムイが誰が相方かを明かしていないので、特定の人が共有にはならない。
+# @expect Miiファイター: [villager, seer, medium, bodyguard, mason, nekomata, fanatic, immoralist]
 
 # 共有は２名いるので、必ず生存。他に共有を名乗るものがいないので、カムイは真
 # @expect カムイ: [mason]
@@ -33,7 +37,7 @@ Mii死亡
 
 ルキナ　ロックマン黒
 
-共有　カムイ　ダックハント白
+共有　カムイ　ダックハント
 
 # @expect カムイ: [mason]
 # @expect ダックハント: [mason]

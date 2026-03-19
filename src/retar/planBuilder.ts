@@ -111,21 +111,29 @@ export function buildRoleTestPlan(
       // 共有の仮説生成: CO者のアサーション構造を尊重する
       // CO者が相方を指名している場合、その指名と矛盾しない仮説のみを生成
       const claimSeats = claims[role]
+      // 共有は相方未公開の場合、COしていない生存者も相方候補になる
+      const aliveCandidates: Seat[] = []
+      for ( const [seat, status] of village.statuses.entries() ) {
+        if ( status.surviving && !status.claiming ) {
+          aliveCandidates.push(seat)
+        }
+      }
+      const masonPool = [...new Set([...unrevealedSeats, ...aliveCandidates])]
       for ( const claimSeat of claimSeats ) {
         const status = village.statuses.get(claimSeat)!
         const assertedPartners: Seat[] = []
         for ( const [targetSeat, species] of status.assertions ) {
           if ( species === 'human' ) assertedPartners.push(targetSeat)
         }
-        // CO者 + 指名相方を固定し、残りの枠をunrevealedSeatsから選ぶ
+        // CO者 + 指名相方を固定し、残りの枠をmasonPoolから選ぶ
         const fixed = new Set([claimSeat, ...assertedPartners])
         const remainingSlots = num - fixed.size
         if ( remainingSlots < 0 ) continue
         if ( remainingSlots === 0 ) {
-          const rest = [...new Set([...claimSeats, ...unrevealedSeats])].filter(s => !fixed.has(s))
+          const rest = [...new Set([...claimSeats, ...masonPool])].filter(s => !fixed.has(s))
           testsOfRole.push({ role, selected: [...fixed], rest })
         } else {
-          const available = unrevealedSeats.filter(s => !fixed.has(s))
+          const available = masonPool.filter(s => !fixed.has(s))
           const iter = selectCombinationsFromArray(available, remainingSlots, remainingSlots)
           for ( const [sel, rest] of iter ) {
             testsOfRole.push({ role, selected: [...fixed, ...sel], rest: [...rest, ...claimSeats.filter(s => !fixed.has(s))] })
