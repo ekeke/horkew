@@ -1,0 +1,427 @@
+// @ts-nocheck
+// TODO: Fix type errors inherited from reference implementation
+import type { CauseOfDeath, VillageStatus, SystemRole } from '../types/index.ts'
+import type { Possibilities } from './possibilities.ts'
+
+type Seat = number
+type Day = number
+
+type DeathCounts = {
+  add: number,
+  sub: number
+}
+
+export type AnalyzeContext = {
+  possibilities: Possibilities
+  needSeerAtDay?: number
+  additionalLiars: number
+  hamstersKilledBySeer: { day: number, seat: Seat }[]
+  hamstersMaxSurvivingDay: number
+  requireOneOf: { seat: Seat, role: SystemRole }[][]
+  deathChronicle: Map<Day, DeathCounts>
+}
+
+export type RoleTesterEnv = {
+  vs: VillageStatus
+  nightKillsByDay: Map<Day, Seat[]>
+  maxLiars: number
+  numLiars: number
+  lastHamsterMustDieAt?: number
+  lastHamsterMustDiedBy?: CauseOfDeath
+  dayCountFrom: number
+}
+
+type RoleTester = (env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]) => boolean
+
+function getStatus(env: RoleTesterEnv, seat: Seat) {
+  return env.vs.statuses.get(seat)
+}
+
+function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+  const hamsters = new Set()
+  let lastHamsterDiedAt = -Infinity
+  let lastHamsterDiedBy: CauseOfDeath | undefined
+  let livingHamsters = 0
+  let seerKilledHamsterAt = -Infinity
+  for ( const seat of selected ) {
+    const self = getStatus(env, seat)
+    hamsters.add(seat)
+    if ( !context.possibilities.fixRole(seat,'werehamster') ) {
+      return false
+    }
+    const status = getStatus(env, seat)
+    if ( status.surviving ) {
+      livingHamsters++
+    }
+    else {
+      if ( status.causeOfDeath === 'night_kill' ) {
+
+        const deathChronicle = context.deathChronicle.get(self.diedDay)
+        if ( !deathChronicle ) {
+          context.deathChronicle.set(self.diedDay, { add: 1, sub: 0 })
+        }
+        else {
+          deathChronicle.add += 1
+        }
+
+        context.hamstersKilledBySeer.push({ day: status.diedDay, seat })
+        if ( seerKilledHamsterAt < status.diedDay ) {
+          seerKilledHamsterAt = status.diedDay
+        }
+      }
+      if ( lastHamsterDiedAt < status.diedDay) {
+        lastHamsterDiedAt = status.diedDay
+        lastHamsterDiedBy = status.causeOfDeath
+      }
+    }
+  }
+  if ( 0 <= seerKilledHamsterAt ) {
+    context.needSeerAtDay = seerKilledHamsterAt
+  }
+
+  if ( env.lastHamsterMustDieAt != null ) {
+    if (lastHamsterDiedAt !== env.lastHamsterMustDieAt ) return false
+    if (lastHamsterDiedBy !== env.lastHamsterMustDiedBy ) return false
+  }
+  for ( const seat of rest ) {
+    context.possibilities.denyRole(seat, 'werehamster')
+    if ( !livingHamsters ) {
+      const status = getStatus(env, seat)
+      if ( status.surviving || lastHamsterDiedAt < status.diedDay ) {
+        context.possibilities.denyRole(seat, 'immoralist')
+      }
+    }
+  }
+  if ( livingHamsters ) {
+    context.hamstersMaxSurvivingDay = Infinity
+  }
+  else {
+    context.hamstersMaxSurvivingDay = lastHamsterDiedAt
+  }
+  return true
+}
+
+function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+  const seers = new Set()
+  let maxSurviving = -Infinity
+  const seerTargets: Map<Day, (Seat | 'unknown')[]> = new Map()
+  let unresolvedHamsterDeath: Map<number, number> = new Map()
+  if ( context.hamstersKilledBySeer.length > 0 ) {
+    for ( const { day } of context.hamstersKilledBySeer ) {
+      const current = unresolvedHamsterDeath.get(day) || 0
+      unresolvedHamsterDeath.set(day, current + 1)
+    }
+  }
+
+  for ( const seat of selected ) {
+    seers.add(seat)
+    if ( !context.possibilities.fixRole(seat, 'seer') ) {
+      return false
+    }
+
+    const self = getStatus(env, seat)
+
+    if (!self.claiming) {
+      for ( const [day, count] of unresolvedHamsterDeath.entries() ) {
+        if ( self.surviving || self.diedDay >= day ) {
+          unresolvedHamsterDeath.set(day, count - 1)
+        }
+      }
+    }
+    if (self.surviving) maxSurviving = Infinity
+    else if (maxSurviving < self.diedDay) maxSurviving = self.diedDay
+
+    // Populate seerTargets from divination assertions (insertion order = chronological)
+    let assertionDay = env.dayCountFrom
+    for (const [targetSeat] of self.assertions) {
+      seerTargets.set(assertionDay, [...(seerTargets.get(assertionDay) || []), targetSeat])
+      assertionDay++
+    }
+    // If seer died at night, they acted that night but result is unreported
+    if (!self.surviving && self.causeOfDeath === 'night_kill') {
+      seerTargets.set(self.diedDay, [...(seerTargets.get(self.diedDay) || []), 'unknown'])
+    }
+    // Add 'unknown' only for genuinely unreported nights beyond known assertions
+    const maxActiveDay = self.surviving ? env.vs.day - 1 : (self.causeOfDeath === 'night_kill' ? self.diedDay : self.diedDay - 1)
+    for (let d = assertionDay; d <= maxActiveDay; d++) {
+      if (!seerTargets.has(d)) {
+        seerTargets.set(d, ['unknown'])
+      }
+    }
+    for (const [targetSeat, species] of self.assertions) {
+      const target = context.possibilities.get(targetSeat)
+      if ( species === 'wolf' ) {
+        if ( ! context.possibilities.fixRole(targetSeat,'werewolf') ) {
+          return false
+        }
+        const targetStatus = getStatus(env, targetSeat)
+        if ( !targetStatus.surviving && targetStatus.causeOfDeath === 'night_kill' ) {
+          const nightKillsAtDay = env.nightKillsByDay.get(targetStatus.diedDay)
+          if ( nightKillsAtDay && nightKillsAtDay.length <= 1 ) {
+            return false
+          }
+        }
+      }
+      else if ( context.possibilities.isActualRole(targetSeat, 'werehamster') ) {
+        const targetStatus = getStatus(env, targetSeat)
+        if ( targetStatus.surviving ) return false
+        const targetsOnDeathDay = seerTargets.get(targetStatus.diedDay) || []
+        if ( !targetsOnDeathDay.includes(targetSeat) && !targetsOnDeathDay.includes('unknown') ) return false
+      }
+      else {
+        if ( ! context.possibilities.markAsHuman(targetSeat) ) return false
+      }
+    }
+  }
+
+  for ( const { day, seat } of context.hamstersKilledBySeer ) {
+    for ( const [seerDay, targets] of seerTargets.entries() ) {
+      for ( const target of targets ) {
+        if ( day === seerDay && seat === target ) {
+          unresolvedHamsterDeath.set(day, (unresolvedHamsterDeath.get(day) || 1) - 1)
+        }
+        else if ( day === seerDay && target === 'unknown' ) {
+          unresolvedHamsterDeath.set(day, (unresolvedHamsterDeath.get(day) || 1) - 1)
+        }
+      }
+    }
+  }
+  for ( const count of unresolvedHamsterDeath.values() ) {
+    if ( count > 0 ) return false
+  }
+
+  if ( context.needSeerAtDay != null && maxSurviving < context.needSeerAtDay )
+    return false
+
+  for ( const seat of rest ) {
+    const status = getStatus(env, seat)
+    if ( !status.claiming ) {
+      if ( !context.possibilities.denyRole(seat, 'seer') ) {
+        return false
+      }
+      continue
+    }
+    else {
+      if (!context.possibilities.markAsLiar(seat)) {
+        return false
+      }
+    }
+  }
+
+  for ( const seat of env.vs.statuses.keys() ) {
+    if ( seers.has(seat) ) continue
+    if (!context.possibilities.denyRole(seat, 'seer')) {
+      return false
+    }
+  }
+  return true
+}
+
+function testMedium(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+  const mediums = new Set()
+  for ( const seat of selected ) {
+    mediums.add(seat)
+    if ( !context.possibilities.fixRole(seat, 'medium') ) {
+      return false
+    }
+    const self = getStatus(env, seat)
+
+    for (const [targetSeat, species] of self.assertions) {
+      const target = context.possibilities.get(targetSeat)
+      if ( species === 'wolf' ) {
+        if ( ! context.possibilities.fixRole(targetSeat, 'werewolf') ) {
+          return false
+        }
+      }
+      else {
+        if ( ! context.possibilities.markAsHuman(targetSeat) ) {
+          return false
+        }
+      }
+    }
+  }
+  for ( const seat of rest ) {
+    const status = getStatus(env, seat)
+    if ( !status.claiming ) {
+      if (! context.possibilities.denyRole(seat, 'medium') ) {
+        return false
+      }
+      continue
+    }
+    else {
+      if ( ! context.possibilities.markAsLiar(seat) ) {
+        return false
+      }
+    }
+  }
+  for ( const seat of env.vs.statuses.keys() ) {
+    if ( mediums.has(seat) ) continue
+    if (!context.possibilities.denyRole(seat, 'medium')) {
+      return false
+    }
+  }
+
+  return true
+}
+
+function testBodyguard(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+  const bodyguards = new Set()
+  for ( const seat of selected ) {
+    const self = getStatus(env, seat)
+    bodyguards.add(seat)
+    if ( !context.possibilities.fixRole(seat, 'bodyguard') ) {
+      return false
+    }
+  }
+
+  for ( const seat of rest ) {
+    const status = getStatus(env, seat)
+    if ( !status.claiming ) {
+      if (!context.possibilities.denyRole(seat, 'bodyguard')) {
+        return false
+      }
+      continue
+    }
+    else {
+      if (!context.possibilities.markAsLiar(seat)) {
+        return false
+      }
+    }
+  }
+  for ( const seat of env.vs.statuses.keys() ) {
+    if ( bodyguards.has(seat) ) continue
+    if (!context.possibilities.denyRole(seat, 'bodyguard')) {
+      return false
+    }
+  }
+  return true
+}
+
+function testMason(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+  const masons = new Set()
+  for ( const seat of selected ) {
+    masons.add(seat)
+    if ( ! context.possibilities.fixRole(seat, 'mason') ) {
+      return false
+    }
+    const self = getStatus(env, seat)
+
+    for (const [targetSeat, species] of self.assertions) {
+      if ( species === 'wolf' ) {
+        // 仕様です。共有は相方に人間とアサーションします。
+        return false
+      }
+      else {
+        if ( ! context.possibilities.fixRole(targetSeat, 'mason') ) {
+          return false
+        }
+        masons.add(targetSeat)
+      }
+    }
+  }
+  for ( const seat of rest ) {
+    const status = getStatus(env, seat)
+    if ( !status.claiming ) continue
+    if ( ! context.possibilities.markAsLiar(seat) ) {
+      return false
+    }
+  }
+  for ( const seat of env.vs.statuses.keys() ) {
+    if ( masons.has(seat) ) continue
+    if ( ! context.possibilities.denyRole(seat, 'mason') ) {
+      return false
+    }
+  }
+  return true
+}
+
+function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+  const nekomatas = new Set()
+  const possibleCursed: Seat[] = []
+  for ( const seat of selected ) {
+    nekomatas.add(seat)
+    if ( ! context.possibilities.fixRole(seat, 'nekomata') ) {
+      return false
+    }
+    const self = getStatus(env, seat)
+    if (!self.claiming) {
+      context.additionalLiars++
+      if ( env.maxLiars < context.additionalLiars + env.numLiars ) {
+        return false
+      }
+    }
+    if ( !self.surviving ) {
+      const deathChronicle = context.deathChronicle.get(self.diedDay)
+      if ( self.causeOfDeath === 'night_kill' ) {
+        if ( !deathChronicle ) {
+          context.deathChronicle.set(self.diedDay, { add: 1, sub: 0 })
+        }
+        else {
+          deathChronicle.add += 1
+        }
+      }
+      let ok = false
+      for ( const [targetSeat, targetStatus] of env.vs.statuses.entries() ) {
+        if ( targetStatus.surviving ) continue
+        if (targetStatus.diedDay !== self.diedDay) continue
+        if ( targetStatus.causeOfDeath === 'execution' ) continue
+        if ( targetStatus.causeOfDeath === 'follow_executed_hamster' || targetStatus.causeOfDeath === 'follow_killed_hamster' ) continue
+        if (targetSeat === seat) continue
+        // 別の死体がある
+        if ( self.causeOfDeath === 'execution' ) {
+          if ( targetStatus.causeOfDeath === 'cursed_by_executed_nekomata' ) {
+            ok = true
+            break
+          }
+        }
+        else {
+          ok = true
+          if ( targetStatus.causeOfDeath === 'cursed_by_killed_nekomata' ) {
+            const targetPossible = context.possibilities.get(targetSeat)
+            if ( ! context.possibilities.fixRole(targetSeat, 'werewolf') ) {
+              return false
+            }
+          }
+          possibleCursed.push(targetSeat)
+        }
+      }
+      if ( !ok ) return false
+    }
+  }
+  if ( possibleCursed.length ) {
+    context.requireOneOf.push(
+      possibleCursed.map(targetSeat => ({ seat: targetSeat, role: 'werewolf' }))
+    )
+  }
+
+  for ( const seat of rest ) {
+    const status = getStatus(env, seat)
+    if ( !status.claiming || status.claimingRole !== 'nekomata' ) {
+      if ( !context.possibilities.denyRole(seat, 'nekomata') ) {
+        return false
+      }
+      continue
+    }
+    else {
+      if ( ! context.possibilities.markAsLiar(seat) ) {
+        return false
+      }
+    }
+  }
+  for ( const seat of env.vs.statuses.keys() ) {
+    if ( nekomatas.has(seat) ) continue
+    if ( ! context.possibilities.denyRole(seat, 'nekomata') ) {
+      return false
+    }
+  }
+  return true
+}
+
+export const roleTesterMap: Record<string, RoleTester> = {
+  werehamster: testHamster,
+  seer: testSeer,
+  medium: testMedium,
+  bodyguard: testBodyguard,
+  mason: testMason,
+  nekomata: testNekomata,
+}

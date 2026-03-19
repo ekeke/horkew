@@ -3,6 +3,8 @@
 import type { CauseOfDeath, EnumSpecies, VillageStatus, SeatStatus, SystemRole } from '../types/index.ts'
 import { Possibilities } from './possibilities.ts'
 import { selectCombinationsFromArray, selectOne, generateCombinations, backtrackForMatrix } from './combinatorics.ts'
+import { roleTesterMap } from './roleTesters.ts'
+import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
 
 export { selectCombinationsFromArray, selectOne, backtrackForMatrix } from './combinatorics.ts'
 
@@ -99,20 +101,7 @@ type RoleTest = {
 
 }
 
-type DeathCounts = {
-  add: number,
-  sub: number
-}
-
-type AnalyzeContext = {
-  possibilities: Possibilities
-  needSeerAtDay?: number
-  additionalLiars: number
-  hamstersKilledBySeer: { day: number, seat: Seat }[]
-  hamstersMaxSurvivingDay: number
-  requireOneOf: { seat: Seat, role: SystemRole }[][]
-  deathChronicle: Map<Day, DeathCounts>
-}
+// AnalyzeContext and RoleTesterEnv types are defined in roleTesters.ts
 
 export class VillageRetar {
   // 状況の初期値
@@ -143,6 +132,7 @@ export class VillageRetar {
   setup: Map<SystemRole, number>
 
   options: AnalyzeOptions
+  env: RoleTesterEnv
 
   debugStash: {
     finalizerRuns: number
@@ -414,6 +404,16 @@ export class VillageRetar {
     }
 
     console.log(this.maxLiars, this.numLiars, this.roleTests, this.initialPossibilities.toObj())
+
+    this.env = {
+      vs: this.vs,
+      nightKillsByDay: this.nightKillsByDay,
+      maxLiars: this.maxLiars,
+      numLiars: this.numLiars,
+      lastHamsterMustDieAt: this.lastHamsterMustDieAt,
+      lastHamsterMustDiedBy: this.lastHamsterMustDiedBy,
+      dayCountFrom: this.options.dayCountFrom,
+    }
   }
 
   getStatus(seat: Seat) {
@@ -422,431 +422,13 @@ export class VillageRetar {
 
   testRole(scenario: RoleTest) {
     const { role, selected, rest } = scenario
-    let result = false
-    switch (role) {
-      case 'allpass':
-        return true
-      case 'werehamster':
-        this.debugStash.werehamsterTests++
-        result = this.testHamster(selected, rest)
-        if ( result ) this.debugStash.werehamsterTestPasses++
-        return result
-      case 'seer':
-        this.debugStash.seerTests++
-
-        result = this.testSeer(selected, rest)
-        //console.log({result, pos: this.context.possibilities.toObj()})
-        if ( result ) this.debugStash.seerTestPasses++
-        return result
-      case 'medium':
-        this.debugStash.mediumTests++
-
-        result = this.testMedium(selected, rest)
-        if ( result ) this.debugStash.mediumTestPasses++
-        return result
-      case 'bodyguard':
-        this.debugStash.bodyguardTests++
-
-        result = this.testBodyguard(selected, rest)
-        if ( result ) this.debugStash.bodyguardTestPasses++
-        return result
-      case 'mason':
-        this.debugStash.masonTests++
-
-        result = this.testMason(selected, rest)
-        if ( result ) this.debugStash.masonTestPasses++
-        return result
-      case 'nekomata':
-        this.debugStash.nekomataTests++
-        result = this.testNekomata(selected, rest)
-        if ( result ) this.debugStash.nekomataTestPasses++
-        return result
-    }
-    throw new Error('unknown role')
-  }
-
-  testHamster(selected: Seat[], rest: Seat[]) {
-    const hamsters = new Set()
-    let lastHamsterDiedAt = -Infinity
-    let lastHamsterDiedBy: CauseOfDeath | undefined
-    let livingHamsters = 0
-    let seerKilledHamsterAt = -Infinity
-    for ( const seat of selected ) {
-      const self = this.getStatus(seat)
-      hamsters.add(seat)
-      if ( !this.context.possibilities.fixRole(seat,'werehamster') ) {
-        return false
-      }
-      const status = this.getStatus(seat)
-      if ( status.surviving ) {
-        livingHamsters++
-      }
-      else {
-        if ( status.causeOfDeath === 'night_kill' ) {
-
-          const deathChronicle = this.context.deathChronicle.get(self.diedDay)
-          if ( !deathChronicle ) {
-            this.context.deathChronicle.set(self.diedDay, { add: 1, sub: 0 })
-          }
-          else {
-            deathChronicle.add += 1
-          }
-
-          this.context.hamstersKilledBySeer.push({ day: status.diedDay, seat })
-          if ( seerKilledHamsterAt < status.diedDay ) {
-            seerKilledHamsterAt = status.diedDay
-          }
-        }
-        if ( lastHamsterDiedAt < status.diedDay) {
-          lastHamsterDiedAt = status.diedDay
-          lastHamsterDiedBy = status.causeOfDeath
-        }
-      }
-    }
-    if ( 0 <= seerKilledHamsterAt ) {
-      this.context.needSeerAtDay = seerKilledHamsterAt
-    }
-
-    if ( this.lastHamsterMustDieAt != null ) {
-      if (lastHamsterDiedAt !== this.lastHamsterMustDieAt ) return false
-      if (lastHamsterDiedBy !== this.lastHamsterMustDiedBy ) return false
-    }
-    for ( const seat of rest ) {
-      this.context.possibilities.denyRole(seat, 'werehamster')
-      if ( !livingHamsters ) {
-        const status = this.getStatus(seat)
-        if ( status.surviving || lastHamsterDiedAt < status.diedDay ) {
-          this.context.possibilities.denyRole(seat, 'immoralist')
-        }
-      }
-    }
-    if ( livingHamsters ) {
-      this.context.hamstersMaxSurvivingDay = Infinity
-    }
-    else {
-      this.context.hamstersMaxSurvivingDay = lastHamsterDiedAt
-    }
-    return true
-  }
-
-  testSeer(selected: Seat[], rest: Seat[]) {
-    const seers = new Set()
-    let maxSurviving = -Infinity
-    const seerTargets: Map<Day, (Seat | 'unknown')[]> = new Map()
-    let unresolvedHamsterDeath: Map<number, number> = new Map()
-    if ( this.context.hamstersKilledBySeer.length > 0 ) {
-      for ( const { day } of this.context.hamstersKilledBySeer ) {
-        const current = unresolvedHamsterDeath.get(day) || 0
-        unresolvedHamsterDeath.set(day, current + 1)
-      }
-    }
-
-    for ( const seat of selected ) {
-      seers.add(seat)
-      if ( !this.context.possibilities.fixRole(seat, 'seer') ) {
-        return false
-      }
-
-      const self = this.getStatus(seat)
-
-      if (!self.claiming) {
-        for ( const [day, count] of unresolvedHamsterDeath.entries() ) {
-          if ( self.surviving || self.diedDay >= day ) {
-            unresolvedHamsterDeath.set(day, count - 1)
-          }
-        }
-      }
-      if (self.surviving) maxSurviving = Infinity
-      else if (maxSurviving < self.diedDay) maxSurviving = self.diedDay
-
-      // Populate seerTargets from divination assertions (insertion order = chronological)
-      let assertionDay = this.options.dayCountFrom
-      for (const [targetSeat] of self.assertions) {
-        seerTargets.set(assertionDay, [...(seerTargets.get(assertionDay) || []), targetSeat])
-        assertionDay++
-      }
-      // If seer died at night, they acted that night but result is unreported
-      if (!self.surviving && self.causeOfDeath === 'night_kill') {
-        seerTargets.set(self.diedDay, [...(seerTargets.get(self.diedDay) || []), 'unknown'])
-      }
-      // Add 'unknown' only for genuinely unreported nights beyond known assertions
-      const maxActiveDay = self.surviving ? this.vs.day - 1 : (self.causeOfDeath === 'night_kill' ? self.diedDay : self.diedDay - 1)
-      for (let d = assertionDay; d <= maxActiveDay; d++) {
-        if (!seerTargets.has(d)) {
-          seerTargets.set(d, ['unknown'])
-        }
-      }
-      for (const [targetSeat, species] of self.assertions) {
-        const target = this.context.possibilities.get(targetSeat)
-        if ( species === 'wolf' ) {
-          if ( ! this.context.possibilities.fixRole(targetSeat,'werewolf') ) {
-            return false
-          }
-          const targetStatus = this.getStatus(targetSeat)
-          if ( !targetStatus.surviving && targetStatus.causeOfDeath === 'night_kill' ) {
-            const nightKillsAtDay = this.nightKillsByDay.get(targetStatus.diedDay)
-            if ( nightKillsAtDay && nightKillsAtDay.length <= 1 ) {
-              return false
-            }
-          }
-        }
-        else if ( this.context.possibilities.isActualRole(targetSeat, 'werehamster') ) {
-          const targetStatus = this.getStatus(targetSeat)
-          if ( targetStatus.surviving ) return false
-          const targetsOnDeathDay = seerTargets.get(targetStatus.diedDay) || []
-          if ( !targetsOnDeathDay.includes(targetSeat) && !targetsOnDeathDay.includes('unknown') ) return false
-        }
-        else {
-          if ( ! this.context.possibilities.markAsHuman(targetSeat) ) return false
-        }
-      }
-    }
-
-    for ( const { day, seat } of this.context.hamstersKilledBySeer ) {
-      for ( const [seerDay, targets] of seerTargets.entries() ) {
-        for ( const target of targets ) {
-          if ( day === seerDay && seat === target ) {
-            unresolvedHamsterDeath.set(day, (unresolvedHamsterDeath.get(day) || 1) - 1)
-          }
-          else if ( day === seerDay && target === 'unknown' ) {
-            unresolvedHamsterDeath.set(day, (unresolvedHamsterDeath.get(day) || 1) - 1)
-          }
-        }
-      }
-    }
-    for ( const count of unresolvedHamsterDeath.values() ) {
-      if ( count > 0 ) return false
-    }
-
-    if ( this.context.needSeerAtDay != null && maxSurviving < this.context.needSeerAtDay )
-      return false
-
-    for ( const seat of rest ) {
-      const status = this.getStatus(seat)
-      if ( !status.claiming ) {
-        if ( !this.context.possibilities.denyRole(seat, 'seer') ) {
-          return false
-        }
-        continue
-      }
-      else {
-        if (!this.context.possibilities.markAsLiar(seat)) {
-          return false
-        }
-      }
-    }
-
-    for ( const seat of this.vs.statuses.keys() ) {
-      if ( seers.has(seat) ) continue
-      if (!this.context.possibilities.denyRole(seat, 'seer')) {
-        return false
-      }
-    }
-    return true
-  }
-
-  testMedium(selected: Seat[], rest: Seat[]) {
-    const mediums = new Set()
-//    console.log('testing medium', selected, rest)
-    for ( const seat of selected ) {
-      mediums.add(seat)
-      if ( !this.context.possibilities.fixRole(seat, 'medium') ) {
-//        console.log('failed to fix medium', seat)
-        return false
-      }
-      const self = this.getStatus(seat)
-
-      for (const [targetSeat, species] of self.assertions) {
-        const target = this.context.possibilities.get(targetSeat)
-        if ( species === 'wolf' ) {
-          if ( ! this.context.possibilities.fixRole(targetSeat, 'werewolf') ) {
-  //          console.log('failed to fix werewolf',seat, targetSeat)
-            return false
-          }
-        }
-        else {
-          if ( ! this.context.possibilities.markAsHuman(targetSeat) ) {
-            return false
-          }
-        }
-      }
-    }
-    for ( const seat of rest ) {
-      const status = this.getStatus(seat)
-      if ( !status.claiming ) {
-        if (! this.context.possibilities.denyRole(seat, 'medium') ) {
-          return false
-        }
-        continue
-      }
-      else {
-        if ( ! this.context.possibilities.markAsLiar(seat) ) {
-          return false
-        }
-      }
-    }
-    for ( const seat of this.vs.statuses.keys() ) {
-      if ( mediums.has(seat) ) continue
-      if (!this.context.possibilities.denyRole(seat, 'medium')) {
-//        console.log('failed to deny medium', seat)
-        return false
-      }
-    }
-
-    return true
-  }
-
-  testBodyguard(selected: Seat[], rest: Seat[]) {
-    const bodyguards = new Set()
-    for ( const seat of selected ) {
-      const self = this.getStatus(seat)
-      bodyguards.add(seat)
-      if ( !this.context.possibilities.fixRole(seat, 'bodyguard') ) {
-        return false
-      }
-    }
-
-    for ( const seat of rest ) {
-      const status = this.getStatus(seat)
-      if ( !status.claiming ) {
-        if (!this.context.possibilities.denyRole(seat, 'bodyguard')) {
-          return false
-        }
-        continue
-      }
-      else {
-        if (!this.context.possibilities.markAsLiar(seat)) {
-          return false
-        }
-      }
-    }
-    for ( const seat of this.vs.statuses.keys() ) {
-      if ( bodyguards.has(seat) ) continue
-      if (!this.context.possibilities.denyRole(seat, 'bodyguard')) {
-        return false
-      }
-    }
-    return true
-  }
-
-  testMason(selected: Seat[], rest: Seat[]) {
-    const masons = new Set()
-    for ( const seat of selected ) {
-      masons.add(seat)
-      if ( ! this.context.possibilities.fixRole(seat, 'mason') ) {
-        return false
-      }
-      const self = this.getStatus(seat)
-
-      for (const [targetSeat, species] of self.assertions) {
-        if ( species === 'wolf' ) {
-          // 仕様です。共有は相方に人間とアサーションします。
-          return false
-        }
-        else {
-          if ( ! this.context.possibilities.fixRole(targetSeat, 'mason') ) {
-            return false
-          }
-          masons.add(targetSeat)
-        }
-      }
-    }
-    for ( const seat of rest ) {
-      const status = this.getStatus(seat)
-      if ( !status.claiming ) continue
-      if ( ! this.context.possibilities.markAsLiar(seat) ) {
-        return false
-      }
-    }
-    for ( const seat of this.vs.statuses.keys() ) {
-      if ( masons.has(seat) ) continue
-      if ( ! this.context.possibilities.denyRole(seat, 'mason') ) {
-        return false
-      }
-    }
-    return true
-  }
-
-  testNekomata(selected: Seat[], rest: Seat[]) {
-    const nekomatas = new Set()
-    const possibleCursed: Seat[] = []
-    for ( const seat of selected ) {
-      nekomatas.add(seat)
-      if ( ! this.context.possibilities.fixRole(seat, 'nekomata') ) {
-        return false
-      }
-      const self = this.getStatus(seat)
-      if (!self.claiming) {
-        this.context.additionalLiars++
-        if ( this.maxLiars < this.context.additionalLiars + this.numLiars ) {
-          return false
-        }
-      }
-      if ( !self.surviving ) {
-        const deathChronicle = this.context.deathChronicle.get(self.diedDay)
-        if ( self.causeOfDeath === 'night_kill' ) {
-          if ( !deathChronicle ) {
-            this.context.deathChronicle.set(self.diedDay, { add: 1, sub: 0 })
-          }
-          else {
-            deathChronicle.add += 1
-          }
-        }
-        let ok = false
-        for ( const [targetSeat, targetStatus] of this.vs.statuses.entries() ) {
-          if ( targetStatus.surviving ) continue
-          if (targetStatus.diedDay !== self.diedDay) continue
-          if ( targetStatus.causeOfDeath === 'execution' ) continue
-          if ( targetStatus.causeOfDeath === 'follow_executed_hamster' || targetStatus.causeOfDeath === 'follow_killed_hamster' ) continue
-          if (targetSeat === seat) continue
-          // 別の死体がある
-          if ( self.causeOfDeath === 'execution' ) {
-            if ( targetStatus.causeOfDeath === 'cursed_by_executed_nekomata' ) {
-              ok = true
-              break
-            }
-          }
-          else {
-            ok = true
-            if ( targetStatus.causeOfDeath === 'cursed_by_killed_nekomata' ) {
-              const targetPossible = this.context.possibilities.get(targetSeat)
-              if ( ! this.context.possibilities.fixRole(targetSeat, 'werewolf') ) {
-                return false
-              }
-            }
-            possibleCursed.push(targetSeat)
-          }
-        }
-        if ( !ok ) return false
-      }
-    }
-    if ( possibleCursed.length ) {
-      this.context.requireOneOf.push(
-        possibleCursed.map(targetSeat => ({ seat: targetSeat, role: 'werewolf' }))
-      )
-    }
-
-    for ( const seat of rest ) {
-      const status = this.getStatus(seat)
-      if ( !status.claiming || status.claimingRole !== 'nekomata' ) {
-        if ( !this.context.possibilities.denyRole(seat, 'nekomata') ) {
-          return false
-        }
-        continue
-      }
-      else {
-        if ( ! this.context.possibilities.markAsLiar(seat) ) {
-          return false
-        }
-      }
-    }
-    for ( const seat of this.vs.statuses.keys() ) {
-      if ( nekomatas.has(seat) ) continue
-      if ( ! this.context.possibilities.denyRole(seat, 'nekomata') ) {
-        return false
-      }
-    }
-    return true
+    if (role === 'allpass') return true
+    const tester = roleTesterMap[role]
+    if (!tester) throw new Error('unknown role')
+    this.debugStash[`${role}Tests`]++
+    const result = tester(this.env, this.context, selected, rest)
+    if ( result ) this.debugStash[`${role}TestPasses`]++
+    return result
   }
 
   analyze() {
