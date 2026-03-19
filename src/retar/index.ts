@@ -1,6 +1,4 @@
-// @ts-nocheck
-// TODO: Fix type errors inherited from reference implementation
-import type { CauseOfDeath, EnumSpecies, VillageStatus, SeatStatus, SystemRole } from '../types/index.ts'
+import type { CauseOfDeath, VillageStatus, SystemRole } from '../types/index.ts'
 import { Possibilities } from './possibilities.ts'
 import { generateCombinations, backtrackForMatrix } from './combinatorics.ts'
 import { roleTesterMap, cloneContext } from './roleTesters.ts'
@@ -94,7 +92,6 @@ export type AnalyzeOptions = {
 
 }
 
-const WhiteEnemies = ['possessed', 'fanatic', 'immoralist']
 const HumanRoles = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'possessed', 'fanatic', 'immoralist', 'werehamster']
 
 // AnalyzeContext and RoleTesterEnv types are defined in roleTesters.ts
@@ -108,7 +105,7 @@ export class VillageRetar {
   maxLiars: number
   numLiars: number
 
-  context: AnalyzeContext
+  context!: AnalyzeContext
   lastHamsterMustDieAt?: number
   lastHamsterMustDiedBy?: CauseOfDeath
   nightKillsByDay: Map<Day, Seat[]> = new Map()
@@ -163,10 +160,10 @@ export class VillageRetar {
     // 一切のCOを無視
     if ( this.options.hocusPocus ) {
       for ( const seat of this.options.hocusPocus.keys() ) {
-        const state = this.vs.statuses.get(seat)
+        const state = this.vs.statuses.get(seat)!
         state.assertions = new Map()
         state.claiming = false
-        state.claimingRole = null
+        state.claimingRole = ''
         state.actions = new Map()
       }
     }
@@ -228,7 +225,6 @@ export class VillageRetar {
 
     // 役職固定位置に役職を設定していく
     // この時点で、固定位置に設定できない場合は、矛盾があるか、村の状態がおかしい
-    const setupWithoutFixed = new Map(this.setup)
     for ( const [seat, role] of fixedPositions.entries() ) {
       this.initialPossibilities.fixRole(seat, role)
     }
@@ -241,7 +237,7 @@ export class VillageRetar {
     for ( const [seat, status] of village.statuses.entries() ) {
       if ( status.surviving ) continue
       if ( status.causeOfDeath === 'night_kill' ) {
-        this.nightKillsByDay.set(status.diedDay, [...(this.nightKillsByDay.get(status.diedDay) || []), seat])
+        this.nightKillsByDay.set(status.diedDay!, [...(this.nightKillsByDay.get(status.diedDay!) || []), seat])
       }
     }
     const multipleVictims = Array.from(this.nightKillsByDay.values()).filter(v => v.length > 1).flat()
@@ -272,15 +268,14 @@ export class VillageRetar {
     if (role === 'allpass') return true
     const tester = roleTesterMap[role]
     if (!tester) throw new Error('unknown role')
-    this.debugStash[`${role}Tests`]++
+    ;(this.debugStash as Record<string, number>)[`${role}Tests`]++
     const result = tester(this.env, this.context, selected, rest)
-    if ( result ) this.debugStash[`${role}TestPasses`]++
+    if ( result ) (this.debugStash as Record<string, number>)[`${role}TestPasses`]++
     return result
   }
 
   analyze() {
     const t0 = performance.now()
-    let count = 0
 
     // Initialize
     this.context = {
@@ -333,7 +328,7 @@ export class VillageRetar {
 
       if ( this.maxLiars <= (this.context.additionalLiars || 0) + this.numLiars ) {
         for ( const seat of this.vs.statuses.keys() ) {
-          const status = this.getStatus(seat)
+          const status = this.getStatus(seat)!
           if ( !status.claiming || status.claimingRole === 'villager' ) {
             this.context.possibilities.markAsNotLiar(seat)
           }
