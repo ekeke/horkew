@@ -5,8 +5,9 @@
   import { systemRoles } from '../src/types/index.ts'
   import { stringifyStatements, type StringifiedLine } from './stringify.ts'
   import type { RetarResponse, SeatResult } from './analysis.worker.ts'
-  import type { SystemRole } from '../src/types/index.ts'
+  import type { SystemRole, VillageStatus } from '../src/types/index.ts'
   import AnalysisWorker from './analysis.worker.ts?worker'
+  import StatusPane from './status/StatusPane.svelte'
 
   const STORAGE_PREFIX = 'horkew:'
   const ACTIVE_KEY = 'horkew:__active__'
@@ -15,6 +16,7 @@
   const paneEntries = [
     { id: 'rawStatements', label: 'Raw Statements' },
     { id: 'parsed', label: 'Parsed' },
+    { id: 'status', label: 'Status' },
     { id: 'analyzerInput', label: 'Analyzer Input' },
     { id: 'analysis', label: 'Analysis' },
   ] as const
@@ -22,7 +24,7 @@
   type PaneId = typeof paneEntries[number]['id']
 
   function loadPaneVisibility(): Record<PaneId, boolean> {
-    const defaults: Record<PaneId, boolean> = { rawStatements: true, parsed: true, analyzerInput: true, analysis: true }
+    const defaults: Record<PaneId, boolean> = { rawStatements: true, parsed: true, status: true, analyzerInput: true, analysis: true }
     try {
       const stored = localStorage.getItem(PANES_KEY)
       if (stored) return { ...defaults, ...JSON.parse(stored) }
@@ -74,6 +76,7 @@
   let survivorInfo = $state({ alive: 0, total: 0 })
   let deadSeats: Set<number> = $state(new Set())
   let players: Map<number, string> = $state(new Map())
+  let villageStatus: VillageStatus | null = $state(null)
   let worker: Worker | null = null
   let paneVisible: Record<PaneId, boolean> = $state(loadPaneVisibility())
   let showPaneMenu = $state(false)
@@ -237,6 +240,7 @@
 
       const { vs, setup, players: playersMap } = buildVillageStatus(statements, meta)
       players = playersMap
+      villageStatus = vs
       const alive = [...vs.statuses.values()].filter(s => s.surviving).length
       survivorInfo = { alive, total: vs.statuses.size }
       deadSeats = new Set([...vs.statuses.entries()].filter(([, s]) => !s.surviving).map(([seat]) => seat))
@@ -276,6 +280,7 @@
     } catch (e: any) {
       analysisSeats = []
       analysisError = e.message
+      villageStatus = null
     }
   }
 </script>
@@ -361,6 +366,17 @@
             {/if}
           {/each}
         </div>
+      </div>
+    </section>
+    {/if}
+
+    {#if paneVisible.status}
+    <section class="pane">
+      <div class="pane-header">Status</div>
+      <div class="pane-body">
+        {#if villageStatus}
+          <StatusPane vs={villageStatus} {players} />
+        {/if}
       </div>
     </section>
     {/if}
