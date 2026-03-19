@@ -26,6 +26,7 @@ export type ClaimRow = {
   name: string
   claimingRole: string
   claimedAt: number | undefined
+  claimOrder: number | undefined
   assertions: Assertions
   actions: PlayerAction
   surviving: boolean
@@ -117,6 +118,7 @@ export function extractClaimGroups(vs: VillageStatus, players: Map<number, strin
       name: players.get(seat) ?? `#${seat}`,
       claimingRole: role,
       claimedAt: status.claimedAt,
+      claimOrder: status.claimOrder,
       assertions: status.assertions,
       actions: status.actions,
       surviving: status.surviving,
@@ -132,7 +134,7 @@ export function extractClaimGroups(vs: VillageStatus, players: Map<number, strin
       result.push({
         role,
         roleShortName: roleInfo?.shortName ?? role,
-        rows: rows.sort((a, b) => a.seat - b.seat),
+        rows: rows.sort((a, b) => (a.claimOrder ?? a.seat) - (b.claimOrder ?? b.seat)),
       })
       grouped.delete(role)
     }
@@ -143,7 +145,7 @@ export function extractClaimGroups(vs: VillageStatus, players: Map<number, strin
     result.push({
       role,
       roleShortName: roleInfo?.shortName ?? role,
-      rows: rows.sort((a, b) => a.seat - b.seat),
+      rows: rows.sort((a, b) => (a.claimOrder ?? a.seat) - (b.claimOrder ?? b.seat)),
     })
   }
 

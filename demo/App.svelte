@@ -230,18 +230,19 @@
 
   type NameStatus = 'default' | 'not-village' | 'village' | 'wolf' | 'fox'
 
-  function classifyPlayer(roles: SystemRole[]): { status: NameStatus, fixed: boolean } {
-    if (roles.length === 0) return { status: 'default', fixed: false }
+  function classifyPlayer(roles: SystemRole[]): { status: NameStatus, fixed: boolean, label: string } {
+    if (roles.length === 0) return { status: 'default', fixed: false, label: '?' }
     const fixed = roles.length === 1
+    const label = fixed ? (systemRoles.get(roles[0])?.shortName ?? '?') : '?'
     const alignments = new Set(roles.map(r => systemRoles.get(r)!.alignment))
     if (alignments.size === 1) {
       const a = [...alignments][0]
-      if (a === 'villager') return { status: 'village', fixed }
-      if (a === 'werewolf') return { status: 'wolf', fixed }
-      if (a === 'werehamster') return { status: 'fox', fixed }
+      if (a === 'villager') return { status: 'village', fixed, label }
+      if (a === 'werewolf') return { status: 'wolf', fixed, label }
+      if (a === 'werehamster') return { status: 'fox', fixed, label }
     }
-    if (!alignments.has('villager')) return { status: 'not-village', fixed: false }
-    return { status: 'default', fixed: false }
+    if (!alignments.has('villager')) return { status: 'not-village', fixed: false, label }
+    return { status: 'default', fixed: false, label }
   }
 
   function toggleAssumption(seat: number, role: SystemRole) {
@@ -443,7 +444,7 @@
                 {#each [...players] as [seat, name]}
                   {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
                   <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
-                    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}>{name}</td>
+                    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span>{name}</td>
                     {#each analysisColumns as role}
                       <td
                         class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"
@@ -787,6 +788,14 @@
     background: #cba6f7;
     color: #1e1e2e;
     font-weight: 600;
+  }
+
+  .analysis-label {
+    display: inline-block;
+    width: 1.8em;
+    text-align: center;
+    opacity: 0.6;
+    font-size: 0.85em;
   }
 
   .analysis-name-col.village { color: #a6e3a1; }

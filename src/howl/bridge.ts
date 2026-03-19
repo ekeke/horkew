@@ -76,6 +76,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   let finished = false
   let result: VillageResult = undefined
   let lastDeathEvent: 'execution' | 'night_kill' = 'execution'
+  let claimCounter = 0
 
   function resolveSeat(name: string): number {
     const results = dict.search(name)
@@ -230,6 +231,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           status.claiming = true
           status.claimingRole = 'mason'
           status.claimedAt = day
+          status.claimOrder = ++claimCounter
           status.actions = new Map()
           status.assertions = new Map()
           for (const otherName of s.players) {
@@ -268,6 +270,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
                 actorStatus.claiming = true
                 actorStatus.claimingRole = sysRole
                 actorStatus.claimedAt = day
+                actorStatus.claimOrder = ++claimCounter
                 actorStatus.actions = new Map()
                 actorStatus.assertions = new Map()
               }
