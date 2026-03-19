@@ -1,0 +1,106 @@
+---
+title: まだｘ４名前のない人狼
+tags:
+  - 狐溶け
+  - 背徳後追い
+  - 村勝ち
+setup:
+  nekomata: 1
+  villager: 2
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  fanatic: 1
+  werewolf: 3
+  mason: 2
+  werehamster: 1
+  immoralist: 1
+rules:
+  role.immoraist.follow-immediately: true
+---
+
++エーカゲン２世、ガーグァ、ボムへい、考える人、おわんくん、羽根帚、今川義元、アンゴラウサギ、アネモネ、ちせ、サターニャ、マーマイト、オカリン、闇さとし
+
+エーカゲン死亡
+
+さとし　占いCOガーグァ●
+羽根　霊能CO
+サタ　占いCO　オカリン●
+考える人　占いCO　羽根○
+ちせ　予言CO　さとし〇
+
+オカリン　共有CO　ガーグァ白
+ガーグァ　共有CO　おか〇
+# @expect オカリン: [mason]
+# @expect ガーグァ: [mason]
+# @expect サターニャ: [werewolf, fanatic, werehamster, immoralist]
+# @expect 闇さとし: [werewolf, fanatic, werehamster, immoralist]
+
+サターニャ指定
+
+サターニャ←
+ガーグァ←さとし
+おか←さた
+
+サターニャ処刑
+
+マーマイト　死亡
+ボム　死亡
+さとし　後追い
+
+# @expect 闇さとし: [immoralist]
+
+ちせ　ボム○
+考える　ボム白
+
+# @expect ボムへい: [werehamster]
+
+指定おわんくん
+
+おわんくん←
+おわんくん→あねもね
+
+処刑　おわん
+羽根死亡
+
+考える　アンゴラ白
+ちせ　あねもね黒
+
+あねもね　猫CO
+今川　猫CO
+アンゴラ　狩りCO　考える護衛　ちせ護衛
+
+指定アネモネ
+
+アネモネ←
+今川←考える、アネモネ
+
+アネモネ吊り
+考える道連れ
+
+# @expect 今川義元: [werewolf, fanatic]
+# @expect ちせ: [werewolf, fanatic]
+
+#二人だけなのに円卓使うのか
+
+アンゴラ死亡
+
+# @expect おわんくん: [werewolf]
+# @expect solve: true
+
+今川→オカリン
+ちせ→オカリン
+オカリン→ちせ
+ガーグァ→ちせ
+ーーー
+今川→ちせ
+ちせ→オカリン
+オカリン→今川
+ガーグァ→今川
+
+処刑今川
+
+村勝利
+
+
+

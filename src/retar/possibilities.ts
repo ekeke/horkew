@@ -344,12 +344,62 @@ export class Possibilities {
       )
       if (!res) return false
       const filterForDeads = possibilityFromSet(new Set(Object.keys(roleCount).filter(k => roleCount[k as SystemRole]! > 0) as SystemRole[]))
+      // Collect dead seat entries with filtered possibilities
+      const deadEntries: [RolePossibility, number[]][] = []
       for (let i = index + 1; i < items.length; i++) {
         const item = items[i]
         if (item === 'check') continue
         const [possibility, seats] = item
-        for ( const seat of seats ) {
-          conclusion.possibilities[seat] |= (possibility & filterForDeads)
+        deadEntries.push([possibility & filterForDeads, seats])
+      }
+      // Propagate constraints among dead seats:
+      // If a group has only one possible role and that role's remaining count
+      // equals the group size, remove that role from all other groups
+      const deadRoleCount = Object.assign({}, roleCount)
+      let changed = true
+      while (changed) {
+        changed = false
+        for (const entry of deadEntries) {
+          if (popCount(entry[0]) === 1) {
+            const role = RoleSignatureBitsReverseMap.get(entry[0])!
+            if ((deadRoleCount[role] ?? 0) > 0 && deadRoleCount[role] === entry[1].length) {
+              deadRoleCount[role] = 0
+              for (const other of deadEntries) {
+                if (other === entry) continue
+                const before = other[0]
+                other[0] = before & ~entry[0]
+                if (other[0] !== before) changed = true
+              }
+            }
+          }
+        }
+        // Also check: if a role's remaining count is fully consumed by
+        // groups that must include it, remove it from other groups
+        for (const [roleStr, count] of Object.entries(deadRoleCount)) {
+          if (count as number <= 0) continue
+          const roleBit = RoleSignatureBits[roleStr as SystemRole]
+          let totalSeats = 0
+          const mustHaveGroups: typeof deadEntries = []
+          for (const entry of deadEntries) {
+            if (entry[0] & roleBit) {
+              totalSeats += entry[1].length
+              mustHaveGroups.push(entry)
+            }
+          }
+          if (totalSeats === count) {
+            // All seats that can have this role must have it
+            for (const entry of mustHaveGroups) {
+              if (entry[0] !== roleBit) {
+                entry[0] = roleBit
+                changed = true
+              }
+            }
+          }
+        }
+      }
+      for (const [possibility, seats] of deadEntries) {
+        for (const seat of seats) {
+          conclusion.possibilities[seat] |= possibility
         }
       }
       for (const p of path) {
