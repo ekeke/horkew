@@ -228,6 +228,22 @@
     return systemRoles.get(role)?.shortName ?? role
   }
 
+  type NameStatus = 'default' | 'not-village' | 'village' | 'wolf' | 'fox'
+
+  function classifyPlayer(roles: SystemRole[]): { status: NameStatus, fixed: boolean } {
+    if (roles.length === 0) return { status: 'default', fixed: false }
+    const fixed = roles.length === 1
+    const alignments = new Set(roles.map(r => systemRoles.get(r)!.alignment))
+    if (alignments.size === 1) {
+      const a = [...alignments][0]
+      if (a === 'villager') return { status: 'village', fixed }
+      if (a === 'werewolf') return { status: 'wolf', fixed }
+      if (a === 'werehamster') return { status: 'fox', fixed }
+    }
+    if (!alignments.has('villager')) return { status: 'not-village', fixed: false }
+    return { status: 'default', fixed: false }
+  }
+
   function toggleAssumption(seat: number, role: SystemRole) {
     const current = assumptions.get(seat)
     if (current === role) {
@@ -425,8 +441,9 @@
             <table class="analysis-table">
               <tbody>
                 {#each [...players] as [seat, name]}
+                  {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
                   <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
-                    <td class="analysis-name-col">{name}</td>
+                    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}>{name}</td>
                     {#each analysisColumns as role}
                       <td
                         class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"
@@ -768,8 +785,14 @@
     font-weight: 600;
   }
 
+  .analysis-name-col.village { color: #a6e3a1; }
+  .analysis-name-col.wolf { color: #f38ba8; }
+  .analysis-name-col.fox { color: #f9e2af; }
+  .analysis-name-col.not-village { color: #cba6f7; }
+  .analysis-name-col.role-fixed { font-weight: 700; }
+
   .dead-row .analysis-name-col {
-    color: #585b70;
+    opacity: 0.6;
   }
 
   .modal-confirm {
