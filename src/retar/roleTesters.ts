@@ -35,8 +35,16 @@ function getStatus(env: RoleTesterEnv, seat: Seat): SeatStatus {
   return env.vs.statuses.get(seat)!
 }
 
+function denyRoleForOthers(env: RoleTesterEnv, context: AnalyzeContext, role: SystemRole, exclude: Set<Seat>): boolean {
+  for ( const seat of env.vs.statuses.keys() ) {
+    if ( exclude.has(seat) ) continue
+    if ( !context.possibilities.denyRole(seat, role) ) return false
+  }
+  return true
+}
+
 function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
-  const hamsters = new Set()
+  const hamsters = new Set<Seat>()
   let lastHamsterDiedAt = -Infinity
   let lastHamsterDiedBy: CauseOfDeath | undefined
   let livingHamsters = 0
@@ -100,7 +108,7 @@ function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat
 }
 
 function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
-  const seers = new Set()
+  const seers = new Set<Seat>()
   let maxSurviving = -Infinity
   const seerTargets: Map<Day, (Seat | 'unknown')[]> = new Map()
   let unresolvedHamsterDeath: Map<number, number> = new Map()
@@ -205,17 +213,12 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
     }
   }
 
-  for ( const seat of env.vs.statuses.keys() ) {
-    if ( seers.has(seat) ) continue
-    if (!context.possibilities.denyRole(seat, 'seer')) {
-      return false
-    }
-  }
+  if ( !denyRoleForOthers(env, context, 'seer', seers) ) return false
   return true
 }
 
 function testMedium(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
-  const mediums = new Set()
+  const mediums = new Set<Seat>()
   for ( const seat of selected ) {
     mediums.add(seat)
     if ( !context.possibilities.fixRole(seat, 'medium') ) {
@@ -250,18 +253,12 @@ function testMedium(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[
       }
     }
   }
-  for ( const seat of env.vs.statuses.keys() ) {
-    if ( mediums.has(seat) ) continue
-    if (!context.possibilities.denyRole(seat, 'medium')) {
-      return false
-    }
-  }
-
+  if ( !denyRoleForOthers(env, context, 'medium', mediums) ) return false
   return true
 }
 
 function testBodyguard(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
-  const bodyguards = new Set()
+  const bodyguards = new Set<Seat>()
   for ( const seat of selected ) {
     bodyguards.add(seat)
     if ( !context.possibilities.fixRole(seat, 'bodyguard') ) {
@@ -283,17 +280,12 @@ function testBodyguard(env: RoleTesterEnv, context: AnalyzeContext, selected: Se
       }
     }
   }
-  for ( const seat of env.vs.statuses.keys() ) {
-    if ( bodyguards.has(seat) ) continue
-    if (!context.possibilities.denyRole(seat, 'bodyguard')) {
-      return false
-    }
-  }
+  if ( !denyRoleForOthers(env, context, 'bodyguard', bodyguards) ) return false
   return true
 }
 
 function testMason(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
-  const masons = new Set()
+  const masons = new Set<Seat>()
   for ( const seat of selected ) {
     masons.add(seat)
     if ( ! context.possibilities.fixRole(seat, 'mason') ) {
@@ -321,17 +313,12 @@ function testMason(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[]
       return false
     }
   }
-  for ( const seat of env.vs.statuses.keys() ) {
-    if ( masons.has(seat) ) continue
-    if ( ! context.possibilities.denyRole(seat, 'mason') ) {
-      return false
-    }
-  }
+  if ( !denyRoleForOthers(env, context, 'mason', masons) ) return false
   return true
 }
 
 function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
-  const nekomatas = new Set()
+  const nekomatas = new Set<Seat>()
   const possibleCursed: Seat[] = []
   for ( const seat of selected ) {
     nekomatas.add(seat)
@@ -402,12 +389,7 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
       }
     }
   }
-  for ( const seat of env.vs.statuses.keys() ) {
-    if ( nekomatas.has(seat) ) continue
-    if ( ! context.possibilities.denyRole(seat, 'nekomata') ) {
-      return false
-    }
-  }
+  if ( !denyRoleForOthers(env, context, 'nekomata', nekomatas) ) return false
   return true
 }
 
