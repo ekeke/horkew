@@ -13,12 +13,13 @@
   let survivorInfo = $derived(extractSurvivorInfo(vs, players))
   let deathHistory = $derived(extractDeathHistory(vs, players))
   let claimGroups = $derived(extractClaimGroups(vs, players))
+  let survivors = $derived(new Set(survivorInfo.survivors.map(s => s.seat)))
 </script>
 
 <div class="status-pane">
   <SurvivorSection info={survivorInfo} />
   <DeathHistory days={deathHistory} />
-  <ClaimTable groups={claimGroups} maxDay={vs.day} {players} />
+  <ClaimTable groups={claimGroups} maxDay={vs.day} {players} {survivors} />
 </div>
 
 <style>

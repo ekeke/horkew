@@ -1,11 +1,13 @@
 <script lang="ts">
   import type { ClaimGroup, DayAssertion } from './extract.ts'
   import { buildAssertionTimeline } from './extract.ts'
+  import PlayerName from './PlayerName.svelte'
 
-  let { groups, maxDay, players }: {
+  let { groups, maxDay, players, survivors }: {
     groups: ClaimGroup[]
     maxDay: number
     players: Map<number, string>
+    survivors: Set<number>
   } = $props()
 
   const tableRoles = new Set(['seer', 'medium', 'bodyguard'])
@@ -92,12 +94,12 @@
             <tbody>
               {#each group.rows as row}
                 {@const timeline = buildAssertionTimeline(row, maxDay, players)}
-                <tr class:dead={!row.surviving}>
-                  <td class="name-cell">{row.name}</td>
+                <tr>
+                  <td class="name-cell"><PlayerName dead={!row.surviving}>{row.name}</PlayerName></td>
                   {#each nights as night}
                     {@const assertion = timeline.get(night) ?? null}
                     <td class="data-cell" class:human={assertion?.species === 'human'} class:wolf={assertion?.species === 'wolf'} class:guard={row.claimingRole === 'bodyguard' && assertion !== null}>
-                      {cellContent(assertion, row.claimingRole)}
+                      {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)}>{cellContent(assertion, row.claimingRole)}</PlayerName>{/if}
                     </td>
                   {/each}
                 </tr>
@@ -113,7 +115,7 @@
         <div class="group-header">{masonGroup.roleShortName}</div>
         <div class="mason-groups">
           {#each buildMasonGroups(masonGroup) as cluster}
-            <span class="mason-cluster">{#each cluster.members as member, i}{#if i > 0}<span class="mason-sep"> - </span>{/if}<span class:dead={member.dead}>{member.name}</span>{/each}</span>
+            <span class="mason-cluster">{#each cluster.members as member, i}{#if i > 0}<span class="mason-sep"> - </span>{/if}<PlayerName dead={member.dead}>{member.name}</PlayerName>{/each}</span>
           {/each}
         </div>
       </div>
@@ -124,7 +126,7 @@
         <div class="group-header">{nekomataGroup.roleShortName}</div>
         <div class="simple-claims">
           {#each nekomataGroup.rows as row}
-            <span class="simple-name" class:dead={!row.surviving}>{row.name}</span>
+            <PlayerName dead={!row.surviving}>{row.name}</PlayerName>
           {/each}
         </div>
       </div>
@@ -214,15 +216,6 @@
     color: #89b4fa;
   }
 
-  tr.dead .name-cell {
-    color: #585b70;
-    text-decoration: line-through;
-  }
-
-  tr.dead .data-cell {
-    opacity: 0.6;
-  }
-
   .mason-groups {
     display: flex;
     flex-wrap: wrap;
@@ -242,14 +235,6 @@
     gap: 4px 8px;
     font-size: 12px;
     font-family: 'Consolas', 'Menlo', monospace;
-  }
-
-  .simple-name {
     color: #cdd6f4;
-  }
-
-  .dead {
-    color: #585b70;
-    text-decoration: line-through;
   }
 </style>
