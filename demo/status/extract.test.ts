@@ -68,7 +68,7 @@ describe('extractDeathHistory', () => {
     assert.strictEqual(history[0].nightKills.length, 0)
   })
 
-  test('night kill on day 1 (reported as attack on day 2)', () => {
+  test('night kill displayed on discovery day (next day)', () => {
     const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス
@@ -76,12 +76,14 @@ describe('extractDeathHistory', () => {
 噛み ボブ`)
     const history = extractDeathHistory(vs, players)
     // Day 1: execution of アリス
-    // Day 1: night kill of ボブ (kills map uses day-1 = day 1)
-    assert.ok(history.length >= 1)
     const day1 = history.find(d => d.day === 1)!
     assert.ok(day1)
     assert.strictEqual(day1.executions[0].name, 'アリス')
-    assert.strictEqual(day1.nightKills[0].name, 'ボブ')
+    assert.strictEqual(day1.nightKills.length, 0)
+    // Day 2: ボブ discovered (night kill on night 1, displayed on day 2)
+    const day2 = history.find(d => d.day === 2)!
+    assert.ok(day2)
+    assert.strictEqual(day2.nightKills[0].name, 'ボブ')
   })
 
   test('multi-day deaths sorted by day', () => {
@@ -102,17 +104,18 @@ describe('extractDeathHistory', () => {
     }
   })
 
-  test('curse death appears in nightKills', () => {
+  test('curse after execution appears in executions row', () => {
     const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス
 道連れ ボブ`)
     const history = extractDeathHistory(vs, players)
     const day1 = history.find(d => d.day === 1)!
-    // ボブ's curse death should be in kills map (same day as execution)
-    const cursed = day1.nightKills.find(e => e.name === 'ボブ')
+    // ボブ's curse death is execution-related, belongs in executions
+    const cursed = day1.executions.find(e => e.name === 'ボブ')
     assert.ok(cursed)
     assert.strictEqual(cursed!.causeOfDeath, 'cursed_by_executed_nekomata')
+    assert.strictEqual(day1.nightKills.length, 0)
   })
 })
 
@@ -189,7 +192,7 @@ describe('buildAssertionTimeline', () => {
     assert.strictEqual(night2!.species, 'wolf')
   })
 
-  test('bodyguard actions mapped by night', () => {
+  test('bodyguard last guard anchored to previous night', () => {
     const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り デイブ
@@ -197,15 +200,35 @@ describe('buildAssertionTimeline', () => {
 噛み エミリー
 
 アリス: 狩人CO ボブ護衛`)
+    // Reported on day 2 → last (only) guard = night 1 (day-1)
     const groups = extractClaimGroups(vs, players)
     const bgGroup = groups.find(g => g.role === 'bodyguard')!
     const row = bgGroup.rows[0]
-    // guard reported on day 2 → bridge sets actions.set(day-1=1, target)
     const timeline = buildAssertionTimeline(row, vs.day, players)
     const night1 = timeline.get(1)
     assert.ok(night1)
     assert.strictEqual(night1!.targetName, 'ボブ')
-    assert.strictEqual(night1!.species, null)
+  })
+
+  test('bodyguard multiple guards: last = day-1, counting backwards', () => {
+    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー、フランク、ジョージ
+
+吊り デイブ
+
+噛み エミリー
+
+吊り フランク
+
+噛み ジョージ
+
+アリス: 狩人CO チャーリー護衛 ボブ護衛`)
+    // Reported on day 3 → last guard (ボブ) = night 2 (day-1), first (チャーリー) = night 1
+    const groups = extractClaimGroups(vs, players)
+    const bgGroup = groups.find(g => g.role === 'bodyguard')!
+    const row = bgGroup.rows[0]
+    const timeline = buildAssertionTimeline(row, vs.day, players)
+    assert.strictEqual(timeline.get(1)!.targetName, 'チャーリー')
+    assert.strictEqual(timeline.get(2)!.targetName, 'ボブ')
   })
 
   test('empty timeline when no assertions', () => {

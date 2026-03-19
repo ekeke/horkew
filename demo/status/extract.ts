@@ -64,37 +64,45 @@ export function extractSurvivorInfo(vs: VillageStatus, players: Map<number, stri
 }
 
 export function extractDeathHistory(vs: VillageStatus, players: Map<number, string>): DayDeaths[] {
-  const days: DayDeaths[] = []
+  const dayMap = new Map<number, { executions: DeathEntry[], nightKills: DeathEntry[] }>()
 
-  // Collect all days that have any deaths
-  const allDays = new Set<number>()
-  for (const day of vs.executions.keys()) allDays.add(day)
-  for (const day of vs.kills.keys()) allDays.add(day)
+  function ensure(day: number) {
+    if (!dayMap.has(day)) dayMap.set(day, { executions: [], nightKills: [] })
+    return dayMap.get(day)!
+  }
 
-  const sortedDays = [...allDays].sort((a, b) => a - b)
-
-  for (const day of sortedDays) {
-    const execSeats = vs.executions.get(day) ?? []
-    const killSeats = vs.kills.get(day) ?? []
-
-    const executions: DeathEntry[] = execSeats.map(seat => ({
+  function toEntry(seat: number, fallback: CauseOfDeath): DeathEntry {
+    return {
       seat,
       name: players.get(seat) ?? `#${seat}`,
-      causeOfDeath: vs.statuses.get(seat)?.causeOfDeath ?? 'execution',
-    }))
-
-    const nightKills: DeathEntry[] = killSeats.map(seat => ({
-      seat,
-      name: players.get(seat) ?? `#${seat}`,
-      causeOfDeath: vs.statuses.get(seat)?.causeOfDeath ?? 'night_kill',
-    }))
-
-    if (executions.length > 0 || nightKills.length > 0) {
-      days.push({ day, executions, nightKills })
+      causeOfDeath: vs.statuses.get(seat)?.causeOfDeath ?? fallback,
     }
   }
 
-  return days
+  // Executions: display on execution day
+  for (const [day, seats] of vs.executions) {
+    const row = ensure(day)
+    for (const seat of seats) row.executions.push(toEntry(seat, 'execution'))
+  }
+
+  // Kills: execution-related deaths go into executions row (same day),
+  // night-related deaths go into nightKills row (shifted to discovery day)
+  const executionCauses: CauseOfDeath[] = ['cursed_by_executed_nekomata', 'follow_executed_hamster']
+  for (const [day, seats] of vs.kills) {
+    for (const seat of seats) {
+      const entry = toEntry(seat, 'night_kill')
+      if (executionCauses.includes(entry.causeOfDeath)) {
+        ensure(day).executions.push(entry)
+      } else {
+        ensure(day + 1).nightKills.push(entry)
+      }
+    }
+  }
+
+  return [...dayMap.entries()]
+    .sort(([a], [b]) => a - b)
+    .filter(([, { executions, nightKills }]) => executions.length > 0 || nightKills.length > 0)
+    .map(([day, { executions, nightKills }]) => ({ day, executions, nightKills }))
 }
 
 export function extractClaimGroups(vs: VillageStatus, players: Map<number, string>): ClaimGroup[] {
@@ -155,16 +163,13 @@ export function buildAssertionTimeline(
   const timeline = new Map<number, DayAssertion>()
 
   if (row.claimingRole === 'bodyguard') {
-    // Bodyguard: actions map is night → target seat
-    for (let night = 1; night < maxDay; night++) {
-      const target = row.actions.get(night)
-      if (target !== undefined) {
-        timeline.set(night, {
-          targetSeat: target,
-          targetName: players.get(target) ?? `#${target}`,
-          species: null,
-        })
-      }
+    // Bodyguard: actions map keys are actual night numbers (last = day-1)
+    for (const [night, targetSeat] of row.actions) {
+      timeline.set(night, {
+        targetSeat,
+        targetName: players.get(targetSeat) ?? `#${targetSeat}`,
+        species: null,
+      })
     }
   } else {
     // Seer/Medium: assertions are target → species, use insertion order

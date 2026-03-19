@@ -10,23 +10,32 @@
   {#if days.length === 0}
     <div class="empty">---</div>
   {:else}
-    {#each days as { day, executions, nightKills }}
-      <div class="day-group">
-        <div class="day-label">{day}日目</div>
-        {#each executions as entry}
-          <div class="death-entry execution">
-            <span class="cause">処刑</span>
-            <span class="name">{entry.name}</span>
-          </div>
-        {/each}
-        {#each nightKills as entry}
-          <div class="death-entry night-kill">
-            <span class="cause">{causeOfDeathLabel(entry.causeOfDeath)}</span>
-            <span class="name">{entry.name}</span>
-          </div>
-        {/each}
-      </div>
-    {/each}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            {#each days as { day }}
+              <th class="day-col">{day}</th>
+            {/each}
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="kill-row">
+            <td class="type-cell kill-type">襲撃</td>
+            {#each days as { nightKills }}
+              <td class="name-cell">{#each nightKills as entry, i}{#if i > 0}、{/if}{entry.name}{#if entry.causeOfDeath !== 'night_kill'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
+            {/each}
+          </tr>
+          <tr class="exec-row">
+            <td class="type-cell exec-type">処刑</td>
+            {#each days as { executions }}
+              <td class="name-cell">{#each executions as entry, i}{#if i > 0}、{/if}{entry.name}{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
+            {/each}
+          </tr>
+        </tbody>
+      </table>
+    </div>
   {/if}
 </div>
 
@@ -48,45 +57,51 @@
     font-size: 12px;
   }
 
-  .day-group {
-    margin-bottom: 4px;
+  .table-wrap {
+    overflow-x: auto;
   }
 
-  .day-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: #cba6f7;
-    margin-bottom: 2px;
-  }
-
-  .death-entry {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 1px 0;
+  table {
+    border-collapse: collapse;
     font-size: 12px;
+    font-family: 'Consolas', 'Menlo', monospace;
   }
 
-  .cause {
-    display: inline-block;
-    min-width: 36px;
-    font-size: 10px;
-    padding: 1px 4px;
-    border-radius: 3px;
+  th, td {
+    border: 1px solid #313244;
+    padding: 2px 6px;
+    white-space: nowrap;
+  }
+
+  th {
+    background: #181825;
+    color: #cba6f7;
+    font-weight: 600;
+    font-size: 11px;
     text-align: center;
   }
 
-  .execution .cause {
-    background: rgba(243, 139, 168, 0.2);
-    color: #f38ba8;
+  .type-cell {
+    text-align: center;
+    font-size: 10px;
+    font-weight: 500;
   }
 
-  .night-kill .cause {
-    background: rgba(249, 226, 175, 0.2);
+  .kill-type {
     color: #f9e2af;
   }
 
-  .name {
+  .exec-type {
+    color: #f38ba8;
+  }
+
+  .name-cell {
     color: #cdd6f4;
+  }
+
+  .cause-note {
+    color: #585b70;
+    font-size: 10px;
+    margin-left: 2px;
   }
 </style>

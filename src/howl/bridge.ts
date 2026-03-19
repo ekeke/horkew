@@ -224,6 +224,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         const s = stmt as AssertStatement
         const actorSeat = resolveSeat(s.actor)
         const actorStatus = statuses.get(actorSeat)!
+        const guardTargets: number[] = []
 
         for (const assertion of s.assertions) {
           if (assertion.roles && assertion.roles.length > 0) {
@@ -244,9 +245,17 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
               actorStatus.assertions.set(targetSeat, speciesMap[assertion.result]!)
             }
             if (assertion.action === 'guard') {
-              // Guard happened the previous night (reported on current day)
-              actorStatus.actions.set(day - 1, targetSeat)
+              guardTargets.push(targetSeat)
             }
+          }
+        }
+
+        // Assign guard actions: last guard = previous night (day-1), counting backwards
+        if (guardTargets.length > 0) {
+          const lastNight = day - 1
+          for (let i = 0; i < guardTargets.length; i++) {
+            const night = lastNight - (guardTargets.length - 1 - i)
+            actorStatus.actions.set(night, guardTargets[i])
           }
         }
         break
