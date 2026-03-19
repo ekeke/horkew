@@ -12,51 +12,6 @@ export { selectCombinationsFromArray, selectOne, backtrackForMatrix } from './co
 
 type Seat = number
 type Day = number
-/**
- * 解析オプション
- * no: 現在も潜伏している可能性を含める
- * auto: 潜伏を可能性に含めるが、対抗が出たら必ず対抗COすると仮定する
- * yes: 潜伏を考慮しない。死亡済みまたはCO済みのプレイヤーのみを考慮する
- */
-type AnalyzeOptionValue = 'no' | 'auto' | 'yes'
-
-export type RetarOptions = {
-  // システム設定
-
-  // aggregate用の実行ID
-  id: number
-  batches: number
-  batch: number
-
-  // 潜伏役職の扱い
-  noMoreHiddenSeer: AnalyzeOptionValue,
-  noMoreHiddenMedium: AnalyzeOptionValue,
-  noMoreHiddenBodyguard: AnalyzeOptionValue,
-  noMoreHiddenMason: AnalyzeOptionValue,
-  noMoreHiddenNekomata: AnalyzeOptionValue,
-
-  // ユーザーが仮定した役職
-  assumptions: Map<Seat, SystemRole>
-
-  dayCountFrom: number
-  hasFirstGhost: boolean
-
-  /* 後追いのタイミングなど、ローカルルールへの対応 */
-  // TODO: レギュレーションとどう組み合わせるか考える
-
-  // 妖狐が吊られたときの背徳の後追いの発生タイミング
-  immoralistFollowsExecutedHamsterImmediately?: boolean
-
-  // 妖狐が溶けたとき、背徳の後追いに特別なアナウンスがあるか
-  immoralistFollowsKilledHamsterWithAnnounce?: boolean
-
-  // 猫又が吊られたときのランダム対象が村人陣営限定か
-  executedNekomataCursesOnlyVillagers?: boolean
-
-  // 猫又が吊られたとき、猫又の呪いが翌朝に発動するか
-  executedNekomataCursesImmediately?: boolean
-}
-
 type SeatPossibility = Set<SystemRole>
 export type AnalyzedPossibilities = Map<Seat, SeatPossibility>
 export type AnalyzeResult = {
