@@ -5,6 +5,7 @@ export type RetarRequest = {
   vs: VillageStatus
   setup: [SystemRole, number][]
   players: [number, string][]
+  assumptions: [number, SystemRole][]
 }
 
 export type SeatResult = {
@@ -41,7 +42,7 @@ self.onmessage = (e: MessageEvent<RetarRequest>) => {
       nekomataClaimingDueDate: 99,
       dayCountFrom: 1,
       hasFirstGhost: false,
-      assumptions: new Map(),
+      assumptions: new Map(e.data.assumptions ?? []),
       hocusPocus: new Map(),
       id: 0,
       batches: 1,

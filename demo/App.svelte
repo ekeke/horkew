@@ -71,12 +71,14 @@
   let parsedLines: StringifiedLine[] = $state([])
   let statementLines: number[] = []
   let analysisSeats: SeatResult[] = $state([])
+  let analysisColumns: SystemRole[] = $state([])
   let analysisError = $state('')
   let analyzing = $state(false)
   let survivorInfo = $state({ alive: 0, total: 0 })
   let deadSeats: Set<number> = $state(new Set())
   let players: Map<number, string> = $state(new Map())
   let villageStatus: VillageStatus | null = $state(null)
+  let assumptions: Map<number, SystemRole> = $state(new Map())
   let worker: Worker | null = null
   let paneVisible: Record<PaneId, boolean> = $state(loadPaneVisibility())
   let showPaneMenu = $state(false)
@@ -100,7 +102,9 @@
     rawStatements = ''
     parsedLines = []
     analysisSeats = []
+    analysisColumns = []
     analysisError = ''
+    assumptions = new Map()
   }
 
   function openNewModal() {
@@ -125,7 +129,9 @@
     analyzerJson = ''
     parsedLines = []
     analysisSeats = []
+    analysisColumns = []
     analysisError = ''
+    assumptions = new Map()
   }
 
   function cancelNew() {
@@ -147,7 +153,9 @@
     analyzerJson = ''
     parsedLines = []
     analysisSeats = []
+    analysisColumns = []
     analysisError = ''
+    assumptions = new Map()
   }
 
   function onSelectChange(e: Event) {
@@ -220,6 +228,16 @@
     return systemRoles.get(role)?.shortName ?? role
   }
 
+  function toggleAssumption(seat: number, role: SystemRole) {
+    const current = assumptions.get(seat)
+    if (current === role) {
+      assumptions.delete(seat)
+    } else {
+      assumptions.set(seat, role)
+    }
+    assumptions = new Map(assumptions)
+    run()
+  }
 
   function run() {
     if (worker) {
@@ -245,10 +263,14 @@
       survivorInfo = { alive, total: vs.statuses.size }
       deadSeats = new Set([...vs.statuses.entries()].filter(([, s]) => !s.surviving).map(([seat]) => seat))
 
+      const roleOrder = [...systemRoles.keys()] as SystemRole[]
+      analysisColumns = roleOrder.filter(r => setup.has(r as SystemRole))
+
       const workerPayload = {
         vs,
         setup: [...setup],
         players: [...playersMap],
+        assumptions: [...assumptions],
       }
       analyzerJson = JSON.stringify(workerPayload, (_key, value) =>
         value instanceof Map ? Object.fromEntries(value) : value
@@ -396,18 +418,20 @@
       <div class="pane-body">
         {#if analysisError}
           <pre class="output">Error: {analysisError}</pre>
-        {:else if analysisSeats.length > 0}
-          {@const allRoles = [...new Set(analysisSeats.flatMap(s => s.roles))] as SystemRole[]}
-          {@const roleOrder = [...systemRoles.keys()] as SystemRole[]}
-          {@const columns = roleOrder.filter(r => allRoles.includes(r))}
+        {/if}
+        {#if analysisColumns.length > 0 && players.size > 0}
+          {@const currentMap = new Map(analysisSeats.map(s => [s.seat, s.roles]))}
           <div class="analysis-table-wrap">
             <table class="analysis-table">
               <tbody>
-                {#each analysisSeats as { seat, roles }}
+                {#each [...players] as [seat, name]}
                   <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
-                    <td class="analysis-name-col">{players.get(seat) ?? `#${seat}`}</td>
-                    {#each columns as role}
-                      <td class={roles.includes(role) ? 'role-possible' : 'role-impossible'}>{roleToShort(role)}</td>
+                    <td class="analysis-name-col">{name}</td>
+                    {#each analysisColumns as role}
+                      <td
+                        class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"
+                        onclick={() => toggleAssumption(seat, role)}
+                      >{roleToShort(role)}</td>
                     {/each}
                   </tr>
                 {/each}
@@ -717,6 +741,17 @@
     font-weight: 500;
   }
 
+  .role-possible,
+  .role-impossible {
+    cursor: pointer;
+  }
+
+  .role-possible:hover,
+  .role-impossible:hover {
+    outline: 1px solid #cba6f7;
+    outline-offset: -1px;
+  }
+
   .role-possible {
     background: #45475a;
     color: #cdd6f4;
@@ -725,6 +760,12 @@
   .role-impossible {
     background: #11111b;
     color: #313244;
+  }
+
+  .role-assumed {
+    background: #cba6f7;
+    color: #1e1e2e;
+    font-weight: 600;
   }
 
   .dead-row .analysis-name-col {
