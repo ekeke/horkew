@@ -17,6 +17,7 @@ import type {
   FollowStatement,
   OverStatement,
   AssertStatement,
+  MasonStatement,
 } from './statement.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
 
@@ -216,6 +217,25 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           status.voted = false
           status.votedCount = 0
           status.votedTarget = -1
+        }
+        break
+      }
+
+      case 'mason': {
+        const s = stmt as MasonStatement
+        for (const playerName of s.players) {
+          const seat = resolveSeat(playerName)
+          const status = statuses.get(seat)!
+          status.claiming = true
+          status.claimingRole = 'mason'
+          status.claimedAt = day
+          status.actions = new Map()
+          status.assertions = new Map()
+          for (const otherName of s.players) {
+            if (otherName === playerName) continue
+            const otherSeat = resolveSeat(otherName)
+            status.assertions.set(otherSeat, 'human')
+          }
         }
         break
       }

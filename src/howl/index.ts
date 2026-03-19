@@ -17,6 +17,7 @@ export type {
   RevoteStatement,
   OverStatement,
   AssertStatement,
+  MasonStatement,
   PeaceStatement,
   RevealStatement,
   UnknownStatement,

@@ -485,3 +485,37 @@ describe('follow statement', () => {
     assert.equal(S.parseFollowStatement('後追い', 1), null)
   })
 })
+
+describe('mason statement', () => {
+  test('two players', () => {
+    const result = S.parseMasonStatement('共有　ボブ　アリス', 1)
+    assert.deepEqual(result, {
+      type: 'mason',
+      line: 1,
+      players: ['ボブ', 'アリス'],
+    })
+  })
+
+  test('three players', () => {
+    const result = S.parseMasonStatement('共有　アリス　ボブ　チャーリー', 1)
+    assert.deepEqual(result, {
+      type: 'mason',
+      line: 1,
+      players: ['アリス', 'ボブ', 'チャーリー'],
+    })
+  })
+
+  test('共有者 variant', () => {
+    const result = S.parseMasonStatement('共有者　ペガサス　裁縫龍', 1)
+    assert.deepEqual(result, {
+      type: 'mason',
+      line: 1,
+      players: ['ペガサス', '裁縫龍'],
+    })
+  })
+
+  test('invalid mason statement', () => {
+    assert.equal(S.parseMasonStatement('', 1), null)
+    assert.equal(S.parseMasonStatement('共有', 1), null)
+  })
+})
