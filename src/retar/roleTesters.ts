@@ -249,7 +249,7 @@ function testMedium(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[
   }
   for ( const seat of rest ) {
     const status = getStatus(env, seat)
-    if ( !status.claiming ) {
+    if ( !status.claiming || status.claimingRole !== 'medium' ) {
       if (! context.possibilities.denyRole(seat, 'medium') ) {
         return false
       }
@@ -276,7 +276,7 @@ function testBodyguard(env: RoleTesterEnv, context: AnalyzeContext, selected: Se
 
   for ( const seat of rest ) {
     const status = getStatus(env, seat)
-    if ( !status.claiming ) {
+    if ( !status.claiming || status.claimingRole !== 'bodyguard' ) {
       if (!context.possibilities.denyRole(seat, 'bodyguard')) {
         return false
       }
@@ -316,7 +316,7 @@ function testMason(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[]
   }
   for ( const seat of rest ) {
     const status = getStatus(env, seat)
-    if ( !status.claiming ) continue
+    if ( !status.claiming || status.claimingRole !== 'mason' ) continue
     if ( ! context.possibilities.markAsLiar(seat) ) {
       return false
     }

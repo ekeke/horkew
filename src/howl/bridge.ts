@@ -30,6 +30,7 @@ function createSeatStatus(): SeatStatus {
     voted: false,
     claiming: false,
     claimingRole: 'none',
+    deniedRoles: [],
     votedCount: 0,
     votedTarget: -1,
     actions: new Map(),
@@ -246,11 +247,23 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         const actorStatus = statuses.get(actorSeat)!
         const guardTargets: number[] = []
 
+        const villageRoles: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+
         for (const assertion of s.assertions) {
           if (assertion.roles && assertion.roles.length > 0) {
-            const role = assertion.roles[0]
-            const sysRole = claimRoleToSystemRole[role]
-            if (sysRole) {
+            const sysRoles = assertion.roles
+              .map(r => claimRoleToSystemRole[r])
+              .filter((r): r is SystemRole => r != null)
+
+            if (assertion.negative || sysRoles.length > 1) {
+              // 否定CO or 複数CO (ギドラ): claiming せず deniedRoles で処理
+              const denied = assertion.negative
+                ? sysRoles                                          // 非占いCO → deny seer
+                : villageRoles.filter(r => !sysRoles.includes(r))   // 猫狩CO → deny seer,medium,mason
+              actorStatus.deniedRoles.push(...denied)
+            } else if (sysRoles.length === 1) {
+              // 単独CO: 従来通り
+              const sysRole = sysRoles[0]
               if (!actorStatus.claiming || actorStatus.claimingRole !== sysRole) {
                 actorStatus.claiming = true
                 actorStatus.claimingRole = sysRole

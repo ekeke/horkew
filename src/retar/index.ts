@@ -139,6 +139,9 @@ export class VillageRetar {
       if ( !status.claiming && !status.surviving && status.causeOfDeath === 'execution' ) {
         this.initialPossibilities.markAsNoVillageRole(seat)
       }
+      for ( const role of status.deniedRoles ) {
+        this.initialPossibilities.denyRole(seat, role)
+      }
     }
 
     if ( this.options.assumptions.size > 0 ) {

@@ -422,6 +422,37 @@ describe('the parser function', () => {
     })
   })
 
+  test('negative assertion (非CO)', () => {
+    const result = S.parseAssertStatement('ボブ　非占いCO', 1)
+    assert.deepEqual(result, {
+      actor: 'ボブ',
+      type: 'assert',
+      line: 1,
+      assertions: [
+        {
+          player: 'ボブ',
+          roles: ['seer'],
+          negative: true,
+        },
+      ]
+    })
+  })
+
+  test('multi-role CO (ギドラ)', () => {
+    const result = S.parseAssertStatement('ボブ　猫狩CO', 1)
+    assert.deepEqual(result, {
+      actor: 'ボブ',
+      type: 'assert',
+      line: 1,
+      assertions: [
+        {
+          player: 'ボブ',
+          roles: ['bodyguard', 'nekomata'],
+        },
+      ]
+    })
+  })
+
   test('invalid parser function', () => {
     const result = S.parseStatement('', 1)
     assert.deepEqual(result, {

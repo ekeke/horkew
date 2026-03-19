@@ -11,6 +11,7 @@ export type Assertion = {
   player: string
   target?: string
   roles?: Role[]
+  negative?: boolean
   result?: Species
   action?: 'guard'
 }
@@ -248,7 +249,7 @@ const historyRegexText = [
 
 const assertRegex = new RegExp([
   `^${V.optionalSpace}(?<actor>${V.possibleName})${V.delimiter}${V.optionalSpace}`,
-  `(?<claim>(?:${V.anyRole})+${V.claim})?`,
+  `(?<claim>(?:${V.denial})?(?:${V.anyRole})+${V.claim})?`,
   `${V.optionalSpace}`,
   `(?<history>(?:`,
     `(?:${V.optionalSpace}${V.delimiter})?`,
@@ -259,7 +260,8 @@ const assertRegex = new RegExp([
 
 const historyRegex = new RegExp(historyRegexText, 'g')
 
-function extractRoles(claim: string): Role[] {
+function extractRoles(claim: string): { roles: Role[], negative: boolean } {
+  const negative = new RegExp(`^${V.denial}`).test(claim)
   const roleMap: [RegExp, Role][] = [
     [new RegExp(V.seer), 'seer'],
     [new RegExp(V.medium), 'medium'],
@@ -271,7 +273,7 @@ function extractRoles(claim: string): Role[] {
   for (const [regex, role] of roleMap) {
     if (regex.test(claim)) roles.push(role)
   }
-  return roles.length > 0 ? roles : ['nonVillage']
+  return { roles: roles.length > 0 ? roles : ['nonVillage'], negative }
 }
 
 export function parseAssertStatement(text: string, line: number): AssertStatement | null {
@@ -282,8 +284,10 @@ export function parseAssertStatement(text: string, line: number): AssertStatemen
   const assertions: Assertion[] = []
 
   if (claim) {
-    const roles = extractRoles(claim)
-    assertions.push({ player: actor, roles })
+    const { roles, negative } = extractRoles(claim)
+    const assertion: Assertion = { player: actor, roles }
+    if (negative) assertion.negative = true
+    assertions.push(assertion)
   }
 
   const history = match.groups?.history ?? undefined

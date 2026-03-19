@@ -57,3 +57,7 @@ export const anyAlignment = `(?:${village}|${wolf}|${hamster})` // Any alignment
 export const isHuman = `[白◯○〇]`
 export const isWolf  = `[黒●]`
 export const race = `(?:${isHuman}|${isWolf})`
+
+// ********************************* Modifiers
+
+export const denial = `(?:非)`

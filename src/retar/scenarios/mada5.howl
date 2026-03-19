@@ -31,6 +31,7 @@ setup:
 星　霊CO
 
 共有　ペガサス　裁縫龍
+共有　裁縫　ペガサス　
 
 百面ダイス　スレッタ黒
 
@@ -52,6 +53,11 @@ setup:
 ウルガー　猫狩CO
 スレ　猫狩CO
 ビス　猫狩CO
+
+# 複数CO（ギドラ）を受け付ける
+# @expect ウルガー: [nekomata,bodyguard,werewolf,fanatic,werehamster,immoralist]
+# @expect スレッタ: [nekomata,bodyguard,werewolf,fanatic,werehamster,immoralist]
+# @expect ビスマス結晶: [nekomata,bodyguard,werewolf,fanatic,werehamster,immoralist]
 
 吊り　ブル
 

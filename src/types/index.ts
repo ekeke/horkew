@@ -40,7 +40,7 @@ export type SeatStatus = {
   claiming: boolean
   claimedAt?: number
   claimingRole: string
-  claimingRoleID?: number
+  deniedRoles: SystemRole[]
   votedCount: number
   votedTarget: number
   actions: PlayerAction
