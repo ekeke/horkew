@@ -88,6 +88,8 @@ setup:
 
 人狼勝利
 
+# @expect solve: true
+
 ダイス＝背徳
 グロ＝占い
 泣く＝人狼

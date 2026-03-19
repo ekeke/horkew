@@ -229,9 +229,20 @@ export function parseMasonStatement(text: string, line: number): AssertStatement
   const masonRegex = new RegExp(`^${V.optionalSpace}${V.mason}${V.delimiter}(${V.possibleName}(?:${V.optionalSpace}${V.delimiter}${V.possibleName})*)${V.optionalSpace}$`)
   const match = masonRegex.exec(text)
   if (!match) return null
+  const raceTrailing = new RegExp(`(${V.race})$`)
   const players = match[1].split(new RegExp(`(?:${V.delimiter})+?`)).map(p => p.trim()).filter(p => p.length > 0)
-  const assertions: Assertion[] = players.map(player => ({ player, roles: ['mason'] as Role[] }))
-  return { type: 'assert', line, actor: players[0], assertions }
+  const assertions: Assertion[] = []
+  const actor = players[0].replace(raceTrailing, '')
+  assertions.push({ player: actor, roles: ['mason'] as Role[] })
+  for (let i = 1; i < players.length; i++) {
+    const raceMatch = raceTrailing.exec(players[i])
+    const name = players[i].replace(raceTrailing, '')
+    if (raceMatch) {
+      const result: Species = new RegExp(V.isWolf).test(raceMatch[1]) ? 'isWolf' : 'isHuman'
+      assertions.push({ player: actor, target: name, result })
+    }
+  }
+  return { type: 'assert', line, actor, assertions }
 }
 
 const historyRegexText = [
