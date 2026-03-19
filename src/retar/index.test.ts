@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
-import { backtrackForMatrix } from './index.ts'
+import { backtrackForMatrix } from './combinatorics.ts'
 
 describe('isPossibleSetsForRole', () => {
   it('should return true when there are possible sets for each role', () => {

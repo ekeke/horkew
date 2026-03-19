@@ -1,17 +1,14 @@
-import type { CauseOfDeath, VillageStatus, SystemRole } from '../types/index.ts'
+import type { CauseOfDeath, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import { Possibilities } from './possibilities.ts'
 import { generateCombinations, backtrackForMatrix } from './combinatorics.ts'
 import { roleTesterMap, cloneContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
 import { buildRoleTestPlan, LiarRoles } from './planBuilder.ts'
 import type { RoleTest } from './planBuilder.ts'
-import { finalize as runFinalize, validateDeathCounts } from './finalizer.ts'
+import { finalize as runFinalize, constrainByDeathCounts, createDebugStash } from './finalizer.ts'
 import type { DebugStash } from './finalizer.ts'
 
-export { selectCombinationsFromArray, selectOne, backtrackForMatrix } from './combinatorics.ts'
 
-type Seat = number
-type Day = number
 type SeatPossibility = Set<SystemRole>
 export type AnalyzedPossibilities = Map<Seat, SeatPossibility>
 export type AnalyzeResult = {
@@ -47,7 +44,7 @@ export type AnalyzeOptions = {
 
 }
 
-const HumanRoles = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'possessed', 'fanatic', 'immoralist', 'werehamster']
+const HumanRoles: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'possessed', 'fanatic', 'immoralist', 'werehamster']
 
 // AnalyzeContext and RoleTesterEnv types are defined in roleTesters.ts
 
@@ -57,8 +54,8 @@ export class VillageRetar {
   initialPossibilities: Possibilities
   // 実行中の解析状況
   // コンテキスト的なものにまとめるべき？
-  maxLiars: number
-  numLiars: number
+  totalLiarRoles: number
+  knownFakeClaimCount: number
 
   context!: AnalyzeContext
   lastHamsterMustDieAt?: number
@@ -82,58 +79,57 @@ export class VillageRetar {
   options: AnalyzeOptions
   env: RoleTesterEnv
 
-  debugStash: DebugStash = {
-    finalizerRuns: 0,
-    finalizerMiddle: 0,
-    finalizerPasses: 0,
-    finalizerFails: 0,
-    seerTests: 0,
-    mediumTests: 0,
-    bodyguardTests: 0,
-    masonTests: 0,
-    nekomataTests: 0,
-    werehamsterTests: 0,
-    seerTestPasses: 0,
-    mediumTestPasses: 0,
-    bodyguardTestPasses: 0,
-    masonTestPasses: 0,
-    nekomataTestPasses: 0,
-    werehamsterTestPasses: 0,
-    preFinalizeTests: 0,
-    preFinalizePasses: 0,
-  }
+  debugStash: DebugStash = createDebugStash()
   constructor(village: VillageStatus, setup: Map<SystemRole, number>, options: AnalyzeOptions) {
     this.vs = village
     this.setup = setup
     this.options = options
-    this.conclusions = new Possibilities(setup)
-    for ( let i=0; i<this.conclusions.possibilities.length; i++) {
-      this.conclusions.possibilities[i] = 0
-    }
+    this.conclusions = Possibilities.empty(setup)
 
-    // 村騙りなどのハルプンテ指定
-    // 一切のCOを無視
-    if ( this.options.hocusPocus ) {
-      for ( const seat of this.options.hocusPocus.keys() ) {
-        const state = this.vs.statuses.get(seat)!
-        state.assertions = new Map()
-        state.claiming = false
-        state.claimingRole = ''
-        state.actions = new Map()
-      }
-    }
+    this.applyHocusPocus()
 
     this.setOfRoles = new Set<SystemRole>(setup.keys())
-    this.setOfHuman = new Set(HumanRoles as SystemRole[]).intersection(this.setOfRoles)
-    this.setOfLiar = new Set(LiarRoles as SystemRole[]).intersection(this.setOfRoles)
-
-    // 状態空間の初期状態を設定
-    const fixedPositions = new Map<Seat, SystemRole>()
+    this.setOfHuman = new Set(HumanRoles).intersection(this.setOfRoles)
+    this.setOfLiar = new Set(LiarRoles).intersection(this.setOfRoles)
 
     this.initialPossibilities = new Possibilities(setup)
+    this.applyFixedPositions(village)
 
-    // 村COと、黙って吊られた人は役職否定とみなす
-    for ( const [seat,status] of this.vs.statuses.entries() ) {
+    const multipleVictims = this.buildNightKillMap(village)
+
+    const plan = buildRoleTestPlan(village, setup, multipleVictims)
+    this.roleTests = plan.roleTests
+    this.totalLiarRoles = plan.totalLiarRoles
+    this.knownFakeClaimCount = plan.knownFakeClaimCount
+
+    this.env = {
+      vs: this.vs,
+      nightKillsByDay: this.nightKillsByDay,
+      totalLiarRoles: this.totalLiarRoles,
+      knownFakeClaimCount: this.knownFakeClaimCount,
+      lastHamsterMustDieAt: this.lastHamsterMustDieAt,
+      lastHamsterMustDiedBy: this.lastHamsterMustDiedBy,
+      dayCountFrom: this.options.dayCountFrom,
+    }
+  }
+
+  // 村騙りなどのハルプンテ指定 — 一切のCOを無視
+  private applyHocusPocus() {
+    if ( !this.options.hocusPocus ) return
+    for ( const seat of this.options.hocusPocus.keys() ) {
+      const state = this.vs.statuses.get(seat)!
+      state.assertions = new Map()
+      state.claiming = false
+      state.claimingRole = ''
+      state.actions = new Map()
+    }
+  }
+
+  // 村COと黙って吊られた人の役職否定、仮定・特殊死因による役職固定
+  private applyFixedPositions(village: VillageStatus) {
+    const fixedPositions = new Map<Seat, SystemRole>()
+
+    for ( const [seat, status] of this.vs.statuses.entries() ) {
       if ( status.claiming && status.claimingRole === 'villager' ) {
         this.initialPossibilities.markAsNoVillageRole(seat)
       }
@@ -178,13 +174,13 @@ export class VillageRetar {
       }
     }
 
-    // 役職固定位置に役職を設定していく
-    // この時点で、固定位置に設定できない場合は、矛盾があるか、村の状態がおかしい
     for ( const [seat, role] of fixedPositions.entries() ) {
       this.initialPossibilities.fixRole(seat, role)
     }
+  }
 
-    // 後で使うために、死体数のカウントを取っておく
+  // 夜死体数のカウント。複数死体の日のseat一覧を返す
+  private buildNightKillMap(village: VillageStatus): Seat[] {
     const firstKill = this.options.dayCountFrom - (this.options.hasFirstGhost ? 1 : 0)
     for ( let d = firstKill; d<this.vs.day; d++) {
       this.nightKillsByDay.set(d, [])
@@ -195,23 +191,7 @@ export class VillageRetar {
         this.nightKillsByDay.set(status.diedDay!, [...(this.nightKillsByDay.get(status.diedDay!) || []), seat])
       }
     }
-    const multipleVictims = Array.from(this.nightKillsByDay.values()).filter(v => v.length > 1).flat()
-
-    // プランニング
-    const plan = buildRoleTestPlan(village, setup, multipleVictims)
-    this.roleTests = plan.roleTests
-    this.maxLiars = plan.maxLiars
-    this.numLiars = plan.numLiars
-
-    this.env = {
-      vs: this.vs,
-      nightKillsByDay: this.nightKillsByDay,
-      maxLiars: this.maxLiars,
-      numLiars: this.numLiars,
-      lastHamsterMustDieAt: this.lastHamsterMustDieAt,
-      lastHamsterMustDiedBy: this.lastHamsterMustDiedBy,
-      dayCountFrom: this.options.dayCountFrom,
-    }
+    return Array.from(this.nightKillsByDay.values()).filter(v => v.length > 1).flat()
   }
 
   getStatus(seat: Seat) {
@@ -229,7 +209,7 @@ export class VillageRetar {
     return result
   }
 
-  analyze() {
+  analyze(): AnalyzeResult {
     const t0 = performance.now()
 
     // Initialize
@@ -248,7 +228,6 @@ export class VillageRetar {
     TESTS:
     while (true) {
       if ( testIter.done ) {
-//        console.log('done')
         break TESTS
       }
       const testItem = testIter.value
@@ -276,12 +255,12 @@ export class VillageRetar {
 
       this.debugStash.preFinalizeTests++
       // 死体数の確認
-      if (!validateDeathCounts(this.context, this.vs, this.nightKillsByDay, this.setup)) {
+      if (!constrainByDeathCounts(this.context, this.vs, this.nightKillsByDay, this.setup)) {
         testIter = loop.next([false, this.context])
         continue TESTS
       }
 
-      if ( this.maxLiars <= (this.context.additionalLiars || 0) + this.numLiars ) {
+      if ( this.totalLiarRoles <= (this.context.additionalLiars || 0) + this.knownFakeClaimCount ) {
         for ( const seat of this.vs.statuses.keys() ) {
           const status = this.getStatus(seat)!
           if ( !status.claiming || status.claimingRole === 'villager' ) {
@@ -312,7 +291,6 @@ export class VillageRetar {
     }
 
     const elapsed = performance.now() - t0
-    console.log('debug', this.debugStash)
     return {
       elapsed,
       batch: this.options.batch,
@@ -325,12 +303,12 @@ export class VillageRetar {
     runFinalize(this.context, this.vs, this.setup, this.conclusions, this.debugStash)
   }
 
-  analyzeSafe() {
+  analyzeSafe(): AnalyzeResult {
     try {
       return this.analyze()
     }
     catch (e) {
-      return { error: e }
+      return { error: e instanceof Error ? e : new Error(String(e)), result: new Map() }
     }
   }
 }

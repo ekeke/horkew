@@ -1,18 +1,14 @@
-// @ts-nocheck
-// TODO: Fix type errors inherited from reference implementation
-import type { VillageStatus, SystemRole } from '../types/index.ts'
+import type { VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
 import type { AnalyzeContext } from './roleTesters.ts'
-
-type Seat = number
-type Day = number
+import { solvePossibilities } from './solver.ts'
 
 /**
  * 死体数の検証。各日の夜死体数が仮説と整合するか確認する。
  * @returns true: 検証パス、false: 仮説を棄却
  * 副作用: context.requireOneOf に背徳後追い制約を追加する場合がある
  */
-export function validateDeathCounts(
+export function constrainByDeathCounts(
   context: AnalyzeContext,
   vs: VillageStatus,
   nightKillsByDay: Map<Day, Seat[]>,
@@ -44,7 +40,7 @@ export function validateDeathCounts(
     }
     for ( const [seat, status] of vs.statuses.entries() ) {
       if (
-        ( status.surviving || day <= status.diedDay)
+        ( status.surviving || day <= status.diedDay!)
         && context.possibilities.hasRole(seat,'bodyguard')
       ) {
         continue DAY
@@ -53,6 +49,17 @@ export function validateDeathCounts(
     return false
   }
   return true
+}
+
+export function createDebugStash(): DebugStash {
+  return {
+    finalizerRuns: 0, finalizerMiddle: 0, finalizerPasses: 0, finalizerFails: 0,
+    seerTests: 0, mediumTests: 0, bodyguardTests: 0, masonTests: 0,
+    nekomataTests: 0, werehamsterTests: 0,
+    seerTestPasses: 0, mediumTestPasses: 0, bodyguardTestPasses: 0, masonTestPasses: 0,
+    nekomataTestPasses: 0, werehamsterTestPasses: 0,
+    preFinalizeTests: 0, preFinalizePasses: 0,
+  }
 }
 
 export type DebugStash = {
@@ -100,7 +107,7 @@ export function finalize(
     return
   }
   for (const [role, count] of setup.entries()) {
-    const candidates = context.possibilities.getPossibieSeatsForRole(role)
+    const candidates = context.possibilities.getPossibleSeatsForRole(role)
     if (candidates.length < count) {
       return
     }
@@ -128,7 +135,7 @@ export function finalize(
   */
 
 
-  const survivors = Array.from(vs.statuses.keys()).filter(seat => vs.statuses.get(seat).surviving)
+  const survivors = Array.from(vs.statuses.keys()).filter(seat => vs.statuses.get(seat)!.surviving)
   const numSurvivingHamsters = survivors.filter(seat => context.possibilities.isActualRole(seat, 'werehamster')).length
   const maxSurvivingWolves = Math.min(
     setup.get('werewolf') || Infinity,
@@ -159,7 +166,8 @@ export function finalize(
 
   // 狐勝ちの場合だけは、狼全滅と飽和の両方を検証する
   if ( vs.result === 'werehamster_won') {
-    const conclusion = context.possibilities.solvePossibilities(
+    const conclusion = solvePossibilities(
+      context.possibilities,
       survivingMap,
       0,
       0,
@@ -171,7 +179,8 @@ export function finalize(
       debugStash.finalizerPasses++
       conclusions.union(conclusion)
     }
-    const conclusion2 = context.possibilities.solvePossibilities(
+    const conclusion2 = solvePossibilities(
+      context.possibilities,
       survivingMap,
       maxSurvivingWolves + 1,
       Infinity,
@@ -185,7 +194,8 @@ export function finalize(
     }
   }
   else {
-    const conclusion = context.possibilities.solvePossibilities(
+    const conclusion = solvePossibilities(
+      context.possibilities,
       survivingMap,
       condition.minSurvivingWolves,
       condition.maxSurvivingWolves,

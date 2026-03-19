@@ -1,9 +1,7 @@
-import type { VillageStatus, SystemRole } from '../types/index.ts'
+import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import { selectCombinationsFromArray } from './combinatorics.ts'
 
-type Seat = number
-
-export const LiarRoles = ['werewolf', 'werehamster', 'immoralist', 'possessed', 'fanatic']
+export const LiarRoles: SystemRole[] = ['werewolf', 'werehamster', 'immoralist', 'possessed', 'fanatic']
 
 const rolesInTestPlanning
   = ['nekomata', 'mason', 'seer', 'medium', 'bodyguard'] as const
@@ -17,8 +15,8 @@ export type RoleTest = {
 
 export type BuildPlanResult = {
   roleTests: RoleTest[][]
-  maxLiars: number
-  numLiars: number
+  totalLiarRoles: number
+  knownFakeClaimCount: number
 }
 
 export function buildRoleTestPlan(
@@ -29,19 +27,17 @@ export function buildRoleTestPlan(
   // 露呈人外数の管理の準備
   let numLiars = 0
 
-  const claims: {[role in RoleInTestPlanning]: Seat[]}
-    = Object.fromEntries(rolesInTestPlanning.map(role => [role, []])) as {[role in RoleInTestPlanning]: Seat[]}
-  const poseAsCount: {[role in RoleInTestPlanning]: number}
-    = Object.fromEntries(rolesInTestPlanning.map(role => [role, 0])) as {[role in RoleInTestPlanning]: number}
-  const minClaimDay: {[role in RoleInTestPlanning]: number}
-    = Object.fromEntries(rolesInTestPlanning.map(role => [role, Infinity])) as {[role in RoleInTestPlanning]: number}
+  const claims = Object.fromEntries(rolesInTestPlanning.map(role => [role, [] as Seat[]])) as {[role in RoleInTestPlanning]: Seat[]}
+  const poseAsCount = Object.fromEntries(rolesInTestPlanning.map(role => [role, 0])) as {[role in RoleInTestPlanning]: number}
+  const minClaimDay = Object.fromEntries(rolesInTestPlanning.map(role => [role, Infinity])) as {[role in RoleInTestPlanning]: number}
 
   for ( const [seat, status] of village.statuses.entries() ) {
     if ( !rolesInTestPlanning.includes(status.claimingRole as RoleInTestPlanning) ) continue
     if ( status.claiming ) {
-      claims[status.claimingRole].push(seat)
+      const role = status.claimingRole as RoleInTestPlanning
+      claims[role].push(seat)
       const claimDay = status.claimedAt || Infinity
-      minClaimDay[status.claimingRole] = Math.min(minClaimDay[status.claimingRole], claimDay)
+      minClaimDay[role] = Math.min(minClaimDay[role], claimDay)
     }
   }
 
@@ -62,10 +58,10 @@ export function buildRoleTestPlan(
   const roleTests: RoleTest[][] = []
 
   // 狐の処理は面倒なので、最初に全員分のプランを作成しておく
-  if (setup.has('werehamster') && setup.get('werehamster') > 0 ) {
+  if (setup.has('werehamster') && setup.get('werehamster')! > 0 ) {
     const hamsterTests: RoleTest[] = []
     const allSeats = Array.from(village.statuses.keys())
-    const num = setup.get('werehamster')
+    const num = setup.get('werehamster')!
     const iter = selectCombinationsFromArray(allSeats, num, num)
     for ( const [selected, rest] of iter ) {
       hamsterTests.push({ role: 'werehamster', selected, rest })
@@ -155,7 +151,7 @@ export function buildRoleTestPlan(
 
   return {
     roleTests: finalTests,
-    maxLiars: numLiars,
-    numLiars: poseAsCountTotal,
+    totalLiarRoles: numLiars,
+    knownFakeClaimCount: poseAsCountTotal,
   }
 }

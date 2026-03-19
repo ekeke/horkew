@@ -1,3 +1,6 @@
+export type Seat = number
+export type Day = number
+
 export type SystemRole = 'werewolf' | 'possessed' | 'fanatic' | 'werehamster' | 'immoralist' | 'villager' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata'
 
 export type EnumSpecies = 'human' | 'wolf' | null

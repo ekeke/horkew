@@ -85,7 +85,7 @@ describe('selectOne', () => {
 
 describe('generateCombinations', () => {
   it('generates cartesian product of arrays', () => {
-    const results = collect(generateCombinations([['a', 'b'], [1, 2]]))
+    const results = collect(generateCombinations<string | number>([['a', 'b'], [1, 2]]))
     assert.deepStrictEqual(results, [
       ['a', 1], ['a', 2], ['b', 1], ['b', 2]
     ])

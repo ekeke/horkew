@@ -1,8 +1,5 @@
-import type { CauseOfDeath, SeatStatus, VillageStatus, SystemRole } from '../types/index.ts'
+import type { CauseOfDeath, SeatStatus, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
-
-type Seat = number
-type Day = number
 
 type DeathCounts = {
   add: number,
@@ -22,8 +19,8 @@ export type AnalyzeContext = {
 export type RoleTesterEnv = {
   vs: VillageStatus
   nightKillsByDay: Map<Day, Seat[]>
-  maxLiars: number
-  numLiars: number
+  totalLiarRoles: number
+  knownFakeClaimCount: number
   lastHamsterMustDieAt?: number
   lastHamsterMustDiedBy?: CauseOfDeath
   dayCountFrom: number
@@ -31,11 +28,11 @@ export type RoleTesterEnv = {
 
 export function cloneContext(context: AnalyzeContext): AnalyzeContext {
   return {
-    additionalLiars: structuredClone(context.additionalLiars),
-    hamstersKilledBySeer: structuredClone(context.hamstersKilledBySeer),
+    additionalLiars: context.additionalLiars,
+    hamstersKilledBySeer: context.hamstersKilledBySeer.map(x => ({ ...x })),
     hamstersMaxSurvivingDay: context.hamstersMaxSurvivingDay,
-    requireOneOf: structuredClone(context.requireOneOf),
-    deathChronicle: structuredClone(context.deathChronicle),
+    requireOneOf: context.requireOneOf.map(arr => arr.map(x => ({ ...x }))),
+    deathChronicle: new Map(Array.from(context.deathChronicle.entries(), ([k, v]) => [k, { ...v }])),
     possibilities: context.possibilities.clone(),
   }
 }
@@ -339,7 +336,7 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
     const self = getStatus(env, seat)
     if (!self.claiming) {
       context.additionalLiars++
-      if ( env.maxLiars < context.additionalLiars + env.numLiars ) {
+      if ( env.totalLiarRoles < context.additionalLiars + env.knownFakeClaimCount ) {
         return false
       }
     }
@@ -404,7 +401,7 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
   return true
 }
 
-export const roleTesterMap: Record<string, RoleTester> = {
+export const roleTesterMap: Partial<Record<SystemRole, RoleTester>> = {
   werehamster: testHamster,
   seer: testSeer,
   medium: testMedium,
