@@ -60,6 +60,7 @@ export type VoteStatus = {
   totalVoters: number
   hasAnyVotes: boolean
   executionOccurred: boolean
+  hasMultiVote: boolean
 }
 
 export type VoteVerdict =
@@ -227,9 +228,11 @@ export function extractVoteStatus(vs: VillageStatus, players: Map<number, string
   const votersBySeat = new Map<number, { seat: number, name: string, votedOrder: number }[]>()
   const pending: { seat: number, name: string }[] = []
   let hasAnyVotes = false
+  const excluded = vs.voteFinalRule !== 'revote' ? vs.revoteTargets : new Set<number>()
 
   for (const [seat, status] of vs.statuses) {
     if (!status.surviving) continue
+    if (excluded.has(seat)) continue
     if (status.voted) {
       hasAnyVotes = true
       const target = status.votedTarget
@@ -270,6 +273,7 @@ export function extractVoteStatus(vs: VillageStatus, players: Map<number, string
     totalVoters,
     hasAnyVotes,
     executionOccurred: vs.executions.has(vs.day),
+    hasMultiVote: vs.hasMultiVote,
   }
 }
 
@@ -277,7 +281,7 @@ export function computeVerdicts(status: VoteStatus): Map<number, VoteVerdictInfo
   const { rows, remainingVotes, totalVoters } = status
   const verdicts = new Map<number, VoteVerdictInfo>()
 
-  if (rows.length === 0) return verdicts
+  if (rows.length === 0 || status.hasMultiVote) return verdicts
 
   const maxVotes = Math.max(...rows.map(r => r.votedCount))
 

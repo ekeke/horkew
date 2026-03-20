@@ -15,6 +15,7 @@ import type {
   LynchStatement,
   CurseStatement,
   FollowStatement,
+  RevoteStatement,
   OverStatement,
   AssertStatement,
   MasonStatement,
@@ -80,6 +81,9 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   let lastDeathEvent: 'execution' | 'night_kill' = 'execution'
   let claimCounter = 0
   let voteOrderCounter = 0
+  const voteFinalRule: 'revote' | 'final' = meta?.rules?.['vote.final'] === 'revote' ? 'revote' : 'final'
+  let revoteTargets = new Set<number>()
+  let hasMultiVote = false
 
   function resolveSeat(name: string): number {
     const results = dict.search(name)
@@ -100,6 +104,8 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         status.votedOrder = 0
       }
       voteOrderCounter = 0
+      revoteTargets = new Set()
+      hasMultiVote = false
     }
   }
 
@@ -134,6 +140,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       }
 
       case 'multiVote': {
+        hasMultiVote = true
         const s = stmt as MultiVoteStatement
         const targetSeat = resolveSeat(s.target)
         const target = statuses.get(targetSeat)!
@@ -175,6 +182,15 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       }
 
       case 'peace': {
+        for (const status of statuses.values()) {
+          status.voted = false
+          status.votedCount = 0
+          status.votedTarget = -1
+          status.votedOrder = 0
+        }
+        voteOrderCounter = 0
+        revoteTargets = new Set()
+        hasMultiVote = false
         break
       }
 
@@ -191,6 +207,15 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           currentExec.push(targetSeat)
           executions.set(day, currentExec)
         }
+        for (const status of statuses.values()) {
+          status.voted = false
+          status.votedCount = 0
+          status.votedTarget = -1
+          status.votedOrder = 0
+        }
+        voteOrderCounter = 0
+        revoteTargets = new Set()
+        hasMultiVote = false
         break
       }
 
@@ -227,6 +252,22 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       }
 
       case 'revote': {
+        const s = stmt as RevoteStatement
+        if (s.targets.length > 0) {
+          revoteTargets = new Set(s.targets.map(t => resolveSeat(t)))
+        } else {
+          // Derive targets from current vote state: top-tied candidates
+          let maxVotes = 0
+          for (const status of statuses.values()) {
+            if (status.surviving && status.votedCount > maxVotes) maxVotes = status.votedCount
+          }
+          revoteTargets = new Set<number>()
+          if (maxVotes > 0) {
+            for (const [seat, status] of statuses) {
+              if (status.surviving && status.votedCount === maxVotes) revoteTargets.add(seat)
+            }
+          }
+        }
         for (const status of statuses.values()) {
           status.voted = false
           status.votedCount = 0
@@ -234,6 +275,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           status.votedOrder = 0
         }
         voteOrderCounter = 0
+        hasMultiVote = false
         break
       }
 
@@ -352,6 +394,9 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     roles,
     claims,
     voteHistory,
+    revoteTargets,
+    voteFinalRule,
+    hasMultiVote,
     day,
     finished,
     result,

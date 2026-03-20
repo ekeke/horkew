@@ -59,6 +59,9 @@ export type VillageStatus = {
   roles: Map<number, Role | SystemRole>
   claims: Map<number | SystemRole, number[]>
   voteHistory: Map<Day, VoteRecord[]>
+  revoteTargets: Set<number>
+  voteFinalRule: 'revote' | 'final'
+  hasMultiVote: boolean
   day: number
   finished: boolean
   result: VillageResult
