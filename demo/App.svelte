@@ -9,6 +9,7 @@
   import AnalysisWorker from './analysis.worker.ts?worker'
   import StatusPane from './status/StatusPane.svelte'
   import PlayerName from './status/PlayerName.svelte'
+  import { explain } from '../src/gmork/index.ts'
 
   const nightKillCauses: Set<CauseOfDeath> = new Set([
     'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
@@ -89,6 +90,8 @@
   let players: Map<number, string> = $state(new Map())
   let villageStatus: VillageStatus | null = $state(null)
   let assumptions: Map<number, SystemRole> = $state(new Map())
+  let gmorkResult = $state('')
+  let currentSetup: Map<SystemRole, number> = $state(new Map())
   let worker: Worker | null = null
   let skin: Skin = $state((localStorage.getItem(SKIN_KEY) as Skin) ?? 'flat')
   let paneVisible: Record<PaneId, boolean> = $state(loadPaneVisibility())
@@ -256,6 +259,12 @@
     return { status: 'default', fixed: false, label }
   }
 
+  function runGmork(): string {
+    if (assumptions.size !== 1 || !villageStatus) return ''
+    const [[seat, role]] = [...assumptions]
+    return explain(villageStatus, currentSetup, seat, role)
+  }
+
   function toggleAssumption(seat: number, role: SystemRole) {
     const current = assumptions.get(seat)
     if (current === role) {
@@ -274,6 +283,7 @@
 
     analysisSeats = []
     analysisError = ''
+    gmorkResult = ''
     rawStatements = ''
     analyzerJson = ''
     parsedLines = []
@@ -287,6 +297,7 @@
       const { vs, setup, players: playersMap } = buildVillageStatus(statements, meta)
       players = playersMap
       villageStatus = vs
+      currentSetup = setup
       const alive = [...vs.statuses.values()].filter(s => s.surviving).length
       survivorInfo = { alive, total: vs.statuses.size }
       deadSeats = new Set([...vs.statuses.entries()].filter(([, s]) => !s.surviving).map(([seat]) => seat))
@@ -325,9 +336,11 @@
         if (data.type === 'result') {
           analysisSeats = data.seats
           analysisError = ''
+          gmorkResult = runGmork()
         } else {
           analysisSeats = []
           analysisError = data.message
+          gmorkResult = ''
         }
         worker?.terminate()
         worker = null
@@ -485,6 +498,9 @@
               </tbody>
             </table>
           </div>
+        {/if}
+        {#if gmorkResult}
+          <div class="gmork-results">{gmorkResult}</div>
         {/if}
       </div>
     </section>
@@ -847,5 +863,12 @@
   .modal-confirm:hover:not(:disabled) {
     background: #b4befe;
     border-color: #b4befe;
+  }
+
+  .gmork-results {
+    padding: 8px;
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-size: 13px;
+    color: #a6adc8;
   }
 </style>
