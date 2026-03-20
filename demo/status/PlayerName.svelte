@@ -1,33 +1,40 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
 
-  let { dead, nightKill = false, executed = false, children }: {
+  let { dead, nightKill = false, executed = false, claim, children }: {
     dead: boolean
     nightKill?: boolean
     executed?: boolean
+    claim?: string
     children: Snippet
   } = $props()
 </script>
 
 {#if nightKill}
   <span class="night-kill" class:dead>
-    <span class="sizer">{@render children()}</span>
-    <span class="strip s0">{@render children()}</span>
-    <span class="strip s1">{@render children()}</span>
-    <span class="strip s2">{@render children()}</span>
-    <span class="strip s3">{@render children()}</span>
+    <span class="sizer">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+    <span class="strip s0">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+    <span class="strip s1">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+    <span class="strip s2">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+    <span class="strip s3">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
   </span>
 {:else if executed}
   <span class="executed" class:dead>
-    <span class="exec-sizer">{@render children()}</span>
-    <span class="exec-sharp">{@render children()}</span>
-    <span class="exec-blur">{@render children()}</span>
+    <span class="exec-sizer">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+    <span class="exec-sharp">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+    <span class="exec-blur">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
   </span>
 {:else}
-  <span class="pn" class:dead={dead}>{@render children()}</span>
+  <span class="pn" class:dead={dead}>{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
 {/if}
 
 <style>
+  .claim {
+    color: #cba6f7;
+    font-size: 0.85em;
+    margin-left: 1px;
+  }
+
   .dead {
     opacity: 0.5;
     text-decoration: line-through;

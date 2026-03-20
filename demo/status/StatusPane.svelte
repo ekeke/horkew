@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { VillageStatus } from '../../src/types/index.ts'
+  import type { VillageStatus, SystemRole } from '../../src/types/index.ts'
+  import { systemRoles } from '../../src/types/index.ts'
   import { extractSurvivorInfo, extractDeathHistory, extractClaimGroups, extractVoteStatus } from './extract.ts'
   import SurvivorSection from './SurvivorSection.svelte'
   import VoteTable from './VoteTable.svelte'
@@ -33,13 +34,18 @@
       .filter(([, s]) => !s.surviving && s.causeOfDeath && executionCauses.has(s.causeOfDeath))
       .map(([seat]) => seat)
   ))
+  let claimShortNames = $derived(new Map(
+    [...vs.statuses.entries()]
+      .filter(([, s]) => s.claiming)
+      .map(([seat, s]) => [seat, systemRoles.get(s.claimingRole as SystemRole)?.shortName ?? s.claimingRole] as const)
+  ))
 </script>
 
 <div class="status-pane">
   <SurvivorSection info={survivorInfo} />
   <VoteTable status={voteStatus} />
-  <DeathHistory days={deathHistory} />
-  <ClaimTable groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} />
+  <DeathHistory days={deathHistory} {claimShortNames} />
+  <ClaimTable groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} {claimShortNames} />
 </div>
 
 <style>

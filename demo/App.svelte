@@ -90,6 +90,13 @@
   let executedSeats: Set<number> = $state(new Set())
   let players: Map<number, string> = $state(new Map())
   let villageStatus: VillageStatus | null = $state(null)
+  let claimShortNames: Map<number, string> = $derived(
+    villageStatus
+      ? new Map([...villageStatus.statuses.entries()]
+          .filter(([, s]) => s.claiming)
+          .map(([seat, s]) => [seat, systemRoles.get(s.claimingRole as SystemRole)?.shortName ?? s.claimingRole] as const))
+      : new Map()
+  )
   let assumptions: Map<number, SystemRole> = $state(new Map())
   let gmorkResult = $state('')
   let currentSetup: Map<SystemRole, number> = $state(new Map())
@@ -499,7 +506,7 @@
                 {#each [...players] as [seat, name]}
                   {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
                   <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
-                    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)}>{name}</PlayerName></td>
+                    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)} claim={claimShortNames.get(seat)}>{name}</PlayerName></td>
                     {#each analysisColumns as role}
                       <td
                         class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"
