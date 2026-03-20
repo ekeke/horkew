@@ -1,34 +1,63 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
+  import { getContext } from 'svelte'
 
-  let { dead, nightKill = false, executed = false, claim, children }: {
+  let { dead, nightKill = false, executed = false, claim, seat, children }: {
     dead: boolean
     nightKill?: boolean
     executed?: boolean
     claim?: string
+    seat?: number
     children: Snippet
   } = $props()
+
+  const onplayerclick = getContext<((seat: number) => void) | undefined>('playerclick')
+  let clickable = $derived(seat != null && onplayerclick != null)
+
+  function handleClick() {
+    if (seat != null && onplayerclick) onplayerclick(seat)
+  }
 </script>
 
-{#if nightKill}
-  <span class="night-kill" class:dead>
-    <span class="sizer">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-    <span class="strip s0">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-    <span class="strip s1">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-    <span class="strip s2">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-    <span class="strip s3">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-  </span>
-{:else if executed}
-  <span class="executed" class:dead>
-    <span class="exec-sizer">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-    <span class="exec-sharp">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-    <span class="exec-blur">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-  </span>
+{#snippet inner()}
+  {#if nightKill}
+    <span class="night-kill" class:dead>
+      <span class="sizer">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="strip s0">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="strip s1">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="strip s2">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="strip s3">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+    </span>
+  {:else if executed}
+    <span class="executed" class:dead>
+      <span class="exec-sizer">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="exec-sharp">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="exec-blur">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+    </span>
+  {:else}
+    <span class="pn" class:dead={dead}>{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+  {/if}
+{/snippet}
+
+{#if clickable}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <span class="clickable" onclick={handleClick}>{@render inner()}</span>
 {:else}
-  <span class="pn" class:dead={dead}>{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+  {@render inner()}
 {/if}
 
 <style>
+  .clickable {
+    cursor: pointer;
+    border-radius: 2px;
+  }
+
+  .clickable:hover {
+    text-decoration: underline;
+    text-decoration-color: #cba6f7;
+    text-underline-offset: 2px;
+  }
+
   .claim {
     color: #cba6f7;
     font-size: 0.85em;

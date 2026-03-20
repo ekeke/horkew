@@ -27,13 +27,13 @@
           <tr class="kill-row">
             <td class="type-cell kill-type">襲撃</td>
             {#each days as { nightKills }}
-              <td class="name-cell">{#each nightKills as entry, i}{#if i > 0}、{/if}<PlayerName dead={true} nightKill={nightKillCauses.has(entry.causeOfDeath)} claim={claimShortNames.get(entry.seat)}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'night_kill'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
+              <td class="name-cell">{#each nightKills as entry, i}{#if i > 0}、{/if}<PlayerName dead={true} nightKill={nightKillCauses.has(entry.causeOfDeath)} claim={claimShortNames.get(entry.seat)} seat={entry.seat}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'night_kill'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
             {/each}
           </tr>
           <tr class="exec-row">
             <td class="type-cell exec-type">処刑</td>
             {#each days as { executions }}
-              <td class="name-cell">{#each executions as entry, i}{#if i > 0}、{/if}<PlayerName dead={true} executed claim={claimShortNames.get(entry.seat)}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
+              <td class="name-cell">{#each executions as entry, i}{#if i > 0}、{/if}<PlayerName dead={true} executed claim={claimShortNames.get(entry.seat)} seat={entry.seat}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
             {/each}
           </tr>
         </tbody>

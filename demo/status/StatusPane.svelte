@@ -1,16 +1,33 @@
 <script lang="ts">
-  import type { VillageStatus, SystemRole } from '../../src/types/index.ts'
+  import type { VillageStatus, SystemRole, SeatStatus } from '../../src/types/index.ts'
   import { systemRoles } from '../../src/types/index.ts'
+  import { setContext } from 'svelte'
   import { extractSurvivorInfo, extractDeathHistory, extractClaimGroups, extractVoteStatus } from './extract.ts'
   import SurvivorSection from './SurvivorSection.svelte'
   import VoteTable from './VoteTable.svelte'
   import DeathHistory from './DeathHistory.svelte'
   import ClaimTable from './ClaimTable.svelte'
+  import PlayerDialog from './PlayerDialog.svelte'
 
-  let { vs, players }: {
+  let { vs, players, setup }: {
     vs: VillageStatus
     players: Map<number, string>
+    setup: Map<SystemRole, number>
   } = $props()
+
+  let dialogSeat: number | null = $state(null)
+  let dialogName = $derived(dialogSeat != null ? players.get(dialogSeat) ?? `#${dialogSeat}` : '')
+  let dialogStatus: SeatStatus | null = $derived(dialogSeat != null ? vs.statuses.get(dialogSeat) ?? null : null)
+
+  function openPlayerDialog(seat: number) {
+    dialogSeat = seat
+  }
+
+  setContext('playerclick', openPlayerDialog)
+
+  function closePlayerDialog() {
+    dialogSeat = null
+  }
 
   let survivorInfo = $derived(extractSurvivorInfo(vs, players))
   let voteStatus = $derived(extractVoteStatus(vs, players))
@@ -47,6 +64,10 @@
   <DeathHistory days={deathHistory} {claimShortNames} />
   <ClaimTable groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} {claimShortNames} />
 </div>
+
+{#if dialogSeat != null && dialogStatus}
+  <PlayerDialog seat={dialogSeat} name={dialogName} status={dialogStatus} vs={vs} {setup} {players} onclose={closePlayerDialog} />
+{/if}
 
 <style>
   .status-pane {

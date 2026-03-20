@@ -98,11 +98,11 @@
               {#each group.rows as row}
                 {@const timeline = buildAssertionTimeline(row, maxDay, players)}
                 <tr>
-                  <td class="name-cell"><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)}>{row.name}</PlayerName></td>
+                  <td class="name-cell"><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)} seat={row.seat}>{row.name}</PlayerName></td>
                   {#each nights as night}
                     {@const assertion = timeline.get(night) ?? null}
                     <td class="data-cell" class:human={assertion?.species === 'human'} class:wolf={assertion?.species === 'wolf'} class:guard={row.claimingRole === 'bodyguard' && assertion !== null}>
-                      {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)}>{cellContent(assertion, row.claimingRole)}</PlayerName>{/if}
+                      {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{cellContent(assertion, row.claimingRole)}</PlayerName>{/if}
                     </td>
                   {/each}
                 </tr>
@@ -118,7 +118,7 @@
         <div class="group-header">{masonGroup.roleShortName}</div>
         <div class="mason-groups">
           {#each buildMasonGroups(masonGroup) as cluster}
-            <span class="mason-cluster">{#each cluster.members as member, i}{#if i > 0}<span class="mason-sep"> - </span>{/if}<PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} claim={claimShortNames.get(member.seat)}>{member.name}</PlayerName>{/each}</span>
+            <span class="mason-cluster">{#each cluster.members as member, i}{#if i > 0}<span class="mason-sep"> - </span>{/if}<PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} claim={claimShortNames.get(member.seat)} seat={member.seat}>{member.name}</PlayerName>{/each}</span>
           {/each}
         </div>
       </div>
@@ -129,7 +129,7 @@
         <div class="group-header">{nekomataGroup.roleShortName}</div>
         <div class="simple-claims">
           {#each nekomataGroup.rows as row}
-            <PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)}>{row.name}</PlayerName>
+            <PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)} seat={row.seat}>{row.name}</PlayerName>
           {/each}
         </div>
       </div>

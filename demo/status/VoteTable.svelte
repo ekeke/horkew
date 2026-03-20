@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { VoteStatus, VoteVerdictInfo } from './extract.ts'
   import { computeVerdicts } from './extract.ts'
+  import PlayerName from './PlayerName.svelte'
 
   let { status }: {
     status: VoteStatus
@@ -62,9 +63,9 @@
             class:cutoff={i === cutoffIndex && cutoffIndex < status.rows.length - 1}
           >
             <td class="verdict-cell">{verdictLabel(info)}</td>
-            <td class="name-cell">{row.name}</td>
+            <td class="name-cell"><PlayerName dead={false} seat={row.seat}>{row.name}</PlayerName></td>
             <td class="count-cell">{row.votedCount}</td>
-            <td class="voters-cell">{#each row.voters as voter, vi}{#if vi > 0}<span class="sep">, </span>{/if}<span class:decisive-exec={execOrders.has(voter.votedOrder)} class:decisive-runoff={runoffOrders.has(voter.votedOrder)}>{voter.name}</span>{/each}</td>
+            <td class="voters-cell">{#each row.voters as voter, vi}{#if vi > 0}<span class="sep">, </span>{/if}<span class:decisive-exec={execOrders.has(voter.votedOrder)} class:decisive-runoff={runoffOrders.has(voter.votedOrder)}><PlayerName dead={false} seat={voter.seat}>{voter.name}</PlayerName></span>{/each}</td>
           </tr>
         {/each}
       </tbody>
@@ -75,7 +76,7 @@
       <span class="pending-label">未投票:</span>
       {#each status.pending as p, i}
         {#if i > 0}<span class="sep">, </span>{/if}
-        <span class="pending-name">{p.name}</span>
+        <span class="pending-name"><PlayerName dead={false} seat={p.seat}>{p.name}</PlayerName></span>
       {/each}
     </div>
   {/if}

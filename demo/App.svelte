@@ -476,7 +476,7 @@
       <div class="pane-header">Status</div>
       <div class="pane-body">
         {#if villageStatus}
-          <StatusPane vs={villageStatus} {players} />
+          <StatusPane vs={villageStatus} {players} setup={currentSetup} />
         {/if}
       </div>
     </section>

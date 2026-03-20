@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SurvivorInfo } from './extract.ts'
+  import PlayerName from './PlayerName.svelte'
 
   let { info }: { info: SurvivorInfo } = $props()
 </script>
@@ -7,8 +8,8 @@
 <div class="section">
   <div class="section-header">生存 <span class="count">{info.alive}</span>/{info.total}</div>
   <div class="survivor-list">
-    {#each info.survivors as { name }}
-      <span class="survivor-badge">{name}</span>
+    {#each info.survivors as { seat, name }}
+      <span class="survivor-badge"><PlayerName dead={false} {seat}>{name}</PlayerName></span>
     {/each}
     {#if info.survivors.length === 0}
       <span class="empty">---</span>
