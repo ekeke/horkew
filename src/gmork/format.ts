@@ -86,7 +86,7 @@ export function formatReason(reason: DenialReason, role: SystemRole): string {
     case 'mason_partner':
       return `共有者(${reason.masonSeat})に相方と認定されているため共有者に確定`
     case 'role_slots_filled':
-      return `${roleName(role)}の枠がCO者で埋まっているため${roleName(role)}ではありえない`
+      return `${roleName(role)}の対抗に出なかったため${roleName(role)}ではありえない`
     case 'nekomata_no_companion':
       return `${reason.night}d夜の死者が1人だけのため猫又ではありえない（道連れがいない）`
     case 'all_hamsters_dead':

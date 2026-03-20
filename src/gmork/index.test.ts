@@ -321,7 +321,7 @@ describe('gmork explain', () => {
         claims: [['seer', [2]]],
       })
       const result = explain(village, defaultSetup, 5, 'seer')
-      assert.match(result, /占い師.*枠.*CO.*埋まっている/)
+      assert.match(result, /占い師.*対抗に出なかった/)
     })
 
     it('6.2: does NOT deny the claimant itself', () => {
