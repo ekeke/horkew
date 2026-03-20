@@ -85,6 +85,7 @@
   let survivorInfo = $state({ alive: 0, total: 0 })
   let deadSeats: Set<number> = $state(new Set())
   let nightKilledSeats: Set<number> = $state(new Set())
+  let executedSeats: Set<number> = $state(new Set())
   let players: Map<number, string> = $state(new Map())
   let villageStatus: VillageStatus | null = $state(null)
   let assumptions: Map<number, SystemRole> = $state(new Map())
@@ -294,6 +295,14 @@
           .filter(([, s]) => !s.surviving && s.causeOfDeath && nightKillCauses.has(s.causeOfDeath))
           .map(([seat]) => seat)
       )
+      const executionCauses: Set<CauseOfDeath> = new Set([
+        'execution', 'cursed_by_executed_nekomata', 'follow_executed_hamster',
+      ])
+      executedSeats = new Set(
+        [...vs.statuses.entries()]
+          .filter(([, s]) => !s.surviving && s.causeOfDeath && executionCauses.has(s.causeOfDeath))
+          .map(([seat]) => seat)
+      )
 
       const roleOrder = [...systemRoles.keys()] as SystemRole[]
       analysisColumns = roleOrder.filter(r => setup.has(r as SystemRole))
@@ -464,7 +473,7 @@
                 {#each [...players] as [seat, name]}
                   {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
                   <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
-                    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)}>{name}</PlayerName></td>
+                    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)}>{name}</PlayerName></td>
                     {#each analysisColumns as role}
                       <td
                         class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"

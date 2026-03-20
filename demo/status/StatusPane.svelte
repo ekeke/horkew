@@ -18,9 +18,17 @@
   const nightKillCauses: Set<import('../../src/types/index.ts').CauseOfDeath> = new Set([
     'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
   ])
+  const executionCauses: Set<import('../../src/types/index.ts').CauseOfDeath> = new Set([
+    'execution', 'cursed_by_executed_nekomata', 'follow_executed_hamster',
+  ])
   let nightKilled = $derived(new Set(
     [...vs.statuses.entries()]
       .filter(([, s]) => !s.surviving && s.causeOfDeath && nightKillCauses.has(s.causeOfDeath))
+      .map(([seat]) => seat)
+  ))
+  let executed = $derived(new Set(
+    [...vs.statuses.entries()]
+      .filter(([, s]) => !s.surviving && s.causeOfDeath && executionCauses.has(s.causeOfDeath))
       .map(([seat]) => seat)
   ))
 </script>
@@ -28,7 +36,7 @@
 <div class="status-pane">
   <SurvivorSection info={survivorInfo} />
   <DeathHistory days={deathHistory} />
-  <ClaimTable groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} />
+  <ClaimTable groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} />
 </div>
 
 <style>

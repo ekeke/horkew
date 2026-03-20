@@ -33,7 +33,7 @@
           <tr class="exec-row">
             <td class="type-cell exec-type">処刑</td>
             {#each days as { executions }}
-              <td class="name-cell">{#each executions as entry, i}{#if i > 0}、{/if}<PlayerName dead={true}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
+              <td class="name-cell">{#each executions as entry, i}{#if i > 0}、{/if}<PlayerName dead={true} executed>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
             {/each}
           </tr>
         </tbody>

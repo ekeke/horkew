@@ -1,9 +1,10 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
 
-  let { dead, nightKill = false, children }: {
+  let { dead, nightKill = false, executed = false, children }: {
     dead: boolean
     nightKill?: boolean
+    executed?: boolean
     children: Snippet
   } = $props()
 </script>
@@ -15,6 +16,12 @@
     <span class="strip s1">{@render children()}</span>
     <span class="strip s2">{@render children()}</span>
     <span class="strip s3">{@render children()}</span>
+  </span>
+{:else if executed}
+  <span class="executed" class:dead>
+    <span class="exec-sizer">{@render children()}</span>
+    <span class="exec-sharp">{@render children()}</span>
+    <span class="exec-blur">{@render children()}</span>
   </span>
 {:else}
   <span class="pn" class:dead={dead}>{@render children()}</span>
@@ -42,6 +49,42 @@
     inset: 0;
     white-space: nowrap;
     color: #cdd6f4;
+  }
+
+  .executed {
+    display: inline-block;
+    position: relative;
+    vertical-align: baseline;
+  }
+
+  .exec-sizer {
+    visibility: hidden;
+    white-space: nowrap;
+  }
+
+  .exec-sharp,
+  .exec-blur {
+    position: absolute;
+    inset: 0;
+    white-space: nowrap;
+  }
+
+  /* Excite skin: dissolve effect (sharp top → blurred bottom) */
+  :global(.skin-excite) .executed.dead {
+    opacity: 1;
+    text-decoration: none;
+  }
+
+  :global(.skin-excite) .exec-sharp {
+    mask-image: linear-gradient(to bottom, black 20%, transparent 80%);
+    -webkit-mask-image: linear-gradient(to bottom, black 20%, transparent 80%);
+  }
+
+  :global(.skin-excite) .exec-blur {
+    filter: blur(1.5px);
+    mask-image: linear-gradient(to bottom, transparent 0%, black 60%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 60%);
+    opacity: 0.5;
   }
 
   /* Excite skin: slash effect */
