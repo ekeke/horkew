@@ -29,6 +29,7 @@ self.onmessage = (e: MessageEvent<RetarRequest>) => {
     vs.kills = new Map(vs.kills as any)
     vs.roles = new Map(vs.roles as any)
     vs.claims = new Map(vs.claims as any)
+    vs.voteHistory = new Map(vs.voteHistory as any ?? [])
     for (const [seat, status] of vs.statuses) {
       status.actions = new Map(status.actions as any)
       status.assertions = new Map(status.assertions as any)

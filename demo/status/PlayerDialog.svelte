@@ -43,6 +43,7 @@
       kills: [...v.kills],
       roles: [...v.roles],
       claims: [...v.claims],
+      voteHistory: [...v.voteHistory],
     }
   }
 
@@ -83,24 +84,33 @@
 
   // --- Main player verdict (derived from retarState) ---
 
-  function seatVerdict(seatId: number, claimingRole: string | null): 'loading' | 'ok' | 'busted' | 'exposed' | 'error' {
-    if (retarState.type === 'loading') return 'loading'
-    if (retarState.type === 'error') return 'error'
+  type Verdict = { type: 'loading' | 'ally' | 'ok' | 'busted' | 'exposed' | 'error', fixedRole?: string }
+
+  function seatVerdict(seatId: number, claimingRole: string | null): Verdict {
+    if (retarState.type === 'loading') return { type: 'loading' }
+    if (retarState.type === 'error') return { type: 'error' }
     const result = retarState.seats.find(s => s.seat === seatId)
+    const fixedRole = result && result.roles.length === 1
+      ? systemRoles.get(result.roles[0])?.name ?? result.roles[0]
+      : undefined
     if (!result || result.roles.length === 0) {
-      return claimingRole ? 'busted' : 'exposed'
+      return { type: claimingRole ? 'busted' : 'exposed' }
     }
     if (claimingRole) {
-      // CO した役職が可能役職に含まれていなければ破綻
-      if (!result.roles.includes(claimingRole as SystemRole)) return 'busted'
+      if (!result.roles.includes(claimingRole as SystemRole)) return { type: 'busted', fixedRole }
     } else {
       const hasVillageRole = result.roles.some(r => {
         const role = systemRoles.get(r)
         return role && role.alignment === 'villager'
       })
-      if (!hasVillageRole) return 'exposed'
+      if (!hasVillageRole) return { type: 'exposed', fixedRole }
     }
-    return 'ok'
+    const allVillage = result.roles.every(r => {
+      const role = systemRoles.get(r)
+      return role && role.alignment === 'villager'
+    })
+    if (allVillage) return { type: 'ally', fixedRole }
+    return { type: 'ok', fixedRole }
   }
 
   let mainVerdict = $derived(seatVerdict(seat, status.claiming ? status.claimingRole : null))
@@ -148,42 +158,72 @@
       .join(' ')
   })
 
-  let targetVerdict = $derived(
-    targetStatus ? seatVerdict(targetSeat, targetStatus.claiming ? targetStatus.claimingRole : null) : 'loading'
+  let targetVerdict: Verdict = $derived(
+    targetStatus ? seatVerdict(targetSeat, targetStatus.claiming ? targetStatus.claimingRole : null) : { type: 'loading' }
   )
 
-  // --- Vote relationship ---
-
-  let mainVotedTarget = $derived(status.voted && status.votedTarget === targetSeat)
-  let targetVotedMain = $derived(!!targetStatus?.voted && targetStatus.votedTarget === seat)
-
-  // --- Decisive / salvation vote analysis ---
-
-  let voteAnalysis = $derived(extractVoteStatus(vs, players))
-  let verdicts = $derived(computeVerdicts(voteAnalysis))
+  // --- Vote history (all days) ---
 
   type VoteTag = { text: string, color: 'exec' | 'runoff' | 'saved' }
 
-  let mainToTargetTag = $derived.by((): VoteTag | null => {
-    if (!mainVotedTarget) return null
-    const v = verdicts.get(targetSeat)
-    if (v?.executionVoterName === name) return { text: '処刑確定票', color: 'exec' }
-    if (v?.runoffVoterName === name) return { text: '決戦確定票', color: 'runoff' }
-    return null
-  })
+  type DayVoteRelation = {
+    day: number
+    mainVotedForTarget: boolean
+    targetVotedForMain: boolean
+    mainTag: VoteTag | null
+    targetTag: VoteTag | null
+  }
 
-  let targetToMainTag = $derived.by((): VoteTag | null => {
-    if (!targetVotedMain) return null
-    const v = verdicts.get(seat)
-    if (v?.executionVoterName === targetName) return { text: '処刑確定票', color: 'exec' }
-    if (v?.runoffVoterName === targetName) return { text: '決戦確定票', color: 'runoff' }
-    if (v?.savedBy === targetName) return { text: '救済票', color: 'saved' }
-    return null
-  })
+  // Current day decisive vote analysis
+  let voteAnalysis = $derived(extractVoteStatus(vs, players))
+  let verdicts = $derived(computeVerdicts(voteAnalysis))
 
-  let mainSavedByTarget = $derived.by((): boolean => {
-    const v = verdicts.get(seat)
-    return v?.savedBy === targetName
+  function currentDayVoteTag(voterName: string, votedForSeat: number): VoteTag | null {
+    const v = verdicts.get(votedForSeat)
+    if (v?.executionVoterName === voterName) return { text: '処刑確定票', color: 'exec' }
+    if (v?.runoffVoterName === voterName) return { text: '決戦確定票', color: 'runoff' }
+    for (const [, info] of verdicts) {
+      if (info.savedBy === voterName) return { text: '救済票', color: 'saved' }
+    }
+    return null
+  }
+
+  // For past days: determine tag from execution outcome
+  function pastDayVoteTag(day: number, voterSeat: number, votedForSeat: number): VoteTag | null {
+    const executed = vs.executions.get(day)
+    if (!executed) return null
+    if (executed.includes(votedForSeat)) return { text: '処刑票', color: 'exec' }
+    return null
+  }
+
+  let voteRelationHistory = $derived.by((): DayVoteRelation[] => {
+    const result: DayVoteRelation[] = []
+    const days = [...vs.voteHistory.keys()].sort((a, b) => a - b)
+    for (const d of days) {
+      const votes = vs.voteHistory.get(d) ?? []
+      const mainVote = votes.find(v => v.voter === seat)
+      const targetVote = votes.find(v => v.voter === targetSeat)
+      const mainVotedForTarget = !!mainVote && mainVote.target === targetSeat
+      const targetVotedForMain = !!targetVote && targetVote.target === seat
+      if (!mainVotedForTarget && !targetVotedForMain) continue
+
+      const isCurrentDay = d === vs.day
+      let mainTag: VoteTag | null = null
+      let targetTag: VoteTag | null = null
+      if (mainVotedForTarget) {
+        mainTag = isCurrentDay
+          ? currentDayVoteTag(name, targetSeat)
+          : pastDayVoteTag(d, seat, targetSeat)
+      }
+      if (targetVotedForMain) {
+        targetTag = isCurrentDay
+          ? currentDayVoteTag(targetName, seat)
+          : pastDayVoteTag(d, targetSeat, seat)
+      }
+
+      result.push({ day: d, mainVotedForTarget, targetVotedForMain, mainTag, targetTag })
+    }
+    return result
   })
 
   // --- Seer / Medium divination results ---
@@ -269,20 +309,23 @@
     }
   }
 
-  function verdictLabel(v: string): string {
-    switch (v) {
-      case 'busted': return '破綻'
-      case 'exposed': return '人外露呈'
-      case 'ok': return '整合'
+  function verdictLabel(v: Verdict): string {
+    if (v.fixedRole) return v.fixedRole
+    switch (v.type) {
+      case 'busted': return '敵対'
+      case 'exposed': return '敵対'
+      case 'ally': return '同陣営'
+      case 'ok': return '未定'
       case 'error': return 'エラー'
       default: return '...'
     }
   }
 
-  function verdictClass(v: string): string {
-    switch (v) {
+  function verdictClass(v: Verdict): string {
+    switch (v.type) {
       case 'busted': return 'busted'
       case 'exposed': return 'exposed'
+      case 'ally': return 'ally'
       case 'ok': return 'ok'
       case 'error': return 'error'
       default: return 'none'
@@ -295,6 +338,17 @@
 
   function onKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') onclose()
+    if (e.key === 'ArrowLeft') { prevTarget(); e.preventDefault() }
+    if (e.key === 'ArrowRight') { nextTarget(); e.preventDefault() }
+  }
+
+  function onWheel(e: WheelEvent) {
+    // Tilt wheel (horizontal scroll) to navigate targets
+    if (e.deltaX !== 0) {
+      if (e.deltaX > 0) nextTarget()
+      else prevTarget()
+      e.preventDefault()
+    }
   }
 </script>
 
@@ -303,7 +357,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="overlay" onclick={onOverlayClick}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="dialog" onclick={(e) => e.stopPropagation()}>
+  <div class="dialog" onclick={(e) => e.stopPropagation()} onwheel={onWheel}>
     <div class="dialog-header">
       <span class="dialog-title">{name}</span>
       <button class="close-btn" onclick={onclose}>&times;</button>
@@ -384,24 +438,27 @@
               {/each}
             </div>
           {/if}
-          {#if mainVotedTarget || targetVotedMain}
-            <div class="rel-row vote-row">
-              {#if mainVotedTarget}
-                <span class="vote-arrow">
-                  {name} → {targetName}
-                  {#if mainToTargetTag}
-                    <span class="vote-tag {mainToTargetTag.color}">{mainToTargetTag.text}</span>
-                  {/if}
-                </span>
-              {/if}
-              {#if targetVotedMain}
-                <span class="vote-arrow">
-                  {targetName} → {name}
-                  {#if targetToMainTag}
-                    <span class="vote-tag {targetToMainTag.color}">{targetToMainTag.text}</span>
-                  {/if}
-                </span>
-              {/if}
+          {#if voteRelationHistory.length > 0}
+            <div class="vote-history">
+              {#each voteRelationHistory as rel}
+                <div class="vote-day">
+                  <span class="vote-day-label">{rel.day}d</span>
+                  <div class="vote-day-content">
+                    {#if rel.mainVotedForTarget}
+                      <span class="vote-arrow mutual">
+                        {name} → {targetName}
+                        {#if rel.mainTag}<span class="vote-tag {rel.mainTag.color}">{rel.mainTag.text}</span>{/if}
+                      </span>
+                    {/if}
+                    {#if rel.targetVotedForMain}
+                      <span class="vote-arrow mutual">
+                        {targetName} → {name}
+                        {#if rel.targetTag}<span class="vote-tag {rel.targetTag.color}">{rel.targetTag.text}</span>{/if}
+                      </span>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
             </div>
           {/if}
         </div>
@@ -416,17 +473,19 @@
     inset: 0;
     background: rgba(0, 0, 0, 0.6);
     display: flex;
-    align-items: center;
     justify-content: center;
     z-index: 100;
+    padding-top: 10vh;
+    align-items: flex-start;
   }
 
   .dialog {
     background: #1e1e2e;
     border: 1px solid #45475a;
     border-radius: 8px;
-    min-width: 280px;
-    max-width: 400px;
+    width: 420px;
+    max-height: 80vh;
+    overflow-y: auto;
   }
 
   .dialog-header {
@@ -506,6 +565,11 @@
 
   .exposed {
     color: #fab387;
+    font-weight: 600;
+  }
+
+  .ally {
+    color: #89dceb;
     font-weight: 600;
   }
 
@@ -630,18 +694,43 @@
     letter-spacing: 0.5px;
   }
 
-  .vote-row {
+  .vote-history {
+    display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     margin-top: 2px;
   }
 
+  .vote-day {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .vote-day-label {
+    color: #585b70;
+    font-size: 11px;
+    min-width: 20px;
+    flex-shrink: 0;
+  }
+
+  .vote-day-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
   .vote-arrow {
-    color: #cdd6f4;
+    color: #a6adc8;
     font-size: 12px;
     display: flex;
     align-items: baseline;
     gap: 6px;
+  }
+
+  .vote-arrow.mutual {
+    color: #cdd6f4;
+    font-weight: 500;
   }
 
   .vote-tag {

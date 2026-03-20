@@ -50,12 +50,15 @@ export type SeatStatus = {
   assertions: Assertions
 }
 
+export type VoteRecord = { voter: Seat, target: Seat }
+
 export type VillageStatus = {
   statuses: Map<number, SeatStatus>
   executions: Map<number, number[]>
   kills: Map<number, number[]>
   roles: Map<number, Role | SystemRole>
   claims: Map<number | SystemRole, number[]>
+  voteHistory: Map<Day, VoteRecord[]>
   day: number
   finished: boolean
   result: VillageResult

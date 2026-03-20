@@ -73,6 +73,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   const kills = new Map<number, number[]>()
   const roles = new Map<number, Role | SystemRole>()
   const claims = new Map<number | SystemRole, number[]>()
+  const voteHistory = new Map<number, import('../types/index.ts').VoteRecord[]>()
   let day = 1
   let finished = false
   let result: VillageResult = undefined
@@ -127,6 +128,8 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         voter.votedTarget = targetSeat
         voter.votedOrder = ++voteOrderCounter
         target.votedCount++
+        if (!voteHistory.has(day)) voteHistory.set(day, [])
+        voteHistory.get(day)!.push({ voter: voterSeat, target: targetSeat })
         break
       }
 
@@ -142,12 +145,15 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
               .filter(([, st]) => st.surviving && !st.voted)
               .map(([seat]) => seat)
 
+        if (!voteHistory.has(day)) voteHistory.set(day, [])
+        const dayVotes = voteHistory.get(day)!
         for (const voterSeat of voterSeats) {
           const voter = statuses.get(voterSeat)!
           voter.voted = true
           voter.votedTarget = targetSeat
           voter.votedOrder = ++voteOrderCounter
           target.votedCount++
+          dayVotes.push({ voter: voterSeat, target: targetSeat })
         }
         break
       }
@@ -345,6 +351,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     kills,
     roles,
     claims,
+    voteHistory,
     day,
     finished,
     result,
