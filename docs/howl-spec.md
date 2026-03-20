@@ -113,8 +113,6 @@ Bob←
 
 When voters are **empty**, it means "all surviving players who have not yet voted this round vote for the target."
 
-**Notation mixing**: Normal vote (`→`) and multi vote (`←`) notations cannot be mixed in the same round. When the notation style changes, it is treated as an implicit revote — the vote round is reset.
-
 **Output**: `{ type: 'multiVote', voters: string[], target: string }`
 
 An empty `voters` array indicates the "all remaining" semantic.
