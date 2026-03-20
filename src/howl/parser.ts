@@ -11,6 +11,7 @@ import {
   type FollowStatement,
   type AssertStatement,
 } from './statement.ts'
+import * as V from './vocabulary.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
 
 export type ParseOptions = {
@@ -222,6 +223,67 @@ function fillMediumTargets(statements: Statement[]): Statement[] {
   })
 }
 
+const survivorsRegex = new RegExp(`^${V.survivors}$`)
+
+function expandSurvivorAsserts(statements: Statement[]): Statement[] {
+  const alive = new Set<string>()
+  const dict = new FlexibleDictionary()
+  const result: Statement[] = []
+
+  for (const s of statements) {
+    switch (s.type) {
+      case 'join': {
+        for (const p of (s as JoinStatement).players) {
+          alive.add(p)
+          dict.add(p, [p])
+        }
+        result.push(s)
+        break
+      }
+      case 'lynch': {
+        result.push(s)
+        const target = (s as LynchStatement).target
+        if (target) alive.delete(resolveName(dict, target))
+        break
+      }
+      case 'attack': {
+        for (const t of (s as AttackStatement).target) {
+          alive.delete(resolveName(dict, t))
+        }
+        result.push(s)
+        break
+      }
+      case 'curse': {
+        alive.delete(resolveName(dict, (s as CurseStatement).target))
+        result.push(s)
+        break
+      }
+      case 'follow': {
+        alive.delete(resolveName(dict, (s as FollowStatement).target))
+        result.push(s)
+        break
+      }
+      case 'assert': {
+        const st = s as AssertStatement
+        if (survivorsRegex.test(st.actor)) {
+          for (const player of alive) {
+            const assertions = st.assertions.map(a => ({ ...a, player }))
+            result.push({ ...st, actor: player, assertions } as AssertStatement)
+          }
+        } else {
+          result.push(s)
+        }
+        break
+      }
+      default:
+        result.push(s)
+        break
+    }
+  }
+
+  return result
+}
+
 function assignDays(statements: Statement[]): Statement[] {
   let day = 1
   let inNight = false
@@ -257,6 +319,7 @@ export function parse(text: string, options: ParseOptions = {}): { meta: any, st
   }
 
   statements = fillMultiVoteVoters(statements, mergedOptions)
+  statements = expandSurvivorAsserts(statements)
   statements = fillMediumTargets(statements)
   statements = assignDays(statements)
 

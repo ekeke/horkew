@@ -61,3 +61,4 @@ export const race = `(?:${isHuman}|${isWolf})`
 // ********************************* Modifiers
 
 export const denial = `(?:非)`
+export const survivors = `(?:生存者|全員)`

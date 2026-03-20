@@ -535,6 +535,72 @@ Bob　霊CO　Charlie白
   })
 })
 
+describe('expandSurvivorAsserts', () => {
+  function findAsserts(text: string) {
+    return parse(text).statements
+      .filter((s: any) => s.type === 'assert')
+      .map((s: any) => ({ actor: s.actor, assertions: s.assertions }))
+  }
+
+  test('生存者 非猫CO expands to all survivors', () => {
+    const text = `+Alice,Bob,Charlie,Dave,Eve
+噛み Alice
+生存者 非猫CO`
+    const asserts = findAsserts(text)
+    // Alice is dead, so 4 survivors
+    assert.strictEqual(asserts.length, 4)
+    const actors = asserts.map((a: any) => a.actor).sort()
+    assert.deepStrictEqual(actors, ['Bob', 'Charlie', 'Dave', 'Eve'])
+    for (const a of asserts) {
+      assert.strictEqual(a.assertions.length, 1)
+      assert.deepStrictEqual(a.assertions[0].roles, ['nekomata'])
+      assert.strictEqual(a.assertions[0].negative, true)
+      assert.strictEqual(a.assertions[0].player, a.actor)
+    }
+  })
+
+  test('全員 非猫CO works as alias', () => {
+    const text = `+Alice,Bob,Charlie
+全員 非猫CO`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts.length, 3)
+    const actors = asserts.map((a: any) => a.actor).sort()
+    assert.deepStrictEqual(actors, ['Alice', 'Bob', 'Charlie'])
+  })
+
+  test('生存者 非占CO expands for seer denial', () => {
+    const text = `+Alice,Bob,Charlie
+噛み Alice
+生存者 非占CO`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts.length, 2)
+    for (const a of asserts) {
+      assert.deepStrictEqual(a.assertions[0].roles, ['seer'])
+      assert.strictEqual(a.assertions[0].negative, true)
+    }
+  })
+
+  test('lynch and attack victims are excluded from expansion', () => {
+    const text = `+Alice,Bob,Charlie,Dave,Eve
+噛み Alice
+吊り Bob
+噛み Charlie
+生存者 非猫CO`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts.length, 2)
+    const actors = asserts.map((a: any) => a.actor).sort()
+    assert.deepStrictEqual(actors, ['Dave', 'Eve'])
+  })
+
+  test('regular assert statements are not expanded', () => {
+    const text = `+Alice,Bob,Charlie
+Alice 非猫CO`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts.length, 1)
+    assert.strictEqual(asserts[0].actor, 'Alice')
+  })
+})
+
 describe('curse and follow statements in parser', () => {
   test('curse removes target from alive set', () => {
     const howl = `+アリス、ボブ、チャーリー、デイブ
