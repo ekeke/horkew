@@ -44,6 +44,39 @@ export type DayAssertion = {
   species: EnumSpecies
 } | null
 
+// --- Vote status types ---
+
+export type VoteRow = {
+  seat: number
+  name: string
+  votedCount: number
+  voters: { seat: number, name: string, votedOrder: number }[]
+}
+
+export type VoteStatus = {
+  rows: VoteRow[]
+  pending: { seat: number, name: string }[]
+  remainingVotes: number
+  totalVoters: number
+  hasAnyVotes: boolean
+  executionOccurred: boolean
+}
+
+export type VoteVerdict =
+  | 'execution_locked'
+  | 'runoff_locked'
+  | 'at_risk'
+  | 'safe'
+
+export type VoteVerdictInfo = {
+  verdict: VoteVerdict
+  savedBy?: string                    // for safe: name of voter who caused salvation
+  runoffVoterName?: string            // name of voter whose vote triggered runoff lock
+  runoffVoterOrder?: number           // their votedOrder (for highlighting if in voters column)
+  executionVoterName?: string         // name of voter whose vote triggered execution lock
+  executionVoterOrder?: number        // their votedOrder
+}
+
 // --- Role ordering for CO table grouping ---
 
 const roleOrder: string[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
@@ -186,6 +219,145 @@ export function buildAssertionTimeline(
   }
 
   return timeline
+}
+
+// --- Vote extraction ---
+
+export function extractVoteStatus(vs: VillageStatus, players: Map<number, string>): VoteStatus {
+  const votersBySeat = new Map<number, { seat: number, name: string, votedOrder: number }[]>()
+  const pending: { seat: number, name: string }[] = []
+  let hasAnyVotes = false
+
+  for (const [seat, status] of vs.statuses) {
+    if (!status.surviving) continue
+    if (status.voted) {
+      hasAnyVotes = true
+      const target = status.votedTarget
+      if (!votersBySeat.has(target)) votersBySeat.set(target, [])
+      votersBySeat.get(target)!.push({ seat, name: players.get(seat) ?? `#${seat}`, votedOrder: status.votedOrder })
+    } else {
+      pending.push({ seat, name: players.get(seat) ?? `#${seat}` })
+    }
+  }
+
+  // Sort each voter list by vote order
+  for (const voters of votersBySeat.values()) {
+    voters.sort((a, b) => a.votedOrder - b.votedOrder)
+  }
+
+  // Build rows only for players with at least 1 vote
+  const rows: VoteRow[] = []
+  for (const [seat, status] of vs.statuses) {
+    if (!status.surviving) continue
+    if (status.votedCount === 0) continue
+    rows.push({
+      seat,
+      name: players.get(seat) ?? `#${seat}`,
+      votedCount: status.votedCount,
+      voters: votersBySeat.get(seat) ?? [],
+    })
+  }
+
+  // Sort by votedCount descending, then seat ascending
+  rows.sort((a, b) => b.votedCount - a.votedCount || a.seat - b.seat)
+
+  const totalVoters = [...vs.statuses.values()].filter(s => s.surviving).length
+
+  return {
+    rows,
+    pending,
+    remainingVotes: pending.length,
+    totalVoters,
+    hasAnyVotes,
+    executionOccurred: vs.executions.has(vs.day),
+  }
+}
+
+export function computeVerdicts(status: VoteStatus): Map<number, VoteVerdictInfo> {
+  const { rows, remainingVotes, totalVoters } = status
+  const verdicts = new Map<number, VoteVerdictInfo>()
+
+  if (rows.length === 0) return verdicts
+
+  const maxVotes = Math.max(...rows.map(r => r.votedCount))
+
+  // Compute final verdict for each row
+  for (const row of rows) {
+    const maxOther = rows.reduce((max, r) => r.seat !== row.seat ? Math.max(max, r.votedCount) : max, 0)
+
+    if (maxOther + remainingVotes < row.votedCount) {
+      // 処刑確定: no one can even tie with this candidate
+      verdicts.set(row.seat, { verdict: 'execution_locked' })
+    } else if (maxOther + remainingVotes <= row.votedCount) {
+      // 決戦以上確定: someone can tie but no one can surpass
+      verdicts.set(row.seat, { verdict: 'runoff_locked' })
+    } else if (row.votedCount + remainingVotes < maxVotes) {
+      // 安全域: can't reach current max even with all remaining votes
+      verdicts.set(row.seat, { verdict: 'safe' })
+    } else {
+      verdicts.set(row.seat, { verdict: 'at_risk' })
+    }
+  }
+
+  // Simulate votes in chronological order to find decisive voters
+  const needsDecisive = rows.filter(r => verdicts.get(r.seat)?.verdict !== 'at_risk')
+  if (needsDecisive.length > 0) {
+    const allVotes: { voterSeat: number, voterName: string, targetSeat: number, votedOrder: number }[] = []
+    for (const row of rows) {
+      for (const voter of row.voters) {
+        allVotes.push({ voterSeat: voter.seat, voterName: voter.name, targetSeat: row.seat, votedOrder: voter.votedOrder })
+      }
+    }
+    allVotes.sort((a, b) => a.votedOrder - b.votedOrder)
+
+    const counts = new Map<number, number>()
+    const foundRunoff = new Set<number>()
+    const foundExec = new Set<number>()
+    const foundSafe = new Set<number>()
+
+    for (let i = 0; i < allVotes.length; i++) {
+      const vote = allVotes[i]
+      counts.set(vote.targetSeat, (counts.get(vote.targetSeat) ?? 0) + 1)
+      const remaining = totalVoters - (i + 1)
+
+      for (const candidate of needsDecisive) {
+        const info = verdicts.get(candidate.seat)!
+        const cCount = counts.get(candidate.seat) ?? 0
+        const maxOther = rows.reduce((max, r) =>
+          r.seat !== candidate.seat ? Math.max(max, counts.get(r.seat) ?? 0) : max, 0)
+
+        // Runoff threshold: maxOther + remaining <= cCount
+        // The triggering voter is whoever cast this vote (not necessarily for the candidate)
+        if (!foundRunoff.has(candidate.seat) && (info.verdict === 'execution_locked' || info.verdict === 'runoff_locked')) {
+          if (maxOther + remaining <= cCount) {
+            info.runoffVoterName = vote.voterName
+            info.runoffVoterOrder = vote.votedOrder
+            foundRunoff.add(candidate.seat)
+          }
+        }
+
+        // Execution threshold: maxOther + remaining < cCount
+        if (!foundExec.has(candidate.seat) && info.verdict === 'execution_locked') {
+          if (maxOther + remaining < cCount) {
+            info.executionVoterName = vote.voterName
+            info.executionVoterOrder = vote.votedOrder
+            foundExec.add(candidate.seat)
+          }
+        }
+
+        // Safe threshold: cCount + remaining < currentMax
+        if (!foundSafe.has(candidate.seat) && info.verdict === 'safe') {
+          const currentMax = rows.reduce((max, r) => Math.max(max, counts.get(r.seat) ?? 0), 0)
+          if (cCount + remaining < currentMax) {
+            info.savedBy = vote.voterName
+            foundSafe.add(candidate.seat)
+          }
+        }
+      }
+    }
+  }
+
+  return verdicts
 }
 
 /**

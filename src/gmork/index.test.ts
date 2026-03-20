@@ -15,6 +15,7 @@ function createSeatStatus(overrides: Partial<SeatStatus> = {}): SeatStatus {
     deniedRoles: [],
     votedCount: 0,
     votedTarget: -1,
+    votedOrder: 0,
     actions: new Map(),
     assertions: new Map(),
     ...overrides,

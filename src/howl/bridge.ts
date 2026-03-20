@@ -33,6 +33,7 @@ function createSeatStatus(): SeatStatus {
     deniedRoles: [],
     votedCount: 0,
     votedTarget: -1,
+    votedOrder: 0,
     actions: new Map(),
     assertions: new Map(),
   }
@@ -77,6 +78,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   let result: VillageResult = undefined
   let lastDeathEvent: 'execution' | 'night_kill' = 'execution'
   let claimCounter = 0
+  let voteOrderCounter = 0
 
   function resolveSeat(name: string): number {
     const results = dict.search(name)
@@ -94,7 +96,9 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         status.voted = false
         status.votedCount = 0
         status.votedTarget = -1
+        status.votedOrder = 0
       }
+      voteOrderCounter = 0
     }
   }
 
@@ -121,6 +125,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         const target = statuses.get(targetSeat)!
         voter.voted = true
         voter.votedTarget = targetSeat
+        voter.votedOrder = ++voteOrderCounter
         target.votedCount++
         break
       }
@@ -141,6 +146,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           const voter = statuses.get(voterSeat)!
           voter.voted = true
           voter.votedTarget = targetSeat
+          voter.votedOrder = ++voteOrderCounter
           target.votedCount++
         }
         break
@@ -219,7 +225,9 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           status.voted = false
           status.votedCount = 0
           status.votedTarget = -1
+          status.votedOrder = 0
         }
+        voteOrderCounter = 0
         break
       }
 

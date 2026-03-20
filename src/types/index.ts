@@ -45,6 +45,7 @@ export type SeatStatus = {
   deniedRoles: SystemRole[]
   votedCount: number
   votedTarget: number
+  votedOrder: number
   actions: PlayerAction
   assertions: Assertions
 }

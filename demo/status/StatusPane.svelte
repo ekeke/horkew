@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { VillageStatus } from '../../src/types/index.ts'
-  import { extractSurvivorInfo, extractDeathHistory, extractClaimGroups } from './extract.ts'
+  import { extractSurvivorInfo, extractDeathHistory, extractClaimGroups, extractVoteStatus } from './extract.ts'
   import SurvivorSection from './SurvivorSection.svelte'
+  import VoteTable from './VoteTable.svelte'
   import DeathHistory from './DeathHistory.svelte'
   import ClaimTable from './ClaimTable.svelte'
 
@@ -11,6 +12,7 @@
   } = $props()
 
   let survivorInfo = $derived(extractSurvivorInfo(vs, players))
+  let voteStatus = $derived(extractVoteStatus(vs, players))
   let deathHistory = $derived(extractDeathHistory(vs, players))
   let claimGroups = $derived(extractClaimGroups(vs, players))
   let survivors = $derived(new Set(survivorInfo.survivors.map(s => s.seat)))
@@ -35,6 +37,7 @@
 
 <div class="status-pane">
   <SurvivorSection info={survivorInfo} />
+  <VoteTable status={voteStatus} />
   <DeathHistory days={deathHistory} />
   <ClaimTable groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} />
 </div>
