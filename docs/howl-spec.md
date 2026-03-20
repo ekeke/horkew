@@ -15,7 +15,7 @@ body (statements, one per line)
 
 ### Frontmatter
 
-Optional YAML block delimited by `---`. Contains metadata such as game setup configuration.
+Optional YAML block delimited by `---`. Contains metadata such as game setup configuration and rules.
 
 ```yaml
 ---
@@ -26,6 +26,8 @@ setup:
   medium: 1
   bodyguard: 1
   possessed: 1
+rules:
+  vote.final: revote   # final vote candidates can vote (default: they cannot)
 ---
 ```
 
@@ -121,7 +123,7 @@ An empty `voters` array indicates the "all remaining" semantic.
 
 Night kill(s). Advances the day counter.
 
-**Syntax**: `襲撃` or `噛み` followed by delimiter and target(s). For single-target actions, the delimiter may be omitted and the order may be transposed (e.g., `target噛`).
+**Syntax**: `襲撃`, `噛み`, `噛`, or `死亡` followed by delimiter and target(s). For single-target actions, the delimiter may be omitted and the order may be transposed (e.g., `target噛`).
 
 ```
 襲撃 Alice
@@ -133,13 +135,14 @@ Night kill(s). Advances the day counter.
 
 ### 5. Lynch (`lynch`)
 
-Daytime execution of a player, or declaration that no execution occurred.
+Daytime execution of a player, or declaration that no execution occurred. Supports transposition for single-target (e.g., `ボブ吊り`).
 
 **Syntax**: `吊り` or `処刑` followed by delimiter and target, or followed by a "none" keyword.
 
 ```
 吊り Alice
 処刑：ボブ
+ボブ吊り
 ```
 
 To indicate no execution took place, append `なし`, `無し`, or `ナシ` (optionally preceded by `者`):
@@ -156,24 +159,51 @@ To indicate no execution took place, append `なし`, `無し`, or `ナシ` (opt
 
 When `target` is `null`, no player is executed on that day.
 
-### 6. Revote (`revote`)
+### 6. Curse (`curse`)
+
+Nekomata's death curse — a player is killed as a side effect of the nekomata dying. Supports transposition.
+
+**Syntax**: `道連れ` or `猫又の呪い` followed by target.
+
+```
+道連れ ボブ
+猫又の呪い アリス
+```
+
+**Output**: `{ type: 'curse', target: string }`
+
+### 7. Follow (`follow`)
+
+Immoralist's follow-death — the immoralist dies when their linked werehamster dies. Supports transposition.
+
+**Syntax**: `後追い` followed by target.
+
+```
+後追い ボブ
+```
+
+**Output**: `{ type: 'follow', target: string }`
+
+### 8. Revote (`revote`)
 
 Resets all vote state. Optionally lists candidates for a final vote.
 
-**Syntax**: `再投票` optionally followed by candidate names, or `---`/`===` (dashes/equals, 2+).
+**Syntax**: `再投票` optionally followed by candidate names, or separator lines (`--`, `==`, `ーー`, `＝＝`, each 2+ characters).
 
 ```
 再投票 Alice, Bob
 再投票
 ---
 ===
+ーーー
+＝＝＝
 ```
 
 When targets are empty, it is a simple revote reset with no candidate restriction.
 
 **Output**: `{ type: 'revote', targets: string[] }`
 
-### 7. Over (`over`)
+### 9. Over (`over`)
 
 Declares the game result.
 
@@ -195,7 +225,7 @@ Declares the game result.
 
 **Output**: `{ type: 'over', result: 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw' }`
 
-### 8. Peace (`peace`)
+### 10. Peace (`peace`)
 
 No night kill occurred. Advances the day counter.
 
@@ -207,9 +237,9 @@ No night kill occurred. Advances the day counter.
 
 **Output**: `{ type: 'peace' }`
 
-### 9. Mason (`mason`)
+### 11. Mason (`mason`)
 
-Shorthand for declaring mason (共有) players. Parsed as an assert statement.
+Shorthand for declaring mason (共有) players.
 
 **Syntax**: `共有` (or variants) followed by delimiter and player names.
 
@@ -218,9 +248,9 @@ Shorthand for declaring mason (共有) players. Parsed as an assert statement.
 共：アリス、ボブ
 ```
 
-**Output**: `{ type: 'assert', actor: string, assertions: [{ player, roles: ['mason'] }, ...] }`
+**Output**: `{ type: 'mason', players: string[] }`
 
-### 10. Assert (`assert`)
+### 12. Assert (`assert`)
 
 Role claims and divination/medium/guard action results.
 
@@ -229,7 +259,7 @@ Role claims and divination/medium/guard action results.
 Where:
 - **roleCO**: Role name + `CO` (coming out). `CO` is case-insensitive (`CO`, `co`, `Co`, `ＣＯ`).
 - **history**: Sequence of `[day] [target] action` entries
-  - **action**: `白`/`◯`/`○` (human), `黒`/`●` (wolf), or `護衛`/`ガード` (guard)
+  - **action**: `白`/`◯`/`○`/`〇` (human), `黒`/`●` (wolf), or `護衛`/`護`/`ガード` (guard)
   - **day**: Optional, e.g. `3日`, `3日目`, `3d`, `3day`, `３ｄ`
 
 #### Role Names for CO
@@ -245,6 +275,28 @@ Each role accepts multiple notations:
 | Nekomata (猫又) | `猫又`, `猫` | `猫又CO`, `猫CO` |
 
 If the CO text does not match any known role, the claim is inferred as `nonVillage`.
+
+#### Negative CO and Multi-role CO (ギドラ)
+
+A `非` prefix denotes a negative claim — the player asserts they are NOT the given role:
+
+```
+ボブ: 非占いCO    # "I am NOT a seer"
+```
+
+Multiple roles in a single CO denote a multi-role claim (ギドラ). The player claims to be one of the listed roles without specifying which:
+
+```
+アリス: 猫狩CO    # "I am either nekomata or bodyguard"
+```
+
+#### Medium Target Auto-fill
+
+When a medium claimant reports results without explicit target names, the targets are automatically filled from the execution history in chronological order:
+
+```
+ボブ: 霊媒CO 白 黒    # targets filled from 1st and 2nd lynch victims
+```
 
 #### Examples
 
@@ -274,6 +326,12 @@ Alice: 共CO
 
 # CO only, no history yet
 アリス: 占いCO
+
+# Negative CO
+ボブ: 非占いCO
+
+# Multi-role CO (ギドラ)
+アリス: 猫狩CO
 ```
 
 **Roles recognized**: 占い/seer, 霊媒/medium, 護衛/bodyguard, 共有/mason, 猫又/nekomata. If no known role matches, `nonVillage` is inferred.
@@ -283,6 +341,7 @@ Alice: 共CO
 Each assertion contains:
 - `player`: The actor making the claim
 - `roles?`: Role(s) claimed (on CO entries)
+- `negative?`: `true` if this is a negative claim (`非CO`)
 - `target?`: Target of the action
 - `result?`: `'isHuman'` or `'isWolf'` (on divination/medium results)
 - `action?`: `'guard'` (on bodyguard actions)
@@ -305,7 +364,7 @@ This also handles **result slides** (結果スライド): when a player corrects
 百面ダイス: スレッタ黒        # → Night 0: スレッタ● (overwrites グロ○)
 ```
 
-### 11. Reveal (`reveal`)
+### 13. Reveal (`reveal`)
 
 Reveals a player's actual role (post-game or GM disclosure).
 
@@ -318,7 +377,7 @@ Alice=占い
 
 **Output**: `{ type: 'reveal', player: string, role: string }`
 
-### 12. Unknown (`unknown`)
+### 14. Unknown (`unknown`)
 
 Any line that does not match the above parsers.
 
@@ -333,13 +392,23 @@ Statements are tried in this order. The first match wins:
 3. `multiVote`
 4. `attack`
 5. `lynch`
-6. `revote`
-7. `over`
-8. `peace`
-9. `mason`
-10. `assert`
-11. `reveal`
-12. `unknown` (fallback)
+6. `curse`
+7. `follow`
+8. `revote`
+9. `over`
+10. `peace`
+11. `mason`
+12. `assert`
+13. `reveal`
+14. `unknown` (fallback)
+
+## Post-Processing Pipeline
+
+After parsing, statements go through three post-processing passes:
+
+1. **Multi-vote voter filling**: Empty voter lists in `multiVote` statements are expanded to all surviving, non-voted players. In final vote rounds (after revote), candidates are excluded from voting unless `rules.vote.final` is set to `revote`.
+2. **Medium target filling**: For medium claimants, result assertions without explicit targets are filled from the chronological execution history.
+3. **Day assignment**: Each statement receives a `day` number. Attack and peace statements advance the day counter.
 
 ## Example Game Log
 

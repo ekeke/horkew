@@ -51,5 +51,16 @@ export function preprocess(input: string): PreprocessResult {
     }
   })
 
-  return { meta, lines }
+  // Join行（+で始まる）を先頭に巻き上げ
+  const joinLines: Line[] = []
+  const otherLines: Line[] = []
+  for (const line of lines) {
+    if (/^[+＋]/.test(line.content)) {
+      joinLines.push(line)
+    } else {
+      otherLines.push(line)
+    }
+  }
+
+  return { meta, lines: [...joinLines, ...otherLines] }
 }

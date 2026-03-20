@@ -64,3 +64,39 @@ test('preprocess function - handles empty input', () => {
   assert.deepStrictEqual(result.meta, expectedMeta, 'Meta data should be empty')
   assert.deepStrictEqual(result.lines, expectedLines, 'Processed lines should be empty')
 })
+
+test('preprocess function - hoists join lines to the top', () => {
+  const input = `アリス: 占いCO ボブ白
++アリス、ボブ、チャーリー
+吊り ボブ`
+
+  const result = preprocess(input)
+
+  assert.strictEqual(result.lines[0].content, '+アリス、ボブ、チャーリー', 'Join line should be hoisted to first position')
+  assert.strictEqual(result.lines[1].content, 'アリス: 占いCO ボブ白')
+  assert.strictEqual(result.lines[2].content, '吊り ボブ')
+})
+
+test('preprocess function - hoists full-width join lines', () => {
+  const input = `吊り ボブ
+＋アリス、ボブ`
+
+  const result = preprocess(input)
+
+  assert.strictEqual(result.lines[0].content, '＋アリス、ボブ', 'Full-width + join should be hoisted')
+  assert.strictEqual(result.lines[1].content, '吊り ボブ')
+})
+
+test('preprocess function - preserves order among multiple join lines', () => {
+  const input = `吊り ボブ
++アリス、ボブ
+噛み チャーリー
++デイブ、エミリー`
+
+  const result = preprocess(input)
+
+  assert.strictEqual(result.lines[0].content, '+アリス、ボブ')
+  assert.strictEqual(result.lines[1].content, '+デイブ、エミリー')
+  assert.strictEqual(result.lines[2].content, '吊り ボブ')
+  assert.strictEqual(result.lines[3].content, '噛み チャーリー')
+})
