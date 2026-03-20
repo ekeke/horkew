@@ -1,8 +1,11 @@
 <script lang="ts">
   import type { DayDeaths } from './extract.ts'
   import { causeOfDeathLabel } from './extract.ts'
+  import PlayerName from './PlayerName.svelte'
 
   let { days }: { days: DayDeaths[] } = $props()
+
+  const nightKillCauses = new Set(['night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata'])
 </script>
 
 <div class="section">
@@ -24,13 +27,13 @@
           <tr class="kill-row">
             <td class="type-cell kill-type">襲撃</td>
             {#each days as { nightKills }}
-              <td class="name-cell">{#each nightKills as entry, i}{#if i > 0}、{/if}{entry.name}{#if entry.causeOfDeath !== 'night_kill'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
+              <td class="name-cell">{#each nightKills as entry, i}{#if i > 0}、{/if}<PlayerName dead={true} nightKill={nightKillCauses.has(entry.causeOfDeath)}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'night_kill'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
             {/each}
           </tr>
           <tr class="exec-row">
             <td class="type-cell exec-type">処刑</td>
             {#each days as { executions }}
-              <td class="name-cell">{#each executions as entry, i}{#if i > 0}、{/if}{entry.name}{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
+              <td class="name-cell">{#each executions as entry, i}{#if i > 0}、{/if}<PlayerName dead={true}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}</td>
             {/each}
           </tr>
         </tbody>

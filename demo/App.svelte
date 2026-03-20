@@ -5,13 +5,21 @@
   import { systemRoles } from '../src/types/index.ts'
   import { stringifyStatements, type StringifiedLine } from './stringify.ts'
   import type { RetarResponse, SeatResult } from './analysis.worker.ts'
-  import type { SystemRole, VillageStatus } from '../src/types/index.ts'
+  import type { SystemRole, VillageStatus, CauseOfDeath } from '../src/types/index.ts'
   import AnalysisWorker from './analysis.worker.ts?worker'
   import StatusPane from './status/StatusPane.svelte'
+  import PlayerName from './status/PlayerName.svelte'
+
+  const nightKillCauses: Set<CauseOfDeath> = new Set([
+    'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
+  ])
 
   const STORAGE_PREFIX = 'horkew:'
   const ACTIVE_KEY = 'horkew:__active__'
   const PANES_KEY = 'horkew:__panes__'
+  const SKIN_KEY = 'horkew:__skin__'
+
+  type Skin = 'flat' | 'excite'
 
   const paneEntries = [
     { id: 'rawStatements', label: 'Raw Statements' },
@@ -76,10 +84,12 @@
   let analyzing = $state(false)
   let survivorInfo = $state({ alive: 0, total: 0 })
   let deadSeats: Set<number> = $state(new Set())
+  let nightKilledSeats: Set<number> = $state(new Set())
   let players: Map<number, string> = $state(new Map())
   let villageStatus: VillageStatus | null = $state(null)
   let assumptions: Map<number, SystemRole> = $state(new Map())
   let worker: Worker | null = null
+  let skin: Skin = $state((localStorage.getItem(SKIN_KEY) as Skin) ?? 'flat')
   let paneVisible: Record<PaneId, boolean> = $state(loadPaneVisibility())
   let showPaneMenu = $state(false)
   let showModal = $state(false)
@@ -279,6 +289,11 @@
       const alive = [...vs.statuses.values()].filter(s => s.surviving).length
       survivorInfo = { alive, total: vs.statuses.size }
       deadSeats = new Set([...vs.statuses.entries()].filter(([, s]) => !s.surviving).map(([seat]) => seat))
+      nightKilledSeats = new Set(
+        [...vs.statuses.entries()]
+          .filter(([, s]) => !s.surviving && s.causeOfDeath && nightKillCauses.has(s.causeOfDeath))
+          .map(([seat]) => seat)
+      )
 
       const roleOrder = [...systemRoles.keys()] as SystemRole[]
       analysisColumns = roleOrder.filter(r => setup.has(r as SystemRole))
@@ -324,7 +339,7 @@
   }
 </script>
 
-<div class="layout">
+<div class="layout skin-{skin}">
   <header class="header">
     <span class="header-title">Horkew</span>
 
@@ -343,6 +358,11 @@
     <button class="header-btn" onclick={openNewModal}>New</button>
 
     <div class="header-spacer"></div>
+
+    <select class="header-select skin-select" value={skin} onchange={(e) => { skin = (e.target as HTMLSelectElement).value as Skin; localStorage.setItem(SKIN_KEY, skin) }}>
+      <option value="flat">Flat</option>
+      <option value="excite">Excite</option>
+    </select>
 
     <div class="pane-menu-wrap">
       <button class="header-btn" onclick={() => showPaneMenu = !showPaneMenu}>Panes</button>
@@ -444,7 +464,7 @@
                 {#each [...players] as [seat, name]}
                   {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
                   <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
-                    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span>{name}</td>
+                    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)}>{name}</PlayerName></td>
                     {#each analysisColumns as role}
                       <td
                         class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"
