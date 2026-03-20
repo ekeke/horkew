@@ -108,11 +108,11 @@ describe('gmork integration: ultimate.5.3', () => {
       assert.strictEqual(analysis.seer.candidates.length, 2)
     })
 
-    it('ダンカンは破綻: 対抗(中田)が襲撃死かつ人外枠不足', () => {
+    it('ダンカンは破綻: 白人外数超過', () => {
       const seat = seatOf('ダンカン')
       const bust = analysis.seer.busted.get(seat)
       assert.ok(bust)
-      assert.strictEqual(bust.type, 'rival_not_wolf_no_evil_slot')
+      assert.strictEqual(bust.type, 'white_evil_exceeded')
     })
 
     it('中田が真占い師確定', () => {
@@ -125,11 +125,11 @@ describe('gmork integration: ultimate.5.3', () => {
     const emptyConfirmed = new Map()
     const seerIndependent = analyzeSeer(vs, setup, emptyConfirmed)
 
-    it('ダンカンは破綻: 対抗(中田)が襲撃死かつ人外枠不足', () => {
+    it('ダンカンは破綻: 白人外数超過 (Retar無しでも検出)', () => {
       const seat = seatOf('ダンカン')
       const bust = seerIndependent.busted.get(seat)
       assert.ok(bust, 'ダンカンはRetar無しでも破綻すべき')
-      assert.strictEqual(bust.type, 'rival_not_wolf_no_evil_slot')
+      assert.strictEqual(bust.type, 'white_evil_exceeded')
     })
 
     it('Retar無しでも中田が真占い師確定', () => {

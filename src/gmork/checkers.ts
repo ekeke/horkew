@@ -318,10 +318,17 @@ function checkVillageWon({ village, status, role }: CheckerInput): DenialReason 
 
 function checkLiarBudget({ village, setup, status, role }: CheckerInput): DenialReason | null {
   const coRoles: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+  const roleNameJa: Record<string, string> = {
+    seer: '占い', medium: '霊媒', bodyguard: '狩人', mason: '共有', nekomata: '猫又',
+    werewolf: '人狼', possessed: '狂人', fanatic: '狂信者', werehamster: '妖狐', immoralist: '背徳者',
+    villager: '村人',
+  }
 
   let evilCapacity = 0
+  const evilParts: string[] = []
   for (const r of evilRoles) {
-    evilCapacity += setup.get(r) || 0
+    const c = setup.get(r) || 0
+    if (c > 0) { evilCapacity += c; evilParts.push(`${roleNameJa[r]}${c}`) }
   }
   if (evilRoles.includes(role)) {
     evilCapacity -= 1
@@ -329,6 +336,8 @@ function checkLiarBudget({ village, setup, status, role }: CheckerInput): Denial
   if (evilCapacity < 0) return null
 
   let minFakes = 0
+  const breakdown: { label: string, count: number }[] = []
+
   for (const r of coRoles) {
     const claimants = (village.claims.get(r) || []) as Seat[]
     let realSlots = setup.get(r) || 0
@@ -338,18 +347,32 @@ function checkLiarBudget({ village, setup, status, role }: CheckerInput): Denial
     }
 
     const seatClaimsR = status.claiming && status.claimingRole === r
+    let fakes: number
 
     if (seatClaimsR && role !== r) {
-      minFakes += 1 + Math.max(0, claimants.length - 1 - realSlots)
+      fakes = 1 + Math.max(0, claimants.length - 1 - realSlots)
     } else if (seatClaimsR && role === r) {
-      minFakes += Math.max(0, claimants.length - 1 - realSlots)
+      fakes = Math.max(0, claimants.length - 1 - realSlots)
     } else {
-      minFakes += Math.max(0, claimants.length - realSlots)
+      fakes = Math.max(0, claimants.length - realSlots)
+    }
+
+    if (fakes > 0) {
+      if (seatClaimsR && role !== r) {
+        breakdown.push({ label: `自身の${roleNameJa[r]}COが偽で${fakes}人`, count: fakes })
+      } else {
+        breakdown.push({ label: `${roleNameJa[r]}の偽者(${claimants.length}CO中${realSlots}枠)に${fakes}人`, count: fakes })
+      }
+      minFakes += fakes
     }
   }
 
   if (minFakes > evilCapacity) {
-    return { type: 'liar_budget_exceeded', required: minFakes, available: evilCapacity }
+    const hypothesisLabel = `${roleNameJa[role] || role}`
+    const budgetDetail = evilRoles.includes(role)
+      ? `${evilParts.join('・')}から自身を除いた${evilCapacity}`
+      : `${evilParts.join('・')}の計${evilCapacity}`
+    return { type: 'liar_budget_exceeded', required: minFakes, available: evilCapacity, budgetDetail, hypothesisLabel, breakdown }
   }
   return null
 }

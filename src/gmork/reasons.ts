@@ -33,7 +33,7 @@ export type DenialReason =
   | { type: 'all_hamsters_dead', lastHamsterDiedDay: Day }
   // Tier 3: Chained reasoning
   | { type: 'village_won_survivor' }
-  | { type: 'liar_budget_exceeded', required: number, available: number }
+  | { type: 'liar_budget_exceeded', required: number, available: number, budgetDetail: string, hypothesisLabel: string, breakdown: { label: string, count: number }[] }
 
 export type CheckerInput = {
   village: VillageStatus

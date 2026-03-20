@@ -883,5 +883,6 @@
     font-family: 'Consolas', 'Menlo', monospace;
     font-size: 13px;
     color: #a6adc8;
+    white-space: pre-wrap;
   }
 </style>

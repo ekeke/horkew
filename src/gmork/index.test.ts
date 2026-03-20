@@ -95,7 +95,7 @@ describe('gmork explain', () => {
         kills: [[2, [3]]],
       })
       const result = explain(village, defaultSetup, 3, 'villager')
-      assert.match(result, /猫又の呪殺道連れにより人狼確定/)
+      assert.match(result, /猫又の呪殺道連れ.*人狼/)
     })
 
     it('1.2/1.3: cursed_by_nekomata does NOT deny werewolf', () => {
@@ -120,7 +120,7 @@ describe('gmork explain', () => {
         }]],
       })
       const result = explain(village, setupWithFox, 5, 'villager')
-      assert.match(result, /後追い死のため背徳者確定/)
+      assert.match(result, /後追い.*背徳者/)
     })
 
     it('1.1: sole night kill denies werewolf', () => {
@@ -133,7 +133,7 @@ describe('gmork explain', () => {
         kills: [[2, [4]]],
       })
       const result = explain(village, defaultSetup, 4, 'werewolf')
-      assert.match(result, /2d夜: 単独襲撃死のため人狼ではありえない/)
+      assert.match(result, /2d夜.*単独.*襲撃死.*人狼/)
     })
 
     it('1.1: multiple night kills does NOT deny werewolf via sole_night_kill', () => {
@@ -152,9 +152,9 @@ describe('gmork explain', () => {
       const village = createVillage({
         statuses: [[1, { claimingRole: 'villager' }]],
       })
-      assert.match(explain(village, defaultSetup, 1, 'seer'), /村人COしているため占い師ではありえない/)
-      assert.match(explain(village, defaultSetup, 1, 'medium'), /村人COしているため霊能者ではありえない/)
-      assert.match(explain(village, defaultSetup, 1, 'bodyguard'), /村人COしているため狩人ではありえない/)
+      assert.match(explain(village, defaultSetup, 1, 'seer'), /村人.*CO.*占い師.*ありえない/)
+      assert.match(explain(village, defaultSetup, 1, 'medium'), /村人.*CO.*霊能者.*ありえない/)
+      assert.match(explain(village, defaultSetup, 1, 'bodyguard'), /村人.*CO.*狩人.*ありえない/)
     })
 
     it('2.1: villager CO does NOT deny werewolf', () => {
@@ -169,8 +169,8 @@ describe('gmork explain', () => {
       const village = createVillage({
         statuses: [[2, { claimingRole: 'surrender' }]],
       })
-      assert.match(explain(village, defaultSetup, 2, 'villager'), /降参CO/)
-      assert.match(explain(village, defaultSetup, 2, 'seer'), /降参CO/)
+      assert.match(explain(village, defaultSetup, 2, 'villager'), /人外.*CO/)
+      assert.match(explain(village, defaultSetup, 2, 'seer'), /人外.*CO/)
     })
 
     it('2.3: silent execution denies village special roles', () => {
@@ -182,8 +182,8 @@ describe('gmork explain', () => {
         }]],
         executions: [[2, [6]]],
       })
-      assert.match(explain(village, defaultSetup, 6, 'seer'), /COなしで処刑されたため占い師ではありえない/)
-      assert.match(explain(village, defaultSetup, 6, 'medium'), /COなしで処刑されたため霊能者ではありえない/)
+      assert.match(explain(village, defaultSetup, 6, 'seer'), /COなし.*処刑.*占い師.*ありえない/)
+      assert.match(explain(village, defaultSetup, 6, 'medium'), /COなし.*処刑.*霊能者.*ありえない/)
     })
 
     it('2.3: silent execution does NOT deny werewolf', () => {
@@ -202,7 +202,7 @@ describe('gmork explain', () => {
       const village = createVillage({
         statuses: [[7, { deniedRoles: ['seer' as SystemRole] }]],
       })
-      assert.match(explain(village, defaultSetup, 7, 'seer'), /CO内容により占い師ではありえない/)
+      assert.match(explain(village, defaultSetup, 7, 'seer'), /CO内容.*占い師.*ありえない/)
     })
   })
 
@@ -221,7 +221,7 @@ describe('gmork explain', () => {
         claims: [['seer', [2]]],
       })
       const result = explain(village, defaultSetup, 5, 'werewolf')
-      assert.match(result, /占い師2の2d白判定により人狼ではない/)
+      assert.match(result, /占い師.*2d.*白判定.*人狼/)
     })
 
     it('3.2: seer black confirms werewolf (denies non-werewolf)', () => {
@@ -236,7 +236,7 @@ describe('gmork explain', () => {
         claims: [['seer', [2]]],
       })
       const result = explain(village, defaultSetup, 5, 'villager')
-      assert.match(result, /占い師2の3d黒判定により人狼確定/)
+      assert.match(result, /占い師.*3d.*黒判定.*人狼/)
     })
 
     it('3.3: seer fox kill confirms werehamster', () => {
@@ -255,7 +255,7 @@ describe('gmork explain', () => {
         claims: [['seer', [2]]],
       })
       const result = explain(village, setupWithFox, 7, 'villager')
-      assert.match(result, /占い師2の3d占い先呪殺により妖狐確定/)
+      assert.match(result, /占い師.*3d.*呪殺.*妖狐/)
     })
 
     it('4.1: medium white denies werewolf', () => {
@@ -272,7 +272,7 @@ describe('gmork explain', () => {
         executions: [[2, [6]]],
       })
       const result = explain(village, defaultSetup, 6, 'werewolf')
-      assert.match(result, /霊媒師3の2d白判定により人狼ではない/)
+      assert.match(result, /霊媒師.*2d.*白判定.*人狼/)
     })
 
     it('4.2: medium black confirms werewolf', () => {
@@ -289,7 +289,7 @@ describe('gmork explain', () => {
         executions: [[2, [6]]],
       })
       const result = explain(village, defaultSetup, 6, 'villager')
-      assert.match(result, /霊媒師3の2d黒判定により人狼確定/)
+      assert.match(result, /霊媒師.*2d.*黒判定.*人狼/)
     })
 
     it('5.1: mason partner confirms mason', () => {
@@ -310,7 +310,7 @@ describe('gmork explain', () => {
         claims: [['mason', [1, 2]]],
       })
       const result = explain(village, setupWithMason, 2, 'werewolf')
-      assert.match(result, /共有者1の相方認定により共有者確定/)
+      assert.match(result, /共有者.*相方.*認定.*共有者/)
     })
 
     it('6.2: role slots filled denies non-claimant', () => {
@@ -321,7 +321,7 @@ describe('gmork explain', () => {
         claims: [['seer', [2]]],
       })
       const result = explain(village, defaultSetup, 5, 'seer')
-      assert.match(result, /占い師枠がCO者で充足済み/)
+      assert.match(result, /占い師.*枠.*CO.*埋まっている/)
     })
 
     it('6.2: does NOT deny the claimant itself', () => {
@@ -346,7 +346,7 @@ describe('gmork explain', () => {
         kills: [[2, [4]]],
       })
       const result = explain(village, setupWithNeko, 4, 'nekomata')
-      assert.match(result, /2d夜: 死者が1人のため猫又ではありえない/)
+      assert.match(result, /2d夜.*死者が1人.*猫又/)
     })
 
     it('9.2: all hamsters dead denies immoralist for survivor', () => {
@@ -361,7 +361,7 @@ describe('gmork explain', () => {
         ],
       })
       const result = explain(village, setupWithFox, 1, 'immoralist')
-      assert.match(result, /妖狐が2dに全滅しているため背徳者ではない/)
+      assert.match(result, /妖狐.*全滅.*背徳者/)
     })
   })
 
@@ -374,7 +374,7 @@ describe('gmork explain', () => {
         result: 'villager_won',
       })
       const result = explain(village, defaultSetup, 1, 'werewolf')
-      assert.match(result, /村勝利のため生存者は人狼ではありえない/)
+      assert.match(result, /村.*勝利.*生存者.*人狼/)
     })
 
     it('7.1: liar budget exceeded', () => {

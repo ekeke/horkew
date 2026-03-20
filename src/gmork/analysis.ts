@@ -20,11 +20,11 @@ export function getConfirmedRoles(
 export type BustReason =
   | { type: 'result_contradicts_confirmed', target: Seat, confirmedRole: SystemRole, night: Day }
   | { type: 'confirmed_as_other_role', confirmedRole: SystemRole }
-  | { type: 'rival_not_wolf_no_evil_slot', rival: Seat }
-  | { type: 'perspective_liar_budget', needed: number, budget: number, breakdown: LiarBreakdownEntry[] }
+  | { type: 'perspective_liar_budget', needed: number, budget: number, budgetDetail: string, claimerName: string, breakdown: BreakdownEntry[] }
+  | { type: 'white_evil_exceeded', needed: number, budget: number, budgetDetail: string, claimerName: string, breakdown: BreakdownEntry[] }
 
-export type LiarBreakdownEntry = {
-  label: string   // e.g. "霊媒対抗", "藤澤黒判定"
+export type BreakdownEntry = {
+  label: string
   count: number
 }
 
@@ -134,8 +134,15 @@ function checkPerspectiveLiarBudget(
   const coRoles: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
   const evilRoleNames: SystemRole[] = ['werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist']
 
+  const evilRoleNameJa: Record<string, string> = {
+    werewolf: '人狼', possessed: '狂人', fanatic: '狂信者', werehamster: '妖狐', immoralist: '背徳者',
+  }
   let evilBudget = 0
-  for (const r of evilRoleNames) evilBudget += setup.get(r) || 0
+  const evilParts: string[] = []
+  for (const r of evilRoleNames) {
+    const c = setup.get(r) || 0
+    if (c > 0) { evilBudget += c; evilParts.push(`${evilRoleNameJa[r]}${c}`) }
+  }
 
   // 全CO者を収集（黒判定との重複排除用）
   const allCoSeats = new Set<Seat>()
@@ -148,7 +155,7 @@ function checkPerspectiveLiarBudget(
     seer: '占い', medium: '霊媒', bodyguard: '狩人', mason: '共有', nekomata: '猫又',
   }
   let minFakes = 0
-  const breakdown: LiarBreakdownEntry[] = []
+  const breakdown: BreakdownEntry[] = []
 
   for (const r of coRoles) {
     const coHolders = [...(village.claims.get(r) || [])] as Seat[]
@@ -162,7 +169,9 @@ function checkPerspectiveLiarBudget(
     }
 
     if (fakes > 0) {
-      const label = r === claimRole ? `${roleNameJa[r]}対抗` : `${roleNameJa[r]}偽(${coHolders.length}CO枠${realSlots})`
+      const label = r === claimRole
+        ? `${roleNameJa[r]}対抗`
+        : `${roleNameJa[r]}の偽者(${coHolders.length}CO中${realSlots}枠)`
       breakdown.push({ label, count: fakes })
       minFakes += fakes
     }
@@ -174,14 +183,15 @@ function checkPerspectiveLiarBudget(
     if (night < 0) continue
     if (species === 'wolf' && !allCoSeats.has(target)) {
       const targetName = players?.get(target) ?? `${target}`
-      breakdown.push({ label: `${targetName}黒判定`, count: 1 })
+      breakdown.push({ label: `${targetName}への黒判定`, count: 1 })
       additionalEvil++
     }
   }
 
   const totalNeeded = minFakes + additionalEvil
   if (totalNeeded > evilBudget) {
-    return { type: 'perspective_liar_budget', needed: totalNeeded, budget: evilBudget, breakdown }
+    const claimerName = players?.get(seat) ?? `${seat}`
+    return { type: 'perspective_liar_budget', needed: totalNeeded, budget: evilBudget, budgetDetail: evilParts.join('・'), claimerName, breakdown }
   }
   return null
 }
@@ -196,13 +206,13 @@ export function analyzeSeer(
 ): RoleAnalysis {
   const base = analyzeRole(village, setup, confirmed, 'seer', 'seerResult', players)
 
-  // 追加破綻判定: 対抗占い師が襲撃死かつ人外枠不足
+  // 追加破綻判定: 白人外数超過
   // confirmed_as_other_role よりも自己完結した説明を優先する
   for (const candidate of base.candidates) {
     const existing = base.busted.get(candidate)
     if (existing && existing.type !== 'confirmed_as_other_role') continue
     const status = village.statuses.get(candidate)!
-    const bust = checkRivalSeerBust(candidate, status, village, setup, base.candidates)
+    const bust = checkWhiteEvilExceeded(candidate, status, village, setup, base.candidates, players)
     if (bust) {
       base.busted.set(candidate, bust)
     }
@@ -216,75 +226,82 @@ export function analyzeSeer(
 }
 
 /**
- * 対抗占い師の人外枠分析による破綻判定
+ * 白人外数超過による占い師破綻判定
+ *
+ * 白人外 = 占いで白(人間)判定が出る人外（狂人・狂信者・背徳者）
  *
  * この占い師が真だと仮定した場合:
- * - 白判定を出した他役職CO者のうち、枠を超える分は人外(狂人等)
- * - 占い白 = seerResult が 'human' の役職 → 人狼以外の人外(狂人・狂信者等)を消費
- * - 対抗占い師が襲撃死(=非人狼)の場合、残りの人間表示人外枠が必要
- * - 枠が不足すれば矛盾 → この占い師は破綻
+ * - 白判定を出した他役職CO者の偽者分は非人狼 → 白人外枠を消費
+ * - 対抗占い師が単独襲撃死 → 非人狼 → 白人外枠を消費
+ * - 合計がセットアップの白人外数を超えれば矛盾
  */
-function checkRivalSeerBust(
+function checkWhiteEvilExceeded(
   seerSeat: Seat,
   seerStatus: SeatStatus,
   village: VillageStatus,
   setup: Map<SystemRole, number>,
   allSeerCandidates: Seat[],
+  players?: Map<number, string>,
 ): BustReason | null {
-  const rivals = allSeerCandidates.filter(s => s !== seerSeat)
-
-  // 対抗のうち、単独襲撃死の者（人狼ではありえない）
-  const nightKilledRivals: Seat[] = []
-  for (const rival of rivals) {
-    const rs = village.statuses.get(rival)!
-    if (!rs.surviving && rs.causeOfDeath === 'night_kill' && rs.diedDay != null) {
-      const nightDeaths = village.kills.get(rs.diedDay) || []
-      if (nightDeaths.length === 1) {
-        nightKilledRivals.push(rival)
-      }
-    }
+  const roleNameJa: Record<string, string> = {
+    seer: '占い', medium: '霊媒', bodyguard: '狩人', mason: '共有', nekomata: '猫又',
   }
-  if (nightKilledRivals.length === 0) return null
 
-  // 配役上の「占い白で出る人外」枠の合計 (seerResult === 'human' の人外)
-  const humanAppearingEvil: SystemRole[] = ['possessed', 'fanatic', 'immoralist']
-  let totalHumanEvil = 0
-  for (const r of humanAppearingEvil) {
-    totalHumanEvil += setup.get(r) || 0
+  // 白人外枠: 占いで白が出る人外役職の合計
+  const whiteEvilRoles: SystemRole[] = ['possessed', 'fanatic', 'immoralist']
+  const weNameJa: Record<string, string> = { possessed: '狂人', fanatic: '狂信者', immoralist: '背徳者' }
+  let budget = 0
+  const budgetParts: string[] = []
+  for (const r of whiteEvilRoles) {
+    const c = setup.get(r) || 0
+    if (c > 0) { budget += c; budgetParts.push(`${weNameJa[r]}${c}`) }
   }
-  // werehamster も占い白だが独立陣営。偽COの動機は薄いため含めない
 
-  // この占い師の白判定先が他役職CO者の偽枠をどれだけ消費するか
+  let needed = 0
+  const breakdown: BreakdownEntry[] = []
+
+  // 1. 白判定を出した他役職CO者の偽者分
   const coRoles: SystemRole[] = ['medium', 'bodyguard', 'mason', 'nekomata']
-  let minConsumed = 0
-
   for (const coRole of coRoles) {
     const coHolders = [...(village.claims.get(coRole) || [])] as Seat[]
     const realSlots = setup.get(coRole) || 0
 
-    let whiteTargetsInCo = 0
+    let whiteCount = 0
     for (const holder of coHolders) {
       for (const [night, { target, species }] of seerStatus.assertions) {
         if (night < 0) continue
         if (target === holder && species === 'human') {
-          whiteTargetsInCo++
+          whiteCount++
           break
         }
       }
     }
 
-    // 白判定のCO者数が実枠を超えた分 = 偽者かつ非人狼 → 人間表示人外枠を消費
-    minConsumed += Math.max(0, whiteTargetsInCo - realSlots)
+    const fakes = Math.max(0, whiteCount - realSlots)
+    if (fakes > 0) {
+      breakdown.push({ label: `自身の能力結果から${roleNameJa[coRole]}師候補に${fakes}人`, count: fakes })
+      needed += fakes
+    }
   }
 
-  const remainingHumanEvil = totalHumanEvil - minConsumed
-
-  // 襲撃死の対抗は非人狼 → 人間表示人外でなければならない
-  // 枠が足りなければ矛盾
-  if (nightKilledRivals.length > remainingHumanEvil) {
-    return { type: 'rival_not_wolf_no_evil_slot', rival: nightKilledRivals[0] }
+  // 2. 対抗占い師のうち単独襲撃死の者（非人狼 → 白人外が必要）
+  const rivals = allSeerCandidates.filter(s => s !== seerSeat)
+  for (const rival of rivals) {
+    const rs = village.statuses.get(rival)!
+    if (!rs.surviving && rs.causeOfDeath === 'night_kill' && rs.diedDay != null) {
+      const nightDeaths = village.kills.get(rs.diedDay) || []
+      if (nightDeaths.length === 1) {
+        const name = players?.get(rival) ?? `${rival}`
+        breakdown.push({ label: `対抗で噛まれた${name}`, count: 1 })
+        needed++
+      }
+    }
   }
 
+  if (needed > budget) {
+    const seerName = players?.get(seerSeat) ?? `${seerSeat}`
+    return { type: 'white_evil_exceeded', needed, budget, budgetDetail: budgetParts.join('・'), claimerName: seerName, breakdown }
+  }
   return null
 }
 
