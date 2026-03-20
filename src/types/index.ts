@@ -62,6 +62,7 @@ export type VillageStatus = {
   revoteTargets: Set<number>
   voteFinalRule: 'revote' | 'final'
   hasMultiVote: boolean
+  multiVoteDays: Set<number>
   day: number
   finished: boolean
   result: VillageResult

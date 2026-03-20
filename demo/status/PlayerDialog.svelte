@@ -182,14 +182,13 @@
     const v = verdicts.get(votedForSeat)
     if (v?.executionVoterName === voterName) return { text: '処刑確定票', color: 'exec' }
     if (v?.runoffVoterName === voterName) return { text: '決戦確定票', color: 'runoff' }
-    for (const [, info] of verdicts) {
-      if (info.savedBy === voterName) return { text: '救済票', color: 'saved' }
-    }
+    if (v?.savedBy === voterName) return { text: '救済票', color: 'saved' }
     return null
   }
 
   // For past days: determine tag from execution outcome
   function pastDayVoteTag(day: number, voterSeat: number, votedForSeat: number): VoteTag | null {
+    if (vs.multiVoteDays.has(day)) return null
     const executed = vs.executions.get(day)
     if (!executed) return null
     if (executed.includes(votedForSeat)) return { text: '処刑票', color: 'exec' }

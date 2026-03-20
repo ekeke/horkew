@@ -84,6 +84,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   const voteFinalRule: 'revote' | 'final' = meta?.rules?.['vote.final'] === 'revote' ? 'revote' : 'final'
   let revoteTargets = new Set<number>()
   let hasMultiVote = false
+  const multiVoteDays = new Set<number>()
 
   function resolveSeat(name: string): number {
     const results = dict.search(name)
@@ -141,6 +142,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
 
       case 'multiVote': {
         hasMultiVote = true
+        multiVoteDays.add(day)
         const s = stmt as MultiVoteStatement
         const targetSeat = resolveSeat(s.target)
         const target = statuses.get(targetSeat)!
@@ -397,6 +399,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     revoteTargets,
     voteFinalRule,
     hasMultiVote,
+    multiVoteDays,
     day,
     finished,
     result,
