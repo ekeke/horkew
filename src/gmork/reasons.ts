@@ -22,11 +22,11 @@ export type DenialReason =
   | { type: 'silent_execution' }
   | { type: 'denied_by_negative_co' }
   // Tier 2: Simple combination
-  | { type: 'seer_black', seerSeat: Seat, night: Day }
-  | { type: 'seer_white', seerSeat: Seat, night: Day }
+  | { type: 'seer_black', claimants: { name: string, night: Day }[] }
+  | { type: 'seer_white', claimants: { name: string, night: Day }[] }
   | { type: 'seer_fox_kill', seerSeat: Seat, night: Day }
-  | { type: 'medium_black', mediumSeat: Seat, night: Day }
-  | { type: 'medium_white', mediumSeat: Seat, night: Day }
+  | { type: 'medium_black', claimants: { name: string, night: Day }[] }
+  | { type: 'medium_white', claimants: { name: string, night: Day }[] }
   | { type: 'mason_partner', masonSeat: Seat }
   | { type: 'role_slots_filled', claimants: Seat[] }
   | { type: 'nekomata_no_companion', night: Day }
@@ -42,6 +42,7 @@ export type CheckerInput = {
   role: SystemRole
   status: SeatStatus
   analysis: AnalysisResult | null
+  players: Map<number, string> | undefined
 }
 
 export type Checker = (input: CheckerInput) => DenialReason | null

@@ -22,7 +22,7 @@ export function findReason(
     ? runAnalysis(village, setup, possibilities, players)
     : null
 
-  const input = { village, setup, seat, role, status, analysis }
+  const input = { village, setup, seat, role, status, analysis, players }
   for (const checker of allCheckers) {
     const reason = checker(input)
     if (reason) return reason

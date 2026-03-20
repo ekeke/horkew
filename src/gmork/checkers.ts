@@ -1,6 +1,7 @@
-import type { SystemRole, Seat } from '../types/index.ts'
+import type { SystemRole, Seat, VillageStatus, Day } from '../types/index.ts'
 import type { Checker, CheckerInput, DenialReason } from './reasons.ts'
 import { villageSpecialRoles, villageSideRoles, evilRoles } from './reasons.ts'
+import type { AnalysisResult } from './analysis.ts'
 import { isTrustworthy } from './analysis.ts'
 
 // ── CO constraint: 村役職COは他の村役職を否定 ──────────────────────
@@ -161,34 +162,51 @@ function checkDeniedByNegativeCo({ status, role }: CheckerInput): DenialReason |
 
 // ── Tier 2: Simple combination ──────────────────────────────────────
 
-function checkSeerBlack({ village, analysis, seat, role }: CheckerInput): DenialReason | null {
+function checkSeerBlack({ village, analysis, seat, role, players }: CheckerInput): DenialReason | null {
   if (role === 'werewolf') return null
-  const seerClaimants = (village.claims.get('seer') || []) as Seat[]
-  for (const seerSeat of seerClaimants) {
-    if (analysis && !isTrustworthy(seerSeat, 'seer', analysis.confirmed)) continue
-    const seerStatus = village.statuses.get(seerSeat)!
-    for (const [night, { target, species }] of seerStatus.assertions) {
-      if (target === seat && species === 'wolf') {
-        return { type: 'seer_black', seerSeat, night }
-      }
-    }
-  }
-  return null
+  const result = collectSeerConsensus(village, analysis, seat, 'wolf', players)
+  if (!result) return null
+  return { type: 'seer_black', claimants: result }
 }
 
-function checkSeerWhite({ village, analysis, seat, role }: CheckerInput): DenialReason | null {
+function checkSeerWhite({ village, analysis, seat, role, players }: CheckerInput): DenialReason | null {
   if (role !== 'werewolf') return null
+  const result = collectSeerConsensus(village, analysis, seat, 'human', players)
+  if (!result) return null
+  return { type: 'seer_white', claimants: result }
+}
+
+/** 破綻していない占い師候補全員が同じ結果を出しているか確認 */
+function collectSeerConsensus(
+  village: VillageStatus,
+  analysis: AnalysisResult | null,
+  seat: Seat,
+  species: 'human' | 'wolf',
+  players: Map<number, string> | undefined,
+): { name: string, night: Day }[] | null {
   const seerClaimants = (village.claims.get('seer') || []) as Seat[]
+  const eligible: Seat[] = []
   for (const seerSeat of seerClaimants) {
     if (analysis && !isTrustworthy(seerSeat, 'seer', analysis.confirmed)) continue
+    if (analysis?.seer.busted.has(seerSeat)) continue
+    eligible.push(seerSeat)
+  }
+  if (eligible.length === 0) return null
+
+  const matches: { name: string, night: Day }[] = []
+  for (const seerSeat of eligible) {
     const seerStatus = village.statuses.get(seerSeat)!
-    for (const [night, { target, species }] of seerStatus.assertions) {
-      if (target === seat && species === 'human') {
-        return { type: 'seer_white', seerSeat, night }
+    let found = false
+    for (const [night, { target, species: sp }] of seerStatus.assertions) {
+      if (target === seat && sp === species) {
+        matches.push({ name: players?.get(seerSeat) ?? `${seerSeat}`, night })
+        found = true
+        break
       }
     }
+    if (!found) return null // 1人でも結果を出していなければ合意なし
   }
-  return null
+  return matches
 }
 
 function checkSeerFoxKill({ village, analysis, seat, status, role }: CheckerInput): DenialReason | null {
@@ -201,6 +219,7 @@ function checkSeerFoxKill({ village, analysis, seat, status, role }: CheckerInpu
   const seerClaimants = (village.claims.get('seer') || []) as Seat[]
   for (const seerSeat of seerClaimants) {
     if (analysis && !isTrustworthy(seerSeat, 'seer', analysis.confirmed)) continue
+    if (analysis?.seer.busted.has(seerSeat)) continue
     const seerStatus = village.statuses.get(seerSeat)!
     for (const [night, { target }] of seerStatus.assertions) {
       if (target === seat && night === status.diedDay) {
@@ -213,34 +232,51 @@ function checkSeerFoxKill({ village, analysis, seat, status, role }: CheckerInpu
   return null
 }
 
-function checkMediumBlack({ village, analysis, seat, role }: CheckerInput): DenialReason | null {
+function checkMediumBlack({ village, analysis, seat, role, players }: CheckerInput): DenialReason | null {
   if (role === 'werewolf') return null
-  const mediumClaimants = (village.claims.get('medium') || []) as Seat[]
-  for (const mediumSeat of mediumClaimants) {
-    if (analysis && !isTrustworthy(mediumSeat, 'medium', analysis.confirmed)) continue
-    const mediumStatus = village.statuses.get(mediumSeat)!
-    for (const [night, { target, species }] of mediumStatus.assertions) {
-      if (target === seat && species === 'wolf') {
-        return { type: 'medium_black', mediumSeat, night }
-      }
-    }
-  }
-  return null
+  const result = collectMediumConsensus(village, analysis, seat, 'wolf', players)
+  if (!result) return null
+  return { type: 'medium_black', claimants: result }
 }
 
-function checkMediumWhite({ village, analysis, seat, role }: CheckerInput): DenialReason | null {
+function checkMediumWhite({ village, analysis, seat, role, players }: CheckerInput): DenialReason | null {
   if (role !== 'werewolf') return null
+  const result = collectMediumConsensus(village, analysis, seat, 'human', players)
+  if (!result) return null
+  return { type: 'medium_white', claimants: result }
+}
+
+/** 破綻していない霊媒師候補全員が同じ結果を出しているか確認 */
+function collectMediumConsensus(
+  village: VillageStatus,
+  analysis: AnalysisResult | null,
+  seat: Seat,
+  species: 'human' | 'wolf',
+  players: Map<number, string> | undefined,
+): { name: string, night: Day }[] | null {
   const mediumClaimants = (village.claims.get('medium') || []) as Seat[]
+  const eligible: Seat[] = []
   for (const mediumSeat of mediumClaimants) {
     if (analysis && !isTrustworthy(mediumSeat, 'medium', analysis.confirmed)) continue
+    if (analysis?.medium.busted.has(mediumSeat)) continue
+    eligible.push(mediumSeat)
+  }
+  if (eligible.length === 0) return null
+
+  const matches: { name: string, night: Day }[] = []
+  for (const mediumSeat of eligible) {
     const mediumStatus = village.statuses.get(mediumSeat)!
-    for (const [night, { target, species }] of mediumStatus.assertions) {
-      if (target === seat && species === 'human') {
-        return { type: 'medium_white', mediumSeat, night }
+    let found = false
+    for (const [night, { target, species: sp }] of mediumStatus.assertions) {
+      if (target === seat && sp === species) {
+        matches.push({ name: players?.get(mediumSeat) ?? `${mediumSeat}`, night })
+        found = true
+        break
       }
     }
+    if (!found) return null
   }
-  return null
+  return matches
 }
 
 function checkMasonPartner({ village, seat, role }: CheckerInput): DenialReason | null {

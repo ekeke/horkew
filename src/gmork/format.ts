@@ -65,16 +65,24 @@ export function formatReason(reason: DenialReason, role: SystemRole): string {
       return `CO内容から${roleName(role)}ではありえない`
 
     // Tier 2
-    case 'seer_black':
-      return `占い師(${reason.seerSeat})が${reason.night + 1}dに黒判定を出しているため人狼に確定`
-    case 'seer_white':
-      return `占い師(${reason.seerSeat})が${reason.night + 1}dに白判定を出しているため人狼ではありえない`
+    case 'seer_black': {
+      const names = reason.claimants.map(c => `${c.name}(${c.night + 1}d)`).join('・')
+      return `占い師候補全員（破綻した候補は除く）（${names}）が黒判定を出しており、この中に必ず真の結果があるため人狼に確定`
+    }
+    case 'seer_white': {
+      const names = reason.claimants.map(c => `${c.name}(${c.night + 1}d)`).join('・')
+      return `占い師候補全員（破綻した候補は除く）（${names}）が白判定を出しており、この中に必ず真の結果があるため人狼ではありえない`
+    }
     case 'seer_fox_kill':
       return `占い師(${reason.seerSeat})の${reason.night + 1}d占い先が呪殺されているため妖狐に確定`
-    case 'medium_black':
-      return `霊媒師(${reason.mediumSeat})が${reason.night + 1}dに黒判定を出しているため人狼に確定`
-    case 'medium_white':
-      return `霊媒師(${reason.mediumSeat})が${reason.night + 1}dに白判定を出しているため人狼ではありえない`
+    case 'medium_black': {
+      const names = reason.claimants.map(c => `${c.name}(${c.night + 1}d)`).join('・')
+      return `霊媒師候補全員（破綻した候補は除く）（${names}）が黒判定を出しており、この中に必ず真の結果があるため人狼に確定`
+    }
+    case 'medium_white': {
+      const names = reason.claimants.map(c => `${c.name}(${c.night + 1}d)`).join('・')
+      return `霊媒師候補全員（破綻した候補は除く）（${names}）が白判定を出しており、この中に必ず真の結果があるため人狼ではありえない`
+    }
     case 'mason_partner':
       return `共有者(${reason.masonSeat})に相方と認定されているため共有者に確定`
     case 'role_slots_filled':

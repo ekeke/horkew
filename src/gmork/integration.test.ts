@@ -100,8 +100,8 @@ describe('gmork integration: mada4', () => {
 })
 
 describe('gmork integration: ultimate.5.3', () => {
-  const { vs, setup, possibilities, seatOf } = loadScenario('ultimate.5.3.howl')
-  const analysis = runAnalysis(vs, setup, possibilities)
+  const { vs, setup, possibilities, seatOf, players } = loadScenario('ultimate.5.3.howl')
+  const analysis = runAnalysis(vs, setup, possibilities, players)
 
   describe('占い師真贋分析', () => {
     it('占いCO者は2人(ダンカン, 中田)', () => {
@@ -160,42 +160,42 @@ describe('gmork integration: ultimate.5.3', () => {
 
   describe('真占い師(中田)の判定による否定', () => {
     it('森本は人狼ではない (中田の1d白判定)', () => {
-      const reason = findReason(vs, setup, seatOf('森本'), 'werewolf', possibilities)
+      const reason = findReason(vs, setup, seatOf('森本'), 'werewolf', possibilities, players)
       assert.ok(reason)
       assert.strictEqual(reason.type, 'confirmed_seer_white')
     })
 
     it('大野は人狼ではない (中田の4d白判定)', () => {
-      const reason = findReason(vs, setup, seatOf('大野'), 'werewolf', possibilities)
+      const reason = findReason(vs, setup, seatOf('大野'), 'werewolf', possibilities, players)
       assert.ok(reason)
       assert.strictEqual(reason.type, 'confirmed_seer_white')
     })
 
     it('結は人狼ではない (中田の3d白判定)', () => {
-      const reason = findReason(vs, setup, seatOf('結'), 'werewolf', possibilities)
+      const reason = findReason(vs, setup, seatOf('結'), 'werewolf', possibilities, players)
       assert.ok(reason)
       assert.strictEqual(reason.type, 'confirmed_seer_white')
     })
   })
 
   describe('偽占い師の結果を信用しない', () => {
-    it('香川/werewolf: ダンカン(確定人狼)の白判定を使わない', () => {
-      const reason = findReason(vs, setup, seatOf('香川'), 'werewolf', possibilities)
-      // ダンカンは確定人狼なので、ダンカンの白判定は無視されるべき
+    it('香川/werewolf: ダンカン(破綻占い師)の白判定を使わない', () => {
+      const reason = findReason(vs, setup, seatOf('香川'), 'werewolf', possibilities, players)
+      // ダンカンは破綻占い師なので、ダンカンの白判定は無視されるべき
       if (reason && reason.type === 'seer_white') {
-        assert.notStrictEqual((reason as any).seerSeat, seatOf('ダンカン'),
-          'ダンカン(確定人狼)の占い結果を信用してはいけない')
+        const names = reason.claimants.map(c => c.name)
+        assert.ok(!names.includes('ダンカン'), 'ダンカン(破綻占い師)の占い結果を信用してはいけない')
       }
     })
   })
 
   describe('偽霊媒師の結果を信用しない', () => {
-    it('藤澤/werewolf: 香川(確定狂人)の黒判定を使わない', () => {
-      const reason = findReason(vs, setup, seatOf('藤澤'), 'werewolf', possibilities)
-      // 香川は確定狂人なので霊媒結果は信用できない
+    it('藤澤/werewolf: 香川(破綻霊媒師)の黒判定を使わない', () => {
+      const reason = findReason(vs, setup, seatOf('藤澤'), 'werewolf', possibilities, players)
+      // 香川は破綻霊媒師なので霊媒結果は信用できない
       if (reason && (reason.type === 'medium_black' || reason.type === 'medium_white')) {
-        assert.notStrictEqual((reason as any).mediumSeat, seatOf('香川'),
-          '香川(確定狂人)の霊媒結果を信用してはいけない')
+        const names = reason.claimants.map(c => c.name)
+        assert.ok(!names.includes('香川'), '香川(破綻霊媒師)の霊媒結果を信用してはいけない')
       }
     })
   })
