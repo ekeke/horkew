@@ -9,7 +9,8 @@
   import AnalysisWorker from './analysis.worker.ts?worker'
   import StatusPane from './status/StatusPane.svelte'
   import PlayerName from './status/PlayerName.svelte'
-  import { explain } from '../src/gmork/index.ts'
+  import { findReason } from '../src/gmork/index.ts'
+  import { formatReason } from '../src/gmork/format.ts'
 
   const nightKillCauses: Set<CauseOfDeath> = new Set([
     'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
@@ -259,10 +260,22 @@
     return { status: 'default', fixed: false, label }
   }
 
+  const GMORK_DEBUG = true
+
   function runGmork(): string {
     if (assumptions.size !== 1 || !villageStatus) return ''
     const [[seat, role]] = [...assumptions]
-    return explain(villageStatus, currentSetup, seat, role)
+    const possibilities = new Map(analysisSeats.map(s => [s.seat, new Set(s.roles)]))
+    const playerName = players.get(seat) ?? `席${seat}`
+    const roleName = systemRoles.get(role)?.name ?? role
+    const reasonObj = findReason(villageStatus, currentSetup, seat, role, possibilities, players)
+    const reasonText = reasonObj ? formatReason(reasonObj, role) : 'わかりません'
+    let debugKey = ''
+    if (GMORK_DEBUG && reasonObj) {
+      const inner = 'bustReason' in reasonObj ? (reasonObj as any).bustReason.type : null
+      debugKey = inner ? ` [${reasonObj.type} > ${inner}]` : ` [${reasonObj.type}]`
+    }
+    return `「${playerName}」が「${roleName}」ではありえない理由： ${reasonText}${debugKey}`
   }
 
   function toggleAssumption(seat: number, role: SystemRole) {
