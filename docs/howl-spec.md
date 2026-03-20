@@ -60,7 +60,12 @@ Any of: `,` `;` `:` `、` `，` `；` `：` and whitespace. Used to separate lis
 
 ### Player Names
 
-Any sequence of non-whitespace, non-delimiter characters. Resolved via flexible dictionary matching (prefix, substring, kana normalization).
+Any sequence of non-whitespace, non-delimiter characters. Player names can be abbreviated as long as they uniquely identify a player. Hiragana/katakana differences are ignored.
+
+Resolution priority:
+1. **Prefix match**: Unique match from the start of the name (e.g., `二郎` matches `二郎三郎` over `裕二郎`)
+2. **Substring match**: Unique substring match anywhere in the name
+3. **2-char omit match** (2-character input only): Match treating the input as the first and last characters with one character omitted in between
 
 ## Statement Types
 
@@ -76,6 +81,8 @@ Registers players into the game.
 +Alice, Bob, Charlie, David
 ＋アリス、ボブ、チャーリー
 ```
+
+**Hoisting**: Join statements are hoisted — they are always processed first regardless of their position in the document.
 
 **Output**: `{ type: 'join', players: string[] }`
 
@@ -106,6 +113,8 @@ Bob←
 
 When voters are **empty**, it means "all surviving players who have not yet voted this round vote for the target."
 
+**Notation mixing**: Normal vote (`→`) and multi vote (`←`) notations cannot be mixed in the same round. When the notation style changes, it is treated as an implicit revote — the vote round is reset.
+
 **Output**: `{ type: 'multiVote', voters: string[], target: string }`
 
 An empty `voters` array indicates the "all remaining" semantic.
@@ -114,7 +123,7 @@ An empty `voters` array indicates the "all remaining" semantic.
 
 Night kill(s). Advances the day counter.
 
-**Syntax**: `襲撃` or `噛み` followed by delimiter and target(s), or `target噛` (reverse form).
+**Syntax**: `襲撃` or `噛み` followed by delimiter and target(s). For single-target actions, the delimiter may be omitted and the order may be transposed (e.g., `target噛`).
 
 ```
 襲撃 Alice
@@ -279,6 +288,24 @@ Each assertion contains:
 - `target?`: Target of the action
 - `result?`: `'isHuman'` or `'isWolf'` (on divination/medium results)
 - `action?`: `'guard'` (on bodyguard actions)
+
+#### Right-alignment of Results
+
+Results in a single statement are interpreted as **right-aligned** to the current day. The last result corresponds to the previous night's action, and earlier results count backwards from there.
+
+```
+# Day 3
+ハイラム：占いCO マドック白 メイソン黒
+# → Night 1: マドック○, Night 2: メイソン● (Night 0 is unknown)
+```
+
+This also handles **result slides** (結果スライド): when a player corrects a previously claimed result on the same day, the new result overwrites the old one for the same night.
+
+```
+# Day 1
+百面ダイス: 占いCO グロ白    # → Night 0: グロ○
+百面ダイス: スレッタ黒        # → Night 0: スレッタ● (overwrites グロ○)
+```
 
 ### 11. Reveal (`reveal`)
 
