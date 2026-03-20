@@ -174,16 +174,14 @@ export function buildAssertionTimeline(
       })
     }
   } else {
-    // Seer: starts from column 1 (includes pre-game divination)
-    // Medium: starts from column 2 (first result is day 1 execution, reported day 2)
-    let night = row.claimingRole === 'medium' ? 2 : 1
-    for (const [targetSeat, species] of row.assertions) {
+    // Assertions are now day-keyed by bridge (right-aligned)
+    for (const [night, { target: targetSeat, species }] of row.assertions) {
+      if (night < 0) continue
       timeline.set(night, {
         targetSeat,
         targetName: players.get(targetSeat) ?? `#${targetSeat}`,
         species,
       })
-      night++
     }
   }
 

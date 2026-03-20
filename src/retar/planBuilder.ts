@@ -122,7 +122,7 @@ export function buildRoleTestPlan(
       for ( const claimSeat of claimSeats ) {
         const status = village.statuses.get(claimSeat)!
         const assertedPartners: Seat[] = []
-        for ( const [targetSeat, species] of status.assertions ) {
+        for ( const [, { target: targetSeat, species }] of status.assertions ) {
           if ( species === 'human' ) assertedPartners.push(targetSeat)
         }
         // CO者 + 指名相方を固定し、残りの枠をmasonPoolから選ぶ

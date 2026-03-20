@@ -145,11 +145,10 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
     if (self.surviving) maxSurviving = Infinity
     else if (maxSurviving < self.diedDay!) maxSurviving = self.diedDay!
 
-    // Populate seerTargets from divination assertions (insertion order = chronological)
-    let assertionDay = env.dayCountFrom
-    for (const [targetSeat] of self.assertions) {
-      seerTargets.set(assertionDay, [...(seerTargets.get(assertionDay) || []), targetSeat])
-      assertionDay++
+    // Populate seerTargets from day-keyed divination assertions (right-aligned by bridge)
+    for (const [night, { target }] of self.assertions) {
+      if (night < 0) continue
+      seerTargets.set(night, [...(seerTargets.get(night) || []), target])
     }
     // If seer died at night, they acted that night but result is unreported
     if (!self.surviving && self.causeOfDeath === 'night_kill') {
@@ -157,12 +156,12 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
     }
     // Add 'unknown' only for genuinely unreported nights beyond known assertions
     const maxActiveDay = self.surviving ? env.vs.day - 1 : (self.causeOfDeath === 'night_kill' ? self.diedDay! : self.diedDay! - 1)
-    for (let d = assertionDay; d <= maxActiveDay; d++) {
+    for (let d = env.dayCountFrom; d <= maxActiveDay; d++) {
       if (!seerTargets.has(d)) {
         seerTargets.set(d, ['unknown'])
       }
     }
-    for (const [targetSeat, species] of self.assertions) {
+    for (const [, { target: targetSeat, species }] of self.assertions) {
       if ( species === 'wolf' ) {
         if ( ! context.possibilities.fixRole(targetSeat,'werewolf') ) {
           return false
@@ -234,7 +233,7 @@ function testMedium(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[
     }
     const self = getStatus(env, seat)
 
-    for (const [targetSeat, species] of self.assertions) {
+    for (const [, { target: targetSeat, species }] of self.assertions) {
       if ( species === 'wolf' ) {
         if ( ! context.possibilities.fixRole(targetSeat, 'werewolf') ) {
           return false
@@ -301,7 +300,7 @@ function testMason(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[]
     }
     const self = getStatus(env, seat)
 
-    for (const [targetSeat, species] of self.assertions) {
+    for (const [, { target: targetSeat, species }] of self.assertions) {
       if ( species === 'wolf' ) {
         // 仕様です。共有は相方に人間とアサーションします。
         return false

@@ -16,7 +16,8 @@ export type CauseOfDeath =
 export type VillageResult = 'werewolf_won' | 'villager_won' | 'werehamster_won' | 'draw' | undefined
 
 export type PlayerAction = Map<number, number>
-export type Assertions = Map<number, EnumSpecies>
+export type Assertion = { target: Seat, species: EnumSpecies }
+export type Assertions = Map<Day, Assertion>
 
 export type Role = {
   name: string

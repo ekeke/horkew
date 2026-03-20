@@ -234,10 +234,11 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           status.claimOrder = ++claimCounter
           status.actions = new Map()
           status.assertions = new Map()
+          let masonKey = -1
           for (const otherName of s.players) {
             if (otherName === playerName) continue
             const otherSeat = resolveSeat(otherName)
-            status.assertions.set(otherSeat, 'human')
+            status.assertions.set(masonKey--, { target: otherSeat, species: 'human' })
           }
         }
         break
@@ -248,6 +249,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         const actorSeat = resolveSeat(s.actor)
         const actorStatus = statuses.get(actorSeat)!
         const guardTargets: number[] = []
+        const divinationResults: { target: number, species: EnumSpecies }[] = []
 
         const villageRoles: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata']
 
@@ -280,11 +282,20 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           if (assertion.target) {
             const targetSeat = resolveSeat(assertion.target)
             if (assertion.result) {
-              actorStatus.assertions.set(targetSeat, speciesMap[assertion.result]!)
+              divinationResults.push({ target: targetSeat, species: speciesMap[assertion.result]! })
             }
             if (assertion.action === 'guard') {
               guardTargets.push(targetSeat)
             }
+          }
+        }
+
+        // Right-align divination results: last result = previous night, counting backwards
+        if (divinationResults.length > 0) {
+          const lastNight = day - 1
+          for (let i = 0; i < divinationResults.length; i++) {
+            const night = lastNight - (divinationResults.length - 1 - i)
+            actorStatus.assertions.set(night, divinationResults[i])
           }
         }
 

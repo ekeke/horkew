@@ -176,20 +176,20 @@ describe('buildAssertionTimeline', () => {
     const groups = extractClaimGroups(vs, players)
     const seerGroup = groups.find(g => g.role === 'seer')!
     const row = seerGroup.rows[0]
-    // vs.day is now 3, so timeline has nights 1 and 2
+    // vs.day is now 2, assertions right-aligned: nights 0 and 1
     const timeline = buildAssertionTimeline(row, vs.day, players)
 
-    // Night 1: ボブ→白 (first assertion in insertion order)
+    // Night 0 (お告げ): ボブ→白
+    const night0 = timeline.get(0)
+    assert.ok(night0)
+    assert.strictEqual(night0!.targetName, 'ボブ')
+    assert.strictEqual(night0!.species, 'human')
+
+    // Night 1: チャーリー→黒
     const night1 = timeline.get(1)
     assert.ok(night1)
-    assert.strictEqual(night1!.targetName, 'ボブ')
-    assert.strictEqual(night1!.species, 'human')
-
-    // Night 2: チャーリー→黒 (second assertion)
-    const night2 = timeline.get(2)
-    assert.ok(night2)
-    assert.strictEqual(night2!.targetName, 'チャーリー')
-    assert.strictEqual(night2!.species, 'wolf')
+    assert.strictEqual(night1!.targetName, 'チャーリー')
+    assert.strictEqual(night1!.species, 'wolf')
   })
 
   test('bodyguard last guard anchored to previous night', () => {

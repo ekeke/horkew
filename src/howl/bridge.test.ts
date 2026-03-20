@@ -247,3 +247,127 @@ setup:
     assert.deepStrictEqual([...satoshiRoles!], ['immoralist'])
   })
 })
+
+describe('bridge: assertion right-alignment', () => {
+  function setup(howl: string) {
+    const { statements, meta } = parse(howl)
+    return buildVillageStatus(statements, meta)
+  }
+
+  function seat(players: Map<number, string>, name: string): number {
+    return [...players.entries()].find(([, n]) => n === name)![0]
+  }
+
+  test('single result on day 1 maps to night 0', () => {
+    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+
+アリス: 占いCO ボブ白`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const assertions = vs.statuses.get(aliceSeat)!.assertions
+    assert.strictEqual(assertions.size, 1)
+    const night0 = assertions.get(0)
+    assert.ok(night0)
+    assert.strictEqual(night0!.target, bobSeat)
+    assert.strictEqual(night0!.species, 'human')
+  })
+
+  test('two results on day 3 right-align to nights 1 and 2', () => {
+    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+
+吊り デイブ
+
+噛み エミリー
+
+アリス: 占いCO ボブ白 チャーリー黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const charSeat = seat(players, 'チャーリー')
+    const assertions = vs.statuses.get(aliceSeat)!.assertions
+
+    assert.strictEqual(assertions.size, 2)
+    // Night 0 (お告げ) = ボブ白
+    assert.deepStrictEqual(assertions.get(0), { target: bobSeat, species: 'human' })
+    // Night 1 = チャーリー黒
+    assert.deepStrictEqual(assertions.get(1), { target: charSeat, species: 'wolf' })
+  })
+
+  test('slide: second assert on same day overwrites first (結果スライド)', () => {
+    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+
+アリス: 占いCO ボブ白
+アリス: チャーリー黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const charSeat = seat(players, 'チャーリー')
+    const assertions = vs.statuses.get(aliceSeat)!.assertions
+
+    // Only 1 result: the slide replaced ボブ白 with チャーリー黒 for night 0
+    assert.strictEqual(assertions.size, 1)
+    const night0 = assertions.get(0)
+    assert.ok(night0)
+    assert.strictEqual(night0!.target, charSeat)
+    assert.strictEqual(night0!.species, 'wolf')
+  })
+
+  test('late CO on day 3 with 3 results: nights 0, 1, 2', () => {
+    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー、フランク
+
+吊り デイブ
+
+噛み エミリー
+
+吊り フランク
+
+噛み ボブ
+
+アリス: 占いCO デイブ白 エミリー白 チャーリー黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const daveSeat = seat(players, 'デイブ')
+    const emilySeat = seat(players, 'エミリー')
+    const charSeat = seat(players, 'チャーリー')
+    const assertions = vs.statuses.get(aliceSeat)!.assertions
+
+    assert.strictEqual(assertions.size, 3)
+    // Right-aligned from day 3: nights 0, 1, 2
+    assert.deepStrictEqual(assertions.get(0), { target: daveSeat, species: 'human' })
+    assert.deepStrictEqual(assertions.get(1), { target: emilySeat, species: 'human' })
+    assert.deepStrictEqual(assertions.get(2), { target: charSeat, species: 'wolf' })
+  })
+
+  test('incremental results across days accumulate correctly', () => {
+    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+
+アリス: 占いCO ボブ白
+
+吊り デイブ
+
+噛み エミリー
+
+アリス: チャーリー黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const charSeat = seat(players, 'チャーリー')
+    const assertions = vs.statuses.get(aliceSeat)!.assertions
+
+    // Day 1: ボブ白 → night 0
+    // Day 2: チャーリー黒 → night 1
+    assert.strictEqual(assertions.size, 2)
+    assert.deepStrictEqual(assertions.get(0), { target: bobSeat, species: 'human' })
+    assert.deepStrictEqual(assertions.get(1), { target: charSeat, species: 'wolf' })
+  })
+
+  test('mason assertions use negative day keys', () => {
+    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+
+共有 アリス ボブ`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const assertions = vs.statuses.get(aliceSeat)!.assertions
+
+    assert.strictEqual(assertions.size, 1)
+    const entry = assertions.get(-1)
+    assert.ok(entry)
+    assert.strictEqual(entry!.target, bobSeat)
+    assert.strictEqual(entry!.species, 'human')
+  })
+})
