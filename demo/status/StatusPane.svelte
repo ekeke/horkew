@@ -3,6 +3,7 @@
   import { systemRoles } from '../../src/types/index.ts'
   import { setContext } from 'svelte'
   import { writable } from 'svelte/store'
+  import type { SourceLines } from '../App.svelte'
   import { extractSurvivorInfo, extractDeathHistory, extractClaimGroups, extractVoteStatus } from './extract.ts'
   import SurvivorSection from './SurvivorSection.svelte'
   import VoteTable from './VoteTable.svelte'
@@ -11,11 +12,13 @@
   import SummaryTable from './SummaryTable.svelte'
   import PlayerDialog from './PlayerDialog.svelte'
 
-  let { vs, players, setup, shortNames = new Map() }: {
+  let { vs, players, setup, shortNames = new Map(), sourceLines, cursorLine = 0 }: {
     vs: VillageStatus
     players: Map<number, string>
     setup: Map<SystemRole, number>
     shortNames?: Map<number, string>
+    sourceLines: SourceLines
+    cursorLine?: number
   } = $props()
 
   let dialogSeat: number | null = $state(null)
@@ -31,6 +34,13 @@
   const hoveredSeat = writable<number | null>(null)
   setContext('hoveredSeat', hoveredSeat)
   setContext('shortNames', shortNames)
+
+  const srcLines = writable(sourceLines)
+  const cursor = writable(cursorLine)
+  $effect(() => { srcLines.set(sourceLines) })
+  $effect(() => { cursor.set(cursorLine) })
+  setContext('sourceLines', srcLines)
+  setContext('cursorLine', cursor)
 
   function closePlayerDialog() {
     dialogSeat = null

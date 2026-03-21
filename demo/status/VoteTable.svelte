@@ -1,11 +1,17 @@
 <script lang="ts">
   import type { VoteStatus, VoteVerdictInfo } from './extract.ts'
+  import type { SourceLines } from '../App.svelte'
+  import type { Writable } from 'svelte/store'
+  import { getContext } from 'svelte'
   import { computeVerdicts } from './extract.ts'
   import PlayerName from './PlayerName.svelte'
 
   let { status }: {
     status: VoteStatus
   } = $props()
+
+  const srcLines = getContext<Writable<SourceLines>>('sourceLines')
+  const cursor = getContext<Writable<number>>('cursorLine')
 
   let verdicts = $derived(computeVerdicts(status))
 
@@ -61,11 +67,12 @@
             class:runoff-locked={info?.verdict === 'runoff_locked'}
             class:safe={info?.verdict === 'safe'}
             class:cutoff={i === cutoffIndex && cutoffIndex < status.rows.length - 1}
+            class:active-hl-row={row.voters.some(v => $srcLines.vote.get(v.seat) === $cursor)}
           >
             <td class="verdict-cell">{verdictLabel(info)}</td>
             <td class="name-cell"><PlayerName dead={false} seat={row.seat}>{row.name}</PlayerName></td>
             <td class="count-cell">{row.votedCount}</td>
-            <td class="voters-cell">{#each row.voters as voter, vi}{#if vi > 0}<span class="sep">, </span>{/if}<span class:decisive-exec={execOrders.has(voter.votedOrder)} class:decisive-runoff={runoffOrders.has(voter.votedOrder)}><PlayerName dead={false} seat={voter.seat}>{voter.name}</PlayerName></span>{/each}</td>
+            <td class="voters-cell">{#each row.voters as voter, vi}{#if vi > 0}<span class="sep">, </span>{/if}<span class:decisive-exec={execOrders.has(voter.votedOrder)} class:decisive-runoff={runoffOrders.has(voter.votedOrder)} class:active-hl-voter={$srcLines.vote.get(voter.seat) === $cursor}><PlayerName dead={false} seat={voter.seat}>{voter.name}</PlayerName></span>{/each}</td>
           </tr>
         {/each}
       </tbody>
@@ -221,5 +228,14 @@
 
   .pending-name {
     color: #cdd6f4;
+  }
+
+  tr.active-hl-row > td {
+    background: rgba(137, 180, 250, 0.1);
+  }
+
+  .active-hl-voter {
+    color: #89b4fa;
+    font-weight: 600;
   }
 </style>

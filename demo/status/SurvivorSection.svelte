@@ -1,14 +1,20 @@
 <script lang="ts">
   import type { SurvivorInfo } from './extract.ts'
+  import type { SourceLines } from '../App.svelte'
+  import type { Writable } from 'svelte/store'
+  import { getContext } from 'svelte'
   import PlayerName from './PlayerName.svelte'
 
   let { info }: { info: SurvivorInfo } = $props()
+
+  const srcLines = getContext<Writable<SourceLines>>('sourceLines')
+  const cursor = getContext<Writable<number>>('cursorLine')
 </script>
 
 <div class="section">
   <span class="section-header">生存 <span class="count">{info.alive}</span>/{info.total}</span>
   {#each info.survivors as { seat, name }}
-    <span class="survivor-badge"><PlayerName dead={false} {seat}>{name}</PlayerName></span>
+    <span class="survivor-badge" class:active-hl={$srcLines.survivor.get(seat) === $cursor}><PlayerName dead={false} {seat}>{name}</PlayerName></span>
   {/each}
   {#if info.survivors.length === 0}
     <span class="empty">---</span>
@@ -49,5 +55,10 @@
   .empty {
     color: #585b70;
     font-size: 12px;
+  }
+
+  .active-hl {
+    outline: 1.5px solid rgba(137, 180, 250, 0.6);
+    background: rgba(137, 180, 250, 0.15);
   }
 </style>

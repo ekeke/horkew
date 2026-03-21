@@ -1,5 +1,8 @@
 <script lang="ts">
   import type { DayDeaths, ClaimGroup, DayAssertion } from './extract.ts'
+  import type { SourceLines } from '../App.svelte'
+  import type { Writable } from 'svelte/store'
+  import { getContext } from 'svelte'
   import { causeOfDeathLabel, buildAssertionTimeline } from './extract.ts'
   import PlayerName from './PlayerName.svelte'
 
@@ -13,6 +16,9 @@
     executed: Set<number>
     claimShortNames?: Map<number, string>
   } = $props()
+
+  const srcLines = getContext<Writable<SourceLines>>('sourceLines')
+  const cursor = getContext<Writable<number>>('cursorLine')
 
   const nightKillCauses = new Set(['night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata'])
   const tableRoles = new Set(['seer', 'medium', 'bodyguard'])
@@ -105,7 +111,7 @@
         <td class="name-cell"></td>
         {#each dayColumns as day}
           {@const d = deathByDay.get(day)}
-          <td class="data-cell">{#if d}{#each d.nightKills as entry, i}{#if i > 0}、{/if}<PlayerName dead nightKill={nightKillCauses.has(entry.causeOfDeath)} executed={false} claim={claimShortNames.get(entry.seat)} seat={entry.seat}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'night_kill'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}{/if}</td>
+          <td class="data-cell" class:active-hl-cell={$srcLines.kill.get(day - 1) === $cursor}>{#if d}{#each d.nightKills as entry, i}{#if i > 0}、{/if}<PlayerName dead nightKill={nightKillCauses.has(entry.causeOfDeath)} executed={false} claim={claimShortNames.get(entry.seat)} seat={entry.seat}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'night_kill'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}{/if}</td>
         {/each}
       </tr>
 
@@ -113,14 +119,14 @@
       {#each tableGroups as group}
         {#each group.rows as row, rowIdx}
           {@const timeline = buildAssertionTimeline(row, maxDay, players)}
-          <tr class:group-first={rowIdx === 0}>
+          <tr class:group-first={rowIdx === 0} class:active-hl-row={$srcLines.claimRow.get(row.seat) === $cursor}>
             {#if rowIdx === 0}
               <td class="label-cell role-label" rowspan={group.rows.length}>{group.roleShortName}</td>
             {/if}
             <td class="name-cell"><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} seat={row.seat}>{row.name}</PlayerName></td>
             {#each dayColumns as day}
               {@const assertion = timeline.get(day - 1) ?? null}
-              <td class="data-cell" class:human={assertion?.species === 'human'} class:wolf={assertion?.species === 'wolf'} class:guard={row.claimingRole === 'bodyguard' && assertion !== null}>
+              <td class="data-cell" class:human={assertion?.species === 'human'} class:wolf={assertion?.species === 'wolf'} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:active-hl-cell={$srcLines.claimCell.get(`${row.seat}:${day - 1}`) === $cursor}>
                 {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{cellContent(assertion, row.claimingRole)}</PlayerName>{/if}
               </td>
             {/each}
@@ -134,7 +140,7 @@
         <td class="name-cell"></td>
         {#each dayColumns as day}
           {@const d = deathByDay.get(day)}
-          <td class="data-cell">{#if d}{#each d.executions as entry, i}{#if i > 0}、{/if}<PlayerName dead nightKill={false} executed claim={claimShortNames.get(entry.seat)} seat={entry.seat}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}{/if}</td>
+          <td class="data-cell" class:active-hl-cell={$srcLines.exec.get(day) === $cursor}>{#if d}{#each d.executions as entry, i}{#if i > 0}、{/if}<PlayerName dead nightKill={false} executed claim={claimShortNames.get(entry.seat)} seat={entry.seat}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}{/if}</td>
         {/each}
       </tr>
 
@@ -143,7 +149,7 @@
   {#if masonGroup || nekomataGroup}
   <div class="extra-claims">
     {#if masonGroup}
-      <span class="extra-item"><span class="extra-label">{masonGroup.roleShortName}</span>{#each buildMasonDisplay(masonGroup) as cluster, ci}{#if ci > 0}<span class="cluster-sep"> / </span>{/if}{#each cluster as member, i}{#if i > 0}<span class="mason-sep">-</span>{/if}<PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} seat={member.seat}>{member.name}</PlayerName>{/each}{/each}</span>
+      <span class="extra-item" class:active-hl={masonGroup.rows.some(r => $srcLines.claimRow.get(r.seat) === $cursor)}><span class="extra-label">{masonGroup.roleShortName}</span>{#each buildMasonDisplay(masonGroup) as cluster, ci}{#if ci > 0}<span class="cluster-sep"> / </span>{/if}{#each cluster as member, i}{#if i > 0}<span class="mason-sep">-</span>{/if}<PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} seat={member.seat}>{member.name}</PlayerName>{/each}{/each}</span>
     {/if}
     {#if nekomataGroup}
       <span class="extra-item"><span class="extra-label">{nekomataGroup.roleShortName}</span>{#each nekomataGroup.rows as row, i}{#if i > 0}、{/if}<PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} seat={row.seat}>{row.name}</PlayerName>{/each}</span>
@@ -257,5 +263,20 @@
 
   .mason-sep, .cluster-sep {
     color: #585b70;
+  }
+
+  .active-hl-row > :global(td) {
+    background: rgba(137, 180, 250, 0.1);
+  }
+
+  .active-hl-cell {
+    outline: 1.5px solid rgba(137, 180, 250, 0.6);
+    background: rgba(137, 180, 250, 0.15) !important;
+  }
+
+  .active-hl {
+    outline: 1.5px solid rgba(137, 180, 250, 0.6);
+    background: rgba(137, 180, 250, 0.15);
+    border-radius: 4px;
   }
 </style>

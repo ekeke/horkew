@@ -13,6 +13,16 @@
   import { formatReason, formatConfirmationReason } from '../src/gmork/format.ts'
   import HelpPanel from './HelpPanel.svelte'
   import { onOpenHelp } from './help.ts'
+  import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
+
+  export type SourceLines = {
+    survivor: Map<number, number>   // seat → line
+    claimRow: Map<number, number>   // seat → line (CO declaration / row highlight)
+    claimCell: Map<string, number>  // "seat:night" → line (per-cell highlight)
+    kill: Map<number, number>       // nightDay (kills map key) → line
+    exec: Map<number, number>       // execDay → line
+    vote: Map<number, number>       // voterSeat → line
+  }
 
   const nightKillCauses: Set<CauseOfDeath> = new Set([
     'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
@@ -94,6 +104,8 @@
   let players: Map<number, string> = $state(new Map())
   let playerShortNames: Map<number, string> = $state(new Map())
   let villageStatus: VillageStatus | null = $state(null)
+  let sourceLines: SourceLines = $state({ survivor: new Map(), claimRow: new Map(), claimCell: new Map(), kill: new Map(), exec: new Map(), vote: new Map() })
+  let cursorLine = $state(0)
   let claimShortNames: Map<number, string> = $derived(
     villageStatus
       ? new Map([...villageStatus.statuses.entries()]
@@ -337,6 +349,74 @@
     run()
   }
 
+  function buildSourceLines(statements: any[], dict: FlexibleDictionary): SourceLines {
+    const survivor = new Map<number, number>()
+    const claimRow = new Map<number, number>()
+    const claimCell = new Map<string, number>()
+    const kill = new Map<number, number>()
+    const exec = new Map<number, number>()
+    const vote = new Map<number, number>()
+
+    function resolve(name: string): number {
+      const res = dict.search(name)
+      return res.length > 0 ? Number(res[0]) : -1
+    }
+
+    for (const stmt of statements) {
+      const line = stmt.line as number
+      switch (stmt.type) {
+        case 'join':
+          survivor.set(resolve(stmt.name), line)
+          break
+        case 'joinMulti':
+          for (const name of stmt.players) survivor.set(resolve(name), line)
+          break
+        case 'vote':
+          vote.set(resolve(stmt.voter), line)
+          break
+        case 'multiVote':
+          for (const name of stmt.voters) vote.set(resolve(name), line)
+          break
+        case 'attack':
+          kill.set((stmt.day ?? 1) - 1, line)
+          break
+        case 'peace':
+          kill.set((stmt.day ?? 1) - 1, line)
+          break
+        case 'lynch':
+          exec.set(stmt.day, line)
+          break
+        case 'curse':
+        case 'follow':
+          kill.set((stmt.day ?? 1) - 1, line)
+          break
+        case 'assert': {
+          const seat = resolve(stmt.actor)
+          claimRow.set(seat, line)
+          // Compute which nights this assert populates (right-aligned, same as bridge)
+          const day = stmt.day ?? 1
+          const lastNight = day - 1
+          const divResults = (stmt.assertions ?? []).filter((a: any) => a.target && a.result)
+          for (let i = 0; i < divResults.length; i++) {
+            const night = lastNight - (divResults.length - 1 - i)
+            claimCell.set(`${seat}:${night}`, line)
+          }
+          const guardTargets = (stmt.assertions ?? []).filter((a: any) => a.action === 'guard')
+          for (let i = 0; i < guardTargets.length; i++) {
+            const night = lastNight - (guardTargets.length - 1 - i)
+            claimCell.set(`${seat}:${night}`, line)
+          }
+          break
+        }
+        case 'mason':
+          for (const name of stmt.players) claimRow.set(resolve(name), line)
+          break
+      }
+    }
+
+    return { survivor, claimRow, claimCell, kill, exec, vote }
+  }
+
   function run() {
     if (worker) {
       worker.terminate()
@@ -348,6 +428,7 @@
     rawStatements = ''
     analyzerJson = ''
     parsedLines = []
+    sourceLines = { survivor: new Map(), claimRow: new Map(), claimCell: new Map(), kill: new Map(), exec: new Map(), vote: new Map() }
 
     try {
       const { meta, statements } = parse(getInputUpToCursor())
@@ -355,7 +436,9 @@
       parsedLines = stringifyStatements(statements)
       statementLines = statements.map((s: any) => s.line as number)
 
-      const { vs, setup, players: playersMap, shortNames: shortNamesMap } = buildVillageStatus(statements, meta)
+      const { vs, setup, players: playersMap, shortNames: shortNamesMap, dict } = buildVillageStatus(statements, meta)
+      sourceLines = buildSourceLines(statements, dict)
+      cursorLine = getCursorLine()
       players = playersMap
       playerShortNames = shortNamesMap
       villageStatus = vs
@@ -499,7 +582,7 @@
       <div class="pane-header">Status</div>
       <div class="pane-body">
         {#if villageStatus}
-          <StatusPane vs={villageStatus} {players} setup={currentSetup} shortNames={playerShortNames} />
+          <StatusPane vs={villageStatus} {players} setup={currentSetup} shortNames={playerShortNames} {sourceLines} {cursorLine} />
         {/if}
       </div>
     </section>

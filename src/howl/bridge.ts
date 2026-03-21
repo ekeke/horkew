@@ -66,6 +66,7 @@ export type BridgeResult = {
   setup: Map<SystemRole, number>
   players: Map<number, string>
   shortNames: Map<number, string>
+  dict: FlexibleDictionary
 }
 
 export function buildVillageStatus(statements: Statement[], meta?: Record<string, any>): BridgeResult {
@@ -446,5 +447,5 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     if (count <= 0) setup.delete(role)
   }
 
-  return { vs, setup, players, shortNames }
+  return { vs, setup, players, shortNames, dict }
 }
