@@ -54,6 +54,8 @@ export type ConfirmationReason =
   | { type: 'dead_werewolf_count', requiredDead: number, candidates: { seat: Seat, name: string }[] }
   // 全人外位置判明によるCO信用
   | { type: 'all_evil_accounted', role: SystemRole, evilSeats: { seat: Seat, name: string }[] }
+  // 霊媒白 + 人外確定 → 狂人/狂信者
+  | { type: 'medium_white_non_wolf', claimants: { name: string, night: Day }[] }
 
 export type ConfirmationCheckerInput = {
   village: VillageStatus

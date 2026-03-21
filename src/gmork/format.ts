@@ -136,5 +136,9 @@ export function formatConfirmationReason(reason: ConfirmationReason, _role: Syst
       const names = reason.evilSeats.map(c => c.name).join('・')
       return `全人外の位置が判明（${names}）しており、${roleName(reason.role)}COは信用できるため${roleName(reason.role)}に確定`
     }
+    case 'medium_white_non_wolf': {
+      const names = reason.claimants.map(c => `${c.name}(${c.night + 1}d)`).join('・')
+      return `霊媒師候補全員（破綻した候補は除く）（${names}）が白判定を出しており、人狼ではない人外のため狂人系に確定`
+    }
   }
 }

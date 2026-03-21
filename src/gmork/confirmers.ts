@@ -167,6 +167,29 @@ function checkMediumConsensusBlack({ village, analysis, seat, role, players }: C
   return { type: 'medium_consensus_black', claimants: result }
 }
 
+/**
+ * 霊媒合意白 + 人外確定 → 狂人/狂信者
+ *
+ * 非破綻の霊媒CO者全員が白判定を出している（= 人狼ではない）
+ * かつ possibilitiesで人外のみに絞られている
+ * → mediumResultが'human'の人外役職（possessed, fanatic）に確定
+ */
+function checkMediumWhiteNonWolf({ village, analysis, seat, role, possibilities, players }: ConfirmationCheckerInput): ConfirmationReason | null {
+  if (role !== 'possessed' && role !== 'fanatic') return null
+  if (!possibilities) return null
+
+  // possibilitiesで人外のみに絞られているか確認
+  const evilRoleNames: SystemRole[] = ['werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist']
+  const roles = possibilities.get(seat)
+  if (!roles || roles.size === 0) return null
+  if (![...roles].every(r => evilRoleNames.includes(r))) return null
+
+  // 霊媒合意白
+  const result = collectConsensus(village, analysis, 'medium', seat, 'human', players)
+  if (!result) return null
+  return { type: 'medium_white_non_wolf', claimants: result }
+}
+
 /** 破綻していないCO者全員が同じ結果を出しているか確認 */
 function collectConsensus(
   village: import('../types/index.ts').VillageStatus,
@@ -319,6 +342,7 @@ export const allConfirmationCheckers: ConfirmationChecker[] = [
   checkAllOtherCosBusted,
   checkSeerConsensusBlack,
   checkMediumConsensusBlack,
+  checkMediumWhiteNonWolf,
   checkMasonPartnerConfirm,
   checkSeerFoxKillConfirm,
   checkDeadWerewolfCount,

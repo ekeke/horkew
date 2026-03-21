@@ -102,22 +102,24 @@ setup:
 
 # @expect 中田　功: [seer]
 # @expect ダンカン: [werewolf, possessed]
-# @gmork-confirm 中田　功/seer: all_other_cos_busted
-# @gmork-deny 森本/werewolf: confirmed_seer_white
-# @gmork-deny 大野/werewolf: confirmed_seer_white
-# @gmork-deny 結/werewolf: confirmed_seer_white
 
-ダンカン　人外CO
+#ダンカン　人外CO
 
 でじ　狩りCO
 めそ　狩りCO
+
+# @expect 香川　愛生: [possessed]
+# @expect ダンカン: [werewolf]
+
+# @gmork-confirm 香川　愛生/possessed: medium_white_non_wolf
+# @gmork-deny マドック/possessed: !liar_budget_exceeded
 
 ダンカン→マドック
 ダンカン←
 
 吊り　ダンカン
 
-結　無惨
+結　死亡
 
 でじ→めそ
 めそ→でじ
@@ -125,6 +127,7 @@ setup:
 森本→めそ
 大野→でじ
 
+デイジー処刑
 #狼勝ち
 
 

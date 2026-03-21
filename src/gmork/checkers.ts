@@ -437,7 +437,8 @@ function checkLiarBudget({ village, setup, status, role }: CheckerInput): Denial
     let fakes: number
 
     if (seatClaimsR && role !== r) {
-      fakes = 1 + Math.max(0, claimants.length - 1 - realSlots)
+      // 自分は偽者だがevilCapacityで既に除外済みなので、他のCO者のうちの偽者のみ数える
+      fakes = Math.max(0, claimants.length - 1 - realSlots)
     } else if (seatClaimsR && role === r) {
       fakes = Math.max(0, claimants.length - 1 - realSlots)
     } else {
@@ -445,11 +446,7 @@ function checkLiarBudget({ village, setup, status, role }: CheckerInput): Denial
     }
 
     if (fakes > 0) {
-      if (seatClaimsR && role !== r) {
-        breakdown.push({ label: `自身の${roleNameJa[r]}COが偽で${fakes}人`, count: fakes })
-      } else {
-        breakdown.push({ label: `${roleNameJa[r]}の偽者(${claimants.length}CO中${realSlots}枠)に${fakes}人`, count: fakes })
-      }
+      breakdown.push({ label: `${roleNameJa[r]}の偽者(${claimants.length}CO中${realSlots}枠)に${fakes}人`, count: fakes })
       minFakes += fakes
     }
   }
