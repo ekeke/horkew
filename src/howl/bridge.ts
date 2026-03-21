@@ -163,12 +163,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         const targetSeat = resolveSeat(s.target)
         const target = statuses.get(targetSeat)!
 
-        // Empty voters means "all surviving players who haven't voted yet"
-        const voterSeats = s.voters.length > 0
-          ? s.voters.map(resolveSeat)
-          : [...statuses.entries()]
-              .filter(([, st]) => st.surviving && !st.voted)
-              .map(([seat]) => seat)
+        const voterSeats = s.voters.map(resolveSeat)
 
         if (!voteHistory.has(day)) voteHistory.set(day, [])
         const dayVotes = voteHistory.get(day)!
