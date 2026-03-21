@@ -45,7 +45,7 @@ Input text → preprocess (YAML frontmatter extraction, comment stripping, spoil
 Key modules in `howl/src/`:
 - **parser.ts** — Entry point, orchestrates the pipeline
 - **preprocess.ts** — Frontmatter extraction, line normalization
-- **statement.ts** — 11 statement types as discriminated unions (`join`, `vote`, `multiVote`, `attack`, `lynch`, `revote`, `over`, `assert`, `peace`, `reveal`, `unknown`)
+- **statement.ts** — 12 statement types as discriminated unions (`join`, `joinMulti`, `vote`, `multiVote`, `attack`, `lynch`, `revote`, `over`, `assert`, `peace`, `reveal`, `unknown`)
 - **vocabulary.ts** — Regex patterns for arrows, roles, species; handles hiragana/katakana normalization
 - **flexibleDictionary.ts** — Fuzzy player name lookup (prefix, substring, 2-char omit)
 - **ruleset.ts** — Game variant configuration (15+ rules)

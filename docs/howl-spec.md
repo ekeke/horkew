@@ -73,20 +73,54 @@ Resolution priority:
 
 Statements are parsed in priority order. The first matching parser wins.
 
-### 1. Join (`join`)
+### 1a. Join Multi (`joinMulti`)
 
-Registers players into the game.
+Registers multiple players into the game in a single line.
 
-**Syntax**: `+` followed by a delimiter-separated list of player names.
+**Syntax**: `++` followed by a delimiter-separated list of player names (space, `,`, `、` etc.).
 
 ```
-+Alice, Bob, Charlie, David
-＋アリス、ボブ、チャーリー
+++Alice, Bob, Charlie, David
+＋＋アリス、ボブ、チャーリー
+++Alice Bob Charlie
+```
+
+Names containing spaces or delimiters can be quoted with `"`, `'`, or their full-width/smart variants. Any quote character from the same family (single or double) can open or close interchangeably.
+
+```
+++"Alice Smith", Bob, Charlie
+++"藤澤 仁" "児玉　健" ボブ
 ```
 
 **Hoisting**: Join statements are hoisted — they are always processed first regardless of their position in the document.
 
-**Output**: `{ type: 'join', players: string[] }`
+**Output**: `{ type: 'joinMulti', players: string[] }`
+
+### 1b. Join (`join`)
+
+Registers a single player per line, with optional short display name and search aliases.
+
+**Syntax**: `+` followed by the player's name, optionally with a parenthesized short name and additional aliases.
+
+```
++ Alice
++ Alice(Al)
++ Alice(Al), アリス, ally
+＋ ボブ（ボ）、Bob
+```
+
+- First token: player name, optionally with `(shortName)` or `（shortName）` suffix
+- Subsequent tokens: search aliases registered in the flexible dictionary
+
+Quoted names are supported, same as `joinMulti`:
+
+```
++ "Alice Smith"(Al) アリス
+```
+
+**Hoisting**: Same as `joinMulti`.
+
+**Output**: `{ type: 'join', name: string, shortName?: string, aliases: string[] }`
 
 ### 2. Vote (`vote`)
 
@@ -387,20 +421,21 @@ Any line that does not match the above parsers.
 
 Statements are tried in this order. The first match wins:
 
-1. `join`
-2. `vote`
-3. `multiVote`
-4. `attack`
-5. `lynch`
-6. `curse`
-7. `follow`
-8. `revote`
-9. `over`
-10. `peace`
-11. `mason`
-12. `assert`
-13. `reveal`
-14. `unknown` (fallback)
+1. `joinMulti`
+2. `join`
+3. `vote`
+4. `multiVote`
+5. `attack`
+6. `lynch`
+7. `curse`
+8. `follow`
+9. `revote`
+10. `over`
+11. `peace`
+12. `mason`
+13. `assert`
+14. `reveal`
+15. `unknown` (fallback)
 
 ## Post-Processing Pipeline
 
@@ -423,7 +458,7 @@ setup:
   possessed: 1
 ---
 # Day 1
-+アリス、ボブ、チャーリー、デイビッド、エマ、フランク、ジョージ、ハナ
+++アリス、ボブ、チャーリー、デイビッド、エマ、フランク、ジョージ、ハナ
 
 ボブ: 占いCO アリス白
 チャーリー: 占いCO デイビッド●
