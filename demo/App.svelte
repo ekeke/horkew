@@ -299,7 +299,7 @@
     // 確定済み役職をトグルした場合は確定理由を表示
     const possibleRoles = possibilities.get(seat)
     if (possibleRoles && possibleRoles.size === 1 && possibleRoles.has(role)) {
-      const confirmObj = findConfirmationReason(villageStatus, currentSetup, seat, role, players)
+      const confirmObj = findConfirmationReason(villageStatus, currentSetup, seat, role, players, possibilities)
       const confirmText = confirmObj ? formatConfirmationReason(confirmObj, role) : 'わかりません'
       let debugKey = ''
       if (GMORK_DEBUG && confirmObj) {

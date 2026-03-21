@@ -108,9 +108,10 @@ function checkNoHamsterNoImmoralist({ setup, role }: CheckerInput): DenialReason
 }
 
 function checkCursedByNekomata({ status, role }: CheckerInput): DenialReason | null {
+  // 猫又が夜に噛まれた場合のみ人狼確定（噛んだ人狼が道連れ）
+  // 猫又が処刑された場合は対象がランダムなので人狼確定にならない
   if (
-    (status.causeOfDeath === 'cursed_by_killed_nekomata' ||
-     status.causeOfDeath === 'cursed_by_executed_nekomata') &&
+    status.causeOfDeath === 'cursed_by_killed_nekomata' &&
     !status.surviving &&
     role !== 'werewolf'
   ) {

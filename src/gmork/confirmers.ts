@@ -1,16 +1,78 @@
-import type { Seat, Day } from '../types/index.ts'
+import type { Seat, Day, VillageStatus, SystemRole } from '../types/index.ts'
 import type { ConfirmationChecker, ConfirmationCheckerInput, ConfirmationReason } from './reasons.ts'
 import { isTrustworthy } from './analysis.ts'
+
+// ── 人狼人数制約 ────────────────────────────────────────────────────
+
+/**
+ * ゲーム状態から死亡人狼数の最小・最大を返す
+ *
+ * - ゲーム続行中: 1 ≤ 生存人狼 ≤ floor((生存者数-1)/2)
+ * - 村勝利: 生存人狼 = 0
+ * - 狼勝利: 生存人狼 ≥ ceil(生存者数/2)
+ */
+/**
+ * 確定死亡した狐の数を数える
+ * 後追い死（follow_*_hamster）が発生していれば、その原因となった狐は死亡確定
+ */
+function countConfirmedDeadHamsters(village: VillageStatus): number {
+  let count = 0
+  for (const [, s] of village.statuses) {
+    if (
+      !s.surviving &&
+      (s.causeOfDeath === 'follow_executed_hamster' || s.causeOfDeath === 'follow_killed_hamster')
+    ) {
+      count++
+    }
+  }
+  return count
+}
+
+export function deadWerewolfBounds(
+  village: VillageStatus,
+  setup: Map<SystemRole, number>,
+): { min: number, max: number } | null {
+  const totalWolves = setup.get('werewolf') || 0
+  if (totalWolves === 0) return null
+
+  const aliveCount = [...village.statuses.values()].filter(s => s.surviving).length
+  const totalHamsters = setup.get('werehamster') || 0
+  const confirmedDeadHamsters = countConfirmedDeadHamsters(village)
+  // 生存している可能性のある狐の最大数
+  const maxAliveHamsters = Math.min(totalHamsters - confirmedDeadHamsters, aliveCount)
+
+  if (village.result === 'villager_won' || village.result === 'werehamster_won') {
+    // 人狼全滅（村勝利・狐勝利とも人狼は全滅）
+    return { min: totalWolves, max: totalWolves }
+  }
+
+  if (village.result === 'werewolf_won') {
+    // 人狼 ≥ 非人狼（狐除外）
+    const nonHamsterAlive = aliveCount - maxAliveHamsters
+    const minAlive = Math.ceil(nonHamsterAlive / 2)
+    const maxAlive = Math.min(totalWolves, aliveCount)
+    return { min: totalWolves - maxAlive, max: totalWolves - minAlive }
+  }
+
+  // ゲーム続行中: 人狼 < 非人狼（狐除外）かつ人狼 ≥ 1
+  if (!village.finished) {
+    // 非狐の生存者数で人狼上限を計算（retarと同じロジック）
+    const nonHamsterAlive = aliveCount - maxAliveHamsters
+    const maxAlive = Math.min(totalWolves, Math.floor((nonHamsterAlive - 0.1) / 2))
+    const minAlive = 1
+    if (maxAlive < minAlive) return null
+    return { min: totalWolves - maxAlive, max: totalWolves - minAlive }
+  }
+
+  return null
+}
 
 // ── 死因による確定 ──────────────────────────────────────────────────
 
 function checkCursedByNekomataConfirm({ status, role }: ConfirmationCheckerInput): ConfirmationReason | null {
   if (role !== 'werewolf') return null
-  if (
-    !status.surviving &&
-    (status.causeOfDeath === 'cursed_by_killed_nekomata' ||
-     status.causeOfDeath === 'cursed_by_executed_nekomata')
-  ) {
+  // 猫又が夜に噛まれた場合のみ人狼確定
+  if (!status.surviving && status.causeOfDeath === 'cursed_by_killed_nekomata') {
     return { type: 'cursed_by_nekomata' }
   }
   return null
@@ -137,6 +199,35 @@ function checkSeerFoxKillConfirm({ village, analysis, seat, status, role }: Conf
   return null
 }
 
+// ── 消去法 ──────────────────────────────────────────────────────────
+
+function checkDeadWerewolfCount({ village, setup, seat, role, status, possibilities, players }: ConfirmationCheckerInput): ConfirmationReason | null {
+  if (!possibilities) return null
+  if (role !== 'werewolf') return null
+  if (status.surviving) return null
+
+  const bounds = deadWerewolfBounds(village, setup)
+  if (!bounds || bounds.min <= 0) return null
+
+  // 死者の中で自分以外にwerewolfになれるプレイヤーを数える
+  const deadWolfCandidates: { seat: Seat, name: string }[] = []
+  for (const [s, roles] of possibilities) {
+    if (s === seat) continue
+    const st = village.statuses.get(s)
+    if (st && !st.surviving && roles.has('werewolf')) {
+      deadWolfCandidates.push({ seat: s, name: players?.get(s) ?? `${s}` })
+    }
+  }
+
+  // 死者中の他候補数が必要死亡人狼数 - 1（自分の分）と一致すれば確定
+  if (deadWolfCandidates.length === bounds.min - 1) {
+    const self = { seat, name: players?.get(seat) ?? `${seat}` }
+    return { type: 'dead_werewolf_count', requiredDead: bounds.min, candidates: [...deadWolfCandidates, self] }
+  }
+
+  return null
+}
+
 // ── Exported checker list ───────────────────────────────────────────
 
 export const allConfirmationCheckers: ConfirmationChecker[] = [
@@ -147,4 +238,5 @@ export const allConfirmationCheckers: ConfirmationChecker[] = [
   checkMediumConsensusBlack,
   checkMasonPartnerConfirm,
   checkSeerFoxKillConfirm,
+  checkDeadWerewolfCount,
 ]

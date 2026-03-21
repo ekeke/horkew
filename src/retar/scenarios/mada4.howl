@@ -35,6 +35,7 @@ rules:
 # @expect ガーグァ: [mason]
 # @expect サターニャ: [werewolf, fanatic, werehamster, immoralist]
 # @expect 闇さとし: [werewolf, fanatic, werehamster, immoralist]
+# @gmork-deny 闇さとし/seer: seer_claim_contradicted > result_contradicts_confirmed
 
 サターニャ指定
 
@@ -49,11 +50,13 @@ rules:
 さとし　後追い
 
 # @expect 闇さとし: [immoralist]
+# @gmork-confirm 闇さとし/immoralist: follow_hamster
 
 ちせ　ボム○
 考える　ボム白
 羽根　黒
 # @expect ボムへい: [werehamster]
+# @gmork-confirm ボムへい/werehamster: seer_fox_kill
 
 指定おわんくん
 
@@ -88,6 +91,14 @@ rules:
 # @expect おわんくん: [werewolf]
 # @expect solve: true
 # @gmork-confirm 闇さとし/immoralist: follow_hamster
+
+# まず、残り４人でゲームが終了していないので、残り人狼は一人以下。
+# 人狼はここまでで二人死んでいるはずです。
+# 三日目の３死体は狐、背徳者まで確定している。他の日は１死体なので、猫又を噛んだ人狼はいません。
+# 真霊媒が確定しており、その結果よりサターニャが一人目の人狼
+# 真占い、真猫が確定しており、４日目の処刑はその猫と占い師
+# よって、おわんくん以外の死んだプレイヤーは全員人狼ではないので、おわんくんは人狼です
+# @gmork-confirm おわんくん/werewolf: dead_werewolf_count
 
 今川→オカリン
 ちせ→オカリン

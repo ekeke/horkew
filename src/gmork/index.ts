@@ -49,7 +49,7 @@ export function explain(
 
 /**
  * 指定された席の役職確定理由を構造化データで返す
- * retarの結果は使わず、gmork自身のCO分析のみで判定する
+ * 対象自身にはretarを使わないが、消去法で他プレイヤーの否定にはpossibilitiesを使える
  */
 export function findConfirmationReason(
   village: VillageStatus,
@@ -57,6 +57,7 @@ export function findConfirmationReason(
   seat: Seat,
   role: SystemRole,
   players?: Map<number, string>,
+  possibilities?: Map<Seat, Set<SystemRole>>,
 ): ConfirmationReason | null {
   const status = village.statuses.get(seat)
   if (!status) return null
@@ -66,7 +67,7 @@ export function findConfirmationReason(
   const medium = analyzeMedium(village, setup, confirmed, players)
   const analysis = { confirmed, seer, medium }
 
-  const input = { village, setup, seat, role, status, analysis, players }
+  const input = { village, setup, seat, role, status, analysis, players, possibilities }
   for (const checker of allConfirmationCheckers) {
     const reason = checker(input)
     if (reason) return reason
@@ -83,8 +84,9 @@ export function explainConfirmation(
   seat: Seat,
   role: SystemRole,
   players?: Map<number, string>,
+  possibilities?: Map<Seat, Set<SystemRole>>,
 ): string {
-  const reason = findConfirmationReason(village, setup, seat, role, players)
+  const reason = findConfirmationReason(village, setup, seat, role, players, possibilities)
   if (reason) return formatConfirmationReason(reason, role)
   return 'わかりません'
 }

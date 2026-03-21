@@ -34,7 +34,8 @@ type GmorkDirective = {
   kind: 'deny' | 'confirm'
   playerName: string
   role: SystemRole
-  expectedType: string | null  // null = 理由なし
+  expectedType: string | null | undefined  // null = 理由なし, undefined = 何でもよい(存在すればOK)
+  expectedInnerType?: string  // bustReason.type等の内部type (> で指定)
 }
 
 type GmorkCheckpoint = {
@@ -78,23 +79,33 @@ function extractGmorkCheckpoints(rawText: string) {
 }
 
 function parseGmorkDirective(kind: 'deny' | 'confirm', content: string): GmorkDirective | null {
-  // Format: PlayerName/role: reason_type
+  // Format: PlayerName/role: reason_type or PlayerName/role: outer > inner
   const colonIdx = content.indexOf(':')
   if (colonIdx < 0) return null
   const left = content.slice(0, colonIdx).trim()
-  const expectedType = content.slice(colonIdx + 1).trim()
+  const rawType = content.slice(colonIdx + 1).trim()
 
   const slashIdx = left.lastIndexOf('/')
   if (slashIdx < 0) return null
   const playerName = left.slice(0, slashIdx).trim()
   const role = left.slice(slashIdx + 1).trim() as SystemRole
 
-  return {
-    kind,
-    playerName,
-    role,
-    expectedType: expectedType === 'null' ? null : expectedType,
+  let expectedType: string | null | undefined
+  let expectedInnerType: string | undefined
+
+  if (rawType === 'null') {
+    expectedType = null
+  } else if (rawType === '') {
+    expectedType = undefined
+  } else if (rawType.includes('>')) {
+    const parts = rawType.split('>').map(s => s.trim())
+    expectedType = parts[0]
+    expectedInnerType = parts[1]
+  } else {
+    expectedType = rawType
   }
+
+  return { kind, playerName, role, expectedType, expectedInnerType }
 }
 
 // ── テスト実行 ──────────────────────────────────────────────────────
@@ -134,7 +145,9 @@ function runGmorkCheckpoint(
 
   describe(label, () => {
     for (const d of checkpoint.directives) {
-      const testName = `@gmork-${d.kind} ${d.playerName}/${d.role}: ${d.expectedType ?? 'null'}`
+      const innerLabel = d.expectedInnerType ? ` > ${d.expectedInnerType}` : ''
+      const typeLabel = d.expectedType === undefined ? '(TODO)' : (d.expectedType ?? 'null') + innerLabel
+      const testName = `@gmork-${d.kind} ${d.playerName}/${d.role}: ${typeLabel}`
 
       test(testName, () => {
         const seat = seatOf(d.playerName)
@@ -144,17 +157,37 @@ function runGmorkCheckpoint(
           if (d.expectedType === null) {
             assert.strictEqual(reason, null,
               `expected no denial reason for ${d.playerName}/${d.role}, got ${reason?.type}`)
+          } else if (d.expectedType === undefined) {
+            if (reason) {
+              const inner = 'bustReason' in reason ? ` > ${(reason as any).bustReason.type}` : ''
+              assert.fail(`アノテーション修正可: 理由は出せたがアノテーションに理由が未記入です。実際の理由: ${reason.type}${inner}`)
+            } else {
+              assert.fail(`理由が出せませんでした: ${d.playerName}/${d.role} の否定理由が見つかりません`)
+            }
           } else {
             assert.ok(reason,
               `expected denial reason "${d.expectedType}" for ${d.playerName}/${d.role}, got null`)
             assert.strictEqual(reason.type, d.expectedType,
               `expected "${d.expectedType}" but got "${reason.type}"`)
+            if (d.expectedInnerType) {
+              const inner = (reason as any).bustReason
+              assert.ok(inner,
+                `expected inner reason "${d.expectedInnerType}" but reason has no bustReason`)
+              assert.strictEqual(inner.type, d.expectedInnerType,
+                `expected inner "${d.expectedInnerType}" but got "${inner.type}"`)
+            }
           }
         } else {
-          const reason = findConfirmationReason(vs, setup, seat, d.role, players)
+          const reason = findConfirmationReason(vs, setup, seat, d.role, players, possibilities)
           if (d.expectedType === null) {
             assert.strictEqual(reason, null,
               `expected no confirmation reason for ${d.playerName}/${d.role}, got ${reason?.type}`)
+          } else if (d.expectedType === undefined) {
+            if (reason) {
+              assert.fail(`アノテーション修正可: 理由は出せたがアノテーションに理由が未記入です。実際の理由: ${reason.type}`)
+            } else {
+              assert.fail(`理由が出せませんでした: ${d.playerName}/${d.role} の確定理由が見つかりません`)
+            }
           } else {
             assert.ok(reason,
               `expected confirmation reason "${d.expectedType}" for ${d.playerName}/${d.role}, got null`)

@@ -124,5 +124,9 @@ export function formatConfirmationReason(reason: ConfirmationReason, _role: Syst
       return `共有者(${reason.masonSeat})に相方と認定されているため共有者に確定`
     case 'seer_fox_kill':
       return `占い師(${reason.seerSeat})の${reason.night + 1}d占い先が呪殺されているため妖狐に確定`
+    case 'dead_werewolf_count': {
+      const names = reason.candidates.map(c => c.name).join('・')
+      return `死亡人狼は最低${reason.requiredDead}人必要ですが、死者の中で人狼になりうるのは${names}の${reason.candidates.length}人のみのため人狼に確定`
+    }
   }
 }

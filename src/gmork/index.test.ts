@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { explain, findReason, findConfirmationReason, explainConfirmation } from './index.ts'
+import { deadWerewolfBounds } from './confirmers.ts'
 import type { VillageStatus, SeatStatus, SystemRole } from '../types/index.ts'
 
 function createSeatStatus(overrides: Partial<SeatStatus> = {}): SeatStatus {
@@ -590,7 +591,7 @@ describe('gmork confirmation', () => {
       const village = createVillage({
         statuses: [[3, {
           surviving: false,
-          causeOfDeath: 'cursed_by_executed_nekomata',
+          causeOfDeath: 'cursed_by_killed_nekomata',
           diedDay: 2,
         }]],
       })
@@ -735,5 +736,124 @@ describe('gmork denial: confirmed_role_holder_exists', () => {
 
     const result = explain(village, setup, 3, 'seer', possibilities)
     assert.match(result, /占い師.*真確定.*ありえない/)
+  })
+})
+
+// ── deadWerewolfBounds ──────────────────────────────────────────────
+
+describe('deadWerewolfBounds', () => {
+  it('ゲーム続行中: 10人生存、人狼3 → 死亡人狼 1〜2', () => {
+    const village = createVillage({ playerCount: 13 })  // 全員生存ではなく…
+    // 10人生存、3人死亡の状態を作る
+    const v = createVillage({
+      playerCount: 13,
+      statuses: [
+        [11, { surviving: false, causeOfDeath: 'execution', diedDay: 1 }],
+        [12, { surviving: false, causeOfDeath: 'night_kill', diedDay: 1 }],
+        [13, { surviving: false, causeOfDeath: 'execution', diedDay: 2 }],
+      ],
+    })
+    const setup = new Map<SystemRole, number>([['werewolf', 3], ['villager', 10]])
+    const bounds = deadWerewolfBounds(v, setup)
+    assert.ok(bounds)
+    // 10人生存: maxAlive = min(3, floor(9/2)) = 4 → 3, minAlive = 1
+    // 死亡: min = 3 - 3 = 0... wait
+    // Actually: 10 alive, floor((10-1)/2) = 4, min(3,4) = 3
+    // So maxAlive = 3, minAlive = 1
+    // deadMin = 3 - 3 = 0, deadMax = 3 - 1 = 2
+    assert.strictEqual(bounds.min, 0)
+    assert.strictEqual(bounds.max, 2)
+  })
+
+  it('ゲーム続行中: 4人生存、人狼3 → 死亡人狼 2〜2', () => {
+    const v = createVillage({
+      playerCount: 14,
+      statuses: Array.from({ length: 10 }, (_, i) => [i + 5, {
+        surviving: false, causeOfDeath: 'execution' as const, diedDay: 1,
+      }] as [number, Partial<SeatStatus>]),
+    })
+    const setup = new Map<SystemRole, number>([['werewolf', 3], ['villager', 11]])
+    const bounds = deadWerewolfBounds(v, setup)
+    assert.ok(bounds)
+    // 4人生存: maxAlive = min(3, floor(3/2)) = 1, minAlive = 1
+    // deadMin = 3 - 1 = 2, deadMax = 3 - 1 = 2
+    assert.strictEqual(bounds.min, 2)
+    assert.strictEqual(bounds.max, 2)
+  })
+
+  it('村勝利: 人狼3 → 死亡人狼 3〜3', () => {
+    const v = createVillage({ playerCount: 10, result: 'villager_won', finished: true })
+    const setup = new Map<SystemRole, number>([['werewolf', 3], ['villager', 7]])
+    const bounds = deadWerewolfBounds(v, setup)
+    assert.ok(bounds)
+    assert.strictEqual(bounds.min, 3)
+    assert.strictEqual(bounds.max, 3)
+  })
+
+  it('狐勝利: 人狼全滅', () => {
+    const v = createVillage({ playerCount: 10, result: 'werehamster_won', finished: true })
+    const setup = new Map<SystemRole, number>([['werewolf', 2], ['villager', 7], ['werehamster', 1]])
+    const bounds = deadWerewolfBounds(v, setup)
+    assert.ok(bounds)
+    assert.strictEqual(bounds.min, 2)
+    assert.strictEqual(bounds.max, 2)
+  })
+
+  it('狼勝利: 6人生存、人狼3 → 死亡人狼 0〜0', () => {
+    const v = createVillage({ playerCount: 10, result: 'werewolf_won', finished: true,
+      statuses: Array.from({ length: 4 }, (_, i) => [i + 7, {
+        surviving: false, causeOfDeath: 'execution' as const, diedDay: 1,
+      }] as [number, Partial<SeatStatus>]),
+    })
+    const setup = new Map<SystemRole, number>([['werewolf', 3], ['villager', 7]])
+    const bounds = deadWerewolfBounds(v, setup)
+    assert.ok(bounds)
+    // 6人生存, 狼勝利: minAlive = ceil(6/2) = 3, maxAlive = min(3,6) = 3
+    // dead: min = 0, max = 0
+    assert.strictEqual(bounds.min, 0)
+    assert.strictEqual(bounds.max, 0)
+  })
+
+  it('ゲーム続行中: 4人生存、人狼3、狐1死亡確認 → 非狐生存者4人で計算', () => {
+    // 狐が死亡確認済み（後追いあり）→ 生存者から狐を除外しない
+    const v = createVillage({
+      playerCount: 14,
+      statuses: [
+        ...Array.from({ length: 9 }, (_, i) => [i + 5, {
+          surviving: false, causeOfDeath: 'execution' as const, diedDay: 1,
+        }] as [number, Partial<SeatStatus>]),
+        [14, { surviving: false, causeOfDeath: 'follow_killed_hamster' as const, diedDay: 2 }],
+      ],
+    })
+    const setup = new Map<SystemRole, number>([['werewolf', 3], ['villager', 9], ['werehamster', 1], ['immoralist', 1]])
+    const bounds = deadWerewolfBounds(v, setup)
+    assert.ok(bounds)
+    // 4人生存、狐1死亡確認 → maxAliveHamsters = 0 → nonHamsterAlive = 4
+    // maxAlive = min(3, floor(3.9/2)) = 1
+    assert.strictEqual(bounds.min, 2)
+    assert.strictEqual(bounds.max, 2)
+  })
+
+  it('ゲーム続行中: 4人生存、人狼3、狐1生存の可能性 → 非狐生存者3人で計算', () => {
+    // 狐がまだ生存している可能性がある（後追いなし）
+    const v = createVillage({
+      playerCount: 14,
+      statuses: Array.from({ length: 10 }, (_, i) => [i + 5, {
+        surviving: false, causeOfDeath: 'execution' as const, diedDay: 1,
+      }] as [number, Partial<SeatStatus>]),
+    })
+    const setup = new Map<SystemRole, number>([['werewolf', 3], ['villager', 9], ['werehamster', 1], ['immoralist', 1]])
+    const bounds = deadWerewolfBounds(v, setup)
+    assert.ok(bounds)
+    // 4人生存、狐が生存している可能性 → maxAliveHamsters = 1 → nonHamsterAlive = 3
+    // maxAlive = min(3, floor(2.9/2)) = 1
+    assert.strictEqual(bounds.min, 2)
+    assert.strictEqual(bounds.max, 2)
+  })
+
+  it('人狼0の配役 → null', () => {
+    const v = createVillage({ playerCount: 5 })
+    const setup = new Map<SystemRole, number>([['villager', 5]])
+    assert.strictEqual(deadWerewolfBounds(v, setup), null)
   })
 })

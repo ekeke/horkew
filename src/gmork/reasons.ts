@@ -49,6 +49,8 @@ export type ConfirmationReason =
   | { type: 'mason_partner', masonSeat: Seat }
   // 呪殺
   | { type: 'seer_fox_kill', seerSeat: Seat, night: Day }
+  // 死亡人狼カウント
+  | { type: 'dead_werewolf_count', requiredDead: number, candidates: { seat: Seat, name: string }[] }
 
 export type ConfirmationCheckerInput = {
   village: VillageStatus
@@ -58,6 +60,7 @@ export type ConfirmationCheckerInput = {
   status: SeatStatus
   analysis: AnalysisResult
   players: Map<number, string> | undefined
+  possibilities: Map<Seat, Set<SystemRole>> | undefined
 }
 
 export type ConfirmationChecker = (input: ConfirmationCheckerInput) => ConfirmationReason | null
