@@ -55,7 +55,9 @@ export type ConfirmationReason =
   // 全人外位置判明によるCO信用
   | { type: 'all_evil_accounted', role: SystemRole, evilSeats: { seat: Seat, name: string }[] }
   // 霊媒白 + 人外確定 → 狂人/狂信者
-  | { type: 'medium_white_non_wolf', claimants: { name: string, night: Day }[] }
+  | { type: 'medium_white_non_wolf', claimants: { name: string, night: Day }[], bustDescription: string }
+  // 否定理由による消去法 + retar突合
+  | { type: 'denial_elimination', eliminatedRoles: { role: SystemRole, reason: string }[] }
 
 export type ConfirmationCheckerInput = {
   village: VillageStatus

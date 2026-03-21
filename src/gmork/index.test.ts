@@ -814,3 +814,132 @@ describe('deadWerewolfBounds', () => {
     assert.strictEqual(deadWerewolfBounds(v, setup), null)
   })
 })
+
+// ── denial_elimination ──────────────────────────────────────────────
+
+describe('gmork confirmation: denial_elimination', () => {
+  it('破綻した占いCO者: 否定理由で狂人が消えretarと突合 → 人狼確定', () => {
+    // Seat 2: true seer (non-busted)
+    // Seat 3: busted seer (too many black results → perspective_liar_budget)
+    // Seat 4: confirmed possessed (by other logic)
+    // → Seat 3 の possibilities = [werewolf] (retarで狂人が消えている)
+    // → denial_elimination: 村役職は全て否定、possessed は confirmed_role_holder_exists で否定
+    //   → 残りは werewolf のみ → 確定
+    const setup = new Map<SystemRole, number>([
+      ['villager', 4],
+      ['seer', 1],
+      ['medium', 1],
+      ['werewolf', 2],
+      ['possessed', 1],
+    ])
+    const village = createVillage({
+      playerCount: 8,
+      statuses: [
+        [2, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([[1, { target: 5, species: 'human' as const }]]),
+        }],
+        [3, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([
+            [1, { target: 6, species: 'wolf' as const }],
+            [2, { target: 7, species: 'wolf' as const }],
+            [3, { target: 8, species: 'wolf' as const }],
+          ]),
+        }],
+      ],
+      claims: [['seer', [2, 3]]],
+    })
+    // retar は seat 3 = [werewolf] に絞り込み済み
+    const possibilities = new Map<number, Set<SystemRole>>()
+    for (let i = 1; i <= 8; i++) {
+      possibilities.set(i, new Set(['villager', 'seer', 'werewolf', 'medium', 'possessed'] as SystemRole[]))
+    }
+    possibilities.set(3, new Set(['werewolf'] as SystemRole[]))
+    // seat 4 を possessed 確定（retarのconfirmedに入る）
+    possibilities.set(4, new Set(['possessed'] as SystemRole[]))
+
+    const reason = findConfirmationReason(village, setup, 3, 'werewolf', undefined, possibilities)
+    assert.ok(reason, 'confirmation reason should exist')
+    assert.strictEqual(reason.type, 'denial_elimination')
+  })
+
+  it('retarで2つ以上の役職が残っている場合は確定しない', () => {
+    const setup = new Map<SystemRole, number>([
+      ['villager', 4],
+      ['seer', 1],
+      ['werewolf', 2],
+      ['possessed', 1],
+    ])
+    const village = createVillage({
+      playerCount: 8,
+      statuses: [
+        [3, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([
+            [1, { target: 6, species: 'wolf' as const }],
+            [2, { target: 7, species: 'wolf' as const }],
+          ]),
+        }],
+      ],
+      claims: [['seer', [3]]],
+    })
+    // retar は seat 3 = [werewolf, possessed] (まだ絞れていない)
+    const possibilities = new Map<number, Set<SystemRole>>()
+    for (let i = 1; i <= 8; i++) {
+      possibilities.set(i, new Set(['villager', 'seer', 'werewolf', 'possessed'] as SystemRole[]))
+    }
+    possibilities.set(3, new Set(['werewolf', 'possessed'] as SystemRole[]))
+
+    const reason = findConfirmationReason(village, setup, 3, 'werewolf', undefined, possibilities)
+    assert.strictEqual(reason, null)
+  })
+
+  it('否定理由にretarを使わない役職だけで絞り込めた場合も確定する', () => {
+    // seat 3 は seer CO、村側役職は全て co_implies_not_other_village_role で否定
+    // possessed は not_in_setup で否定（setup に possessed がない）
+    // → 残りは werewolf のみ
+    const setup = new Map<SystemRole, number>([
+      ['villager', 4],
+      ['seer', 1],
+      ['medium', 1],
+      ['werewolf', 2],
+    ])
+    const village = createVillage({
+      playerCount: 8,
+      statuses: [
+        [2, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([[1, { target: 5, species: 'human' as const }]]),
+        }],
+        [3, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([
+            [1, { target: 6, species: 'wolf' as const }],
+            [2, { target: 7, species: 'wolf' as const }],
+            [3, { target: 8, species: 'wolf' as const }],
+          ]),
+        }],
+      ],
+      claims: [['seer', [2, 3]]],
+    })
+    const possibilities = new Map<number, Set<SystemRole>>()
+    for (let i = 1; i <= 8; i++) {
+      possibilities.set(i, new Set(['villager', 'seer', 'werewolf', 'medium'] as SystemRole[]))
+    }
+    possibilities.set(3, new Set(['werewolf'] as SystemRole[]))
+
+    const reason = findConfirmationReason(village, setup, 3, 'werewolf', undefined, possibilities)
+    assert.ok(reason, 'confirmation reason should exist')
+    assert.strictEqual(reason.type, 'denial_elimination')
+    if (reason.type === 'denial_elimination') {
+      // 否定された役職が含まれていること
+      assert.ok(reason.eliminatedRoles.length > 0)
+    }
+  })
+})

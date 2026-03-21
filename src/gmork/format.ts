@@ -7,7 +7,7 @@ function roleName(role: SystemRole): string {
   return systemRoles.get(role)?.name || role
 }
 
-function formatBustReason(br: BustReason, claimLabel: string): string {
+export function formatBustReason(br: BustReason, claimLabel: string): string {
   switch (br.type) {
     case 'confirmed_as_other_role':
       return `確定${roleName(br.confirmedRole)}のため${claimLabel}ではありえない`
@@ -138,7 +138,15 @@ export function formatConfirmationReason(reason: ConfirmationReason, _role: Syst
     }
     case 'medium_white_non_wolf': {
       const names = reason.claimants.map(c => `${c.name}(${c.night + 1}d)`).join('・')
-      return `霊媒師候補全員（破綻した候補は除く）（${names}）が白判定を出しており、人狼ではない人外のため狂人系に確定`
+      return `${reason.bustDescription}\nさらに霊媒師候補全員（破綻した候補は除く）（${names}）が白判定を出しているため人狼ではなく、狂人系に確定`
+    }
+    case 'denial_elimination': {
+      const items = reason.eliminatedRoles.map(e => {
+        const rn = systemRoles.get(e.role)?.name ?? e.role
+        const indentedReason = e.reason.replace(/\n/g, '\n      ')
+        return `  - ${rn}: ${indentedReason}`
+      }).join('\n')
+      return `以下の否定理由により他の役職がすべて排除されたため確定:\n${items}`
     }
   }
 }

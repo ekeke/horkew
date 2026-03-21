@@ -1,7 +1,11 @@
 import type { Seat, Day, VillageStatus, SystemRole } from '../types/index.ts'
+import { systemRoles } from '../types/index.ts'
 import type { ConfirmationChecker, ConfirmationCheckerInput, ConfirmationReason } from './reasons.ts'
 import { villageSideRoles } from './reasons.ts'
 import { isTrustworthy } from './analysis.ts'
+import type { BustReason } from './analysis.ts'
+import { formatBustReason, formatReason } from './format.ts'
+import { allCheckers } from './checkers.ts'
 
 // ── 人狼人数制約 ────────────────────────────────────────────────────
 
@@ -174,7 +178,7 @@ function checkMediumConsensusBlack({ village, analysis, seat, role, players }: C
  * かつ possibilitiesで人外のみに絞られている
  * → mediumResultが'human'の人外役職（possessed, fanatic）に確定
  */
-function checkMediumWhiteNonWolf({ village, analysis, seat, role, possibilities, players }: ConfirmationCheckerInput): ConfirmationReason | null {
+function checkMediumWhiteNonWolf({ village, analysis, seat, status, role, possibilities, players }: ConfirmationCheckerInput): ConfirmationReason | null {
   if (role !== 'possessed' && role !== 'fanatic') return null
   if (!possibilities) return null
 
@@ -187,7 +191,25 @@ function checkMediumWhiteNonWolf({ village, analysis, seat, role, possibilities,
   // 霊媒合意白
   const result = collectConsensus(village, analysis, 'medium', seat, 'human', players)
   if (!result) return null
-  return { type: 'medium_white_non_wolf', claimants: result }
+
+  // 破綻理由を収集（CO者なら analysis の bust reason）
+  let bustDescription = '人外確定'
+  if (status.claiming) {
+    const claimRole = status.claimingRole as SystemRole
+    const roleNameJa: Record<string, string> = {
+      seer: '占い師', medium: '霊媒師', bodyguard: '狩人', mason: '共有者', nekomata: '猫又',
+    }
+    const roleAnalysis =
+      claimRole === 'seer' ? analysis.seer :
+      claimRole === 'medium' ? analysis.medium :
+      null
+    const bustReason = roleAnalysis?.busted.get(seat)
+    if (bustReason) {
+      bustDescription = formatBustReason(bustReason, roleNameJa[claimRole] ?? claimRole)
+    }
+  }
+
+  return { type: 'medium_white_non_wolf', claimants: result, bustDescription }
 }
 
 /** 破綻していないCO者全員が同じ結果を出しているか確認 */
@@ -333,6 +355,52 @@ function checkAllEvilAccounted({ village, setup, seat, role, status, possibiliti
   return null
 }
 
+// ── 否定理由による消去法 ────────────────────────────────────────────
+
+/**
+ * 否定理由で他の役職を消去し、retarのpossibilitiesと突合して確定する
+ *
+ * 1. setupに存在する全役職について、この席に対する否定理由を収集
+ * 2. 否定できなかった役職とretarのpossibilitiesの積集合を取る
+ * 3. 積集合が{target role}のみなら確定
+ */
+function checkDenialElimination({ village, setup, seat, role, status, analysis, players, possibilities }: ConfirmationCheckerInput): ConfirmationReason | null {
+  if (!possibilities) return null
+
+  const retarRoles = possibilities.get(seat)
+  if (!retarRoles || retarRoles.size !== 1 || !retarRoles.has(role)) return null
+
+  // setupに存在する全役職を収集
+  const allRoles: SystemRole[] = []
+  for (const [r, count] of setup) {
+    if (count > 0) allRoles.push(r)
+  }
+
+  // 各役職について否定理由を収集
+  const checkerInput = { village, setup, seat, role: role, status, analysis, players }
+  const eliminatedRoles: { role: SystemRole, reason: string }[] = []
+
+  for (const candidateRole of allRoles) {
+    if (candidateRole === role) continue
+
+    const input = { ...checkerInput, role: candidateRole }
+    let denied = false
+    for (const checker of allCheckers) {
+      const denialReason = checker(input)
+      if (denialReason) {
+        const roleName = systemRoles.get(candidateRole)?.name ?? candidateRole
+        eliminatedRoles.push({ role: candidateRole, reason: formatReason(denialReason, candidateRole) })
+        denied = true
+        break
+      }
+    }
+    if (!denied) return null // 否定できない役職がある → 確定不可
+  }
+
+  if (eliminatedRoles.length === 0) return null
+  return { type: 'denial_elimination', eliminatedRoles }
+}
+
 // ── Exported checker list ───────────────────────────────────────────
 
 export const allConfirmationCheckers: ConfirmationChecker[] = [
@@ -347,4 +415,5 @@ export const allConfirmationCheckers: ConfirmationChecker[] = [
   checkSeerFoxKillConfirm,
   checkDeadWerewolfCount,
   checkAllEvilAccounted,
+  checkDenialElimination,
 ]
