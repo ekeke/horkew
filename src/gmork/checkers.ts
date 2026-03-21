@@ -58,6 +58,25 @@ function checkConfirmedMediumResult({ village, analysis, seat, role }: CheckerIn
   return null
 }
 
+function checkConfirmedRoleHolderExists({ analysis, seat, role, status }: CheckerInput): DenialReason | null {
+  if (!analysis) return null
+  if (!status.claiming) return null
+
+  const claimed = status.claimingRole as SystemRole
+  if (claimed !== role) return null
+
+  const roleAnalysis =
+    role === 'seer' ? analysis.seer :
+    role === 'medium' ? analysis.medium :
+    null
+  if (!roleAnalysis) return null
+
+  if (roleAnalysis.confirmed != null && roleAnalysis.confirmed !== seat) {
+    return { type: 'confirmed_role_holder_exists', confirmedSeat: roleAnalysis.confirmed, confirmedRole: role }
+  }
+  return null
+}
+
 function checkSeerClaimContradicted({ analysis, seat, role }: CheckerInput): DenialReason | null {
   if (!analysis || role !== 'seer') return null
   const bustReason = analysis.seer.busted.get(seat)
@@ -421,6 +440,7 @@ export const allCheckers: Checker[] = [
   // Tier 0: Analysis-based
   checkConfirmedSeerResult,
   checkConfirmedMediumResult,
+  checkConfirmedRoleHolderExists,
   checkSeerClaimContradicted,
   checkMediumClaimContradicted,
   // Tier 1

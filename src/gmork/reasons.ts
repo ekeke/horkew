@@ -9,6 +9,7 @@ export type DenialReason =
   | { type: 'confirmed_seer_black', seerSeat: Seat, night: Day }
   | { type: 'confirmed_medium_white', mediumSeat: Seat, night: Day }
   | { type: 'confirmed_medium_black', mediumSeat: Seat, night: Day }
+  | { type: 'confirmed_role_holder_exists', confirmedSeat: Seat, confirmedRole: SystemRole }
   | { type: 'seer_claim_contradicted', bustReason: BustReason }
   | { type: 'medium_claim_contradicted', bustReason: BustReason }
   // Tier 1: Direct inference
@@ -34,6 +35,32 @@ export type DenialReason =
   // Tier 3: Chained reasoning
   | { type: 'village_won_survivor' }
   | { type: 'liar_budget_exceeded', required: number, available: number, budgetDetail: string, hypothesisLabel: string, breakdown: { label: string, count: number }[] }
+
+export type ConfirmationReason =
+  // 死因による確定
+  | { type: 'cursed_by_nekomata' }
+  | { type: 'follow_hamster' }
+  // CO分析による確定
+  | { type: 'all_other_cos_busted', role: SystemRole, bustedSeats: Seat[] }
+  // 結果合意による確定
+  | { type: 'seer_consensus_black', claimants: { name: string, night: Day }[] }
+  | { type: 'medium_consensus_black', claimants: { name: string, night: Day }[] }
+  // 共有相方
+  | { type: 'mason_partner', masonSeat: Seat }
+  // 呪殺
+  | { type: 'seer_fox_kill', seerSeat: Seat, night: Day }
+
+export type ConfirmationCheckerInput = {
+  village: VillageStatus
+  setup: Map<SystemRole, number>
+  seat: Seat
+  role: SystemRole
+  status: SeatStatus
+  analysis: AnalysisResult
+  players: Map<number, string> | undefined
+}
+
+export type ConfirmationChecker = (input: ConfirmationCheckerInput) => ConfirmationReason | null
 
 export type CheckerInput = {
   village: VillageStatus

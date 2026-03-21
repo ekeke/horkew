@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
-import { explain, findReason } from './index.ts'
+import { explain, findReason, findConfirmationReason, explainConfirmation } from './index.ts'
 import type { VillageStatus, SeatStatus, SystemRole } from '../types/index.ts'
 
 function createSeatStatus(overrides: Partial<SeatStatus> = {}): SeatStatus {
@@ -415,5 +415,325 @@ describe('gmork explain', () => {
       const result = explain(village, defaultSetup, 99, 'villager')
       assert.strictEqual(result, 'わかりません')
     })
+  })
+})
+
+// ── 確定理由 ────────────────────────────────────────────────────────
+
+describe('gmork confirmation', () => {
+  describe('death cause', () => {
+    it('cursed_by_nekomata confirms werewolf', () => {
+      const village = createVillage({
+        statuses: [[3, {
+          surviving: false,
+          causeOfDeath: 'cursed_by_killed_nekomata',
+          diedDay: 2,
+        }]],
+      })
+      const reason = findConfirmationReason(village, defaultSetup, 3, 'werewolf')
+      assert.ok(reason)
+      assert.strictEqual(reason.type, 'cursed_by_nekomata')
+    })
+
+    it('cursed_by_nekomata does NOT confirm non-werewolf', () => {
+      const village = createVillage({
+        statuses: [[3, {
+          surviving: false,
+          causeOfDeath: 'cursed_by_killed_nekomata',
+          diedDay: 2,
+        }]],
+      })
+      const reason = findConfirmationReason(village, defaultSetup, 3, 'villager')
+      assert.strictEqual(reason, null)
+    })
+
+    it('follow_hamster confirms immoralist', () => {
+      const setupWithFox = new Map<SystemRole, number>([...defaultSetup, ['werehamster', 1], ['immoralist', 1]])
+      const village = createVillage({
+        statuses: [[5, {
+          surviving: false,
+          causeOfDeath: 'follow_executed_hamster',
+          diedDay: 3,
+        }]],
+      })
+      const reason = findConfirmationReason(village, setupWithFox, 5, 'immoralist')
+      assert.ok(reason)
+      assert.strictEqual(reason.type, 'follow_hamster')
+    })
+  })
+
+  describe('CO analysis', () => {
+    it('all_other_cos_busted confirms true seer', () => {
+      // Seat 2: seer CO, perspective budget ok
+      // Seat 3: seer CO, perspective budget busted (3 seer COs + 1 medium CO = 3 fakes, but only 2 evil)
+      // Seat 4: seer CO, perspective budget busted
+      const setup = new Map<SystemRole, number>([
+        ['villager', 5],
+        ['seer', 1],
+        ['medium', 1],
+        ['werewolf', 2],
+      ])
+      const village = createVillage({
+        playerCount: 9,
+        statuses: [
+          [2, {
+            claiming: true,
+            claimingRole: 'seer',
+            assertions: new Map([[1, { target: 5, species: 'human' as const }]]),
+          }],
+          [3, {
+            claiming: true,
+            claimingRole: 'seer',
+            assertions: new Map([
+              [1, { target: 6, species: 'wolf' as const }],
+              [2, { target: 7, species: 'wolf' as const }],
+              [3, { target: 8, species: 'wolf' as const }],
+            ]),
+          }],
+          [4, {
+            claiming: true,
+            claimingRole: 'seer',
+            assertions: new Map([
+              [1, { target: 6, species: 'wolf' as const }],
+              [2, { target: 7, species: 'wolf' as const }],
+              [3, { target: 8, species: 'wolf' as const }],
+            ]),
+          }],
+        ],
+        claims: [['seer', [2, 3, 4]]],
+      })
+
+      const reason = findConfirmationReason(village, setup, 2, 'seer')
+      assert.ok(reason)
+      assert.strictEqual(reason.type, 'all_other_cos_busted')
+    })
+  })
+
+  describe('consensus', () => {
+    it('seer_consensus_black confirms werewolf', () => {
+      const village = createVillage({
+        statuses: [
+          [2, {
+            claiming: true,
+            claimingRole: 'seer',
+            assertions: new Map([[1, { target: 5, species: 'wolf' as const }]]),
+          }],
+        ],
+        claims: [['seer', [2]]],
+      })
+      const reason = findConfirmationReason(village, defaultSetup, 5, 'werewolf')
+      assert.ok(reason)
+      assert.strictEqual(reason.type, 'seer_consensus_black')
+    })
+
+    it('medium_consensus_black confirms werewolf', () => {
+      const village = createVillage({
+        statuses: [
+          [3, {
+            claiming: true,
+            claimingRole: 'medium',
+            assertions: new Map([[1, { target: 6, species: 'wolf' as const }]]),
+          }],
+          [6, { surviving: false, causeOfDeath: 'execution', diedDay: 2 }],
+        ],
+        claims: [['medium', [3]]],
+      })
+      const reason = findConfirmationReason(village, defaultSetup, 6, 'werewolf')
+      assert.ok(reason)
+      assert.strictEqual(reason.type, 'medium_consensus_black')
+    })
+  })
+
+  describe('mason partner', () => {
+    it('confirms mason via partner assertion', () => {
+      const setupWithMason = new Map<SystemRole, number>([...defaultSetup, ['mason', 2]])
+      const village = createVillage({
+        statuses: [
+          [1, {
+            claiming: true,
+            claimingRole: 'mason',
+            assertions: new Map([[-1, { target: 2, species: 'human' as const }]]),
+          }],
+        ],
+        claims: [['mason', [1, 2]]],
+      })
+      const reason = findConfirmationReason(village, setupWithMason, 2, 'mason')
+      assert.ok(reason)
+      assert.strictEqual(reason.type, 'mason_partner')
+    })
+  })
+
+  describe('fox kill', () => {
+    it('seer_fox_kill confirms werehamster', () => {
+      const setupWithFox = new Map<SystemRole, number>([...defaultSetup, ['werehamster', 1]])
+      const village = createVillage({
+        statuses: [
+          [2, {
+            claiming: true,
+            claimingRole: 'seer',
+            assertions: new Map([[2, { target: 7, species: 'human' as const }]]),
+          }],
+          [7, { surviving: false, causeOfDeath: 'night_kill', diedDay: 2 }],
+          [8, { surviving: false, causeOfDeath: 'night_kill', diedDay: 2 }],
+        ],
+        kills: [[2, [7, 8]]],
+        claims: [['seer', [2]]],
+      })
+      const reason = findConfirmationReason(village, setupWithFox, 7, 'werehamster')
+      assert.ok(reason)
+      assert.strictEqual(reason.type, 'seer_fox_kill')
+    })
+  })
+
+  describe('format', () => {
+    it('formats confirmation reason in Japanese', () => {
+      const village = createVillage({
+        statuses: [[3, {
+          surviving: false,
+          causeOfDeath: 'cursed_by_executed_nekomata',
+          diedDay: 2,
+        }]],
+      })
+      const result = explainConfirmation(village, defaultSetup, 3, 'werewolf')
+      assert.match(result, /猫又.*人狼/)
+    })
+
+    it('returns わかりません when no confirmation reason found', () => {
+      const village = createVillage()
+      const result = explainConfirmation(village, defaultSetup, 1, 'villager')
+      assert.strictEqual(result, 'わかりません')
+    })
+  })
+})
+
+// ── 新否定理由: confirmed_role_holder_exists ──────────────────────────
+
+describe('gmork denial: confirmed_role_holder_exists', () => {
+  it('denies seer CO when another player is confirmed true seer', () => {
+    // Seat 2: true seer (only non-busted)
+    // Seat 3: busted seer (perspective liar budget exceeded)
+    // Seat 4: busted seer (perspective liar budget exceeded)
+    // Asking: can seat 3 be seer? → No, seat 2 is confirmed
+    const setup = new Map<SystemRole, number>([
+      ['villager', 5],
+      ['seer', 1],
+      ['medium', 1],
+      ['werewolf', 2],
+    ])
+    const village = createVillage({
+      playerCount: 9,
+      statuses: [
+        [2, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([[1, { target: 5, species: 'human' as const }]]),
+        }],
+        [3, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([
+            [1, { target: 6, species: 'wolf' as const }],
+            [2, { target: 7, species: 'wolf' as const }],
+            [3, { target: 8, species: 'wolf' as const }],
+          ]),
+        }],
+        [4, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([
+            [1, { target: 6, species: 'wolf' as const }],
+            [2, { target: 7, species: 'wolf' as const }],
+            [3, { target: 8, species: 'wolf' as const }],
+          ]),
+        }],
+      ],
+      claims: [['seer', [2, 3, 4]]],
+    })
+
+    // With possibilities (to trigger analysis)
+    const possibilities = new Map<number, Set<SystemRole>>()
+    for (let i = 1; i <= 9; i++) {
+      possibilities.set(i, new Set(['villager', 'seer', 'werewolf', 'medium'] as SystemRole[]))
+    }
+
+    const reason = findReason(village, setup, 3, 'seer', possibilities)
+    assert.ok(reason)
+    assert.strictEqual(reason.type, 'confirmed_role_holder_exists')
+    if (reason.type === 'confirmed_role_holder_exists') {
+      assert.strictEqual(reason.confirmedSeat, 2)
+      assert.strictEqual(reason.confirmedRole, 'seer')
+    }
+  })
+
+  it('does NOT deny seer when no confirmed holder exists', () => {
+    const village = createVillage({
+      statuses: [
+        [2, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([[1, { target: 5, species: 'human' as const }]]),
+        }],
+        [3, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([[1, { target: 6, species: 'wolf' as const }]]),
+        }],
+      ],
+      claims: [['seer', [2, 3]]],
+    })
+
+    const possibilities = new Map<number, Set<SystemRole>>()
+    for (let i = 1; i <= 10; i++) {
+      possibilities.set(i, new Set(['villager', 'seer', 'werewolf', 'possessed'] as SystemRole[]))
+    }
+
+    const reason = findReason(village, defaultSetup, 3, 'seer', possibilities)
+    assert.ok(reason === null || reason.type !== 'confirmed_role_holder_exists')
+  })
+
+  it('formats confirmed_role_holder_exists in Japanese', () => {
+    const setup = new Map<SystemRole, number>([
+      ['villager', 5],
+      ['seer', 1],
+      ['medium', 1],
+      ['werewolf', 2],
+    ])
+    const village = createVillage({
+      playerCount: 9,
+      statuses: [
+        [2, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([[1, { target: 5, species: 'human' as const }]]),
+        }],
+        [3, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([
+            [1, { target: 6, species: 'wolf' as const }],
+            [2, { target: 7, species: 'wolf' as const }],
+            [3, { target: 8, species: 'wolf' as const }],
+          ]),
+        }],
+        [4, {
+          claiming: true,
+          claimingRole: 'seer',
+          assertions: new Map([
+            [1, { target: 6, species: 'wolf' as const }],
+            [2, { target: 7, species: 'wolf' as const }],
+            [3, { target: 8, species: 'wolf' as const }],
+          ]),
+        }],
+      ],
+      claims: [['seer', [2, 3, 4]]],
+    })
+
+    const possibilities = new Map<number, Set<SystemRole>>()
+    for (let i = 1; i <= 9; i++) {
+      possibilities.set(i, new Set(['villager', 'seer', 'werewolf', 'medium'] as SystemRole[]))
+    }
+
+    const result = explain(village, setup, 3, 'seer', possibilities)
+    assert.match(result, /占い師.*真確定.*ありえない/)
   })
 })

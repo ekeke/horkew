@@ -1,4 +1,4 @@
-import type { DenialReason } from './reasons.ts'
+import type { DenialReason, ConfirmationReason } from './reasons.ts'
 import type { BustReason } from './analysis.ts'
 import type { SystemRole } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
@@ -39,6 +39,8 @@ export function formatReason(reason: DenialReason, role: SystemRole): string {
       return `真霊媒師(${reason.mediumSeat})の${reason.night + 1}d白判定により人狼ではありえない`
     case 'confirmed_medium_black':
       return `真霊媒師(${reason.mediumSeat})の${reason.night + 1}d黒判定により人狼に確定`
+    case 'confirmed_role_holder_exists':
+      return `${roleName(reason.confirmedRole)}は(${reason.confirmedSeat})が真確定しているため${roleName(reason.confirmedRole)}ではありえない`
     case 'seer_claim_contradicted':
       return formatBustReason(reason.bustReason, '占い師')
     case 'medium_claim_contradicted':
@@ -99,5 +101,28 @@ export function formatReason(reason: DenialReason, role: SystemRole): string {
       const items = reason.breakdown.map(e => ` - ${e.label}`).join('\n')
       return `偽者数超過。${reason.hypothesisLabel}の場合、人外枠は${reason.budgetDetail}人ですが、以下のように偽者が${reason.required}人必要となり矛盾します。\n${items}`
     }
+  }
+}
+
+export function formatConfirmationReason(reason: ConfirmationReason, _role: SystemRole): string {
+  switch (reason.type) {
+    case 'cursed_by_nekomata':
+      return '猫又の呪殺道連れで死亡しているため人狼に確定'
+    case 'follow_hamster':
+      return '妖狐の死亡に後追いしているため背徳者に確定'
+    case 'all_other_cos_busted':
+      return `他の${roleName(reason.role)}CO者(${reason.bustedSeats.join('・')})が全員破綻しているため真${roleName(reason.role)}に確定`
+    case 'seer_consensus_black': {
+      const names = reason.claimants.map(c => `${c.name}(${c.night + 1}d)`).join('・')
+      return `占い師候補全員（破綻した候補は除く）（${names}）が黒判定を出しているため人狼に確定`
+    }
+    case 'medium_consensus_black': {
+      const names = reason.claimants.map(c => `${c.name}(${c.night + 1}d)`).join('・')
+      return `霊媒師候補全員（破綻した候補は除く）（${names}）が黒判定を出しているため人狼に確定`
+    }
+    case 'mason_partner':
+      return `共有者(${reason.masonSeat})に相方と認定されているため共有者に確定`
+    case 'seer_fox_kill':
+      return `占い師(${reason.seerSeat})の${reason.night + 1}d占い先が呪殺されているため妖狐に確定`
   }
 }

@@ -9,8 +9,8 @@
   import AnalysisWorker from './analysis.worker.ts?worker'
   import StatusPane from './status/StatusPane.svelte'
   import PlayerName from './status/PlayerName.svelte'
-  import { findReason } from '../src/gmork/index.ts'
-  import { formatReason } from '../src/gmork/format.ts'
+  import { findReason, findConfirmationReason } from '../src/gmork/index.ts'
+  import { formatReason, formatConfirmationReason } from '../src/gmork/format.ts'
   import HelpPanel from './HelpPanel.svelte'
   import { onOpenHelp } from './help.ts'
 
@@ -102,6 +102,7 @@
   )
   let assumptions: Map<number, SystemRole> = $state(new Map())
   let gmorkResult = $state('')
+  let baseAnalysisSeats: SeatResult[] = []
   let currentSetup: Map<SystemRole, number> = $state(new Map())
   let worker: Worker | null = null
   let skin: Skin = $state((localStorage.getItem(SKIN_KEY) as Skin) ?? 'flat')
@@ -291,9 +292,27 @@
   function runGmork(): string {
     if (assumptions.size !== 1 || !villageStatus) return ''
     const [[seat, role]] = [...assumptions]
-    const possibilities = new Map(analysisSeats.map(s => [s.seat, new Set(s.roles)]))
+    const possibilities = new Map(baseAnalysisSeats.map(s => [s.seat, new Set(s.roles)]))
     const playerName = players.get(seat) ?? `席${seat}`
     const roleName = systemRoles.get(role)?.name ?? role
+
+    // 確定済み役職をトグルした場合は確定理由を表示
+    const possibleRoles = possibilities.get(seat)
+    if (possibleRoles && possibleRoles.size === 1 && possibleRoles.has(role)) {
+      const confirmObj = findConfirmationReason(villageStatus, currentSetup, seat, role, players)
+      const confirmText = confirmObj ? formatConfirmationReason(confirmObj, role) : 'わかりません'
+      let debugKey = ''
+      if (GMORK_DEBUG && confirmObj) {
+        debugKey = ` [${confirmObj.type}]`
+      }
+      return `「${playerName}」が「${roleName}」に確定した理由： ${confirmText}${debugKey}`
+    }
+
+    // 未確定プレイヤーの可能性がある役職をトグルした場合は何もしない
+    if (possibleRoles && possibleRoles.has(role)) {
+      return ''
+    }
+
     const reasonObj = findReason(villageStatus, currentSetup, seat, role, possibilities, players)
     const reasonText = reasonObj ? formatReason(reasonObj, role) : 'わかりません'
     let debugKey = ''
@@ -312,6 +331,8 @@
       assumptions.set(seat, role)
     }
     assumptions = new Map(assumptions)
+    // baseAnalysisSeats(assumption未適用)でgmorkを計算
+    gmorkResult = runGmork()
     run()
   }
 
@@ -322,7 +343,7 @@
 
     analysisSeats = []
     analysisError = ''
-    gmorkResult = ''
+    if (assumptions.size === 0) gmorkResult = ''
     rawStatements = ''
     analyzerJson = ''
     parsedLines = []
@@ -375,7 +396,7 @@
         if (data.type === 'result') {
           analysisSeats = data.seats
           analysisError = ''
-          gmorkResult = runGmork()
+          if (assumptions.size === 0) baseAnalysisSeats = data.seats
         } else {
           analysisSeats = []
           analysisError = data.message
