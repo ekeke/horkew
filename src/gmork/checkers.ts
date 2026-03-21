@@ -313,16 +313,27 @@ function checkMasonPartner({ village, seat, role }: CheckerInput): DenialReason 
   return null
 }
 
-function checkRoleSlotsFilled({ village, setup, status, role }: CheckerInput): DenialReason | null {
+function checkRoleSlotsFilled({ village, setup, seat, status, role }: CheckerInput): DenialReason | null {
   if (!villageSpecialRoles.includes(role)) return null
   if (status.claiming && status.claimingRole === role) return null
 
   const claimants = (village.claims.get(role) || []) as Seat[]
   const slots = setup.get(role) || 0
-  if (slots > 0 && claimants.length >= slots) {
-    return { type: 'role_slots_filled', claimants }
+  if (slots <= 0 || claimants.length < slots) return null
+
+  // CO前に襲撃死した非CO者には適用しない（COの機会がなかった）
+  if (!status.claiming && status.causeOfDeath === 'night_kill' && status.diedDay != null) {
+    let firstCoDay = Infinity
+    for (const coSeat of claimants) {
+      const coStatus = village.statuses.get(coSeat)
+      if (coStatus?.claimedAt != null && coStatus.claimedAt < firstCoDay) {
+        firstCoDay = coStatus.claimedAt
+      }
+    }
+    if (status.diedDay < firstCoDay) return null
   }
-  return null
+
+  return { type: 'role_slots_filled', claimants }
 }
 
 function checkNekomataNoCompanion({ village, status, role }: CheckerInput): DenialReason | null {
@@ -441,7 +452,6 @@ export const allCheckers: Checker[] = [
   // Tier 0: Analysis-based
   checkConfirmedSeerResult,
   checkConfirmedMediumResult,
-  checkConfirmedRoleHolderExists,
   checkSeerClaimContradicted,
   checkMediumClaimContradicted,
   // Tier 1
@@ -467,4 +477,6 @@ export const allCheckers: Checker[] = [
   // Tier 3
   checkVillageWon,
   checkLiarBudget,
+  // Tier 4: 間接的な理由（他プレイヤーの確定に依存するため最低優先）
+  checkConfirmedRoleHolderExists,
 ]

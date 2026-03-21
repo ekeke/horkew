@@ -36,6 +36,7 @@ type GmorkDirective = {
   role: SystemRole
   expectedType: string | null | undefined  // null = 理由なし, undefined = 何でもよい(存在すればOK)
   expectedInnerType?: string  // bustReason.type等の内部type (> で指定)
+  negated?: boolean  // !prefix: この理由が返ってこないことを検証
 }
 
 type GmorkCheckpoint = {
@@ -92,20 +93,27 @@ function parseGmorkDirective(kind: 'deny' | 'confirm', content: string): GmorkDi
 
   let expectedType: string | null | undefined
   let expectedInnerType: string | undefined
+  let negated = false
 
-  if (rawType === 'null') {
+  let typeStr = rawType
+  if (typeStr.startsWith('!')) {
+    negated = true
+    typeStr = typeStr.slice(1).trim()
+  }
+
+  if (typeStr === 'null') {
     expectedType = null
-  } else if (rawType === '') {
+  } else if (typeStr === '') {
     expectedType = undefined
-  } else if (rawType.includes('>')) {
-    const parts = rawType.split('>').map(s => s.trim())
+  } else if (typeStr.includes('>')) {
+    const parts = typeStr.split('>').map(s => s.trim())
     expectedType = parts[0]
     expectedInnerType = parts[1]
   } else {
-    expectedType = rawType
+    expectedType = typeStr
   }
 
-  return { kind, playerName, role, expectedType, expectedInnerType }
+  return { kind, playerName, role, expectedType, expectedInnerType, negated }
 }
 
 // ── テスト実行 ──────────────────────────────────────────────────────
@@ -146,7 +154,8 @@ function runGmorkCheckpoint(
   describe(label, () => {
     for (const d of checkpoint.directives) {
       const innerLabel = d.expectedInnerType ? ` > ${d.expectedInnerType}` : ''
-      const typeLabel = d.expectedType === undefined ? '(TODO)' : (d.expectedType ?? 'null') + innerLabel
+      const negLabel = d.negated ? '!' : ''
+      const typeLabel = d.expectedType === undefined ? '(TODO)' : negLabel + (d.expectedType ?? 'null') + innerLabel
       const testName = `@gmork-${d.kind} ${d.playerName}/${d.role}: ${typeLabel}`
 
       test(testName, () => {
@@ -154,7 +163,16 @@ function runGmorkCheckpoint(
 
         if (d.kind === 'deny') {
           const reason = findReason(vs, setup, seat, d.role, possibilities, players)
-          if (d.expectedType === null) {
+          if (d.negated) {
+            // !type: この理由が返ってこないことを検証
+            if (reason && reason.type === d.expectedType) {
+              const inner = d.expectedInnerType && 'bustReason' in reason
+                ? (reason as any).bustReason?.type : undefined
+              if (!d.expectedInnerType || inner === d.expectedInnerType) {
+                assert.fail(`expected denial reason NOT to be "${d.expectedType}" for ${d.playerName}/${d.role}, but it was`)
+              }
+            }
+          } else if (d.expectedType === null) {
             assert.strictEqual(reason, null,
               `expected no denial reason for ${d.playerName}/${d.role}, got ${reason?.type}`)
           } else if (d.expectedType === undefined) {
@@ -179,7 +197,12 @@ function runGmorkCheckpoint(
           }
         } else {
           const reason = findConfirmationReason(vs, setup, seat, d.role, players, possibilities)
-          if (d.expectedType === null) {
+          if (d.negated) {
+            // !type: この理由が返ってこないことを検証
+            if (reason && reason.type === d.expectedType) {
+              assert.fail(`expected confirmation reason NOT to be "${d.expectedType}" for ${d.playerName}/${d.role}, but it was`)
+            }
+          } else if (d.expectedType === null) {
             assert.strictEqual(reason, null,
               `expected no confirmation reason for ${d.playerName}/${d.role}, got ${reason?.type}`)
           } else if (d.expectedType === undefined) {

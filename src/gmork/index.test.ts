@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { explain, findReason, findConfirmationReason, explainConfirmation } from './index.ts'
+import { formatReason } from './format.ts'
 import { deadWerewolfBounds } from './confirmers.ts'
 import type { VillageStatus, SeatStatus, SystemRole } from '../types/index.ts'
 
@@ -614,7 +615,8 @@ describe('gmork denial: confirmed_role_holder_exists', () => {
     // Seat 2: true seer (only non-busted)
     // Seat 3: busted seer (perspective liar budget exceeded)
     // Seat 4: busted seer (perspective liar budget exceeded)
-    // Asking: can seat 3 be seer? → No, seat 2 is confirmed
+    // seer_claim_contradictedがより具体的な理由として先に返る
+    // confirmed_role_holder_existsは最低優先
     const setup = new Map<SystemRole, number>([
       ['villager', 5],
       ['seer', 1],
@@ -651,7 +653,6 @@ describe('gmork denial: confirmed_role_holder_exists', () => {
       claims: [['seer', [2, 3, 4]]],
     })
 
-    // With possibilities (to trigger analysis)
     const possibilities = new Map<number, Set<SystemRole>>()
     for (let i = 1; i <= 9; i++) {
       possibilities.set(i, new Set(['villager', 'seer', 'werewolf', 'medium'] as SystemRole[]))
@@ -659,11 +660,7 @@ describe('gmork denial: confirmed_role_holder_exists', () => {
 
     const reason = findReason(village, setup, 3, 'seer', possibilities)
     assert.ok(reason)
-    assert.strictEqual(reason.type, 'confirmed_role_holder_exists')
-    if (reason.type === 'confirmed_role_holder_exists') {
-      assert.strictEqual(reason.confirmedSeat, 2)
-      assert.strictEqual(reason.confirmedRole, 'seer')
-    }
+    assert.strictEqual(reason.type, 'seer_claim_contradicted')
   })
 
   it('does NOT deny seer when no confirmed holder exists', () => {
@@ -693,48 +690,8 @@ describe('gmork denial: confirmed_role_holder_exists', () => {
   })
 
   it('formats confirmed_role_holder_exists in Japanese', () => {
-    const setup = new Map<SystemRole, number>([
-      ['villager', 5],
-      ['seer', 1],
-      ['medium', 1],
-      ['werewolf', 2],
-    ])
-    const village = createVillage({
-      playerCount: 9,
-      statuses: [
-        [2, {
-          claiming: true,
-          claimingRole: 'seer',
-          assertions: new Map([[1, { target: 5, species: 'human' as const }]]),
-        }],
-        [3, {
-          claiming: true,
-          claimingRole: 'seer',
-          assertions: new Map([
-            [1, { target: 6, species: 'wolf' as const }],
-            [2, { target: 7, species: 'wolf' as const }],
-            [3, { target: 8, species: 'wolf' as const }],
-          ]),
-        }],
-        [4, {
-          claiming: true,
-          claimingRole: 'seer',
-          assertions: new Map([
-            [1, { target: 6, species: 'wolf' as const }],
-            [2, { target: 7, species: 'wolf' as const }],
-            [3, { target: 8, species: 'wolf' as const }],
-          ]),
-        }],
-      ],
-      claims: [['seer', [2, 3, 4]]],
-    })
-
-    const possibilities = new Map<number, Set<SystemRole>>()
-    for (let i = 1; i <= 9; i++) {
-      possibilities.set(i, new Set(['villager', 'seer', 'werewolf', 'medium'] as SystemRole[]))
-    }
-
-    const result = explain(village, setup, 3, 'seer', possibilities)
+    const reason = { type: 'confirmed_role_holder_exists' as const, confirmedSeat: 2 as number, confirmedRole: 'seer' as SystemRole }
+    const result = formatReason(reason, 'seer')
     assert.match(result, /占い師.*真確定.*ありえない/)
   })
 })
