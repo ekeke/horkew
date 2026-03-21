@@ -39,7 +39,8 @@ rules:
 
 無惨　狩りCO
 
-# @gmork-deny 初日犠牲者/fanatic:
+# @gmork-deny 初日犠牲者/fanatic: co_contradiction_pair_slot
+# @gmork-deny 初日犠牲者/villager: co_contradiction_pair_slot
 
 # 初日に
 # @explain 初日犠牲者: [seer, bodyguard]

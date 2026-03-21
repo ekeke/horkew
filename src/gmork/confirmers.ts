@@ -418,7 +418,7 @@ function checkDenialElimination({ village, setup, seat, role, status, analysis, 
   }
 
   // 各役職について否定理由を収集
-  const checkerInput = { village, setup, seat, role: role, status, analysis: filteredAnalysis, players }
+  const checkerInput = { village, setup, seat, role: role, status, analysis: filteredAnalysis, players, possibilities }
   const eliminatedRoles: { role: SystemRole, reason: string }[] = []
 
   for (const candidateRole of allRoles) {

@@ -101,6 +101,48 @@ export function formatReason(reason: DenialReason, role: SystemRole): string {
       const items = reason.breakdown.map(e => ` - ${e.label}`).join('\n')
       return `偽者数超過。${reason.hypothesisLabel}の場合、人外枠は${reason.budgetDetail}人ですが、以下のように偽者が${reason.required}人必要となり矛盾します。\n${items}`
     }
+    case 'co_contradiction_pair_slot': {
+      const roleNameJa: Record<string, string> = {
+        seer: '占い師', medium: '霊媒師', bodyguard: '狩人', mason: '共有者', nekomata: '猫又',
+      }
+      const dRole = roleNameJa[reason.divinerRole] ?? reason.divinerRole
+      const tRole = roleNameJa[reason.targetRole] ?? reason.targetRole
+      const slotsDesc = reason.roleSlots.map(s => `${roleNameJa[s.role] ?? s.role}${s.slots}枠`).join('・')
+      const excluded = reason.excludedCandidates.length > 0
+        ? `（他の非CO候補${reason.excludedCandidates.map(c => c.name).join('・')}は${dRole}/${tRole}になれない）`
+        : ''
+      return `${dRole}CO${reason.divinerName}が${tRole}CO${reason.targetName}に黒判定のためどちらかが偽者で、${slotsDesc}のいずれかが空く。この枠を埋められる非CO候補は自身以外に${reason.maxFilling}人${excluded}のため、${dRole}か${tRole}でなければならず${roleName(role)}ではありえない`
+    }
+    case 'co_contradiction_triple_slot': {
+      const roleNameJa: Record<string, string> = {
+        seer: '占い師', medium: '霊媒師', bodyguard: '狩人', mason: '共有者', nekomata: '猫又',
+      }
+      const cDesc = reason.contradictions.map(c =>
+        `${roleNameJa[c.divinerRole] ?? c.divinerRole}CO${c.divinerName}→${roleNameJa[c.targetRole] ?? c.targetRole}CO${c.targetName}黒`
+      ).join('、')
+      const slotsDesc = reason.roleSlots.map(s => `${roleNameJa[s.role] ?? s.role}${s.slots}枠`).join('・')
+      const excluded = reason.excludedCandidates.length > 0
+        ? `（他の非CO候補${reason.excludedCandidates.map(c => c.name).join('・')}はこれらの役職になれない）`
+        : ''
+      return `CO間矛盾(${cDesc})により${slotsDesc}のいずれかが空く。この枠を埋められる非CO候補は自身以外に${reason.maxFilling}人${excluded}のため${roleName(role)}ではありえない`
+    }
+    case 'pigeonhole_must_be_village_special': {
+      const parts: string[] = []
+      parts.push(`村役職枠${reason.totalSlots}人に対しCO者から真は最大${reason.maxRealCOs}人`)
+      if (reason.confirmedNonCoSlots > 0) {
+        parts.push(`非CO確定者${reason.confirmedNonCoSlots}人`)
+      }
+      if (reason.contradictions.length > 0) {
+        const roleNameJa: Record<string, string> = {
+          seer: '占い', medium: '霊媒', bodyguard: '狩人', mason: '共有', nekomata: '猫又',
+        }
+        const cDesc = reason.contradictions.map(c =>
+          `${c.divinerName}(${roleNameJa[c.divinerRole] ?? c.divinerRole}CO)→${c.targetName}(${roleNameJa[c.targetRole] ?? c.targetRole}CO)黒`
+        ).join('、')
+        parts.push(`CO間矛盾(${cDesc})により偽者確定`)
+      }
+      return `${parts.join('、')}。残り${reason.remainingSlots}枠に対し自身以外の候補が${reason.otherEligibleCount}人しかおらず、村役職でなければならないため${roleName(role)}ではありえない`
+    }
   }
 }
 

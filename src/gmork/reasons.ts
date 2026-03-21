@@ -35,6 +35,11 @@ export type DenialReason =
   // Tier 3: Chained reasoning
   | { type: 'village_won_survivor' }
   | { type: 'liar_budget_exceeded', required: number, available: number, budgetDetail: string, hypothesisLabel: string, breakdown: { label: string, count: number }[] }
+  // Tier 3: CO contradiction slot constraint (focused)
+  | { type: 'co_contradiction_pair_slot', divinerName: string, divinerRole: string, targetName: string, targetRole: string, maxFilling: number, roleSlots: { role: string, slots: number }[], excludedCandidates: { name: string }[] }
+  | { type: 'co_contradiction_triple_slot', contradictions: { divinerName: string, divinerRole: string, targetName: string, targetRole: string }[], roles: string[], minVacancies: number, maxFilling: number, roleSlots: { role: string, slots: number }[], excludedCandidates: { name: string }[] }
+  // Tier 3: Cross-role pigeonhole (general)
+  | { type: 'pigeonhole_must_be_village_special', totalSlots: number, maxRealCOs: number, confirmedNonCoSlots: number, remainingSlots: number, otherEligibleCount: number, contradictions: { divinerSeat: Seat, divinerName: string, divinerRole: string, targetSeat: Seat, targetName: string, targetRole: string }[] }
 
 export type ConfirmationReason =
   // 死因による確定
@@ -80,6 +85,7 @@ export type CheckerInput = {
   status: SeatStatus
   analysis: AnalysisResult | null
   players: Map<number, string> | undefined
+  possibilities: Map<Seat, Set<SystemRole>> | undefined
 }
 
 export type Checker = (input: CheckerInput) => DenialReason | null
