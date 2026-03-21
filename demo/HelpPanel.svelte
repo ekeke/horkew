@@ -123,6 +123,7 @@
             <li><a href="#help-faq-cursor">カーソル位置で解析範囲が変わる？</a></li>
             <li><a href="#help-faq-name">名前が認識されない</a></li>
             <li><a href="#help-faq-frontmatter">Frontmatterオプション</a></li>
+            <li><a href="#help-faq-analyzer">ゲーム終了時にアナライザの結果が表示されない</a></li>
           </ul>
         </li>
       </ul>
@@ -440,6 +441,10 @@ vote.style: ordered
 
       <h3 id="help-faq-frontmatter">Frontmatterオプション</h3>
       <p>Frontmatterはドキュメントの先頭に <code>---</code> で囲んで記述します。詳細は<a href="#help-notation-frontmatter">入力方法 &gt; Frontmatterオプション</a>を参照してください。</p>
+
+      <h3 id="help-faq-analyzer">ゲーム終了時にアナライザの結果が表示されない</h3>
+      <p>アナライザは、標準状態ではゲームが続いている、つまり人狼が1匹以上生存している前提で分析を行います。そのため、人狼が論理的に全滅した場合など盤面との齟齬が起こる場合があります。</p>
+      <p>ゲーム終了行（<code>人狼勝利</code>、<code>村勝ち</code> など）を入力してください。</p>
     </section>
   </div>
 </aside>
