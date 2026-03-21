@@ -22,6 +22,7 @@
   const ACTIVE_KEY = 'horkew:__active__'
   const PANES_KEY = 'horkew:__panes__'
   const SKIN_KEY = 'horkew:__skin__'
+  const DEBUG_KEY = 'horkew:__debug__'
 
   type Skin = 'flat' | 'excite'
 
@@ -104,6 +105,7 @@
   let currentSetup: Map<SystemRole, number> = $state(new Map())
   let worker: Worker | null = null
   let skin: Skin = $state((localStorage.getItem(SKIN_KEY) as Skin) ?? 'flat')
+  let debugMode = $state(localStorage.getItem(DEBUG_KEY) === 'true')
   let paneVisible: Record<PaneId, boolean> = $state(loadPaneVisibility())
   let showPaneMenu = $state(false)
   let showModal = $state(false)
@@ -423,6 +425,13 @@
       <option value="excite">Excite</option>
     </select>
 
+    <button
+      class="header-btn debug-btn"
+      class:debug-on={debugMode}
+      onclick={() => { debugMode = !debugMode; localStorage.setItem(DEBUG_KEY, String(debugMode)) }}
+    >{debugMode ? 'DEBUG ON' : 'DEBUG OFF'}</button>
+
+    {#if debugMode}
     <div class="pane-menu-wrap">
       <button class="header-btn" onclick={() => showPaneMenu = !showPaneMenu}>Panes</button>
       {#if showPaneMenu}
@@ -438,11 +447,12 @@
         </div>
       {/if}
     </div>
+    {/if}
 
     <button class="header-btn help-btn" onclick={() => showHelp = true} title="Howl記法ヘルプ">?</button>
   </header>
 
-  <div class="panes">
+  {#snippet inputPane()}
     <section class="pane">
       <div class="pane-header">Input</div>
       <div class="pane-body pane-body-input">
@@ -459,38 +469,9 @@
         {/if}
       </div>
     </section>
+  {/snippet}
 
-    {#if paneVisible.rawStatements}
-    <section class="pane">
-      <div class="pane-header">Raw Statements</div>
-      <div class="pane-body" bind:this={rawBodyEl}>
-        <pre class="output">{rawStatements}</pre>
-      </div>
-    </section>
-    {/if}
-
-    {#if paneVisible.parsed}
-    <section class="pane">
-      <div class="pane-header">Parsed</div>
-      <div class="pane-body">
-        <div class="output parsed-output">
-          {#each parsedLines as line}
-            {#if line.type === 'blank'}
-              <div class="parsed-blank">&nbsp;</div>
-            {:else if line.type === 'day'}
-              <div class="parsed-day">{line.text}</div>
-            {:else if line.type === 'unknown'}
-              <div class="parsed-unknown">{line.text}</div>
-            {:else}
-              <div>{line.text}</div>
-            {/if}
-          {/each}
-        </div>
-      </div>
-    </section>
-    {/if}
-
-    {#if paneVisible.status}
+  {#snippet statusPane()}
     <section class="pane">
       <div class="pane-header">Status</div>
       <div class="pane-body">
@@ -499,18 +480,9 @@
         {/if}
       </div>
     </section>
-    {/if}
+  {/snippet}
 
-    {#if paneVisible.analyzerInput}
-    <section class="pane">
-      <div class="pane-header">Analyzer Input</div>
-      <div class="pane-body">
-        <pre class="output">{analyzerJson}</pre>
-      </div>
-    </section>
-    {/if}
-
-    {#if paneVisible.analysis}
+  {#snippet analysisPane()}
     <section class="pane">
       <div class="pane-header">Analysis</div>
       <div class="pane-body">
@@ -543,8 +515,70 @@
         {/if}
       </div>
     </section>
+  {/snippet}
+
+  {#if debugMode}
+  <div class="panes">
+    {@render inputPane()}
+
+    {#if paneVisible.rawStatements}
+    <section class="pane">
+      <div class="pane-header">Raw Statements</div>
+      <div class="pane-body" bind:this={rawBodyEl}>
+        <pre class="output">{rawStatements}</pre>
+      </div>
+    </section>
+    {/if}
+
+    {#if paneVisible.parsed}
+    <section class="pane">
+      <div class="pane-header">Parsed</div>
+      <div class="pane-body">
+        <div class="output parsed-output">
+          {#each parsedLines as line}
+            {#if line.type === 'blank'}
+              <div class="parsed-blank">&nbsp;</div>
+            {:else if line.type === 'day'}
+              <div class="parsed-day">{line.text}</div>
+            {:else if line.type === 'unknown'}
+              <div class="parsed-unknown">{line.text}</div>
+            {:else}
+              <div>{line.text}</div>
+            {/if}
+          {/each}
+        </div>
+      </div>
+    </section>
+    {/if}
+
+    {#if paneVisible.status}
+    {@render statusPane()}
+    {/if}
+
+    {#if paneVisible.analyzerInput}
+    <section class="pane">
+      <div class="pane-header">Analyzer Input</div>
+      <div class="pane-body">
+        <pre class="output">{analyzerJson}</pre>
+      </div>
+    </section>
+    {/if}
+
+    {#if paneVisible.analysis}
+    {@render analysisPane()}
     {/if}
   </div>
+  {:else}
+  <div class="panes panes-prod">
+    <div class="prod-left">
+      {@render inputPane()}
+    </div>
+    <div class="prod-right">
+      {@render statusPane()}
+      {@render analysisPane()}
+    </div>
+  </div>
+  {/if}
 </div>
 
 {#if showModal}
@@ -653,6 +687,24 @@
     text-align: center;
   }
 
+  .debug-btn {
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.5;
+  }
+
+  .debug-btn.debug-on {
+    opacity: 1;
+    background: #f38ba8;
+    color: #1e1e2e;
+    border-color: #f38ba8;
+  }
+
+  .debug-btn.debug-on:hover {
+    background: #eba0ac;
+    border-color: #eba0ac;
+  }
+
   .pane-menu-wrap {
     position: relative;
   }
@@ -695,6 +747,50 @@
     display: flex;
     flex: 1;
     min-height: 0;
+  }
+
+  .panes-prod {
+    display: flex;
+  }
+
+  .prod-left {
+    display: flex;
+    flex: 1;
+    max-width: 400px;
+    min-width: 0;
+    border-right: 1px solid #313244;
+  }
+
+  .prod-left .input-editor {
+    background: #242438;
+  }
+
+  .panes-prod .pane-header {
+    display: none;
+  }
+
+  .prod-right {
+    display: flex;
+    flex-direction: column;
+    flex: 2;
+    min-width: 0;
+    overflow-y: auto;
+    background: #181825;
+    scrollbar-width: none;
+  }
+
+  .prod-left :global(::-webkit-scrollbar),
+  .prod-right::-webkit-scrollbar {
+    display: none;
+  }
+
+  .prod-right .pane {
+    border-right: none;
+    border-bottom: 1px solid #313244;
+  }
+
+  .prod-right .pane:last-child {
+    border-bottom: none;
   }
 
   .pane {

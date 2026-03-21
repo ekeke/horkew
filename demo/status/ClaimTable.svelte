@@ -15,7 +15,10 @@
 
   const tableRoles = new Set(['seer', 'medium', 'bodyguard'])
 
+  const divinationRoles = new Set(['seer', 'medium'])
   let tableGroups = $derived(groups.filter(g => tableRoles.has(g.role)))
+  let leftGroups = $derived(tableGroups.filter(g => divinationRoles.has(g.role)))
+  let rightTableGroups = $derived(tableGroups.filter(g => !divinationRoles.has(g.role)))
   let masonGroup = $derived(groups.find(g => g.role === 'mason'))
   let nekomataGroup = $derived(groups.find(g => g.role === 'nekomata'))
 
@@ -77,18 +80,16 @@
 </script>
 
 <div class="section">
-  <div class="section-header">CO表</div>
   {#if groups.length === 0}
     <div class="empty">---</div>
   {:else}
-    {#each tableGroups as group}
+    {#snippet roleTable(group: ClaimGroup)}
       <div class="group">
-        <div class="group-header">{group.roleShortName}</div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th class="name-col"></th>
+                <th class="role-label" rowspan={group.rows.length + 1}>{group.roleShortName}</th>
                 {#each nights as night}
                   <th class="night-col">{night}</th>
                 {/each}
@@ -111,29 +112,40 @@
           </table>
         </div>
       </div>
-    {/each}
+    {/snippet}
 
-    {#if masonGroup}
-      <div class="group">
-        <div class="group-header">{masonGroup.roleShortName}</div>
-        <div class="mason-groups">
-          {#each buildMasonGroups(masonGroup) as cluster}
-            <span class="mason-cluster">{#each cluster.members as member, i}{#if i > 0}<span class="mason-sep"> - </span>{/if}<PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} claim={claimShortNames.get(member.seat)} seat={member.seat}>{member.name}</PlayerName>{/each}</span>
-          {/each}
-        </div>
+    <div class="claim-columns">
+      <div class="claim-col">
+        {#each leftGroups as group}
+          {@render roleTable(group)}
+        {/each}
       </div>
-    {/if}
-
-    {#if nekomataGroup}
-      <div class="group">
-        <div class="group-header">{nekomataGroup.roleShortName}</div>
-        <div class="simple-claims">
-          {#each nekomataGroup.rows as row}
-            <PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)} seat={row.seat}>{row.name}</PlayerName>
-          {/each}
-        </div>
+      <div class="claim-col">
+        {#each rightTableGroups as group}
+          {@render roleTable(group)}
+        {/each}
+        {#if masonGroup}
+          <div class="group group-inline">
+            <span class="inline-role-label">{masonGroup.roleShortName}</span>
+            <div class="mason-groups">
+              {#each buildMasonGroups(masonGroup) as cluster}
+                <span class="mason-cluster">{#each cluster.members as member, i}{#if i > 0}<span class="mason-sep"> - </span>{/if}<PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} claim={claimShortNames.get(member.seat)} seat={member.seat}>{member.name}</PlayerName>{/each}</span>
+              {/each}
+            </div>
+          </div>
+        {/if}
+        {#if nekomataGroup}
+          <div class="group group-inline">
+            <span class="inline-role-label">{nekomataGroup.roleShortName}</span>
+            <div class="simple-claims">
+              {#each nekomataGroup.rows as row}
+                <PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)} seat={row.seat}>{row.name}</PlayerName>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
-    {/if}
+    </div>
   {/if}
 </div>
 
@@ -142,27 +154,46 @@
     padding: 8px 12px;
   }
 
-  .section-header {
-    font-size: 12px;
-    font-weight: 600;
-    color: #a6adc8;
-    margin-bottom: 6px;
-  }
-
   .empty {
     color: #585b70;
     font-size: 12px;
   }
 
-  .group {
-    margin-bottom: 8px;
+  .claim-columns {
+    display: flex;
+    gap: 12px;
   }
 
-  .group-header {
+  .claim-col {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .group {
+    margin-bottom: 6px;
+  }
+
+  .group-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .inline-role-label {
     font-size: 11px;
     font-weight: 600;
     color: #cba6f7;
-    margin-bottom: 2px;
+  }
+
+  .role-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #cba6f7;
+    background: #181825;
+    border: 1px solid #313244;
+    padding: 2px 6px;
+    vertical-align: middle;
+    text-align: center;
   }
 
   .table-wrap {
@@ -187,10 +218,6 @@
     font-weight: 500;
     font-size: 10px;
     text-align: center;
-  }
-
-  .name-col {
-    min-width: 48px;
   }
 
   .night-col {

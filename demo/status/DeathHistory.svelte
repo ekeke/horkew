@@ -9,7 +9,6 @@
 </script>
 
 <div class="section">
-  <div class="section-header">死亡履歴</div>
   {#if days.length === 0}
     <div class="empty">---</div>
   {:else}
@@ -46,13 +45,6 @@
   .section {
     padding: 8px 12px;
     border-bottom: 1px solid #313244;
-  }
-
-  .section-header {
-    font-size: 12px;
-    font-weight: 600;
-    color: #a6adc8;
-    margin-bottom: 6px;
   }
 
   .empty {
