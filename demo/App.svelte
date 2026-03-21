@@ -11,6 +11,7 @@
   import PlayerName from './status/PlayerName.svelte'
   import { findReason } from '../src/gmork/index.ts'
   import { formatReason } from '../src/gmork/format.ts'
+  import HelpPanel from './HelpPanel.svelte'
 
   const nightKillCauses: Set<CauseOfDeath> = new Set([
     'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
@@ -105,6 +106,7 @@
   let paneVisible: Record<PaneId, boolean> = $state(loadPaneVisibility())
   let showPaneMenu = $state(false)
   let showModal = $state(false)
+  let showHelp = $state(false)
   let newTitle = $state('')
   let modalInput: HTMLInputElement | undefined = $state()
   let textareaEl: HTMLTextAreaElement | undefined = $state()
@@ -421,6 +423,8 @@
         </div>
       {/if}
     </div>
+
+    <button class="header-btn help-btn" onclick={() => showHelp = true} title="Howl記法ヘルプ">?</button>
   </header>
 
   <div class="panes">
@@ -551,6 +555,8 @@
   </div>
 {/if}
 
+<HelpPanel open={showHelp} onclose={() => showHelp = false} />
+
 <style>
   :global(html, body) {
     margin: 0;
@@ -622,6 +628,14 @@
   .header-btn:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+
+  .help-btn {
+    font-weight: 700;
+    font-size: 13px;
+    width: 28px;
+    padding: 4px 0;
+    text-align: center;
   }
 
   .pane-menu-wrap {
