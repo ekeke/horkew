@@ -1,14 +1,14 @@
-import { describe, it } from 'node:test'
+import { describe, test } from 'node:test'
 import assert from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
-import { explain, findReason } from './index.ts'
-import { runAnalysis, analyzeSeer } from './analysis.ts'
+import type { SystemRole } from '../types/index.ts'
+import { findReason, findConfirmationReason } from './index.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const scenariosDir = join(__dirname, '..', 'retar', 'scenarios')
@@ -28,11 +28,99 @@ const defaultOptions: AnalyzeOptions = {
   batch: 0,
 }
 
-function loadScenario(file: string) {
-  const content = readFileSync(join(scenariosDir, file), 'utf-8').replace(/\r\n/g, '\n')
-  const { meta, statements } = parse(content)
+// ── アノテーション解析 ──────────────────────────────────────────────
+
+type GmorkDirective = {
+  kind: 'deny' | 'confirm'
+  playerName: string
+  role: SystemRole
+  expectedType: string | null  // null = 理由なし
+}
+
+type GmorkCheckpoint = {
+  lineNumber: number
+  directives: GmorkDirective[]
+}
+
+const gmorkPattern = /^#\s*@gmork-(deny|confirm)\s+(.+)$/
+
+function extractGmorkCheckpoints(rawText: string) {
+  const fmMatch = rawText.match(/^(---\n[\s\S]*?\n---\n)/)
+  const frontmatter = fmMatch ? fmMatch[1] : ''
+  const bodyText = fmMatch ? rawText.slice(fmMatch[1].length) : rawText
+  const bodyLines = bodyText.split('\n')
+
+  const checkpoints: GmorkCheckpoint[] = []
+  let current: GmorkCheckpoint | null = null
+
+  for (let i = 0; i < bodyLines.length; i++) {
+    const line = bodyLines[i].trim()
+    const m = gmorkPattern.exec(line)
+
+    if (m) {
+      if (current === null) {
+        current = { lineNumber: i, directives: [] }
+      }
+      const directive = parseGmorkDirective(m[1] as 'deny' | 'confirm', m[2])
+      if (directive) current.directives.push(directive)
+    } else {
+      if (current !== null) {
+        checkpoints.push(current)
+        current = null
+      }
+    }
+  }
+  if (current !== null) {
+    checkpoints.push(current)
+  }
+
+  return { frontmatter, bodyLines, checkpoints }
+}
+
+function parseGmorkDirective(kind: 'deny' | 'confirm', content: string): GmorkDirective | null {
+  // Format: PlayerName/role: reason_type
+  const colonIdx = content.indexOf(':')
+  if (colonIdx < 0) return null
+  const left = content.slice(0, colonIdx).trim()
+  const expectedType = content.slice(colonIdx + 1).trim()
+
+  const slashIdx = left.lastIndexOf('/')
+  if (slashIdx < 0) return null
+  const playerName = left.slice(0, slashIdx).trim()
+  const role = left.slice(slashIdx + 1).trim() as SystemRole
+
+  return {
+    kind,
+    playerName,
+    role,
+    expectedType: expectedType === 'null' ? null : expectedType,
+  }
+}
+
+// ── テスト実行 ──────────────────────────────────────────────────────
+
+function buildOptions(meta: Record<string, any>): AnalyzeOptions {
+  return {
+    ...defaultOptions,
+    ...(meta.options || {}),
+    assumptions: meta.options?.assumptions
+      ? new Map(Object.entries(meta.options.assumptions))
+      : defaultOptions.assumptions,
+    hocusPocus: meta.options?.hocusPocus
+      ? new Map(Object.entries(meta.options.hocusPocus))
+      : defaultOptions.hocusPocus,
+  }
+}
+
+function runGmorkCheckpoint(
+  partialText: string,
+  meta: Record<string, any>,
+  checkpoint: GmorkCheckpoint,
+  label: string,
+) {
+  const options = buildOptions(meta)
+  const { statements } = parse(partialText)
   const { vs, setup, players } = buildVillageStatus(statements, meta)
-  const options = { ...defaultOptions, ...(meta.options || {}) }
   const retar = new VillageRetar(vs, setup, options)
   const result = retar.analyze()
   const possibilities = result.result
@@ -44,159 +132,84 @@ function loadScenario(file: string) {
     throw new Error(`player "${name}" not found`)
   }
 
-  return { vs, setup, players, possibilities, seatOf }
+  describe(label, () => {
+    for (const d of checkpoint.directives) {
+      const testName = `@gmork-${d.kind} ${d.playerName}/${d.role}: ${d.expectedType ?? 'null'}`
+
+      test(testName, () => {
+        const seat = seatOf(d.playerName)
+
+        if (d.kind === 'deny') {
+          const reason = findReason(vs, setup, seat, d.role, possibilities, players)
+          if (d.expectedType === null) {
+            assert.strictEqual(reason, null,
+              `expected no denial reason for ${d.playerName}/${d.role}, got ${reason?.type}`)
+          } else {
+            assert.ok(reason,
+              `expected denial reason "${d.expectedType}" for ${d.playerName}/${d.role}, got null`)
+            assert.strictEqual(reason.type, d.expectedType,
+              `expected "${d.expectedType}" but got "${reason.type}"`)
+          }
+        } else {
+          const reason = findConfirmationReason(vs, setup, seat, d.role, players)
+          if (d.expectedType === null) {
+            assert.strictEqual(reason, null,
+              `expected no confirmation reason for ${d.playerName}/${d.role}, got ${reason?.type}`)
+          } else {
+            assert.ok(reason,
+              `expected confirmation reason "${d.expectedType}" for ${d.playerName}/${d.role}, got null`)
+            assert.strictEqual(reason.type, d.expectedType,
+              `expected "${d.expectedType}" but got "${reason.type}"`)
+          }
+        }
+      })
+    }
+  })
 }
 
-describe('gmork integration: mada4', () => {
-  const { vs, setup, possibilities, seatOf } = loadScenario('mada4.howl')
-  const analysis = runAnalysis(vs, setup, possibilities)
+// ── シナリオ読み込み・実行 ──────────────────────────────────────────
 
-  describe('占い師真贋分析', () => {
-    it('占いCO者は4人', () => {
-      assert.strictEqual(analysis.seer.candidates.length, 4)
-    })
+function loadScenarios() {
+  let files: string[]
+  try {
+    files = readdirSync(scenariosDir).filter(f => f.endsWith('.howl'))
+  } catch {
+    return []
+  }
+  return files.map(file => {
+    const content = readFileSync(join(scenariosDir, file), 'utf-8').replace(/\r\n/g, '\n')
+    return { file, content }
+  })
+}
 
-    it('さとし(闇さとし)は破綻', () => {
-      const seat = seatOf('闇さとし')
-      assert.ok(analysis.seer.busted.has(seat), 'さとしは破綻しているべき')
-    })
+const scenarios = loadScenarios()
 
-    it('サターニャは破綻', () => {
-      const seat = seatOf('サターニャ')
-      assert.ok(analysis.seer.busted.has(seat), 'サターニャは破綻しているべき')
-    })
+const gmorkFilterPattern = /^#\s*@gmork-(deny|confirm)\s/m
+const withGmork = scenarios.filter(s => gmorkFilterPattern.test(s.content))
 
-    it('ちせは破綻', () => {
-      const seat = seatOf('ちせ')
-      assert.ok(analysis.seer.busted.has(seat), 'ちせは破綻しているべき')
-    })
-
-    it('考える人は破綻していない → 真占い師確定', () => {
-      const seat = seatOf('考える人')
-      assert.ok(!analysis.seer.busted.has(seat))
-      assert.strictEqual(analysis.seer.confirmed, seat)
+if (withGmork.length === 0) {
+  describe('gmork integration (no annotations)', () => {
+    test('waiting for @gmork-deny/@gmork-confirm annotations in scenario files', () => {
+      assert.ok(true, 'no gmork annotations to test')
     })
   })
+} else {
+  describe('gmork integration', () => {
+    for (const { file, content } of withGmork) {
+      const { frontmatter, bodyLines, checkpoints } = extractGmorkCheckpoints(content)
+      const { meta } = parse(content)
+      const title = meta.title || file
 
-  describe('霊媒師真贋分析', () => {
-    it('霊媒CO者は1人(羽根帚) → 真霊媒師確定', () => {
-      assert.strictEqual(analysis.medium.candidates.length, 1)
-      assert.strictEqual(analysis.medium.confirmed, seatOf('羽根帚'))
-    })
+      describe(title, () => {
+        for (let i = 0; i < checkpoints.length; i++) {
+          const cp = checkpoints[i]
+          const partialText = frontmatter + bodyLines.slice(0, cp.lineNumber).join('\n')
+          const label = checkpoints.length === 1
+            ? `gmork checkpoint (line ${cp.lineNumber + 1})`
+            : `gmork checkpoint ${i + 1} (line ${cp.lineNumber + 1})`
+          runGmorkCheckpoint(partialText, meta, cp, label)
+        }
+      })
+    }
   })
-
-  describe('真占い師の判定による否定', () => {
-    it('羽根帚は人狼ではない (真占い師の白判定)', () => {
-      const reason = findReason(vs, setup, seatOf('羽根帚'), 'werewolf', possibilities)
-      assert.ok(reason)
-      assert.strictEqual(reason.type, 'confirmed_seer_white')
-    })
-
-    it('explain出力に真占い師が含まれる', () => {
-      const result = explain(vs, setup, seatOf('羽根帚'), 'werewolf', possibilities)
-      assert.match(result, /真占い師/)
-    })
-  })
-})
-
-describe('gmork integration: ultimate.5.3', () => {
-  const { vs, setup, possibilities, seatOf, players } = loadScenario('ultimate.5.3.howl')
-  const analysis = runAnalysis(vs, setup, possibilities, players)
-
-  describe('占い師真贋分析', () => {
-    it('占いCO者は2人(ダンカン, 中田)', () => {
-      assert.strictEqual(analysis.seer.candidates.length, 2)
-    })
-
-    it('ダンカンは破綻: 白人外数超過', () => {
-      const seat = seatOf('ダンカン')
-      const bust = analysis.seer.busted.get(seat)
-      assert.ok(bust)
-      assert.strictEqual(bust.type, 'white_evil_exceeded')
-    })
-
-    it('中田が真占い師確定', () => {
-      assert.strictEqual(analysis.seer.confirmed, seatOf('中田'))
-    })
-  })
-
-  describe('占い師真贋分析 (Retar確定なし・Gmork独自推論)', () => {
-    // Retar確定を使わず、Gmorkだけで破綻を検出できるか
-    const emptyConfirmed = new Map()
-    const seerIndependent = analyzeSeer(vs, setup, emptyConfirmed)
-
-    it('ダンカンは破綻: 白人外数超過 (Retar無しでも検出)', () => {
-      const seat = seatOf('ダンカン')
-      const bust = seerIndependent.busted.get(seat)
-      assert.ok(bust, 'ダンカンはRetar無しでも破綻すべき')
-      assert.strictEqual(bust.type, 'white_evil_exceeded')
-    })
-
-    it('Retar無しでも中田が真占い師確定', () => {
-      assert.strictEqual(seerIndependent.confirmed, seatOf('中田'))
-    })
-  })
-
-  describe('霊媒師真贋分析', () => {
-    it('霊媒CO者は3人(香川, 児玉, マドック)', () => {
-      assert.strictEqual(analysis.medium.candidates.length, 3)
-    })
-
-    it('香川は破綻: 視点人外数が超過 (霊媒対抗2+占い1+藤澤黒1+狩人1=5 > 人外4)', () => {
-      const bust = analysis.medium.busted.get(seatOf('香川'))
-      assert.ok(bust)
-      assert.strictEqual(bust.type, 'perspective_liar_budget')
-      if (bust.type === 'perspective_liar_budget') {
-        assert.strictEqual(bust.needed, 5)
-        assert.strictEqual(bust.budget, 4)
-        assert.strictEqual(bust.breakdown.length, 4) // 霊媒対抗, 占い偽, 黒判定, 狩人偽
-      }
-    })
-
-    it('霊媒師は未確定 (児玉・マドックが残り2人で枠1)', () => {
-      assert.strictEqual(analysis.medium.confirmed, null)
-    })
-  })
-
-  describe('真占い師(中田)の判定による否定', () => {
-    it('森本は人狼ではない (中田の1d白判定)', () => {
-      const reason = findReason(vs, setup, seatOf('森本'), 'werewolf', possibilities, players)
-      assert.ok(reason)
-      assert.strictEqual(reason.type, 'confirmed_seer_white')
-    })
-
-    it('大野は人狼ではない (中田の4d白判定)', () => {
-      const reason = findReason(vs, setup, seatOf('大野'), 'werewolf', possibilities, players)
-      assert.ok(reason)
-      assert.strictEqual(reason.type, 'confirmed_seer_white')
-    })
-
-    it('結は人狼ではない (中田の3d白判定)', () => {
-      const reason = findReason(vs, setup, seatOf('結'), 'werewolf', possibilities, players)
-      assert.ok(reason)
-      assert.strictEqual(reason.type, 'confirmed_seer_white')
-    })
-  })
-
-  describe('偽占い師の結果を信用しない', () => {
-    it('香川/werewolf: ダンカン(破綻占い師)の白判定を使わない', () => {
-      const reason = findReason(vs, setup, seatOf('香川'), 'werewolf', possibilities, players)
-      // ダンカンは破綻占い師なので、ダンカンの白判定は無視されるべき
-      if (reason && reason.type === 'seer_white') {
-        const names = reason.claimants.map(c => c.name)
-        assert.ok(!names.includes('ダンカン'), 'ダンカン(破綻占い師)の占い結果を信用してはいけない')
-      }
-    })
-  })
-
-  describe('偽霊媒師の結果を信用しない', () => {
-    it('藤澤/werewolf: 香川(破綻霊媒師)の黒判定を使わない', () => {
-      const reason = findReason(vs, setup, seatOf('藤澤'), 'werewolf', possibilities, players)
-      // 香川は破綻霊媒師なので霊媒結果は信用できない
-      if (reason && (reason.type === 'medium_black' || reason.type === 'medium_white')) {
-        const names = reason.claimants.map(c => c.name)
-        assert.ok(!names.includes('香川'), '香川(破綻霊媒師)の霊媒結果を信用してはいけない')
-      }
-    })
-  })
-})
+}

@@ -87,6 +87,7 @@ rules:
 
 # @expect おわんくん: [werewolf]
 # @expect solve: true
+# @gmork-confirm 闇さとし/immoralist: follow_hamster
 
 今川→オカリン
 ちせ→オカリン

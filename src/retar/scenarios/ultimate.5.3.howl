@@ -102,6 +102,10 @@ setup:
 
 # @expect 中田　功: [seer]
 # @expect ダンカン: [werewolf, possessed]
+# @gmork-confirm 中田　功/seer: all_other_cos_busted
+# @gmork-deny 森本/werewolf: confirmed_seer_white
+# @gmork-deny 大野/werewolf: confirmed_seer_white
+# @gmork-deny 結/werewolf: confirmed_seer_white
 
 ダンカン　人外CO
 
