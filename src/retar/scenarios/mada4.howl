@@ -62,6 +62,8 @@ rules:
 # この村の占い師は一人だけなので、前日の処刑以前に死亡した人物は占い師ではない。
 # @gmork-deny エーカゲン２世/seer: !role_slots_filled
 
+# @gmork-deny ちせ/werehamster: confirmed_role_holder_exists
+
 指定おわんくん
 
 おわんくん←

@@ -62,26 +62,23 @@ function checkConfirmedMediumResult({ village, analysis, seat, role, players }: 
 
 function checkConfirmedRoleHolderExists({ village, setup, analysis, seat, role, status, players }: CheckerInput): DenialReason | null {
   if (!analysis) return null
-  if (!status.claiming) return null
 
-  const claimed = status.claimingRole as SystemRole
-  if (claimed !== role) return null
-
-  // seer/medium: analysis の破綻判定経由で確定者を探す
-  const roleAnalysis =
-    role === 'seer' ? analysis.seer :
-    role === 'medium' ? analysis.medium :
-    null
-  if (roleAnalysis) {
-    if (roleAnalysis.confirmed != null && roleAnalysis.confirmed !== seat) {
-      const confirmedName = players?.get(roleAnalysis.confirmed) ?? `${roleAnalysis.confirmed}`
-      return { type: 'confirmed_role_holder_exists', confirmedSeat: roleAnalysis.confirmed, confirmedName, confirmedRole: role }
+  // seer/medium CO者: analysis の破綻判定経由で確定者を探す
+  if (status.claiming && status.claimingRole === role) {
+    const roleAnalysis =
+      role === 'seer' ? analysis.seer :
+      role === 'medium' ? analysis.medium :
+      null
+    if (roleAnalysis) {
+      if (roleAnalysis.confirmed != null && roleAnalysis.confirmed !== seat) {
+        const confirmedName = players?.get(roleAnalysis.confirmed) ?? `${roleAnalysis.confirmed}`
+        return { type: 'confirmed_role_holder_exists', confirmedSeat: roleAnalysis.confirmed, confirmedName, confirmedRole: role }
+      }
+      return null
     }
-    return null
   }
 
-  // その他の村役職: retar の confirmed roles からスロットが埋まっているか確認
-  if (!villageSpecialRoles.includes(role)) return null
+  // 汎用: retar の confirmed roles からスロットが埋まっているか確認
   const slots = setup.get(role) || 0
   if (slots <= 0) return null
 
