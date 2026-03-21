@@ -61,8 +61,8 @@
 
 <div class="status-pane">
   <SurvivorSection info={survivorInfo} />
-  <VoteTable status={voteStatus} />
   <SummaryTable days={deathHistory} groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} {claimShortNames} />
+  <VoteTable status={voteStatus} />
 </div>
 
 {#if dialogSeat != null && dialogStatus}

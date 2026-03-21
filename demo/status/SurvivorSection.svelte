@@ -6,20 +6,22 @@
 </script>
 
 <div class="section">
-  <div class="section-header">生存 <span class="count">{info.alive}</span>/{info.total}</div>
-  <div class="survivor-list">
-    {#each info.survivors as { seat, name }}
-      <span class="survivor-badge"><PlayerName dead={false} {seat}>{name}</PlayerName></span>
-    {/each}
-    {#if info.survivors.length === 0}
-      <span class="empty">---</span>
-    {/if}
-  </div>
+  <span class="section-header">生存 <span class="count">{info.alive}</span>/{info.total}</span>
+  {#each info.survivors as { seat, name }}
+    <span class="survivor-badge"><PlayerName dead={false} {seat}>{name}</PlayerName></span>
+  {/each}
+  {#if info.survivors.length === 0}
+    <span class="empty">---</span>
+  {/if}
 </div>
 
 <style>
   .section {
-    padding: 8px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
     border-bottom: 1px solid #313244;
   }
 
@@ -27,18 +29,12 @@
     font-size: 12px;
     font-weight: 600;
     color: #a6adc8;
-    margin-bottom: 6px;
+    margin-right: 4px;
   }
 
   .count {
     color: #a6e3a1;
     font-size: 14px;
-  }
-
-  .survivor-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
   }
 
   .survivor-badge {

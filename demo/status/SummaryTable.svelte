@@ -16,18 +16,34 @@
 
   const nightKillCauses = new Set(['night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata'])
   const tableRoles = new Set(['seer', 'medium', 'bodyguard'])
+  const roleDisplayOrder = ['bodyguard', 'seer', 'medium']
 
-  let tableGroups = $derived(groups.filter(g => tableRoles.has(g.role)))
+  let tableGroups = $derived(
+    roleDisplayOrder
+      .map(r => groups.find(g => g.role === r))
+      .filter((g): g is ClaimGroup => g != null)
+  )
   let masonGroup = $derived(groups.find(g => g.role === 'mason'))
   let nekomataGroup = $derived(groups.find(g => g.role === 'nekomata'))
 
-  // Day columns: 0 to maxDay-1 (night N results shown on day N)
-  let dayColumns = $derived(
-    Array.from({ length: Math.max(0, maxDay) }, (_, i) => i)
-  )
-
   // Index death history by day
   let deathByDay = $derived(new Map(days.map(d => [d.day, d])))
+
+  // Build all role timelines for checking non-empty days
+  let allTimelines = $derived(
+    tableGroups.flatMap(g => g.rows.map(row => buildAssertionTimeline(row, maxDay, players)))
+  )
+
+  // Day columns: only include days that have any data
+  let dayColumns = $derived(
+    Array.from({ length: Math.max(0, maxDay) }, (_, i) => i)
+      .filter(day => {
+        const d = deathByDay.get(day)
+        if (d && (d.executions.length > 0 || d.nightKills.length > 0)) return true
+        if (allTimelines.some(t => t.has(day - 1))) return true
+        return false
+      })
+  )
 
   function speciesSymbol(species: import('../../src/types/index.ts').EnumSpecies): string {
     if (species === 'human') return '○'
@@ -83,15 +99,6 @@
       </tr>
     </thead>
     <tbody>
-      <!-- 吊り -->
-      <tr class="exec-row">
-        <td class="label-cell exec-label">吊</td>
-        <td class="name-cell"></td>
-        {#each dayColumns as day}
-          {@const d = deathByDay.get(day)}
-          <td class="data-cell">{#if d}{#each d.executions as entry, i}{#if i > 0}、{/if}<PlayerName dead nightKill={false} executed claim={claimShortNames.get(entry.seat)} seat={entry.seat}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}{/if}</td>
-        {/each}
-      </tr>
       <!-- 噛み -->
       <tr class="kill-row">
         <td class="label-cell kill-label">噛</td>
@@ -102,22 +109,17 @@
         {/each}
       </tr>
 
-      <!-- セパレータ -->
-      {#if tableGroups.length > 0}
-      <tr class="separator"><td colspan={dayColumns.length + 2}></td></tr>
-      {/if}
-
-      <!-- 各役職 -->
+      <!-- 各役職 (狩→占→霊) -->
       {#each tableGroups as group}
         {#each group.rows as row, rowIdx}
           {@const timeline = buildAssertionTimeline(row, maxDay, players)}
-          <tr>
+          <tr class:group-first={rowIdx === 0}>
             {#if rowIdx === 0}
               <td class="label-cell role-label" rowspan={group.rows.length}>{group.roleShortName}</td>
             {/if}
-            <td class="name-cell"><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)} seat={row.seat}>{row.name}</PlayerName></td>
-            {#each dayColumns as night}
-              {@const assertion = timeline.get(night) ?? null}
+            <td class="name-cell"><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} seat={row.seat}>{row.name}</PlayerName></td>
+            {#each dayColumns as day}
+              {@const assertion = timeline.get(day - 1) ?? null}
               <td class="data-cell" class:human={assertion?.species === 'human'} class:wolf={assertion?.species === 'wolf'} class:guard={row.claimingRole === 'bodyguard' && assertion !== null}>
                 {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{cellContent(assertion, row.claimingRole)}</PlayerName>{/if}
               </td>
@@ -126,39 +128,28 @@
         {/each}
       {/each}
 
-      <!-- 共有 -->
-      {#if masonGroup}
-        <tr>
-          <td class="label-cell role-label">{masonGroup.roleShortName}</td>
-          <td class="name-cell" colspan={dayColumns.length + 1}>
-            <span class="inline-list">
-              {#each buildMasonDisplay(masonGroup) as cluster, ci}
-                {#if ci > 0}<span class="cluster-sep"> / </span>{/if}
-                {#each cluster as member, i}
-                  {#if i > 0}<span class="mason-sep"> - </span>{/if}
-                  <PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} claim={claimShortNames.get(member.seat)} seat={member.seat}>{member.name}</PlayerName>
-                {/each}
-              {/each}
-            </span>
-          </td>
-        </tr>
-      {/if}
-
-      <!-- 猫又 -->
-      {#if nekomataGroup}
-        {#each nekomataGroup.rows as row, rowIdx}
-          <tr>
-            {#if rowIdx === 0}
-              <td class="label-cell role-label" rowspan={nekomataGroup.rows.length}>{nekomataGroup.roleShortName}</td>
-            {/if}
-            <td class="name-cell" colspan={dayColumns.length + 1}>
-              <PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)} seat={row.seat}>{row.name}</PlayerName>
-            </td>
-          </tr>
+      <!-- 吊り -->
+      <tr class="exec-row group-first">
+        <td class="label-cell exec-label">吊</td>
+        <td class="name-cell"></td>
+        {#each dayColumns as day}
+          {@const d = deathByDay.get(day)}
+          <td class="data-cell">{#if d}{#each d.executions as entry, i}{#if i > 0}、{/if}<PlayerName dead nightKill={false} executed claim={claimShortNames.get(entry.seat)} seat={entry.seat}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}{/if}</td>
         {/each}
-      {/if}
+      </tr>
+
     </tbody>
   </table>
+  {#if masonGroup || nekomataGroup}
+  <div class="extra-claims">
+    {#if masonGroup}
+      <span class="extra-item"><span class="extra-label">{masonGroup.roleShortName}</span>{#each buildMasonDisplay(masonGroup) as cluster, ci}{#if ci > 0}<span class="cluster-sep"> / </span>{/if}{#each cluster as member, i}{#if i > 0}<span class="mason-sep">-</span>{/if}<PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} claim={claimShortNames.get(member.seat)} seat={member.seat}>{member.name}</PlayerName>{/each}{/each}</span>
+    {/if}
+    {#if nekomataGroup}
+      <span class="extra-item"><span class="extra-label">{nekomataGroup.roleShortName}</span>{#each nekomataGroup.rows as row, i}{#if i > 0}、{/if}<PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)} seat={row.seat}>{row.name}</PlayerName>{/each}</span>
+    {/if}
+  </div>
+  {/if}
 </div>
 {/if}
 
@@ -237,11 +228,8 @@
     color: #89b4fa;
   }
 
-  .separator td {
-    border-left: none;
-    border-right: none;
-    height: 4px;
-    padding: 0;
+  .group-first td {
+    border-top: 2px solid #9399b2;
   }
 
   .cause-note {
@@ -250,8 +238,21 @@
     margin-left: 2px;
   }
 
-  .inline-list {
+  .extra-claims {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    margin-top: 6px;
     font-size: 12px;
+    font-family: 'Consolas', 'Menlo', monospace;
+    color: #cdd6f4;
+  }
+
+  .extra-label {
+    color: #cba6f7;
+    font-weight: 600;
+    font-size: 11px;
+    margin-right: 4px;
   }
 
   .mason-sep, .cluster-sep {

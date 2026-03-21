@@ -491,27 +491,29 @@
         {/if}
         {#if analysisColumns.length > 0 && players.size > 0}
           {@const currentMap = new Map(analysisSeats.map(s => [s.seat, s.roles]))}
-          <div class="analysis-table-wrap">
-            <table class="analysis-table">
-              <tbody>
-                {#each [...players] as [seat, name]}
-                  {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
-                  <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
-                    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)} claim={claimShortNames.get(seat)}>{name}</PlayerName></td>
-                    {#each analysisColumns as role}
-                      <td
-                        class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"
-                        onclick={() => toggleAssumption(seat, role)}
-                      >{roleToShort(role)}</td>
-                    {/each}
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
+          <div class="analysis-layout">
+            <div class="analysis-table-wrap">
+              <table class="analysis-table">
+                <tbody>
+                  {#each [...players] as [seat, name]}
+                    {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
+                    <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
+                      <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)} claim={claimShortNames.get(seat)}>{name}</PlayerName></td>
+                      {#each analysisColumns as role}
+                        <td
+                          class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"
+                          onclick={() => toggleAssumption(seat, role)}
+                        >{roleToShort(role)}</td>
+                      {/each}
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+            {#if gmorkResult}
+              <div class="gmork-results">{gmorkResult}</div>
+            {/if}
           </div>
-        {/if}
-        {#if gmorkResult}
-          <div class="gmork-results">{gmorkResult}</div>
         {/if}
       </div>
     </section>
@@ -574,8 +576,12 @@
       {@render inputPane()}
     </div>
     <div class="prod-right">
-      {@render statusPane()}
-      {@render analysisPane()}
+      <div class="prod-right-top">
+        {@render statusPane()}
+      </div>
+      <div class="prod-right-bottom">
+        {@render analysisPane()}
+      </div>
     </div>
   </div>
   {/if}
@@ -774,19 +780,37 @@
     flex-direction: column;
     flex: 2;
     min-width: 0;
-    overflow-y: auto;
     background: #181825;
+  }
+
+  .prod-right-top {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     scrollbar-width: none;
   }
 
-  .prod-left :global(::-webkit-scrollbar),
-  .prod-right::-webkit-scrollbar {
+  .prod-right-top::-webkit-scrollbar {
+    display: none;
+  }
+
+  .prod-right-bottom {
+    flex: 0 0 auto;
+    border-top: 1px solid #45475a;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .prod-right-bottom::-webkit-scrollbar {
+    display: none;
+  }
+
+  .prod-left :global(::-webkit-scrollbar) {
     display: none;
   }
 
   .prod-right .pane {
     border-right: none;
-    border-bottom: 1px solid #313244;
   }
 
   .prod-right .pane:last-child {
@@ -929,7 +953,14 @@
     gap: 0.5rem;
   }
 
+  .analysis-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+  }
+
   .analysis-table-wrap {
+    flex: 0 0 auto;
     overflow: auto;
     padding: 8px;
   }
@@ -1011,6 +1042,8 @@
   }
 
   .gmork-results {
+    flex: 1;
+    min-width: 0;
     padding: 8px;
     font-family: 'Consolas', 'Menlo', monospace;
     font-size: 13px;
