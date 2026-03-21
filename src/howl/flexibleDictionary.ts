@@ -5,6 +5,10 @@ function kanaToHira(str: string) {
   })
 }
 
+function escapeRegExp(str: string) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 export class FlexibleDictionary {
   keywords: { [key: string]: string }
   cache: { [key: string]: string[] }
@@ -32,10 +36,11 @@ export class FlexibleDictionary {
     if ( this.cache[query_word] ) return this.cache[query_word]
 
     const query = kanaToHira(query_word)
-    const queries = [ "^" + query, query ]
+    const escaped = escapeRegExp(query)
+    const queries = [ "^" + escaped, escaped ]
     if (query.length == 2) {
-      queries.push( "^" + query[0] + "." + query[1] )
-      queries.push( query[0] + "." + query[1] )
+      queries.push( "^" + escapeRegExp(query[0]) + "." + escapeRegExp(query[1]) )
+      queries.push( escapeRegExp(query[0]) + "." + escapeRegExp(query[1]) )
     }
     for ( const q of queries ) {
       const res = this.searchCore(q)

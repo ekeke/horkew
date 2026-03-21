@@ -60,6 +60,45 @@ describe('FlexibleDictionary', () => {
     })
   })
 
+  describe('search with regex metacharacters', () => {
+    it('should match player names containing dots literally', () => {
+      dictionary.add('id1', ['A.B'])
+      assert.deepEqual(dictionary.search('A.B'), ['id1'])
+      // '.' should not match arbitrary characters
+      assert.deepEqual(dictionary.search('AXB'), [])
+    })
+
+    it('should match player names containing parentheses literally', () => {
+      dictionary.add('id1', ['player(1)'])
+      assert.deepEqual(dictionary.search('player(1)'), ['id1'])
+    })
+
+    it('should match player names containing plus literally', () => {
+      dictionary.add('id1', ['C++'])
+      assert.deepEqual(dictionary.search('C++'), ['id1'])
+    })
+
+    it('should match player names containing brackets literally', () => {
+      dictionary.add('id1', ['[admin]'])
+      assert.deepEqual(dictionary.search('[admin]'), ['id1'])
+    })
+
+    it('should not throw on player names with invalid regex chars', () => {
+      dictionary.add('id1', ['test*name'])
+      assert.doesNotThrow(() => dictionary.search('test*name'))
+      assert.deepEqual(dictionary.search('test*name'), ['id1'])
+    })
+
+    it('should handle 2-char query with metacharacters', () => {
+      dictionary.add('id1', ['a.c'])
+      // query ".c" should match the literal substring ".c", not regex ". then c"
+      assert.deepEqual(dictionary.search('.c'), ['id1'])
+      dictionary.add('id2', ['xyzbc'])
+      // "bc" should NOT match ".c" entry via the 2-char omit pattern
+      assert.deepEqual(dictionary.search('bc'), ['id2'])
+    })
+  })
+
   describe('searchOne', () => {
     it('should return the single matching ID', () => {
       dictionary.add('id1', ['keyword1'])
