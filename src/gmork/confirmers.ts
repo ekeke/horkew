@@ -275,17 +275,17 @@ function checkDeadWerewolfCount({ village, setup, seat, role, status, possibilit
 // ── 全人外位置判明 ──────────────────────────────────────────────────
 
 /**
- * 全人外の位置が確定している場合、村側COは信用できる
+ * 全人外の位置が確定している場合、村人側の役職が確定する
  *
  * setupの人外枠（werewolf, possessed, fanatic, werehamster, immoralist）の
  * 合計数ぶんの人外がpossibilitiesで確定済みなら、残りは全員村人側。
- * よってこのプレイヤーのCOが真に確定する。
+ * CO者はそのCO役職に、非CO者は消去法で村人に確定する。
  */
 function checkAllEvilAccounted({ village, setup, seat, role, status, possibilities, players }: ConfirmationCheckerInput): ConfirmationReason | null {
   if (!possibilities) return null
-  if (!status.claiming) return null
-  if (status.claimingRole !== role) return null
   if (!villageSideRoles.includes(role)) return null
+  // CO者の場合はCO役職と一致すること
+  if (status.claiming && status.claimingRole !== role) return null
 
   const evilRoleNames: SystemRole[] = ['werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist']
   let totalEvilSlots = 0

@@ -107,9 +107,14 @@ rules:
 # 自身の占い結果で人狼を出したアネモネが真猫で確定したため破綻
 # @gmork-deny ちせ/seer: seer_claim_contradicted > result_contradicts_confirmed
 
+
 #二人だけなのに円卓使うのか
 
 アンゴラ死亡
+
+# 全人外露呈、かつ全村役職も露呈しているので、残ったエーカゲン２世とマーマイトが村人です。
+# @gmork-confirm マーマイト/villager: all_evil_accounted
+
 
 # @expect おわんくん: [werewolf]
 # @expect solve: true
