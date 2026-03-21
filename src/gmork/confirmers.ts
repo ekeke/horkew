@@ -2,7 +2,7 @@ import type { Seat, Day, VillageStatus, SystemRole } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 import type { ConfirmationChecker, ConfirmationCheckerInput, ConfirmationReason } from './reasons.ts'
 import { villageSideRoles } from './reasons.ts'
-import { isTrustworthy } from './analysis.ts'
+import { isTrustworthy, analyzeSeer, analyzeMedium } from './analysis.ts'
 import type { BustReason } from './analysis.ts'
 import { formatBustReason, formatReason } from './format.ts'
 import { allCheckers } from './checkers.ts'
@@ -157,16 +157,16 @@ function checkAllOtherCosBusted({ village, analysis, seat, role, players, possib
 
 // ── 結果合意による確定 ──────────────────────────────────────────────
 
-function checkSeerConsensusBlack({ village, analysis, seat, role, players }: ConfirmationCheckerInput): ConfirmationReason | null {
+function checkSeerConsensusBlack({ village, setup, analysis, seat, role, players, possibilities }: ConfirmationCheckerInput): ConfirmationReason | null {
   if (role !== 'werewolf') return null
-  const result = collectConsensus(village, analysis, 'seer', seat, 'wolf', players)
+  const result = collectConsensus(village, analysis, setup, 'seer', seat, 'wolf', players, possibilities)
   if (!result) return null
   return { type: 'seer_consensus_black', claimants: result }
 }
 
-function checkMediumConsensusBlack({ village, analysis, seat, role, players }: ConfirmationCheckerInput): ConfirmationReason | null {
+function checkMediumConsensusBlack({ village, setup, analysis, seat, role, players, possibilities }: ConfirmationCheckerInput): ConfirmationReason | null {
   if (role !== 'werewolf') return null
-  const result = collectConsensus(village, analysis, 'medium', seat, 'wolf', players)
+  const result = collectConsensus(village, analysis, setup, 'medium', seat, 'wolf', players, possibilities)
   if (!result) return null
   return { type: 'medium_consensus_black', claimants: result }
 }
@@ -178,7 +178,7 @@ function checkMediumConsensusBlack({ village, analysis, seat, role, players }: C
  * かつ possibilitiesで人外のみに絞られている
  * → mediumResultが'human'の人外役職（possessed, fanatic）に確定
  */
-function checkMediumWhiteNonWolf({ village, analysis, seat, status, role, possibilities, players }: ConfirmationCheckerInput): ConfirmationReason | null {
+function checkMediumWhiteNonWolf({ village, setup, analysis, seat, status, role, possibilities, players }: ConfirmationCheckerInput): ConfirmationReason | null {
   if (role !== 'possessed' && role !== 'fanatic') return null
   if (!possibilities) return null
 
@@ -189,7 +189,7 @@ function checkMediumWhiteNonWolf({ village, analysis, seat, status, role, possib
   if (![...roles].every(r => evilRoleNames.includes(r))) return null
 
   // 霊媒合意白
-  const result = collectConsensus(village, analysis, 'medium', seat, 'human', players)
+  const result = collectConsensus(village, analysis, setup, 'medium', seat, 'human', players, possibilities)
   if (!result) return null
 
   // 破綻理由を収集（CO者なら analysis の bust reason）
@@ -212,14 +212,22 @@ function checkMediumWhiteNonWolf({ village, analysis, seat, status, role, possib
   return { type: 'medium_white_non_wolf', claimants: result, bustDescription }
 }
 
-/** 破綻していないCO者全員が同じ結果を出しているか確認 */
+/**
+ * 破綻していないCO者全員が同じ結果を出しているか確認
+ *
+ * 合意が成立するには、全ての真の役職者がeligible CO者の中にいる必要がある。
+ * CO前に死亡した非CO者がretarで当該役職の候補に残っている場合、
+ * その人物が真の可能性があり、結果が不明なため合意とは見なさない。
+ */
 function collectConsensus(
   village: import('../types/index.ts').VillageStatus,
   analysis: import('./analysis.ts').AnalysisResult,
+  setup: Map<SystemRole, number>,
   claimRole: 'seer' | 'medium',
   seat: Seat,
   species: 'human' | 'wolf',
   players: Map<number, string> | undefined,
+  possibilities?: Map<Seat, Set<SystemRole>>,
 ): { name: string, night: Day }[] | null {
   const claimants = (village.claims.get(claimRole) || []) as Seat[]
   const eligible: Seat[] = []
@@ -230,6 +238,32 @@ function collectConsensus(
     eligible.push(claimant)
   }
   if (eligible.length === 0) return null
+
+  const slots = setup.get(claimRole) || 0
+  if (slots <= 0 || eligible.length < slots) return null
+
+  // CO前に死亡した非CO者で、retarで当該役職の候補に残っている人数
+  const coSeats = new Set(claimants)
+  let firstCoDay = Infinity
+  for (const coSeat of claimants) {
+    const coStatus = village.statuses.get(coSeat)
+    if (coStatus?.claimedAt != null && coStatus.claimedAt < firstCoDay) {
+      firstCoDay = coStatus.claimedAt
+    }
+  }
+  let unknownTrueCandidates = 0
+  for (const [s, st] of village.statuses) {
+    if (coSeats.has(s)) continue
+    if (!st.surviving && !st.claiming && st.causeOfDeath === 'night_kill' && st.diedDay != null && st.diedDay < firstCoDay) {
+      // retarでこの役職の可能性が残っているかチェック
+      const roles = possibilities?.get(s)
+      if (!roles || roles.has(claimRole)) {
+        unknownTrueCandidates++
+      }
+    }
+  }
+  // 未知の真候補がいる場合、全eligibleの結果が一致しても真の結果は不明
+  if (unknownTrueCandidates > 0) return null
 
   const matches: { name: string, night: Day }[] = []
   for (const claimant of eligible) {
@@ -370,6 +404,13 @@ function checkDenialElimination({ village, setup, seat, role, status, analysis, 
   const retarRoles = possibilities.get(seat)
   if (!retarRoles || retarRoles.size !== 1 || !retarRoles.has(role)) return null
 
+  // 対象自身を confirmed から除外した analysis を構築（循環参照防止）
+  const filteredConfirmed = new Map(analysis.confirmed)
+  filteredConfirmed.delete(seat)
+  const filteredSeer = analyzeSeer(village, setup, filteredConfirmed, players)
+  const filteredMedium = analyzeMedium(village, setup, filteredConfirmed, players)
+  const filteredAnalysis = { confirmed: filteredConfirmed, seer: filteredSeer, medium: filteredMedium }
+
   // setupに存在する全役職を収集
   const allRoles: SystemRole[] = []
   for (const [r, count] of setup) {
@@ -377,7 +418,7 @@ function checkDenialElimination({ village, setup, seat, role, status, analysis, 
   }
 
   // 各役職について否定理由を収集
-  const checkerInput = { village, setup, seat, role: role, status, analysis, players }
+  const checkerInput = { village, setup, seat, role: role, status, analysis: filteredAnalysis, players }
   const eliminatedRoles: { role: SystemRole, reason: string }[] = []
 
   for (const candidateRole of allRoles) {
@@ -388,7 +429,6 @@ function checkDenialElimination({ village, setup, seat, role, status, analysis, 
     for (const checker of allCheckers) {
       const denialReason = checker(input)
       if (denialReason) {
-        const roleName = systemRoles.get(candidateRole)?.name ?? candidateRole
         eliminatedRoles.push({ role: candidateRole, reason: formatReason(denialReason, candidateRole) })
         denied = true
         break

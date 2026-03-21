@@ -24,6 +24,7 @@ setup:
 ゼルダ　霊CO
 
 共有　ロイ　ガノンドロフ
+共有　ガノンドロフ　ロイ
 
 # @expect ロイ: [mason]
 # @expect ガノンドロフ: [mason]
@@ -43,7 +44,7 @@ setup:
 ゼルダ　黒
 
 # @expect ゲムヲ: [werewolf]
-
+# @gmork-confirm ゲムヲ/werewolf: !seer_consensus_black
 #指定ゼルダ
 
 ゼルダ←

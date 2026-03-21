@@ -11,6 +11,9 @@ setup:
   mason: 2
   werehamster: 1
   immoralist: 1
+rules:
+  vote.final: revote
+  vote.style: concurrent
 ---
 
 ＋DIO,ヴァイト、どスケベ公、お嬢様、ミスド常連、伯爵、アイドル、ズバット、宅配サービス、屋根から滑り落ちる人、読書家、無惨、棺桶、初日犠牲者
@@ -18,6 +21,7 @@ setup:
 初日犠牲者　死亡
 
 ズバッ←
+ズバ→伯爵
 
 ズバ処刑
 
@@ -31,7 +35,14 @@ setup:
 スケベ　共有CO　ヴァイト白
 ヴァイト　共有CO　スケベ白
 
+生存者　非猫CO
+
 無惨　狩りCO
+
+# @gmork-deny 初日犠牲者/fanatic:
+
+# 初日に
+# @explain 初日犠牲者: [seer, bodyguard]
 
 #指定お嬢様
 
@@ -47,6 +58,7 @@ setup:
 無惨処刑
 
 読書家死亡
+
 棺桶　黒
 
 ミスド常連処刑
