@@ -65,12 +65,14 @@ export type BridgeResult = {
   vs: VillageStatus
   setup: Map<SystemRole, number>
   players: Map<number, string>
+  shortNames: Map<number, string>
 }
 
 export function buildVillageStatus(statements: Statement[], meta?: Record<string, any>): BridgeResult {
   const dict = new FlexibleDictionary()
   const statuses = new Map<number, SeatStatus>()
   const players = new Map<number, string>()
+  const shortNames = new Map<number, string>()
   const executions = new Map<number, number[]>()
   const kills = new Map<number, number[]>()
   const roles = new Map<number, Role | SystemRole>()
@@ -122,6 +124,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         dict.add(String(seat), [s.name, ...s.aliases])
         statuses.set(seat, createSeatStatus())
         players.set(seat, s.name)
+        if (s.shortName) shortNames.set(seat, s.shortName)
         break
       }
 
@@ -443,5 +446,5 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     if (count <= 0) setup.delete(role)
   }
 
-  return { vs, setup, players }
+  return { vs, setup, players, shortNames }
 }

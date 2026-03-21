@@ -11,10 +11,11 @@
   import SummaryTable from './SummaryTable.svelte'
   import PlayerDialog from './PlayerDialog.svelte'
 
-  let { vs, players, setup }: {
+  let { vs, players, setup, shortNames = new Map() }: {
     vs: VillageStatus
     players: Map<number, string>
     setup: Map<SystemRole, number>
+    shortNames?: Map<number, string>
   } = $props()
 
   let dialogSeat: number | null = $state(null)
@@ -29,6 +30,7 @@
 
   const hoveredSeat = writable<number | null>(null)
   setContext('hoveredSeat', hoveredSeat)
+  setContext('shortNames', shortNames)
 
   function closePlayerDialog() {
     dialogSeat = null

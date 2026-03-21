@@ -92,6 +92,7 @@
   let nightKilledSeats: Set<number> = $state(new Set())
   let executedSeats: Set<number> = $state(new Set())
   let players: Map<number, string> = $state(new Map())
+  let playerShortNames: Map<number, string> = $state(new Map())
   let villageStatus: VillageStatus | null = $state(null)
   let claimShortNames: Map<number, string> = $derived(
     villageStatus
@@ -354,8 +355,9 @@
       parsedLines = stringifyStatements(statements)
       statementLines = statements.map((s: any) => s.line as number)
 
-      const { vs, setup, players: playersMap } = buildVillageStatus(statements, meta)
+      const { vs, setup, players: playersMap, shortNames: shortNamesMap } = buildVillageStatus(statements, meta)
       players = playersMap
+      playerShortNames = shortNamesMap
       villageStatus = vs
       currentSetup = setup
       const alive = [...vs.statuses.values()].filter(s => s.surviving).length
@@ -497,7 +499,7 @@
       <div class="pane-header">Status</div>
       <div class="pane-body">
         {#if villageStatus}
-          <StatusPane vs={villageStatus} {players} setup={currentSetup} />
+          <StatusPane vs={villageStatus} {players} setup={currentSetup} shortNames={playerShortNames} />
         {/if}
       </div>
     </section>
@@ -519,7 +521,7 @@
                   {#each [...players] as [seat, name]}
                     {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
                     <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
-                      <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)} claim={claimShortNames.get(seat)}>{name}</PlayerName></td>
+                      <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)} claim={claimShortNames.get(seat)}>{playerShortNames.get(seat) ?? name}</PlayerName></td>
                       {#each analysisColumns as role}
                         <td
                           class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"

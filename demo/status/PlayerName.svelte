@@ -14,8 +14,10 @@
 
   const onplayerclick = getContext<((seat: number) => void) | undefined>('playerclick')
   const hoveredSeat = getContext<Writable<number | null> | undefined>('hoveredSeat')
+  const shortNames = getContext<Map<number, string> | undefined>('shortNames')
   let clickable = $derived(seat != null && onplayerclick != null)
   let highlighted = $derived(seat != null && hoveredSeat != null && $hoveredSeat === seat)
+  let displayShortName = $derived(seat != null && shortNames ? shortNames.get(seat) : undefined)
 
   function handleClick() {
     if (seat != null && onplayerclick) onplayerclick(seat)
@@ -30,23 +32,25 @@
   }
 </script>
 
+{#snippet nameText()}{#if displayShortName}{displayShortName}{:else}{@render children()}{/if}{/snippet}
+
 {#snippet inner()}
   {#if nightKill}
     <span class="night-kill" class:dead>
-      <span class="sizer">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="strip s0">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="strip s1">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="strip s2">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="strip s3">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="sizer">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="strip s0">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="strip s1">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="strip s2">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="strip s3">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
     </span>
   {:else if executed}
     <span class="executed" class:dead>
-      <span class="exec-sizer">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="exec-sharp">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="exec-blur">{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="exec-sizer">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="exec-sharp">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="exec-blur">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
     </span>
   {:else}
-    <span class="pn" class:dead={dead}>{@render children()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+    <span class="pn" class:dead={dead}>{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
   {/if}
 {/snippet}
 
