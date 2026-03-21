@@ -73,6 +73,68 @@ The pipeline connection: Howl parser output → (mapped to events) → VillageSt
 - Named regex capture groups used extensively in parsing
 - Discriminated unions keyed on `type` field for statement and event types
 
+## Gmork (Role Reasoning Engine)
+
+Gmork explains **why** a role is denied or confirmed for a player. It complements Retar (which computes **what** roles are possible).
+
+### Architecture
+```
+VillageStatus + setup → findReason(seat, role)              → DenialReason | null
+                      → findConfirmationReason(seat, role)  → ConfirmationReason | null
+```
+
+Key modules in `src/gmork/`:
+- **index.ts** — Public API: `findReason`, `findConfirmationReason`, `explain`, `explainConfirmation`
+- **checkers.ts** — Denial checkers (tiered: CO constraint → Tier 0 analysis → Tier 1 direct → Tier 2 combination → Tier 3 chained)
+- **confirmers.ts** — Confirmation checkers + `deadWerewolfBounds` utility
+- **analysis.ts** — CO bust analysis (seer/medium), independent of Retar
+- **reasons.ts** — `DenialReason` / `ConfirmationReason` discriminated unions, checker input types
+- **format.ts** — Japanese text formatting for reasons
+
+### Key constraints
+- `findConfirmationReason` does NOT use Retar's possibilities for the target player (to avoid circular reasoning), but MAY use them for other players (e.g. `dead_werewolf_count` confirmer)
+- `cursed_by_killed_nekomata` (night bite) confirms werewolf; `cursed_by_executed_nekomata` (day execution) does NOT (random target)
+
+### Scenario-driven testing with `@gmork` annotations
+
+Gmork tests are embedded as comments in `.howl` scenario files (`src/retar/scenarios/*.howl`) and auto-discovered by `src/gmork/integration.test.ts`.
+
+#### Annotation syntax
+
+```
+# @gmork-deny PlayerName/role: reason_type
+# @gmork-deny PlayerName/role: outer_type > inner_type
+# @gmork-confirm PlayerName/role: reason_type
+```
+
+- **`@gmork-deny`** — Asserts `findReason()` returns the specified denial reason type
+- **`@gmork-confirm`** — Asserts `findConfirmationReason()` returns the specified confirmation reason type
+- **`> inner_type`** — Additionally checks `bustReason.type` inside the reason (for `seer_claim_contradicted` / `medium_claim_contradicted`)
+- **`: null`** — Asserts no reason is found (null)
+- **Empty after `:`** (e.g. `# @gmork-deny Player/role:`) — **TODO marker**: always fails, reporting whether a reason was found and what type it was. Use this when adding annotations where you don't yet know the expected reason type.
+
+#### Checkpoint behavior
+
+Annotations are grouped into checkpoints (consecutive comment blocks). Each checkpoint runs against the **partial game text up to that point** (same as `@expect`). This means the game state at the checkpoint determines what gmork can reason about.
+
+```howl
+# These run against game state at this point in the file:
+# @gmork-deny 闇さとし/seer: seer_claim_contradicted > result_contradicts_confirmed
+# @gmork-confirm 闇さとし/immoralist: follow_hamster
+
+# Game events continue below...
+サターニャ処刑
+```
+
+#### Workflow for adding annotations
+
+1. Add `# @gmork-deny Player/role:` or `# @gmork-confirm Player/role:` with empty reason
+2. Run `node --experimental-strip-types --test src/gmork/integration.test.ts`
+3. The test fails with either:
+   - `アノテーション修正可: 理由は出せたがアノテーションに理由が未記入です。実際の理由: xxx` → Copy the reason type into the annotation
+   - `理由が出せませんでした` → Gmork implementation needs to be extended
+4. Fill in the reason type and re-run
+
 ## Domain Notes
 
 The notation and vocabulary support dual Japanese/ASCII syntax:
