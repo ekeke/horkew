@@ -9,6 +9,7 @@ import type {
 import type {
   Statement,
   JoinStatement,
+  JoinMultiStatement,
   VoteStatement,
   MultiVoteStatement,
   AttackStatement,
@@ -110,13 +111,24 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     }
   }
 
+  let nextSeat = 1
+
   for (const stmt of statements) {
     syncDay(stmt)
     switch (stmt.type) {
       case 'join': {
         const s = stmt as JoinStatement
+        const seat = nextSeat++
+        dict.add(String(seat), [s.name, ...s.aliases])
+        statuses.set(seat, createSeatStatus())
+        players.set(seat, s.name)
+        break
+      }
+
+      case 'joinMulti': {
+        const s = stmt as JoinMultiStatement
         for (let i = 0; i < s.players.length; i++) {
-          const seat = i + 1
+          const seat = nextSeat++
           const name = s.players[i]
           dict.add(String(seat), [name])
           statuses.set(seat, createSeatStatus())

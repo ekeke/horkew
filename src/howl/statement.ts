@@ -1,6 +1,6 @@
 import * as V from './vocabulary.ts'
 
-export type StatementType = 'join' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'curse' | 'follow' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'unknown'
+export type StatementType = 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'curse' | 'follow' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf'
@@ -23,8 +23,15 @@ export type Statement = {
 }
 
 export type JoinStatement = Statement & {
-    type: 'join'  // Type of statement (e.g., 'join')
-    players: string[]  // Player's name
+    type: 'join'
+    name: string
+    shortName?: string
+    aliases: string[]
+}
+
+export type JoinMultiStatement = Statement & {
+    type: 'joinMulti'
+    players: string[]
 }
 
 export type VoteStatement = Statement & {
@@ -95,18 +102,44 @@ export type UnknownStatement = Statement & {
     text: string
 }
 
-// Join statement: +John, Curt,...
-const joinRegex = new RegExp(`^${V.optionalSpace}${V.plus}`)
-export function parseJoinStatement(text: string, line: number): JoinStatement | null {
-  const match = joinRegex.test(text)
+// JoinMulti statement: ++John, Curt,...
+const joinMultiRegex = new RegExp(`^${V.optionalSpace}${V.plus}${V.plus}`)
+export function parseJoinMultiStatement(text: string, line: number): JoinMultiStatement | null {
+  const match = joinMultiRegex.test(text)
   if (!match) return null
-  text = text.replace(joinRegex, '') // Remove the + from the text
+  text = text.replace(joinMultiRegex, '')
   const joinDelimiter = `[${V.delimiterClass}]${V.optionalSpace}`
   const players = text.split(new RegExp(`(?:${joinDelimiter})+?`)).map((player) => player.trim()).filter((player) => player.length > 0)
   return {
-    type: 'join',
+    type: 'joinMulti',
     line,
     players,
+  }
+}
+
+// Join statement (single player): +Alice(Al), アリス
+const joinRegex = new RegExp(`^${V.optionalSpace}${V.plus}`)
+const shortNameRegex = /[（(]([^）)]+)[）)]\s*$/
+export function parseJoinStatement(text: string, line: number): JoinStatement | null {
+  if (joinMultiRegex.test(text)) return null
+  if (!joinRegex.test(text)) return null
+  text = text.replace(joinRegex, '')
+  const joinDelimiter = `[${V.delimiterClass}]${V.optionalSpace}`
+  const tokens = text.split(new RegExp(`(?:${joinDelimiter})+?`)).map((t) => t.trim()).filter((t) => t.length > 0)
+  if (tokens.length === 0) return null
+  let nameToken = tokens[0]
+  let shortName: string | undefined
+  const shortMatch = shortNameRegex.exec(nameToken)
+  if (shortMatch) {
+    shortName = shortMatch[1]
+    nameToken = nameToken.slice(0, shortMatch.index).trim()
+  }
+  return {
+    type: 'join',
+    line,
+    name: nameToken,
+    ...(shortName !== undefined && { shortName }),
+    aliases: tokens.slice(1),
   }
 }
 
@@ -312,6 +345,7 @@ export function parseAssertStatement(text: string, line: number): AssertStatemen
 
 export function parseStatement (text: string, line: number): Statement {
   const parsers = [
+    parseJoinMultiStatement,
     parseJoinStatement,
     parseVoteStatement,
     parseMultiVoteStatement,

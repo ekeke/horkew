@@ -1,5 +1,5 @@
 import type {
-  Statement, JoinStatement, VoteStatement, MultiVoteStatement,
+  Statement, JoinStatement, JoinMultiStatement, VoteStatement, MultiVoteStatement,
   AttackStatement, LynchStatement, CurseStatement, FollowStatement,
   RevoteStatement, OverStatement,
   AssertStatement, PeaceStatement, RevealStatement, UnknownStatement,
@@ -73,6 +73,11 @@ export function stringifyStatements(statements: Statement[]): StringifiedLine[] 
     switch (s.type) {
       case 'join': {
         const st = s as JoinStatement
+        dict.add(st.name, [st.name, ...st.aliases])
+        return [{ text: `${p(st.name)}が参加しました。`, type: 'normal' }]
+      }
+      case 'joinMulti': {
+        const st = s as JoinMultiStatement
         for (const player of st.players) {
           dict.add(player, [player])
         }

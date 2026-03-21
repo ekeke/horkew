@@ -20,7 +20,7 @@ function setup(howl: string) {
 
 describe('extractSurvivorInfo', () => {
   test('all alive when no deaths', () => {
-    const { vs, players } = setup('+アリス、ボブ、チャーリー')
+    const { vs, players } = setup('++アリス、ボブ、チャーリー')
     const info = extractSurvivorInfo(vs, players)
     assert.strictEqual(info.alive, 3)
     assert.strictEqual(info.total, 3)
@@ -28,7 +28,7 @@ describe('extractSurvivorInfo', () => {
   })
 
   test('correct count after execution', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス`)
     const info = extractSurvivorInfo(vs, players)
@@ -40,7 +40,7 @@ describe('extractSurvivorInfo', () => {
   })
 
   test('correct count after execution and night kill', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス
 
@@ -53,13 +53,13 @@ describe('extractSurvivorInfo', () => {
 
 describe('extractDeathHistory', () => {
   test('empty when no deaths', () => {
-    const { vs, players } = setup('+アリス、ボブ、チャーリー')
+    const { vs, players } = setup('++アリス、ボブ、チャーリー')
     const history = extractDeathHistory(vs, players)
     assert.strictEqual(history.length, 0)
   })
 
   test('execution on day 1', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス`)
     const history = extractDeathHistory(vs, players)
@@ -72,7 +72,7 @@ describe('extractDeathHistory', () => {
   })
 
   test('night kill displayed on discovery day (next day)', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス
 
@@ -90,7 +90,7 @@ describe('extractDeathHistory', () => {
   })
 
   test('multi-day deaths sorted by day', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー、フランク、ジョージ
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー、フランク、ジョージ
 
 吊り アリス
 
@@ -108,7 +108,7 @@ describe('extractDeathHistory', () => {
   })
 
   test('curse after execution appears in executions row', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス
 道連れ ボブ`)
@@ -124,13 +124,13 @@ describe('extractDeathHistory', () => {
 
 describe('extractClaimGroups', () => {
   test('empty when no claims', () => {
-    const { vs, players } = setup('+アリス、ボブ、チャーリー')
+    const { vs, players } = setup('++アリス、ボブ、チャーリー')
     const groups = extractClaimGroups(vs, players)
     assert.strictEqual(groups.length, 0)
   })
 
   test('single seer claim', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 アリス: 占いCO ボブ白`)
     const groups = extractClaimGroups(vs, players)
@@ -142,7 +142,7 @@ describe('extractClaimGroups', () => {
   })
 
   test('multiple roles grouped and ordered correctly', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 アリス: 占いCO ボブ白
 チャーリー: 霊媒CO`)
@@ -154,7 +154,7 @@ describe('extractClaimGroups', () => {
   })
 
   test('two seer claimants in same group', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 アリス: 占いCO ボブ白
 デイブ: 占いCO チャーリー黒`)
@@ -167,7 +167,7 @@ describe('extractClaimGroups', () => {
 
 describe('buildAssertionTimeline', () => {
   test('seer assertions mapped to sequential nights', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り デイブ
 
@@ -196,7 +196,7 @@ describe('buildAssertionTimeline', () => {
   })
 
   test('bodyguard last guard anchored to previous night', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り デイブ
 
@@ -214,7 +214,7 @@ describe('buildAssertionTimeline', () => {
   })
 
   test('bodyguard multiple guards: last = day-1, counting backwards', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー、フランク、ジョージ
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー、フランク、ジョージ
 
 吊り デイブ
 
@@ -235,7 +235,7 @@ describe('buildAssertionTimeline', () => {
   })
 
   test('empty timeline when no assertions', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 アリス: 霊媒CO`)
     const groups = extractClaimGroups(vs, players)
@@ -540,7 +540,7 @@ describe('computeVerdicts', () => {
 
   describe('integration: howl → extractVoteStatus → computeVerdicts', () => {
     test('partial voting produces correct verdicts', () => {
-      const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+      const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 アリス→ボブ
 チャーリー→ボブ
@@ -555,7 +555,7 @@ describe('computeVerdicts', () => {
     })
 
     test('hidden after execution', () => {
-      const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+      const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 アリス→ボブ
 チャーリー→ボブ

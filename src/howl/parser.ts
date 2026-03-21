@@ -3,6 +3,7 @@ import {
   parseStatement,
   type Statement,
   type JoinStatement,
+  type JoinMultiStatement,
   type VoteStatement,
   type MultiVoteStatement,
   type AttackStatement,
@@ -94,7 +95,14 @@ function fillMultiVoteVoters(statements: Statement[], options: ParseOptions): St
   for (const s of statements) {
     switch (s.type) {
       case 'join': {
-        const players = (s as JoinStatement).players
+        const js = s as JoinStatement
+        alive.add(js.name)
+        dict.add(js.name, [js.name, ...js.aliases])
+        result.push(s)
+        break
+      }
+      case 'joinMulti': {
+        const players = (s as JoinMultiStatement).players
         for (let i = 0; i < players.length; i++) {
           alive.add(players[i])
           dict.add(players[i], [players[i]])
@@ -171,7 +179,10 @@ function fillMediumTargets(statements: Statement[]): Statement[] {
   // First pass: collect join names, lynch targets, and medium claimants
   for (const s of statements) {
     if (s.type === 'join') {
-      for (const p of (s as JoinStatement).players) {
+      const js = s as JoinStatement
+      dict.add(js.name, [js.name, ...js.aliases])
+    } else if (s.type === 'joinMulti') {
+      for (const p of (s as JoinMultiStatement).players) {
         dict.add(p, [p])
       }
     } else if (s.type === 'lynch') {
@@ -233,7 +244,14 @@ function expandSurvivorAsserts(statements: Statement[]): Statement[] {
   for (const s of statements) {
     switch (s.type) {
       case 'join': {
-        for (const p of (s as JoinStatement).players) {
+        const js = s as JoinStatement
+        alive.add(js.name)
+        dict.add(js.name, [js.name, ...js.aliases])
+        result.push(s)
+        break
+      }
+      case 'joinMulti': {
+        for (const p of (s as JoinMultiStatement).players) {
           alive.add(p)
           dict.add(p, [p])
         }

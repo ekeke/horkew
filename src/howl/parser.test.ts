@@ -9,7 +9,7 @@ description: Demonstrates various statement types in the Howl format
 date: 2023-10-01
 ---
 
-+便ールガンカ、花京院、小梅ちゃん、ワンワン、ウルガー、ペガサス盛り、星刻、百面ダイス、ブルファンゴ、泣く女、ビスマス結晶、スレッタ、裁縫龍、グロ中尉
+++便ールガンカ、花京院、小梅ちゃん、ワンワン、ウルガー、ペガサス盛り、星刻、百面ダイス、ブルファンゴ、泣く女、ビスマス結晶、スレッタ、裁縫龍、グロ中尉
 
 噛み　ルガ
 
@@ -125,7 +125,7 @@ date: 2023-10-01
   })
 
   test('multiple attacks in one night share the same day', () => {
-    const text = `+Alice,Bob,Charlie,Dave,Eve
+    const text = `++Alice,Bob,Charlie,Dave,Eve
 吊り Alice
 噛み Bob
 噛み Charlie
@@ -144,7 +144,7 @@ Dave→Eve
   })
 
   test('peace and attack do not double-increment', () => {
-    const text = `+Alice,Bob,Charlie
+    const text = `++Alice,Bob,Charlie
 吊り Alice
 平和
 Bob→Charlie
@@ -166,7 +166,7 @@ describe('fillMultiVoteVoters', () => {
   }
 
   test('empty multiVote excludes later explicit voters in same round', () => {
-    const text = `+Alice,Bob,Charlie,Dave,Eve
+    const text = `++Alice,Bob,Charlie,Dave,Eve
 噛み Alice
 Charlie←
 Dave→Bob
@@ -182,7 +182,7 @@ Dave→Bob
   })
 
   test('empty multiVote with no later votes gets all alive', () => {
-    const text = `+Alice,Bob,Charlie
+    const text = `++Alice,Bob,Charlie
 噛み Alice
 Charlie←
 吊り Charlie`
@@ -192,7 +192,7 @@ Charlie←
   })
 
   test('revote resets round — voters from previous round do not affect new round', () => {
-    const text = `+Alice,Bob,Charlie,Dave
+    const text = `++Alice,Bob,Charlie,Dave
 噛み Alice
 Bob→Charlie
 再投票
@@ -206,7 +206,7 @@ Charlie←
   })
 
   test('lynch resets for next day — dead player excluded', () => {
-    const text = `+Alice,Bob,Charlie,Dave,Eve
+    const text = `++Alice,Bob,Charlie,Dave,Eve
 噛み Alice
 Bob→Charlie
 吊り Charlie
@@ -221,7 +221,7 @@ Eve←
   })
 
   test('attack removes dead from alive set', () => {
-    const text = `+Alice,Bob,Charlie,Dave
+    const text = `++Alice,Bob,Charlie,Dave
 噛み Alice
 Dave←
 吊り Dave
@@ -237,7 +237,7 @@ Charlie←
   })
 
   test('multiple empty multiVotes in same round share same voters', () => {
-    const text = `+Alice,Bob,Charlie,Dave,Eve
+    const text = `++Alice,Bob,Charlie,Dave,Eve
 噛み Alice
 Bob←
 Charlie←
@@ -255,7 +255,7 @@ Dave→Eve
   })
 
   test('all alive voted explicitly — empty multiVote gets empty voters', () => {
-    const text = `+Alice,Bob,Charlie
+    const text = `++Alice,Bob,Charlie
 噛み Alice
 Bob→Charlie
 Charlie←
@@ -279,7 +279,7 @@ setup:
   villager: 6
 ---
 
-+ マドック、ダンカン、デイジー、メイソン、結、藤澤 仁、児玉　健、森本　茂樹、大野　聡、　伊藤　真吾、香川　愛生、村中　秀史、中田　功
+++ マドック、ダンカン、デイジー、メイソン、結、藤澤 仁、児玉　健、森本　茂樹、大野　聡、　伊藤　真吾、香川　愛生、村中　秀史、中田　功
 
 村中→伊藤
 大野→中田
@@ -335,7 +335,7 @@ rules:
   vote.final: revote
 ---
 
-+ マドック、ダンカン、デイジー、メイソン、結、藤澤 仁、児玉　健、森本　茂樹、大野　聡、　伊藤　真吾、香川　愛生、村中　秀史、中田　功
+++ マドック、ダンカン、デイジー、メイソン、結、藤澤 仁、児玉　健、森本　茂樹、大野　聡、　伊藤　真吾、香川　愛生、村中　秀史、中田　功
 
 村中→伊藤
 大野→中田
@@ -368,7 +368,7 @@ rules:
   })
 
   test('non-empty multiVote voters counted as explicit', () => {
-    const text = `+Alice,Bob,Charlie,Dave,Eve
+    const text = `++Alice,Bob,Charlie,Dave,Eve
 噛み Alice
 Charlie←Bob,Dave
 Eve←
@@ -390,7 +390,7 @@ describe('fillMediumTargets', () => {
   }
 
   test('medium result without target is filled from lynch history', () => {
-    const text = `+Alice,Bob,Charlie,Dave
+    const text = `++Alice,Bob,Charlie,Dave
 噛み Alice
 Bob　霊CO　白
 吊り Charlie
@@ -408,7 +408,7 @@ Bob　黒`
   })
 
   test('incremental medium reports match sequential lynches', () => {
-    const text = `+Alice,Bob,Charlie,Dave,Eve,Frank
+    const text = `++Alice,Bob,Charlie,Dave,Eve,Frank
 噛み Alice
 Bob　霊CO
 吊り Charlie
@@ -426,7 +426,7 @@ Bob　黒`
   })
 
   test('medium claim after results — retroactive fill', () => {
-    const text = `+Alice,Bob,Charlie,Dave,Eve
+    const text = `++Alice,Bob,Charlie,Dave,Eve
 噛み Alice
 Bob　白
 吊り Charlie
@@ -443,7 +443,7 @@ Bob　霊CO　黒`
   })
 
   test('non-medium assert is not affected', () => {
-    const text = `+Alice,Bob,Charlie,Dave
+    const text = `++Alice,Bob,Charlie,Dave
 噛み Alice
 Bob　占いCO　Charlie白
 吊り Dave`
@@ -454,7 +454,7 @@ Bob　占いCO　Charlie白
   })
 
   test('medium with explicit target is not overwritten', () => {
-    const text = `+Alice,Bob,Charlie,Dave
+    const text = `++Alice,Bob,Charlie,Dave
 噛み Alice
 Bob　霊CO　Charlie白
 吊り Dave`
@@ -464,7 +464,7 @@ Bob　霊CO　Charlie白
   })
 
   test('scenario: medium incremental reports in full game', () => {
-    const text = `+便ールガンカ、花京院、小梅ちゃん、ワンワン、ウルガー、ペガサス盛り、星刻、百面ダイス、ブルファンゴ、泣く女、ビスマス結晶、スレッタ、裁縫龍、グロ中尉
+    const text = `++便ールガンカ、花京院、小梅ちゃん、ワンワン、ウルガー、ペガサス盛り、星刻、百面ダイス、ブルファンゴ、泣く女、ビスマス結晶、スレッタ、裁縫龍、グロ中尉
 
 噛み　ルガ
 
@@ -542,7 +542,7 @@ describe('expandSurvivorAsserts', () => {
   }
 
   test('生存者 非猫CO expands to all survivors', () => {
-    const text = `+Alice,Bob,Charlie,Dave,Eve
+    const text = `++Alice,Bob,Charlie,Dave,Eve
 噛み Alice
 生存者 非猫CO`
     const asserts = findAsserts(text)
@@ -559,7 +559,7 @@ describe('expandSurvivorAsserts', () => {
   })
 
   test('全員 非猫CO works as alias', () => {
-    const text = `+Alice,Bob,Charlie
+    const text = `++Alice,Bob,Charlie
 全員 非猫CO`
     const asserts = findAsserts(text)
     assert.strictEqual(asserts.length, 3)
@@ -568,7 +568,7 @@ describe('expandSurvivorAsserts', () => {
   })
 
   test('生存者 非占CO expands for seer denial', () => {
-    const text = `+Alice,Bob,Charlie
+    const text = `++Alice,Bob,Charlie
 噛み Alice
 生存者 非占CO`
     const asserts = findAsserts(text)
@@ -580,7 +580,7 @@ describe('expandSurvivorAsserts', () => {
   })
 
   test('lynch and attack victims are excluded from expansion', () => {
-    const text = `+Alice,Bob,Charlie,Dave,Eve
+    const text = `++Alice,Bob,Charlie,Dave,Eve
 噛み Alice
 吊り Bob
 噛み Charlie
@@ -592,7 +592,7 @@ describe('expandSurvivorAsserts', () => {
   })
 
   test('regular assert statements are not expanded', () => {
-    const text = `+Alice,Bob,Charlie
+    const text = `++Alice,Bob,Charlie
 Alice 非猫CO`
     const asserts = findAsserts(text)
     assert.strictEqual(asserts.length, 1)
@@ -602,7 +602,7 @@ Alice 非猫CO`
 
 describe('curse and follow statements in parser', () => {
   test('curse removes target from alive set', () => {
-    const howl = `+アリス、ボブ、チャーリー、デイブ
+    const howl = `++アリス、ボブ、チャーリー、デイブ
 
 吊り アリス
 道連れ ボブ
@@ -626,7 +626,7 @@ describe('curse and follow statements in parser', () => {
   })
 
   test('follow removes target from alive set', () => {
-    const howl = `+アリス、ボブ、チャーリー、デイブ
+    const howl = `++アリス、ボブ、チャーリー、デイブ
 
 吊り アリス
 後追い ボブ
@@ -645,7 +645,7 @@ describe('curse and follow statements in parser', () => {
   })
 
   test('curse and follow get correct day assignment', () => {
-    const howl = `+アリス、ボブ、チャーリー、デイブ、エミリー
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス
 道連れ ボブ

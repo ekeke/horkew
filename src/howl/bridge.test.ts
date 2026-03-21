@@ -6,7 +6,7 @@ import { VillageRetar } from '../retar/index.ts'
 
 describe('bridge: curse statement', () => {
   test('curse after execution sets cursed_by_executed_nekomata', () => {
-    const howl = `+アリス、ボブ、チャーリー、デイブ、エミリー
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス
 道連れ ボブ`
@@ -23,7 +23,7 @@ describe('bridge: curse statement', () => {
   })
 
   test('curse after night kill sets cursed_by_killed_nekomata', () => {
-    const howl = `+アリス、ボブ、チャーリー、デイブ、エミリー
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス
 
@@ -44,7 +44,7 @@ describe('bridge: curse statement', () => {
 
 describe('bridge: follow statement', () => {
   test('follow after execution sets follow_executed_hamster', () => {
-    const howl = `+アリス、ボブ、チャーリー、デイブ、エミリー
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス
 後追い ボブ`
@@ -61,7 +61,7 @@ describe('bridge: follow statement', () => {
   })
 
   test('follow after night kill sets follow_killed_hamster', () => {
-    const howl = `+アリス、ボブ、チャーリー、デイブ、エミリー
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り アリス
 
@@ -82,7 +82,7 @@ describe('bridge: follow statement', () => {
 
 describe('bridge: curse/follow in kills map', () => {
   test('curse and follow victims appear in kills map', () => {
-    const howl = `+アリス、ボブ、チャーリー、デイブ、エミリー、フランク
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー、フランク
 
 吊り アリス
 道連れ ボブ
@@ -117,7 +117,7 @@ setup:
   immoralist: 1
 ---
 
-+エーカゲン２世、ガーグァ、ボムへい、考える人、おわんくん、羽根帚、今川義元、アンゴラウサギ、アネモネ、ちせ、サターニャ、マーマイト、オカリン、闇さとし
+++エーカゲン２世、ガーグァ、ボムへい、考える人、おわんくん、羽根帚、今川義元、アンゴラウサギ、アネモネ、ちせ、サターニャ、マーマイト、オカリン、闇さとし
 
 エーカゲン死亡
 
@@ -187,7 +187,7 @@ setup:
   immoralist: 1
 ---
 
-+エーカゲン２世、ガーグァ、ボムへい、考える人、おわんくん、羽根帚、今川義元、アンゴラウサギ、アネモネ、ちせ、サターニャ、マーマイト、オカリン、闇さとし
+++エーカゲン２世、ガーグァ、ボムへい、考える人、おわんくん、羽根帚、今川義元、アンゴラウサギ、アネモネ、ちせ、サターニャ、マーマイト、オカリン、闇さとし
 
 エーカゲン死亡
 
@@ -259,7 +259,7 @@ describe('bridge: assertion right-alignment', () => {
   }
 
   test('single result on day 1 maps to night 0', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 アリス: 占いCO ボブ白`)
     const aliceSeat = seat(players, 'アリス')
@@ -273,7 +273,7 @@ describe('bridge: assertion right-alignment', () => {
   })
 
   test('two results on day 3 right-align to nights 1 and 2', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 吊り デイブ
 
@@ -293,7 +293,7 @@ describe('bridge: assertion right-alignment', () => {
   })
 
   test('slide: second assert on same day overwrites first (結果スライド)', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 アリス: 占いCO ボブ白
 アリス: チャーリー黒`)
@@ -310,7 +310,7 @@ describe('bridge: assertion right-alignment', () => {
   })
 
   test('late CO on day 3 with 3 results: nights 0, 1, 2', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー、フランク
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー、フランク
 
 吊り デイブ
 
@@ -335,7 +335,7 @@ describe('bridge: assertion right-alignment', () => {
   })
 
   test('incremental results across days accumulate correctly', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 アリス: 占いCO ボブ白
 
@@ -357,7 +357,7 @@ describe('bridge: assertion right-alignment', () => {
   })
 
   test('mason assertions use negative day keys', () => {
-    const { vs, players } = setup(`+アリス、ボブ、チャーリー、デイブ、エミリー
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
 共有 アリス ボブ`)
     const aliceSeat = seat(players, 'アリス')

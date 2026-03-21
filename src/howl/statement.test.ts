@@ -4,27 +4,107 @@ import * as S from './statement.ts'
 
 
 
-describe('join statement', () => {
-  test('valid join statement', () => {
-    const result = S.parseJoinStatement('+John, Curt', 1)
+describe('join statement (single player)', () => {
+  test('name only', () => {
+    const result = S.parseJoinStatement('+Alice', 1)
     assert.deepEqual(result, {
       type: 'join',
+      line: 1,
+      name: 'Alice',
+      aliases: [],
+    })
+  })
+
+  test('name with short name', () => {
+    const result = S.parseJoinStatement('+Alice(Al)', 1)
+    assert.deepEqual(result, {
+      type: 'join',
+      line: 1,
+      name: 'Alice',
+      shortName: 'Al',
+      aliases: [],
+    })
+  })
+
+  test('name with short name and aliases', () => {
+    const result = S.parseJoinStatement('+Alice(Al), アリス', 1)
+    assert.deepEqual(result, {
+      type: 'join',
+      line: 1,
+      name: 'Alice',
+      shortName: 'Al',
+      aliases: ['アリス'],
+    })
+  })
+
+  test('full-width brackets for short name', () => {
+    const result = S.parseJoinStatement('＋ボブ（ボ）、Bob', 1)
+    assert.deepEqual(result, {
+      type: 'join',
+      line: 1,
+      name: 'ボブ',
+      shortName: 'ボ',
+      aliases: ['Bob'],
+    })
+  })
+
+  test('name with multiple aliases', () => {
+    const result = S.parseJoinStatement('+Alice(Al), アリス, ally', 1)
+    assert.deepEqual(result, {
+      type: 'join',
+      line: 1,
+      name: 'Alice',
+      shortName: 'Al',
+      aliases: ['アリス', 'ally'],
+    })
+  })
+
+  test('does not match double plus', () => {
+    const result = S.parseJoinStatement('++Alice, Bob', 1)
+    assert.equal(result, null)
+  })
+
+  test('invalid join statement', () => {
+    const result = S.parseJoinStatement('', 1)
+    assert.equal(result, null)
+  })
+
+  test('returns null for plus with no name', () => {
+    const result = S.parseJoinStatement('+', 1)
+    assert.equal(result, null)
+  })
+})
+
+describe('joinMulti statement', () => {
+  test('valid joinMulti statement', () => {
+    const result = S.parseJoinMultiStatement('++John, Curt', 1)
+    assert.deepEqual(result, {
+      type: 'joinMulti',
       line: 1,
       players: ['John', 'Curt'],
     })
   })
 
   test('Accepts roughly inputted players on Japanese IME', () => {
-    const result = S.parseJoinStatement('　　＋ボブ　,　マックス、John', 1)
+    const result = S.parseJoinMultiStatement('　　＋＋ボブ　,　マックス、John', 1)
     assert.deepEqual(result, {
-      type: 'join',
+      type: 'joinMulti',
       line: 1,
       players: ['ボブ', 'マックス', 'John'],
     })
   })
 
-  test('invalid join statement', () => {
-    const result = S.parseJoinStatement('', 1)
+  test('mixed plus signs', () => {
+    const result = S.parseJoinMultiStatement('+＋Alice, Bob', 1)
+    assert.deepEqual(result, {
+      type: 'joinMulti',
+      line: 1,
+      players: ['Alice', 'Bob'],
+    })
+  })
+
+  test('does not match single plus', () => {
+    const result = S.parseJoinMultiStatement('+Alice', 1)
     assert.equal(result, null)
   })
 })
@@ -332,10 +412,20 @@ describe('assert statement', () => {
 
 
 describe('the parser function', () => {
-  test('valid parser function', () => {
+  test('valid parser function with join', () => {
     const result = S.parseStatement('　　＋John, Curt　', 1)
     assert.deepEqual(result, {
       type: 'join',
+      line: 1,
+      name: 'John',
+      aliases: ['Curt'],
+    })
+  })
+
+  test('valid parser function with joinMulti', () => {
+    const result = S.parseStatement('　　＋＋John, Curt　', 1)
+    assert.deepEqual(result, {
+      type: 'joinMulti',
       line: 1,
       players: ['John', 'Curt'],
     })

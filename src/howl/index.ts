@@ -1,7 +1,7 @@
 export { parse } from './parser.ts'
 export { preprocess } from './preprocess.ts'
 export type { Line, PreprocessResult } from './preprocess.ts'
-export { parseStatement } from './statement.ts'
+export { parseStatement, parseJoinMultiStatement } from './statement.ts'
 export type {
   StatementType,
   GameResult,
@@ -10,6 +10,7 @@ export type {
   Assertion,
   Statement,
   JoinStatement,
+  JoinMultiStatement,
   VoteStatement,
   MultiVoteStatement,
   AttackStatement,
