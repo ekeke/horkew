@@ -6,7 +6,6 @@ describe('parser', () => {
   const howl = `---
 title: Example Howl File
 description: Demonstrates various statement types in the Howl format
-author: aklas
 date: 2023-10-01
 ---
 
