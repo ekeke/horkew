@@ -36,7 +36,7 @@
 
   // Day columns: only include days that have any data
   let dayColumns = $derived(
-    Array.from({ length: Math.max(0, maxDay) }, (_, i) => i)
+    Array.from({ length: Math.max(0, maxDay + 1) }, (_, i) => i)
       .filter(day => {
         const d = deathByDay.get(day)
         if (d && (d.executions.length > 0 || d.nightKills.length > 0)) return true
