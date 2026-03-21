@@ -73,6 +73,48 @@ describe('join statement (single player)', () => {
     const result = S.parseJoinStatement('+', 1)
     assert.equal(result, null)
   })
+
+  test('space-delimited aliases', () => {
+    const result = S.parseJoinStatement('+Alice Bob', 1)
+    assert.deepEqual(result, {
+      type: 'join',
+      line: 1,
+      name: 'Alice',
+      aliases: ['Bob'],
+    })
+  })
+
+  test('quoted name with space', () => {
+    const result = S.parseJoinStatement('+"Alice Smith"(Al) アリス', 1)
+    assert.deepEqual(result, {
+      type: 'join',
+      line: 1,
+      name: 'Alice Smith',
+      shortName: 'Al',
+      aliases: ['アリス'],
+    })
+  })
+
+  test('smart quotes', () => {
+    const result = S.parseJoinStatement('+\u201CAlice Smith\u201D', 1)
+    assert.deepEqual(result, {
+      type: 'join',
+      line: 1,
+      name: 'Alice Smith',
+      aliases: [],
+    })
+  })
+
+  test('fullwidth quotes with shortName and aliases', () => {
+    const result = S.parseJoinStatement('＋\uFF02村中　秀史\uFF02（村中）　むらなか　しょあく', 1)
+    assert.deepEqual(result, {
+      type: 'join',
+      line: 1,
+      name: '村中　秀史',
+      shortName: '村中',
+      aliases: ['むらなか', 'しょあく'],
+    })
+  })
 })
 
 describe('joinMulti statement', () => {
@@ -106,6 +148,42 @@ describe('joinMulti statement', () => {
   test('does not match single plus', () => {
     const result = S.parseJoinMultiStatement('+Alice', 1)
     assert.equal(result, null)
+  })
+
+  test('space-delimited players', () => {
+    const result = S.parseJoinMultiStatement('++ Alice Bob Charlie', 1)
+    assert.deepEqual(result, {
+      type: 'joinMulti',
+      line: 1,
+      players: ['Alice', 'Bob', 'Charlie'],
+    })
+  })
+
+  test('quoted player name with space', () => {
+    const result = S.parseJoinMultiStatement('++ "Alice Smith" Bob', 1)
+    assert.deepEqual(result, {
+      type: 'joinMulti',
+      line: 1,
+      players: ['Alice Smith', 'Bob'],
+    })
+  })
+
+  test('single-quoted player name', () => {
+    const result = S.parseJoinMultiStatement("++ 'Alice Smith' Bob", 1)
+    assert.deepEqual(result, {
+      type: 'joinMulti',
+      line: 1,
+      players: ['Alice Smith', 'Bob'],
+    })
+  })
+
+  test('smart quotes', () => {
+    const result = S.parseJoinMultiStatement('++ \u201C太郎\u201D \u2018次郎\u2019', 1)
+    assert.deepEqual(result, {
+      type: 'joinMulti',
+      line: 1,
+      players: ['太郎', '次郎'],
+    })
   })
 })
 

@@ -102,14 +102,67 @@ export type UnknownStatement = Statement & {
     text: string
 }
 
+// Quote-aware token splitter for join statements
+// Splits on delimiters (comma, space, etc.) but respects quoted strings
+// Quote families: any member opens, any member of the same family closes
+const doubleQuotes = new Set(['"', '\u201C', '\u201D', '\uFF02'])
+const singleQuotes = new Set(["'", '\u2018', '\u2019', '\uFF07'])
+function getQuoteFamily(ch: string): Set<string> | undefined {
+  if (doubleQuotes.has(ch)) return doubleQuotes
+  if (singleQuotes.has(ch)) return singleQuotes
+  return undefined
+}
+const delimiterRegex = new RegExp(`^(?:${V.delimiter})+`)
+
+function splitTokens(text: string): string[] {
+  const tokens: string[] = []
+  let i = 0
+  while (i < text.length) {
+    // Skip delimiters
+    const rest = text.slice(i)
+    const delimMatch = delimiterRegex.exec(rest)
+    if (delimMatch) {
+      i += delimMatch[0].length
+      continue
+    }
+    // Start of a token
+    let token = ''
+    while (i < text.length) {
+      const ch = text[i]
+      const family = getQuoteFamily(ch)
+      if (family) {
+        // Quoted segment: consume until any quote in the same family
+        i++ // skip opening quote
+        let end = -1
+        for (let j = i; j < text.length; j++) {
+          if (family.has(text[j])) { end = j; break }
+        }
+        if (end === -1) {
+          token += text.slice(i)
+          i = text.length
+        } else {
+          token += text.slice(i, end)
+          i = end + 1
+        }
+      } else if (delimiterRegex.test(text.slice(i))) {
+        break // delimiter reached, end of token
+      } else {
+        token += ch
+        i++
+      }
+    }
+    if (token.length > 0) tokens.push(token)
+  }
+  return tokens
+}
+
 // JoinMulti statement: ++John, Curt,...
 const joinMultiRegex = new RegExp(`^${V.optionalSpace}${V.plus}${V.plus}`)
 export function parseJoinMultiStatement(text: string, line: number): JoinMultiStatement | null {
   const match = joinMultiRegex.test(text)
   if (!match) return null
   text = text.replace(joinMultiRegex, '')
-  const joinDelimiter = `[${V.delimiterClass}]${V.optionalSpace}`
-  const players = text.split(new RegExp(`(?:${joinDelimiter})+?`)).map((player) => player.trim()).filter((player) => player.length > 0)
+  const players = splitTokens(text)
   return {
     type: 'joinMulti',
     line,
@@ -124,8 +177,7 @@ export function parseJoinStatement(text: string, line: number): JoinStatement | 
   if (joinMultiRegex.test(text)) return null
   if (!joinRegex.test(text)) return null
   text = text.replace(joinRegex, '')
-  const joinDelimiter = `[${V.delimiterClass}]${V.optionalSpace}`
-  const tokens = text.split(new RegExp(`(?:${joinDelimiter})+?`)).map((t) => t.trim()).filter((t) => t.length > 0)
+  const tokens = splitTokens(text)
   if (tokens.length === 0) return null
   let nameToken = tokens[0]
   let shortName: string | undefined
