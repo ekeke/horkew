@@ -1,5 +1,25 @@
 <script lang="ts">
   let { open, onclose }: { open: boolean, onclose: () => void } = $props()
+
+  let panelBody: HTMLDivElement | undefined = $state()
+
+  export function scrollToId(id: string) {
+    requestAnimationFrame(() => {
+      const el = panelBody?.querySelector(`#${CSS.escape(id)}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  function onTocClick(e: MouseEvent) {
+    const a = (e.target as HTMLElement).closest('a')
+    if (!a) return
+    e.preventDefault()
+    const id = a.getAttribute('href')?.slice(1)
+    if (id) {
+      history.replaceState(null, '', `#${id}`)
+      scrollToId(id)
+    }
+  }
 </script>
 
 {#if open}
@@ -11,9 +31,30 @@
     <span class="panel-title">Howl 記法リファレンス</span>
     <button class="close-btn" onclick={onclose}>&times;</button>
   </div>
-  <div class="panel-body">
+  <div class="panel-body" bind:this={panelBody}>
 
-    <section>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <nav class="toc" onclick={onTocClick}>
+      <a href="#help-structure">基本構造</a>
+      <a href="#help-join">参加</a>
+      <a href="#help-vote">投票</a>
+      <a href="#help-multivote">複数投票</a>
+      <a href="#help-lynch">処刑</a>
+      <a href="#help-attack">襲撃</a>
+      <a href="#help-curse">道連れ・後追い</a>
+      <a href="#help-revote">再投票</a>
+      <a href="#help-peace">平和</a>
+      <a href="#help-assert">CO・主張</a>
+      <a href="#help-bulk-assert">一括CO</a>
+      <a href="#help-mason">共有確認</a>
+      <a href="#help-reveal">役職公開</a>
+      <a href="#help-over">決着</a>
+      <a href="#help-roles">役職名一覧</a>
+      <a href="#help-matching">名前マッチング</a>
+      <a href="#help-frontmatter">Frontmatter</a>
+    </nav>
+
+    <section id="help-structure">
       <h2>基本構造</h2>
       <p>Howlドキュメントは <strong>YAML frontmatter</strong>（省略可）と<strong>記法本体</strong>で構成されます。</p>
       <pre><code>---
@@ -28,7 +69,7 @@ vote.style: ordered
       <p><code>#</code> で始まる行はコメントとして無視されます。</p>
     </section>
 
-    <section>
+    <section id="help-join">
       <h2>参加 (Join)</h2>
       <p>行頭の <code>+</code> に続けてプレイヤー名を列挙します。</p>
       <pre><code>+アリス ボブ チャーリー
@@ -36,7 +77,7 @@ vote.style: ordered
       <p>区切り文字はスペース・<code>,</code>・<code>、</code> などが使えます。<br>参加行は自動的に先頭に移動されるため、文中のどこに書いても構いません。</p>
     </section>
 
-    <section>
+    <section id="help-vote">
       <h2>投票 (Vote)</h2>
       <p>右矢印で投票者→投票先を記述します。</p>
       <pre><code>アリス → ボブ
@@ -51,7 +92,7 @@ vote.style: ordered
       </table>
     </section>
 
-    <section>
+    <section id="help-multivote">
       <h2>複数投票 (MultiVote)</h2>
       <p>左矢印で投票先←投票者たちを記述します。</p>
       <pre><code>ボブ ← アリス、チャーリー、デイブ
@@ -65,7 +106,7 @@ vote.style: ordered
       </table>
     </section>
 
-    <section>
+    <section id="help-lynch">
       <h2>処刑 (Lynch)</h2>
       <pre><code>吊り アリス
 処刑 アリス
@@ -75,7 +116,7 @@ vote.style: ordered
       処刑なし: <code>処刑者なし</code> <code>吊りなし</code></p>
     </section>
 
-    <section>
+    <section id="help-attack">
       <h2>襲撃 (Attack)</h2>
       <pre><code>襲撃 アリス
 噛み ボブ
@@ -83,7 +124,7 @@ vote.style: ordered
       <p>キーワード: <code>襲撃</code> <code>噛み</code> <code>噛</code> <code>死亡</code></p>
     </section>
 
-    <section>
+    <section id="help-curse">
       <h2>道連れ・後追い</h2>
       <pre><code>道連れ アリス
 アリス 道連れ
@@ -93,7 +134,7 @@ vote.style: ordered
       <code>後追い</code>: 背徳者の後追い死</p>
     </section>
 
-    <section>
+    <section id="help-revote">
       <h2>再投票 (Revote)</h2>
       <pre><code>再投票
 ---
@@ -102,13 +143,13 @@ vote.style: ordered
       対象者を指定すると決選投票の候補を明示できます。</p>
     </section>
 
-    <section>
+    <section id="help-peace">
       <h2>平和 (Peace)</h2>
       <pre><code>平和</code></pre>
       <p>襲撃による死亡者がなかった場合に記述します。</p>
     </section>
 
-    <section>
+    <section id="help-assert">
       <h2>CO・主張 (Assert)</h2>
       <p>プレイヤー名の後にコロンを置き、役職COや占い・霊媒結果を記述します。</p>
       <pre><code>アリス: 占いCO ボブ白 チャーリー●
@@ -138,27 +179,27 @@ vote.style: ordered
       <p><code>1日目</code> <code>2日</code> <code>3d</code> など、数字+日単位で指定できます。</p>
     </section>
 
-    <section>
+    <section id="help-bulk-assert">
       <h2>一括CO</h2>
       <p>キーワード <code>生存者</code> を使って、全生存者の一括COを記述できます。</p>
       <pre><code>生存者 占いCO
 生存者 非猫CO</code></pre>
     </section>
 
-    <section>
+    <section id="help-mason">
       <h2>共有確認 (Mason)</h2>
       <pre><code>共有 アリス ボブ</code></pre>
       <p>共有者のペアを明示します。</p>
     </section>
 
-    <section>
+    <section id="help-reveal">
       <h2>役職公開 (Reveal)</h2>
       <pre><code>アリス = 人狼
 ボブ = 狂人</code></pre>
       <p>ゲーム終了後の役職公開を記述します。</p>
     </section>
 
-    <section>
+    <section id="help-over">
       <h2>決着 (Over)</h2>
       <pre><code>村勝ち
 人狼勝利
@@ -168,7 +209,7 @@ vote.style: ordered
       勝利: <code>勝ち</code> <code>勝利</code> <code>勝</code></p>
     </section>
 
-    <section>
+    <section id="help-roles">
       <h2>役職名一覧</h2>
       <table>
         <thead>
@@ -188,7 +229,7 @@ vote.style: ordered
       </table>
     </section>
 
-    <section>
+    <section id="help-matching">
       <h2>プレイヤー名の柔軟マッチング</h2>
       <p>登録済みの名前に対して、以下の順で照合されます:</p>
       <ol>
@@ -199,7 +240,7 @@ vote.style: ordered
       一意に特定できない場合はマッチしません。</p>
     </section>
 
-    <section>
+    <section id="help-frontmatter">
       <h2>Frontmatter オプション</h2>
       <table>
         <thead>
@@ -288,6 +329,25 @@ vote.style: ordered
     font-size: 13px;
     line-height: 1.7;
     color: #cdd6f4;
+  }
+
+  .toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #313244;
+  }
+
+  .toc a {
+    color: #89b4fa;
+    text-decoration: none;
+    font-size: 12px;
+  }
+
+  .toc a:hover {
+    text-decoration: underline;
   }
 
   .panel-body section {

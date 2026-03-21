@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { parse } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import { systemRoles } from '../src/types/index.ts'
@@ -12,6 +12,7 @@
   import { findReason } from '../src/gmork/index.ts'
   import { formatReason } from '../src/gmork/format.ts'
   import HelpPanel from './HelpPanel.svelte'
+  import { onOpenHelp } from './help.ts'
 
   const nightKillCauses: Set<CauseOfDeath> = new Set([
     'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
@@ -111,6 +112,20 @@
   let modalInput: HTMLInputElement | undefined = $state()
   let textareaEl: HTMLTextAreaElement | undefined = $state()
   let rawBodyEl: HTMLElement | undefined = $state()
+  let helpPanel: HelpPanel | undefined = $state()
+
+  function doOpenHelp(sectionId?: string) {
+    showHelp = true
+    if (sectionId) {
+      tick().then(() => helpPanel?.scrollToId(sectionId))
+    }
+  }
+
+  onMount(() => {
+    onOpenHelp(doOpenHelp)
+    const hash = location.hash.slice(1)
+    if (hash.startsWith('help-')) doOpenHelp(hash)
+  })
 
   $effect(() => {
     if (activeTitle && input !== undefined) {
@@ -555,7 +570,7 @@
   </div>
 {/if}
 
-<HelpPanel open={showHelp} onclose={() => showHelp = false} />
+<HelpPanel bind:this={helpPanel} open={showHelp} onclose={() => showHelp = false} />
 
 <style>
   :global(html, body) {
