@@ -7,6 +7,7 @@
   import VoteTable from './VoteTable.svelte'
   import DeathHistory from './DeathHistory.svelte'
   import ClaimTable from './ClaimTable.svelte'
+  import SummaryTable from './SummaryTable.svelte'
   import PlayerDialog from './PlayerDialog.svelte'
 
   let { vs, players, setup }: {
@@ -61,8 +62,7 @@
 <div class="status-pane">
   <SurvivorSection info={survivorInfo} />
   <VoteTable status={voteStatus} />
-  <DeathHistory days={deathHistory} {claimShortNames} />
-  <ClaimTable groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} {claimShortNames} />
+  <SummaryTable days={deathHistory} groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} {claimShortNames} />
 </div>
 
 {#if dialogSeat != null && dialogStatus}
