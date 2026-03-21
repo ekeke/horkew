@@ -18,7 +18,7 @@ export function getConfirmedRoles(
 // ── CO者の破綻判定（占い・霊媒共通） ────────────────────────────────
 
 export type BustReason =
-  | { type: 'result_contradicts_confirmed', target: Seat, confirmedRole: SystemRole, night: Day }
+  | { type: 'result_contradicts_confirmed', target: Seat, targetName: string, confirmedRole: SystemRole, night: Day }
   | { type: 'confirmed_as_other_role', confirmedRole: SystemRole }
   | { type: 'perspective_liar_budget', needed: number, budget: number, budgetDetail: string, claimerName: string, breakdown: BreakdownEntry[] }
   | { type: 'white_evil_exceeded', needed: number, budget: number, budgetDetail: string, claimerName: string, breakdown: BreakdownEntry[] }
@@ -67,7 +67,7 @@ function analyzeRole(
     }
 
     // 破綻2: 結果が確定役職と矛盾（Retar確定に依存）
-    const bust = checkResultContradiction(status, confirmed, resultField)
+    const bust = checkResultContradiction(status, confirmed, resultField, players)
     if (bust) {
       busted.set(seat, bust)
       continue
@@ -90,6 +90,7 @@ function checkResultContradiction(
   status: SeatStatus,
   confirmed: Map<Seat, SystemRole>,
   resultField: 'seerResult' | 'mediumResult',
+  players?: Map<number, string>,
 ): BustReason | null {
   for (const [night, { target, species }] of status.assertions) {
     if (night < 0) continue
@@ -101,14 +102,15 @@ function checkResultContradiction(
     if (!roleInfo) continue
 
     const expectedResult = roleInfo[resultField]
+    const targetName = players?.get(target) ?? `${target}`
 
     // 黒判定だが対象は人狼ではない（占い/霊媒で白が出るはずの役職）
     if (species === 'wolf' && expectedResult !== 'wolf') {
-      return { type: 'result_contradicts_confirmed', target, confirmedRole: targetRole, night }
+      return { type: 'result_contradicts_confirmed', target, targetName, confirmedRole: targetRole, night }
     }
     // 白判定だが対象は人狼（占い/霊媒で黒が出るはずの役職）
     if (species === 'human' && expectedResult === 'wolf') {
-      return { type: 'result_contradicts_confirmed', target, confirmedRole: targetRole, night }
+      return { type: 'result_contradicts_confirmed', target, targetName, confirmedRole: targetRole, night }
     }
   }
   return null

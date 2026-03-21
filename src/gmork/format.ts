@@ -12,7 +12,7 @@ function formatBustReason(br: BustReason, claimLabel: string): string {
     case 'confirmed_as_other_role':
       return `確定${roleName(br.confirmedRole)}のため${claimLabel}ではありえない`
     case 'result_contradicts_confirmed':
-      return `確定${roleName(br.confirmedRole)}(${br.target})に矛盾する判定を出しているため${claimLabel}ではありえない`
+      return `確定${roleName(br.confirmedRole)}の${br.targetName}に矛盾する判定を出しているため${claimLabel}ではありえない`
     case 'perspective_liar_budget': {
       const items = br.breakdown.map(e => ` - ${e.label}に${e.count}人`).join('\n')
       return `視点人外数超過。この村の人外は${br.budgetDetail}の計${br.budget}人ですが、${br.claimerName}視点では以下のように${br.needed}人以上になり矛盾します。\n${items}`
@@ -32,15 +32,15 @@ export function formatReason(reason: DenialReason, role: SystemRole): string {
 
     // Tier 0: Analysis-based
     case 'confirmed_seer_white':
-      return `真占い師(${reason.seerSeat})の${reason.night + 1}d白判定により人狼ではありえない`
+      return `真占い師${reason.seerName}の${reason.night + 1}d白判定により人狼ではありえない`
     case 'confirmed_seer_black':
-      return `真占い師(${reason.seerSeat})の${reason.night + 1}d黒判定により人狼に確定`
+      return `真占い師${reason.seerName}の${reason.night + 1}d黒判定により人狼に確定`
     case 'confirmed_medium_white':
-      return `真霊媒師(${reason.mediumSeat})の${reason.night + 1}d白判定により人狼ではありえない`
+      return `真霊媒師${reason.mediumName}の${reason.night + 1}d白判定により人狼ではありえない`
     case 'confirmed_medium_black':
-      return `真霊媒師(${reason.mediumSeat})の${reason.night + 1}d黒判定により人狼に確定`
+      return `真霊媒師${reason.mediumName}の${reason.night + 1}d黒判定により人狼に確定`
     case 'confirmed_role_holder_exists':
-      return `${roleName(reason.confirmedRole)}は(${reason.confirmedSeat})が真確定しているため${roleName(reason.confirmedRole)}ではありえない`
+      return `${roleName(reason.confirmedRole)}は${reason.confirmedName}が真確定しているため${roleName(reason.confirmedRole)}ではありえない`
     case 'seer_claim_contradicted':
       return formatBustReason(reason.bustReason, '占い師')
     case 'medium_claim_contradicted':
@@ -76,7 +76,7 @@ export function formatReason(reason: DenialReason, role: SystemRole): string {
       return `占い師候補全員（破綻した候補は除く）（${names}）が白判定を出しており、この中に必ず真の結果があるため人狼ではありえない`
     }
     case 'seer_fox_kill':
-      return `占い師(${reason.seerSeat})の${reason.night + 1}d占い先が呪殺されているため妖狐に確定`
+      return `占い師${reason.seerName}の${reason.night + 1}d占い先が呪殺されているため妖狐に確定`
     case 'medium_black': {
       const names = reason.claimants.map(c => `${c.name}(${c.night + 1}d)`).join('・')
       return `霊媒師候補全員（破綻した候補は除く）（${names}）が黒判定を出しており、この中に必ず真の結果があるため人狼に確定`
@@ -86,7 +86,7 @@ export function formatReason(reason: DenialReason, role: SystemRole): string {
       return `霊媒師候補全員（破綻した候補は除く）（${names}）が白判定を出しており、この中に必ず真の結果があるため人狼ではありえない`
     }
     case 'mason_partner':
-      return `共有者(${reason.masonSeat})に相方と認定されているため共有者に確定`
+      return `共有者${reason.masonName}に相方と認定されているため共有者に確定`
     case 'role_slots_filled':
       return `${roleName(role)}の対抗に出なかったため${roleName(role)}ではありえない`
     case 'nekomata_no_companion':
@@ -125,12 +125,16 @@ export function formatConfirmationReason(reason: ConfirmationReason, _role: Syst
       return `霊媒師候補全員（破綻した候補は除く）（${names}）が黒判定を出しているため人狼に確定`
     }
     case 'mason_partner':
-      return `共有者(${reason.masonSeat})に相方と認定されているため共有者に確定`
+      return `共有者${reason.masonName}に相方と認定されているため共有者に確定`
     case 'seer_fox_kill':
-      return `占い師(${reason.seerSeat})の${reason.night + 1}d占い先が呪殺されているため妖狐に確定`
+      return `占い師${reason.seerName}の${reason.night + 1}d占い先が呪殺されているため妖狐に確定`
     case 'dead_werewolf_count': {
       const names = reason.candidates.map(c => c.name).join('・')
       return `死亡人狼は最低${reason.requiredDead}人必要ですが、死者の中で人狼になりうるのは${names}の${reason.candidates.length}人のみのため人狼に確定`
+    }
+    case 'all_evil_accounted': {
+      const names = reason.evilSeats.map(c => c.name).join('・')
+      return `全人外の位置が判明（${names}）しており、${roleName(reason.role)}COは信用できるため${roleName(reason.role)}に確定`
     }
   }
 }

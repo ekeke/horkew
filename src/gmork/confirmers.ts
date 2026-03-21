@@ -1,5 +1,6 @@
 import type { Seat, Day, VillageStatus, SystemRole } from '../types/index.ts'
 import type { ConfirmationChecker, ConfirmationCheckerInput, ConfirmationReason } from './reasons.ts'
+import { villageSideRoles } from './reasons.ts'
 import { isTrustworthy } from './analysis.ts'
 
 // ── 人狼人数制約 ────────────────────────────────────────────────────
@@ -203,14 +204,14 @@ function collectConsensus(
 
 // ── 共有相方 ────────────────────────────────────────────────────────
 
-function checkMasonPartnerConfirm({ village, seat, role }: ConfirmationCheckerInput): ConfirmationReason | null {
+function checkMasonPartnerConfirm({ village, seat, role, players }: ConfirmationCheckerInput): ConfirmationReason | null {
   if (role !== 'mason') return null
   const masonClaimants = (village.claims.get('mason') || []) as Seat[]
   for (const masonSeat of masonClaimants) {
     const masonStatus = village.statuses.get(masonSeat)!
     for (const [, { target, species }] of masonStatus.assertions) {
       if (target === seat && species === 'human') {
-        return { type: 'mason_partner', masonSeat }
+        return { type: 'mason_partner', masonSeat, masonName: players?.get(masonSeat) ?? `${masonSeat}` }
       }
     }
   }
@@ -219,7 +220,7 @@ function checkMasonPartnerConfirm({ village, seat, role }: ConfirmationCheckerIn
 
 // ── 呪殺 ────────────────────────────────────────────────────────────
 
-function checkSeerFoxKillConfirm({ village, analysis, seat, status, role }: ConfirmationCheckerInput): ConfirmationReason | null {
+function checkSeerFoxKillConfirm({ village, analysis, seat, status, role, players }: ConfirmationCheckerInput): ConfirmationReason | null {
   if (role !== 'werehamster') return null
   if (status.surviving || status.causeOfDeath !== 'night_kill' || status.diedDay == null) return null
 
@@ -234,7 +235,7 @@ function checkSeerFoxKillConfirm({ village, analysis, seat, status, role }: Conf
     for (const [night, { target }] of seerStatus.assertions) {
       if (target === seat && night === status.diedDay) {
         if (seerStatus.surviving || (seerStatus.diedDay != null && seerStatus.diedDay >= night)) {
-          return { type: 'seer_fox_kill', seerSeat, night }
+          return { type: 'seer_fox_kill', seerSeat, seerName: players?.get(seerSeat) ?? `${seerSeat}`, night }
         }
       }
     }
@@ -271,6 +272,44 @@ function checkDeadWerewolfCount({ village, setup, seat, role, status, possibilit
   return null
 }
 
+// ── 全人外位置判明 ──────────────────────────────────────────────────
+
+/**
+ * 全人外の位置が確定している場合、村側COは信用できる
+ *
+ * setupの人外枠（werewolf, possessed, fanatic, werehamster, immoralist）の
+ * 合計数ぶんの人外がpossibilitiesで確定済みなら、残りは全員村人側。
+ * よってこのプレイヤーのCOが真に確定する。
+ */
+function checkAllEvilAccounted({ village, setup, seat, role, status, possibilities, players }: ConfirmationCheckerInput): ConfirmationReason | null {
+  if (!possibilities) return null
+  if (!status.claiming) return null
+  if (status.claimingRole !== role) return null
+  if (!villageSideRoles.includes(role)) return null
+
+  const evilRoleNames: SystemRole[] = ['werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist']
+  let totalEvilSlots = 0
+  for (const r of evilRoleNames) {
+    totalEvilSlots += setup.get(r) || 0
+  }
+  if (totalEvilSlots === 0) return null
+
+  // possibilitiesで人外のみに絞られているプレイヤーを数える
+  const evilSeats: { seat: Seat, name: string }[] = []
+  for (const [s, roles] of possibilities) {
+    if (roles.size === 0) continue
+    const allEvil = [...roles].every(r => evilRoleNames.includes(r))
+    if (allEvil) {
+      evilSeats.push({ seat: s, name: players?.get(s) ?? `${s}` })
+    }
+  }
+
+  if (evilSeats.length >= totalEvilSlots) {
+    return { type: 'all_evil_accounted', role, evilSeats }
+  }
+  return null
+}
+
 // ── Exported checker list ───────────────────────────────────────────
 
 export const allConfirmationCheckers: ConfirmationChecker[] = [
@@ -283,4 +322,5 @@ export const allConfirmationCheckers: ConfirmationChecker[] = [
   checkMasonPartnerConfirm,
   checkSeerFoxKillConfirm,
   checkDeadWerewolfCount,
+  checkAllEvilAccounted,
 ]

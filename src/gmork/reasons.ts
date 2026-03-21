@@ -5,11 +5,11 @@ export type DenialReason =
   // CO constraint: 村役職COは他の村役職を否定
   | { type: 'co_implies_not_other_village_role', claimedRole: SystemRole }
   // Tier 0: Analysis-based (confirmed roles from Retar)
-  | { type: 'confirmed_seer_white', seerSeat: Seat, night: Day }
-  | { type: 'confirmed_seer_black', seerSeat: Seat, night: Day }
-  | { type: 'confirmed_medium_white', mediumSeat: Seat, night: Day }
-  | { type: 'confirmed_medium_black', mediumSeat: Seat, night: Day }
-  | { type: 'confirmed_role_holder_exists', confirmedSeat: Seat, confirmedRole: SystemRole }
+  | { type: 'confirmed_seer_white', seerSeat: Seat, seerName: string, night: Day }
+  | { type: 'confirmed_seer_black', seerSeat: Seat, seerName: string, night: Day }
+  | { type: 'confirmed_medium_white', mediumSeat: Seat, mediumName: string, night: Day }
+  | { type: 'confirmed_medium_black', mediumSeat: Seat, mediumName: string, night: Day }
+  | { type: 'confirmed_role_holder_exists', confirmedSeat: Seat, confirmedName: string, confirmedRole: SystemRole }
   | { type: 'seer_claim_contradicted', bustReason: BustReason }
   | { type: 'medium_claim_contradicted', bustReason: BustReason }
   // Tier 1: Direct inference
@@ -25,10 +25,10 @@ export type DenialReason =
   // Tier 2: Simple combination
   | { type: 'seer_black', claimants: { name: string, night: Day }[] }
   | { type: 'seer_white', claimants: { name: string, night: Day }[] }
-  | { type: 'seer_fox_kill', seerSeat: Seat, night: Day }
+  | { type: 'seer_fox_kill', seerSeat: Seat, seerName: string, night: Day }
   | { type: 'medium_black', claimants: { name: string, night: Day }[] }
   | { type: 'medium_white', claimants: { name: string, night: Day }[] }
-  | { type: 'mason_partner', masonSeat: Seat }
+  | { type: 'mason_partner', masonSeat: Seat, masonName: string }
   | { type: 'role_slots_filled', claimants: Seat[] }
   | { type: 'nekomata_no_companion', night: Day }
   | { type: 'all_hamsters_dead', lastHamsterDiedDay: Day }
@@ -47,11 +47,13 @@ export type ConfirmationReason =
   | { type: 'seer_consensus_black', claimants: { name: string, night: Day }[] }
   | { type: 'medium_consensus_black', claimants: { name: string, night: Day }[] }
   // 共有相方
-  | { type: 'mason_partner', masonSeat: Seat }
+  | { type: 'mason_partner', masonSeat: Seat, masonName: string }
   // 呪殺
-  | { type: 'seer_fox_kill', seerSeat: Seat, night: Day }
+  | { type: 'seer_fox_kill', seerSeat: Seat, seerName: string, night: Day }
   // 死亡人狼カウント
   | { type: 'dead_werewolf_count', requiredDead: number, candidates: { seat: Seat, name: string }[] }
+  // 全人外位置判明によるCO信用
+  | { type: 'all_evil_accounted', role: SystemRole, evilSeats: { seat: Seat, name: string }[] }
 
 export type ConfirmationCheckerInput = {
   village: VillageStatus

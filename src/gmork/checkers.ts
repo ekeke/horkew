@@ -20,59 +20,82 @@ function checkCoImpliesNotOtherVillageRole({ status, role }: CheckerInput): Deni
 
 // ── Tier 0: Analysis-based (confirmed roles from Retar) ────────────
 
-function checkConfirmedSeerResult({ village, analysis, seat, role }: CheckerInput): DenialReason | null {
+function checkConfirmedSeerResult({ village, analysis, seat, role, players }: CheckerInput): DenialReason | null {
   if (!analysis?.seer.confirmed) return null
 
   const seerSeat = analysis.seer.confirmed
+  const seerName = players?.get(seerSeat) ?? `${seerSeat}`
   const seerStatus = village.statuses.get(seerSeat)
   if (!seerStatus) return null
 
   for (const [night, { target, species }] of seerStatus.assertions) {
     if (night < 0 || target !== seat) continue
     if (species === 'human' && role === 'werewolf') {
-      return { type: 'confirmed_seer_white', seerSeat, night }
+      return { type: 'confirmed_seer_white', seerSeat, seerName, night }
     }
     if (species === 'wolf' && role !== 'werewolf') {
-      return { type: 'confirmed_seer_black', seerSeat, night }
+      return { type: 'confirmed_seer_black', seerSeat, seerName, night }
     }
   }
   return null
 }
 
-function checkConfirmedMediumResult({ village, analysis, seat, role }: CheckerInput): DenialReason | null {
+function checkConfirmedMediumResult({ village, analysis, seat, role, players }: CheckerInput): DenialReason | null {
   if (!analysis?.medium.confirmed) return null
 
   const mediumSeat = analysis.medium.confirmed
+  const mediumName = players?.get(mediumSeat) ?? `${mediumSeat}`
   const mediumStatus = village.statuses.get(mediumSeat)
   if (!mediumStatus) return null
 
   for (const [night, { target, species }] of mediumStatus.assertions) {
     if (night < 0 || target !== seat) continue
     if (species === 'human' && role === 'werewolf') {
-      return { type: 'confirmed_medium_white', mediumSeat, night }
+      return { type: 'confirmed_medium_white', mediumSeat, mediumName, night }
     }
     if (species === 'wolf' && role !== 'werewolf') {
-      return { type: 'confirmed_medium_black', mediumSeat, night }
+      return { type: 'confirmed_medium_black', mediumSeat, mediumName, night }
     }
   }
   return null
 }
 
-function checkConfirmedRoleHolderExists({ analysis, seat, role, status }: CheckerInput): DenialReason | null {
+function checkConfirmedRoleHolderExists({ village, setup, analysis, seat, role, status, players }: CheckerInput): DenialReason | null {
   if (!analysis) return null
   if (!status.claiming) return null
 
   const claimed = status.claimingRole as SystemRole
   if (claimed !== role) return null
 
+  // seer/medium: analysis の破綻判定経由で確定者を探す
   const roleAnalysis =
     role === 'seer' ? analysis.seer :
     role === 'medium' ? analysis.medium :
     null
-  if (!roleAnalysis) return null
+  if (roleAnalysis) {
+    if (roleAnalysis.confirmed != null && roleAnalysis.confirmed !== seat) {
+      const confirmedName = players?.get(roleAnalysis.confirmed) ?? `${roleAnalysis.confirmed}`
+      return { type: 'confirmed_role_holder_exists', confirmedSeat: roleAnalysis.confirmed, confirmedName, confirmedRole: role }
+    }
+    return null
+  }
 
-  if (roleAnalysis.confirmed != null && roleAnalysis.confirmed !== seat) {
-    return { type: 'confirmed_role_holder_exists', confirmedSeat: roleAnalysis.confirmed, confirmedRole: role }
+  // その他の村役職: retar の confirmed roles からスロットが埋まっているか確認
+  if (!villageSpecialRoles.includes(role)) return null
+  const slots = setup.get(role) || 0
+  if (slots <= 0) return null
+
+  let filledCount = 0
+  let lastConfirmedSeat: Seat | null = null
+  for (const [s, confirmedRole] of analysis.confirmed) {
+    if (s !== seat && confirmedRole === role) {
+      filledCount++
+      lastConfirmedSeat = s
+    }
+  }
+  if (filledCount >= slots && lastConfirmedSeat != null) {
+    const confirmedName = players?.get(lastConfirmedSeat) ?? `${lastConfirmedSeat}`
+    return { type: 'confirmed_role_holder_exists', confirmedSeat: lastConfirmedSeat, confirmedName, confirmedRole: role }
   }
   return null
 }
@@ -229,7 +252,7 @@ function collectSeerConsensus(
   return matches
 }
 
-function checkSeerFoxKill({ village, analysis, seat, status, role }: CheckerInput): DenialReason | null {
+function checkSeerFoxKill({ village, analysis, seat, status, role, players }: CheckerInput): DenialReason | null {
   if (role === 'werehamster') return null
   if (status.surviving || status.causeOfDeath !== 'night_kill' || status.diedDay == null) return null
 
@@ -244,7 +267,7 @@ function checkSeerFoxKill({ village, analysis, seat, status, role }: CheckerInpu
     for (const [night, { target }] of seerStatus.assertions) {
       if (target === seat && night === status.diedDay) {
         if (seerStatus.surviving || (seerStatus.diedDay != null && seerStatus.diedDay >= night)) {
-          return { type: 'seer_fox_kill', seerSeat, night }
+          return { type: 'seer_fox_kill', seerSeat, seerName: players?.get(seerSeat) ?? `${seerSeat}`, night }
         }
       }
     }
@@ -299,14 +322,14 @@ function collectMediumConsensus(
   return matches
 }
 
-function checkMasonPartner({ village, seat, role }: CheckerInput): DenialReason | null {
+function checkMasonPartner({ village, seat, role, players }: CheckerInput): DenialReason | null {
   if (role === 'mason') return null
   const masonClaimants = (village.claims.get('mason') || []) as Seat[]
   for (const masonSeat of masonClaimants) {
     const masonStatus = village.statuses.get(masonSeat)!
     for (const [, { target, species }] of masonStatus.assertions) {
       if (target === seat && species === 'human') {
-        return { type: 'mason_partner', masonSeat }
+        return { type: 'mason_partner', masonSeat, masonName: players?.get(masonSeat) ?? `${masonSeat}` }
       }
     }
   }
