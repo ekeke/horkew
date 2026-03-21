@@ -110,8 +110,12 @@ export function formatConfirmationReason(reason: ConfirmationReason, _role: Syst
       return '猫又の呪殺道連れで死亡しているため人狼に確定'
     case 'follow_hamster':
       return '妖狐の死亡に後追いしているため背徳者に確定'
-    case 'all_other_cos_busted':
-      return `他の${roleName(reason.role)}CO者(${reason.bustedSeats.join('・')})が全員破綻しているため真${roleName(reason.role)}に確定`
+    case 'execution_companion':
+      return `処刑時に${reason.companionName}が道連れになったため猫又に確定`
+    case 'all_other_cos_busted': {
+      const names = reason.eliminatedCandidates.map(c => c.name).join('・')
+      return `他の${roleName(reason.role)}候補（${names}）が全員否定されているため真${roleName(reason.role)}に確定`
+    }
     case 'seer_consensus_black': {
       const names = reason.claimants.map(c => `${c.name}(${c.night + 1}d)`).join('・')
       return `占い師候補全員（破綻した候補は除く）（${names}）が黒判定を出しているため人狼に確定`

@@ -81,6 +81,12 @@ rules:
 アネモネ吊り
 考える道連れ
 
+# 処刑により道連れが発生したので猫又確定
+# @gmork-confirm アネモネ/nekomata: execution_companion
+
+# すべての対抗が破綻したため真確定
+# @gmork-confirm 考える人/seer: all_other_cos_busted
+
 # @expect 今川義元: [werewolf, fanatic]
 # @expect ちせ: [werewolf, fanatic]
 

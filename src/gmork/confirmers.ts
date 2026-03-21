@@ -78,6 +78,20 @@ function checkCursedByNekomataConfirm({ status, role }: ConfirmationCheckerInput
   return null
 }
 
+function checkExecutionCompanionConfirm({ village, seat, status, role, players }: ConfirmationCheckerInput): ConfirmationReason | null {
+  if (role !== 'nekomata') return null
+  if (status.causeOfDeath !== 'execution' || status.diedDay == null) return null
+
+  // 同じ日に cursed_by_executed_nekomata で死亡したプレイヤーがいれば猫又確定
+  for (const [s, st] of village.statuses) {
+    if (s === seat) continue
+    if (st.causeOfDeath === 'cursed_by_executed_nekomata' && st.diedDay === status.diedDay) {
+      return { type: 'execution_companion', companionSeat: s, companionName: players?.get(s) ?? `${s}` }
+    }
+  }
+  return null
+}
+
 function checkFollowHamsterConfirm({ status, role }: ConfirmationCheckerInput): ConfirmationReason | null {
   if (role !== 'immoralist') return null
   if (
@@ -92,7 +106,7 @@ function checkFollowHamsterConfirm({ status, role }: ConfirmationCheckerInput): 
 
 // ── CO分析による確定 ────────────────────────────────────────────────
 
-function checkAllOtherCosBusted({ analysis, seat, role }: ConfirmationCheckerInput): ConfirmationReason | null {
+function checkAllOtherCosBusted({ village, analysis, seat, role, players, possibilities }: ConfirmationCheckerInput): ConfirmationReason | null {
   const roleAnalysis =
     role === 'seer' ? analysis.seer :
     role === 'medium' ? analysis.medium :
@@ -104,7 +118,36 @@ function checkAllOtherCosBusted({ analysis, seat, role }: ConfirmationCheckerInp
   const bustedSeats = Array.from(roleAnalysis.busted.keys())
   if (bustedSeats.length === 0) return null
 
-  return { type: 'all_other_cos_busted', role, bustedSeats }
+  // 破綻したCO者
+  const eliminatedCandidates: { seat: Seat, name: string }[] = bustedSeats.map(s => ({
+    seat: s,
+    name: players?.get(s) ?? `${s}`,
+  }))
+
+  // CO日までに襲撃死した非CO者: possibilitiesで役職が否定されていれば候補に含める
+  if (possibilities) {
+    const coSeats = new Set(roleAnalysis.candidates)
+    // このCO役職の最初のCO日を求める
+    let firstCoDay = Infinity
+    for (const coSeat of roleAnalysis.candidates) {
+      const coStatus = village.statuses.get(coSeat)
+      if (coStatus?.claimedAt != null && coStatus.claimedAt < firstCoDay) {
+        firstCoDay = coStatus.claimedAt
+      }
+    }
+    // CO日までに襲撃死した非CO者
+    for (const [s, st] of village.statuses) {
+      if (s === seat || coSeats.has(s)) continue
+      if (!st.surviving && !st.claiming && st.causeOfDeath === 'night_kill' && st.diedDay != null && st.diedDay < firstCoDay) {
+        const roles = possibilities.get(s)
+        if (roles && !roles.has(role)) {
+          eliminatedCandidates.push({ seat: s, name: players?.get(s) ?? `${s}` })
+        }
+      }
+    }
+  }
+
+  return { type: 'all_other_cos_busted', role, eliminatedCandidates }
 }
 
 // ── 結果合意による確定 ──────────────────────────────────────────────
@@ -232,6 +275,7 @@ function checkDeadWerewolfCount({ village, setup, seat, role, status, possibilit
 
 export const allConfirmationCheckers: ConfirmationChecker[] = [
   checkCursedByNekomataConfirm,
+  checkExecutionCompanionConfirm,
   checkFollowHamsterConfirm,
   checkAllOtherCosBusted,
   checkSeerConsensusBlack,

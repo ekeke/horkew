@@ -1,6 +1,6 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { DenialReason, ConfirmationReason } from './reasons.ts'
-import { runAnalysis, analyzeSeer, analyzeMedium } from './analysis.ts'
+import { runAnalysis, getConfirmedRoles, analyzeSeer, analyzeMedium } from './analysis.ts'
 import { allCheckers } from './checkers.ts'
 import { allConfirmationCheckers } from './confirmers.ts'
 import { formatReason, formatConfirmationReason } from './format.ts'
@@ -62,7 +62,9 @@ export function findConfirmationReason(
   const status = village.statuses.get(seat)
   if (!status) return null
 
-  const confirmed = new Map<Seat, SystemRole>()
+  const confirmed = possibilities
+    ? getConfirmedRoles(possibilities)
+    : new Map<Seat, SystemRole>()
   const seer = analyzeSeer(village, setup, confirmed, players)
   const medium = analyzeMedium(village, setup, confirmed, players)
   const analysis = { confirmed, seer, medium }

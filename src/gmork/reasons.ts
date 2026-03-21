@@ -40,8 +40,9 @@ export type ConfirmationReason =
   // 死因による確定
   | { type: 'cursed_by_nekomata' }
   | { type: 'follow_hamster' }
+  | { type: 'execution_companion', companionSeat: Seat, companionName: string }
   // CO分析による確定
-  | { type: 'all_other_cos_busted', role: SystemRole, bustedSeats: Seat[] }
+  | { type: 'all_other_cos_busted', role: SystemRole, eliminatedCandidates: { seat: Seat, name: string }[] }
   // 結果合意による確定
   | { type: 'seer_consensus_black', claimants: { name: string, night: Day }[] }
   | { type: 'medium_consensus_black', claimants: { name: string, night: Day }[] }
