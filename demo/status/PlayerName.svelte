@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
+  import type { Writable } from 'svelte/store'
   import { getContext } from 'svelte'
 
   let { dead, nightKill = false, executed = false, claim, seat, children }: {
@@ -12,10 +13,20 @@
   } = $props()
 
   const onplayerclick = getContext<((seat: number) => void) | undefined>('playerclick')
+  const hoveredSeat = getContext<Writable<number | null> | undefined>('hoveredSeat')
   let clickable = $derived(seat != null && onplayerclick != null)
+  let highlighted = $derived(seat != null && hoveredSeat != null && $hoveredSeat === seat)
 
   function handleClick() {
     if (seat != null && onplayerclick) onplayerclick(seat)
+  }
+
+  function handleMouseEnter() {
+    if (seat != null && hoveredSeat) hoveredSeat.set(seat)
+  }
+
+  function handleMouseLeave() {
+    if (hoveredSeat) hoveredSeat.set(null)
   }
 </script>
 
@@ -39,12 +50,14 @@
   {/if}
 {/snippet}
 
-{#if clickable}
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <span class="clickable" onclick={handleClick}>{@render inner()}</span>
-{:else}
-  {@render inner()}
-{/if}
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<span
+  class:clickable
+  class:highlighted
+  onclick={clickable ? handleClick : undefined}
+  onmouseenter={handleMouseEnter}
+  onmouseleave={handleMouseLeave}
+>{@render inner()}</span>
 
 <style>
   .clickable {
@@ -56,6 +69,12 @@
     text-decoration: underline;
     text-decoration-color: #cba6f7;
     text-underline-offset: 2px;
+  }
+
+  .highlighted {
+    background-color: rgba(203, 166, 247, 0.25);
+    border-radius: 2px;
+    text-shadow: 0 0 6px rgba(203, 166, 247, 0.7);
   }
 
   .claim {

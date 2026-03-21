@@ -2,6 +2,7 @@
   import type { VillageStatus, SystemRole, SeatStatus } from '../../src/types/index.ts'
   import { systemRoles } from '../../src/types/index.ts'
   import { setContext } from 'svelte'
+  import { writable } from 'svelte/store'
   import { extractSurvivorInfo, extractDeathHistory, extractClaimGroups, extractVoteStatus } from './extract.ts'
   import SurvivorSection from './SurvivorSection.svelte'
   import VoteTable from './VoteTable.svelte'
@@ -25,6 +26,9 @@
   }
 
   setContext('playerclick', openPlayerDialog)
+
+  const hoveredSeat = writable<number | null>(null)
+  setContext('hoveredSeat', hoveredSeat)
 
   function closePlayerDialog() {
     dialogSeat = null
