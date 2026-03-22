@@ -13,71 +13,72 @@
 //
 // 1. ユーザーがエディタに入力
 // 2. CM6 onChange → App.svelteのinput更新 → $effect → run()
-// 3. run()内でparse(input)が実行され、statements[]が得られる
-// 4. statements[]からStatementInfo[]を作り、setStatements Effectでこのモジュールに送信
-// 5. buildDecorations()がStatementInfo[] + docからDecorationSetを構築
+// 3. run()内でparse(input) → buildVillageStatus() → dict取得
+// 4. App.svelteが以下を構築し、HighlightPayloadとしてsetStatements Effectで送信:
+//    - StatementInfo[]: statement type + line (パーサー出力から)
+//    - PlayerNameInfo[]: プレイヤー名の位置・解決状態 (dict + 行テキスト検索から)
+//    - cursorLine: 現在のカーソル行番号
+// 5. buildDecorations()がHighlightPayload + docからDecorationSetを構築
 // 6. CM6が装飾を描画
 //
-// ## ハイライトの2層構造
+// ## 装飾レイヤー構造
 //
-// ### Layer 1: 行レベル装飾 (Decoration.line)
-//   パーサーが返すstatement.typeに基づいて行全体にCSSクラスを付与。
-//   これにより行の種別が視覚的に区別できる。
-//
-//   StatementType → CSSクラスの対応:
-//     join, joinMulti  → hwl-join    (プレイヤー参加)
-//     vote, multiVote  → hwl-vote    (投票)
-//     attack           → hwl-attack  (夜襲撃)
-//     lynch            → hwl-lynch   (処刑)
-//     curse            → hwl-curse   (道連れ)
-//     follow           → hwl-follow  (後追い)
-//     peace            → hwl-peace   (平和)
-//     revote           → hwl-revote  (再投票)
-//     over             → hwl-over    (ゲーム終了)
-//     assert, mason    → hwl-assert  (CO/共有確認)
-//     reveal           → hwl-reveal  (役職公開)
-//     unknown          → hwl-unknown (パース不能行)
-//
-// ### Layer 2: 行内トークン装飾 (Decoration.mark)
-//   vocabulary.tsからインポートした正規表現で、行内の特定トークンにCSSクラスを付与。
-//   パーサーのstatement.typeに応じて適用するトークン種を制限する。
-//
-//   全statement共通:
-//     rightArrow, leftArrow  → hw-arrow  (→, =>, <-, ← 等)
-//     isHuman                → hw-human  (白, ○ 等)
-//     isWolf                 → hw-wolf   (黒, ● 等)
-//
-//   assertのみ:
-//     claim (CO)             → hw-co     (CO キーワード)
-//     anyRole                → hw-role   (役職名: 占い, 霊媒, 狩人 等)
-//
-//   revealのみ:
-//     anyRole                → hw-role   (役職名)
-//
-// ## パーサーがカバーしない行の処理
-//
-//   Howlパーサーのpreprocess段階で除去される行は、statementsに含まれない。
-//   これらはdoc全体を走査して直接検出する:
+// ### Layer 0: パーサー前処理で除去される行
+//   Howlパーサーのpreprocess段階で除去される行はstatementsに含まれない。
+//   doc全体を走査して直接検出する:
 //
 //   - frontmatter行 (--- で囲まれたYAML) → hw-meta マーク
 //   - コメント行 (# で始まる行)          → hw-comment マーク
 //   - 空行                               → 装飾なし
 //
-// ## 実装済み機能
+// ### Layer 1: 行レベル装飾 (Decoration.line)
+//   パーサーが返すstatement.typeに基づいて行全体にCSSクラスを付与。
+//   重要行には背景色と::beforeアイコンが適用される。
 //
-//   1. プレイヤー名マッチの可視化
-//      - PlayerNameInfo[] で解決済み/未解決のプレイヤー名位置をApp.svelteから送信
-//      - hw-player-resolved (薄い緑下線), hw-player-unresolved (赤波線) で表示
+//   StatementType → CSSクラス (背景色 / ::beforeアイコン):
+//     join, joinMulti  → hwl-join    (青背景 / +)
+//     vote, multiVote  → hwl-vote    (装飾なし)
+//     attack           → hwl-attack  (赤背景 / 🐺)
+//     lynch            → hwl-lynch   (peach背景 / ⚔)
+//     curse            → hwl-curse   (紫背景 / 💀)
+//     follow           → hwl-follow  (グレー背景)
+//     peace            → hwl-peace   (緑背景 / ☮)
+//     revote           → hwl-revote  (装飾なし)
+//     over             → hwl-over    (装飾なし)
+//     assert, mason    → hwl-assert  (装飾なし)
+//     reveal           → hwl-reveal  (装飾なし)
+//     unknown          → hwl-unknown (赤背景 + 赤波線下線)
 //
-//   2. カーソル行以下のグレイアウト
-//      - HighlightPayloadにcursorLineを含め、カーソル行以下をhw-beyond-cursorで半透明化
+// ### Layer 2: 行内トークン装飾 (Decoration.mark)
+//   vocabulary.tsからインポートした正規表現で、行内の特定トークンにCSSクラスを付与。
 //
-//   3. unknown行の可視化強化
-//      - hwl-unknown行レベル装飾 + hwl-unknown-textマーク (波線+背景+ツールチップ)
+//   全statement共通:
+//     rightArrow, leftArrow  → hw-arrow  (青 / →, =>, <-, ← 等)
+//     isHuman                → hw-human  (緑 / 白, ○ 等)
+//     isWolf                 → hw-wolf   (赤 / 黒, ● 等)
 //
-//   4. 重要アクションのクラス分け・装飾
-//      - curse → hwl-curse, follow → hwl-follow に分離
-//      - lynch/attack/peace等に背景色 + CSS ::before アイコン
+//   assertのみ:
+//     claim (CO)             → hw-co     (紫 / CO キーワード)
+//     anyRole                → hw-role   (黄 / 占い, 霊媒, 狩人 等)
+//
+//   revealのみ:
+//     anyRole                → hw-role   (黄 / 役職名)
+//
+//   unknownのみ:
+//     行全体                 → hwl-unknown-text  (ツールチップ: 「この行はHowl記法として認識できません」)
+//
+// ### Layer 3: プレイヤー名装飾 (Decoration.mark)
+//   App.svelteがFlexibleDictionaryで解決したプレイヤー名の位置情報(PlayerNameInfo[])
+//   に基づき、名前にマークを付与する。kind別に3種類:
+//
+//   definition  → hw-join-name         (青太字 / JOIN行での名前定義)
+//   resolved    → hw-player-resolved   (teal文字 + teal背景 / 辞書にマッチした参照)
+//   unresolved  → hw-player-unresolved (赤波線 + ツールチップ / 未登録名)
+//
+// ### Layer 4: カーソル行以下のグレイアウト (Decoration.line)
+//   cursorLine以降の行にhw-beyond-cursorクラスを付与し、opacity: 0.35で半透明化。
+//   statusパネルはカーソル行までの解析結果を反映するため、
+//   「この範囲はstatusに反映されていない」ことを視覚的に明示する。
 //
 // ## StateField の更新戦略
 //
