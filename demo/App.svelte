@@ -133,7 +133,7 @@
       fileIndex[key] = { createdAt: now, updatedAt: now }
     }
     saveIndex(fileIndex)
-    updateSettings({ active: key })
+    if (settings.active !== key) updateSettings({ active: key })
   }
 
   function deleteText(key: string) {
@@ -215,6 +215,7 @@
     if (editorView) {
       editorView.dispatch({
         changes: { from: 0, to: editorView.state.doc.length, insert: text },
+        selection: { anchor: text.length },
       })
     }
   }
@@ -388,23 +389,24 @@
   }
 
   // Initialize CM6 editor when parent element is available (lazy-loaded)
+  // Only depends on editorParent (DOM availability via {#if activeKey} block).
+  // activeKey and editorView are intentionally NOT dependencies to avoid
+  // destroy/recreate loops on document switch.
   $effect(() => {
-    if (editorParent && activeKey && !editorView) {
-      import('./editor/index.ts').then(mod => {
-        editorModule = mod
-        if (!editorParent) return
-        editorView = mod.createHowlEditor(editorParent, {
-          doc: input,
-          onChange(value) {
-            input = value
-          },
-          onCursorChange(_line) {
-            onCursorMove()
-          },
-        })
+    if (!editorParent) return
+    import('./editor/index.ts').then(mod => {
+      editorModule = mod
+      if (!editorParent || editorView) return
+      editorView = mod.createHowlEditor(editorParent, {
+        doc: input,
+        onChange(value) {
+          input = value
+        },
+        onCursorChange(_line) {
+          onCursorMove()
+        },
       })
-    }
-    // Cleanup on destroy
+    })
     return () => {
       if (editorView) {
         editorView.destroy()
