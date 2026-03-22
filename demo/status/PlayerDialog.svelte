@@ -54,13 +54,12 @@
       ? [[seat, status.claimingRole as SystemRole]]
       : []
 
-    const { promise } = runParallelAnalysis({
+    runParallelAnalysis({
       vs: serializeVs(vs) as any,
       setup: [...setup],
       players: [...players],
       assumptions,
-    })
-    promise.then((data) => {
+    }).then((data) => {
       if (data.type === 'error') {
         retarState = { type: 'error', message: data.message }
         return
