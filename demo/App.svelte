@@ -14,7 +14,7 @@
   import HelpPanel from './HelpPanel.svelte'
   import { onOpenHelp } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
-  import { createHowlEditor, EditorView } from './editor/index.ts'
+  import { createHowlEditor, EditorView, setStatements, type StatementInfo } from './editor/index.ts'
 
   export type SourceLines = {
     survivor: Map<number, number>   // seat → line
@@ -469,6 +469,12 @@
       rawStatements = JSON.stringify(statements, null, 2)
       parsedLines = stringifyStatements(statements)
       statementLines = statements.map((s: any) => s.line as number)
+
+      // Feed parse results to CM6 for syntax highlighting
+      if (editorView) {
+        const stmtInfo: StatementInfo[] = statements.map((s: any) => ({ type: s.type, line: s.line }))
+        editorView.dispatch({ effects: setStatements.of(stmtInfo) })
+      }
 
       const { vs, setup, players: playersMap, shortNames: shortNamesMap, dict } = buildVillageStatus(statements, meta)
       sourceLines = buildSourceLines(statements, dict)

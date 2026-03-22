@@ -1,6 +1,5 @@
 import { EditorView } from '@codemirror/view'
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
-import { tags as t } from '@lezer/highlight'
+import type { Extension } from '@codemirror/state'
 
 // Catppuccin Mocha palette
 const base     = '#1e1e2e'
@@ -15,7 +14,7 @@ const green    = '#a6e3a1'
 const red      = '#f38ba8'
 const peach    = '#fab387'
 
-export const howlThemeExtension = EditorView.theme({
+export const howlThemeExtension: Extension = EditorView.theme({
   '&': {
     backgroundColor: base,
     color: text,
@@ -43,18 +42,15 @@ export const howlThemeExtension = EditorView.theme({
   '.cm-scroller': {
     overflow: 'auto',
   },
+
+  // Inline token marks
+  '.hw-comment':  { color: overlay0, fontStyle: 'italic' },
+  '.hw-meta':     { color: overlay0 },
+  '.hw-keyword':  { color: purple },
+  '.hw-arrow':    { color: blue },
+  '.hw-role':     { color: yellow },
+  '.hw-human':    { color: green },
+  '.hw-wolf':     { color: red },
+  '.hw-co':       { color: purple },
+  '.hw-over':     { color: peach },
 }, { dark: true })
-
-const howlHighlightStyle = HighlightStyle.define([
-  { tag: t.comment, color: overlay0, fontStyle: 'italic' },
-  { tag: t.meta, color: overlay0 },
-  { tag: t.keyword, color: purple },
-  { tag: t.operator, color: blue },
-  { tag: t.typeName, color: yellow },
-  { tag: t.string, color: green },      // species human (白/○)
-  { tag: t.bool, color: red },          // species wolf (黒/●)
-  { tag: t.heading, color: peach },     // game result
-  { tag: t.number, color: subtext0 },   // day marker
-])
-
-export const howlHighlighting = syntaxHighlighting(howlHighlightStyle)

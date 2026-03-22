@@ -1,10 +1,11 @@
 import { EditorState } from '@codemirror/state'
 import { EditorView, drawSelection, highlightActiveLine, keymap } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-import { howlLanguage } from './howlLanguage.ts'
-import { howlThemeExtension, howlHighlighting } from './howlTheme.ts'
+import { howlLanguageExtension, setStatements, type StatementInfo } from './howlLanguage.ts'
+import { howlThemeExtension } from './howlTheme.ts'
 
 export { EditorView } from '@codemirror/view'
+export { setStatements, type StatementInfo } from './howlLanguage.ts'
 
 export function createHowlEditor(parent: HTMLElement, opts: {
   doc: string
@@ -14,9 +15,8 @@ export function createHowlEditor(parent: HTMLElement, opts: {
   const state = EditorState.create({
     doc: opts.doc,
     extensions: [
-      howlLanguage,
+      howlLanguageExtension,
       howlThemeExtension,
-      howlHighlighting,
       history(),
       drawSelection(),
       highlightActiveLine(),
