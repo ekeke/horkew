@@ -246,13 +246,20 @@ export class VillageRetar {
       }
     }
     if (maxDiedDay < 0) return []
-    const seats: Seat[] = []
+    // 同じ日に昼フェーズ（処刑系）と夜フェーズ（夜殺系）の死亡が混在する場合、
+    // 夜フェーズの死亡のみがゲーム終了のトリガーとなる
+    const nightPhaseDeaths: Seat[] = []
+    const dayPhaseDeaths: Seat[] = []
     for (const [seat, status] of this.vs.statuses.entries()) {
       if (!status.surviving && status.diedDay === maxDiedDay && !this.initialPossibilities.isFixed(seat)) {
-        seats.push(seat)
+        if (status.causeOfDeath === 'night_kill' || status.causeOfDeath === 'cursed_by_killed_nekomata' || status.causeOfDeath === 'follow_killed_hamster') {
+          nightPhaseDeaths.push(seat)
+        } else {
+          dayPhaseDeaths.push(seat)
+        }
       }
     }
-    return seats
+    return nightPhaseDeaths.length > 0 ? nightPhaseDeaths : dayPhaseDeaths
   }
 
   // ゲーム結果に基づく最終死者の役職制約を initialPossibilities に適用
