@@ -1,5 +1,6 @@
 # Custom Dictionary Words
 combinatorially
+decos
 frontmatter
 immoralists
 neko
