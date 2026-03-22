@@ -14,10 +14,10 @@
 
   const onplayerclick = getContext<((seat: number) => void) | undefined>('playerclick')
   const hoveredSeat = getContext<Writable<number | null> | undefined>('hoveredSeat')
-  const shortNames = getContext<Map<number, string> | undefined>('shortNames')
+  const shortNamesStore = getContext<Writable<Map<number, string>> | undefined>('shortNames')
   let clickable = $derived(seat != null && onplayerclick != null)
   let highlighted = $derived(seat != null && hoveredSeat != null && $hoveredSeat === seat)
-  let displayShortName = $derived(seat != null && shortNames ? shortNames.get(seat) : undefined)
+  let displayShortName = $derived(seat != null && shortNamesStore ? $shortNamesStore.get(seat) : undefined)
 
   function handleClick() {
     if (seat != null && onplayerclick) onplayerclick(seat)

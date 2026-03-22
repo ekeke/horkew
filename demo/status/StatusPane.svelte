@@ -33,7 +33,9 @@
 
   const hoveredSeat = writable<number | null>(null)
   setContext('hoveredSeat', hoveredSeat)
-  setContext('shortNames', shortNames)
+  const shortNamesStore = writable(shortNames)
+  $effect(() => { shortNamesStore.set(shortNames) })
+  setContext('shortNames', shortNamesStore)
 
   const srcLines = writable(sourceLines)
   const cursor = writable(cursorLine)
@@ -46,7 +48,21 @@
     dialogSeat = null
   }
 
+  let setupEntries = $derived(
+    [...systemRoles.keys()]
+      .filter(role => setup.has(role))
+      .map(role => ({
+        shortName: systemRoles.get(role)?.shortName ?? role,
+        count: setup.get(role)!,
+        alignment: systemRoles.get(role)?.alignment ?? 'villager',
+      }))
+  )
+  let setupTotal = $derived(
+    [...setup.values()].reduce((sum, c) => sum + c, 0)
+  )
+
   let survivorInfo = $derived(extractSurvivorInfo(vs, players))
+  let setupMismatch = $derived(survivorInfo.total > 0 && setupTotal !== survivorInfo.total)
   let voteStatus = $derived(extractVoteStatus(vs, players))
   let deathHistory = $derived(extractDeathHistory(vs, players))
   let claimGroups = $derived(extractClaimGroups(vs, players))
@@ -76,7 +92,15 @@
 </script>
 
 <div class="status-pane">
-  <SurvivorSection info={survivorInfo} />
+  {#if setupEntries.length > 0}
+    <div class="setup-section">
+      <span class="setup-header">配役 <span class="count">{setupTotal}</span>人</span>
+      {#each setupEntries as { shortName, count, alignment }}
+        <span class="setup-badge {alignment}">{shortName}{count}</span>
+      {/each}
+    </div>
+  {/if}
+  <SurvivorSection info={survivorInfo} {setupMismatch} day={vs.day} />
   <SummaryTable days={deathHistory} groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} {claimShortNames} />
   <VoteTable status={voteStatus} />
 </div>
@@ -89,4 +113,41 @@
   .status-pane {
     font-family: system-ui, -apple-system, sans-serif;
   }
+
+  .setup-section {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border-bottom: 1px solid #313244;
+  }
+
+  .setup-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: #a6adc8;
+    margin-right: 4px;
+  }
+
+  .setup-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 12px;
+    border-radius: 4px;
+    color: #cdd6f4;
+  }
+
+  .setup-badge.villager {
+    background: #313244;
+  }
+
+  .setup-badge.werewolf {
+    background: #45273a;
+  }
+
+  .setup-badge.werehamster {
+    background: #2d3a27;
+  }
+
 </style>
