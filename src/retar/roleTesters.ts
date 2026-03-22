@@ -37,6 +37,48 @@ export function cloneContext(context: AnalyzeContext): AnalyzeContext {
   }
 }
 
+export type ContextSnapshot = {
+  possArr: Uint16Array
+  possSetup: { [key: string]: number | undefined }
+  additionalLiars: number
+  hamstersMaxSurvivingDay: number
+  needSeerAtDay: number | undefined
+  hamstersKilledBySeerLen: number
+  requireOneOfLen: number
+  deathChronicleEntries: [number, number, number][]
+}
+
+export function saveContext(ctx: AnalyzeContext): ContextSnapshot {
+  const dc: [number, number, number][] = []
+  for (const [day, counts] of ctx.deathChronicle) {
+    dc.push([day, counts.add, counts.sub])
+  }
+  return {
+    possArr: new Uint16Array(ctx.possibilities.possibilities),
+    possSetup: Object.assign({}, ctx.possibilities.setup),
+    additionalLiars: ctx.additionalLiars,
+    hamstersMaxSurvivingDay: ctx.hamstersMaxSurvivingDay,
+    needSeerAtDay: ctx.needSeerAtDay,
+    hamstersKilledBySeerLen: ctx.hamstersKilledBySeer.length,
+    requireOneOfLen: ctx.requireOneOf.length,
+    deathChronicleEntries: dc,
+  }
+}
+
+export function restoreContext(ctx: AnalyzeContext, s: ContextSnapshot): void {
+  ctx.possibilities.possibilities.set(s.possArr)
+  Object.assign(ctx.possibilities.setup, s.possSetup)
+  ctx.additionalLiars = s.additionalLiars
+  ctx.hamstersMaxSurvivingDay = s.hamstersMaxSurvivingDay
+  ctx.needSeerAtDay = s.needSeerAtDay
+  ctx.hamstersKilledBySeer.length = s.hamstersKilledBySeerLen
+  ctx.requireOneOf.length = s.requireOneOfLen
+  ctx.deathChronicle.clear()
+  for (const [day, add, sub] of s.deathChronicleEntries) {
+    ctx.deathChronicle.set(day, { add, sub })
+  }
+}
+
 type RoleTester = (env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]) => boolean
 
 function getStatus(env: RoleTesterEnv, seat: Seat): SeatStatus {

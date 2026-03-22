@@ -1,7 +1,7 @@
 import type { CauseOfDeath, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import { Possibilities } from './possibilities.ts'
-import { generateCombinations, backtrackForMatrix } from './combinatorics.ts'
-import { roleTesterMap, cloneContext } from './roleTesters.ts'
+import { generateCombinations } from './combinatorics.ts'
+import { roleTesterMap, cloneContext, saveContext, restoreContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
 import { buildRoleTestPlan, LiarRoles } from './planBuilder.ts'
 import type { RoleTest } from './planBuilder.ts'
@@ -350,72 +350,65 @@ export class VillageRetar {
       hamstersMaxSurvivingDay: Infinity,
     }
 
-    const loop = backtrackForMatrix(this.roleTests, this.context)
-    let testIter = loop.next([true, this.context])
+    this.walkRoleTests(0)
+  }
 
-    TESTS:
-    while (true) {
-      if ( testIter.done || this.isAborted() ) {
-        break TESTS
-      }
-      const testItem = testIter.value
-      if ( testItem == null ) throw new Error('invalid test item')
-      if ( 'object' !== typeof testItem ) throw new Error('invalid test item')
-      if ( !('context' in testItem ) ) throw new Error('invalid context')
-      this.context = cloneContext(testItem.context)
-      if (testItem.depth === 0 && testItem.index % this.options.batches !== this.options.batch) {
-        testIter = loop.next([false, this.context])
-        continue TESTS
-      }
-      const result = this.testRole(testItem.item)
+  private walkRoleTests(depth: number): void {
+    if (depth >= this.roleTests.length) {
+      this.tryFinalize()
+      return
+    }
 
-      if ( ! result ) {
-        testIter = loop.next([result, this.context])
-        continue TESTS
-      }
+    const group = this.roleTests[depth]
+    for (let i = 0; i < group.length; i++) {
+      if (this.isAborted()) return
 
-      if ( !testItem.last ) {
-        testIter = loop.next([result, this.context])
-        continue TESTS
+      // Batch filtering at depth 0
+      if (depth === 0 && i % this.options.batches !== this.options.batch) continue
+
+      const snapshot = saveContext(this.context)
+      const result = this.testRole(group[i])
+
+      if (result) {
+        this.walkRoleTests(depth + 1)
       }
 
+      restoreContext(this.context, snapshot)
+    }
+  }
 
+  private tryFinalize(): void {
+    this.debugStash.preFinalizeTests++
+    // 死体数の確認
+    if (!constrainByDeathCounts(this.context, this.vs, this.nightKillsByDay, this.setup)) {
+      return
+    }
 
-      this.debugStash.preFinalizeTests++
-      // 死体数の確認
-      if (!constrainByDeathCounts(this.context, this.vs, this.nightKillsByDay, this.setup)) {
-        testIter = loop.next([false, this.context])
-        continue TESTS
-      }
-
-      if ( this.totalLiarRoles <= (this.context.additionalLiars || 0) + this.knownFakeClaimCount ) {
-        for ( const seat of this.vs.statuses.keys() ) {
-          const status = this.getStatus(seat)!
-          if ( !status.claiming || status.claimingRole === 'villager' ) {
-            this.context.possibilities.markAsNotLiar(seat)
-          }
+    if ( this.totalLiarRoles <= (this.context.additionalLiars || 0) + this.knownFakeClaimCount ) {
+      for ( const seat of this.vs.statuses.keys() ) {
+        const status = this.getStatus(seat)!
+        if ( !status.claiming || status.claimingRole === 'villager' ) {
+          this.context.possibilities.markAsNotLiar(seat)
         }
       }
-      this.debugStash.preFinalizePasses++
+    }
+    this.debugStash.preFinalizePasses++
 
-      if ( this.context.requireOneOf.length > 0 ) {
-        const originalContext = this.context
-        VARIATION:
-        for ( const variation of generateCombinations(this.context.requireOneOf)) {
-          this.context = cloneContext(originalContext)
-          for ( const {seat, role} of variation ) {
-            if ( ! this.context.possibilities.fixRole(seat, role) ) {
-              continue VARIATION
-            }
+    if ( this.context.requireOneOf.length > 0 ) {
+      const snapshot = saveContext(this.context)
+      VARIATION:
+      for ( const variation of generateCombinations(this.context.requireOneOf)) {
+        restoreContext(this.context, snapshot)
+        for ( const {seat, role} of variation ) {
+          if ( ! this.context.possibilities.fixRole(seat, role) ) {
+            continue VARIATION
           }
-
-          this.finalize()
         }
-      }
-      else {
         this.finalize()
       }
-      testIter = loop.next([result, this.context])
+    }
+    else {
+      this.finalize()
     }
   }
 
