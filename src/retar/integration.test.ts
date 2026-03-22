@@ -26,7 +26,7 @@ const defaultOptions: AnalyzeOptions = {
   batch: 0,
 }
 
-type RoleExpectation = { roles: string[], partial: boolean }
+type RoleExpectation = { roles: string[], negated: string[], partial: boolean }
 
 type Checkpoint = {
   lineNumber: number
@@ -85,8 +85,10 @@ function parseDirective(checkpoint: Checkpoint, content: string) {
     const stripped = value.replace(/[\[\]]/g, '').trim()
     const partial = stripped.endsWith('...')
     const rolesStr = partial ? stripped.slice(0, -3) : stripped
-    const roles = rolesStr.split(',').map(r => r.trim()).filter(Boolean)
-    checkpoint.roles.set(key, { roles, partial })
+    const allRoles = rolesStr.split(',').map(r => r.trim()).filter(Boolean)
+    const roles = allRoles.filter(r => !r.startsWith('!'))
+    const negated = allRoles.filter(r => r.startsWith('!')).map(r => r.slice(1))
+    checkpoint.roles.set(key, { roles, negated, partial })
   }
 }
 
@@ -151,11 +153,16 @@ function runCheckpoint(
         const actual = [...actualRoles].sort()
         const expected = [...expectation.roles].sort()
 
+        for (const neg of expectation.negated) {
+          assert.ok(!actual.includes(neg),
+            `${playerName}: expected NOT ${neg} but got [${actual}]`)
+        }
+
         if (expectation.partial) {
           const missing = expected.filter(r => !actual.includes(r))
           assert.deepStrictEqual(missing, [],
             `${playerName}: expected at least [${expected}] but got [${actual}], missing [${missing}]`)
-        } else {
+        } else if (expected.length > 0) {
           assert.deepStrictEqual(actual, expected,
             `${playerName}: expected [${expected}] but got [${actual}]`)
         }

@@ -101,6 +101,30 @@ function backtrackForRoleAssignment(
           }
         }
       }
+      // Naked subset: groups whose possibilities ⊆ mask consume exactly those roles
+      const checked = new Set<number>()
+      for (const entry of deadEntries) {
+        const mask = entry[0]
+        if (mask === 0 || checked.has(mask)) continue
+        checked.add(mask)
+        let roleSum = 0
+        for (let i = 0; i < ROLE_COUNT; i++) {
+          if (mask & (1 << i)) roleSum += deadRoleCount[i]
+        }
+        if (roleSum === 0) continue
+        let seatSum = 0
+        for (const e of deadEntries) {
+          if (e[0] !== 0 && (e[0] & mask) === e[0]) seatSum += e[1].length
+        }
+        if (seatSum === roleSum) {
+          for (const e of deadEntries) {
+            if ((e[0] & mask) === e[0]) continue
+            const before = e[0]
+            e[0] = before & ~mask
+            if (e[0] !== before) changed = true
+          }
+        }
+      }
       // Also check: if a role's remaining count is fully consumed by
       // groups that must include it, remove it from other groups
       for (let bitIdx = 0; bitIdx < ROLE_COUNT; bitIdx++) {
