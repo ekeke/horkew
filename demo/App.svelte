@@ -12,6 +12,8 @@
   import { findReason, findConfirmationReason } from '../src/gmork/index.ts'
   import { formatReason, formatConfirmationReason } from '../src/gmork/format.ts'
   import HelpPanel from './HelpPanel.svelte'
+  import ColorSwatchPane from './ColorSwatchPane.svelte'
+  import './theme.css'
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
   import type { EditorView } from '@codemirror/view'
@@ -75,6 +77,7 @@
     { id: 'status', label: 'Status' },
     { id: 'analyzerInput', label: 'Analyzer Input' },
     { id: 'analysis', label: 'Analysis' },
+    { id: 'colorSwatch', label: 'Color Swatch' },
   ] as const
 
   type PaneId = typeof paneEntries[number]['id']
@@ -87,7 +90,7 @@
     panes: Record<PaneId, boolean>
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true }
+  const defaultPanes: Record<PaneId, boolean> = { rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: false, panes: { ...defaultPanes } }
@@ -917,6 +920,15 @@
     {#if paneVisible.analysis}
     {@render analysisPane()}
     {/if}
+
+    {#if paneVisible.colorSwatch}
+    <section class="pane">
+      <div class="pane-header">Color Swatch</div>
+      <div class="pane-body">
+        <ColorSwatchPane />
+      </div>
+    </section>
+    {/if}
   </div>
   {:else}
   <div class="panes panes-prod">
@@ -975,8 +987,8 @@
     padding: 0;
     height: 100%;
     overflow: hidden;
-    background: #1e1e2e;
-    color: #cdd6f4;
+    background: var(--color-bg);
+    color: var(--color-text);
   }
 
   :global(#app) {

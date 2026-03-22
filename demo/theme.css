@@ -1,0 +1,94 @@
+/*
+ * Horkew Demo — カラーテーマ定義
+ *
+ * Catppuccin Mocha パレットをベースにしたカラースキーマ。
+ * すべてのコンポーネントはここで定義された CSS 変数を参照すること。
+ * hex 値を直接ハードコードしてはならない。
+ *
+ * パレットリファレンス: https://catppuccin.com/palette
+ */
+
+:root {
+  /* ============================================================
+   * Catppuccin Mocha — ベースパレット (--ctp-*)
+   * 色の追加・変更はここだけで行う
+   * ============================================================ */
+
+  /* Background tones (暗→明) */
+  --ctp-crust:    #11111b;
+  --ctp-mantle:   #181825;
+  --ctp-base:     #1e1e2e;
+  --ctp-surface0: #313244;
+  --ctp-surface1: #45475a;
+  --ctp-surface2: #585b70;
+
+  /* Text tones (暗→明) */
+  --ctp-overlay0: #6c7086;
+  --ctp-overlay1: #7f849c;
+  --ctp-subtext0: #a6adc8;
+  --ctp-subtext1: #bac2de;
+  --ctp-text:     #cdd6f4;
+
+  /* Accent colors */
+  --ctp-rosewater: #f5e0dc;
+  --ctp-flamingo:  #f2cdcd;
+  --ctp-pink:      #f5c2e7;
+  --ctp-mauve:     #cba6f7;
+  --ctp-red:       #f38ba8;
+  --ctp-maroon:    #eba0ac;
+  --ctp-peach:     #fab387;
+  --ctp-yellow:    #f9e2af;
+  --ctp-green:     #a6e3a1;
+  --ctp-teal:      #94e2d5;
+  --ctp-sky:       #89dceb;
+  --ctp-sapphire:  #74c7ec;
+  --ctp-blue:      #89b4fa;
+  --ctp-lavender:  #b4befe;
+
+  /* ============================================================
+   * セマンティックトークン (--color-*)
+   * 用途に応じた別名。パレット色を直接使わず、ここを経由する。
+   * ============================================================ */
+
+  /* --- Layout --- */
+  --color-bg:             var(--ctp-base);       /* ページ背景 */
+  --color-bg-elevated:    var(--ctp-mantle);     /* ヘッダー、テーブルヘッダ */
+  --color-bg-sunken:      var(--ctp-crust);      /* 入力フィールド内部 */
+  --color-surface:        var(--ctp-surface0);   /* カード、ボタン背景 */
+  --color-surface-hover:  var(--ctp-surface1);   /* ホバー状態 */
+  --color-border:         var(--ctp-surface0);   /* 通常の境界線 */
+  --color-border-strong:  var(--ctp-surface1);   /* 強調された境界線 */
+
+  /* --- Text --- */
+  --color-text:           var(--ctp-text);       /* 主要テキスト */
+  --color-text-muted:     var(--ctp-subtext0);   /* 補助テキスト */
+  --color-text-faint:     var(--ctp-surface2);   /* 無効/非活性テキスト */
+  --color-text-overlay:   var(--ctp-overlay0);   /* コメント、ガター */
+
+  /* --- Interactive --- */
+  --color-accent:         var(--ctp-mauve);      /* アクセント（タイトル、CO、ヘッダ） */
+  --color-focus-ring:     var(--ctp-mauve);      /* フォーカスリング */
+  --color-link:           var(--ctp-blue);       /* リンク */
+
+  /* --- Domain: 陣営 --- */
+  --color-village:        var(--ctp-green);      /* 村人陣営 */
+  --color-wolf:           var(--ctp-red);        /* 人狼陣営 */
+  --color-fox:            var(--ctp-yellow);     /* 妖狐陣営 */
+  --color-unknown-team:   var(--ctp-mauve);      /* 陣営不明 */
+
+  /* --- Domain: 判定結果 --- */
+  --color-human-result:   var(--ctp-green);      /* ○ 白判定 */
+  --color-wolf-result:    var(--ctp-red);        /* ● 黒判定 */
+
+  /* --- Domain: ゲームイベント --- */
+  --color-role:           var(--ctp-yellow);     /* 役職名 */
+  --color-co:             var(--ctp-mauve);      /* CO（カミングアウト） */
+  --color-execution:      var(--ctp-peach);      /* 処刑 */
+  --color-vote-arrow:     var(--ctp-blue);       /* 投票先矢印 */
+  --color-player-resolved: var(--ctp-teal);      /* 名前解決済みプレイヤー */
+
+  /* --- Feedback --- */
+  --color-error:          var(--ctp-red);        /* エラー */
+  --color-danger-bg:      var(--ctp-red);        /* 危険アクション背景 */
+  --color-danger-text:    var(--ctp-base);       /* 危険アクション上のテキスト */
+}
