@@ -7,6 +7,7 @@
     "build": "tsc",
     "test": "node --experimental-strip-types --test --experimental-test-coverage",
     "typecheck": "tsc --noEmit",
+    "bench:retar": "node --experimental-strip-types src/retar/bench.ts",
     "dev": "vite",
     "build:demo": "vite build",
     "preview": "vite preview"
