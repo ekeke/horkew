@@ -733,7 +733,7 @@
     {#if trialMode}
     <span class="trial-banner">お試しモード</span>
     {#if activeKey}<button class="header-btn trial-exit" onclick={exitTrialMode}>戻る</button>{/if}
-    <button class="header-btn" onclick={openNewModal}>New</button>
+    <button class="header-btn trial-new" onclick={openNewModal}>新規作成</button>
     {:else}
     <select class="header-select" value={activeKey} onchange={onSelectChange}>
       {#if entries.length === 0}
@@ -1498,5 +1498,9 @@
   .trial-exit {
     color: #f9e2af;
     border-color: #f9e2af;
+  }
+
+  .trial-new {
+    margin-left: 24px;
   }
 </style>
