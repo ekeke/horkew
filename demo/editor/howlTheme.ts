@@ -13,6 +13,7 @@ const yellow   = '#f9e2af'
 const green    = '#a6e3a1'
 const red      = '#f38ba8'
 const peach    = '#fab387'
+const teal     = '#94e2d5'
 
 export const howlThemeExtension: Extension = EditorView.theme({
   '&': {
@@ -62,7 +63,7 @@ export const howlThemeExtension: Extension = EditorView.theme({
   '.hwl-peace':    { backgroundColor: `${green}10`, position: 'relative', paddingLeft: '1.5em !important' },
   '.hwl-unknown':  { textDecoration: `wavy underline ${red}`, textUnderlineOffset: '3px', backgroundColor: `${red}20` },
   '.hw-beyond-cursor': { opacity: '0.35' },
-  '.hw-player-resolved':   { textDecoration: `underline ${green}40`, textUnderlineOffset: '3px' },
+  '.hw-player-resolved':   { backgroundColor: `${teal}20`, color: teal },
   '.hw-player-unresolved': { textDecoration: `wavy underline ${red}`, textUnderlineOffset: '3px', backgroundColor: `${red}18` },
 
   // Gutter icons via ::before

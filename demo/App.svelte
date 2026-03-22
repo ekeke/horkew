@@ -413,14 +413,21 @@
       const lineIdx = stmt.line - 1
       if (lineIdx < 0 || lineIdx >= lines.length) continue
       const lineText = lines[lineIdx]
-      let searchFrom = 0
+      const used: [number, number][] = []
       for (const name of names) {
         if (!name) continue
-        const idx = lineText.indexOf(name, searchFrom)
-        if (idx === -1) continue
-        const resolved = dict.search(name).length > 0
-        result.push({ line: stmt.line, offset: idx, length: name.length, resolved })
-        searchFrom = idx + name.length
+        let searchFrom = 0
+        let idx = -1
+        while ((idx = lineText.indexOf(name, searchFrom)) !== -1) {
+          const end = idx + name.length
+          if (!used.some(([f, t]) => idx < t && end > f)) {
+            used.push([idx, end])
+            const resolved = dict.search(name).length > 0
+            result.push({ line: stmt.line, offset: idx, length: name.length, resolved })
+            break
+          }
+          searchFrom = idx + 1
+        }
       }
     }
     return result

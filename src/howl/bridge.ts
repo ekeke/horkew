@@ -90,9 +90,9 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   let hasMultiVote = false
   const multiVoteDays = new Set<number>()
 
-  function resolveSeat(name: string): number {
+  function resolveSeat(name: string): number | null {
     const results = dict.search(name)
-    if (results.length === 0) throw new Error(`Player not found: ${name}`)
+    if (results.length === 0) return null
     return Number(results[0])
   }
 
@@ -145,6 +145,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         const s = stmt as VoteStatement
         const voterSeat = resolveSeat(s.voter)
         const targetSeat = resolveSeat(s.target)
+        if (voterSeat === null || targetSeat === null) break
         const voter = statuses.get(voterSeat)!
         const target = statuses.get(targetSeat)!
         voter.voted = true
@@ -161,9 +162,10 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         multiVoteDays.add(day)
         const s = stmt as MultiVoteStatement
         const targetSeat = resolveSeat(s.target)
+        if (targetSeat === null) break
         const target = statuses.get(targetSeat)!
 
-        const voterSeats = s.voters.map(resolveSeat)
+        const voterSeats = s.voters.map(resolveSeat).filter((s): s is number => s !== null)
 
         if (!voteHistory.has(day)) voteHistory.set(day, [])
         const dayVotes = voteHistory.get(day)!
@@ -183,6 +185,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         lastDeathEvent = 'night_kill'
         for (const targetName of s.target) {
           const targetSeat = resolveSeat(targetName)
+          if (targetSeat === null) continue
           const status = statuses.get(targetSeat)!
           status.surviving = false
           status.causeOfDeath = 'night_kill'
@@ -212,6 +215,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         lastDeathEvent = 'execution'
         if (s.target !== null) {
           const targetSeat = resolveSeat(s.target)
+          if (targetSeat === null) break
           const status = statuses.get(targetSeat)!
           status.surviving = false
           status.causeOfDeath = 'execution'
@@ -235,6 +239,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       case 'curse': {
         const s = stmt as CurseStatement
         const targetSeat = resolveSeat(s.target)
+        if (targetSeat === null) break
         const status = statuses.get(targetSeat)!
         status.surviving = false
         status.causeOfDeath = lastDeathEvent === 'execution'
@@ -251,6 +256,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       case 'follow': {
         const s = stmt as FollowStatement
         const targetSeat = resolveSeat(s.target)
+        if (targetSeat === null) break
         const status = statuses.get(targetSeat)!
         status.surviving = false
         status.causeOfDeath = lastDeathEvent === 'execution'
@@ -267,7 +273,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       case 'revote': {
         const s = stmt as RevoteStatement
         if (s.targets.length > 0) {
-          revoteTargets = new Set(s.targets.map(t => resolveSeat(t)))
+          revoteTargets = new Set(s.targets.map(t => resolveSeat(t)).filter((s): s is number => s !== null))
         } else {
           // Derive targets from current vote state: top-tied candidates
           let maxVotes = 0
@@ -296,6 +302,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         const s = stmt as MasonStatement
         for (const playerName of s.players) {
           const seat = resolveSeat(playerName)
+          if (seat === null) continue
           const status = statuses.get(seat)!
           status.claiming = true
           status.claimingRole = 'mason'
@@ -307,6 +314,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           for (const otherName of s.players) {
             if (otherName === playerName) continue
             const otherSeat = resolveSeat(otherName)
+            if (otherSeat === null) continue
             status.assertions.set(masonKey--, { target: otherSeat, species: 'human' })
           }
         }
@@ -316,6 +324,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       case 'assert': {
         const s = stmt as AssertStatement
         const actorSeat = resolveSeat(s.actor)
+        if (actorSeat === null) break
         const actorStatus = statuses.get(actorSeat)!
         const guardTargets: number[] = []
         const divinationResults: { target: number, species: EnumSpecies }[] = []
@@ -350,6 +359,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
 
           if (assertion.target) {
             const targetSeat = resolveSeat(assertion.target)
+            if (targetSeat === null) continue
             if (assertion.result) {
               divinationResults.push({ target: targetSeat, species: speciesMap[assertion.result]! })
             }

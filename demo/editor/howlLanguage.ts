@@ -134,7 +134,7 @@ const markDeco = {
   meta:     Decoration.mark({ class: 'hw-meta' }),
   unknownText: Decoration.mark({ class: 'hwl-unknown-text', attributes: { title: 'この行はHowl記法として認識できません' } }),
   playerResolved:   Decoration.mark({ class: 'hw-player-resolved' }),
-  playerUnresolved: Decoration.mark({ class: 'hw-player-unresolved' }),
+  playerUnresolved: Decoration.mark({ class: 'hw-player-unresolved', attributes: { title: '登録されていないプレイヤー名です' } }),
 }
 
 // ---- Line decorations (行レベル・statement type別) ----
