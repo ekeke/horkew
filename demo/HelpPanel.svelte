@@ -83,7 +83,6 @@
               </ul>
             </li>
             <li><a href="#help-notation-roles">役職名・記号一覧</a></li>
-            <li><a href="#help-notation-frontmatter">Frontmatterオプション</a></li>
           </ul>
         </li>
         <li><a href="#help-views">画面の見方</a>
@@ -122,7 +121,6 @@
           <ul>
             <li><a href="#help-faq-cursor">カーソル位置で解析範囲が変わる？</a></li>
             <li><a href="#help-faq-name">名前が認識されない</a></li>
-            <li><a href="#help-faq-frontmatter">Frontmatterオプション</a></li>
             <li><a href="#help-faq-analyzer">ゲーム終了時にアナライザの結果が表示されない</a></li>
             <li><a href="#help-faq-stealth">占い師や狩人の潜伏が考慮されないのはなぜ？</a></li>
           </ul>
@@ -157,12 +155,8 @@
       <h2>入力方法</h2>
 
       <h3 id="help-notation-structure">ドキュメント構造</h3>
-      <p>Howlドキュメントは <strong>YAML frontmatter</strong>（省略可）と<strong>記法本体</strong>で構成されます。</p>
-      <pre><code>---
-title: 3日目決着村
-vote.style: ordered
----
-+アリス ボブ チャーリー デイブ エミリー
+      <p>Howlドキュメントは以下のような記法で構成されます。</p>
+      <pre><code>+アリス ボブ チャーリー デイブ エミリー
 アリス: 占いCO ボブ白
 ボブ → チャーリー
 チャーリー → ボブ
@@ -344,24 +338,6 @@ vote.style: ordered
       </table>
     </section>
 
-    <!-- Frontmatter -->
-    <section id="help-notation-frontmatter">
-      <h2>Frontmatterオプション</h2>
-      <p>ドキュメント先頭の <code>---</code> で囲んだ YAML ブロックで、ゲームのルールを設定できます。</p>
-      <table>
-        <thead>
-          <tr><th>キー</th><th>値</th><th>既定</th></tr>
-        </thead>
-        <tbody>
-          <tr><td><code>vote.style</code></td><td>free / ordered / concurrent</td><td>free</td></tr>
-          <tr><td><code>vote.final</code></td><td>revote / final</td><td>final</td></tr>
-          <tr><td><code>vote.tiebreaker</code></td><td>random / no-lynch</td><td>no-lynch</td></tr>
-          <tr><td><code>first-victim</code></td><td>none / random / first-vote</td><td>none</td></tr>
-          <tr><td><code>general.countFirstDay</code></td><td>true / false</td><td>false</td></tr>
-        </tbody>
-      </table>
-    </section>
-
     <!-- ===== 画面の見方 ===== -->
     <section id="help-views">
       <h2>画面の見方</h2>
@@ -454,9 +430,6 @@ vote.style: ordered
 
       <h3 id="help-faq-name">名前が認識されない</h3>
       <p>プレイヤー名は <code>+</code> または <code>++</code> 行で先に登録する必要があります。省略形は一意に特定できる場合のみマッチします。同じ前方一致になる名前が複数ある場合は、より多くの文字を入力してください。</p>
-
-      <h3 id="help-faq-frontmatter">Frontmatterオプション</h3>
-      <p>Frontmatterはドキュメントの先頭に <code>---</code> で囲んで記述します。詳細は<a href="#help-notation-frontmatter">入力方法 &gt; Frontmatterオプション</a>を参照してください。</p>
 
       <h3 id="help-faq-analyzer">ゲーム終了時にアナライザの結果が表示されない</h3>
       <p>アナライザは、標準状態ではゲームが続いている、つまり人狼が1匹以上生存している前提で分析を行います。そのため、人狼が論理的に全滅した場合など盤面との齟齬が起こる場合があります。</p>

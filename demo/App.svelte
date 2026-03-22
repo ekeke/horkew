@@ -217,6 +217,7 @@
         changes: { from: 0, to: editorView.state.doc.length, insert: text },
         selection: { anchor: text.length },
       })
+      editorView.focus()
     }
   }
 
@@ -254,11 +255,10 @@
   ]
 
   function buildTemplate(title: string, preset: Preset): string {
-    const frontmatter = title ? `---\ntitle: ${title}\n---\n\n` : ''
     const names = defaultNames.slice(0, preset.count)
     const joins = names.map(n => `+${n}`).join('\n')
     const kill = preset.firstDayKill ? `\n${names[0]}死亡\n` : ''
-    return `${frontmatter}@ ${preset.setup}\n\n${joins}${kill}\n`
+    return `@ ${preset.setup}\n\n${joins}${kill}\n`
   }
 
   function openNewModal() {
