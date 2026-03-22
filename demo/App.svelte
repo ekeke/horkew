@@ -880,7 +880,7 @@
   </div>
 {/if}
 
-<HelpPanel bind:this={helpPanel} open={showHelp} onclose={() => showHelp = false} />
+<HelpPanel bind:this={helpPanel} open={showHelp} onclose={() => { showHelp = false; if (location.hash) history.replaceState(null, '', location.pathname + location.search) }} />
 
 <footer class="site-footer">
   <a class="footer-github" href="https://github.com/ekeke/horkew" target="_blank" rel="noopener noreferrer" title="GitHub">
