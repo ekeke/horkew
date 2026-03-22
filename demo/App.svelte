@@ -224,7 +224,7 @@
     if (titles.includes(trimmed)) {
       switchTo(trimmed)
     } else {
-      const template = `---\ntitle: ${trimmed}\n---\n\n`
+      const template = `---\ntitle: ${trimmed}\n---\n\n@ 村2 占1 霊1 狩1 共2 猫1 狼3 狂1 狐1 背1\n\n`
       activeTitle = trimmed
       input = template
       setEditorContent(input)

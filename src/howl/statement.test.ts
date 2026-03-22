@@ -718,3 +718,139 @@ describe('mason statement', () => {
     assert.equal(S.parseMasonStatement('共有', 1), null)
   })
 })
+
+describe('setup statement', () => {
+  test('all roles with Japanese shorthand', () => {
+    const result = S.parseSetupStatement('@ 村4 占1 霊1 狩1 共2 猫1 狼3 狂1 狐1 背1', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: {
+        villager: 4, seer: 1, medium: 1, bodyguard: 1,
+        mason: 2, nekomata: 1, werewolf: 3, possessed: 1,
+        werehamster: 1, immoralist: 1,
+      },
+    })
+  })
+
+  test('full-width @', () => {
+    const result = S.parseSetupStatement('＠ 村4 占1 狼3', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { villager: 4, seer: 1, werewolf: 3 },
+    })
+  })
+
+  test('full-width digits', () => {
+    const result = S.parseSetupStatement('@ 村４ 占１ 狼３', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { villager: 4, seer: 1, werewolf: 3 },
+    })
+  })
+
+  test('longer role names', () => {
+    const result = S.parseSetupStatement('@ 村人4 占い師1 霊媒師1 狩人1 人狼3', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { villager: 4, seer: 1, medium: 1, bodyguard: 1, werewolf: 3 },
+    })
+  })
+
+  test('delimiter variants (comma, 、)', () => {
+    const result = S.parseSetupStatement('@ 村4,占1,狼3', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { villager: 4, seer: 1, werewolf: 3 },
+    })
+  })
+
+  test('no delimiters', () => {
+    const result = S.parseSetupStatement('@ 村4占1霊1狩1共2猫1狼3狂1狐1背1', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: {
+        villager: 4, seer: 1, medium: 1, bodyguard: 1,
+        mason: 2, nekomata: 1, werewolf: 3, possessed: 1,
+        werehamster: 1, immoralist: 1,
+      },
+    })
+  })
+
+  test('mixed delimiters and no delimiters', () => {
+    const result = S.parseSetupStatement('@ 村4占1 霊1,狼3', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { villager: 4, seer: 1, medium: 1, werewolf: 3 },
+    })
+  })
+
+  test('fanatic with shorthand 信', () => {
+    const result = S.parseSetupStatement('@ 狼3 信1', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { werewolf: 3, fanatic: 1 },
+    })
+  })
+
+  test('fanatic with 狂信', () => {
+    const result = S.parseSetupStatement('@ 狂信1 狂1', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { fanatic: 1, possessed: 1 },
+    })
+  })
+
+  test('fanatic with 狂信者', () => {
+    const result = S.parseSetupStatement('@ 狂信者1 狂人1', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { fanatic: 1, possessed: 1 },
+    })
+  })
+
+  test('狂 alone maps to possessed, not fanatic', () => {
+    const result = S.parseSetupStatement('@ 狂1', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { possessed: 1 },
+    })
+  })
+
+  test('zero count is allowed', () => {
+    const result = S.parseSetupStatement('@ 村4 狼0', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { villager: 4, werewolf: 0 },
+    })
+  })
+
+  test('returns null for non-@ line', () => {
+    assert.equal(S.parseSetupStatement('+Alice', 1), null)
+    assert.equal(S.parseSetupStatement('John→Bob', 1), null)
+  })
+
+  test('returns null for @ with no valid tokens', () => {
+    assert.equal(S.parseSetupStatement('@ abc', 1), null)
+  })
+
+  test('returns null for @ with invalid token mixed in', () => {
+    assert.equal(S.parseSetupStatement('@ 村4 xyz 狼3', 1), null)
+  })
+
+  test('parseStatement routes to setup', () => {
+    const result = S.parseStatement('@ 村4 狼2', 1)
+    assert.equal(result.type, 'setup')
+  })
+})

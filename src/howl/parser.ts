@@ -11,6 +11,7 @@ import {
   type CurseStatement,
   type FollowStatement,
   type AssertStatement,
+  type SetupStatement,
 } from './statement.ts'
 import * as V from './vocabulary.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
@@ -318,6 +319,17 @@ function assignDays(statements: Statement[]): Statement[] {
   })
 }
 
+function applySetupStatements(meta: any, statements: Statement[]): Statement[] {
+  let lastSetup: SetupStatement | null = null
+  for (const s of statements) {
+    if (s.type === 'setup') lastSetup = s as SetupStatement
+  }
+  if (lastSetup) {
+    meta.setup = lastSetup.roles
+  }
+  return statements.filter(s => s.type !== 'setup')
+}
+
 export function parse(text: string, options: ParseOptions = {}): { meta: any, statements: Statement[] } {
   const { meta, lines }: { meta: any; lines: Line[] } = preprocess(text)
   const mergedOptions: ParseOptions = {
@@ -336,6 +348,7 @@ export function parse(text: string, options: ParseOptions = {}): { meta: any, st
     }
   }
 
+  statements = applySetupStatements(meta, statements)
   statements = fillMultiVoteVoters(statements, mergedOptions)
   statements = expandSurvivorAsserts(statements)
   statements = fillMediumTargets(statements)

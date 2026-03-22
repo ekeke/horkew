@@ -40,10 +40,11 @@ export const bodyguard   = `(?:護(?:衛)?|狩(?:り|人)?)`
 export const mason       = `(?:共(?:有者?)?)`
 export const nekomata    = `(?:猫又?)`
 export const werewolf    = `(?:人?狼)`
-export const possessed   = `(?:狂人?|狂信者?)`
+export const possessed   = `(?:狂人?)`
+export const fanatic     = `(?:狂信者?|信)`
 export const werehamster = `(?:妖?狐)`
 export const immoralist  = `(?:背(?:徳者?)?)`
-export const anyRole     = `(?:${villager}|${seer}|${medium}|${bodyguard}|${mason}|${nekomata}|${werewolf}|${possessed}|${werehamster}|${immoralist})` // Any role (villager, seer, medium, bodyguard, mason, nekomata, werewolf, possessed, werehamster, immoralist)
+export const anyRole     = `(?:${villager}|${seer}|${medium}|${bodyguard}|${mason}|${nekomata}|${werewolf}|${possessed}|${fanatic}|${werehamster}|${immoralist})`
 
 // ********************************* Alignments
 
@@ -61,4 +62,5 @@ export const race = `(?:${isHuman}|${isWolf})`
 // ********************************* Modifiers
 
 export const denial = `(?:非)`
+export const setupPrefix = `(?:@|＠)`
 export const survivors = `(?:生存者|全員)`

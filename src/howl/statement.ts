@@ -1,6 +1,6 @@
 import * as V from './vocabulary.ts'
 
-export type StatementType = 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'curse' | 'follow' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'unknown'
+export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'curse' | 'follow' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf'
@@ -95,6 +95,11 @@ export type CurseStatement = Statement & {
 export type FollowStatement = Statement & {
     type: 'follow'
     target: string
+}
+
+export type SetupStatement = Statement & {
+    type: 'setup'
+    roles: Record<string, number>
 }
 
 export type UnknownStatement = Statement & {
@@ -395,8 +400,69 @@ export function parseAssertStatement(text: string, line: number): AssertStatemen
   return { type: 'assert', line, actor, assertions }
 }
 
+// Setup statement: @ 村4 占1 霊1 狩1 共2 猫1 狼3 狂1 狐1 背1
+const setupRegex = new RegExp(`^${V.optionalSpace}${V.setupPrefix}${V.optionalSpace}(.+)$`)
+
+const roleMapping: [RegExp, string][] = [
+  [new RegExp(`^${V.villager}`), 'villager'],
+  [new RegExp(`^${V.seer}`), 'seer'],
+  [new RegExp(`^${V.medium}`), 'medium'],
+  [new RegExp(`^${V.bodyguard}`), 'bodyguard'],
+  [new RegExp(`^${V.mason}`), 'mason'],
+  [new RegExp(`^${V.nekomata}`), 'nekomata'],
+  [new RegExp(`^${V.werewolf}`), 'werewolf'],
+  [new RegExp(`^${V.fanatic}`), 'fanatic'],
+  [new RegExp(`^${V.possessed}`), 'possessed'],
+  [new RegExp(`^${V.werehamster}`), 'werehamster'],
+  [new RegExp(`^${V.immoralist}`), 'immoralist'],
+]
+
+const fullWidthDigits: Record<string, string> = { '０':'0','１':'1','２':'2','３':'3','４':'4','５':'5','６':'6','７':'7','８':'8','９':'9' }
+function normalizeDigits(s: string): string {
+  return s.replace(/[０-９]/g, c => fullWidthDigits[c])
+}
+
+const setupDelimRegex = new RegExp(`^[${V.whiteSpaceClass}${V.delimiterClass}]+`)
+const digitRegex = /^[0-9０-９]+/
+
+export function parseSetupStatement(text: string, line: number): SetupStatement | null {
+  const match = setupRegex.exec(text)
+  if (!match) return null
+  const body = match[1].trim()
+  const roles: Record<string, number> = {}
+  let pos = 0
+  while (pos < body.length) {
+    const delimMatch = setupDelimRegex.exec(body.slice(pos))
+    if (delimMatch) pos += delimMatch[0].length
+    if (pos >= body.length) break
+    let bestLen = 0
+    let bestRole = ''
+    let bestCount = 0
+    for (const [regex, roleName] of roleMapping) {
+      const roleMatch = regex.exec(body.slice(pos))
+      if (roleMatch) {
+        const digitMatch = digitRegex.exec(body.slice(pos + roleMatch[0].length))
+        if (digitMatch) {
+          const totalLen = roleMatch[0].length + digitMatch[0].length
+          if (totalLen > bestLen) {
+            bestLen = totalLen
+            bestRole = roleName
+            bestCount = parseInt(normalizeDigits(digitMatch[0]), 10)
+          }
+        }
+      }
+    }
+    if (bestLen === 0) return null
+    roles[bestRole] = bestCount
+    pos += bestLen
+  }
+  if (Object.keys(roles).length === 0) return null
+  return { type: 'setup', line, roles }
+}
+
 export function parseStatement (text: string, line: number): Statement {
   const parsers = [
+    parseSetupStatement,
     parseJoinMultiStatement,
     parseJoinStatement,
     parseVoteStatement,
