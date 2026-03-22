@@ -61,6 +61,8 @@ export class VillageRetar {
   lastHamsterMustDieAt?: number
   lastHamsterMustDiedBy?: CauseOfDeath
   nightKillsByDay: Map<Day, Seat[]> = new Map()
+  lastDeaths: Seat[] = []
+  hamsterWinPath?: 'village' | 'wolf'
 
   // 最終結果
   conclusions: Possibilities
@@ -103,6 +105,9 @@ export class VillageRetar {
         this.initialPossibilities.denyRole(killed[0], 'werewolf')
       }
     }
+
+    this.lastDeaths = this.findLastDeaths()
+    this.applyGameEndConstraints()
 
     const plan = buildRoleTestPlan(village, setup, multipleVictims)
     this.roleTests = plan.roleTests
@@ -204,6 +209,46 @@ export class VillageRetar {
     return Array.from(this.nightKillsByDay.values()).filter(v => v.length > 1).flat()
   }
 
+  // ゲーム終了をトリガーした最終死者を特定する
+  private findLastDeaths(): Seat[] {
+    if (!this.vs.finished || !this.vs.result || this.vs.result === 'draw') return []
+    let maxDiedDay = -1
+    for (const [, status] of this.vs.statuses.entries()) {
+      if (!status.surviving && status.diedDay != null && status.diedDay > maxDiedDay) {
+        maxDiedDay = status.diedDay
+      }
+    }
+    if (maxDiedDay < 0) return []
+    const seats: Seat[] = []
+    for (const [seat, status] of this.vs.statuses.entries()) {
+      if (!status.surviving && status.diedDay === maxDiedDay && !this.initialPossibilities.isFixed(seat)) {
+        seats.push(seat)
+      }
+    }
+    return seats
+  }
+
+  // ゲーム結果に基づく最終死者の役職制約を initialPossibilities に適用
+  // werehamster_won は analyze() で2パスに分解するためここでは処理しない
+  private applyGameEndConstraints() {
+    if (this.lastDeaths.length === 0) return
+
+    if (this.vs.result === 'villager_won') {
+      // 村勝利: 最終死者で最後の狼が死んだ → 単一なら狼確定
+      if (this.lastDeaths.length === 1) {
+        this.initialPossibilities.fixRole(this.lastDeaths[0], 'werewolf')
+      }
+    }
+    else if (this.vs.result === 'werewolf_won') {
+      // 狼勝利: 人間が死んで飽和 → 最終死者は非狼・非狐
+      for (const seat of this.lastDeaths) {
+        this.initialPossibilities.denyRole(seat, 'werewolf')
+        this.initialPossibilities.denyRole(seat, 'werehamster')
+      }
+    }
+    // werehamster_won は analyzeHamsterWin() で処理
+  }
+
   getStatus(seat: Seat) {
     return this.vs.statuses.get(seat)
   }
@@ -220,8 +265,64 @@ export class VillageRetar {
   }
 
   analyze(): AnalyzeResult {
+    if (this.vs.result === 'werehamster_won' && this.lastDeaths.length > 0) {
+      return this.analyzeHamsterWin()
+    }
     const t0 = performance.now()
+    this.runAnalysis()
+    const elapsed = performance.now() - t0
+    return {
+      elapsed,
+      batch: this.options.batch,
+      id: this.options.id,
+      result: this.conclusions.toStructured(),
+    }
+  }
 
+  // werehamster_won を2パスに分解して分析する
+  private analyzeHamsterWin(): AnalyzeResult {
+    const t0 = performance.now()
+    const originalPossibilities = this.initialPossibilities
+
+    // パス1: 狼全滅（村勝利相当）→ 最終死者は狼
+    this.hamsterWinPath = 'village'
+    const poss1 = originalPossibilities.clone()
+    let path1Valid = true
+    if (this.lastDeaths.length === 1) {
+      path1Valid = poss1.fixRole(this.lastDeaths[0], 'werewolf')
+    }
+    if (path1Valid) {
+      this.initialPossibilities = poss1
+      this.runAnalysis()
+    }
+
+    // パス2: 飽和（狼勝利相当）→ 最終死者は非狼・非狐
+    this.hamsterWinPath = 'wolf'
+    const poss2 = originalPossibilities.clone()
+    let path2Valid = true
+    for (const seat of this.lastDeaths) {
+      if (!poss2.denyRole(seat, 'werewolf')) { path2Valid = false; break }
+      if (!poss2.denyRole(seat, 'werehamster')) { path2Valid = false; break }
+    }
+    if (path2Valid) {
+      this.initialPossibilities = poss2
+      this.runAnalysis()
+    }
+
+    // 復元
+    this.initialPossibilities = originalPossibilities
+    this.hamsterWinPath = undefined
+
+    const elapsed = performance.now() - t0
+    return {
+      elapsed,
+      batch: this.options.batch,
+      id: this.options.id,
+      result: this.conclusions.toStructured(),
+    }
+  }
+
+  private runAnalysis(): void {
     // Initialize
     this.context = {
       additionalLiars: 0,
@@ -299,18 +400,10 @@ export class VillageRetar {
       }
       testIter = loop.next([result, this.context])
     }
-
-    const elapsed = performance.now() - t0
-    return {
-      elapsed,
-      batch: this.options.batch,
-      id: this.options.id,
-      result: this.conclusions.toStructured(),
-    }
   }
 
   finalize() {
-    runFinalize(this.context, this.vs, this.setup, this.conclusions, this.debugStash)
+    runFinalize(this.context, this.vs, this.setup, this.conclusions, this.debugStash, this.hamsterWinPath)
   }
 
   analyzeSafe(): AnalyzeResult {

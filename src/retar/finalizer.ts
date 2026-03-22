@@ -92,6 +92,7 @@ export function finalize(
   setup: Map<SystemRole, number>,
   conclusions: Possibilities,
   debugStash: DebugStash,
+  hamsterWinPath?: 'village' | 'wolf',
 ): void {
   debugStash.finalizerRuns++
   // ここまで処理が終わったところで、襲撃死した人物は非狼とみなす
@@ -168,32 +169,37 @@ export function finalize(
   }
 
   // 狐勝ちの場合だけは、狼全滅と飽和の両方を検証する
+  // hamsterWinPath が指定されている場合は該当パスのみ実行
   if ( vs.result === 'werehamster_won') {
-    const conclusion = solvePossibilities(
-      context.possibilities,
-      survivingMap,
-      0,
-      0,
-      1,
-      Infinity,
-      setup
-    )
-    if (conclusion) {
-      debugStash.finalizerPasses++
-      conclusions.union(conclusion)
+    if (hamsterWinPath !== 'wolf') {
+      const conclusion = solvePossibilities(
+        context.possibilities,
+        survivingMap,
+        0,
+        0,
+        1,
+        Infinity,
+        setup
+      )
+      if (conclusion) {
+        debugStash.finalizerPasses++
+        conclusions.union(conclusion)
+      }
     }
-    const conclusion2 = solvePossibilities(
-      context.possibilities,
-      survivingMap,
-      maxSurvivingWolves + 1,
-      Infinity,
-      1,
-      Infinity,
-      setup
-    )
-    if (conclusion2) {
-      debugStash.finalizerPasses++
-      conclusions.union(conclusion2)
+    if (hamsterWinPath !== 'village') {
+      const conclusion2 = solvePossibilities(
+        context.possibilities,
+        survivingMap,
+        maxSurvivingWolves + 1,
+        Infinity,
+        1,
+        Infinity,
+        setup
+      )
+      if (conclusion2) {
+        debugStash.finalizerPasses++
+        conclusions.union(conclusion2)
+      }
     }
   }
   else {
