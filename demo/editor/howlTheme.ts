@@ -38,7 +38,13 @@ export const howlThemeExtension: Extension = EditorView.theme({
     backgroundColor: `${surface0}80`,
   },
   '.cm-gutters': {
-    display: 'none',
+    backgroundColor: base,
+    color: overlay0,
+    borderRight: `1px solid ${surface0}`,
+  },
+  '.cm-lineNumbers .cm-gutterElement': {
+    padding: '0 8px 0 4px',
+    minWidth: '2.5em',
   },
   '.cm-scroller': {
     overflow: 'auto',
@@ -56,22 +62,29 @@ export const howlThemeExtension: Extension = EditorView.theme({
   '.hw-over':     { color: peach },
 
   // Line-level backgrounds
-  '.hwl-join':     { backgroundColor: `${blue}10`, position: 'relative', paddingLeft: '1.5em !important' },
-  '.hwl-lynch':    { backgroundColor: `${peach}10`, position: 'relative', paddingLeft: '1.5em !important' },
-  '.hwl-attack':   { backgroundColor: `${red}10`, position: 'relative', paddingLeft: '1.5em !important' },
-  '.hwl-curse':    { backgroundColor: `${purple}10`, position: 'relative', paddingLeft: '1.5em !important' },
-  '.hwl-follow':   { backgroundColor: `${overlay0}10`, position: 'relative', paddingLeft: '1.5em !important' },
-  '.hwl-peace':    { backgroundColor: `${green}10`, position: 'relative', paddingLeft: '1.5em !important' },
+  '.hwl-join':     { backgroundColor: `${blue}10` },
+  '.hwl-lynch':    { backgroundColor: `${peach}10` },
+  '.hwl-attack':   { backgroundColor: `${red}10` },
+  '.hwl-curse':    { backgroundColor: `${purple}10` },
+  '.hwl-follow':   { backgroundColor: `${overlay0}10` },
+  '.hwl-peace':    { backgroundColor: `${green}10` },
   '.hwl-unknown':  { textDecoration: `wavy underline ${red}`, textUnderlineOffset: '3px', backgroundColor: `${red}20` },
   '.hw-beyond-cursor': { opacity: '0.35' },
   '.hw-join-name':         { color: blue, fontWeight: 'bold' },
   '.hw-player-resolved':   { backgroundColor: `${teal}20`, color: teal },
   '.hw-player-unresolved': { textDecoration: `wavy underline ${red}`, textUnderlineOffset: '3px', backgroundColor: `${red}18` },
 
-  // Gutter icons via ::before
-  '.hwl-join::before':   { content: '"+"', position: 'absolute', left: '0', width: '1.2em', textAlign: 'center', color: blue, fontWeight: 'bold' },
-  '.hwl-lynch::before':  { content: '"⚔"', position: 'absolute', left: '0', width: '1.2em', textAlign: 'center' },
-  '.hwl-attack::before': { content: '"🐺"', position: 'absolute', left: '0', width: '1.2em', textAlign: 'center', fontSize: '0.85em' },
-  '.hwl-curse::before':  { content: '"💀"', position: 'absolute', left: '0', width: '1.2em', textAlign: 'center', fontSize: '0.85em' },
-  '.hwl-peace::before':  { content: '"☮"', position: 'absolute', left: '0', width: '1.2em', textAlign: 'center' },
+  // Statement type gutter (left of line numbers)
+  '.hwl-gutter': {
+    width: '1.5em',
+    textAlign: 'center',
+  },
+  '.hwl-gutter .cm-gutterElement': {
+    padding: '0',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  '.hwl-gutter .cm-gutterElement span': { fontSize: '1em', lineHeight: '1' },
+  '.hwg-unknown': { color: red },
 }, { dark: true })

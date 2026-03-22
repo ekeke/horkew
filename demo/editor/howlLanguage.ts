@@ -89,8 +89,8 @@
 //
 // ============================================================================
 
-import { StateEffect, StateField, type Extension } from '@codemirror/state'
-import { Decoration, type DecorationSet, EditorView } from '@codemirror/view'
+import { StateEffect, StateField, RangeSet, type Extension } from '@codemirror/state'
+import { Decoration, type DecorationSet, EditorView, GutterMarker, gutter } from '@codemirror/view'
 import type { StatementType } from '../../src/howl/statement.ts'
 import * as V from '../../src/howl/vocabulary.ts'
 
@@ -160,6 +160,73 @@ const lineDeco: Record<string, Decoration> = {
 }
 
 const beyondCursorDeco = Decoration.line({ class: 'hw-beyond-cursor' })
+
+// ---- Gutter markers (行タイプアイコン) ----
+
+const gutterIcons: Record<string, string> = {
+  join: '🙋', joinMulti: '🙋',
+  vote: '🎫', multiVote: '🎫',
+  attack: '🐺', lynch: '⚔', curse: '💀', follow: '👻', peace: '☮',
+  revote: '🔄', over: '🏁',
+  assert: '💬', mason: '🤝',
+  reveal: '👁', unknown: '❓',
+}
+
+class StatementGutterMarker extends GutterMarker {
+  constructor(readonly icon: string, readonly cssClass: string) { super() }
+  toDOM() {
+    const span = document.createElement('span')
+    span.textContent = this.icon
+    span.className = this.cssClass
+    return span
+  }
+}
+
+const gutterMarkerCache = new Map<string, StatementGutterMarker>()
+function getGutterMarker(type: string): StatementGutterMarker | null {
+  const icon = gutterIcons[type]
+  if (!icon) return null
+  if (!gutterMarkerCache.has(type)) {
+    gutterMarkerCache.set(type, new StatementGutterMarker(icon, `hwg-${type}`))
+  }
+  return gutterMarkerCache.get(type)!
+}
+
+// ガターマーカーのRangeSetを構築
+function buildGutterMarkers(
+  statements: StatementInfo[],
+  doc: { line(n: number): { from: number }, lines: number },
+): RangeSet<GutterMarker> {
+  const markers: { from: number, marker: GutterMarker }[] = []
+  for (const s of statements) {
+    if (s.line < 1 || s.line > doc.lines) continue
+    const marker = getGutterMarker(s.type)
+    if (!marker) continue
+    markers.push({ from: doc.line(s.line).from, marker })
+  }
+  markers.sort((a, b) => a.from - b.from)
+  return RangeSet.of(markers.map(m => m.marker.range(m.from)))
+}
+
+const gutterField = StateField.define<RangeSet<GutterMarker>>({
+  create() { return RangeSet.empty },
+  update(markers, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setStatements)) {
+        return buildGutterMarkers(e.value.statements, tr.state.doc)
+      }
+    }
+    if (tr.docChanged) {
+      return markers.map(tr.changes)
+    }
+    return markers
+  },
+})
+
+const statementGutter = gutter({
+  class: 'hwl-gutter',
+  markers: v => v.state.field(gutterField),
+})
 
 // ---- Helpers ----
 
@@ -323,4 +390,4 @@ const statementsField = StateField.define<DecorationSet>({
   provide: f => EditorView.decorations.from(f),
 })
 
-export const howlLanguageExtension: Extension = statementsField
+export const howlLanguageExtension: Extension = [statementsField, gutterField, statementGutter]
