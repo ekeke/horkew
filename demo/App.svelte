@@ -368,15 +368,6 @@
     }
   })
 
-  function getInputUpToCursor(): string {
-    if (!editorView) return input
-    const head = editorView.state.selection.main.head
-    const doc = editorView.state.doc.toString()
-    // Include the full line the cursor is on
-    const nextNewline = doc.indexOf('\n', head)
-    return nextNewline === -1 ? doc : doc.slice(0, nextNewline)
-  }
-
   function roleToShort(role: SystemRole): string {
     return systemRoles.get(role)?.shortName ?? role
   }
@@ -589,7 +580,7 @@
     sourceLines = { survivor: new Map(), claimRow: new Map(), claimCell: new Map(), kill: new Map(), exec: new Map(), vote: new Map() }
 
     try {
-      const { meta, statements } = parse(getInputUpToCursor())
+      const { meta, statements } = parse(input, { cursorLine: getCursorLine() })
       rawStatements = JSON.stringify(statements, null, 2)
       parsedLines = stringifyStatements(statements)
       statementLines = statements.map((s: any) => s.line as number)
