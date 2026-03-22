@@ -35,6 +35,36 @@
 
   const STORAGE_PREFIX = 'horkew:'
   const SETTINGS_KEY = 'horkew:__settings__'
+  const INDEX_KEY = 'horkew:__index__'
+
+  interface FileEntry {
+    title?: string
+    createdAt: number
+    updatedAt: number
+  }
+
+  type FileIndex = Record<string, FileEntry>
+
+  function formatDate(ms: number): string {
+    const d = new Date(ms)
+    return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+
+  function displayName(entry: FileEntry): string {
+    return entry.title ?? formatDate(entry.createdAt)
+  }
+
+  function loadIndex(): FileIndex {
+    try {
+      const stored = localStorage.getItem(INDEX_KEY)
+      if (stored) return JSON.parse(stored)
+    } catch {}
+    return {}
+  }
+
+  function saveIndex(index: FileIndex) {
+    localStorage.setItem(INDEX_KEY, JSON.stringify(index))
+  }
 
   type Skin = 'flat' | 'excite'
 
@@ -68,22 +98,6 @@
         return { ...defaults, ...parsed, panes: { ...defaultPanes, ...parsed.panes } }
       }
     } catch {}
-    // migrate from legacy individual keys
-    const legacyKeys = ['__active__', '__panes__', '__skin__', '__debug__'] as const
-    const hasLegacy = legacyKeys.some(k => localStorage.getItem(STORAGE_PREFIX + k) !== null)
-    if (hasLegacy) {
-      const s: Settings = { ...defaults }
-      s.active = localStorage.getItem(STORAGE_PREFIX + '__active__') ?? ''
-      s.skin = (localStorage.getItem(STORAGE_PREFIX + '__skin__') as Skin) ?? 'flat'
-      s.debug = localStorage.getItem(STORAGE_PREFIX + '__debug__') === 'true'
-      try {
-        const p = localStorage.getItem(STORAGE_PREFIX + '__panes__')
-        if (p) s.panes = { ...defaultPanes, ...JSON.parse(p) }
-      } catch {}
-      for (const k of legacyKeys) localStorage.removeItem(STORAGE_PREFIX + k)
-      saveSettings(s)
-      return s
-    }
     return defaults
   }
 
@@ -98,36 +112,42 @@
     saveSettings(settings)
   }
 
-  function savedKeys(): string[] {
-    const keys: string[] = []
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i)!
-      if (k.startsWith(STORAGE_PREFIX) && k !== SETTINGS_KEY) {
-        keys.push(k.slice(STORAGE_PREFIX.length))
-      }
+  let fileIndex = loadIndex()
+
+  function fileEntries(): { key: string, entry: FileEntry }[] {
+    return Object.entries(fileIndex)
+      .map(([key, entry]) => ({ key, entry }))
+      .sort((a, b) => b.entry.createdAt - a.entry.createdAt)
+  }
+
+  function loadText(key: string): string {
+    return localStorage.getItem(STORAGE_PREFIX + key) ?? ''
+  }
+
+  function saveText(key: string, text: string) {
+    localStorage.setItem(STORAGE_PREFIX + key, text)
+    const now = Date.now()
+    if (fileIndex[key]) {
+      fileIndex[key].updatedAt = now
+    } else {
+      fileIndex[key] = { createdAt: now, updatedAt: now }
     }
-    return keys.sort()
+    saveIndex(fileIndex)
+    updateSettings({ active: key })
   }
 
-  function loadText(title: string): string {
-    return localStorage.getItem(STORAGE_PREFIX + title) ?? ''
-  }
-
-  function saveText(title: string, text: string) {
-    localStorage.setItem(STORAGE_PREFIX + title, text)
-    updateSettings({ active: title })
-  }
-
-  function deleteText(title: string) {
-    localStorage.removeItem(STORAGE_PREFIX + title)
-    if (settings.active === title) {
+  function deleteText(key: string) {
+    localStorage.removeItem(STORAGE_PREFIX + key)
+    delete fileIndex[key]
+    saveIndex(fileIndex)
+    if (settings.active === key) {
       updateSettings({ active: '' })
     }
   }
 
-  let titles = $state(savedKeys())
-  let activeTitle = $state(settings.active)
-  let input = $state(activeTitle ? loadText(activeTitle) : '')
+  let entries = $state(fileEntries())
+  let activeKey = $state(settings.active)
+  let input = $state(activeKey ? loadText(activeKey) : '')
   let rawStatements = $state('')
   let analyzerJson = $state('')
   let parsedLines: StringifiedLine[] = $state([])
@@ -167,7 +187,6 @@
   let showModal = $state(false)
   let showHelp = $state(false)
   let newTitle = $state('')
-  let modalInput: HTMLInputElement | undefined = $state()
   let editorParent: HTMLElement | undefined = $state()
   let editorView: EditorView | undefined = $state()
   let rawBodyEl: HTMLElement | undefined = $state()
@@ -187,8 +206,8 @@
   })
 
   $effect(() => {
-    if (activeTitle && input !== undefined) {
-      saveText(activeTitle, input)
+    if (activeKey && input !== undefined) {
+      saveText(activeKey, input)
     }
   })
 
@@ -200,11 +219,11 @@
     }
   }
 
-  function switchTo(title: string) {
-    activeTitle = title
-    input = loadText(title)
+  function switchTo(key: string) {
+    activeKey = key
+    input = loadText(key)
     setEditorContent(input)
-    updateSettings({ active: title })
+    updateSettings({ active: key })
     rawStatements = ''
     parsedLines = []
     analysisSeats = []
@@ -213,24 +232,51 @@
     assumptions = new Map()
   }
 
+  const defaultNames = [
+    'あるふぁ', 'ぶらぼー', 'ちゃーりー', 'でるた', 'えこー',
+    'ふぉっくす', 'ごるふ', 'ほてる', 'いんでぃあ', 'じゅりえっと',
+    'きろ', 'りま', 'まいく', 'のべんばー', 'おすかー',
+    'ぱぱ', 'きゅーべっく',
+  ]
+
+  interface Preset {
+    label: string
+    setup: string
+    count: number
+    firstDayKill?: boolean
+  }
+
+  const presets: Preset[] = [
+    { label: '17A', setup: '村6 占1 霊1 狩1 共2 狼4 狂1 狐1', count: 17, firstDayKill: true },
+    { label: '14D猫', setup: '村2 占1 霊1 狩1 共2 猫1 狼3 信1 狐1 背1', count: 14, firstDayKill: true },
+    { label: '13人村', setup: '村6 占1 霊1 狩1 狼3 狂1', count: 13 },
+  ]
+
+  function buildTemplate(title: string, preset: Preset): string {
+    const frontmatter = title ? `---\ntitle: ${title}\n---\n\n` : ''
+    const names = defaultNames.slice(0, preset.count)
+    const joins = names.map(n => `+${n}`).join('\n')
+    const kill = preset.firstDayKill ? `\n${names[0]}死亡\n` : ''
+    return `${frontmatter}@ ${preset.setup}\n\n${joins}${kill}\n`
+  }
+
   function openNewModal() {
     newTitle = ''
     showModal = true
   }
 
-  function confirmNew() {
+  function createFromPreset(preset: Preset) {
     const trimmed = newTitle.trim()
-    if (!trimmed) return
-    if (titles.includes(trimmed)) {
-      switchTo(trimmed)
-    } else {
-      const template = `---\ntitle: ${trimmed}\n---\n\n@ 村2 占1 霊1 狩1 共2 猫1 狼3 狂1 狐1 背1\n\n`
-      activeTitle = trimmed
-      input = template
-      setEditorContent(input)
-      saveText(trimmed, template)
-      titles = savedKeys()
-    }
+    const key = trimmed || ('_' + Date.now().toString(36))
+    const now = Date.now()
+    const template = buildTemplate(trimmed, preset)
+    fileIndex[key] = { title: trimmed || undefined, createdAt: now, updatedAt: now }
+    saveIndex(fileIndex)
+    activeKey = key
+    input = template
+    setEditorContent(input)
+    saveText(key, template)
+    entries = fileEntries()
     showModal = false
     rawStatements = ''
     analyzerJson = ''
@@ -246,13 +292,13 @@
   }
 
   function deleteCurrent() {
-    if (!activeTitle) return
-    deleteText(activeTitle)
-    titles = savedKeys()
-    if (titles.length > 0) {
-      switchTo(titles[0])
+    if (!activeKey) return
+    deleteText(activeKey)
+    entries = fileEntries()
+    if (entries.length > 0) {
+      switchTo(entries[0].key)
     } else {
-      activeTitle = ''
+      activeKey = ''
       input = ''
       updateSettings({ active: '' })
     }
@@ -295,7 +341,6 @@
   }
 
   function onModalKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter') confirmNew()
     if (e.key === 'Escape') cancelNew()
   }
 
@@ -344,7 +389,7 @@
 
   // Initialize CM6 editor when parent element is available (lazy-loaded)
   $effect(() => {
-    if (editorParent && activeTitle && !editorView) {
+    if (editorParent && activeKey && !editorView) {
       import('./editor/index.ts').then(mod => {
         editorModule = mod
         if (!editorParent) return
@@ -659,17 +704,17 @@
     <span class="header-subtitle">人狼メモ・解析ツール</span>
     <span class="header-title" class:title-flash={titleFlash} onclick={onTitleTap}>Horkew</span>
 
-    <select class="header-select" value={activeTitle} onchange={onSelectChange} disabled={titles.length === 0}>
-      {#if titles.length === 0}
+    <select class="header-select" value={activeKey} onchange={onSelectChange} disabled={entries.length === 0}>
+      {#if entries.length === 0}
         <option value="">---</option>
       {:else}
-        {#each titles as title}
-          <option value={title}>{title}</option>
+        {#each entries as { key, entry }}
+          <option value={key}>{displayName(entry)}</option>
         {/each}
       {/if}
     </select>
 
-    <button class="header-btn" onclick={deleteCurrent} disabled={!activeTitle} title="Delete">Del</button>
+    <button class="header-btn" onclick={deleteCurrent} disabled={!activeKey} title="Delete">Del</button>
 
     <button class="header-btn" onclick={openNewModal}>New</button>
 
@@ -713,7 +758,7 @@
     <section class="pane">
       <div class="pane-header">Input</div>
       <div class="pane-body pane-body-input">
-        {#if activeTitle}
+        {#if activeKey}
           <div class="input-editor" bind:this={editorParent}></div>
         {:else}
           <div class="pane-placeholder"><span>New ボタンから開始してください</span></div>
@@ -862,19 +907,21 @@
   <div class="modal-overlay" onkeydown={onModalKeydown} onclick={cancelNew}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <div class="modal-title">新しい村のメモを作成</div>
       <input
         class="modal-input"
         type="text"
-        placeholder="タイトルを入力"
+        placeholder="タイトル（省略可）"
         bind:value={newTitle}
-        bind:this={modalInput}
         onkeydown={onModalKeydown}
         autofocus
       />
       <div class="modal-actions">
-        <button class="header-btn" onclick={cancelNew}>Cancel</button>
-        <button class="header-btn modal-confirm" onclick={confirmNew} disabled={!newTitle.trim()}>Create</button>
+        <button class="modal-cancel" onclick={cancelNew}>Cancel</button>
+        <div class="modal-presets">
+          {#each presets as preset}
+            <button class="preset-btn" onclick={() => createFromPreset(preset)}>{preset.label}</button>
+          {/each}
+        </div>
       </div>
     </div>
   </div>
@@ -1253,17 +1300,11 @@
     background: #1e1e2e;
     border: 1px solid #45475a;
     border-radius: 8px;
-    padding: 1.5rem;
-    min-width: 320px;
+    padding: 1rem 1.5rem;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-  }
-
-  .modal-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #cdd6f4;
+    gap: 0.75rem;
+    min-width: 320px;
   }
 
   .modal-input {
@@ -1282,8 +1323,42 @@
 
   .modal-actions {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
     gap: 0.5rem;
+  }
+
+  .modal-cancel {
+    font-size: 12px;
+    color: #6c7086;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+  }
+
+  .modal-cancel:hover {
+    color: #a6adc8;
+  }
+
+  .modal-presets {
+    display: flex;
+    gap: 0.5rem;
+    margin-left: auto;
+  }
+
+  .preset-btn {
+    padding: 6px 16px;
+    font-size: 13px;
+    background: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .preset-btn:hover {
+    background: #45475a;
+    border-color: #cba6f7;
   }
 
   .analysis-layout {
@@ -1362,17 +1437,7 @@
     opacity: 0.6;
   }
 
-  .modal-confirm {
-    background: #cba6f7;
-    color: #1e1e2e;
-    border-color: #cba6f7;
-    font-weight: 600;
-  }
 
-  .modal-confirm:hover:not(:disabled) {
-    background: #b4befe;
-    border-color: #b4befe;
-  }
 
   .gmork-results {
     flex: 1;
