@@ -12,7 +12,7 @@
   import { findReason, findConfirmationReason } from '../src/gmork/index.ts'
   import { formatReason, formatConfirmationReason } from '../src/gmork/format.ts'
   import HelpPanel from './HelpPanel.svelte'
-  import { onOpenHelp, onStartTrial } from './help.ts'
+  import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
   import type { EditorView } from '@codemirror/view'
   import type { StatementInfo, PlayerNameInfo } from './editor/howlLanguage.ts'
@@ -192,8 +192,6 @@
   let rawBodyEl: HTMLElement | undefined = $state()
   let helpPanel: HelpPanel | undefined = $state()
   let trialMode = $state(false)
-  let trialPreviousKey = $state('')
-  let trialPreviousInput = $state('')
 
   function doOpenHelp(sectionId?: string) {
     showHelp = true
@@ -226,23 +224,10 @@
   }
 
   function handleStartTrial(text: string) {
-    trialPreviousKey = activeKey
-    trialPreviousInput = input
     trialMode = true
     input = text
     setEditorContent(text)
     showHelp = false
-  }
-
-  function exitTrialMode() {
-    trialMode = false
-    if (trialPreviousKey) {
-      activeKey = trialPreviousKey
-      input = trialPreviousInput
-      setEditorContent(input)
-    }
-    trialPreviousKey = ''
-    trialPreviousInput = ''
   }
 
   function switchTo(key: string) {
@@ -339,7 +324,11 @@
 
   function onSelectChange(e: Event) {
     const value = (e.target as HTMLSelectElement).value
-    if (value) switchTo(value)
+    if (value === '__trial__') {
+      handleStartTrial(TUTORIAL_TEXT)
+    } else if (value) {
+      switchTo(value)
+    }
   }
 
   function togglePane(id: PaneId) {
@@ -731,22 +720,19 @@
     <span class="header-subtitle">人狼メモ・解析ツール</span>
     <span class="header-title" class:title-flash={titleFlash} onclick={onTitleTap}>Horkew</span>
 
-    {#if trialMode}
-    <span class="trial-banner">お試しモード</span>
-    <button class="header-btn trial-exit" onclick={exitTrialMode}>戻る</button>
-    {:else}
-    <select class="header-select" value={activeKey} onchange={onSelectChange} disabled={entries.length === 0}>
-      {#if entries.length === 0}
+    <select class="header-select" value={trialMode ? '__trial__' : activeKey} onchange={onSelectChange}>
+      {#if entries.length === 0 && !trialMode}
         <option value="">---</option>
       {:else}
         {#each entries as { key, entry }}
           <option value={key}>{displayName(entry)}</option>
         {/each}
       {/if}
+      <option value="__trial__">お試し</option>
     </select>
 
+    {#if !trialMode}
     <button class="header-btn" onclick={deleteCurrent} disabled={!activeKey} title="Delete">Del</button>
-
     <button class="header-btn" onclick={openNewModal}>New</button>
     {/if}
 
@@ -1488,14 +1474,4 @@
     text-align: right;
   }
 
-  .trial-banner {
-    color: #f9e2af;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .trial-exit {
-    color: #f9e2af;
-    border-color: #f9e2af;
-  }
 </style>

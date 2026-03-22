@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { startTrial } from './help.ts'
+  import { startTrial, TUTORIAL_TEXT } from './help.ts'
 
   let { open, onclose }: { open: boolean, onclose: () => void } = $props()
 
@@ -12,37 +12,6 @@
     })
   }
 
-  const TUTORIAL_TEXT = `# 配役: 村人2, 占い師1, 人狼1, 狂人1
-@ 村2 占1 狼1 狂1
-
-# 参加者を登録
-++アリス ボブ チャーリー デイブ エミリー
-
-# 1日目: CO（カミングアウト＝役職の宣言）と投票
-アリス: 占いCO ボブ白
-デイブ: 占いCO チャーリー●
-
-アリス → チャーリー
-ボブ → チャーリー
-チャーリー → デイブ
-デイブ → ボブ
-エミリー → チャーリー
-
-チャーリー処刑
-
-# 2日目朝: 夜の襲撃結果
-襲撃 デイブ
-
-# 2日目: COと投票
-アリス: 2日目 エミリー●
-
-ボブ → エミリー
-アリス → エミリー
-エミリー → ボブ
-
-エミリー処刑
-村勝ち
-`
 
   function onTocClick(e: MouseEvent) {
     const a = (e.target as HTMLElement).closest('a')
