@@ -92,7 +92,9 @@ export function finalize(
   setup: Map<SystemRole, number>,
   conclusions: Possibilities,
   debugStash: DebugStash,
-  hamsterWinPath?: 'village' | 'wolf',
+  hamsterWinPath: 'village' | 'wolf' | undefined,
+  cachedSurvivors: Seat[],
+  cachedSurvivingMap: Map<Seat, boolean>,
 ): void {
   debugStash.finalizerRuns++
   // ここまで処理が終わったところで、襲撃死した人物は非狼とみなす
@@ -139,14 +141,14 @@ export function finalize(
   */
 
 
-  const survivors = Array.from(vs.statuses.keys()).filter(seat => vs.statuses.get(seat)!.surviving)
+  const survivors = cachedSurvivors
   const numSurvivingHamsters = survivors.filter(seat => context.possibilities.isActualRole(seat, 'werehamster')).length
   const maxSurvivingWolves = Math.min(
     setup.get('werewolf') || Infinity,
     Math.floor((survivors.length - numSurvivingHamsters - 0.1) / 2)
   )
 
-  const survivingMap = new Map(survivors.map(seat => [seat, true]))
+  const survivingMap = cachedSurvivingMap
   const condition = {
     minSurvivingWolves: 1,
     maxSurvivingWolves,
@@ -166,6 +168,39 @@ export function finalize(
     condition.maxSurvivingWolves = 0
     condition.minSurvivingHamsters = 0
     condition.maxSurvivingHamsters = 0
+  }
+
+  // All seats fully determined → validate survival counts and skip solver
+  let allFixed = true
+  for (let i = 1; i < context.possibilities.possibilities.length; i++) {
+    if (!context.possibilities.isFixed(i)) { allFixed = false; break }
+  }
+  if (allFixed) {
+    // Count surviving wolves and hamsters
+    let survWolves = 0, survHamsters = 0
+    for (const seat of survivors) {
+      if (context.possibilities.isActualRole(seat, 'werewolf')) survWolves++
+      if (context.possibilities.isActualRole(seat, 'werehamster')) survHamsters++
+    }
+    const checkCondition = (minW: number, maxW: number, minH: number, maxH: number) =>
+      survWolves >= minW && survWolves <= maxW && survHamsters >= minH && survHamsters <= maxH
+
+    if (vs.result === 'werehamster_won') {
+      if (hamsterWinPath !== 'wolf' && checkCondition(0, 0, 1, Infinity)) {
+        debugStash.finalizerPasses++
+        conclusions.union(context.possibilities)
+      }
+      if (hamsterWinPath !== 'village' && checkCondition(maxSurvivingWolves + 1, Infinity, 1, Infinity)) {
+        debugStash.finalizerPasses++
+        conclusions.union(context.possibilities)
+      }
+    } else if (checkCondition(condition.minSurvivingWolves, condition.maxSurvivingWolves, condition.minSurvivingHamsters, condition.maxSurvivingHamsters)) {
+      debugStash.finalizerPasses++
+      conclusions.union(context.possibilities)
+    } else {
+      debugStash.finalizerFails++
+    }
+    return
   }
 
   // 狐勝ちの場合だけは、狼全滅と飽和の両方を検証する

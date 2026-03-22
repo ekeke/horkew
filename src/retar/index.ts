@@ -69,6 +69,9 @@ export class VillageRetar {
 
   // 最終結果
   conclusions: Possibilities
+  // Pre-computed survivor data (immutable during analysis)
+  cachedSurvivors!: Seat[]
+  cachedSurvivingMap!: Map<Seat, boolean>
 
   // 世界線ベースの解析プラン
   roleTests: RoleTest[][] = []
@@ -126,6 +129,9 @@ export class VillageRetar {
       lastHamsterMustDiedBy: this.lastHamsterMustDiedBy,
       dayCountFrom: this.options.dayCountFrom,
     }
+
+    this.cachedSurvivors = Array.from(village.statuses.keys()).filter(seat => village.statuses.get(seat)!.surviving)
+    this.cachedSurvivingMap = new Map(this.cachedSurvivors.map(seat => [seat, true]))
   }
 
   // 村騙りなどのハルプンテ指定 — 一切のCOを無視
@@ -413,7 +419,7 @@ export class VillageRetar {
   }
 
   finalize() {
-    runFinalize(this.context, this.vs, this.setup, this.conclusions, this.debugStash, this.hamsterWinPath)
+    runFinalize(this.context, this.vs, this.setup, this.conclusions, this.debugStash, this.hamsterWinPath, this.cachedSurvivors, this.cachedSurvivingMap)
   }
 
   analyzeSafe(): AnalyzeResult {
