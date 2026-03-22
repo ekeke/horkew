@@ -101,7 +101,7 @@ export type PlayerNameInfo = {
   line: number
   offset: number
   length: number
-  resolved: boolean
+  kind: 'resolved' | 'unresolved' | 'definition'
 }
 
 export type HighlightPayload = {
@@ -132,6 +132,7 @@ const markDeco = {
   co:       Decoration.mark({ class: 'hw-co' }),
   comment:  Decoration.mark({ class: 'hw-comment' }),
   meta:     Decoration.mark({ class: 'hw-meta' }),
+  joinName: Decoration.mark({ class: 'hw-join-name' }),
   unknownText: Decoration.mark({ class: 'hwl-unknown-text', attributes: { title: 'この行はHowl記法として認識できません' } }),
   playerResolved:   Decoration.mark({ class: 'hw-player-resolved' }),
   playerUnresolved: Decoration.mark({ class: 'hw-player-unresolved', attributes: { title: '登録されていないプレイヤー名です' } }),
@@ -273,7 +274,10 @@ function buildDecorations(
     const from = line.from + pn.offset
     const to = from + pn.length
     if (from >= line.from && to <= line.to && to > from) {
-      builder.push({ from, to, deco: pn.resolved ? markDeco.playerResolved : markDeco.playerUnresolved })
+      const deco = pn.kind === 'definition' ? markDeco.joinName
+                 : pn.kind === 'resolved'   ? markDeco.playerResolved
+                 :                            markDeco.playerUnresolved
+      builder.push({ from, to, deco })
     }
   }
 

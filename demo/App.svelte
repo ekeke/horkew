@@ -383,7 +383,7 @@
     run()
   }
 
-  function extractPlayerNames(stmt: any): string[] {
+  function extractRefNames(stmt: any): string[] {
     switch (stmt.type) {
       case 'vote': return [stmt.voter, stmt.target]
       case 'multiVote': return [...stmt.voters, stmt.target]
@@ -404,26 +404,40 @@
     }
   }
 
+  function extractDefNames(stmt: any): string[] {
+    switch (stmt.type) {
+      case 'join': return [stmt.name, ...(stmt.shortName ? [stmt.shortName] : []), ...stmt.aliases]
+      case 'joinMulti': return stmt.players ?? []
+      default: return []
+    }
+  }
+
+  type NameEntry = { name: string, kind: 'definition' | 'resolved' | 'unresolved' }
+
   function buildPlayerNames(statements: any[], dict: FlexibleDictionary, doc: string): PlayerNameInfo[] {
     const lines = doc.split('\n')
     const result: PlayerNameInfo[] = []
     for (const stmt of statements) {
-      const names = extractPlayerNames(stmt)
-      if (names.length === 0) continue
+      const entries: NameEntry[] = []
+      for (const name of extractDefNames(stmt)) {
+        if (name) entries.push({ name, kind: 'definition' })
+      }
+      for (const name of extractRefNames(stmt)) {
+        if (name) entries.push({ name, kind: dict.search(name).length > 0 ? 'resolved' : 'unresolved' })
+      }
+      if (entries.length === 0) continue
       const lineIdx = stmt.line - 1
       if (lineIdx < 0 || lineIdx >= lines.length) continue
       const lineText = lines[lineIdx]
       const used: [number, number][] = []
-      for (const name of names) {
-        if (!name) continue
+      for (const { name, kind } of entries) {
         let searchFrom = 0
         let idx = -1
         while ((idx = lineText.indexOf(name, searchFrom)) !== -1) {
           const end = idx + name.length
           if (!used.some(([f, t]) => idx < t && end > f)) {
             used.push([idx, end])
-            const resolved = dict.search(name).length > 0
-            result.push({ line: stmt.line, offset: idx, length: name.length, resolved })
+            result.push({ line: stmt.line, offset: idx, length: name.length, kind })
             break
           }
           searchFrom = idx + 1
