@@ -39,7 +39,7 @@ export function cloneContext(context: AnalyzeContext): AnalyzeContext {
 
 export type ContextSnapshot = {
   possArr: Uint16Array
-  possSetup: { [key: string]: number | undefined }
+  possSetup: Uint8Array
   additionalLiars: number
   hamstersMaxSurvivingDay: number
   needSeerAtDay: number | undefined
@@ -55,7 +55,7 @@ export function saveContext(ctx: AnalyzeContext): ContextSnapshot {
   }
   return {
     possArr: new Uint16Array(ctx.possibilities.possibilities),
-    possSetup: Object.assign({}, ctx.possibilities.setup),
+    possSetup: new Uint8Array(ctx.possibilities.setup),
     additionalLiars: ctx.additionalLiars,
     hamstersMaxSurvivingDay: ctx.hamstersMaxSurvivingDay,
     needSeerAtDay: ctx.needSeerAtDay,
@@ -67,7 +67,7 @@ export function saveContext(ctx: AnalyzeContext): ContextSnapshot {
 
 export function restoreContext(ctx: AnalyzeContext, s: ContextSnapshot): void {
   ctx.possibilities.possibilities.set(s.possArr)
-  Object.assign(ctx.possibilities.setup, s.possSetup)
+  ctx.possibilities.setup.set(s.possSetup)
   ctx.additionalLiars = s.additionalLiars
   ctx.hamstersMaxSurvivingDay = s.hamstersMaxSurvivingDay
   ctx.needSeerAtDay = s.needSeerAtDay

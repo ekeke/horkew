@@ -182,37 +182,37 @@ export function* combinationWithReplacementBit(
 
 export class Possibilities {
   possibilities: Uint16Array
-  setup: { [role in SystemRole]?: number }
-  setupOriginal!: { [role in SystemRole]?: number }
+  setup: Uint8Array
+  setupOriginal!: Uint8Array
   constructor(
     setup: Map<SystemRole, number> | Uint16Array | number,
-    setupObject?: { [role in SystemRole]?: number },
-    originalSetup?: { [role in SystemRole]?: number }
+    setupArr?: Uint8Array,
+    originalSetupArr?: Uint8Array,
   ) {
     if (typeof setup === 'number') {
       this.possibilities = new Uint16Array(setup + 1) // 0番目は使わない
-      this.setup = {}
+      this.setup = new Uint8Array(ROLE_COUNT)
       return
     }
 
-    if (setupObject && setup instanceof Uint16Array && originalSetup) {
-      this.setup = Object.assign({}, setupObject)
-      this.setupOriginal = Object.assign({}, originalSetup)
+    if (setupArr && setup instanceof Uint16Array && originalSetupArr) {
+      this.setup = new Uint8Array(setupArr)
+      this.setupOriginal = new Uint8Array(originalSetupArr)
       this.possibilities = setup
       return
     }
     if (setup instanceof Uint16Array) {
-      throw new Error('setupObject is required when setup is Uint16Array')
+      throw new Error('setupArr is required when setup is Uint16Array')
     }
     let count: number = 0
     let initial: RolePossibility = 0
-    this.setup = {}
+    this.setup = new Uint8Array(ROLE_COUNT)
     for (const [role, num] of setup) {
-      this.setup[role] = num
+      this.setup[RoleBitIndex[role]] = num
       count += num
       initial |= RoleSignatureBits[role]
     }
-    this.setupOriginal = Object.assign({}, this.setup)
+    this.setupOriginal = new Uint8Array(this.setup)
     this.possibilities = new Uint16Array(count + 1) // 0番目は使わない
     for (let i = 1; i < this.possibilities.length; i++) {
       this.possibilities[i] = initial
@@ -235,7 +235,7 @@ export class Possibilities {
     for (let i = 1; i < this.possibilities.length; i++) {
       obj[i] = Array.from(setOfRolesFromPossibility(this.possibilities[i]))
     }
-    const setup = Object.assign({}, this.setup)
+    const setup = new Uint8Array(this.setup)
     return { obj, setup }
   }
 
@@ -248,7 +248,7 @@ export class Possibilities {
   }
 
   refix(): boolean {
-    this.setup = Object.assign({}, this.setupOriginal)
+    this.setup.set(this.setupOriginal)
     for (let i = 1; i < this.possibilities.length; i++) {
       if (!this.fix(i)) return false
     }
@@ -260,11 +260,11 @@ export class Possibilities {
     const count = popCount(p)
     if (count === 0) return false
     if (count === 1) {
-      const role = RoleSignatureBitsReverseMap.get(p)!
-      if (!this.setup[role]) {
+      const bitIdx = 31 - Math.clz32(p)
+      if (!this.setup[bitIdx]) {
         return false
       }
-      if (this.setup[role] === 1) {
+      if (this.setup[bitIdx] === 1) {
         const theRole = p
         for (let i = 1; i < this.possibilities.length; i++) {
           if (i === seat) continue
@@ -273,7 +273,7 @@ export class Possibilities {
           if (this.possibilities[i] === 0) return false
         }
       }
-      this.setup[role]!--
+      this.setup[bitIdx]--
     }
     return true
   }
