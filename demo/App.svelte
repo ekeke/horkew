@@ -14,7 +14,11 @@
   import HelpPanel from './HelpPanel.svelte'
   import { onOpenHelp } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
-  import { createHowlEditor, EditorView, setStatements, type StatementInfo, type PlayerNameInfo } from './editor/index.ts'
+  import type { EditorView } from '@codemirror/view'
+  import type { StatementInfo, PlayerNameInfo } from './editor/howlLanguage.ts'
+
+  type EditorModule = typeof import('./editor/index.ts')
+  let editorModule: EditorModule | undefined
 
   export type SourceLines = {
     survivor: Map<number, number>   // seat → line
@@ -338,17 +342,21 @@
     tick().then(scrollRawToCursor)
   }
 
-  // Initialize CM6 editor when parent element is available
+  // Initialize CM6 editor when parent element is available (lazy-loaded)
   $effect(() => {
     if (editorParent && activeTitle && !editorView) {
-      editorView = createHowlEditor(editorParent, {
-        doc: input,
-        onChange(value) {
-          input = value
-        },
-        onCursorChange(_line) {
-          onCursorMove()
-        },
+      import('./editor/index.ts').then(mod => {
+        editorModule = mod
+        if (!editorParent) return
+        editorView = mod.createHowlEditor(editorParent, {
+          doc: input,
+          onChange(value) {
+            input = value
+          },
+          onCursorChange(_line) {
+            onCursorMove()
+          },
+        })
       })
     }
     // Cleanup on destroy
@@ -593,7 +601,7 @@
       if (editorView) {
         const stmtInfo: StatementInfo[] = statements.map((s: any) => ({ type: s.type, line: s.line }))
         const playerNameInfos = buildPlayerNames(statements, dict, editorView.state.doc.toString())
-        editorView.dispatch({ effects: setStatements.of({ statements: stmtInfo, cursorLine: getCursorLine(), playerNames: playerNameInfos }) })
+        editorView.dispatch({ effects: editorModule!.setStatements.of({ statements: stmtInfo, cursorLine: getCursorLine(), playerNames: playerNameInfos }) })
       }
       cursorLine = getCursorLine()
       players = playersMap
