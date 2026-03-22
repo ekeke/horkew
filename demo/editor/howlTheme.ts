@@ -53,4 +53,21 @@ export const howlThemeExtension: Extension = EditorView.theme({
   '.hw-wolf':     { color: red },
   '.hw-co':       { color: purple },
   '.hw-over':     { color: peach },
+
+  // Line-level backgrounds
+  '.hwl-lynch':    { backgroundColor: `${peach}10`, position: 'relative', paddingLeft: '1.5em !important' },
+  '.hwl-attack':   { backgroundColor: `${red}10`, position: 'relative', paddingLeft: '1.5em !important' },
+  '.hwl-curse':    { backgroundColor: `${purple}10`, position: 'relative', paddingLeft: '1.5em !important' },
+  '.hwl-follow':   { backgroundColor: `${overlay0}10`, position: 'relative', paddingLeft: '1.5em !important' },
+  '.hwl-peace':    { backgroundColor: `${green}10`, position: 'relative', paddingLeft: '1.5em !important' },
+  '.hwl-unknown':  { textDecoration: `wavy underline ${red}`, textUnderlineOffset: '3px', backgroundColor: `${red}20` },
+  '.hw-beyond-cursor': { opacity: '0.35' },
+  '.hw-player-resolved':   { textDecoration: `underline ${green}40`, textUnderlineOffset: '3px' },
+  '.hw-player-unresolved': { textDecoration: `wavy underline ${red}`, textUnderlineOffset: '3px', backgroundColor: `${red}18` },
+
+  // Gutter icons via ::before
+  '.hwl-lynch::before':  { content: '"⚔"', position: 'absolute', left: '0', width: '1.2em', textAlign: 'center' },
+  '.hwl-attack::before': { content: '"🐺"', position: 'absolute', left: '0', width: '1.2em', textAlign: 'center', fontSize: '0.85em' },
+  '.hwl-curse::before':  { content: '"💀"', position: 'absolute', left: '0', width: '1.2em', textAlign: 'center', fontSize: '0.85em' },
+  '.hwl-peace::before':  { content: '"☮"', position: 'absolute', left: '0', width: '1.2em', textAlign: 'center' },
 }, { dark: true })

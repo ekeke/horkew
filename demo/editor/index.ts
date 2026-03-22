@@ -5,7 +5,7 @@ import { howlLanguageExtension, setStatements, type StatementInfo } from './howl
 import { howlThemeExtension } from './howlTheme.ts'
 
 export { EditorView } from '@codemirror/view'
-export { setStatements, type StatementInfo } from './howlLanguage.ts'
+export { setStatements, type StatementInfo, type HighlightPayload, type PlayerNameInfo } from './howlLanguage.ts'
 
 export function createHowlEditor(parent: HTMLElement, opts: {
   doc: string

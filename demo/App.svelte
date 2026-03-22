@@ -14,7 +14,7 @@
   import HelpPanel from './HelpPanel.svelte'
   import { onOpenHelp } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
-  import { createHowlEditor, EditorView, setStatements, type StatementInfo } from './editor/index.ts'
+  import { createHowlEditor, EditorView, setStatements, type StatementInfo, type PlayerNameInfo } from './editor/index.ts'
 
   export type SourceLines = {
     survivor: Map<number, number>   // seat → line
@@ -383,6 +383,49 @@
     run()
   }
 
+  function extractPlayerNames(stmt: any): string[] {
+    switch (stmt.type) {
+      case 'vote': return [stmt.voter, stmt.target]
+      case 'multiVote': return [...stmt.voters, stmt.target]
+      case 'attack': return [...stmt.target]
+      case 'lynch': return stmt.target ? [stmt.target] : []
+      case 'curse': case 'follow': return [stmt.target]
+      case 'revote': return stmt.targets ?? []
+      case 'assert': {
+        const names = [stmt.actor]
+        for (const a of stmt.assertions ?? []) {
+          if (a.target) names.push(a.target)
+        }
+        return names
+      }
+      case 'mason': return stmt.players ?? []
+      case 'reveal': return [stmt.player]
+      default: return []
+    }
+  }
+
+  function buildPlayerNames(statements: any[], dict: FlexibleDictionary, doc: string): PlayerNameInfo[] {
+    const lines = doc.split('\n')
+    const result: PlayerNameInfo[] = []
+    for (const stmt of statements) {
+      const names = extractPlayerNames(stmt)
+      if (names.length === 0) continue
+      const lineIdx = stmt.line - 1
+      if (lineIdx < 0 || lineIdx >= lines.length) continue
+      const lineText = lines[lineIdx]
+      let searchFrom = 0
+      for (const name of names) {
+        if (!name) continue
+        const idx = lineText.indexOf(name, searchFrom)
+        if (idx === -1) continue
+        const resolved = dict.search(name).length > 0
+        result.push({ line: stmt.line, offset: idx, length: name.length, resolved })
+        searchFrom = idx + name.length
+      }
+    }
+    return result
+  }
+
   function buildSourceLines(statements: any[], dict: FlexibleDictionary): SourceLines {
     const survivor = new Map<number, number>()
     const claimRow = new Map<number, number>()
@@ -470,14 +513,15 @@
       parsedLines = stringifyStatements(statements)
       statementLines = statements.map((s: any) => s.line as number)
 
-      // Feed parse results to CM6 for syntax highlighting
-      if (editorView) {
-        const stmtInfo: StatementInfo[] = statements.map((s: any) => ({ type: s.type, line: s.line }))
-        editorView.dispatch({ effects: setStatements.of(stmtInfo) })
-      }
-
       const { vs, setup, players: playersMap, shortNames: shortNamesMap, dict } = buildVillageStatus(statements, meta)
       sourceLines = buildSourceLines(statements, dict)
+
+      // Feed parse results to CM6 for syntax highlighting (after buildVillageStatus so dict is available)
+      if (editorView) {
+        const stmtInfo: StatementInfo[] = statements.map((s: any) => ({ type: s.type, line: s.line }))
+        const playerNameInfos = buildPlayerNames(statements, dict, editorView.state.doc.toString())
+        editorView.dispatch({ effects: setStatements.of({ statements: stmtInfo, cursorLine: getCursorLine(), playerNames: playerNameInfos }) })
+      }
       cursorLine = getCursorLine()
       players = playersMap
       playerShortNames = shortNamesMap

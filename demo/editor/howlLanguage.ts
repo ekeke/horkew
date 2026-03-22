@@ -29,7 +29,8 @@
 //     vote, multiVote  → hwl-vote    (投票)
 //     attack           → hwl-attack  (夜襲撃)
 //     lynch            → hwl-lynch   (処刑)
-//     curse, follow    → hwl-attack  (道連れ/後追い — 夜イベントに準じる)
+//     curse            → hwl-curse   (道連れ)
+//     follow           → hwl-follow  (後追い)
 //     peace            → hwl-peace   (平和)
 //     revote           → hwl-revote  (再投票)
 //     over             → hwl-over    (ゲーム終了)
@@ -62,6 +63,22 @@
 //   - コメント行 (# で始まる行)          → hw-comment マーク
 //   - 空行                               → 装飾なし
 //
+// ## 実装済み機能
+//
+//   1. プレイヤー名マッチの可視化
+//      - PlayerNameInfo[] で解決済み/未解決のプレイヤー名位置をApp.svelteから送信
+//      - hw-player-resolved (薄い緑下線), hw-player-unresolved (赤波線) で表示
+//
+//   2. カーソル行以下のグレイアウト
+//      - HighlightPayloadにcursorLineを含め、カーソル行以下をhw-beyond-cursorで半透明化
+//
+//   3. unknown行の可視化強化
+//      - hwl-unknown行レベル装飾 + hwl-unknown-textマーク (波線+背景+ツールチップ)
+//
+//   4. 重要アクションのクラス分け・装飾
+//      - curse → hwl-curse, follow → hwl-follow に分離
+//      - lynch/attack/peace等に背景色 + CSS ::before アイコン
+//
 // ## StateField の更新戦略
 //
 //   - setStatements Effect受信時: buildDecorations()で全装飾を再構築
@@ -80,8 +97,21 @@ import * as V from '../../src/howl/vocabulary.ts'
 
 export type StatementInfo = { type: StatementType, line: number }
 
+export type PlayerNameInfo = {
+  line: number
+  offset: number
+  length: number
+  resolved: boolean
+}
+
+export type HighlightPayload = {
+  statements: StatementInfo[]
+  cursorLine: number
+  playerNames: PlayerNameInfo[]
+}
+
 /** App.svelteからパース結果を送信するためのStateEffect */
-export const setStatements = StateEffect.define<StatementInfo[]>()
+export const setStatements = StateEffect.define<HighlightPayload>()
 
 // ---- Inline token patterns (from vocabulary.ts) ----
 
@@ -102,6 +132,9 @@ const markDeco = {
   co:       Decoration.mark({ class: 'hw-co' }),
   comment:  Decoration.mark({ class: 'hw-comment' }),
   meta:     Decoration.mark({ class: 'hw-meta' }),
+  unknownText: Decoration.mark({ class: 'hwl-unknown-text', attributes: { title: 'この行はHowl記法として認識できません' } }),
+  playerResolved:   Decoration.mark({ class: 'hw-player-resolved' }),
+  playerUnresolved: Decoration.mark({ class: 'hw-player-unresolved' }),
 }
 
 // ---- Line decorations (行レベル・statement type別) ----
@@ -113,8 +146,8 @@ const lineDeco: Record<string, Decoration> = {
   multiVote: Decoration.line({ class: 'hwl-vote' }),
   attack:    Decoration.line({ class: 'hwl-attack' }),
   lynch:     Decoration.line({ class: 'hwl-lynch' }),
-  curse:     Decoration.line({ class: 'hwl-attack' }),
-  follow:    Decoration.line({ class: 'hwl-attack' }),
+  curse:     Decoration.line({ class: 'hwl-curse' }),
+  follow:    Decoration.line({ class: 'hwl-follow' }),
   peace:     Decoration.line({ class: 'hwl-peace' }),
   revote:    Decoration.line({ class: 'hwl-revote' }),
   over:      Decoration.line({ class: 'hwl-over' }),
@@ -123,6 +156,8 @@ const lineDeco: Record<string, Decoration> = {
   reveal:    Decoration.line({ class: 'hwl-reveal' }),
   unknown:   Decoration.line({ class: 'hwl-unknown' }),
 }
+
+const beyondCursorDeco = Decoration.line({ class: 'hw-beyond-cursor' })
 
 // ---- Helpers ----
 
@@ -154,6 +189,8 @@ function detectFrontmatterEnd(doc: string): number {
 
 function buildDecorations(
   statements: StatementInfo[],
+  cursorLine: number,
+  playerNames: PlayerNameInfo[],
   doc: { toString(): string, line(n: number): { from: number, to: number, text: string }, lines: number },
 ): DecorationSet {
   const text = doc.toString()
@@ -222,6 +259,30 @@ function buildDecorations(
         builder.push({ from: f, to: t, deco: markDeco.role })
       }
     }
+
+    // unknown: 行全体にツールチップ付きマーク
+    if (stmt.type === 'unknown' && line.to > line.from) {
+      builder.push({ from: line.from, to: line.to, deco: markDeco.unknownText })
+    }
+  }
+
+  // プレイヤー名のマッチ可視化
+  for (const pn of playerNames) {
+    if (pn.line < 1 || pn.line > doc.lines) continue
+    const line = doc.line(pn.line)
+    const from = line.from + pn.offset
+    const to = from + pn.length
+    if (from >= line.from && to <= line.to && to > from) {
+      builder.push({ from, to, deco: pn.resolved ? markDeco.playerResolved : markDeco.playerUnresolved })
+    }
+  }
+
+  // カーソル行以下のグレイアウト
+  if (cursorLine > 0 && cursorLine < doc.lines) {
+    for (let i = cursorLine + 1; i <= doc.lines; i++) {
+      const line = doc.line(i)
+      builder.push({ from: line.from, to: line.from, deco: beyondCursorDeco })
+    }
   }
 
   // DecorationSetは位置順でソートされている必要がある
@@ -244,7 +305,7 @@ const statementsField = StateField.define<DecorationSet>({
   update(decos, tr) {
     for (const e of tr.effects) {
       if (e.is(setStatements)) {
-        return buildDecorations(e.value, tr.state.doc)
+        return buildDecorations(e.value.statements, e.value.cursorLine, e.value.playerNames, tr.state.doc)
       }
     }
     if (tr.docChanged) {
