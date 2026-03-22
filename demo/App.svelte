@@ -230,6 +230,14 @@
     showHelp = false
   }
 
+  function exitTrialMode() {
+    trialMode = false
+    if (activeKey) {
+      input = loadText(activeKey)
+      setEditorContent(input)
+    }
+  }
+
   function switchTo(key: string) {
     if (trialMode) trialMode = false
     activeKey = key
@@ -720,18 +728,22 @@
     <span class="header-subtitle">人狼メモ・解析ツール</span>
     <span class="header-title" class:title-flash={titleFlash} onclick={onTitleTap}>Horkew</span>
 
-    <select class="header-select" value={trialMode ? '__trial__' : activeKey} onchange={onSelectChange}>
-      {#if entries.length === 0 && !trialMode}
+    {#if trialMode}
+    <span class="trial-banner">お試しモード</span>
+    <button class="header-btn trial-exit" onclick={exitTrialMode}>戻る</button>
+    {:else}
+    <select class="header-select" value={activeKey} onchange={onSelectChange}>
+      {#if entries.length === 0}
         <option value="">---</option>
       {:else}
         {#each entries as { key, entry }}
           <option value={key}>{displayName(entry)}</option>
         {/each}
       {/if}
-      <option value="__trial__">お試し</option>
+      <option disabled>──────────</option>
+      <option value="__trial__">お試しモード（保存なし）</option>
     </select>
 
-    {#if !trialMode}
     <button class="header-btn" onclick={deleteCurrent} disabled={!activeKey} title="Delete">Del</button>
     <button class="header-btn" onclick={openNewModal}>New</button>
     {/if}
@@ -1474,4 +1486,14 @@
     text-align: right;
   }
 
+  .trial-banner {
+    color: #f9e2af;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .trial-exit {
+    color: #f9e2af;
+    border-color: #f9e2af;
+  }
 </style>
