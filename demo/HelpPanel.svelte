@@ -51,6 +51,7 @@
           <ul>
             <li><a href="#help-notation-structure">ドキュメント構造</a></li>
             <li><a href="#help-notation-join">参加者の登録</a></li>
+            <li><a href="#help-notation-setup">配役</a></li>
             <li><a href="#help-notation-input-player-name">プレイヤー名の入力</a></li>
             <li><a href="#help-notation-assert">CO・主張</a>
               <ul>
@@ -183,6 +184,12 @@
 + "村中　秀史"（村中） むらなか</code></pre>
 
       <p>参加行は自動的に先頭に移動されるため、文中のどこに書いても構いません。</p>
+
+      <h3 id="help-notation-setup">配役</h3>
+      <p><code>@</code>（または <code>＠</code>）の後に、各役職の略称と人数を続けて記述します。</p>
+      <pre><code>@ 村6 占1 霊1 狩1 共2 狼3 狂1 狐1</code></pre>
+      <p>区切りにはスペース・<code>,</code>・<code>、</code> などが使えます。全角数字にも対応しています。</p>
+      <p>配役行も参加行と同様、文中のどこに書いても構いません。</p>
 
       <h3 id="help-notation-input-player-name">プレイヤー名の入力</h3>
       <p>登録済みの名前に対して、以下の順で柔軟に照合されます:</p>
