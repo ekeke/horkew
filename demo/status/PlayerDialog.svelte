@@ -1,9 +1,9 @@
 <script lang="ts">
   import type { SeatStatus, SystemRole, CauseOfDeath, VillageStatus } from '../../src/types/index.ts'
   import { systemRoles } from '../../src/types/index.ts'
-  import type { RetarResponse, SeatResult } from '../analysis.worker.ts'
+  import type { SeatResult } from '../analysis.worker.ts'
   import { extractVoteStatus, computeVerdicts } from './extract.ts'
-  import AnalysisWorker from '../analysis.worker.ts?worker'
+  import { runParallelAnalysis } from '../runAnalysis.ts'
 
   let { seat, name, status, vs, setup, players, onclose }: {
     seat: number
@@ -54,26 +54,18 @@
       ? [[seat, status.claimingRole as SystemRole]]
       : []
 
-    const worker = new AnalysisWorker()
-    worker.onmessage = (e: MessageEvent<RetarResponse>) => {
-      worker.terminate()
-      const data = e.data
+    const { promise } = runParallelAnalysis({
+      vs: serializeVs(vs) as any,
+      setup: [...setup],
+      players: [...players],
+      assumptions,
+    })
+    promise.then((data) => {
       if (data.type === 'error') {
         retarState = { type: 'error', message: data.message }
         return
       }
       retarState = { type: 'done', seats: data.seats }
-    }
-    worker.onerror = (e) => {
-      worker.terminate()
-      retarState = { type: 'error', message: e.message ?? 'Worker error' }
-    }
-
-    worker.postMessage({
-      vs: serializeVs(vs),
-      setup: [...setup],
-      players: [...players],
-      assumptions,
     })
   }
 

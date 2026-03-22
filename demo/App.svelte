@@ -4,9 +4,9 @@
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import { systemRoles } from '../src/types/index.ts'
   import { stringifyStatements, type StringifiedLine } from './stringify.ts'
-  import type { RetarResponse, SeatResult } from './analysis.worker.ts'
+  import type { SeatResult } from './analysis.worker.ts'
   import type { SystemRole, VillageStatus, CauseOfDeath } from '../src/types/index.ts'
-  import AnalysisWorker from './analysis.worker.ts?worker'
+  import { runParallelAnalysis, type AnalysisStats } from './runAnalysis.ts'
   import StatusPane from './status/StatusPane.svelte'
   import PlayerName from './status/PlayerName.svelte'
   import { findReason, findConfirmationReason } from '../src/gmork/index.ts'
@@ -133,6 +133,7 @@
   let analysisError = $state('')
   let analyzing = $state(false)
   let analysisDuration = $state(0)
+  let analysisStatsInfo = $state<AnalysisStats | null>(null)
   let analysisStart = 0
   let survivorInfo = $state({ alive: 0, total: 0 })
   let deadSeats: Set<number> = $state(new Set())
@@ -154,7 +155,7 @@
   let gmorkResult = $state('')
   let baseAnalysisSeats: SeatResult[] = []
   let currentSetup: Map<SystemRole, number> = $state(new Map())
-  let worker: Worker | null = null
+  let abortAnalysis: (() => void) | null = null
   let skin: Skin = $state(settings.skin)
   let devMode = $state(settings.devMode)
   let debugMode = $state(settings.debug)
@@ -572,8 +573,9 @@
   }
 
   function run() {
-    if (worker) {
-      worker.terminate()
+    if (abortAnalysis) {
+      abortAnalysis()
+      abortAnalysis = null
     }
 
     analysisSeats = []
@@ -636,31 +638,24 @@
 
       analyzing = true
       analysisStart = performance.now()
-      worker = new AnalysisWorker()
-      worker.onmessage = (e: MessageEvent<RetarResponse>) => {
+      const { promise, abort } = runParallelAnalysis(workerPayload)
+      abortAnalysis = abort
+      promise.then((data) => {
         analyzing = false
         analysisDuration = Math.round(performance.now() - analysisStart)
-        const data = e.data
+        abortAnalysis = null
         if (data.type === 'result') {
           analysisSeats = data.seats
           analysisError = ''
+          analysisStatsInfo = data.stats
           if (assumptions.size === 0) baseAnalysisSeats = data.seats
         } else {
           analysisSeats = []
           analysisError = data.message
+          analysisStatsInfo = null
           gmorkResult = ''
         }
-        worker?.terminate()
-        worker = null
-      }
-      worker.onerror = (e) => {
-        analyzing = false
-        analysisSeats = []
-        analysisError = `Worker error: ${e.message}`
-        worker?.terminate()
-        worker = null
-      }
-      worker.postMessage(workerPayload)
+      })
     } catch (e: any) {
       analysisSeats = []
       analysisError = e.message
@@ -775,7 +770,7 @@
                 </tbody>
               </table>
               {#if analysisDuration > 0}
-                <div class="analysis-duration">analysed in {analysisDuration}ms</div>
+                <div class="analysis-duration">analysed in {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms){/if}</div>
               {/if}
             </div>
             {#if gmorkResult}

@@ -6,6 +6,8 @@ export type RetarRequest = {
   setup: [SystemRole, number][]
   players: [number, string][]
   assumptions: [number, SystemRole][]
+  batches?: number
+  batch?: number
 }
 
 export type SeatResult = {
@@ -14,7 +16,7 @@ export type SeatResult = {
 }
 
 export type RetarResponse =
-  | { type: 'result'; seats: SeatResult[] }
+  | { type: 'result'; seats: SeatResult[]; elapsed: number }
   | { type: 'error'; message: string }
 
 self.onmessage = (e: MessageEvent<RetarRequest>) => {
@@ -46,8 +48,8 @@ self.onmessage = (e: MessageEvent<RetarRequest>) => {
       assumptions: new Map(e.data.assumptions ?? []),
       hocusPocus: new Map(),
       id: 0,
-      batches: 1,
-      batch: 0,
+      batches: e.data.batches ?? 1,
+      batch: e.data.batch ?? 0,
     }
 
     const retar = new VillageRetar(vs, setup, options)
@@ -60,7 +62,7 @@ self.onmessage = (e: MessageEvent<RetarRequest>) => {
       }
     }
 
-    self.postMessage({ type: 'result', seats } satisfies RetarResponse)
+    self.postMessage({ type: 'result', seats, elapsed: result.elapsed ?? 0 } satisfies RetarResponse)
   } catch (e: any) {
     self.postMessage({ type: 'error', message: e.message } satisfies RetarResponse)
   }
