@@ -54,14 +54,15 @@ export function requestAnalysis(payload: AnalysisPayload, callback: SchedulerCal
   if (state === 'idle') {
     dispatch(payload, callback)
   } else {
-    pending = payload
-    currentCallback = callback
     if (signal) {
       // SAB: cooperative abort — workers check signal and return early
+      pending = payload
+      currentCallback = callback
       Atomics.store(signal, 0, 1)
     } else {
-      // No SAB: terminate and recreate pool so pending runs immediately
+      // No SAB: terminate workers and dispatch new request immediately
       destroyPool()
+      dispatch(payload, callback)
     }
   }
 }
