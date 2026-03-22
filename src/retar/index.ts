@@ -379,7 +379,7 @@ export class VillageRetar {
 
   private walkRoleTests(depth: number, baseIndex: number = 0): void {
     if (depth >= this.roleTests.length) {
-      this.tryFinalize()
+      if (!this.isAborted()) this.tryFinalize()
       return
     }
 
@@ -398,6 +398,7 @@ export class VillageRetar {
 
       if (result) {
         this.walkRoleTests(depth + 1, myIndex)
+        if (this.isAborted()) { restoreContext(this.context, snapshot); return }
       }
 
       restoreContext(this.context, snapshot)
@@ -425,6 +426,7 @@ export class VillageRetar {
       const snapshot = saveContext(this.context)
       VARIATION:
       for ( const variation of generateCombinations(this.context.requireOneOf)) {
+        if (this.isAborted()) break
         restoreContext(this.context, snapshot)
         for ( const {seat, role} of variation ) {
           if ( ! this.context.possibilities.fixRole(seat, role) ) {
