@@ -205,6 +205,7 @@
     onStartTrial(handleStartTrial)
     const hash = location.hash.slice(1)
     if (hash.startsWith('help-')) doOpenHelp(hash)
+    if (!activeKey) handleStartTrial(TUTORIAL_TEXT)
   })
 
   $effect(() => {
