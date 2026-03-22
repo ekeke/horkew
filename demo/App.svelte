@@ -730,7 +730,7 @@
 
     {#if trialMode}
     <span class="trial-banner">お試しモード</span>
-    <button class="header-btn trial-exit" onclick={exitTrialMode}>戻る</button>
+    {#if activeKey}<button class="header-btn trial-exit" onclick={exitTrialMode}>戻る</button>{/if}
     {:else}
     <select class="header-select" value={activeKey} onchange={onSelectChange}>
       {#if entries.length === 0}
