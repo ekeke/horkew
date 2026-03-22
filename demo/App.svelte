@@ -30,16 +30,14 @@
   ])
 
   const STORAGE_PREFIX = 'horkew:'
-  const ACTIVE_KEY = 'horkew:__active__'
-  const PANES_KEY = 'horkew:__panes__'
-  const SKIN_KEY = 'horkew:__skin__'
-  const DEBUG_KEY = 'horkew:__debug__'
+  const SETTINGS_KEY = 'horkew:__settings__'
 
   type Skin = 'flat' | 'excite'
 
   const paneEntries = [
     { id: 'rawStatements', label: 'Raw Statements' },
     { id: 'parsed', label: 'Parsed' },
+    { id: 'combined', label: 'Combined' },
     { id: 'status', label: 'Status' },
     { id: 'analyzerInput', label: 'Analyzer Input' },
     { id: 'analysis', label: 'Analysis' },
@@ -47,24 +45,60 @@
 
   type PaneId = typeof paneEntries[number]['id']
 
-  function loadPaneVisibility(): Record<PaneId, boolean> {
-    const defaults: Record<PaneId, boolean> = { rawStatements: true, parsed: true, status: true, analyzerInput: true, analysis: true }
+  interface Settings {
+    active: string
+    skin: Skin
+    devMode: boolean
+    debug: boolean
+    panes: Record<PaneId, boolean>
+  }
+
+  const defaultPanes: Record<PaneId, boolean> = { rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true }
+
+  function loadSettings(): Settings {
+    const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: false, panes: { ...defaultPanes } }
     try {
-      const stored = localStorage.getItem(PANES_KEY)
-      if (stored) return { ...defaults, ...JSON.parse(stored) }
+      const stored = localStorage.getItem(SETTINGS_KEY)
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        return { ...defaults, ...parsed, panes: { ...defaultPanes, ...parsed.panes } }
+      }
     } catch {}
+    // migrate from legacy individual keys
+    const legacyKeys = ['__active__', '__panes__', '__skin__', '__debug__'] as const
+    const hasLegacy = legacyKeys.some(k => localStorage.getItem(STORAGE_PREFIX + k) !== null)
+    if (hasLegacy) {
+      const s: Settings = { ...defaults }
+      s.active = localStorage.getItem(STORAGE_PREFIX + '__active__') ?? ''
+      s.skin = (localStorage.getItem(STORAGE_PREFIX + '__skin__') as Skin) ?? 'flat'
+      s.debug = localStorage.getItem(STORAGE_PREFIX + '__debug__') === 'true'
+      try {
+        const p = localStorage.getItem(STORAGE_PREFIX + '__panes__')
+        if (p) s.panes = { ...defaultPanes, ...JSON.parse(p) }
+      } catch {}
+      for (const k of legacyKeys) localStorage.removeItem(STORAGE_PREFIX + k)
+      saveSettings(s)
+      return s
+    }
     return defaults
   }
 
-  function savePaneVisibility(v: Record<PaneId, boolean>) {
-    localStorage.setItem(PANES_KEY, JSON.stringify(v))
+  function saveSettings(s: Settings) {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
+  }
+
+  let settings = loadSettings()
+
+  function updateSettings(patch: Partial<Settings>) {
+    Object.assign(settings, patch)
+    saveSettings(settings)
   }
 
   function savedKeys(): string[] {
     const keys: string[] = []
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)!
-      if (k.startsWith(STORAGE_PREFIX) && k !== ACTIVE_KEY && k !== PANES_KEY) {
+      if (k.startsWith(STORAGE_PREFIX) && k !== SETTINGS_KEY) {
         keys.push(k.slice(STORAGE_PREFIX.length))
       }
     }
@@ -77,18 +111,18 @@
 
   function saveText(title: string, text: string) {
     localStorage.setItem(STORAGE_PREFIX + title, text)
-    localStorage.setItem(ACTIVE_KEY, title)
+    updateSettings({ active: title })
   }
 
   function deleteText(title: string) {
     localStorage.removeItem(STORAGE_PREFIX + title)
-    if (localStorage.getItem(ACTIVE_KEY) === title) {
-      localStorage.removeItem(ACTIVE_KEY)
+    if (settings.active === title) {
+      updateSettings({ active: '' })
     }
   }
 
   let titles = $state(savedKeys())
-  let activeTitle = $state(localStorage.getItem(ACTIVE_KEY) ?? '')
+  let activeTitle = $state(settings.active)
   let input = $state(activeTitle ? loadText(activeTitle) : '')
   let rawStatements = $state('')
   let analyzerJson = $state('')
@@ -119,9 +153,10 @@
   let baseAnalysisSeats: SeatResult[] = []
   let currentSetup: Map<SystemRole, number> = $state(new Map())
   let worker: Worker | null = null
-  let skin: Skin = $state((localStorage.getItem(SKIN_KEY) as Skin) ?? 'flat')
-  let debugMode = $state(localStorage.getItem(DEBUG_KEY) === 'true')
-  let paneVisible: Record<PaneId, boolean> = $state(loadPaneVisibility())
+  let skin: Skin = $state(settings.skin)
+  let devMode = $state(settings.devMode)
+  let debugMode = $state(settings.debug)
+  let paneVisible: Record<PaneId, boolean> = $state(settings.panes)
   let showPaneMenu = $state(false)
   let showModal = $state(false)
   let showHelp = $state(false)
@@ -163,7 +198,7 @@
     activeTitle = title
     input = loadText(title)
     setEditorContent(input)
-    localStorage.setItem(ACTIVE_KEY, title)
+    updateSettings({ active: title })
     rawStatements = ''
     parsedLines = []
     analysisSeats = []
@@ -213,7 +248,7 @@
     } else {
       activeTitle = ''
       input = ''
-      localStorage.removeItem(ACTIVE_KEY)
+      updateSettings({ active: '' })
     }
     rawStatements = ''
     analyzerJson = ''
@@ -231,7 +266,26 @@
 
   function togglePane(id: PaneId) {
     paneVisible[id] = !paneVisible[id]
-    savePaneVisibility(paneVisible)
+    updateSettings({ panes: paneVisible })
+  }
+
+  const DEV_TAP_COUNT = 7
+  const DEV_TAP_WINDOW = 3000
+  let devTaps: number[] = []
+  let titleFlash = $state(false)
+
+  function onTitleTap() {
+    const now = Date.now()
+    devTaps = devTaps.filter(t => now - t < DEV_TAP_WINDOW)
+    devTaps.push(now)
+    if (devTaps.length >= DEV_TAP_COUNT) {
+      devTaps = []
+      devMode = !devMode
+      if (!devMode) debugMode = false
+      updateSettings({ devMode, debug: debugMode })
+      titleFlash = true
+      setTimeout(() => titleFlash = false, 600)
+    }
   }
 
   function onModalKeydown(e: KeyboardEvent) {
@@ -613,7 +667,7 @@
 
 <div class="layout skin-{skin}">
   <header class="header">
-    <span class="header-title">Horkew</span>
+    <span class="header-title" class:title-flash={titleFlash} onclick={onTitleTap}>Horkew</span>
 
     <select class="header-select" value={activeTitle} onchange={onSelectChange} disabled={titles.length === 0}>
       {#if titles.length === 0}
@@ -631,7 +685,8 @@
 
     <div class="header-spacer"></div>
 
-    <select class="header-select skin-select" value={skin} onchange={(e) => { skin = (e.target as HTMLSelectElement).value as Skin; localStorage.setItem(SKIN_KEY, skin) }}>
+    {#if devMode}
+    <select class="header-select skin-select" value={skin} onchange={(e) => { skin = (e.target as HTMLSelectElement).value as Skin; updateSettings({ skin }) }}>
       <option value="flat">Flat</option>
       <option value="excite">Excite</option>
     </select>
@@ -639,8 +694,9 @@
     <button
       class="header-btn debug-btn"
       class:debug-on={debugMode}
-      onclick={() => { debugMode = !debugMode; localStorage.setItem(DEBUG_KEY, String(debugMode)) }}
+      onclick={() => { debugMode = !debugMode; updateSettings({ debug: debugMode }) }}
     >{debugMode ? 'DEBUG ON' : 'DEBUG OFF'}</button>
+    {/if}
 
     {#if debugMode}
     <div class="pane-menu-wrap">
@@ -758,6 +814,22 @@
     </section>
     {/if}
 
+    {#if paneVisible.combined}
+    <section class="pane pane-combined">
+      <div class="pane-header">Combined</div>
+      <div class="pane-body">
+        <div class="prod-right">
+          <div class="prod-right-top">
+            {@render statusPane()}
+          </div>
+          <div class="prod-right-bottom">
+            {@render analysisPane()}
+          </div>
+        </div>
+      </div>
+    </section>
+    {/if}
+
     {#if paneVisible.status}
     {@render statusPane()}
     {/if}
@@ -854,6 +926,18 @@
     font-size: 14px;
     color: #cba6f7;
     margin-right: 0.5rem;
+    cursor: default;
+    user-select: none;
+  }
+
+  .header-title.title-flash {
+    animation: title-flash 0.6s ease-out;
+  }
+
+  @keyframes title-flash {
+    0%   { color: #cba6f7; text-shadow: none; }
+    30%  { color: #fff; text-shadow: 0 0 12px #cba6f7, 0 0 24px #89b4fa; }
+    100% { color: #cba6f7; text-shadow: none; }
   }
 
   .header-spacer {
@@ -977,6 +1061,18 @@
   }
 
   .panes-prod .pane-header {
+    display: none;
+  }
+
+  .pane-combined .pane-body {
+    overflow: hidden;
+  }
+
+  .pane-combined .pane-body > .prod-right {
+    height: 100%;
+  }
+
+  .pane-combined .pane-header ~ .pane-body .pane-header {
     display: none;
   }
 
