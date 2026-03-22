@@ -12,7 +12,7 @@
   import { findReason, findConfirmationReason } from '../src/gmork/index.ts'
   import { formatReason, formatConfirmationReason } from '../src/gmork/format.ts'
   import HelpPanel from './HelpPanel.svelte'
-  import { onOpenHelp } from './help.ts'
+  import { onOpenHelp, onStartTrial } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
   import type { EditorView } from '@codemirror/view'
   import type { StatementInfo, PlayerNameInfo } from './editor/howlLanguage.ts'
@@ -191,6 +191,9 @@
   let editorView: EditorView | undefined = $state()
   let rawBodyEl: HTMLElement | undefined = $state()
   let helpPanel: HelpPanel | undefined = $state()
+  let trialMode = $state(false)
+  let trialPreviousKey = $state('')
+  let trialPreviousInput = $state('')
 
   function doOpenHelp(sectionId?: string) {
     showHelp = true
@@ -201,12 +204,13 @@
 
   onMount(() => {
     onOpenHelp(doOpenHelp)
+    onStartTrial(handleStartTrial)
     const hash = location.hash.slice(1)
     if (hash.startsWith('help-')) doOpenHelp(hash)
   })
 
   $effect(() => {
-    if (activeKey && input !== undefined) {
+    if (activeKey && input !== undefined && !trialMode) {
       saveText(activeKey, input)
     }
   })
@@ -221,7 +225,28 @@
     }
   }
 
+  function handleStartTrial(text: string) {
+    trialPreviousKey = activeKey
+    trialPreviousInput = input
+    trialMode = true
+    input = text
+    setEditorContent(text)
+    showHelp = false
+  }
+
+  function exitTrialMode() {
+    trialMode = false
+    if (trialPreviousKey) {
+      activeKey = trialPreviousKey
+      input = trialPreviousInput
+      setEditorContent(input)
+    }
+    trialPreviousKey = ''
+    trialPreviousInput = ''
+  }
+
   function switchTo(key: string) {
+    if (trialMode) trialMode = false
     activeKey = key
     input = loadText(key)
     setEditorContent(input)
@@ -706,6 +731,10 @@
     <span class="header-subtitle">人狼メモ・解析ツール</span>
     <span class="header-title" class:title-flash={titleFlash} onclick={onTitleTap}>Horkew</span>
 
+    {#if trialMode}
+    <span class="trial-banner">お試しモード</span>
+    <button class="header-btn trial-exit" onclick={exitTrialMode}>戻る</button>
+    {:else}
     <select class="header-select" value={activeKey} onchange={onSelectChange} disabled={entries.length === 0}>
       {#if entries.length === 0}
         <option value="">---</option>
@@ -719,6 +748,7 @@
     <button class="header-btn" onclick={deleteCurrent} disabled={!activeKey} title="Delete">Del</button>
 
     <button class="header-btn" onclick={openNewModal}>New</button>
+    {/if}
 
     <div class="header-spacer"></div>
 
@@ -760,7 +790,7 @@
     <section class="pane">
       <div class="pane-header">Input</div>
       <div class="pane-body pane-body-input">
-        {#if activeKey}
+        {#if activeKey || trialMode}
           <div class="input-editor" bind:this={editorParent}></div>
         {:else}
           <div class="pane-placeholder"><span>New ボタンから開始してください</span></div>
@@ -1456,5 +1486,16 @@
     font-size: 10px;
     color: #585b70;
     text-align: right;
+  }
+
+  .trial-banner {
+    color: #f9e2af;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .trial-exit {
+    color: #f9e2af;
+    border-color: #f9e2af;
   }
 </style>
