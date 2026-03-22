@@ -49,6 +49,13 @@ export type AnalyzeOptions = {
 
 const HumanRoles: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'possessed', 'fanatic', 'immoralist', 'werehamster']
 
+// Check if a subtree rooted at `start` with `size` paths contains any path for `batch`
+function subtreeContainsBatch(start: number, size: number, batches: number, batch: number): boolean {
+  if (size >= batches) return true
+  const offset = ((batch - start % batches) % batches + batches) % batches
+  return offset < size
+}
+
 // AnalyzeContext and RoleTesterEnv types are defined in roleTesters.ts
 
 export class VillageRetar {
@@ -75,6 +82,8 @@ export class VillageRetar {
 
   // 世界線ベースの解析プラン
   roleTests: RoleTest[][] = []
+  // Strides for flat-index batch distribution across depths
+  private strides: number[] = []
 
   // この村の役職の集合
   setOfRoles: Set<SystemRole>
@@ -128,6 +137,15 @@ export class VillageRetar {
       lastHamsterMustDieAt: this.lastHamsterMustDieAt,
       lastHamsterMustDiedBy: this.lastHamsterMustDiedBy,
       dayCountFrom: this.options.dayCountFrom,
+    }
+
+    // Compute strides for flat-index batch splitting
+    if (this.roleTests.length > 0) {
+      this.strides = new Array(this.roleTests.length)
+      this.strides[this.roleTests.length - 1] = 1
+      for (let d = this.roleTests.length - 2; d >= 0; d--) {
+        this.strides[d] = this.strides[d + 1] * this.roleTests[d + 1].length
+      }
     }
 
     this.cachedSurvivors = Array.from(village.statuses.keys()).filter(seat => village.statuses.get(seat)!.surviving)
@@ -359,24 +377,27 @@ export class VillageRetar {
     this.walkRoleTests(0)
   }
 
-  private walkRoleTests(depth: number): void {
+  private walkRoleTests(depth: number, baseIndex: number = 0): void {
     if (depth >= this.roleTests.length) {
       this.tryFinalize()
       return
     }
 
     const group = this.roleTests[depth]
+    const stride = this.strides[depth]
+    const { batches, batch } = this.options
     for (let i = 0; i < group.length; i++) {
       if (this.isAborted()) return
 
-      // Batch filtering at depth 0
-      if (depth === 0 && i % this.options.batches !== this.options.batch) continue
+      const myIndex = baseIndex + i * stride
+      // Skip subtrees that contain no paths for this batch
+      if (batches > 1 && !subtreeContainsBatch(myIndex, stride, batches, batch)) continue
 
       const snapshot = saveContext(this.context)
       const result = this.testRole(group[i])
 
       if (result) {
-        this.walkRoleTests(depth + 1)
+        this.walkRoleTests(depth + 1, myIndex)
       }
 
       restoreContext(this.context, snapshot)
