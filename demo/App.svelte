@@ -132,6 +132,8 @@
   let analysisColumns: SystemRole[] = $state([])
   let analysisError = $state('')
   let analyzing = $state(false)
+  let analysisDuration = $state(0)
+  let analysisStart = 0
   let survivorInfo = $state({ alive: 0, total: 0 })
   let deadSeats: Set<number> = $state(new Set())
   let nightKilledSeats: Set<number> = $state(new Set())
@@ -633,9 +635,11 @@
       , 2)
 
       analyzing = true
+      analysisStart = performance.now()
       worker = new AnalysisWorker()
       worker.onmessage = (e: MessageEvent<RetarResponse>) => {
         analyzing = false
+        analysisDuration = Math.round(performance.now() - analysisStart)
         const data = e.data
         if (data.type === 'result') {
           analysisSeats = data.seats
@@ -770,6 +774,9 @@
                   {/each}
                 </tbody>
               </table>
+              {#if analysisDuration > 0}
+                <div class="analysis-duration">analysed in {analysisDuration}ms</div>
+              {/if}
             </div>
             {#if gmorkResult}
               <div class="gmork-results">{gmorkResult}</div>
@@ -1253,7 +1260,7 @@
   .analysis-table-wrap {
     flex: 0 0 auto;
     overflow: auto;
-    padding: 8px;
+    padding: 2px;
   }
 
   .analysis-table {
@@ -1340,5 +1347,12 @@
     font-size: 13px;
     color: #a6adc8;
     white-space: pre-wrap;
+  }
+
+  .analysis-duration {
+    padding: 2px;
+    font-size: 10px;
+    color: #585b70;
+    text-align: right;
   }
 </style>
