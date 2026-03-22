@@ -2,15 +2,16 @@ import type { SystemRole, Seat } from '../types/index.ts'
 import {
   Possibilities,
   RoleSignatureBits,
-  RoleSignatureBitsReverseMap,
   popCount,
-  possibilityFromSet,
-  rolesFromPossibility,
-  combinationWithReplacementInLimit,
+  combinationWithReplacementBit,
+  bitIndicesFromMask,
+  RoleBitIndex,
+  ROLE_COUNT,
 } from './possibilities.ts'
 import type { RolePossibility } from './possibilities.ts'
 
-type RoleCount = { [key in SystemRole]?: number }
+const WOLF_BIT = RoleBitIndex['werewolf']
+const HAMSTER_BIT = RoleBitIndex['werehamster']
 
 /*
  * Solver configuration — immutable across recursion.
@@ -38,14 +39,16 @@ type SolverConfig = {
  *
  * The solver writes valid role possibilities into `config.conclusion` via bitwise OR,
  * accumulating the union of all valid assignments.
+ *
+ * roleCount: Uint8Array[ROLE_COUNT] indexed by bit position (0=villager, ..., 10=immoralist)
  */
 function backtrackForRoleAssignment(
   config: SolverConfig,
-  roleCount: RoleCount,
+  roleCount: Uint8Array,
   index: number,
   selectedWolves: number,
   selectedHamsters: number,
-  path: [Seat[], RoleCount][],
+  path: [number[], Uint8Array][],
   all: boolean,
 ): boolean {
   const item = config.items[index]
@@ -56,7 +59,7 @@ function backtrackForRoleAssignment(
     if (selectedHamsters < config.hamstersRange[0]) return false
     const res = backtrackForRoleAssignment(
       config,
-      Object.assign({}, roleCount),
+      new Uint8Array(roleCount),
       index + 1,
       selectedWolves,
       selectedHamsters,
@@ -64,7 +67,11 @@ function backtrackForRoleAssignment(
       false,
     )
     if (!res) return false
-    const filterForDeads = possibilityFromSet(new Set(Object.keys(roleCount).filter(k => roleCount[k as SystemRole]! > 0) as SystemRole[]))
+    // Build bitmask of roles with remaining count > 0
+    let filterForDeads = 0
+    for (let i = 0; i < ROLE_COUNT; i++) {
+      if (roleCount[i] > 0) filterForDeads |= (1 << i)
+    }
     // Collect dead seat entries with filtered possibilities
     const deadEntries: [RolePossibility, number[]][] = []
     for (let i = index + 1; i < config.items.length; i++) {
@@ -76,15 +83,15 @@ function backtrackForRoleAssignment(
     // Propagate constraints among dead seats:
     // If a group has only one possible role and that role's remaining count
     // equals the group size, remove that role from all other groups
-    const deadRoleCount = Object.assign({}, roleCount)
+    const deadRoleCount = new Uint8Array(roleCount)
     let changed = true
     while (changed) {
       changed = false
       for (const entry of deadEntries) {
         if (popCount(entry[0]) === 1) {
-          const role = RoleSignatureBitsReverseMap.get(entry[0])!
-          if ((deadRoleCount[role] ?? 0) > 0 && deadRoleCount[role] === entry[1].length) {
-            deadRoleCount[role] = 0
+          const bitIdx = 31 - Math.clz32(entry[0])
+          if (deadRoleCount[bitIdx] > 0 && deadRoleCount[bitIdx] === entry[1].length) {
+            deadRoleCount[bitIdx] = 0
             for (const other of deadEntries) {
               if (other === entry) continue
               const before = other[0]
@@ -96,9 +103,9 @@ function backtrackForRoleAssignment(
       }
       // Also check: if a role's remaining count is fully consumed by
       // groups that must include it, remove it from other groups
-      for (const [roleStr, count] of Object.entries(deadRoleCount)) {
-        if (count as number <= 0) continue
-        const roleBit = RoleSignatureBits[roleStr as SystemRole]
+      for (let bitIdx = 0; bitIdx < ROLE_COUNT; bitIdx++) {
+        if (deadRoleCount[bitIdx] <= 0) continue
+        const roleBit = 1 << bitIdx
         let totalSeats = 0
         const mustHaveGroups: typeof deadEntries = []
         for (const entry of deadEntries) {
@@ -107,7 +114,7 @@ function backtrackForRoleAssignment(
             mustHaveGroups.push(entry)
           }
         }
-        if (totalSeats === count) {
+        if (totalSeats === deadRoleCount[bitIdx]) {
           for (const entry of mustHaveGroups) {
             if (entry[0] !== roleBit) {
               entry[0] = roleBit
@@ -123,11 +130,12 @@ function backtrackForRoleAssignment(
       }
     }
     for (const p of path) {
-      const [seats, roles] = p
-      for (const [role, count] of Object.entries(roles)) {
-        if (count === 0) continue
+      const [seats, counts] = p
+      for (let i = 0; i < ROLE_COUNT; i++) {
+        if (counts[i] === 0) continue
+        const bit = 1 << i
         for (const seat of seats) {
-          config.conclusion.possibilities[seat] |= RoleSignatureBits[role as SystemRole]
+          config.conclusion.possibilities[seat] |= bit
         }
       }
     }
@@ -139,14 +147,15 @@ function backtrackForRoleAssignment(
   else if (index === config.items.length - 1) {
     // Last element: check remaining role counts match seat count
     let count = 0
-    for (const [_role, num] of Object.entries(roleCount)) {
-      count += num as number
+    let sub = 0
+    for (let i = 0; i < ROLE_COUNT; i++) {
+      if (roleCount[i] > 0) {
+        count += roleCount[i]
+        sub |= (1 << i)
+      }
     }
-    const keys = Object.keys(roleCount).filter(k => roleCount[k as SystemRole]! > 0) as SystemRole[]
-    const set = new Set(keys)
-    const sub = possibilityFromSet(set)
-    const last = (item as [RolePossibility, number[]])[0]
-    if ((item as [RolePossibility, number[]])[1].length !== count) {
+    const [last, seats] = item as [RolePossibility, number[]]
+    if (seats.length !== count) {
       return false
     }
     if ((last & sub) !== sub) {
@@ -156,30 +165,32 @@ function backtrackForRoleAssignment(
   }
 
   const [set, seats] = item as [RolePossibility, number[]]
-  const roles = rolesFromPossibility(set)
+  const indices = bitIndicesFromMask(set)
   let oneOK = false
-  for (const v of combinationWithReplacementInLimit(roles, seats.length, roleCount)) {
+  for (const v of combinationWithReplacementBit(indices, seats.length, roleCount)) {
     let ok = true
-    for (const [role, count] of Object.entries(v)) {
-      if (roleCount[role as SystemRole]! < (count as number)) ok = false
-      roleCount[role as SystemRole] = roleCount[role as SystemRole]! - (count as number)
+    for (const idx of indices) {
+      if (v[idx] === 0) continue
+      if (roleCount[idx] < v[idx]) ok = false
+      roleCount[idx] -= v[idx]
     }
-    path.push([seats, v as RoleCount])
+    path.push([seats, new Uint8Array(v)])
     if (ok) {
       const res = backtrackForRoleAssignment(
         config,
         roleCount,
         index + 1,
-        selectedWolves + ((v as any)['werewolf'] || 0),
-        selectedHamsters + ((v as any)['werehamster'] || 0),
+        selectedWolves + v[WOLF_BIT],
+        selectedHamsters + v[HAMSTER_BIT],
         path,
         all,
       )
       if (res && !all) return true
       if (res) oneOK = true
     }
-    for (const [role, count] of Object.entries(v)) {
-      roleCount[role as SystemRole] = roleCount[role as SystemRole]! + (count as number)
+    for (const idx of indices) {
+      if (v[idx] === 0) continue
+      roleCount[idx] += v[idx]
     }
     path.pop()
   }
@@ -253,9 +264,15 @@ export function solvePossibilities(
     hamstersRange: [fixedDiedHamsters + minSurvivingHamsters, fixedDiedHamsters + maxSurvivingHamsters],
   }
 
+  // Build initial roleCount as Uint8Array from setup
+  const roleCount = new Uint8Array(ROLE_COUNT)
+  for (const [role, count] of setup) {
+    roleCount[RoleBitIndex[role]] = count
+  }
+
   const res = backtrackForRoleAssignment(
     config,
-    Object.fromEntries(setup),
+    roleCount,
     0, 0, 0, [], true,
   )
   if (!res) return undefined

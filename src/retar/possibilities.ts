@@ -21,6 +21,24 @@ export const RoleSignatureBitsReverseMap: Map<number, SystemRole> = new Map(
   Object.entries(RoleSignatureBits).map(([role, bit]) => [bit, role as SystemRole])
 )
 
+export const ROLE_COUNT = 11
+
+// Bit position index for each role (villager=0, seer=1, ..., immoralist=10)
+export const RoleBitIndex: { [role in SystemRole]: number } = {
+  villager: 0, seer: 1, medium: 2, bodyguard: 3, mason: 4,
+  nekomata: 5, werewolf: 6, possessed: 7, fanatic: 8,
+  werehamster: 9, immoralist: 10,
+}
+
+// Extract set bit indices from a bitmask
+export function bitIndicesFromMask(mask: number): number[] {
+  const result: number[] = []
+  for (let i = 0; mask !== 0; i++, mask >>>= 1) {
+    if (mask & 1) result.push(i)
+  }
+  return result
+}
+
 const AllRoles: RolePossibility
   = Object.values(RoleSignatureBits).reduce((acc, cur) => acc | cur, 0)
 
@@ -132,6 +150,33 @@ export function* combinationWithReplacementInLimit<T extends string>(
       delete result[role]
     }
     left++
+  }
+}
+
+// Uint8Array-based version for solver hot path.
+// indices: bit positions (from bitIndicesFromMask). limits: Uint8Array[ROLE_COUNT].
+// Yields into a shared result buffer — caller must consume before next iteration.
+export function* combinationWithReplacementBit(
+  indices: number[],
+  k: number,
+  limits: Uint8Array,
+  left: number = 0,
+  result: Uint8Array = new Uint8Array(ROLE_COUNT),
+): Generator<Uint8Array> {
+  if (k <= 0) {
+    yield result
+    return
+  }
+  if (left >= indices.length) return
+  for (let l = left; l < indices.length; l++) {
+    const idx = indices[l]
+    if (!limits[idx]) continue
+    const max = Math.min(k, limits[idx])
+    for (let count = 1; count <= max; count++) {
+      result[idx] = count
+      yield* combinationWithReplacementBit(indices, k - count, limits, l + 1, result)
+      result[idx] = 0
+    }
   }
 }
 
