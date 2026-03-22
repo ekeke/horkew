@@ -286,6 +286,7 @@
   }
 
   function createFromPreset(preset: Preset) {
+    if (trialMode) trialMode = false
     const trimmed = newTitle.trim()
     const key = trimmed || ('_' + Date.now().toString(36))
     const now = Date.now()
@@ -732,6 +733,7 @@
     {#if trialMode}
     <span class="trial-banner">お試しモード</span>
     {#if activeKey}<button class="header-btn trial-exit" onclick={exitTrialMode}>戻る</button>{/if}
+    <button class="header-btn" onclick={openNewModal}>New</button>
     {:else}
     <select class="header-select" value={activeKey} onchange={onSelectChange}>
       {#if entries.length === 0}
