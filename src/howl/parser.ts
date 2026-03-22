@@ -18,6 +18,7 @@ import { FlexibleDictionary } from './flexibleDictionary.ts'
 
 export type ParseOptions = {
   rules?: Record<string, any>
+  cursorLine?: number
 }
 
 function collectExplicitVoters(round: Statement[]): Set<string> {
@@ -331,7 +332,7 @@ function applySetupStatements(meta: any, statements: Statement[]): Statement[] {
 }
 
 export function parse(text: string, options: ParseOptions = {}): { meta: any, statements: Statement[] } {
-  const { meta, lines }: { meta: any; lines: Line[] } = preprocess(text)
+  const { meta, lines }: { meta: any; lines: Line[] } = preprocess(text, options.cursorLine)
   const mergedOptions: ParseOptions = {
     ...options,
     rules: { ...meta?.rules, ...options.rules },

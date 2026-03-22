@@ -20,7 +20,7 @@ function extractFrontmatter(content: string): { meta: Record<string, any>; numLi
   return { meta: {}, numLines: 1, content }
 }
 
-export function preprocess(input: string): PreprocessResult {
+export function preprocess(input: string, cursorLine?: number): PreprocessResult {
   const { meta, numLines, content } = extractFrontmatter(input)
   const lines: Line[] = []
 
@@ -62,5 +62,15 @@ export function preprocess(input: string): PreprocessResult {
     }
   }
 
-  return { meta, lines: [...joinLines, ...otherLines] }
+  let resultLines = [...joinLines, ...otherLines]
+
+  // cursorLine が指定された場合、構造行（+, @）以外をカーソル行でフィルタ
+  if (cursorLine !== undefined) {
+    resultLines = resultLines.filter(line => {
+      if (/^[+＋@＠]/.test(line.content)) return true
+      return line.number <= cursorLine
+    })
+  }
+
+  return { meta, lines: resultLines }
 }
