@@ -151,7 +151,7 @@ describe('Possibilities', () => {
   it('should throw an error when setup is Uint16Array without setupObject', () => {
     const setup = new Uint16Array([0b10101010])
 
-    assert.throws(() => new Possibilities(setup), { message: /setupObject is required when setup is Uint16Array/ })
+    assert.throws(() => new Possibilities(setup), { message: /setupArr is required when setup is Uint16Array/ })
   })
 
   it('should fix a role in a seat', () => {
