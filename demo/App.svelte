@@ -14,6 +14,7 @@
   import HelpPanel from './HelpPanel.svelte'
   import { onOpenHelp } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
+  import { createHowlEditor, EditorView } from './editor/index.ts'
 
   export type SourceLines = {
     survivor: Map<number, number>   // seat → line
@@ -126,7 +127,8 @@
   let showHelp = $state(false)
   let newTitle = $state('')
   let modalInput: HTMLInputElement | undefined = $state()
-  let textareaEl: HTMLTextAreaElement | undefined = $state()
+  let editorParent: HTMLElement | undefined = $state()
+  let editorView: EditorView | undefined = $state()
   let rawBodyEl: HTMLElement | undefined = $state()
   let helpPanel: HelpPanel | undefined = $state()
 
@@ -146,13 +148,21 @@
   $effect(() => {
     if (activeTitle && input !== undefined) {
       saveText(activeTitle, input)
-      run()
     }
   })
+
+  function setEditorContent(text: string) {
+    if (editorView) {
+      editorView.dispatch({
+        changes: { from: 0, to: editorView.state.doc.length, insert: text },
+      })
+    }
+  }
 
   function switchTo(title: string) {
     activeTitle = title
     input = loadText(title)
+    setEditorContent(input)
     localStorage.setItem(ACTIVE_KEY, title)
     rawStatements = ''
     parsedLines = []
@@ -176,6 +186,7 @@
       const template = `---\ntitle: ${trimmed}\n---\n\n`
       activeTitle = trimmed
       input = template
+      setEditorContent(input)
       saveText(trimmed, template)
       titles = savedKeys()
     }
@@ -229,9 +240,9 @@
   }
 
   function getCursorLine(): number {
-    if (!textareaEl) return 1
-    const pos = textareaEl.selectionStart
-    return input.slice(0, pos).split('\n').length
+    if (!editorView) return 1
+    const head = editorView.state.selection.main.head
+    return editorView.state.doc.lineAt(head).number
   }
 
   function scrollRawToCursor() {
@@ -271,12 +282,35 @@
     tick().then(scrollRawToCursor)
   }
 
+  // Initialize CM6 editor when parent element is available
+  $effect(() => {
+    if (editorParent && activeTitle && !editorView) {
+      editorView = createHowlEditor(editorParent, {
+        doc: input,
+        onChange(value) {
+          input = value
+        },
+        onCursorChange(_line) {
+          onCursorMove()
+        },
+      })
+    }
+    // Cleanup on destroy
+    return () => {
+      if (editorView) {
+        editorView.destroy()
+        editorView = undefined
+      }
+    }
+  })
+
   function getInputUpToCursor(): string {
-    if (!textareaEl) return input
-    const pos = textareaEl.selectionStart
+    if (!editorView) return input
+    const head = editorView.state.selection.main.head
+    const doc = editorView.state.doc.toString()
     // Include the full line the cursor is on
-    const nextNewline = input.indexOf('\n', pos)
-    return nextNewline === -1 ? input : input.slice(0, nextNewline)
+    const nextNewline = doc.indexOf('\n', head)
+    return nextNewline === -1 ? doc : doc.slice(0, nextNewline)
   }
 
   function roleToShort(role: SystemRole): string {
@@ -563,13 +597,7 @@
       <div class="pane-header">Input</div>
       <div class="pane-body pane-body-input">
         {#if activeTitle}
-          <textarea
-            class="input-editor"
-            bind:value={input}
-            bind:this={textareaEl}
-            onclick={onCursorMove}
-            onkeyup={onCursorMove}
-          ></textarea>
+          <div class="input-editor" bind:this={editorParent}></div>
         {:else}
           <div class="pane-placeholder"><span>New ボタンから開始してください</span></div>
         {/if}
@@ -958,17 +986,7 @@
   .input-editor {
     width: 100%;
     height: 100%;
-    box-sizing: border-box;
-    padding: 8px 12px;
-    margin: 0;
-    border: none;
-    outline: none;
-    resize: none;
-    font-family: 'Consolas', 'Menlo', monospace;
-    font-size: 13px;
-    line-height: 1.5;
-    background: #1e1e2e;
-    color: #cdd6f4;
+    overflow: hidden;
   }
 
   .pane-placeholder {
