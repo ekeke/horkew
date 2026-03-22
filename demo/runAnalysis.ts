@@ -10,76 +10,179 @@ export type AnalysisStats = {
   maxElapsed: number
 }
 
-export type ParallelRetarResponse =
+export type AnalysisResult =
   | { type: 'result'; seats: SeatResult[]; stats: AnalysisStats }
   | { type: 'error'; message: string }
 
 // --- Worker Pool ---
 
 const poolSize = navigator.hardwareConcurrency || 4
-const idle: any[] = []
+const hasSAB = typeof SharedArrayBuffer !== 'undefined'
+const signal: Int32Array | null = hasSAB ? new Int32Array(new SharedArrayBuffer(4)) : null
+let pool: any[] | null = null
 
-function initPool() {
+function createWorker(): any {
+  const w: any = new AnalysisWorker()
+  if (signal) w.postMessage({ type: 'init', signal: signal.buffer })
+  return w
+}
+
+function ensurePool(): any[] {
+  if (pool) return pool
+  pool = []
   for (let i = 0; i < poolSize; i++) {
-    idle.push(new AnalysisWorker())
+    pool.push(createWorker())
+  }
+  return pool
+}
+
+function destroyPool(): void {
+  if (!pool) return
+  for (const w of pool) w.terminate()
+  pool = null
+}
+
+// --- Scheduler ---
+
+type SchedulerCallback = (result: AnalysisResult) => void
+
+let state: 'idle' | 'running' = 'idle'
+let pending: AnalysisPayload | null = null
+let currentCallback: SchedulerCallback | null = null
+
+export function requestAnalysis(payload: AnalysisPayload, callback: SchedulerCallback): void {
+  if (state === 'idle') {
+    dispatch(payload, callback)
+  } else {
+    pending = payload
+    currentCallback = callback
+    if (signal) {
+      // SAB: cooperative abort — workers check signal and return early
+      Atomics.store(signal, 0, 1)
+    } else {
+      // No SAB: terminate and recreate pool so pending runs immediately
+      destroyPool()
+    }
   }
 }
 
-function acquireAll(): any[] {
-  if (idle.length === 0) initPool()
-  return idle.splice(0)
-}
+function dispatch(payload: AnalysisPayload, callback: SchedulerCallback): void {
+  state = 'running'
+  pending = null
+  currentCallback = callback
 
-function releaseAll(workers: any[]) {
-  for (const w of workers) {
-    w.onmessage = null
-    w.onerror = null
-    idle.push(w)
-  }
-}
+  if (signal) Atomics.store(signal, 0, 0)
 
-// --- Parallel Analysis ---
-
-export function runParallelAnalysis(payload: AnalysisPayload): {
-  promise: Promise<ParallelRetarResponse>
-  abort: () => void
-} {
-  const workers = acquireAll()
+  const workers = ensurePool()
   const numWorkers = workers.length
-  let aborted = false
+  const results: SeatResult[][] = []
+  const elapsedTimes: number[] = []
+  let completed = 0
+  let failed = false
+  let errorMessage = ''
 
-  const promise = new Promise<ParallelRetarResponse>((resolve) => {
+  for (let i = 0; i < numWorkers; i++) {
+    const worker = workers[i]
+
+    worker.onmessage = (e: any) => {
+      const data = e.data as RetarResponse
+      if (data.type === 'aborted') {
+        completed++
+        if (completed === numWorkers) onAllDone()
+        return
+      }
+      if (data.type === 'error') {
+        if (!failed) { failed = true; errorMessage = data.message }
+        completed++
+        if (completed === numWorkers) onAllDone()
+        return
+      }
+      results.push(data.seats)
+      elapsedTimes.push(data.elapsed)
+      completed++
+      if (completed === numWorkers) onAllDone()
+    }
+
+    worker.onerror = (e: any) => {
+      if (!failed) { failed = true; errorMessage = `Worker error: ${e.message}` }
+      completed++
+      if (completed === numWorkers) onAllDone()
+    }
+
+    worker.postMessage({ ...payload, batches: numWorkers, batch: i })
+  }
+
+  function onAllDone() {
+    if (pending) {
+      const nextPayload = pending
+      const nextCallback = currentCallback!
+      dispatch(nextPayload, nextCallback)
+      return
+    }
+    if (failed || results.length === 0) {
+      finishWith({ type: 'error', message: errorMessage || 'Analysis produced no results' })
+      return
+    }
+    finishWith({
+      type: 'result',
+      seats: mergeResults(results),
+      stats: {
+        workers: numWorkers,
+        minElapsed: Math.round(Math.min(...elapsedTimes)),
+        maxElapsed: Math.round(Math.max(...elapsedTimes)),
+      },
+    })
+  }
+
+  function finishWith(result: AnalysisResult) {
+    state = 'idle'
+    const cb = currentCallback
+    currentCallback = null
+    cb?.(result)
+  }
+}
+
+// --- For PlayerDialog (independent, non-scheduled) ---
+
+export function runParallelAnalysis(payload: AnalysisPayload): Promise<AnalysisResult> {
+  return new Promise((resolve) => {
+    const localWorkers: any[] = []
+    const numWorkers = poolSize
     const results: SeatResult[][] = []
     const elapsedTimes: number[] = []
     let completed = 0
     let failed = false
+    let errorMessage = ''
 
-    function onDone() {
-      if (!aborted) releaseAll(workers)
+    for (let i = 0; i < numWorkers; i++) {
+      localWorkers.push(createWorker())
     }
 
-    function onError(message: string) {
-      if (failed) return
-      failed = true
-      onDone()
-      resolve({ type: 'error', message })
+    function terminateAll() {
+      for (const w of localWorkers) w.terminate()
     }
 
     for (let i = 0; i < numWorkers; i++) {
-      const worker = workers[i]
+      const worker = localWorkers[i]
 
       worker.onmessage = (e: any) => {
-        if (failed || aborted) return
         const data = e.data as RetarResponse
         if (data.type === 'error') {
-          onError(data.message)
+          if (!failed) { failed = true; errorMessage = data.message }
+          completed++
+          if (completed === numWorkers) { terminateAll(); resolve({ type: 'error', message: errorMessage }) }
+          return
+        }
+        if (data.type === 'aborted') {
+          completed++
+          if (completed === numWorkers) { terminateAll(); resolve({ type: 'error', message: 'Aborted' }) }
           return
         }
         results.push(data.seats)
         elapsedTimes.push(data.elapsed)
         completed++
         if (completed === numWorkers) {
-          onDone()
+          terminateAll()
           resolve({
             type: 'result',
             seats: mergeResults(results),
@@ -93,22 +196,14 @@ export function runParallelAnalysis(payload: AnalysisPayload): {
       }
 
       worker.onerror = (e: any) => {
-        if (failed || aborted) return
-        onError(`Worker error: ${e.message}`)
+        if (!failed) { failed = true; errorMessage = `Worker error: ${e.message}` }
+        completed++
+        if (completed === numWorkers) { terminateAll(); resolve({ type: 'error', message: errorMessage }) }
       }
 
       worker.postMessage({ ...payload, batches: numWorkers, batch: i })
     }
   })
-
-  return {
-    promise,
-    abort() {
-      aborted = true
-      // Abort 時はワーカーを破棄して新しいプールを作り直す
-      for (const w of workers) w.terminate()
-    },
-  }
 }
 
 function mergeResults(batches: SeatResult[][]): SeatResult[] {

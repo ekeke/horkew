@@ -6,7 +6,7 @@
   import { stringifyStatements, type StringifiedLine } from './stringify.ts'
   import type { SeatResult } from './analysis.worker.ts'
   import type { SystemRole, VillageStatus, CauseOfDeath } from '../src/types/index.ts'
-  import { runParallelAnalysis, type AnalysisStats } from './runAnalysis.ts'
+  import { requestAnalysis, type AnalysisStats } from './runAnalysis.ts'
   import StatusPane from './status/StatusPane.svelte'
   import PlayerName from './status/PlayerName.svelte'
   import { findReason, findConfirmationReason } from '../src/gmork/index.ts'
@@ -155,7 +155,6 @@
   let gmorkResult = $state('')
   let baseAnalysisSeats: SeatResult[] = []
   let currentSetup: Map<SystemRole, number> = $state(new Map())
-  let abortAnalysis: (() => void) | null = null
   let skin: Skin = $state(settings.skin)
   let devMode = $state(settings.devMode)
   let debugMode = $state(settings.debug)
@@ -573,11 +572,6 @@
   }
 
   function run() {
-    if (abortAnalysis) {
-      abortAnalysis()
-      abortAnalysis = null
-    }
-
     analysisSeats = []
     analysisError = ''
     if (assumptions.size === 0) gmorkResult = ''
@@ -638,12 +632,9 @@
 
       analyzing = true
       analysisStart = performance.now()
-      const { promise, abort } = runParallelAnalysis(workerPayload)
-      abortAnalysis = abort
-      promise.then((data) => {
+      requestAnalysis(workerPayload, (data) => {
         analyzing = false
         analysisDuration = Math.round(performance.now() - analysisStart)
-        abortAnalysis = null
         if (data.type === 'result') {
           analysisSeats = data.seats
           analysisError = ''

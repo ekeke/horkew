@@ -15,6 +15,7 @@ export type AnalyzeResult = {
   elapsed?: number,
   id?: number,
   batch?: number,
+  aborted?: boolean,
   error?: Error,
   info?: any,
   result: AnalyzedPossibilities
@@ -42,6 +43,8 @@ export type AnalyzeOptions = {
   batches: number
   batch: number
 
+  // cooperative abort via SharedArrayBuffer
+  signal?: Int32Array
 }
 
 const HumanRoles: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'possessed', 'fanatic', 'immoralist', 'werehamster']
@@ -249,6 +252,10 @@ export class VillageRetar {
     // werehamster_won は analyzeHamsterWin() で処理
   }
 
+  private isAborted(): boolean {
+    return this.options.signal != null && this.options.signal[0] !== 0
+  }
+
   getStatus(seat: Seat) {
     return this.vs.statuses.get(seat)
   }
@@ -271,11 +278,13 @@ export class VillageRetar {
     const t0 = performance.now()
     this.runAnalysis()
     const elapsed = performance.now() - t0
+    const aborted = this.isAborted()
     return {
       elapsed,
       batch: this.options.batch,
       id: this.options.id,
-      result: this.conclusions.toStructured(),
+      aborted,
+      result: aborted ? new Map() : this.conclusions.toStructured(),
     }
   }
 
@@ -296,6 +305,12 @@ export class VillageRetar {
       this.runAnalysis()
     }
 
+    if (this.isAborted()) {
+      this.initialPossibilities = originalPossibilities
+      this.hamsterWinPath = undefined
+      return { aborted: true, result: new Map() }
+    }
+
     // パス2: 飽和（狼勝利相当）→ 最終死者は非狼・非狐
     this.hamsterWinPath = 'wolf'
     const poss2 = originalPossibilities.clone()
@@ -314,11 +329,13 @@ export class VillageRetar {
     this.hamsterWinPath = undefined
 
     const elapsed = performance.now() - t0
+    const aborted = this.isAborted()
     return {
       elapsed,
       batch: this.options.batch,
       id: this.options.id,
-      result: this.conclusions.toStructured(),
+      aborted,
+      result: aborted ? new Map() : this.conclusions.toStructured(),
     }
   }
 
@@ -338,7 +355,7 @@ export class VillageRetar {
 
     TESTS:
     while (true) {
-      if ( testIter.done ) {
+      if ( testIter.done || this.isAborted() ) {
         break TESTS
       }
       const testItem = testIter.value

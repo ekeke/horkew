@@ -17,12 +17,21 @@ export type SeatResult = {
 
 export type RetarResponse =
   | { type: 'result'; seats: SeatResult[]; elapsed: number }
+  | { type: 'aborted' }
   | { type: 'error'; message: string }
 
-self.onmessage = (e: MessageEvent<RetarRequest>) => {
+let signal: Int32Array | undefined
+
+self.onmessage = (e: MessageEvent<any>) => {
+  const msg = e.data
+  if (msg.type === 'init') {
+    signal = new Int32Array(msg.signal)
+    return
+  }
+
   try {
-    const { vs, players: playersArr } = e.data
-    const setup = new Map<SystemRole, number>(e.data.setup)
+    const { vs, players: playersArr } = msg as RetarRequest
+    const setup = new Map<SystemRole, number>(msg.setup)
     const players = new Map<number, string>(playersArr)
 
     // Reconstruct Maps from serialized VillageStatus
@@ -45,15 +54,21 @@ self.onmessage = (e: MessageEvent<RetarRequest>) => {
       nekomataClaimingDueDate: 99,
       dayCountFrom: 1,
       hasFirstGhost: false,
-      assumptions: new Map(e.data.assumptions ?? []),
+      assumptions: new Map(msg.assumptions ?? []),
       hocusPocus: new Map(),
       id: 0,
-      batches: e.data.batches ?? 1,
-      batch: e.data.batch ?? 0,
+      batches: msg.batches ?? 1,
+      batch: msg.batch ?? 0,
+      signal,
     }
 
     const retar = new VillageRetar(vs, setup, options)
     const result = retar.analyze()
+
+    if (result.aborted) {
+      self.postMessage({ type: 'aborted' } satisfies RetarResponse)
+      return
+    }
 
     const seats: SeatResult[] = []
     if (result && 'result' in result) {
