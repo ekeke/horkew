@@ -72,6 +72,22 @@
   type SemanticEntry = { label: string, var: string, ref: string }
   type SectionEntry = { section: string }
 
+  const textBgCombinations = [
+    { bg: '--color-bg',          bgLabel: 'bg' },
+    { bg: '--color-bg-elevated', bgLabel: 'bg-elevated' },
+    { bg: '--color-surface',     bgLabel: 'surface' },
+    { bg: '--color-surface-hover', bgLabel: 'surface-hover' },
+  ] as const
+
+  const textColors = [
+    { var: '--color-text',         label: 'text' },
+    { var: '--color-text-muted',   label: 'text-muted' },
+    { var: '--color-text-faint',   label: 'text-faint' },
+    { var: '--color-text-overlay', label: 'text-overlay' },
+    { var: '--color-accent',       label: 'accent' },
+    { var: '--color-link',         label: 'link' },
+  ] as const
+
   let copied = $state('')
 
   function copyVar(varName: string) {
@@ -86,6 +102,8 @@
 </script>
 
 <div class="swatch-pane">
+
+  <!-- ======== Palette ======== -->
   <h3 class="section-title">Palette — Base</h3>
   <div class="swatch-grid">
     {#each palette as c}
@@ -114,6 +132,7 @@
     {/each}
   </div>
 
+  <!-- ======== Semantic Tokens ======== -->
   <h3 class="section-title">Semantic Tokens</h3>
   <div class="semantic-list">
     {#each semantic as entry}
@@ -123,10 +142,134 @@
         <button class="semantic-item" onclick={() => copyVar(entry.var)} title="Copy var({entry.var})">
           <span class="swatch-color small" style="background: var({entry.var})"></span>
           <code class="swatch-var" class:copied={copied === entry.var}>{entry.var}</code>
-          <span class="semantic-ref">→ {entry.ref}</span>
+          <span class="semantic-ref">{entry.ref}</span>
         </button>
       {/if}
     {/each}
+  </div>
+
+  <!-- ======== 1. Text x Background ======== -->
+  <h3 class="section-title">Text on Backgrounds</h3>
+  <div class="text-bg-grid">
+    {#each textBgCombinations as bg}
+      <div class="text-bg-row" style="background: var({bg.bg})">
+        <span class="text-bg-label">{bg.bgLabel}</span>
+        {#each textColors as tc}
+          <span class="text-bg-sample" style="color: var({tc.var})">{tc.label}</span>
+        {/each}
+      </div>
+    {/each}
+  </div>
+
+  <!-- ======== 2. Game UI Parts ======== -->
+  <h3 class="section-title">Game UI Parts</h3>
+
+  <div class="example-group">
+    <h4 class="example-label">陣営バッジ</h4>
+    <div class="example-row">
+      <span class="badge" style="color: var(--color-village)">村</span>
+      <span class="badge" style="color: var(--color-wolf)">狼</span>
+      <span class="badge" style="color: var(--color-fox)">狐</span>
+      <span class="badge" style="color: var(--color-unknown-team)">?</span>
+    </div>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">役職 CO</h4>
+    <div class="example-row">
+      <span class="co-tag"><span class="co-prefix">CO</span> <span style="color: var(--color-role)">占い師</span></span>
+      <span class="co-tag"><span class="co-prefix">CO</span> <span style="color: var(--color-role)">霊媒師</span></span>
+      <span class="co-tag"><span class="co-prefix">CO</span> <span style="color: var(--color-role)">狩人</span></span>
+    </div>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">占い/霊媒結果</h4>
+    <div class="example-row">
+      <span class="result-sample">田中 <span class="result-arrow">→</span> <span style="color: var(--color-human-result)">○</span></span>
+      <span class="result-sample">佐藤 <span class="result-arrow">→</span> <span style="color: var(--color-wolf-result)">●</span></span>
+    </div>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">投票</h4>
+    <div class="example-row">
+      <span class="vote-sample">
+        <span style="color: var(--color-text)">山田</span>
+        <span class="vote-arrow">→</span>
+        <span style="color: var(--color-text)">鈴木</span>
+      </span>
+    </div>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">イベント</h4>
+    <div class="example-row example-events">
+      <span style="color: var(--color-execution)">佐藤 処刑</span>
+      <span style="color: var(--color-wolf)">田中 襲撃</span>
+      <span style="color: var(--color-text-overlay)">平和な朝</span>
+    </div>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">プレイヤー名</h4>
+    <div class="example-row">
+      <span class="player-resolved">山田太郎</span>
+      <span class="player-unresolved">やまだ</span>
+      <span style="color: var(--color-text-faint)">（死亡）鈴木</span>
+    </div>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">エラー表示</h4>
+    <div class="example-row">
+      <span class="error-sample">不明なプレイヤー名です</span>
+    </div>
+  </div>
+
+  <!-- ======== 3. Buttons / Interactive ======== -->
+  <h3 class="section-title">Buttons &amp; Interactive</h3>
+
+  <div class="example-group">
+    <h4 class="example-label">通常ボタン</h4>
+    <div class="example-row">
+      <span class="btn-sample">Default</span>
+      <span class="btn-sample btn-hover">Hover</span>
+      <span class="btn-sample btn-disabled">Disabled</span>
+    </div>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">アクセントボタン</h4>
+    <div class="example-row">
+      <span class="btn-accent">Accent</span>
+      <span class="btn-accent btn-accent-hover">Hover</span>
+    </div>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">Danger ボタン</h4>
+    <div class="example-row">
+      <span class="btn-danger">Delete</span>
+      <span class="btn-danger btn-danger-hover">Hover</span>
+    </div>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">入力フィールド</h4>
+    <div class="example-row">
+      <span class="input-sample">テキスト入力</span>
+      <span class="input-sample input-focus">フォーカス中</span>
+    </div>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">テーブルヘッダ</h4>
+    <div class="example-row">
+      <span class="table-header-sample">CO一覧</span>
+      <span class="table-header-sample">投票結果</span>
+      <span class="table-header-sample">死亡履歴</span>
+    </div>
   </div>
 </div>
 
@@ -139,11 +282,17 @@
   }
 
   .section-title {
-    margin: 0 0 8px 0;
+    margin: 20px 0 8px 0;
     font-size: 13px;
     font-weight: 600;
     color: var(--ctp-mauve, #cba6f7);
   }
+
+  .section-title:first-child {
+    margin-top: 0;
+  }
+
+  /* ---- Palette swatches ---- */
 
   .swatch-grid {
     display: grid;
@@ -213,6 +362,8 @@
     font-family: 'Consolas', 'Menlo', monospace;
   }
 
+  /* ---- Semantic tokens ---- */
+
   .semantic-list {
     margin-bottom: 16px;
   }
@@ -252,5 +403,193 @@
     color: var(--ctp-surface2, #585b70);
     font-size: 10px;
     margin-left: auto;
+  }
+
+  /* ---- Text on Backgrounds ---- */
+
+  .text-bg-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 16px;
+  }
+
+  .text-bg-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--ctp-surface0, #313244);
+  }
+
+  .text-bg-label {
+    width: 100px;
+    flex-shrink: 0;
+    font-size: 10px;
+    font-family: 'Consolas', 'Menlo', monospace;
+    color: var(--ctp-overlay0, #6c7086);
+  }
+
+  .text-bg-sample {
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* ---- Example groups ---- */
+
+  .example-group {
+    margin-bottom: 12px;
+  }
+
+  .example-label {
+    margin: 0 0 4px 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ctp-subtext0, #a6adc8);
+  }
+
+  .example-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  /* ---- Game UI parts ---- */
+
+  .badge {
+    font-weight: 700;
+    font-size: 14px;
+    padding: 2px 10px;
+    background: var(--ctp-surface0, #313244);
+    border-radius: 4px;
+  }
+
+  .co-tag {
+    padding: 2px 8px;
+    background: var(--ctp-mantle, #181825);
+    border: 1px solid var(--ctp-surface0, #313244);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .co-prefix {
+    color: var(--ctp-mauve, #cba6f7);
+    font-weight: 600;
+  }
+
+  .result-sample {
+    font-size: 13px;
+    color: var(--ctp-text, #cdd6f4);
+  }
+
+  .result-arrow {
+    color: var(--ctp-blue, #89b4fa);
+  }
+
+  .vote-sample {
+    font-size: 13px;
+  }
+
+  .vote-arrow {
+    color: var(--ctp-blue, #89b4fa);
+    padding: 0 4px;
+  }
+
+  .example-events {
+    gap: 16px;
+  }
+
+  .player-resolved {
+    background: rgba(148, 226, 213, 0.12);
+    color: var(--ctp-teal, #94e2d5);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+
+  .player-unresolved {
+    text-decoration: wavy underline var(--ctp-red, #f38ba8);
+    text-underline-offset: 3px;
+    color: var(--ctp-text, #cdd6f4);
+    padding: 1px 6px;
+  }
+
+  .error-sample {
+    color: var(--ctp-red, #f38ba8);
+    background: rgba(243, 139, 168, 0.12);
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+
+  /* ---- Buttons & interactive ---- */
+
+  .btn-sample {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    background: var(--ctp-surface0, #313244);
+    color: var(--ctp-text, #cdd6f4);
+    border: 1px solid var(--ctp-surface1, #45475a);
+  }
+
+  .btn-hover {
+    background: var(--ctp-surface1, #45475a);
+  }
+
+  .btn-disabled {
+    opacity: 0.4;
+  }
+
+  .btn-accent {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    background: var(--ctp-mauve, #cba6f7);
+    color: var(--ctp-base, #1e1e2e);
+    border: 1px solid var(--ctp-mauve, #cba6f7);
+    font-weight: 600;
+  }
+
+  .btn-accent-hover {
+    filter: brightness(1.1);
+  }
+
+  .btn-danger {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    background: var(--ctp-red, #f38ba8);
+    color: var(--ctp-base, #1e1e2e);
+    border: 1px solid var(--ctp-red, #f38ba8);
+    font-weight: 600;
+  }
+
+  .btn-danger-hover {
+    filter: brightness(1.1);
+  }
+
+  .input-sample {
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    background: var(--ctp-mantle, #181825);
+    color: var(--ctp-text, #cdd6f4);
+    border: 1px solid var(--ctp-surface0, #313244);
+  }
+
+  .input-focus {
+    border-color: var(--ctp-mauve, #cba6f7);
+  }
+
+  .table-header-sample {
+    padding: 4px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--ctp-mantle, #181825);
+    color: var(--ctp-mauve, #cba6f7);
+    border: 1px solid var(--ctp-surface0, #313244);
+    border-radius: 4px;
   }
 </style>
