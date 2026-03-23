@@ -29,6 +29,20 @@ export type GameState = {
   result: 'villager_won' | 'werewolf_won' | 'werehamster_won' | null
 }
 
+export type NightAction =
+  | { type: 'divine', target: number }
+  | { type: 'guard', target: number }
+  | { type: 'attack', target: number }
+  | { type: 'fake_divine', target: number, result: EnumSpecies }
+  | { type: 'none' }
+
+export type DayClaim =
+  | { type: 'seer_co', results: Array<{ target: number, result: EnumSpecies }> }
+  | { type: 'seer_result', target: number, result: EnumSpecies }
+  | { type: 'medium_co' }
+  | { type: 'medium_result', result: EnumSpecies }
+  | { type: 'none' }
+
 export type GameEvent =
   | { type: 'night_kill', target: number }
   | { type: 'fox_kill', target: number }

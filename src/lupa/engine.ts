@@ -1,19 +1,11 @@
-import type { SystemRole } from '../types/index.ts'
-import type { LupaConfig, GameState, GameEvent } from './types.ts'
+import type { LupaConfig, GameState, GameEvent, NightAction, DayClaim } from './types.ts'
 import { Rng } from './random.ts'
 import { NAMES } from './names.ts'
 import {
-  assignRoles, alivePlayers,
+  assignRoles, alivePlayers, getSeerResult,
   killPlayer, checkWinCondition,
 } from './roles.ts'
-import {
-  seerChooseTarget, seerDivine, seerClaimEvent,
-  mediumResult,
-  bodyguardChooseTarget,
-  wolvesChooseTarget,
-  possessedFakeDivine, possessedClaimEvent,
-  decideVote, resolveVotes,
-} from './ai.ts'
+import { decideNightAction, decideDayClaim, decideVote, resolveVotes } from './ai.ts'
 
 export type GameResult = {
   events: GameEvent[]
@@ -29,12 +21,7 @@ export function runGame(config: LupaConfig): GameResult {
     throw new Error(`プレイヤー名が足りません (必要: ${totalPlayers}, 利用可能: ${NAMES.length})`)
   }
 
-  const roleArray: SystemRole[] = []
-  for (const [role, count] of config.roles) {
-    for (let i = 0; i < count; i++) roleArray.push(role)
-  }
   const shuffledIndices = rng.shuffle(Array.from({ length: totalPlayers }, (_, i) => i))
-
   const players = assignRoles(config.roles, names, shuffledIndices)
   const state: GameState = {
     players,
@@ -46,19 +33,10 @@ export function runGame(config: LupaConfig): GameResult {
 
   const events: GameEvent[] = []
 
-  // Night 0: 占い師の初回占い
-  const seers = players.filter(p => p.role === 'seer')
-  for (const seer of seers) {
-    const target = seerChooseTarget(state, seer, rng)
-    if (target !== null) {
-      seerDivine(state, seer, 0, target)
-    }
-  }
-
-  // 狂人の初回偽占い
-  const possessedPlayers = players.filter(p => p.role === 'possessed')
-  for (const p of possessedPlayers) {
-    possessedFakeDivine(state, p, 0, rng)
+  // Night 0: 全員に夜アクションを問い合わせ
+  for (const player of players) {
+    const action = decideNightAction(state, player, 0, rng)
+    applyNightAction(state, player, 0, action)
   }
 
   // メインループ
@@ -68,61 +46,25 @@ export function runGame(config: LupaConfig): GameResult {
   for (let day = 1; day <= MAX_DAYS && !state.finished; day++) {
     state.day = day
 
-    // ==== 夜フェーズ (day 1+) ====
+    // ==== 夜フェーズ (day 2+) ====
     if (day > 1) {
       state.phase = 'night'
       const night = day - 1
 
-      // 占い師の占い
-      for (const seer of seers) {
-        if (!seer.alive) continue
-        const target = seerChooseTarget(state, seer, rng)
-        if (target !== null) {
-          seerDivine(state, seer, night, target)
-          // 妖狐呪殺チェック
-          const targetPlayer = state.players.find(p => p.seat === target)!
-          if (targetPlayer.role === 'werehamster' && targetPlayer.alive) {
-            killPlayer(state, target)
-            events.push({ type: 'fox_kill', target })
-          }
-        }
+      // 全生存者に夜アクションを問い合わせ
+      const actions: Array<{ player: typeof players[0], action: NightAction }> = []
+      for (const player of alivePlayers(state)) {
+        const action = decideNightAction(state, player, night, rng)
+        actions.push({ player, action })
       }
 
-      // 狂人の偽占い
-      for (const p of possessedPlayers) {
-        if (!p.alive) continue
-        possessedFakeDivine(state, p, night, rng)
+      // アクション適用
+      for (const { player, action } of actions) {
+        applyNightAction(state, player, night, action)
       }
 
-      // 狩人の護衛
-      const guards = players.filter(p => p.role === 'bodyguard' && p.alive)
-      let guardTarget: number | null = null
-      for (const guard of guards) {
-        guardTarget = bodyguardChooseTarget(state, guard, rng)
-        guard.guardHistory.set(night, guardTarget)
-      }
-
-      // 人狼の襲撃
-      const aliveWolves = players.filter(p => p.role === 'werewolf' && p.alive)
-      if (aliveWolves.length > 0) {
-        const attackTarget = wolvesChooseTarget(state, rng)
-        const targetPlayer = state.players.find(p => p.seat === attackTarget)!
-
-        if (targetPlayer.role === 'werehamster') {
-          // 妖狐は襲撃されても死なない → 護衛成功と同じく表示上は平和にはしない
-          // ただし他に死者がいなければ平和になる
-        } else if (guardTarget === attackTarget) {
-          // 護衛成功 → 夜の死者なし (この死者のみ)
-        } else {
-          killPlayer(state, attackTarget)
-          events.push({ type: 'night_kill', target: attackTarget })
-        }
-      }
-
-      // 夜の死者が誰もいなければ平和
-      if (!hasNightDeaths(events)) {
-        events.push({ type: 'peace' })
-      }
+      // 夜の結果解決
+      resolveNight(state, actions, events)
 
       // 勝利判定
       checkWinCondition(state)
@@ -130,90 +72,21 @@ export function runGame(config: LupaConfig): GameResult {
         events.push({ type: 'game_over', result: state.result! })
         break
       }
-    } else {
-      // Day 1: 最初の夜死者はいない (初日犠牲者なしルール)
-      // ただしゲームによっては初日犠牲者ありもある → Phase 1では初日犠牲者なし
     }
 
     // ==== 昼フェーズ ====
     state.phase = 'day'
 
-    // CO フェーズ
-    if (day === 1) {
-      // 占いCO (真占い + 狂人)
-      for (const seer of seers) {
-        if (!seer.alive) continue
-        seer.claimedRole = 'seer'
-        seer.claimedDay = day
-        events.push(seerClaimEvent(seer))
-      }
-      for (const p of possessedPlayers) {
-        if (!p.alive) continue
-        p.claimedRole = 'seer'
-        p.claimedDay = day
-        events.push(possessedClaimEvent(p))
-      }
-      // 霊能CO
-      const mediums = players.filter(p => p.role === 'medium' && p.alive)
-      for (const med of mediums) {
-        med.claimedRole = 'medium'
-        med.claimedDay = day
-        events.push({ type: 'medium_claim', actor: med.seat })
-      }
-    } else {
-      // Day 2+: 霊能結果発表
-      if (lastExecutedSeat !== null) {
-        const mediums = players.filter(p => p.role === 'medium' && p.alive)
-        for (const med of mediums) {
-          const result = mediumResult(state, lastExecutedSeat)
-          events.push({ type: 'medium_result', actor: med.seat, result })
-        }
-      }
-
-      // 占い師の新しい結果を発表 (追加結果のみ)
-      for (const seer of seers) {
-        if (!seer.alive) continue
-        const latestNight = day - 1
-        const latest = seer.divineHistory.get(latestNight)
-        if (latest) {
-          events.push({
-            type: 'seer_result', actor: seer.seat,
-            target: latest.target, result: latest.result,
-          })
-        }
-      }
-      for (const p of possessedPlayers) {
-        if (!p.alive) continue
-        const latestNight = day - 1
-        const latest = p.fakeDivineHistory.get(latestNight)
-        if (latest) {
-          events.push({
-            type: 'seer_result', actor: p.seat,
-            target: latest.target, result: latest.result,
-          })
-        }
-      }
+    // COフェーズ: 全生存者にCO判断を問い合わせ
+    for (const player of alivePlayers(state)) {
+      const claim = decideDayClaim(state, player, day, lastExecutedSeat, rng)
+      applyClaim(state, player, day, claim, events)
     }
 
     // 投票フェーズ
-    const alive = alivePlayers(state)
-
-    // 黒出しされたプレイヤーを集計
-    const seerBlackTargets = new Set<number>()
-    for (const seer of seers) {
-      for (const [, d] of seer.divineHistory) {
-        if (d.result === 'wolf') seerBlackTargets.add(d.target)
-      }
-    }
-    for (const p of possessedPlayers) {
-      for (const [, d] of p.fakeDivineHistory) {
-        if (d.result === 'wolf') seerBlackTargets.add(d.target)
-      }
-    }
-
     const votes = new Map<number, number>()
-    for (const voter of alive) {
-      const target = decideVote(state, voter, rng, seerBlackTargets)
+    for (const voter of alivePlayers(state)) {
+      const target = decideVote(state, voter, rng)
       votes.set(voter.seat, target)
       events.push({ type: 'vote', voter: voter.seat, target })
     }
@@ -237,6 +110,102 @@ export function runGame(config: LupaConfig): GameResult {
   }
 
   return { events, state, config }
+}
+
+/** 夜アクションを状態に適用（記録のみ、kill処理はresolveNightで） */
+function applyNightAction(
+  state: GameState, player: typeof state.players[0], night: number, action: NightAction,
+): void {
+  switch (action.type) {
+    case 'divine': {
+      const target = state.players.find(p => p.seat === action.target)!
+      const result = getSeerResult(target.role)
+      player.divineHistory.set(night, { target: action.target, result })
+      break
+    }
+    case 'guard':
+      player.guardHistory.set(night, action.target)
+      break
+    case 'fake_divine':
+      player.fakeDivineHistory.set(night, { target: action.target, result: action.result })
+      break
+    case 'attack':
+    case 'none':
+      break
+  }
+}
+
+/** 夜の結果を解決（呪殺、襲撃、護衛） */
+function resolveNight(
+  state: GameState,
+  actions: Array<{ player: typeof state.players[0], action: NightAction }>,
+  events: GameEvent[],
+): void {
+  // 占い呪殺チェック
+  for (const { action } of actions) {
+    if (action.type !== 'divine') continue
+    const target = state.players.find(p => p.seat === action.target)!
+    if (target.role === 'werehamster' && target.alive) {
+      killPlayer(state, action.target)
+      events.push({ type: 'fox_kill', target: action.target })
+    }
+  }
+
+  // 護衛先を取得
+  let guardTarget: number | null = null
+  for (const { action } of actions) {
+    if (action.type === 'guard') {
+      guardTarget = action.target
+      break
+    }
+  }
+
+  // 襲撃処理
+  for (const { action } of actions) {
+    if (action.type !== 'attack') continue
+    const target = state.players.find(p => p.seat === action.target)!
+
+    if (target.role === 'werehamster') {
+      // 妖狐は襲撃されても死なない
+    } else if (guardTarget === action.target) {
+      // 護衛成功
+    } else {
+      killPlayer(state, action.target)
+      events.push({ type: 'night_kill', target: action.target })
+    }
+  }
+
+  // 夜の死者がいなければ平和
+  if (!hasNightDeaths(events)) {
+    events.push({ type: 'peace' })
+  }
+}
+
+/** COアクションをイベントに変換 */
+function applyClaim(
+  state: GameState, player: typeof state.players[0], day: number,
+  claim: DayClaim, events: GameEvent[],
+): void {
+  switch (claim.type) {
+    case 'seer_co':
+      player.claimedRole = 'seer'
+      player.claimedDay = day
+      events.push({ type: 'seer_claim', actor: player.seat, results: claim.results })
+      break
+    case 'seer_result':
+      events.push({ type: 'seer_result', actor: player.seat, target: claim.target, result: claim.result })
+      break
+    case 'medium_co':
+      player.claimedRole = 'medium'
+      player.claimedDay = day
+      events.push({ type: 'medium_claim', actor: player.seat })
+      break
+    case 'medium_result':
+      events.push({ type: 'medium_result', actor: player.seat, result: claim.result })
+      break
+    case 'none':
+      break
+  }
 }
 
 function hasNightDeaths(events: GameEvent[]): boolean {
