@@ -381,9 +381,6 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
     const self = getStatus(env, seat)
     if (!self.claiming) {
       context.additionalLiars++
-      if ( env.totalLiarRoles < context.additionalLiars + env.knownFakeClaimCount ) {
-        return false
-      }
     }
     if ( !self.surviving ) {
       const deathChronicle = context.deathChronicle.get(self.diedDay!)
