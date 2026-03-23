@@ -325,7 +325,7 @@ function applyClaim(
 function hasNightDeaths(events: GameEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]
-    if (e.type === 'night_kill' || e.type === 'fox_kill' || e.type === 'curse_kill' || e.type === 'follow_kill') return true
+    if (e.type === 'night_kill' || e.type === 'fox_kill') return true
     if (e.type === 'execution' || e.type === 'game_over') return false
   }
   return false

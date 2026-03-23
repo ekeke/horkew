@@ -199,12 +199,26 @@ type GameConfig = {
 }
 
 const configs: GameConfig[] = [
-  { name: 'basic-5p', roles: { werewolf: 1, villager: 3, seer: 1 }, seeds: [0, 100] },
-  { name: 'standard-10p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, possessed: 1 }, seeds: [0, 100] },
-  { name: 'mason-10p', roles: { werewolf: 2, villager: 3, seer: 1, medium: 1, mason: 2, possessed: 1 }, seeds: [0, 50] },
-  { name: 'nekomata-6p', roles: { werewolf: 1, villager: 3, seer: 1, nekomata: 1 }, seeds: [0, 100] },
-  { name: 'hamster-11p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, werehamster: 1, possessed: 1 }, seeds: [0, 50] },
-  { name: 'full-15p', roles: { werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, possessed: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 50] },
+  // 基本構成
+  { name: 'basic-5p', roles: { werewolf: 1, villager: 3, seer: 1 }, seeds: [0, 2000] },
+  { name: 'basic-7p', roles: { werewolf: 1, villager: 4, seer: 1, medium: 1 }, seeds: [0, 2000] },
+  { name: 'standard-10p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, possessed: 1 }, seeds: [0, 2000] },
+  // 狩人・共有
+  { name: 'guard-8p', roles: { werewolf: 2, villager: 3, seer: 1, bodyguard: 1, possessed: 1 }, seeds: [0, 1000] },
+  { name: 'mason-10p', roles: { werewolf: 2, villager: 3, seer: 1, medium: 1, mason: 2, possessed: 1 }, seeds: [0, 1000] },
+  { name: 'mason-guard-12p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, mason: 2, possessed: 1 }, seeds: [0, 1000] },
+  // 猫又
+  { name: 'nekomata-6p', roles: { werewolf: 1, villager: 3, seer: 1, nekomata: 1 }, seeds: [0, 2000] },
+  { name: 'nekomata-10p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, nekomata: 1, possessed: 1 }, seeds: [0, 1000] },
+  // 妖狐・背徳
+  { name: 'hamster-9p', roles: { werewolf: 2, villager: 3, seer: 1, medium: 1, werehamster: 1, possessed: 1 }, seeds: [0, 1000] },
+  { name: 'hamster-11p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, werehamster: 1, possessed: 1 }, seeds: [0, 1000] },
+  { name: 'hamster-imm-12p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, werehamster: 1, immoralist: 1, possessed: 1 }, seeds: [0, 1000] },
+  // 狂信者
+  { name: 'fanatic-10p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, fanatic: 1 }, seeds: [0, 1000] },
+  // 大規模・全役職
+  { name: 'full-15p', roles: { werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, possessed: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 1000] },
+  { name: 'full-17p', roles: { werewolf: 3, villager: 4, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, possessed: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 500] },
 ]
 
 function parseArgs(): { outdir: string | null } {
@@ -242,11 +256,16 @@ function main() {
       totalGames++
 
       const checkpoints = findCheckpoints(events)
+      let gameFailed = false
       for (const cp of checkpoints) {
         totalCheckpoints++
         configCheckpoints++
+        if (gameFailed) continue
         const { failure, skipped, retarMs } = verifyCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
-        if (failure) allFailures.push(failure)
+        if (failure) {
+          allFailures.push(failure)
+          gameFailed = true
+        }
         if (skipped) {
           configSkipped++
           totalSkipped++
