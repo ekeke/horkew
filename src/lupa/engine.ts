@@ -346,13 +346,7 @@ function applyClaim(
     case 'medium_co':
       player.claimedRole = 'medium'
       player.claimedDay = day
-      events.push({ type: 'medium_claim', actor: player.seat })
-      // 過去の処刑結果をまとめて報告
-      if (claim.pastResults) {
-        for (const result of claim.pastResults) {
-          events.push({ type: 'medium_result', actor: player.seat, result })
-        }
-      }
+      events.push({ type: 'medium_claim', actor: player.seat, pastResults: claim.pastResults })
       break
     case 'medium_result':
       events.push({ type: 'medium_result', actor: player.seat, result: claim.result })

@@ -58,7 +58,7 @@ export type GameEvent =
   | { type: 'peace' }
   | { type: 'seer_claim', actor: number, results: Array<{ target: number, result: EnumSpecies }> }
   | { type: 'seer_result', actor: number, target: number, result: EnumSpecies }
-  | { type: 'medium_claim', actor: number }
+  | { type: 'medium_claim', actor: number, pastResults?: EnumSpecies[] }
   | { type: 'medium_result', actor: number, result: EnumSpecies }
   | { type: 'bodyguard_claim', actor: number, targets: number[] }
   | { type: 'mason_claim', actor: number, partner: number }

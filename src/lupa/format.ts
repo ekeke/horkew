@@ -102,7 +102,10 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
         if (lastType === 'night_kill' || lastType === 'fox_kill' || lastType === 'peace') {
           lines.push('')
         }
-        lines.push(`${playerName(event.actor)} 霊能CO`)
+        const pastStr = event.pastResults && event.pastResults.length > 0
+          ? ' ' + event.pastResults.map(r => r === 'human' ? '○' : '●').join(' ')
+          : ''
+        lines.push(`${playerName(event.actor)} 霊能CO${pastStr}`)
         break
       }
       case 'medium_result': {
