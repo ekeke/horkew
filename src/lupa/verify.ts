@@ -236,11 +236,12 @@ type Args = {
   scenario: string | null
   seed: number | null
   seeds: [number, number] | null
+  quiet: boolean
 }
 
 function parseArgs(): Args {
   const args = process.argv.slice(2)
-  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null }
+  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false }
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -258,13 +259,36 @@ function parseArgs(): Args {
         if (m) result.seeds = [parseInt(m[1], 10), parseInt(m[2], 10)]
         break
       }
+      case '--quiet':
+      case '-q':
+        result.quiet = true
+        break
     }
   }
   return result
 }
 
+function renderProgress(
+  current: number, total: number,
+  configName: string, seed: number,
+  failures: number, elapsed: number,
+): void {
+  const pct = total > 0 ? current / total : 0
+  const barWidth = 30
+  const filled = Math.round(pct * barWidth)
+  const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled)
+  const pctStr = (pct * 100).toFixed(0).padStart(3)
+  const rate = current > 0 ? (elapsed / current).toFixed(1) : '—'
+  const eta = current > 0 ? ((elapsed / current) * (total - current) / 1000).toFixed(0) : '?'
+  const failStr = failures > 0 ? ` \x1b[31m${failures} fail\x1b[0m` : ''
+  process.stderr.write(
+    `\r\x1b[K  ${bar} ${pctStr}% ${current}/${total} | ${configName} s${seed} | ${rate}ms/game ETA ${eta}s${failStr}`
+  )
+}
+
 function main() {
-  const { outdir, scenario, seed: singleSeed, seeds: seedRange } = parseArgs()
+  const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet } = parseArgs()
+  const showProgress = !!outdir && !quiet
   const allFailures: FailedCheckpoint[] = []
   let totalGames = 0
   let totalCheckpoints = 0
@@ -283,6 +307,12 @@ function main() {
     console.error(`シナリオ "${scenario}" が見つかりません。利用可能: ${configs.map(c => c.name).join(', ')}`)
     process.exit(1)
   }
+
+  // 総ゲーム数を事前計算（プログレスバー用）
+  const expectedTotal = activeConfigs.reduce((sum, gc) => {
+    const [s, e] = singleSeed != null ? [singleSeed, singleSeed + 1] : seedRange ?? gc.seeds
+    return sum + (e - s)
+  }, 0)
 
   for (const gc of activeConfigs) {
     const lupaConfig: LupaConfig = {
@@ -320,8 +350,12 @@ function main() {
         if (retarMs > 0) retarTimes.push(retarMs)
       }
       gameTimes.push(performance.now() - gameStart)
+      if (showProgress) {
+        renderProgress(totalGames, expectedTotal, gc.name, seed, allFailures.length, performance.now() - totalStart)
+      }
     }
 
+    if (showProgress) process.stderr.write('\r\x1b[K')
     const skippedStr = configSkipped > 0 ? ` (${configSkipped} skipped)` : ''
     const numGames = seedEnd - seedStart
     console.log(`  ${gc.name}: ${numGames} games, ${configCheckpoints} checkpoints${skippedStr}`)
