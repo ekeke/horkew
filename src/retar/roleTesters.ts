@@ -137,7 +137,11 @@ function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat
 
   if ( env.lastHamsterMustDieAt != null ) {
     if (lastHamsterDiedAt !== env.lastHamsterMustDieAt ) return false
-    if (lastHamsterDiedBy !== env.lastHamsterMustDiedBy ) return false
+    if (lastHamsterDiedBy !== env.lastHamsterMustDiedBy ) {
+      // 処刑フェーズの死亡: execution と cursed_by_executed_nekomata を同一視
+      const isExecPhase = (c: CauseOfDeath) => c === 'execution' || c === 'cursed_by_executed_nekomata'
+      if (!isExecPhase(lastHamsterDiedBy!) || !isExecPhase(env.lastHamsterMustDiedBy!)) return false
+    }
   }
   for ( const seat of rest ) {
     context.possibilities.denyRole(seat, 'werehamster')
