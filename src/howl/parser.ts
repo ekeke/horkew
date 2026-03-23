@@ -175,10 +175,11 @@ function fillMultiVoteVoters(statements: Statement[], options: ParseOptions): St
 
 function fillMediumTargets(statements: Statement[]): Statement[] {
   const dict = new FlexibleDictionary()
-  const lynchTargets: string[] = []
   const claimedMediums = new Set<string>()
+  // 日付→処刑対象名のマップ
+  const lynchByDay = new Map<number, string>()
 
-  // First pass: collect join names, lynch targets, and medium claimants
+  // First pass: collect join names, medium claimants, lynch-by-day
   for (const s of statements) {
     if (s.type === 'join') {
       const js = s as JoinStatement
@@ -189,8 +190,8 @@ function fillMediumTargets(statements: Statement[]): Statement[] {
       }
     } else if (s.type === 'lynch') {
       const target = (s as LynchStatement).target
-      if (target) {
-        lynchTargets.push(resolveName(dict, target))
+      if (target && s.day != null) {
+        lynchByDay.set(s.day, resolveName(dict, target))
       }
     } else if (s.type === 'assert') {
       const st = s as AssertStatement
@@ -200,37 +201,66 @@ function fillMediumTargets(statements: Statement[]): Statement[] {
     }
   }
 
-  if (claimedMediums.size === 0 || lynchTargets.length === 0) return statements
+  if (claimedMediums.size === 0 || lynchByDay.size === 0) return statements
+
+  // 処刑日のリスト（昇順）
+  const lynchDays = [...lynchByDay.keys()].sort((a, b) => a - b)
 
   // Second pass: fill missing targets for medium result assertions
-  const mediumResultCount = new Map<string, number>()
+  // 各霊能者ごとに割り当て済みの処刑日を追跡
+  const assignedPerMedium = new Map<string, Set<number>>()
+
   return statements.map(s => {
     if (s.type !== 'assert') return s
     const st = s as AssertStatement
     const actorResolved = resolveName(dict, st.actor)
     if (!claimedMediums.has(actorResolved)) return s
 
-    let count = mediumResultCount.get(actorResolved) ?? 0
+    if (!assignedPerMedium.has(actorResolved)) {
+      assignedPerMedium.set(actorResolved, new Set())
+    }
+    const assigned = assignedPerMedium.get(actorResolved)!
+    const day = st.day
+
     let changed = false
     const newAssertions = st.assertions.map(a => {
       if (a.roles || a.action === 'guard') return a
       if (!a.result) return a
 
       if (a.target) {
-        count++
+        // 明示ターゲット → 対応する処刑日を割り当て済みにする
+        const resolvedTarget = resolveName(dict, a.target)
+        for (const d of lynchDays) {
+          if (lynchByDay.get(d) === resolvedTarget && !assigned.has(d)) {
+            assigned.add(d)
+            break
+          }
+        }
         return a
       }
 
-      // No target + has result + actor is medium → fill from lynch history
-      const lynchIndex = count
-      count++
-      if (lynchIndex < lynchTargets.length) {
+      if (day == null) return a
+
+      // まず day D より前の最新の未割当処刑を探す
+      // 見つからなければ同日 (day D) にフォールバック
+      let found: number | undefined
+      for (let i = lynchDays.length - 1; i >= 0; i--) {
+        const ld = lynchDays[i]
+        if (ld < day && !assigned.has(ld)) { found = ld; break }
+      }
+      if (found == null) {
+        for (let i = lynchDays.length - 1; i >= 0; i--) {
+          const ld = lynchDays[i]
+          if (ld === day && !assigned.has(ld)) { found = ld; break }
+        }
+      }
+      if (found != null) {
+        assigned.add(found)
         changed = true
-        return { ...a, target: lynchTargets[lynchIndex] }
+        return { ...a, target: lynchByDay.get(found) }
       }
       return a
     })
-    mediumResultCount.set(actorResolved, count)
     if (!changed) return s
     return { ...st, assertions: newAssertions }
   })
@@ -352,8 +382,8 @@ export function parse(text: string, options: ParseOptions = {}): { meta: any, st
   statements = applySetupStatements(meta, statements)
   statements = fillMultiVoteVoters(statements, mergedOptions)
   statements = expandSurvivorAsserts(statements)
-  statements = fillMediumTargets(statements)
   statements = assignDays(statements)
+  statements = fillMediumTargets(statements)
 
   return { meta, statements }
 }

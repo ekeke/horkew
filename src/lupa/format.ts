@@ -15,6 +15,21 @@ const ROLE_DISPLAY: Record<SystemRole, string> = {
   immoralist: '背徳',
 }
 
+// @記法用の短縮表記（パーサーのvocabulary最短形に合わせる）
+const ROLE_SETUP_DISPLAY: Record<SystemRole, string> = {
+  villager: '村',
+  seer: '占',
+  medium: '霊',
+  bodyguard: '狩',
+  mason: '共',
+  nekomata: '猫',
+  werewolf: '狼',
+  possessed: '狂',
+  fanatic: '信',
+  werehamster: '狐',
+  immoralist: '背',
+}
+
 const RESULT_DISPLAY = {
   villager_won: '村勝利',
   werewolf_won: '狼勝利',
@@ -25,14 +40,17 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
   const lines: string[] = []
   const playerName = (seat: number) => state.players.find(p => p.seat === seat)!.name
 
-  // YAML frontmatter
-  lines.push('---')
-  lines.push('setup:')
-  for (const [role, count] of config.roles) {
-    lines.push(`  ${role}: ${count}`)
-  }
-  lines.push('---')
+  // 配役（@記法）
+  const setupParts = Array.from(config.roles.entries())
+    .map(([role, count]) => `${ROLE_SETUP_DISPLAY[role]}${count}`)
+    .join(' ')
+  lines.push(`@ ${setupParts}`)
   lines.push('')
+
+  // シード値
+  if (config.seed !== undefined) {
+    lines.push(`# seed: ${config.seed}`)
+  }
 
   // プレイヤー一覧
   const names = state.players.map(p => p.name).join('、')
