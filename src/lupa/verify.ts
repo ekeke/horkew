@@ -306,9 +306,9 @@ function renderProgress(
   const pctStr = (pct * 100).toFixed(0).padStart(3)
   const rate = current > 0 ? (elapsed / current).toFixed(1) : '—'
   const eta = current > 0 ? ((elapsed / current) * (total - current) / 1000).toFixed(0) : '?'
-  const failStr = failures > 0 ? ` \x1b[31m${failures} fail\x1b[0m` : ''
+  const failStr = failures > 0 ? `\x1b[31mFails: ${failures}\x1b[0m` : `\x1b[32mFails: 0\x1b[0m`
   process.stderr.write(
-    `\r\x1b[K  ${bar} ${pctStr}% ${current}/${total} | ${configName} s${seed} | ${rate}ms/game ETA ${eta}s${failStr}`
+    `\r\x1b[K  ${bar} ${pctStr}% ${current}/${total} | ${configName} s${seed} | ${rate}ms/game ETA ${eta}s | ${failStr}`
   )
 }
 
