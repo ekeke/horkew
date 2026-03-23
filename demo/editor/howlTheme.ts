@@ -4,7 +4,7 @@ import type { Extension } from '@codemirror/state'
 export const howlThemeExtension: Extension = EditorView.theme({
   '&': {
     backgroundColor: 'var(--color-bg)',
-    color: 'var(--color-text)',
+    color: 'var(--color-editor-text)',
     fontFamily: "'Consolas', 'Menlo', monospace",
     fontSize: '13px',
     lineHeight: '1.5',
@@ -54,11 +54,11 @@ export const howlThemeExtension: Extension = EditorView.theme({
   '.hwl-curse':    { backgroundColor: 'color-mix(in srgb, var(--ctp-mauve) 6%, transparent)' },
   '.hwl-follow':   { backgroundColor: 'color-mix(in srgb, var(--ctp-overlay0) 6%, transparent)' },
   '.hwl-peace':    { backgroundColor: 'color-mix(in srgb, var(--ctp-green) 6%, transparent)' },
-  '.hwl-unknown':  { textDecoration: 'wavy underline var(--color-error)', textUnderlineOffset: '3px', backgroundColor: 'color-mix(in srgb, var(--ctp-red) 13%, transparent)' },
+  '.hwl-unknown':  { textDecoration: 'wavy underline var(--color-editor-unresolved)', textUnderlineOffset: '3px', backgroundColor: 'color-mix(in srgb, var(--color-editor-unresolved) 13%, transparent)' },
   '.hw-beyond-cursor': { opacity: '0.35' },
   '.hw-join-name':         { color: 'var(--color-vote-arrow)', fontWeight: 'bold' },
-  '.hw-player-resolved':   { backgroundColor: 'color-mix(in srgb, var(--ctp-teal) 13%, transparent)', color: 'var(--color-player-resolved)' },
-  '.hw-player-unresolved': { textDecoration: 'wavy underline var(--color-error)', textUnderlineOffset: '3px', backgroundColor: 'color-mix(in srgb, var(--ctp-red) 9%, transparent)' },
+  '.hw-player-resolved':   { backgroundColor: 'color-mix(in srgb, var(--color-editor-resolved) 13%, transparent)', color: 'var(--color-editor-resolved)' },
+  '.hw-player-unresolved': { textDecoration: 'wavy underline var(--color-editor-unresolved)', textUnderlineOffset: '3px', backgroundColor: 'color-mix(in srgb, var(--color-editor-unresolved) 9%, transparent)' },
 
   // Statement type gutter (left of line numbers)
   '.hwl-gutter': {
@@ -72,5 +72,5 @@ export const howlThemeExtension: Extension = EditorView.theme({
     justifyContent: 'center',
   },
   '.hwl-gutter .cm-gutterElement span': { fontSize: '1em', lineHeight: '1' },
-  '.hwg-unknown': { color: 'var(--color-error)' },
+  '.hwg-unknown': { color: 'var(--color-editor-unresolved)' },
 }, { dark: true })

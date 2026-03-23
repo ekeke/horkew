@@ -56,12 +56,15 @@
     { section: 'Domain: 判定' },
     { label: 'human-result',   var: '--color-human-result',   ref: '--ctp-green' },
     { label: 'wolf-result',    var: '--color-wolf-result',    ref: '--ctp-red' },
+    { section: 'Domain: エディタ（名前解決）' },
+    { label: 'editor-text',       var: '--color-editor-text',       ref: '--ctp-subtext1' },
+    { label: 'editor-resolved',   var: '--color-editor-resolved',   ref: '#ffffff' },
+    { label: 'editor-unresolved', var: '--color-editor-unresolved', ref: '--ctp-red' },
     { section: 'Domain: イベント' },
     { label: 'role',           var: '--color-role',           ref: '--ctp-yellow' },
     { label: 'co',             var: '--color-co',             ref: '--ctp-mauve' },
     { label: 'execution',      var: '--color-execution',      ref: '--ctp-peach' },
     { label: 'vote-arrow',     var: '--color-vote-arrow',     ref: '--ctp-blue' },
-    { label: 'player-resolved', var: '--color-player-resolved', ref: '--ctp-teal' },
     { section: 'Feedback' },
     { label: 'error',          var: '--color-error',          ref: '--ctp-red' },
     { label: 'danger-bg',      var: '--color-danger-bg',      ref: '--ctp-red' },
@@ -170,8 +173,9 @@
       <span class="badge" style="color: var(--color-village)">村</span>
       <span class="badge" style="color: var(--color-wolf)">狼</span>
       <span class="badge" style="color: var(--color-fox)">狐</span>
-      <span class="badge" style="color: var(--color-unknown-team)">?</span>
+      <span class="badge" style="color: var(--color-text)">?</span>
     </div>
+    <code class="example-style">color: --color-village / --color-wolf / --color-fox / 不明は --color-text<br>background: --color-surface</code>
   </div>
 
   <div class="example-group">
@@ -181,6 +185,7 @@
       <span class="co-tag"><span class="co-prefix">CO</span> <span style="color: var(--color-role)">霊媒師</span></span>
       <span class="co-tag"><span class="co-prefix">CO</span> <span style="color: var(--color-role)">狩人</span></span>
     </div>
+    <code class="example-style">CO: --color-co &nbsp; 役職名: --color-role<br>background: --color-bg-elevated &nbsp; border: --color-border</code>
   </div>
 
   <div class="example-group">
@@ -189,6 +194,7 @@
       <span class="result-sample">田中 <span class="result-arrow">→</span> <span style="color: var(--color-human-result)">○</span></span>
       <span class="result-sample">佐藤 <span class="result-arrow">→</span> <span style="color: var(--color-wolf-result)">●</span></span>
     </div>
+    <code class="example-style">○: --color-human-result &nbsp; ●: --color-wolf-result<br>→: --color-vote-arrow &nbsp; 名前: --color-text</code>
   </div>
 
   <div class="example-group">
@@ -200,6 +206,7 @@
         <span style="color: var(--color-text)">鈴木</span>
       </span>
     </div>
+    <code class="example-style">名前: --color-text &nbsp; →: --color-vote-arrow</code>
   </div>
 
   <div class="example-group">
@@ -209,15 +216,29 @@
       <span style="color: var(--color-wolf)">田中 襲撃</span>
       <span style="color: var(--color-text-overlay)">平和な朝</span>
     </div>
+    <code class="example-style">処刑: --color-execution &nbsp; 襲撃: --color-wolf &nbsp; 平和: --color-text-overlay</code>
   </div>
 
   <div class="example-group">
-    <h4 class="example-label">プレイヤー名</h4>
+    <h4 class="example-label">エディタ: 名前解決</h4>
     <div class="example-row">
       <span class="player-resolved">山田太郎</span>
       <span class="player-unresolved">やまだ</span>
-      <span style="color: var(--color-text-faint)">（死亡）鈴木</span>
     </div>
+    <code class="example-style">解決済: --color-editor-resolved &nbsp; 未解決: wavy underline --color-editor-unresolved</code>
+  </div>
+
+  <div class="example-group">
+    <h4 class="example-label">ゲーム: プレイヤー状態</h4>
+    <div class="example-row">
+      <span style="color: var(--color-village)">村側 太郎</span>
+      <span style="color: var(--color-wolf)">狼側 花子</span>
+      <span style="color: var(--color-fox)">狐側 次郎</span>
+      <span style="color: var(--color-text)">不明 三郎</span>
+      <span class="player-dead" style="color: var(--color-village)">村側 鈴木</span>
+      <span class="player-dead" style="color: var(--color-wolf)">狼側 田中</span>
+    </div>
+    <code class="example-style">陣営: --color-village / --color-wolf / --color-fox / 不明は --color-text<br>死亡: opacity: 0.5（陣営色を維持）</code>
   </div>
 
   <div class="example-group">
@@ -225,6 +246,7 @@
     <div class="example-row">
       <span class="error-sample">不明なプレイヤー名です</span>
     </div>
+    <code class="example-style">color: --color-error &nbsp; background: --color-error 12%</code>
   </div>
 
   <!-- ======== 3. Buttons / Interactive ======== -->
@@ -237,6 +259,7 @@
       <span class="btn-sample btn-hover">Hover</span>
       <span class="btn-sample btn-disabled">Disabled</span>
     </div>
+    <code class="example-style">bg: --color-surface → hover: --color-surface-hover &nbsp; color: --color-text &nbsp; border: --color-border-strong</code>
   </div>
 
   <div class="example-group">
@@ -245,6 +268,7 @@
       <span class="btn-accent">Accent</span>
       <span class="btn-accent btn-accent-hover">Hover</span>
     </div>
+    <code class="example-style">bg: --color-accent &nbsp; color: --color-bg &nbsp; border: --color-accent</code>
   </div>
 
   <div class="example-group">
@@ -253,6 +277,7 @@
       <span class="btn-danger">Delete</span>
       <span class="btn-danger btn-danger-hover">Hover</span>
     </div>
+    <code class="example-style">bg: --color-danger-bg &nbsp; color: --color-danger-text &nbsp; border: --color-danger-bg</code>
   </div>
 
   <div class="example-group">
@@ -261,6 +286,7 @@
       <span class="input-sample">テキスト入力</span>
       <span class="input-sample input-focus">フォーカス中</span>
     </div>
+    <code class="example-style">bg: --color-bg-elevated &nbsp; color: --color-text &nbsp; border: --color-border → focus: --color-focus-ring</code>
   </div>
 
   <div class="example-group">
@@ -270,6 +296,7 @@
       <span class="table-header-sample">投票結果</span>
       <span class="table-header-sample">死亡履歴</span>
     </div>
+    <code class="example-style">bg: --color-bg-elevated &nbsp; color: --color-accent &nbsp; border: --color-border</code>
   </div>
 </div>
 
@@ -456,6 +483,16 @@
     flex-wrap: wrap;
   }
 
+  .example-style {
+    display: block;
+    margin-top: 4px;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-family: 'Consolas', 'Menlo', monospace;
+    color: var(--ctp-overlay0, #6c7086);
+    line-height: 1.5;
+  }
+
   /* ---- Game UI parts ---- */
 
   .badge {
@@ -502,17 +539,21 @@
   }
 
   .player-resolved {
-    background: rgba(148, 226, 213, 0.12);
-    color: var(--ctp-teal, #94e2d5);
+    background: color-mix(in srgb, var(--color-editor-resolved) 12%, transparent);
+    color: var(--color-editor-resolved);
     padding: 1px 6px;
     border-radius: 3px;
   }
 
   .player-unresolved {
-    text-decoration: wavy underline var(--ctp-red, #f38ba8);
+    text-decoration: wavy underline var(--color-editor-unresolved);
     text-underline-offset: 3px;
     color: var(--ctp-text, #cdd6f4);
     padding: 1px 6px;
+  }
+
+  .player-dead {
+    opacity: 0.5;
   }
 
   .error-sample {

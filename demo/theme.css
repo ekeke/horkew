@@ -80,12 +80,16 @@
   --color-human-result:   var(--ctp-green);      /* ○ 白判定 */
   --color-wolf-result:    var(--ctp-red);        /* ● 黒判定 */
 
+  /* --- Domain: エディタ（名前解決） --- */
+  --color-editor-text:       var(--ctp-subtext1); /* エディタ通常テキスト（やや控えめ） */
+  --color-editor-resolved:   #ffffff;             /* 名前解決済み（白） */
+  --color-editor-unresolved: var(--ctp-red);      /* 名前未解決（wavy underline） */
+
   /* --- Domain: ゲームイベント --- */
   --color-role:           var(--ctp-yellow);     /* 役職名 */
   --color-co:             var(--ctp-mauve);      /* CO（カミングアウト） */
   --color-execution:      var(--ctp-peach);      /* 処刑 */
   --color-vote-arrow:     var(--ctp-blue);       /* 投票先矢印 */
-  --color-player-resolved: var(--ctp-teal);      /* 名前解決済みプレイヤー */
 
   /* --- Layout (overlay) --- */
   --color-overlay-backdrop: rgba(0, 0, 0, 0.6);  /* モーダル/パネル背景オーバーレイ */
