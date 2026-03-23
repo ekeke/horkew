@@ -465,5 +465,15 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     if (count <= 0) setup.delete(role)
   }
 
+  // 予告先がその夜までに死亡していたら予告を無効化（占い先は変更される）
+  for (const [, status] of statuses) {
+    for (const [night, targetSeat] of status.forecasts) {
+      const targetStatus = statuses.get(targetSeat)!
+      if (!targetStatus.surviving && targetStatus.diedDay != null && targetStatus.diedDay <= night) {
+        status.forecasts.delete(night)
+      }
+    }
+  }
+
   return { vs, setup, players, shortNames, dict }
 }
