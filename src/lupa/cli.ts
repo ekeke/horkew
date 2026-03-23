@@ -8,10 +8,15 @@ function parseArgs(args: string[]): LupaConfig {
   const roles = new Map<SystemRole, number>()
   let seed: number | undefined
   let verify = false
+  let useRandomNames = false
 
   for (const arg of args) {
     if (arg === '--test') {
       verify = true
+      continue
+    }
+    if (arg === '--use-random-names') {
+      useRandomNames = true
       continue
     }
     if (arg.startsWith('--seed=')) {
@@ -48,7 +53,7 @@ function parseArgs(args: string[]): LupaConfig {
     process.exit(1)
   }
 
-  return { roles, seed, verify }
+  return { roles, seed, verify, useRandomNames }
 }
 
 const config = parseArgs(process.argv.slice(2))

@@ -4,6 +4,7 @@ export type LupaConfig = {
   roles: Map<SystemRole, number>
   seed?: number
   verify?: boolean
+  useRandomNames?: boolean
 }
 
 export type PlayerState = {

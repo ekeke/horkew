@@ -1,6 +1,7 @@
 import type { LupaConfig, GameState, GameEvent, NightAction, DayClaim } from './types.ts'
+import type { SystemRole } from '../types/index.ts'
 import { Rng } from './random.ts'
-import { NAMES } from './names.ts'
+import { RANDOM_NAMES, generateRoleNames } from './names.ts'
 import {
   assignRoles, alivePlayers, getSeerResult,
   killPlayer, checkWinCondition,
@@ -16,12 +17,27 @@ export type GameResult = {
 export function runGame(config: LupaConfig): GameResult {
   const rng = new Rng(config.seed)
   const totalPlayers = Array.from(config.roles.values()).reduce((a, b) => a + b, 0)
-  const names = NAMES.slice(0, totalPlayers)
-  if (names.length < totalPlayers) {
-    throw new Error(`プレイヤー名が足りません (必要: ${totalPlayers}, 利用可能: ${NAMES.length})`)
-  }
 
   const shuffledIndices = rng.shuffle(Array.from({ length: totalPlayers }, (_, i) => i))
+
+  // 役職配列を構築してシャッフル結果から割り当て順を決定
+  const roleArray: SystemRole[] = []
+  for (const [role, count] of config.roles) {
+    for (let i = 0; i < count; i++) roleArray.push(role)
+  }
+  const assignedRoles = shuffledIndices.map(i => roleArray[i])
+
+  // 名前生成
+  let names: string[]
+  if (config.useRandomNames) {
+    if (totalPlayers > RANDOM_NAMES.length) {
+      throw new Error(`プレイヤー名が足りません (必要: ${totalPlayers}, 利用可能: ${RANDOM_NAMES.length})`)
+    }
+    names = RANDOM_NAMES.slice(0, totalPlayers)
+  } else {
+    names = generateRoleNames(assignedRoles)
+  }
+
   const players = assignRoles(config.roles, names, shuffledIndices)
   const state: GameState = {
     players,
