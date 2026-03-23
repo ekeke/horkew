@@ -24,6 +24,7 @@ export type {
   UnknownStatement,
   GrelanStatement,
 } from './statement.ts'
+// GrelanStatement is exported for external consumers even though bridge.ts doesn't need it
 export { FlexibleDictionary } from './flexibleDictionary.ts'
 export { Rules } from './ruleset.ts'
 export * as vocabulary from './vocabulary.ts'

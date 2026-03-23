@@ -69,11 +69,13 @@
                 <li><a href="#help-notation-assert-neg">否定CO・複合CO</a></li>
                 <li><a href="#help-notation-assert-result">占い・霊媒結果</a></li>
                 <li><a href="#help-notation-assert-bulk">一括CO (生存者)</a></li>
+                <li><a href="#help-notation-assert-forecast">占い予告</a></li>
               </ul>
             </li>
             <li><a href="#help-notation-death">死亡イベント</a>
               <ul>
                 <li><a href="#help-notation-death-lynch">処刑</a></li>
+                <li><a href="#help-notation-death-grelan">グレラン</a></li>
                 <li><a href="#help-notation-death-attack">襲撃</a></li>
                 <li><a href="#help-notation-death-curse">道連れ・後追い</a></li>
                 <li><a href="#help-notation-death-peace">平和</a></li>
@@ -348,6 +350,12 @@
       <p>キーワード <code>生存者</code> で全生存者の一括COを記述できます。</p>
       <pre><code>生存者 占いCO
 生存者 非猫CO</code></pre>
+
+      <h3 id="help-notation-assert-forecast">占い予告</h3>
+      <p>占いCO済みのプレイヤーが「次の夜に誰を占うか」を予告します。</p>
+      <pre><code>アリス 予告 ボブ</code></pre>
+      <p>予告した占い師が襲撃された場合、予告先を占った扱いになります。予告先が生存していれば妖狐ではないと推定できます。</p>
+      <p>予告先がその夜までに死亡していた場合、予告は自動的に無効化されます（占い先が変更されるため）。</p>
     </section>
 
     <!-- 死亡イベント -->
@@ -361,6 +369,12 @@
 処刑者なし</code></pre>
       <p>キーワード: <code>吊り</code> <code>吊</code> <code>処刑</code><br>
       処刑なし: <code>処刑者なし</code> <code>吊りなし</code></p>
+
+      <h3 id="help-notation-death-grelan">グレラン</h3>
+      <pre><code>グレラン
+アリス処刑</code></pre>
+      <p>処刑行の前に <code>グレラン</code> と書くと、その処刑がグレーランダム投票（COなしの一斉投票）によるものであることを明示します。</p>
+      <p>通常、COせずに処刑されたプレイヤーは占い師・霊媒師などの重要役職ではないと判定されますが、<code>グレラン</code> をつけるとCO機会がなかったものとして扱われ、重要役職の候補から除外されなくなります。</p>
 
       <h3 id="help-notation-death-attack">襲撃</h3>
       <pre><code>襲撃 アリス
@@ -575,6 +589,7 @@
         <ul>
           <li><strong>潜伏を考慮すると推理が成立しない</strong> — 「誰でも何かの役職を隠しているかもしれない」という仮定を入れると、ほぼすべての絞り込みが無効化され、ツールとしての推理支援が機能しなくなります。</li>
           <li><strong>実戦のセオリーに沿った設計</strong> — 一般的な人狼のセオリーでは、重要役職は適切なタイミングでCOすることが基本です。特に処刑対象になった場合にCOせず黙って吊られることは通常想定されません。Horkewはこのセオリーを前提として推理を組み立てます。</li>
+          <li><strong>グレランの場合</strong> — ただし、グレーランダム投票（グレラン）でCOの機会なく処刑された場合は例外です。処刑行の前に <code>グレラン</code> と記述すると、その処刑者は重要役職の候補から除外されなくなります。詳しくは<a href="#help-notation-death-grelan">グレラン</a>を参照してください。</li>
         </ul>
       </details>
     </section>

@@ -21,7 +21,6 @@ import type {
   OverStatement,
   AssertStatement,
   MasonStatement,
-  GrelanStatement,
 } from './statement.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
 

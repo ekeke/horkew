@@ -398,7 +398,36 @@ This also handles **result slides** (結果スライド): when a player corrects
 百面ダイス: スレッタ黒        # → Night 0: スレッタ● (overwrites グロ○)
 ```
 
-### 13. Reveal (`reveal`)
+### 13. Forecast (`forecast`)
+
+A seer claimant announces who they will divine the following night (占い予告). The actor must have already made a seer CO.
+
+**Syntax**: `actor 予告 target`
+
+```
+アリス 予告 ボブ
+```
+
+If the seer dies that night, the forecast target is treated as divined. If the forecast target died before or during that night, the forecast is automatically invalidated (the seer would have divined someone else).
+
+**Output**: `{ type: 'forecast', actor: string, target: string }`
+
+### 14. Grelan (`grelan`)
+
+Marks the following execution as a grey random vote (グレラン), indicating the executed player had no opportunity to CO a role before being lynched.
+
+**Syntax**: `グレラン` on its own line, placed before the `lynch` statement.
+
+```
+グレラン
+ボブ処刑
+```
+
+Without this marker, Retar assumes that a non-claiming executed player voluntarily chose not to CO, and denies them village roles (seer, medium, bodyguard, mason, nekomata). With `グレラン`, the executed player remains a candidate for those roles.
+
+**Output**: `{ type: 'grelan' }`
+
+### 15. Reveal (`reveal`)
 
 Reveals a player's actual role (post-game or GM disclosure).
 
@@ -411,7 +440,7 @@ Alice=占い
 
 **Output**: `{ type: 'reveal', player: string, role: string }`
 
-### 14. Unknown (`unknown`)
+### 16. Unknown (`unknown`)
 
 Any line that does not match the above parsers.
 
@@ -426,16 +455,18 @@ Statements are tried in this order. The first match wins:
 3. `vote`
 4. `multiVote`
 5. `attack`
-6. `lynch`
-7. `curse`
-8. `follow`
-9. `revote`
-10. `over`
-11. `peace`
-12. `mason`
-13. `assert`
-14. `reveal`
-15. `unknown` (fallback)
+6. `grelan`
+7. `lynch`
+8. `curse`
+9. `follow`
+10. `revote`
+11. `over`
+12. `peace`
+13. `mason`
+14. `forecast`
+15. `assert`
+16. `reveal`
+17. `unknown` (fallback)
 
 ## Post-Processing Pipeline
 
