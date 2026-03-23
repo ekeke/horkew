@@ -397,14 +397,14 @@ Bob　霊CO　白
 噛み Dave
 Bob　黒`
     const asserts = findAsserts(text)
-    // Bob claims medium; first result (白) → Charlie (1st lynch)
-    assert.strictEqual(asserts[0].assertions[1].target, 'Charlie')
-    // Second statement: 黒 → no second lynch yet, but Charlie is 1st
-    // Wait: there's only one lynch (Charlie). Bob's 1st result is from CO statement.
-    // "Bob　霊CO　白" has role claim + one history entry (白, no target) → target = Charlie
+    // "Bob　霊CO　白" at day 2: 1 result, right-aligned to night 1.
+    // No execution on day 1 → target unfilled.
     assert.strictEqual(asserts[0].assertions.length, 2)
-    assert.strictEqual(asserts[0].assertions[1].target, 'Charlie')
+    assert.strictEqual(asserts[0].assertions[1].target, undefined)
     assert.strictEqual(asserts[0].assertions[1].result, 'isHuman')
+    // "Bob　黒" at day 3: 1 result, right-aligned to night 2 → Charlie (executed day 2)
+    assert.strictEqual(asserts[1].assertions[0].target, 'Charlie')
+    assert.strictEqual(asserts[1].assertions[0].result, 'isWolf')
   })
 
   test('incremental medium reports match sequential lynches', () => {
@@ -417,11 +417,11 @@ Bob　白
 吊り Eve
 Bob　黒`
     const asserts = findAsserts(text)
-    // Bob's 1st result (白) → Charlie (1st lynch)
+    // "Bob　白" at day 3: right-aligned to night 2 → Charlie (executed day 2)
     assert.strictEqual(asserts[1].assertions[0].target, 'Charlie')
     assert.strictEqual(asserts[1].assertions[0].result, 'isHuman')
-    // Bob's 2nd result (黒) → Eve (2nd lynch)
-    assert.strictEqual(asserts[2].assertions[0].target, 'Eve')
+    // "Bob　黒" at day 3: right-aligned to night 2 → Charlie (result slide, overwrites 白)
+    assert.strictEqual(asserts[2].assertions[0].target, 'Charlie')
     assert.strictEqual(asserts[2].assertions[0].result, 'isWolf')
   })
 
@@ -433,13 +433,12 @@ Bob　白
 噛み Dave
 Bob　霊CO　黒`
     const asserts = findAsserts(text)
-    // "Bob　白" before CO → still filled since Bob eventually claims medium
-    assert.strictEqual(asserts[0].assertions[0].target, 'Charlie')
+    // "Bob　白" at day 2: right-aligned to night 1. No execution on day 1 → unfilled.
+    assert.strictEqual(asserts[0].assertions[0].target, undefined)
     assert.strictEqual(asserts[0].assertions[0].result, 'isHuman')
-    // "Bob　霊CO　黒" → 2nd result (黒), but only 1 lynch (Charlie) so far
-    // Wait: the CO has a role claim + history entry. The history entry is the 2nd result.
-    // But there's only 1 lynch. So target stays undefined.
-    assert.strictEqual(asserts[1].assertions[1].target, undefined)
+    // "Bob　霊CO　黒" at day 3: right-aligned to night 2 → Charlie (executed day 2)
+    assert.strictEqual(asserts[1].assertions[1].target, 'Charlie')
+    assert.strictEqual(asserts[1].assertions[1].result, 'isWolf')
   })
 
   test('non-medium assert is not affected', () => {

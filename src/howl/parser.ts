@@ -203,61 +203,41 @@ function fillMediumTargets(statements: Statement[]): Statement[] {
 
   if (claimedMediums.size === 0 || lynchByDay.size === 0) return statements
 
-  // 処刑日のリスト（昇順）
-  const lynchDays = [...lynchByDay.keys()].sort((a, b) => a - b)
-
   // Second pass: fill missing targets for medium result assertions
-  // 各霊能者ごとに割り当て済みの処刑日を追跡
-  const assignedPerMedium = new Map<string, Set<number>>()
-
+  // 右詰め方式: 各文の結果数に応じて right-align し、対応するナイトの処刑者を割り当てる
   return statements.map(s => {
     if (s.type !== 'assert') return s
     const st = s as AssertStatement
     const actorResolved = resolveName(dict, st.actor)
     if (!claimedMediums.has(actorResolved)) return s
 
-    if (!assignedPerMedium.has(actorResolved)) {
-      assignedPerMedium.set(actorResolved, new Set())
-    }
-    const assigned = assignedPerMedium.get(actorResolved)!
     const day = st.day
+    if (day == null) return s
+
+    // この文内の占い/霊能結果（ターゲット有無問わず）を数える（右詰め位置計算用）
+    const divResults: number[] = []
+    for (let i = 0; i < st.assertions.length; i++) {
+      const a = st.assertions[i]
+      if (a.roles || a.action === 'guard') continue
+      if (!a.result) continue
+      divResults.push(i)
+    }
+    if (divResults.length === 0) return s
 
     let changed = false
-    const newAssertions = st.assertions.map(a => {
+    const lastNight = day - 1
+    const newAssertions = st.assertions.map((a, idx) => {
       if (a.roles || a.action === 'guard') return a
       if (!a.result) return a
+      if (a.target) return a
 
-      if (a.target) {
-        // 明示ターゲット → 対応する処刑日を割り当て済みにする
-        const resolvedTarget = resolveName(dict, a.target)
-        for (const d of lynchDays) {
-          if (lynchByDay.get(d) === resolvedTarget && !assigned.has(d)) {
-            assigned.add(d)
-            break
-          }
-        }
-        return a
-      }
-
-      if (day == null) return a
-
-      // まず day D より前の最新の未割当処刑を探す
-      // 見つからなければ同日 (day D) にフォールバック
-      let found: number | undefined
-      for (let i = lynchDays.length - 1; i >= 0; i--) {
-        const ld = lynchDays[i]
-        if (ld < day && !assigned.has(ld)) { found = ld; break }
-      }
-      if (found == null) {
-        for (let i = lynchDays.length - 1; i >= 0; i--) {
-          const ld = lynchDays[i]
-          if (ld === day && !assigned.has(ld)) { found = ld; break }
-        }
-      }
-      if (found != null) {
-        assigned.add(found)
+      // この結果の右詰め位置を計算
+      const posInDiv = divResults.indexOf(idx)
+      const night = lastNight - (divResults.length - 1 - posInDiv)
+      const target = lynchByDay.get(night)
+      if (target) {
         changed = true
-        return { ...a, target: lynchByDay.get(found) }
+        return { ...a, target }
       }
       return a
     })
