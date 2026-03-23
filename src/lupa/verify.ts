@@ -10,8 +10,12 @@
  * これらの前提に反するチェックポイントはスキップされる（連鎖的な影響があるため）
  *
  * 実行:
- *   node --experimental-strip-types src/lupa/verify.ts
- *   node --experimental-strip-types src/lupa/verify.ts --outdir tmp/verify
+ *   npm run verify:retar                                    # 全シナリオ
+ *   npm run verify:retar -- --outdir tmp/verify             # 失敗howl出力
+ *   npm run verify:retar -- --scenario full-15p             # シナリオ指定
+ *   npm run verify:retar -- --seed 114                      # 単一seed
+ *   npm run verify:retar -- --seeds 100-200                 # seed範囲
+ *   npm run verify:retar -- --scenario full-15p --seed 114  # 組み合わせ
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -221,17 +225,40 @@ const configs: GameConfig[] = [
   { name: 'full-17p', roles: { werewolf: 3, villager: 4, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, possessed: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 500] },
 ]
 
-function parseArgs(): { outdir: string | null } {
+type Args = {
+  outdir: string | null
+  scenario: string | null
+  seed: number | null
+  seeds: [number, number] | null
+}
+
+function parseArgs(): Args {
   const args = process.argv.slice(2)
-  const idx = args.indexOf('--outdir')
-  if (idx >= 0 && idx + 1 < args.length) {
-    return { outdir: args[idx + 1] }
+  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null }
+
+  for (let i = 0; i < args.length; i++) {
+    switch (args[i]) {
+      case '--outdir':
+        result.outdir = args[++i]
+        break
+      case '--scenario':
+        result.scenario = args[++i]
+        break
+      case '--seed':
+        result.seed = parseInt(args[++i], 10)
+        break
+      case '--seeds': {
+        const m = args[++i].match(/^(\d+)-(\d+)$/)
+        if (m) result.seeds = [parseInt(m[1], 10), parseInt(m[2], 10)]
+        break
+      }
+    }
   }
-  return { outdir: null }
+  return result
 }
 
 function main() {
-  const { outdir } = parseArgs()
+  const { outdir, scenario, seed: singleSeed, seeds: seedRange } = parseArgs()
   const allFailures: FailedCheckpoint[] = []
   let totalGames = 0
   let totalCheckpoints = 0
@@ -242,14 +269,27 @@ function main() {
   const retarTimes: number[] = []
   const totalStart = performance.now()
 
-  for (const gc of configs) {
+  const activeConfigs = scenario
+    ? configs.filter(c => c.name === scenario)
+    : configs
+
+  if (scenario && activeConfigs.length === 0) {
+    console.error(`シナリオ "${scenario}" が見つかりません。利用可能: ${configs.map(c => c.name).join(', ')}`)
+    process.exit(1)
+  }
+
+  for (const gc of activeConfigs) {
     const lupaConfig: LupaConfig = {
       roles: new Map(Object.entries(gc.roles) as [SystemRole, number][]),
     }
     let configCheckpoints = 0
     let configSkipped = 0
 
-    for (let seed = gc.seeds[0]; seed < gc.seeds[1]; seed++) {
+    const [seedStart, seedEnd] = singleSeed != null
+      ? [singleSeed, singleSeed + 1]
+      : seedRange ?? gc.seeds
+
+    for (let seed = seedStart; seed < seedEnd; seed++) {
       const gameStart = performance.now()
       lupaConfig.seed = seed
       const { events, state } = runGame(lupaConfig)
@@ -276,7 +316,8 @@ function main() {
     }
 
     const skippedStr = configSkipped > 0 ? ` (${configSkipped} skipped)` : ''
-    console.log(`  ${gc.name}: ${gc.seeds[1] - gc.seeds[0]} games, ${configCheckpoints} checkpoints${skippedStr}`)
+    const numGames = seedEnd - seedStart
+    console.log(`  ${gc.name}: ${numGames} games, ${configCheckpoints} checkpoints${skippedStr}`)
   }
 
   const totalMs = performance.now() - totalStart
