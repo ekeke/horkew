@@ -239,8 +239,34 @@ type Args = {
   quiet: boolean
 }
 
+function showHelp(): never {
+  const scenarioNames = configs.map(c => c.name).join(', ')
+  console.log(`Lupa × Retar 検証スクリプト
+
+Usage: npm run verify:retar [-- options]
+
+Options:
+  --scenario <name>   指定シナリオのみ実行
+  --seed <n>          単一seedで実行
+  --seeds <from>-<to> seed範囲を指定 (例: 100-200)
+  --outdir <dir>      失敗howlファイルの出力先ディレクトリ
+  --quiet, -q         プログレスバーを非表示
+  --help, -h          このヘルプを表示
+
+シナリオ一覧:
+  ${scenarioNames}
+
+Examples:
+  npm run verify:retar
+  npm run verify:retar -- --outdir tmp/verify
+  npm run verify:retar -- --scenario full-15p --seed 114
+  npm run verify:retar -- --scenario 14d-neko --seeds 0-100 --outdir tmp/verify`)
+  process.exit(0)
+}
+
 function parseArgs(): Args {
   const args = process.argv.slice(2)
+  if (args.includes('--help') || args.includes('-h')) showHelp()
   const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false }
 
   for (let i = 0; i < args.length; i++) {
