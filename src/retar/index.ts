@@ -277,26 +277,20 @@ export class VillageRetar {
     }
     else if (this.vs.result === 'werewolf_won') {
       // 狼勝利: 飽和のトリガーとして非狼・非狐が最低1人含まれる
-      // 非固定の席のうち、狼でも狐でもありうる席を除外した候補が1席なら確定できる
-      const unfixed = this.lastDeaths.filter(seat => !this.initialPossibilities.isFixed(seat))
-      const mustBeHuman = unfixed.filter(seat =>
-        !this.initialPossibilities.hasRole(seat, 'werewolf')
-        && !this.initialPossibilities.hasRole(seat, 'werehamster')
-      )
-      // 狼にも狐にもなれない席は確実に人間 → deny 不要（既に候補なし）
-      // 狼/狐になれる席が1つだけ残って他が全て人間確定なら、その1席も人間
-      const wolfOrHamster = unfixed.filter(seat =>
-        this.initialPossibilities.hasRole(seat, 'werewolf')
-        || this.initialPossibilities.hasRole(seat, 'werehamster')
-      )
-      if (wolfOrHamster.length === 0) {
-        // 全員人間確定 → 追加制約不要
-      } else if (mustBeHuman.length >= 1) {
-        // 既に人間が1人以上いる → 制約は満たされている、追加不要
-      } else if (wolfOrHamster.length === unfixed.length && unfixed.length === 1) {
-        // 未固定が1席で狼/狐の可能性あり → その席が人間
-        this.initialPossibilities.denyRole(unfixed[0], 'werewolf')
-        this.initialPossibilities.denyRole(unfixed[0], 'werehamster')
+      // 固定席も含めて人間（非狼・非狐）が既にいれば制約は満たされている
+      const hasConfirmedHuman = this.lastDeaths.some(seat => {
+        const isWolfOrHamster = this.initialPossibilities.hasRole(seat, 'werewolf')
+          || this.initialPossibilities.hasRole(seat, 'werehamster')
+        // 固定席が人間 or 狼/狐の可能性がない席がある → 制約充足
+        return !isWolfOrHamster
+      })
+      if (!hasConfirmedHuman) {
+        // 全員が狼/狐になりうる → 狼/狐候補が1席のみならその席は人間
+        const unfixed = this.lastDeaths.filter(seat => !this.initialPossibilities.isFixed(seat))
+        if (unfixed.length === 1) {
+          this.initialPossibilities.denyRole(unfixed[0], 'werewolf')
+          this.initialPossibilities.denyRole(unfixed[0], 'werehamster')
+        }
       }
     }
     // werehamster_won は analyzeHamsterWin() で処理
