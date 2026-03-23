@@ -33,7 +33,6 @@ export type NightAction =
   | { type: 'divine', target: number }
   | { type: 'guard', target: number }
   | { type: 'attack', target: number }
-  | { type: 'fake_divine', target: number, result: EnumSpecies }
   | { type: 'none' }
 
 export type DayClaim =

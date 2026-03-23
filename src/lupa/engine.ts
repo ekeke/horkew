@@ -126,9 +126,6 @@ function applyNightAction(
     case 'guard':
       player.guardHistory.set(night, action.target)
       break
-    case 'fake_divine':
-      player.fakeDivineHistory.set(night, { target: action.target, result: action.result })
-      break
     case 'attack':
     case 'none':
       break
