@@ -393,7 +393,7 @@ function main() {
 
   // 時間統計
   const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0
-  const max = (arr: number[]) => arr.length > 0 ? Math.max(...arr) : 0
+  const max = (arr: number[]) => arr.reduce((m, v) => v > m ? v : m, 0)
   console.log(`時間: total ${totalMs.toFixed(0)}ms`)
   console.log(`  game: avg ${avg(gameTimes).toFixed(1)}ms, max ${max(gameTimes).toFixed(1)}ms (${totalGames} games)`)
   console.log(`  retar: avg ${avg(retarTimes).toFixed(1)}ms, max ${max(retarTimes).toFixed(1)}ms (${retarTimes.length} runs)`)
