@@ -9,7 +9,6 @@ type DeathCounts = {
 export type AnalyzeContext = {
   possibilities: Possibilities
   needSeerAtDay?: number
-  additionalLiars: number
   hamstersKilledBySeer: { day: number, seat: Seat }[]
   hamstersMaxSurvivingDay: number
   requireOneOf: { seat: Seat, role: SystemRole }[][]
@@ -28,7 +27,6 @@ export type RoleTesterEnv = {
 
 export function cloneContext(context: AnalyzeContext): AnalyzeContext {
   return {
-    additionalLiars: context.additionalLiars,
     hamstersKilledBySeer: context.hamstersKilledBySeer.map(x => ({ ...x })),
     hamstersMaxSurvivingDay: context.hamstersMaxSurvivingDay,
     requireOneOf: context.requireOneOf.map(arr => arr.map(x => ({ ...x }))),
@@ -40,7 +38,6 @@ export function cloneContext(context: AnalyzeContext): AnalyzeContext {
 export type ContextSnapshot = {
   possArr: Uint16Array
   possSetup: Uint8Array
-  additionalLiars: number
   hamstersMaxSurvivingDay: number
   needSeerAtDay: number | undefined
   hamstersKilledBySeerLen: number
@@ -56,7 +53,6 @@ export function saveContext(ctx: AnalyzeContext): ContextSnapshot {
   return {
     possArr: new Uint16Array(ctx.possibilities.possibilities),
     possSetup: new Uint8Array(ctx.possibilities.setup),
-    additionalLiars: ctx.additionalLiars,
     hamstersMaxSurvivingDay: ctx.hamstersMaxSurvivingDay,
     needSeerAtDay: ctx.needSeerAtDay,
     hamstersKilledBySeerLen: ctx.hamstersKilledBySeer.length,
@@ -68,7 +64,6 @@ export function saveContext(ctx: AnalyzeContext): ContextSnapshot {
 export function restoreContext(ctx: AnalyzeContext, s: ContextSnapshot): void {
   ctx.possibilities.possibilities.set(s.possArr)
   ctx.possibilities.setup.set(s.possSetup)
-  ctx.additionalLiars = s.additionalLiars
   ctx.hamstersMaxSurvivingDay = s.hamstersMaxSurvivingDay
   ctx.needSeerAtDay = s.needSeerAtDay
   ctx.hamstersKilledBySeer.length = s.hamstersKilledBySeerLen
@@ -379,9 +374,6 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
       return false
     }
     const self = getStatus(env, seat)
-    if (!self.claiming) {
-      context.additionalLiars++
-    }
     if ( !self.surviving ) {
       const deathChronicle = context.deathChronicle.get(self.diedDay!)
       if ( self.causeOfDeath === 'night_kill' ) {

@@ -390,7 +390,6 @@ export class VillageRetar {
   private runAnalysis(): void {
     // Initialize
     this.context = {
-      additionalLiars: 0,
       hamstersKilledBySeer: [],
       requireOneOf: [],
       deathChronicle: new Map(),
