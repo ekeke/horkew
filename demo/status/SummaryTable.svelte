@@ -5,6 +5,7 @@
   import { getContext } from 'svelte'
   import { causeOfDeathLabel, buildAssertionTimeline } from './extract.ts'
   import PlayerName from './PlayerName.svelte'
+  import SpeciesIcon from './SpeciesIcon.svelte'
 
   let { days, groups, maxDay, players, survivors, nightKilled, executed, claimShortNames = new Map() }: {
     days: DayDeaths[]
@@ -51,17 +52,6 @@
       })
   )
 
-  function speciesSymbol(species: import('../../src/types/index.ts').EnumSpecies): string {
-    if (species === 'human') return '○'
-    if (species === 'wolf') return '●'
-    return ''
-  }
-
-  function cellContent(assertion: DayAssertion, role: string): string {
-    if (!assertion) return ''
-    if (role === 'bodyguard') return assertion.targetName
-    return assertion.targetName + speciesSymbol(assertion.species)
-  }
 
   function buildMasonDisplay(group: ClaimGroup): { seat: number, name: string, dead: boolean }[][] {
     const parent = new Map<number, number>()
@@ -127,7 +117,7 @@
             {#each dayColumns as day}
               {@const assertion = timeline.get(day - 1) ?? null}
               <td class="data-cell" class:human={assertion?.species === 'human'} class:wolf={assertion?.species === 'wolf'} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:active-hl-cell={$srcLines.claimCell.get(`${row.seat}:${day - 1}`) === $cursor}>
-                {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{cellContent(assertion, row.claimingRole)}</PlayerName>{/if}
+                {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{/if}
               </td>
             {/each}
           </tr>

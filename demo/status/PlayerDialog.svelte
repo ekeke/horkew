@@ -1,9 +1,10 @@
 <script lang="ts">
-  import type { SeatStatus, SystemRole, CauseOfDeath, VillageStatus } from '../../src/types/index.ts'
+  import type { SeatStatus, SystemRole, CauseOfDeath, VillageStatus, EnumSpecies } from '../../src/types/index.ts'
   import { systemRoles } from '../../src/types/index.ts'
   import type { SeatResult } from '../analysis.worker.ts'
   import { extractVoteStatus, computeVerdicts } from './extract.ts'
   import { runParallelAnalysis } from '../runAnalysis.ts'
+  import SpeciesIcon from './SpeciesIcon.svelte'
 
   let { seat, name, status, vs, setup, players, onclose }: {
     seat: number
@@ -218,8 +219,8 @@
 
   // --- Seer / Medium divination results ---
 
-  type DivinationEntry = { seerName: string, species: '○' | '●' | '-' }
-  type MediumEntry = { mediumName: string, species: '○' | '●' | '-' }
+  type DivinationEntry = { seerName: string, species: EnumSpecies | null }
+  type MediumEntry = { mediumName: string, species: EnumSpecies | null }
 
   // All seer claimants (sorted by CO order)
   let seerClaimants = $derived(
@@ -235,30 +236,26 @@
       .sort(([, a], [, b]) => (a.claimOrder ?? Infinity) - (b.claimOrder ?? Infinity))
   )
 
-  function speciesSymbol(species: import('../../src/types/index.ts').EnumSpecies): '○' | '●' {
-    return species === 'wolf' ? '●' : '○'
-  }
-
   // Find a seer's divination result for a given target seat
-  function seerResultFor(seerStatus: SeatStatus, targetSeat: number): '○' | '●' | '-' {
+  function seerResultFor(seerStatus: SeatStatus, targetSeat: number): EnumSpecies | null {
     for (const [, { target, species }] of seerStatus.assertions) {
-      if (target === targetSeat) return speciesSymbol(species)
+      if (target === targetSeat) return species
     }
-    return '-'
+    return null
   }
 
   // Find medium result for a given player seat (must have been executed)
-  function mediumResultFor(mediumSeat: number, mediumStatus: SeatStatus, playerSeat: number, playerStatus: SeatStatus): '○' | '●' | '-' {
+  function mediumResultFor(mediumSeat: number, mediumStatus: SeatStatus, playerSeat: number, playerStatus: SeatStatus): EnumSpecies | null {
     // Player must have died by execution
-    if (playerStatus.surviving) return '-'
-    if (playerStatus.causeOfDeath !== 'execution') return '-'
+    if (playerStatus.surviving) return null
+    if (playerStatus.causeOfDeath !== 'execution') return null
     // Medium must have been alive when the execution happened
-    if (!mediumStatus.surviving && mediumStatus.diedDay != null && playerStatus.diedDay != null && mediumStatus.diedDay <= playerStatus.diedDay) return '-'
+    if (!mediumStatus.surviving && mediumStatus.diedDay != null && playerStatus.diedDay != null && mediumStatus.diedDay <= playerStatus.diedDay) return null
     // Check medium's assertions for a matching target
     for (const [, { target, species }] of mediumStatus.assertions) {
-      if (target === playerSeat) return speciesSymbol(species)
+      if (target === playerSeat) return species
     }
-    return '-'
+    return null
   }
 
   let mainDivinations = $derived.by(() => {
@@ -379,10 +376,10 @@
       {#if mainDivinations.seers.length > 0 || mainDivinations.mediums.length > 0}
         <div class="divination-row">
           {#each mainDivinations.seers as entry}
-            <span class="div-chip"><span class="div-name">{entry.seerName}</span><span class="div-species" class:human={entry.species === '○'} class:wolf={entry.species === '●'} class:unknown={entry.species === '-'}>{entry.species}</span></span>
+            <span class="div-chip"><span class="div-name">{entry.seerName}</span><span class="div-species" class:human={entry.species === 'human'} class:wolf={entry.species === 'wolf'} class:unknown={entry.species == null}>{#if entry.species}<SpeciesIcon species={entry.species} />{:else}-{/if}</span></span>
           {/each}
           {#each mainDivinations.mediums as entry}
-            <span class="div-chip medium-chip"><span class="div-name">{entry.mediumName}</span><span class="div-species" class:human={entry.species === '○'} class:wolf={entry.species === '●'} class:unknown={entry.species === '-'}>{entry.species}</span></span>
+            <span class="div-chip medium-chip"><span class="div-name">{entry.mediumName}</span><span class="div-species" class:human={entry.species === 'human'} class:wolf={entry.species === 'wolf'} class:unknown={entry.species == null}>{#if entry.species}<SpeciesIcon species={entry.species} />{:else}-{/if}</span></span>
           {/each}
         </div>
       {/if}
@@ -421,10 +418,10 @@
           {#if targetDivinations.seers.length > 0 || targetDivinations.mediums.length > 0}
             <div class="divination-row">
               {#each targetDivinations.seers as entry}
-                <span class="div-chip"><span class="div-name">{entry.seerName}</span><span class="div-species" class:human={entry.species === '○'} class:wolf={entry.species === '●'} class:unknown={entry.species === '-'}>{entry.species}</span></span>
+                <span class="div-chip"><span class="div-name">{entry.seerName}</span><span class="div-species" class:human={entry.species === 'human'} class:wolf={entry.species === 'wolf'} class:unknown={entry.species == null}>{#if entry.species}<SpeciesIcon species={entry.species} />{:else}-{/if}</span></span>
               {/each}
               {#each targetDivinations.mediums as entry}
-                <span class="div-chip medium-chip"><span class="div-name">{entry.mediumName}</span><span class="div-species" class:human={entry.species === '○'} class:wolf={entry.species === '●'} class:unknown={entry.species === '-'}>{entry.species}</span></span>
+                <span class="div-chip medium-chip"><span class="div-name">{entry.mediumName}</span><span class="div-species" class:human={entry.species === 'human'} class:wolf={entry.species === 'wolf'} class:unknown={entry.species == null}>{#if entry.species}<SpeciesIcon species={entry.species} />{:else}-{/if}</span></span>
               {/each}
             </div>
           {/if}
