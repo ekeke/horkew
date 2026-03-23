@@ -251,7 +251,7 @@ export class VillageRetar {
     const nightPhaseDeaths: Seat[] = []
     const dayPhaseDeaths: Seat[] = []
     for (const [seat, status] of this.vs.statuses.entries()) {
-      if (!status.surviving && status.diedDay === maxDiedDay && !this.initialPossibilities.isFixed(seat)) {
+      if (!status.surviving && status.diedDay === maxDiedDay) {
         if (status.causeOfDeath === 'night_kill' || status.causeOfDeath === 'cursed_by_killed_nekomata' || status.causeOfDeath === 'follow_killed_hamster') {
           nightPhaseDeaths.push(seat)
         } else {
@@ -268,23 +268,17 @@ export class VillageRetar {
     if (this.lastDeaths.length === 0) return
 
     if (this.vs.result === 'villager_won') {
-      // 道連れ等で全狼が既に確定済みなら追加制約不要
-      let fixedWolfCount = 0
-      for (let i = 1; i < this.initialPossibilities.possibilities.length; i++) {
-        if (this.initialPossibilities.isFixed(i) && this.initialPossibilities.hasRole(i, 'werewolf')) {
-          fixedWolfCount++
-        }
-      }
-      if (fixedWolfCount >= (this.setup.get('werewolf') ?? 0)) return
-
-      // 村勝利: 最終死者で最後の狼が死んだ → 単一なら狼確定
-      if (this.lastDeaths.length === 1) {
-        this.initialPossibilities.fixRole(this.lastDeaths[0], 'werewolf')
+      // 村勝利: 最終死者に狼が1以上含まれる
+      // 狼候補が1席のみなら確定できる
+      const wolfCandidates = this.lastDeaths.filter(seat => this.initialPossibilities.hasRole(seat, 'werewolf'))
+      if (wolfCandidates.length === 1) {
+        this.initialPossibilities.fixRole(wolfCandidates[0], 'werewolf')
       }
     }
     else if (this.vs.result === 'werewolf_won') {
       // 狼勝利: 人間が死んで飽和 → 最終死者は非狼・非狐
       for (const seat of this.lastDeaths) {
+        if (this.initialPossibilities.isFixed(seat)) continue
         this.initialPossibilities.denyRole(seat, 'werewolf')
         this.initialPossibilities.denyRole(seat, 'werehamster')
       }
@@ -333,12 +327,15 @@ export class VillageRetar {
     const t0 = performance.now()
     const originalPossibilities = this.initialPossibilities
 
-    // パス1: 狼全滅（村勝利相当）→ 最終死者は狼
+    // パス1: 狼全滅（村勝利相当）→ 最終死者に狼が1以上含まれる
     this.hamsterWinPath = 'village'
     const poss1 = originalPossibilities.clone()
     let path1Valid = true
-    if (this.lastDeaths.length === 1) {
-      path1Valid = poss1.fixRole(this.lastDeaths[0], 'werewolf')
+    const wolfCandidates = this.lastDeaths.filter(seat => poss1.hasRole(seat, 'werewolf'))
+    if (wolfCandidates.length === 1) {
+      path1Valid = poss1.fixRole(wolfCandidates[0], 'werewolf')
+    } else if (wolfCandidates.length === 0) {
+      path1Valid = false
     }
     if (path1Valid) {
       this.initialPossibilities = poss1
@@ -356,6 +353,7 @@ export class VillageRetar {
     const poss2 = originalPossibilities.clone()
     let path2Valid = true
     for (const seat of this.lastDeaths) {
+      if (poss2.isFixed(seat)) continue
       if (!poss2.denyRole(seat, 'werewolf')) { path2Valid = false; break }
       if (!poss2.denyRole(seat, 'werehamster')) { path2Valid = false; break }
     }
