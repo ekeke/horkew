@@ -244,6 +244,44 @@ function decideNekomataClam(
 }
 
 // ============================================================
+// 真役職の強制CO（対抗が出た場合）
+// ============================================================
+
+/** 対抗が出ている真役職を強制的にCOさせる */
+export function forceTrueRoleCO(
+  state: GameState, player: PlayerState, day: number,
+  lastExecutedSeat: number | null,
+): DayClaim {
+  switch (player.role) {
+    case 'seer': {
+      const results = Array.from(player.divineHistory.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([, v]) => ({ target: v.target, result: v.result }))
+      return { type: 'seer_co', results }
+    }
+    case 'medium':
+      return { type: 'medium_co' }
+    case 'bodyguard': {
+      const targets = Array.from(player.guardHistory.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([, seat]) => seat)
+      return { type: 'bodyguard_co', targets }
+    }
+    case 'mason': {
+      const partner = state.players.find(p =>
+        p.seat !== player.seat && p.role === 'mason'
+      )
+      if (!partner) return { type: 'none' }
+      return { type: 'mason_co', partner: partner.seat }
+    }
+    case 'nekomata':
+      return { type: 'nekomata_co' }
+    default:
+      return { type: 'none' }
+  }
+}
+
+// ============================================================
 // 偽CO共通ユーティリティ
 // ============================================================
 

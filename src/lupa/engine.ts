@@ -6,7 +6,7 @@ import {
   assignRoles, alivePlayers, getSeerResult,
   killPlayer, checkWinCondition,
 } from './roles.ts'
-import { decideNightAction, decideDayClaim, decideVote, resolveVotes } from './ai.ts'
+import { decideNightAction, decideDayClaim, forceTrueRoleCO, decideVote, resolveVotes } from './ai.ts'
 
 export type GameResult = {
   events: GameEvent[]
@@ -91,6 +91,17 @@ export function runGame(config: LupaConfig): GameResult {
     for (const player of alivePlayers(state)) {
       const claim = decideDayClaim(state, player, day, lastExecutedSeat, rng)
       applyClaim(state, player, day, claim, events)
+    }
+
+    // 対抗が出た真役職の強制CO（2パス目）
+    for (const player of alivePlayers(state)) {
+      if (player.claimedRole !== null) continue
+      const hasClaimer = alivePlayers(state).some(p =>
+        p.seat !== player.seat && p.claimedRole === player.role
+      )
+      if (!hasClaimer) continue
+      const forced = forceTrueRoleCO(state, player, day, lastExecutedSeat)
+      applyClaim(state, player, day, forced, events)
     }
 
     // 投票フェーズ

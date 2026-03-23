@@ -235,7 +235,7 @@
       ['bodyguard', 1], ['mason', 2], ['nekomata', 1],
       ['possessed', 1], ['werehamster', 1], ['immoralist', 1],
     ])
-    const config = { roles, seed: Date.now(), useRandomNames: true }
+    const config = { roles, seed: Date.now() }
     const { events, state } = runGame(config)
     const howl = formatHowl(events, state, config)
     if (trialMode || !activeKey) {
