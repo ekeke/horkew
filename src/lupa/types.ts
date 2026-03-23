@@ -41,6 +41,7 @@ export type DayClaim =
   | { type: 'seer_result', target: number, result: EnumSpecies }
   | { type: 'medium_co' }
   | { type: 'medium_result', result: EnumSpecies }
+  | { type: 'bodyguard_co', targets: number[] }
   | { type: 'none' }
 
 export type GameEvent =
@@ -51,6 +52,7 @@ export type GameEvent =
   | { type: 'seer_result', actor: number, target: number, result: EnumSpecies }
   | { type: 'medium_claim', actor: number }
   | { type: 'medium_result', actor: number, result: EnumSpecies }
+  | { type: 'bodyguard_claim', actor: number, targets: number[] }
   | { type: 'vote', voter: number, target: number }
   | { type: 'execution', target: number }
   | { type: 'game_over', result: 'villager_won' | 'werewolf_won' | 'werehamster_won' }

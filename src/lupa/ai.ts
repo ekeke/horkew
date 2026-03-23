@@ -19,7 +19,6 @@ export function decideNightAction(
 }
 
 // ---- 占い師 ----
-// 自分以外の生存者から選択。未占い者を優先、全員占い済みなら既占いも可。
 function decideSeerNight(state: GameState, seer: PlayerState, rng: Rng): NightAction {
   const all = alivePlayersExcept(state, seer.seat)
   if (all.length === 0) return { type: 'none' }
@@ -30,10 +29,8 @@ function decideSeerNight(state: GameState, seer: PlayerState, rng: Rng): NightAc
 }
 
 // ---- 狩人 ----
-// 占いCO者を優先。前夜と同一対象の連続護衛は不可。
 function decideBodyguardNight(state: GameState, guard: PlayerState, rng: Rng): NightAction {
   const all = alivePlayersExcept(state, guard.seat)
-  // 前夜の護衛先を除外（連続護衛不可）
   const lastNight = Math.max(...Array.from(guard.guardHistory.keys()), -1)
   const lastTarget = guard.guardHistory.get(lastNight)
   const eligible = lastTarget !== undefined
@@ -47,7 +44,6 @@ function decideBodyguardNight(state: GameState, guard: PlayerState, rng: Rng): N
 }
 
 // ---- 人狼 ----
-// 非狼生存者を襲撃。能力者CO者を50%で優先。
 function decideWerewolfNight(state: GameState, wolf: PlayerState, rng: Rng): NightAction {
   const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
   if (aliveWolves[0].seat !== wolf.seat) return { type: 'none' }
@@ -55,7 +51,6 @@ function decideWerewolfNight(state: GameState, wolf: PlayerState, rng: Rng): Nig
   const wolfSeats = new Set(aliveWolves.map(w => w.seat))
   const candidates = alivePlayers(state).filter(p => !wolfSeats.has(p.seat))
 
-  // 50% で能力者CO者を優先
   if (rng.next() < 0.5) {
     const claimers = candidates.filter(p => p.claimedRole !== null)
     if (claimers.length > 0) return { type: 'attack', target: rng.pick(claimers).seat }
@@ -67,33 +62,42 @@ function decideWerewolfNight(state: GameState, wolf: PlayerState, rng: Rng): Nig
 // 昼CO
 // ============================================================
 
+const CO_PROBABILITY = 0.4
+
 export function decideDayClaim(
   state: GameState, player: PlayerState, day: number,
   lastExecutedSeat: number | null, rng: Rng,
 ): DayClaim {
   switch (player.role) {
-    case 'seer':      return decideSeerClaim(state, player, day, rng)
-    case 'possessed':  return decidePossessedClaim(state, player, day, rng)
-    case 'medium':     return decideMediumClaim(state, player, day, lastExecutedSeat, rng)
-    default:           return { type: 'none' }
+    case 'seer':
+      return decideSeerClaim(state, player, day, rng)
+    case 'medium':
+      return decideMediumClaim(state, player, day, lastExecutedSeat, rng)
+    case 'possessed':
+      return decideFakeSeerClaim(state, player, day, rng)
+    case 'werewolf':
+      return decideWerewolfClaim(state, player, day, lastExecutedSeat, rng)
+    case 'werehamster':
+      return decideWerehamsterClaim(state, player, day, lastExecutedSeat, rng)
+    case 'bodyguard':
+      return decideBodyguardClaim(state, player, day, rng)
+    default:
+      return { type: 'none' }
   }
 }
 
-// ---- 占い師 ----
-// Day1: 80%でCO。Day2: 未COなら必ずCO。CO済みなら毎日結果報告。
+// ---- 占い師 (真) ----
+// 毎日40%でCO。CO済みなら結果報告。
 function decideSeerClaim(
   _state: GameState, seer: PlayerState, day: number, rng: Rng,
 ): DayClaim {
   if (seer.claimedRole === 'seer') {
-    // CO済み → 最新結果を報告
     const latest = seer.divineHistory.get(day - 1)
     if (!latest) return { type: 'none' }
     return { type: 'seer_result', target: latest.target, result: latest.result }
   }
 
-  // 未CO → COするか判断
-  const shouldCO = day >= 2 || rng.next() < 0.8
-  if (!shouldCO) return { type: 'none' }
+  if (rng.next() >= CO_PROBABILITY) return { type: 'none' }
 
   const results = Array.from(seer.divineHistory.entries())
     .sort((a, b) => a[0] - b[0])
@@ -101,59 +105,13 @@ function decideSeerClaim(
   return { type: 'seer_co', results }
 }
 
-// ---- 狂人 ----
-// Day1: 70%で偽占いCO。Day2: 未COなら必ずCO。
-// 偽結果はCO時に生成（狼→○、非狼→ランダムに●）。
-function decidePossessedClaim(
-  state: GameState, possessed: PlayerState, day: number, rng: Rng,
-): DayClaim {
-  if (possessed.claimedRole === 'seer') {
-    // CO済み → 最新偽結果を生成して報告
-    const night = day - 1
-    generateFakeResult(state, possessed, night, rng)
-    const latest = possessed.fakeDivineHistory.get(night)
-    if (!latest) return { type: 'none' }
-    return { type: 'seer_result', target: latest.target, result: latest.result }
-  }
-
-  // 未CO → COするか判断
-  const shouldCO = day >= 2 || rng.next() < 0.7
-  if (!shouldCO) return { type: 'none' }
-
-  // CO: これまでの夜分の偽結果をまとめて生成
-  for (let n = 0; n < day; n++) {
-    if (!possessed.fakeDivineHistory.has(n)) {
-      generateFakeResult(state, possessed, n, rng)
-    }
-  }
-  const results = Array.from(possessed.fakeDivineHistory.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([, v]) => ({ target: v.target, result: v.result }))
-  return { type: 'seer_co', results }
-}
-
-/** 偽占い結果を1夜分生成: 狼→○、非狼→● */
-function generateFakeResult(
-  state: GameState, possessed: PlayerState, night: number, rng: Rng,
-): void {
-  if (possessed.fakeDivineHistory.has(night)) return
-  const divined = new Set(Array.from(possessed.fakeDivineHistory.values()).map(d => d.target))
-  const candidates = alivePlayersExcept(state, possessed.seat).filter(p => !divined.has(p.seat))
-  if (candidates.length === 0) return
-
-  const target = rng.pick(candidates)
-  const result: EnumSpecies = target.role === 'werewolf' ? 'human' : 'wolf'
-  possessed.fakeDivineHistory.set(night, { target: target.seat, result })
-}
-
-// ---- 霊能者 ----
-// Day1: 80%でCO。Day2: 未COなら必ずCO。CO済みなら毎日結果報告。
+// ---- 霊能者 (真) ----
+// 毎日40%でCO。CO済みなら結果報告。
 function decideMediumClaim(
-  state: GameState, _medium: PlayerState, day: number,
+  state: GameState, medium: PlayerState, _day: number,
   lastExecutedSeat: number | null, rng: Rng,
 ): DayClaim {
-  if (_medium.claimedRole === 'medium') {
-    // CO済み → 結果報告
+  if (medium.claimedRole === 'medium') {
     if (lastExecutedSeat !== null) {
       const target = state.players.find(p => p.seat === lastExecutedSeat)!
       const result = getMediumResult(target.role)
@@ -162,11 +120,146 @@ function decideMediumClaim(
     return { type: 'none' }
   }
 
-  // 未CO → COするか判断
-  const shouldCO = day >= 2 || rng.next() < 0.8
-  if (!shouldCO) return { type: 'none' }
-
+  if (rng.next() >= CO_PROBABILITY) return { type: 'none' }
   return { type: 'medium_co' }
+}
+
+// ---- 狂人 ----
+// 毎日40%で偽占いCO。
+function decideFakeSeerClaim(
+  state: GameState, player: PlayerState, day: number, rng: Rng,
+): DayClaim {
+  if (player.claimedRole === 'seer') {
+    return reportFakeSeerResult(state, player, day, rng)
+  }
+
+  if (rng.next() >= CO_PROBABILITY) return { type: 'none' }
+
+  for (let n = 0; n < day; n++) {
+    generateFakeDivineResult(state, player, n, rng)
+  }
+  const results = Array.from(player.fakeDivineHistory.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, v]) => ({ target: v.target, result: v.result }))
+  return { type: 'seer_co', results }
+}
+
+// ---- 人狼 ----
+// 20%で偽CO。偽占いか偽霊能をランダムに選択。
+function decideWerewolfClaim(
+  state: GameState, player: PlayerState, day: number,
+  lastExecutedSeat: number | null, rng: Rng,
+): DayClaim {
+  if (player.claimedRole === 'seer') {
+    return reportFakeSeerResult(state, player, day, rng)
+  }
+  if (player.claimedRole === 'medium') {
+    return reportFakeMediumResult(state, lastExecutedSeat, rng)
+  }
+
+  if (rng.next() >= 0.2) return { type: 'none' }
+
+  // 占いか霊能をランダムに選択
+  if (rng.next() < 0.5) {
+    return initFakeSeerCO(state, player, day, rng)
+  } else {
+    player.claimedRole = 'medium'
+    player.claimedDay = day
+    return { type: 'medium_co' }
+  }
+}
+
+// ---- 妖狐 ----
+// 20%で偽CO。偽占いか偽霊能をランダムに選択。
+function decideWerehamsterClaim(
+  state: GameState, player: PlayerState, day: number,
+  lastExecutedSeat: number | null, rng: Rng,
+): DayClaim {
+  if (player.claimedRole === 'seer') {
+    return reportFakeSeerResult(state, player, day, rng)
+  }
+  if (player.claimedRole === 'medium') {
+    return reportFakeMediumResult(state, lastExecutedSeat, rng)
+  }
+
+  if (rng.next() >= 0.2) return { type: 'none' }
+
+  if (rng.next() < 0.5) {
+    return initFakeSeerCO(state, player, day, rng)
+  } else {
+    player.claimedRole = 'medium'
+    player.claimedDay = day
+    return { type: 'medium_co' }
+  }
+}
+
+// ---- 狩人 ----
+// 10%でCO。
+function decideBodyguardClaim(
+  _state: GameState, guard: PlayerState, _day: number, rng: Rng,
+): DayClaim {
+  if (guard.claimedRole) return { type: 'none' }
+
+  if (rng.next() >= 0.1) return { type: 'none' }
+
+  const targets = Array.from(guard.guardHistory.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, seat]) => seat)
+  return { type: 'bodyguard_co', targets }
+}
+
+// ============================================================
+// 偽CO共通ユーティリティ
+// ============================================================
+
+/** 偽占いCOを開始 */
+function initFakeSeerCO(
+  state: GameState, player: PlayerState, day: number, rng: Rng,
+): DayClaim {
+  for (let n = 0; n < day; n++) {
+    generateFakeDivineResult(state, player, n, rng)
+  }
+  const results = Array.from(player.fakeDivineHistory.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, v]) => ({ target: v.target, result: v.result }))
+  player.claimedRole = 'seer'
+  player.claimedDay = day
+  return { type: 'seer_co', results }
+}
+
+/** 偽占い結果を1夜分生成: 狼→○、非狼→● */
+function generateFakeDivineResult(
+  state: GameState, player: PlayerState, night: number, rng: Rng,
+): void {
+  if (player.fakeDivineHistory.has(night)) return
+  const divined = new Set(Array.from(player.fakeDivineHistory.values()).map(d => d.target))
+  const candidates = alivePlayersExcept(state, player.seat).filter(p => !divined.has(p.seat))
+  if (candidates.length === 0) return
+
+  const target = rng.pick(candidates)
+  const result: EnumSpecies = target.role === 'werewolf' ? 'human' : 'wolf'
+  player.fakeDivineHistory.set(night, { target: target.seat, result })
+}
+
+/** CO済み偽占い師の日次結果報告 */
+function reportFakeSeerResult(
+  state: GameState, player: PlayerState, day: number, rng: Rng,
+): DayClaim {
+  const night = day - 1
+  generateFakeDivineResult(state, player, night, rng)
+  const latest = player.fakeDivineHistory.get(night)
+  if (!latest) return { type: 'none' }
+  return { type: 'seer_result', target: latest.target, result: latest.result }
+}
+
+/** CO済み偽霊能者の日次結果報告 */
+function reportFakeMediumResult(
+  _state: GameState, lastExecutedSeat: number | null, rng: Rng,
+): DayClaim {
+  if (lastExecutedSeat === null) return { type: 'none' }
+  // ランダムに○か●
+  const result: EnumSpecies = rng.next() < 0.5 ? 'human' : 'wolf'
+  return { type: 'medium_result', result }
 }
 
 // ============================================================
@@ -205,7 +298,6 @@ function decidePossessedVote(
   candidates: PlayerState[], possessed: PlayerState, rng: Rng,
 ): number {
   if (rng.next() < 0.5) {
-    // 自分以外の占いCO者 → 対抗 = 真占い候補
     const rivals = candidates.filter(p =>
       p.claimedRole === 'seer' && p.seat !== possessed.seat
     )

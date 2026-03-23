@@ -216,6 +216,11 @@ function applyClaim(
     case 'medium_result':
       events.push({ type: 'medium_result', actor: player.seat, result: claim.result })
       break
+    case 'bodyguard_co':
+      player.claimedRole = 'bodyguard'
+      player.claimedDay = day
+      events.push({ type: 'bodyguard_claim', actor: player.seat, targets: claim.targets })
+      break
     case 'none':
       break
   }

@@ -87,6 +87,14 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
         lines.push(`${playerName(event.actor)} ${event.result === 'human' ? '○' : '●'}`)
         break
       }
+      case 'bodyguard_claim': {
+        if (lastType === 'night_kill' || lastType === 'fox_kill' || lastType === 'peace') {
+          lines.push('')
+        }
+        const guardsStr = event.targets.map(t => `${playerName(t)}護衛`).join(' ')
+        lines.push(`${playerName(event.actor)} 狩りCO${guardsStr ? ' ' + guardsStr : ''}`)
+        break
+      }
       case 'vote': {
         if (lastType !== 'vote') {
           lines.push('')
