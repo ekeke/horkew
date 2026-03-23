@@ -854,3 +854,52 @@ describe('setup statement', () => {
     assert.equal(result.type, 'setup')
   })
 })
+
+describe('forecast statement', () => {
+  test('basic forecast', () => {
+    const result = S.parseForecastStatement('さとし 予告 ボム', 1)
+    assert.deepEqual(result, {
+      type: 'forecast',
+      line: 1,
+      actor: 'さとし',
+      target: 'ボム',
+    })
+  })
+
+  test('with full-width space', () => {
+    const result = S.parseForecastStatement('さとし　予告　ボム', 1)
+    assert.deepEqual(result, {
+      type: 'forecast',
+      line: 1,
+      actor: 'さとし',
+      target: 'ボム',
+    })
+  })
+
+  test('with delimiter', () => {
+    const result = S.parseForecastStatement('さとし、予告 ボム', 1)
+    assert.deepEqual(result, {
+      type: 'forecast',
+      line: 1,
+      actor: 'さとし',
+      target: 'ボム',
+    })
+  })
+
+  test('returns null for empty string', () => {
+    assert.equal(S.parseForecastStatement('', 1), null)
+  })
+
+  test('returns null for single name', () => {
+    assert.equal(S.parseForecastStatement('さとし 予告', 1), null)
+  })
+
+  test('returns null for unrelated text', () => {
+    assert.equal(S.parseForecastStatement('さとし 占いCO', 1), null)
+  })
+
+  test('parseStatement routes to forecast', () => {
+    const result = S.parseStatement('さとし 予告 ボム', 1)
+    assert.equal(result.type, 'forecast')
+  })
+})

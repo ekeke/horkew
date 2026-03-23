@@ -1,6 +1,6 @@
 import * as V from './vocabulary.ts'
 
-export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'curse' | 'follow' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'unknown'
+export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf'
@@ -94,6 +94,12 @@ export type CurseStatement = Statement & {
 
 export type FollowStatement = Statement & {
     type: 'follow'
+    target: string
+}
+
+export type ForecastStatement = Statement & {
+    type: 'forecast'
+    actor: string
     target: string
 }
 
@@ -293,6 +299,13 @@ export function parseFollowStatement(text: string, line: number): FollowStatemen
   return { type: 'follow', line, target: reverseMatch[1].trim() }
 }
 
+export function parseForecastStatement(text: string, line: number): ForecastStatement | null {
+  const forecastRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})(?:${V.delimiter})?${V.optionalSpace}${V.forecast}${V.optionalSpace}(${V.possibleName})${V.optionalSpace}$`)
+  const match = forecastRegex.exec(text)
+  if (!match) return null
+  return { type: 'forecast', line, actor: match[1].trim(), target: match[2].trim() }
+}
+
 export function parseRevoteStatement(text: string, line: number): RevoteStatement | null {
   const revoteRegex = new RegExp(`^${V.optionalSpace}${V.revote}((?:${V.optionalSpace}${V.delimiter}${V.possibleName})*)?${V.optionalSpace}$`)
   const match = revoteRegex.exec(text)
@@ -475,6 +488,7 @@ export function parseStatement (text: string, line: number): Statement {
     parseOverStatement,
     parsePeaceStatement,
     parseMasonStatement,
+    parseForecastStatement,
     parseAssertStatement,
     parseRevealStatement,
   ]

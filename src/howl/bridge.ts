@@ -16,6 +16,7 @@ import type {
   LynchStatement,
   CurseStatement,
   FollowStatement,
+  ForecastStatement,
   RevoteStatement,
   OverStatement,
   AssertStatement,
@@ -38,6 +39,7 @@ function createSeatStatus(): SeatStatus {
     votedOrder: 0,
     actions: new Map(),
     assertions: new Map(),
+    forecasts: new Map(),
   }
 }
 
@@ -267,6 +269,17 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         const currentKills = kills.get(deathDay) || []
         currentKills.push(targetSeat)
         kills.set(deathDay, currentKills)
+        break
+      }
+
+      case 'forecast': {
+        const s = stmt as ForecastStatement
+        const actorSeat = resolveSeat(s.actor)
+        const targetSeat = resolveSeat(s.target)
+        if (actorSeat === null || targetSeat === null) break
+        const actorStatus = statuses.get(actorSeat)!
+        if (!actorStatus.claiming || actorStatus.claimingRole !== 'seer') break
+        actorStatus.forecasts.set(day, targetSeat)
         break
       }
 

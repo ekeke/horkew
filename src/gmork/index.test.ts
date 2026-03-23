@@ -20,6 +20,7 @@ function createSeatStatus(overrides: Partial<SeatStatus> = {}): SeatStatus {
     votedOrder: 0,
     actions: new Map(),
     assertions: new Map(),
+    forecasts: new Map(),
     ...overrides,
   }
 }

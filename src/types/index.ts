@@ -48,6 +48,7 @@ export type SeatStatus = {
   votedOrder: number
   actions: PlayerAction
   assertions: Assertions
+  forecasts: Map<Day, Seat>
 }
 
 export type VoteRecord = { voter: Seat, target: Seat }

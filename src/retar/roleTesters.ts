@@ -193,13 +193,15 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
     }
     // If seer died at night, they acted that night but result is unreported
     if (!self.surviving && self.causeOfDeath === 'night_kill') {
-      seerTargets.set(self.diedDay!, [...(seerTargets.get(self.diedDay!) || []), 'unknown'])
+      const forecastTarget = self.forecasts.get(self.diedDay!)
+      seerTargets.set(self.diedDay!, [...(seerTargets.get(self.diedDay!) || []), forecastTarget ?? 'unknown'])
     }
     // Add 'unknown' only for genuinely unreported nights beyond known assertions
     const maxActiveDay = self.surviving ? env.vs.day - 1 : (self.causeOfDeath === 'night_kill' ? self.diedDay! : self.diedDay! - 1)
     for (let d = env.dayCountFrom; d <= maxActiveDay; d++) {
       if (!seerTargets.has(d)) {
-        seerTargets.set(d, ['unknown'])
+        const forecastTarget = self.forecasts.get(d)
+        seerTargets.set(d, [forecastTarget ?? 'unknown'])
       }
     }
     for (const [, { target: targetSeat, species }] of self.assertions) {
@@ -223,6 +225,17 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
       }
       else {
         if ( ! context.possibilities.markAsHuman(targetSeat) ) return false
+      }
+    }
+    // Forecast targets with unreported results: if alive, can't be werehamster (呪殺 would have killed them)
+    for (const [night, forecastTarget] of self.forecasts) {
+      if (night < env.dayCountFrom || night > maxActiveDay) continue
+      if (self.assertions.has(night)) continue
+      if ( context.possibilities.isActualRole(forecastTarget, 'werehamster') ) {
+        const targetStatus = getStatus(env, forecastTarget)
+        if ( targetStatus.surviving ) return false
+        const targetsOnDeathDay = seerTargets.get(targetStatus.diedDay!) || []
+        if ( !targetsOnDeathDay.includes(forecastTarget) && !targetsOnDeathDay.includes('unknown') ) return false
       }
     }
   }
