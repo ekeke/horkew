@@ -53,6 +53,18 @@ export function runGame(config: LupaConfig): GameResult {
     applyNightAction(state, player, 0, action)
   }
 
+  // Night 0: 占い呪殺チェック（初日占いで狐を占った場合）
+  for (const player of players) {
+    const divine = player.divineHistory.get(0)
+    if (!divine) continue
+    const target = players.find(p => p.seat === divine.target)!
+    if (target.role === 'werehamster' && target.alive) {
+      killPlayer(state, target.seat)
+      events.push({ type: 'fox_kill', target: target.seat })
+      checkImmoralistFollow(state, events)
+    }
+  }
+
   // メインループ
   let lastExecutedSeat: number | null = null
   const MAX_DAYS = 50
