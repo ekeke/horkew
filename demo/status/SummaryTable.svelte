@@ -172,14 +172,14 @@
   }
 
   th, td {
-    border: 1px solid #313244;
+    border: 1px solid var(--color-border);
     padding: 2px 6px;
     white-space: nowrap;
   }
 
   th {
-    background: #181825;
-    color: #a6adc8;
+    background: var(--color-bg-elevated);
+    color: var(--color-text-muted);
     font-weight: 500;
     font-size: 10px;
     text-align: center;
@@ -201,45 +201,45 @@
   }
 
   .exec-label {
-    color: #f38ba8;
+    color: var(--color-wolf);
   }
 
   .kill-label {
-    color: #f9e2af;
+    color: var(--color-role);
   }
 
   .role-label {
-    color: #cba6f7;
+    color: var(--color-co);
   }
 
   .name-cell {
-    color: #cdd6f4;
+    color: var(--color-text);
     font-weight: 500;
   }
 
   .data-cell {
     text-align: center;
-    color: #a6adc8;
+    color: var(--color-text-muted);
   }
 
   .data-cell.human {
-    color: #a6e3a1;
+    color: var(--color-human-result);
   }
 
   .data-cell.wolf {
-    color: #f38ba8;
+    color: var(--color-wolf-result);
   }
 
   .data-cell.guard {
-    color: #89b4fa;
+    color: var(--color-link);
   }
 
   .group-first td {
-    border-top: 2px solid #9399b2;
+    border-top: 2px solid var(--ctp-overlay1);
   }
 
   .cause-note {
-    color: #585b70;
+    color: var(--color-text-faint);
     font-size: 10px;
     margin-left: 2px;
   }
@@ -251,32 +251,32 @@
     margin-top: 6px;
     font-size: 12px;
     font-family: 'Consolas', 'Menlo', monospace;
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .extra-label {
-    color: #cba6f7;
+    color: var(--color-co);
     font-weight: 600;
     font-size: 11px;
     margin-right: 4px;
   }
 
   .mason-sep, .cluster-sep {
-    color: #585b70;
+    color: var(--color-text-faint);
   }
 
   .active-hl-row > :global(td) {
-    background: rgba(137, 180, 250, 0.1);
+    background: color-mix(in srgb, var(--color-link) 10%, transparent);
   }
 
   .active-hl-cell {
-    outline: 1.5px solid rgba(137, 180, 250, 0.6);
-    background: rgba(137, 180, 250, 0.15) !important;
+    outline: 1.5px solid color-mix(in srgb, var(--color-link) 60%, transparent);
+    background: color-mix(in srgb, var(--color-link) 15%, transparent) !important;
   }
 
   .active-hl {
-    outline: 1.5px solid rgba(137, 180, 250, 0.6);
-    background: rgba(137, 180, 250, 0.15);
+    outline: 1.5px solid color-mix(in srgb, var(--color-link) 60%, transparent);
+    background: color-mix(in srgb, var(--color-link) 15%, transparent);
     border-radius: 4px;
   }
 </style>

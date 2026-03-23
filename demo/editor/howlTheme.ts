@@ -1,24 +1,10 @@
 import { EditorView } from '@codemirror/view'
 import type { Extension } from '@codemirror/state'
 
-// Catppuccin Mocha palette
-const base     = '#1e1e2e'
-const surface0 = '#313244'
-const overlay0 = '#6c7086'
-const text     = '#cdd6f4'
-const subtext0 = '#a6adc8'
-const purple   = '#cba6f7'
-const blue     = '#89b4fa'
-const yellow   = '#f9e2af'
-const green    = '#a6e3a1'
-const red      = '#f38ba8'
-const peach    = '#fab387'
-const teal     = '#94e2d5'
-
 export const howlThemeExtension: Extension = EditorView.theme({
   '&': {
-    backgroundColor: base,
-    color: text,
+    backgroundColor: 'var(--color-bg)',
+    color: 'var(--color-text)',
     fontFamily: "'Consolas', 'Menlo', monospace",
     fontSize: '13px',
     lineHeight: '1.5',
@@ -26,21 +12,21 @@ export const howlThemeExtension: Extension = EditorView.theme({
   },
   '.cm-content': {
     padding: '8px 12px',
-    caretColor: text,
+    caretColor: 'var(--color-text)',
   },
   '.cm-cursor, .cm-dropCursor': {
-    borderLeftColor: text,
+    borderLeftColor: 'var(--color-text)',
   },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
-    backgroundColor: surface0,
+    backgroundColor: 'var(--color-surface)',
   },
   '.cm-activeLine': {
-    backgroundColor: `${surface0}80`,
+    backgroundColor: 'color-mix(in srgb, var(--ctp-surface0) 50%, transparent)',
   },
   '.cm-gutters': {
-    backgroundColor: base,
-    color: overlay0,
-    borderRight: `1px solid ${surface0}`,
+    backgroundColor: 'var(--color-bg)',
+    color: 'var(--color-text-overlay)',
+    borderRight: '1px solid var(--color-border)',
   },
   '.cm-lineNumbers .cm-gutterElement': {
     padding: '0 8px 0 4px',
@@ -51,28 +37,28 @@ export const howlThemeExtension: Extension = EditorView.theme({
   },
 
   // Inline token marks
-  '.hw-comment':  { color: overlay0, fontStyle: 'italic' },
-  '.hw-meta':     { color: overlay0 },
-  '.hw-keyword':  { color: purple },
-  '.hw-arrow':    { color: blue },
-  '.hw-role':     { color: yellow },
-  '.hw-human':    { color: green },
-  '.hw-wolf':     { color: red },
-  '.hw-co':       { color: purple },
-  '.hw-over':     { color: peach },
+  '.hw-comment':  { color: 'var(--color-text-overlay)', fontStyle: 'italic' },
+  '.hw-meta':     { color: 'var(--color-text-overlay)' },
+  '.hw-keyword':  { color: 'var(--color-accent)' },
+  '.hw-arrow':    { color: 'var(--color-vote-arrow)' },
+  '.hw-role':     { color: 'var(--color-role)' },
+  '.hw-human':    { color: 'var(--color-human-result)' },
+  '.hw-wolf':     { color: 'var(--color-wolf-result)' },
+  '.hw-co':       { color: 'var(--color-co)' },
+  '.hw-over':     { color: 'var(--color-execution)' },
 
   // Line-level backgrounds
-  '.hwl-join':     { backgroundColor: `${blue}10` },
-  '.hwl-lynch':    { backgroundColor: `${peach}10` },
-  '.hwl-attack':   { backgroundColor: `${red}10` },
-  '.hwl-curse':    { backgroundColor: `${purple}10` },
-  '.hwl-follow':   { backgroundColor: `${overlay0}10` },
-  '.hwl-peace':    { backgroundColor: `${green}10` },
-  '.hwl-unknown':  { textDecoration: `wavy underline ${red}`, textUnderlineOffset: '3px', backgroundColor: `${red}20` },
+  '.hwl-join':     { backgroundColor: 'color-mix(in srgb, var(--ctp-blue) 6%, transparent)' },
+  '.hwl-lynch':    { backgroundColor: 'color-mix(in srgb, var(--ctp-peach) 6%, transparent)' },
+  '.hwl-attack':   { backgroundColor: 'color-mix(in srgb, var(--ctp-red) 6%, transparent)' },
+  '.hwl-curse':    { backgroundColor: 'color-mix(in srgb, var(--ctp-mauve) 6%, transparent)' },
+  '.hwl-follow':   { backgroundColor: 'color-mix(in srgb, var(--ctp-overlay0) 6%, transparent)' },
+  '.hwl-peace':    { backgroundColor: 'color-mix(in srgb, var(--ctp-green) 6%, transparent)' },
+  '.hwl-unknown':  { textDecoration: 'wavy underline var(--color-error)', textUnderlineOffset: '3px', backgroundColor: 'color-mix(in srgb, var(--ctp-red) 13%, transparent)' },
   '.hw-beyond-cursor': { opacity: '0.35' },
-  '.hw-join-name':         { color: blue, fontWeight: 'bold' },
-  '.hw-player-resolved':   { backgroundColor: `${teal}20`, color: teal },
-  '.hw-player-unresolved': { textDecoration: `wavy underline ${red}`, textUnderlineOffset: '3px', backgroundColor: `${red}18` },
+  '.hw-join-name':         { color: 'var(--color-vote-arrow)', fontWeight: 'bold' },
+  '.hw-player-resolved':   { backgroundColor: 'color-mix(in srgb, var(--ctp-teal) 13%, transparent)', color: 'var(--color-player-resolved)' },
+  '.hw-player-unresolved': { textDecoration: 'wavy underline var(--color-error)', textUnderlineOffset: '3px', backgroundColor: 'color-mix(in srgb, var(--ctp-red) 9%, transparent)' },
 
   // Statement type gutter (left of line numbers)
   '.hwl-gutter': {
@@ -86,5 +72,5 @@ export const howlThemeExtension: Extension = EditorView.theme({
     justifyContent: 'center',
   },
   '.hwl-gutter .cm-gutterElement span': { fontSize: '1em', lineHeight: '1' },
-  '.hwg-unknown': { color: red },
+  '.hwg-unknown': { color: 'var(--color-error)' },
 }, { dark: true })

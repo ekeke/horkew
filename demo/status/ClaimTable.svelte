@@ -155,7 +155,7 @@
   }
 
   .empty {
-    color: #585b70;
+    color: var(--color-text-faint);
     font-size: 12px;
   }
 
@@ -182,15 +182,15 @@
   .inline-role-label {
     font-size: 11px;
     font-weight: 600;
-    color: #cba6f7;
+    color: var(--color-co);
   }
 
   .role-label {
     font-size: 11px;
     font-weight: 600;
-    color: #cba6f7;
-    background: #181825;
-    border: 1px solid #313244;
+    color: var(--color-co);
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
     padding: 2px 6px;
     vertical-align: middle;
     text-align: center;
@@ -207,14 +207,14 @@
   }
 
   th, td {
-    border: 1px solid #313244;
+    border: 1px solid var(--color-border);
     padding: 2px 6px;
     white-space: nowrap;
   }
 
   th {
-    background: #181825;
-    color: #a6adc8;
+    background: var(--color-bg-elevated);
+    color: var(--color-text-muted);
     font-weight: 500;
     font-size: 10px;
     text-align: center;
@@ -225,25 +225,25 @@
   }
 
   .name-cell {
-    color: #cdd6f4;
+    color: var(--color-text);
     font-weight: 500;
   }
 
   .data-cell {
     text-align: center;
-    color: #a6adc8;
+    color: var(--color-text-muted);
   }
 
   .data-cell.human {
-    color: #a6e3a1;
+    color: var(--color-human-result);
   }
 
   .data-cell.wolf {
-    color: #f38ba8;
+    color: var(--color-wolf-result);
   }
 
   .data-cell.guard {
-    color: #89b4fa;
+    color: var(--color-link);
   }
 
   .mason-groups {
@@ -252,11 +252,11 @@
     gap: 4px 16px;
     font-size: 12px;
     font-family: 'Consolas', 'Menlo', monospace;
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .mason-sep {
-    color: #585b70;
+    color: var(--color-text-faint);
   }
 
   .simple-claims {
@@ -265,6 +265,6 @@
     gap: 4px 8px;
     font-size: 12px;
     font-family: 'Consolas', 'Menlo', monospace;
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 </style>

@@ -487,7 +487,7 @@
 
       <h3 id="help-views-status-claims">CO表</h3>
       <p>役職別のCO状況を表形式で表示します。</p>
-      <p>占い師・霊媒師は夜ごとの占い/霊媒結果を、狩人は護衛先を列で表示します。結果は <span style="color:#a6e3a1">○</span> (白) / <span style="color:#f38ba8">●</span> (黒) で色分けされます。</p>
+      <p>占い師・霊媒師は夜ごとの占い/霊媒結果を、狩人は護衛先を列で表示します。結果は <span style="color: var(--color-human-result)">○</span> (白) / <span style="color: var(--color-wolf-result)">●</span> (黒) で色分けされます。</p>
       <p>共有者はペアをグループ化して表示します。</p>
       <img src="help-screenshot-status-claims.webp" alt="CO表。占い師の日ごとの結果が○●で色分け表示されている" />
     </section>
@@ -502,10 +502,10 @@
       <p>明るいセルはその役職の可能性あり、暗いセルは不可能です。左端にはプレイヤー名と陣営の判定ラベルが色分けで表示されます。</p>
       <table>
         <tbody>
-          <tr><th style="color:#a6e3a1">村</th><td>村人陣営確定</td></tr>
-          <tr><th style="color:#f38ba8">狼</th><td>人狼陣営確定</td></tr>
-          <tr><th style="color:#f9e2af">狐</th><td>妖狐陣営確定</td></tr>
-          <tr><th style="color:#cba6f7">?</th><td>複数陣営の可能性あり</td></tr>
+          <tr><th style="color: var(--color-village)">村</th><td>村人陣営確定</td></tr>
+          <tr><th style="color: var(--color-wolf)">狼</th><td>人狼陣営確定</td></tr>
+          <tr><th style="color: var(--color-fox)">狐</th><td>妖狐陣営確定</td></tr>
+          <tr><th style="color: var(--color-unknown-team)">?</th><td>複数陣営の可能性あり</td></tr>
         </tbody>
       </table>
 
@@ -585,7 +585,7 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--color-overlay-backdrop);
     z-index: 200;
     opacity: 0;
     animation: fade-in 0.3s ease forwards;
@@ -602,8 +602,8 @@
     bottom: 0;
     width: min(420px, 90vw);
     z-index: 201;
-    background: #1e1e2e;
-    border-left: 1px solid #45475a;
+    background: var(--color-bg);
+    border-left: 1px solid var(--color-border-strong);
     display: flex;
     flex-direction: column;
     transform: translateX(100%);
@@ -621,20 +621,20 @@
     padding: 0 1rem;
     height: 40px;
     min-height: 40px;
-    background: #181825;
-    border-bottom: 1px solid #313244;
+    background: var(--color-bg-elevated);
+    border-bottom: 1px solid var(--color-border);
   }
 
   .panel-title {
     font-size: 14px;
     font-weight: 600;
-    color: #cba6f7;
+    color: var(--color-accent);
   }
 
   .close-btn {
     background: none;
     border: none;
-    color: #a6adc8;
+    color: var(--color-text-muted);
     font-size: 20px;
     cursor: pointer;
     padding: 0 4px;
@@ -642,7 +642,7 @@
   }
 
   .close-btn:hover {
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .panel-body {
@@ -651,7 +651,7 @@
     padding: 1rem 1.25rem;
     font-size: 13px;
     line-height: 1.7;
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .toc ul {
@@ -677,7 +677,7 @@
   }
 
   .toc a {
-    color: #89b4fa;
+    color: var(--color-link);
     text-decoration: none;
     font-size: 12px;
   }
@@ -689,13 +689,13 @@
   .toc > ul > li > a {
     font-weight: 600;
     font-size: 13px;
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .panel-body section {
     margin-bottom: 1.5rem;
     padding-bottom: 1.5rem;
-    border-bottom: 1px solid #313244;
+    border-bottom: 1px solid var(--color-border);
   }
 
   .panel-body section:last-child {
@@ -705,14 +705,14 @@
   .panel-body h2 {
     font-size: 15px;
     font-weight: 600;
-    color: #cba6f7;
+    color: var(--color-accent);
     margin: 0 0 0.5rem 0;
   }
 
   .panel-body h3 {
     font-size: 13px;
     font-weight: 600;
-    color: #a6adc8;
+    color: var(--color-text-muted);
     margin: 0.75rem 0 0.25rem 0;
   }
 
@@ -721,7 +721,7 @@
   }
 
   .panel-body code {
-    background: #313244;
+    background: var(--color-surface);
     padding: 1px 5px;
     border-radius: 3px;
     font-family: 'Consolas', 'Menlo', monospace;
@@ -729,8 +729,8 @@
   }
 
   .panel-body pre {
-    background: #181825;
-    border: 1px solid #313244;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
     border-radius: 6px;
     padding: 8px 12px;
     margin: 0.5rem 0;
@@ -754,20 +754,20 @@
   .panel-body caption {
     text-align: left;
     font-size: 12px;
-    color: #a6adc8;
+    color: var(--color-text-muted);
     margin-bottom: 4px;
   }
 
   .panel-body th,
   .panel-body td {
     padding: 4px 8px;
-    border: 1px solid #313244;
+    border: 1px solid var(--color-border);
     text-align: left;
   }
 
   .panel-body th {
-    background: #181825;
-    color: #a6adc8;
+    background: var(--color-bg-elevated);
+    color: var(--color-text-muted);
     font-weight: 500;
     white-space: nowrap;
   }
@@ -779,12 +779,12 @@
   }
 
   .panel-body strong {
-    color: #f9e2af;
+    color: var(--color-role);
     font-weight: 600;
   }
 
   .panel-body section a {
-    color: #89b4fa;
+    color: var(--color-link);
     text-decoration: none;
   }
 
@@ -796,7 +796,7 @@
     width: 100%;
     border-radius: 6px;
     margin: 0.5rem 0;
-    border: 1px solid #313244;
+    border: 1px solid var(--color-border);
   }
 
   .panel-body details {
@@ -805,7 +805,7 @@
 
   .panel-body summary {
     cursor: pointer;
-    color: #89b4fa;
+    color: var(--color-link);
     font-size: 13px;
   }
 
@@ -814,8 +814,8 @@
   }
 
   .panel-body .step-annotation {
-    background: #181825;
-    border-left: 3px solid #cba6f7;
+    background: var(--color-bg-elevated);
+    border-left: 3px solid var(--color-accent);
     padding: 6px 12px;
     margin: 0.5rem 0;
     font-size: 12px;
@@ -825,13 +825,13 @@
   .panel-body h4 {
     font-size: 12px;
     font-weight: 600;
-    color: #89b4fa;
+    color: var(--color-link);
     margin: 0.5rem 0 0.25rem 0;
   }
 
   .try-btn {
-    background: #cba6f7;
-    color: #1e1e2e;
+    background: var(--color-accent);
+    color: var(--color-bg);
     border: none;
     border-radius: 4px;
     padding: 6px 16px;
@@ -842,6 +842,6 @@
   }
 
   .try-btn:hover {
-    background: #b48bf2;
+    background: var(--ctp-mauve);
   }
 </style>

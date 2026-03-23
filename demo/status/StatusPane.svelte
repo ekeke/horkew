@@ -120,13 +120,13 @@
     align-items: center;
     gap: 4px;
     padding: 6px 12px;
-    border-bottom: 1px solid #313244;
+    border-bottom: 1px solid var(--color-border);
   }
 
   .setup-header {
     font-size: 12px;
     font-weight: 600;
-    color: #a6adc8;
+    color: var(--color-text-muted);
     margin-right: 4px;
   }
 
@@ -135,19 +135,19 @@
     padding: 2px 6px;
     font-size: 12px;
     border-radius: 4px;
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .setup-badge.villager {
-    background: #313244;
+    background: var(--color-surface);
   }
 
   .setup-badge.werewolf {
-    background: #45273a;
+    background: var(--color-wolf-bg-tint);
   }
 
   .setup-badge.werehamster {
-    background: #2d3a27;
+    background: var(--color-fox-bg-tint);
   }
 
 </style>

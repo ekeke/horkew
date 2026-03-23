@@ -71,18 +71,18 @@
 
   .clickable:hover {
     text-decoration: underline;
-    text-decoration-color: #cba6f7;
+    text-decoration-color: var(--color-accent);
     text-underline-offset: 2px;
   }
 
   .highlighted {
-    background-color: rgba(203, 166, 247, 0.25);
+    background-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
     border-radius: 2px;
-    text-shadow: 0 0 6px rgba(203, 166, 247, 0.7);
+    text-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 70%, transparent);
   }
 
   .claim {
-    color: #cba6f7;
+    color: var(--color-co);
     font-size: 0.85em;
     margin-left: 1px;
   }
@@ -107,7 +107,7 @@
     position: absolute;
     inset: 0;
     white-space: nowrap;
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .executed {

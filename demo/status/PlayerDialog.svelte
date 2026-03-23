@@ -461,7 +461,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--color-overlay-backdrop);
     display: flex;
     justify-content: center;
     z-index: 100;
@@ -470,8 +470,8 @@
   }
 
   .dialog {
-    background: #1e1e2e;
-    border: 1px solid #45475a;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border-strong);
     border-radius: 8px;
     width: 420px;
     max-height: 80vh;
@@ -483,19 +483,19 @@
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
-    border-bottom: 1px solid #313244;
+    border-bottom: 1px solid var(--color-border);
   }
 
   .dialog-title {
     font-size: 15px;
     font-weight: 600;
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .close-btn {
     background: none;
     border: none;
-    color: #585b70;
+    color: var(--color-text-faint);
     font-size: 20px;
     cursor: pointer;
     padding: 0 4px;
@@ -503,7 +503,7 @@
   }
 
   .close-btn:hover {
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .dialog-body {
@@ -521,54 +521,54 @@
   }
 
   .label {
-    color: #a6adc8;
+    color: var(--color-text-muted);
     min-width: 56px;
     flex-shrink: 0;
   }
 
   .value {
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .claim-value {
-    color: #cba6f7;
+    color: var(--color-co);
     font-weight: 600;
   }
 
   .none {
-    color: #585b70;
+    color: var(--color-text-faint);
   }
 
   .detail {
-    color: #585b70;
+    color: var(--color-text-faint);
     font-size: 12px;
   }
 
   .dead {
-    color: #f38ba8;
+    color: var(--color-error);
   }
 
   .busted {
-    color: #f38ba8;
+    color: var(--color-error);
     font-weight: 600;
   }
 
   .exposed {
-    color: #fab387;
+    color: var(--color-execution);
     font-weight: 600;
   }
 
   .ally {
-    color: #89dceb;
+    color: var(--ctp-sky);
     font-weight: 600;
   }
 
   .ok {
-    color: #a6e3a1;
+    color: var(--color-village);
   }
 
   .error {
-    color: #f38ba8;
+    color: var(--color-error);
   }
 
   /* --- Divination chips --- */
@@ -585,18 +585,18 @@
     align-items: center;
     gap: 2px;
     font-size: 11px;
-    background: #313244;
+    background: var(--color-surface);
     border-radius: 3px;
     padding: 1px 6px;
-    border-left: 2px solid #89b4fa;
+    border-left: 2px solid var(--color-link);
   }
 
   .medium-chip {
-    border-left-color: #cba6f7;
+    border-left-color: var(--color-accent);
   }
 
   .div-name {
-    color: #a6adc8;
+    color: var(--color-text-muted);
   }
 
   .div-species {
@@ -604,21 +604,21 @@
   }
 
   .div-species.human {
-    color: #a6e3a1;
+    color: var(--color-human-result);
   }
 
   .div-species.wolf {
-    color: #f38ba8;
+    color: var(--color-wolf-result);
   }
 
   .div-species.unknown {
-    color: #585b70;
+    color: var(--color-text-faint);
   }
 
   /* --- Relation section --- */
 
   .relation-section {
-    border-top: 1px solid #313244;
+    border-top: 1px solid var(--color-border);
   }
 
   .relation-header {
@@ -630,9 +630,9 @@
 
   .nav-btn {
     background: none;
-    border: 1px solid #45475a;
+    border: 1px solid var(--color-border-strong);
     border-radius: 4px;
-    color: #cdd6f4;
+    color: var(--color-text);
     font-size: 18px;
     line-height: 1;
     width: 28px;
@@ -644,14 +644,14 @@
   }
 
   .nav-btn:hover {
-    border-color: #cba6f7;
-    color: #cba6f7;
+    border-color: var(--color-accent);
+    color: var(--color-accent);
   }
 
   .relation-target {
     font-size: 14px;
     font-weight: 600;
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .relation-body {
@@ -670,17 +670,17 @@
   }
 
   .rel-label {
-    color: #a6adc8;
+    color: var(--color-text-muted);
     flex-shrink: 0;
   }
 
   .rel-sep {
-    color: #45475a;
+    color: var(--color-border-strong);
     margin: 0 2px;
   }
 
   .roles-list {
-    color: #89b4fa;
+    color: var(--color-link);
     letter-spacing: 0.5px;
   }
 
@@ -698,7 +698,7 @@
   }
 
   .vote-day-label {
-    color: #585b70;
+    color: var(--color-text-faint);
     font-size: 11px;
     min-width: 20px;
     flex-shrink: 0;
@@ -711,7 +711,7 @@
   }
 
   .vote-arrow {
-    color: #a6adc8;
+    color: var(--color-text-muted);
     font-size: 12px;
     display: flex;
     align-items: baseline;
@@ -719,7 +719,7 @@
   }
 
   .vote-arrow.mutual {
-    color: #cdd6f4;
+    color: var(--color-text);
     font-weight: 500;
   }
 
@@ -731,17 +731,17 @@
   }
 
   .vote-tag.exec {
-    color: #f38ba8;
-    background: rgba(243, 139, 168, 0.15);
+    color: var(--color-error);
+    background: color-mix(in srgb, var(--color-error) 15%, transparent);
   }
 
   .vote-tag.runoff {
-    color: #fab387;
-    background: rgba(250, 179, 135, 0.15);
+    color: var(--color-execution);
+    background: color-mix(in srgb, var(--color-execution) 15%, transparent);
   }
 
   .vote-tag.saved {
-    color: #a6e3a1;
-    background: rgba(166, 227, 161, 0.15);
+    color: var(--color-village);
+    background: color-mix(in srgb, var(--color-village) 15%, transparent);
   }
 </style>

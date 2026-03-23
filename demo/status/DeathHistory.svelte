@@ -44,11 +44,11 @@
 <style>
   .section {
     padding: 8px 12px;
-    border-bottom: 1px solid #313244;
+    border-bottom: 1px solid var(--color-border);
   }
 
   .empty {
-    color: #585b70;
+    color: var(--color-text-faint);
     font-size: 12px;
   }
 
@@ -63,14 +63,14 @@
   }
 
   th, td {
-    border: 1px solid #313244;
+    border: 1px solid var(--color-border);
     padding: 2px 6px;
     white-space: nowrap;
   }
 
   th {
-    background: #181825;
-    color: #cba6f7;
+    background: var(--color-bg-elevated);
+    color: var(--color-co);
     font-weight: 600;
     font-size: 11px;
     text-align: center;
@@ -83,19 +83,19 @@
   }
 
   .kill-type {
-    color: #f9e2af;
+    color: var(--color-role);
   }
 
   .exec-type {
-    color: #f38ba8;
+    color: var(--color-wolf);
   }
 
   .name-cell {
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .cause-note {
-    color: #585b70;
+    color: var(--color-text-faint);
     font-size: 10px;
     margin-left: 2px;
   }

@@ -87,8 +87,16 @@
   --color-vote-arrow:     var(--ctp-blue);       /* 投票先矢印 */
   --color-player-resolved: var(--ctp-teal);      /* 名前解決済みプレイヤー */
 
+  /* --- Layout (overlay) --- */
+  --color-overlay-backdrop: rgba(0, 0, 0, 0.6);  /* モーダル/パネル背景オーバーレイ */
+
+  /* --- Domain: 陣営バッジ背景 --- */
+  --color-wolf-bg-tint:   #45273a;              /* 人狼バッジ背景（暗い赤系） */
+  --color-fox-bg-tint:    #2d3a27;              /* 妖狐バッジ背景（暗い緑系） */
+
   /* --- Feedback --- */
   --color-error:          var(--ctp-red);        /* エラー */
   --color-danger-bg:      var(--ctp-red);        /* 危険アクション背景 */
   --color-danger-text:    var(--ctp-base);       /* 危険アクション上のテキスト */
+  --color-danger-badge:   #e64553;              /* 不一致バッジ（濃い赤） */
 }

@@ -28,23 +28,23 @@
     align-items: center;
     gap: 4px;
     padding: 6px 12px;
-    border-bottom: 1px solid #313244;
+    border-bottom: 1px solid var(--color-border);
   }
 
   .section-header {
     font-size: 12px;
     font-weight: 600;
-    color: #a6adc8;
+    color: var(--color-text-muted);
     margin-right: 4px;
   }
 
   .day {
-    color: #cdd6f4;
+    color: var(--color-text);
     margin-right: 4px;
   }
 
   .count {
-    color: #a6e3a1;
+    color: var(--color-village);
     font-size: 14px;
   }
 
@@ -52,24 +52,24 @@
     display: inline-block;
     padding: 2px 8px;
     font-size: 12px;
-    background: #313244;
+    background: var(--color-surface);
     border-radius: 4px;
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   .empty {
-    color: #585b70;
+    color: var(--color-text-faint);
     font-size: 12px;
   }
 
   .active-hl {
-    outline: 1.5px solid rgba(137, 180, 250, 0.6);
-    background: rgba(137, 180, 250, 0.15);
+    outline: 1.5px solid color-mix(in srgb, var(--color-link) 60%, transparent);
+    background: color-mix(in srgb, var(--color-link) 15%, transparent);
   }
 
   .mismatch {
-    background: #e64553;
-    color: #fff;
+    background: var(--color-danger-badge);
+    color: var(--color-danger-text);
     padding: 0 4px;
     border-radius: 3px;
   }

@@ -93,18 +93,18 @@
 <style>
   .section {
     padding: 8px 12px;
-    border-bottom: 1px solid #313244;
+    border-bottom: 1px solid var(--color-border);
   }
 
   .section-header {
     font-size: 12px;
     font-weight: 600;
-    color: #a6adc8;
+    color: var(--color-text-muted);
     margin-bottom: 6px;
   }
 
   .remaining {
-    color: #89b4fa;
+    color: var(--color-link);
     font-weight: 400;
   }
 
@@ -121,13 +121,13 @@
   }
 
   th, td {
-    border: 1px solid #313244;
+    border: 1px solid var(--color-border);
     padding: 2px 6px;
   }
 
   th {
-    background: #181825;
-    color: #a6adc8;
+    background: var(--color-bg-elevated);
+    color: var(--color-text-muted);
     font-weight: 500;
     font-size: 10px;
     text-align: center;
@@ -148,65 +148,65 @@
   .verdict-cell {
     text-align: center;
     font-size: 10px;
-    color: #a6adc8;
+    color: var(--color-text-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .name-cell {
-    color: #cdd6f4;
+    color: var(--color-text);
     font-weight: 500;
     white-space: nowrap;
   }
 
   .count-cell {
     text-align: center;
-    color: #cdd6f4;
+    color: var(--color-text);
     white-space: nowrap;
   }
 
   .voters-cell {
-    color: #a6adc8;
+    color: var(--color-text-muted);
     word-break: break-all;
     overflow-wrap: break-word;
   }
 
   .sep {
-    color: #585b70;
+    color: var(--color-text-faint);
   }
 
   /* Decisive voter highlights */
   .decisive-runoff {
-    color: #fab387;
+    color: var(--color-execution);
     font-weight: 600;
   }
 
   .decisive-exec {
-    color: #f38ba8;
+    color: var(--color-wolf);
     font-weight: 600;
   }
 
   /* Cutoff line */
   tr.cutoff > td {
-    border-bottom: 3px solid #f9e2af;
+    border-bottom: 3px solid var(--color-role);
   }
 
   /* Execution locked */
   tr.execution-locked > td {
-    background: rgba(243, 139, 168, 0.15);
+    background: color-mix(in srgb, var(--color-error) 15%, transparent);
   }
   tr.execution-locked .verdict-cell {
-    color: #f38ba8;
+    color: var(--color-error);
     font-weight: 600;
   }
 
   /* Runoff locked */
   tr.runoff-locked > td {
-    background: rgba(250, 179, 135, 0.15);
+    background: color-mix(in srgb, var(--color-execution) 15%, transparent);
   }
   tr.runoff-locked .verdict-cell {
-    color: #fab387;
+    color: var(--color-execution);
     font-weight: 600;
   }
 
@@ -219,23 +219,23 @@
     margin-top: 6px;
     font-size: 11px;
     font-family: 'Consolas', 'Menlo', monospace;
-    color: #a6adc8;
+    color: var(--color-text-muted);
   }
 
   .pending-label {
-    color: #585b70;
+    color: var(--color-text-faint);
   }
 
   .pending-name {
-    color: #cdd6f4;
+    color: var(--color-text);
   }
 
   tr.active-hl-row > td {
-    background: rgba(137, 180, 250, 0.1);
+    background: color-mix(in srgb, var(--color-link) 10%, transparent);
   }
 
   .active-hl-voter {
-    color: #89b4fa;
+    color: var(--color-vote-arrow);
     font-weight: 600;
   }
 </style>
