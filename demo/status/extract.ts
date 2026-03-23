@@ -29,6 +29,7 @@ export type ClaimRow = {
   claimOrder: number | undefined
   assertions: Assertions
   actions: PlayerAction
+  forecasts: Map<number, number>
   surviving: boolean
 }
 
@@ -42,6 +43,7 @@ export type DayAssertion = {
   targetSeat: number
   targetName: string
   species: EnumSpecies
+  forecast?: boolean
 } | null
 
 // --- Vote status types ---
@@ -155,6 +157,7 @@ export function extractClaimGroups(vs: VillageStatus, players: Map<number, strin
       claimOrder: status.claimOrder,
       assertions: status.assertions,
       actions: status.actions,
+      forecasts: status.forecasts,
       surviving: status.surviving,
     })
   }
@@ -216,6 +219,19 @@ export function buildAssertionTimeline(
         targetName: players.get(targetSeat) ?? `#${targetSeat}`,
         species,
       })
+    }
+    // Forecasts: show for nights without a reported result
+    if (row.claimingRole === 'seer') {
+      for (const [night, targetSeat] of row.forecasts) {
+        if (!timeline.has(night)) {
+          timeline.set(night, {
+            targetSeat,
+            targetName: players.get(targetSeat) ?? `#${targetSeat}`,
+            species: null,
+            forecast: true,
+          })
+        }
+      }
     }
   }
 

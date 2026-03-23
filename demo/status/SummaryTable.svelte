@@ -41,9 +41,22 @@
     tableGroups.flatMap(g => g.rows.map(row => buildAssertionTimeline(row, maxDay, players)))
   )
 
+  // Max day extended by forecasts (forecast on day D targets night D, displayed in column D+1)
+  let maxDayExtended = $derived.by(() => {
+    let m = maxDay
+    for (const group of tableGroups) {
+      for (const row of group.rows) {
+        for (const night of row.forecasts.keys()) {
+          if (night + 1 > m) m = night + 1
+        }
+      }
+    }
+    return m
+  })
+
   // Day columns: only include days that have any data
   let dayColumns = $derived(
-    Array.from({ length: Math.max(0, maxDay + 1) }, (_, i) => i)
+    Array.from({ length: Math.max(0, maxDayExtended + 1) }, (_, i) => i)
       .filter(day => {
         const d = deathByDay.get(day)
         if (d && (d.executions.length > 0 || d.nightKills.length > 0)) return true
@@ -116,8 +129,8 @@
             <td class="name-cell"><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} seat={row.seat}>{row.name}</PlayerName></td>
             {#each dayColumns as day}
               {@const assertion = timeline.get(day - 1) ?? null}
-              <td class="data-cell" class:human={assertion?.species === 'human'} class:wolf={assertion?.species === 'wolf'} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:active-hl-cell={$srcLines.claimCell.get(`${row.seat}:${day - 1}`) === $cursor}>
-                {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{/if}
+              <td class="data-cell" class:human={assertion?.species === 'human' && !assertion?.forecast} class:wolf={assertion?.species === 'wolf' && !assertion?.forecast} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:forecast={assertion?.forecast} class:active-hl-cell={$srcLines.claimCell.get(`${row.seat}:${day - 1}`) === $cursor}>
+                {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="forecast-label">(予)</span>{:else if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{/if}
               </td>
             {/each}
           </tr>
@@ -222,6 +235,14 @@
 
   .data-cell.guard {
     color: var(--color-link);
+  }
+
+  .data-cell.forecast {
+    color: var(--color-text-muted);
+  }
+
+  .forecast-label {
+    font-size: 10px;
   }
 
   .group-first td {

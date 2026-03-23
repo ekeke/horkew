@@ -23,9 +23,20 @@
   let masonGroup = $derived(groups.find(g => g.role === 'mason'))
   let nekomataGroup = $derived(groups.find(g => g.role === 'nekomata'))
 
-  // Column range: nights 1 to maxDay-1 (night N result reported on day N+1)
+  // Column range: nights 1 to maxDay-1, extended if forecasts exist beyond
+  let maxNight = $derived.by(() => {
+    let m = maxDay - 1
+    for (const group of tableGroups) {
+      for (const row of group.rows) {
+        for (const night of row.forecasts.keys()) {
+          if (night > m) m = night
+        }
+      }
+    }
+    return m
+  })
   let nights = $derived(
-    Array.from({ length: Math.max(0, maxDay - 1) }, (_, i) => i + 1)
+    Array.from({ length: Math.max(0, maxNight) }, (_, i) => i + 1)
   )
 
 
@@ -90,8 +101,8 @@
                   <td class="name-cell"><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)} seat={row.seat}>{row.name}</PlayerName></td>
                   {#each nights as night}
                     {@const assertion = timeline.get(night) ?? null}
-                    <td class="data-cell" class:human={assertion?.species === 'human'} class:wolf={assertion?.species === 'wolf'} class:guard={row.claimingRole === 'bodyguard' && assertion !== null}>
-                      {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{/if}
+                    <td class="data-cell" class:human={assertion?.species === 'human' && !assertion?.forecast} class:wolf={assertion?.species === 'wolf' && !assertion?.forecast} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:forecast={assertion?.forecast}>
+                      {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="forecast-label">(予)</span>{:else if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{/if}
                     </td>
                   {/each}
                 </tr>
@@ -232,6 +243,14 @@
 
   .data-cell.guard {
     color: var(--color-link);
+  }
+
+  .data-cell.forecast {
+    color: var(--color-text-muted);
+  }
+
+  .forecast-label {
+    font-size: 10px;
   }
 
   .mason-groups {
