@@ -14,6 +14,8 @@
   import HelpPanel from './HelpPanel.svelte'
   import ColorSwatchPane from './ColorSwatchPane.svelte'
   import './theme.css'
+  import { runGame } from '../src/lupa/engine.ts'
+  import { formatHowl } from '../src/lupa/format.ts'
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
   import type { EditorView } from '@codemirror/view'
@@ -224,6 +226,22 @@
         selection: { anchor: text.length },
       })
       editorView.focus()
+    }
+  }
+
+  function generateLupaGame() {
+    const roles = new Map<SystemRole, number>([
+      ['werewolf', 3], ['villager', 2], ['seer', 1], ['medium', 1],
+      ['bodyguard', 1], ['mason', 2], ['nekomata', 1],
+      ['possessed', 1], ['werehamster', 1], ['immoralist', 1],
+    ])
+    const config = { roles, seed: Date.now(), useRandomNames: true }
+    const { events, state } = runGame(config)
+    const howl = formatHowl(events, state, config)
+    if (trialMode || !activeKey) {
+      handleStartTrial(howl)
+    } else {
+      setEditorContent(howl)
     }
   }
 
@@ -757,6 +775,8 @@
     <div class="header-spacer"></div>
 
     {#if devMode}
+    <button class="header-btn" onclick={generateLupaGame} title="Lupaでランダムゲームを生成">Lupa</button>
+
     <select class="header-select skin-select" value={skin} onchange={(e) => { skin = (e.target as HTMLSelectElement).value as Skin; updateSettings({ skin }) }}>
       <option value="flat">Flat</option>
       <option value="excite">Excite</option>
