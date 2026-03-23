@@ -5,6 +5,7 @@ export type LupaConfig = {
   seed?: number
   verify?: boolean
   useRandomNames?: boolean
+  hasFirstGhost?: boolean
 }
 
 export type PlayerState = {

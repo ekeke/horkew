@@ -65,6 +65,18 @@ export function runGame(config: LupaConfig): GameResult {
     }
   }
 
+  // 初日犠牲者（人狼・猫又・妖狐以外からランダムに選出）
+  if (config.hasFirstGhost) {
+    const immuneRoles: SystemRole[] = ['werewolf', 'nekomata', 'werehamster']
+    const candidates = alivePlayers(state).filter(p => !immuneRoles.includes(p.role))
+    if (candidates.length > 0) {
+      const victim = rng.pick(candidates)
+      killPlayer(state, victim.seat)
+      events.push({ type: 'night_kill', target: victim.seat })
+      checkImmoralistFollow(state, events)
+    }
+  }
+
   // メインループ
   let lastExecutedSeat: number | null = null
   const MAX_DAYS = 50

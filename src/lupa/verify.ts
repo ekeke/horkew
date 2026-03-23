@@ -142,7 +142,10 @@ function verifyCheckpoint(
     }
   }
 
-  const retar = new VillageRetar(vs, setup, lupaOptions)
+  const options = config.hasFirstGhost
+    ? { ...lupaOptions, hasFirstGhost: true }
+    : lupaOptions
+  const retar = new VillageRetar(vs, setup, options)
   const t0 = performance.now()
   const result = retar.analyze()
   const retarMs = performance.now() - t0
@@ -200,6 +203,7 @@ type GameConfig = {
   name: string
   roles: Record<string, number>
   seeds: [number, number]
+  hasFirstGhost?: boolean
 }
 
 const configs: GameConfig[] = [
@@ -223,6 +227,8 @@ const configs: GameConfig[] = [
   // 大規模・全役職
   { name: 'full-15p', roles: { werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, possessed: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 1000] },
   { name: 'full-17p', roles: { werewolf: 3, villager: 4, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, possessed: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 500] },
+  // 初日犠牲者あり
+  { name: '14d-neko', roles: { werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 1000], hasFirstGhost: true },
 ]
 
 type Args = {
@@ -281,6 +287,7 @@ function main() {
   for (const gc of activeConfigs) {
     const lupaConfig: LupaConfig = {
       roles: new Map(Object.entries(gc.roles) as [SystemRole, number][]),
+      hasFirstGhost: gc.hasFirstGhost,
     }
     let configCheckpoints = 0
     let configSkipped = 0
