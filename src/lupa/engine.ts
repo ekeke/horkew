@@ -43,6 +43,7 @@ export function runGame(config: LupaConfig): GameResult {
     phase: 'night',
     finished: false,
     result: null,
+    executionHistory: new Map(),
   }
 
   const events: GameEvent[] = []
@@ -138,18 +139,44 @@ export function runGame(config: LupaConfig): GameResult {
       }
     }
 
-    // 投票フェーズ
-    const votes = new Map<number, number>()
-    for (const voter of alivePlayers(state)) {
-      const target = decideVote(state, voter, rng)
-      votes.set(voter.seat, target)
-      events.push({ type: 'vote', voter: voter.seat, target })
+    // 投票フェーズ（最大3回再投票、それでも決まらなければ最小seatで決着）
+    let executedSeat: number
+    const MAX_REVOTES = 3
+    let revoteCount = 0
+    let revoteCandidates: number[] | null = null
+
+    while (true) {
+      const votes = new Map<number, number>()
+      const voters = alivePlayers(state)
+      for (const voter of voters) {
+        const target = revoteCandidates
+          ? revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
+          : decideVote(state, voter, rng)
+        votes.set(voter.seat, target)
+        events.push({ type: 'vote', voter: voter.seat, target })
+      }
+
+      const result = resolveVotes(votes)
+      if ('decided' in result) {
+        executedSeat = result.decided
+        break
+      }
+
+      revoteCount++
+      if (revoteCount > MAX_REVOTES) {
+        // 決着がつかない場合、最小seatで処刑
+        executedSeat = result.tied[0]
+        break
+      }
+
+      events.push({ type: 'revote', targets: result.tied })
+      revoteCandidates = result.tied
     }
 
-    const executedSeat = resolveVotes(votes)
     killPlayer(state, executedSeat)
     events.push({ type: 'execution', target: executedSeat })
     lastExecutedSeat = executedSeat
+    state.executionHistory.set(day, executedSeat)
 
     // 霊能結果コメント
     const executedPlayer = state.players.find(p => p.seat === executedSeat)!
@@ -320,6 +347,12 @@ function applyClaim(
       player.claimedRole = 'medium'
       player.claimedDay = day
       events.push({ type: 'medium_claim', actor: player.seat })
+      // 過去の処刑結果をまとめて報告
+      if (claim.pastResults) {
+        for (const result of claim.pastResults) {
+          events.push({ type: 'medium_result', actor: player.seat, result })
+        }
+      }
       break
     case 'medium_result':
       events.push({ type: 'medium_result', actor: player.seat, result: claim.result })

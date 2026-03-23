@@ -124,7 +124,7 @@ function decideSeerClaim(
 // ---- 霊能者 (真) ----
 // 毎日40%でCO。CO済みなら結果報告。
 function decideMediumClaim(
-  state: GameState, medium: PlayerState, _day: number,
+  state: GameState, medium: PlayerState, day: number,
   lastExecutedSeat: number | null, rng: Rng,
 ): DayClaim {
   if (medium.claimedRole === 'medium') {
@@ -137,7 +137,32 @@ function decideMediumClaim(
   }
 
   if (rng.next() >= CO_PROBABILITY) return { type: 'none' }
-  return { type: 'medium_co' }
+
+  // CO時に過去の処刑結果をまとめて報告
+  const pastResults = collectPastMediumResults(state, day)
+  return { type: 'medium_co', pastResults }
+}
+
+/** 過去の処刑者の霊能結果を収集（真霊能用） */
+function collectPastMediumResults(state: GameState, day: number): EnumSpecies[] {
+  const results: EnumSpecies[] = []
+  for (let d = 1; d < day; d++) {
+    const seat = state.executionHistory.get(d)
+    if (seat == null) continue
+    const player = state.players.find(p => p.seat === seat)!
+    results.push(getMediumResult(player.role))
+  }
+  return results
+}
+
+/** 過去の処刑者の偽霊能結果を生成 */
+function collectFakeMediumResults(state: GameState, day: number, rng: Rng): EnumSpecies[] {
+  const results: EnumSpecies[] = []
+  for (let d = 1; d < day; d++) {
+    if (!state.executionHistory.has(d)) continue
+    results.push(rng.next() < 0.5 ? 'human' : 'wolf')
+  }
+  return results
 }
 
 // ---- 狂人 ----
@@ -175,14 +200,7 @@ function decideWerewolfClaim(
 
   if (rng.next() >= 0.2) return { type: 'none' }
 
-  // 占いか霊能をランダムに選択
-  if (rng.next() < 0.5) {
-    return initFakeSeerCO(state, player, day, rng)
-  } else {
-    player.claimedRole = 'medium'
-    player.claimedDay = day
-    return { type: 'medium_co' }
-  }
+  return pickFakeCO(state, player, day, rng)
 }
 
 // ---- 妖狐 ----
@@ -200,13 +218,7 @@ function decideWerehamsterClaim(
 
   if (rng.next() >= 0.2) return { type: 'none' }
 
-  if (rng.next() < 0.5) {
-    return initFakeSeerCO(state, player, day, rng)
-  } else {
-    player.claimedRole = 'medium'
-    player.claimedDay = day
-    return { type: 'medium_co' }
-  }
+  return pickFakeCO(state, player, day, rng)
 }
 
 // ---- 狩人 ----
@@ -318,6 +330,62 @@ export function forceTrueRoleCO(
 // ============================================================
 // 偽CO共通ユーティリティ
 // ============================================================
+
+/** 偽COの役職をランダム選択（占い50%, 霊能25%, 狩人10%, 共有10%, 猫又5%） */
+function pickFakeCO(
+  state: GameState, player: PlayerState, day: number, rng: Rng,
+): DayClaim {
+  const r = rng.next()
+  if (r < 0.50) return initFakeSeerCO(state, player, day, rng)
+  if (r < 0.75) return initFakeMediumCO(state, player, day, rng)
+  if (r < 0.85) return initFakeBodyguardCO(state, player, day, rng)
+  if (r < 0.95) return initFakeMasonCO(state, player, day, rng)
+  return initFakeNekomataC0(player, day)
+}
+
+/** 偽狩人COを開始（適当な護衛先履歴を生成） */
+function initFakeBodyguardCO(
+  state: GameState, player: PlayerState, day: number, rng: Rng,
+): DayClaim {
+  player.claimedRole = 'bodyguard'
+  player.claimedDay = day
+  // 適当な護衛先を生成
+  const targets: number[] = []
+  const alive = alivePlayersExcept(state, player.seat)
+  for (let n = 0; n < day; n++) {
+    if (alive.length > 0) targets.push(rng.pick(alive).seat)
+  }
+  return { type: 'bodyguard_co', targets }
+}
+
+/** 偽共有COを開始（適当な相方を指名） */
+function initFakeMasonCO(
+  state: GameState, player: PlayerState, day: number, rng: Rng,
+): DayClaim {
+  player.claimedRole = 'mason'
+  player.claimedDay = day
+  // 生存者からランダムに相方を指名
+  const candidates = alivePlayersExcept(state, player.seat)
+  if (candidates.length === 0) return { type: 'none' }
+  return { type: 'mason_co', partner: rng.pick(candidates).seat }
+}
+
+/** 偽猫又COを開始 */
+function initFakeNekomataC0(player: PlayerState, day: number): DayClaim {
+  player.claimedRole = 'nekomata'
+  player.claimedDay = day
+  return { type: 'nekomata_co' }
+}
+
+/** 偽霊能COを開始（過去結果付き） */
+function initFakeMediumCO(
+  state: GameState, player: PlayerState, day: number, rng: Rng,
+): DayClaim {
+  player.claimedRole = 'medium'
+  player.claimedDay = day
+  const pastResults = collectFakeMediumResults(state, day, rng)
+  return { type: 'medium_co', pastResults }
+}
 
 /** 偽占いCOを開始 */
 function initFakeSeerCO(
@@ -444,7 +512,8 @@ function collectBlackTargets(state: GameState): Set<number> {
 // 投票集計
 // ============================================================
 
-export function resolveVotes(votes: Map<number, number>): number {
+/** 投票結果を集計。単独最多なら確定、同票なら候補リストを返す */
+export function resolveVotes(votes: Map<number, number>): { decided: number } | { tied: number[] } {
   const counts = new Map<number, number>()
   for (const target of votes.values()) {
     counts.set(target, (counts.get(target) ?? 0) + 1)
@@ -459,5 +528,6 @@ export function resolveVotes(votes: Map<number, number>): number {
       maxTargets.push(target)
     }
   }
-  return Math.min(...maxTargets)
+  if (maxTargets.length === 1) return { decided: maxTargets[0] }
+  return { tied: maxTargets.sort((a, b) => a - b) }
 }

@@ -31,6 +31,8 @@ export type GameState = {
   phase: 'night' | 'day'
   finished: boolean
   result: 'villager_won' | 'werewolf_won' | 'werehamster_won' | null
+  /** 処刑履歴: day → seat */
+  executionHistory: Map<number, number>
 }
 
 export type NightAction =
@@ -42,7 +44,7 @@ export type NightAction =
 export type DayClaim =
   | { type: 'seer_co', results: Array<{ target: number, result: EnumSpecies }> }
   | { type: 'seer_result', target: number, result: EnumSpecies }
-  | { type: 'medium_co' }
+  | { type: 'medium_co', pastResults?: EnumSpecies[] }
   | { type: 'medium_result', result: EnumSpecies }
   | { type: 'bodyguard_co', targets: number[] }
   | { type: 'mason_co', partner: number }
@@ -65,6 +67,7 @@ export type GameEvent =
   | { type: 'curse_kill', target: number }
   | { type: 'follow_kill', target: number }
   | { type: 'vote', voter: number, target: number }
+  | { type: 'revote', targets: number[] }
   | { type: 'execution', target: number }
   | { type: 'comment', text: string }
   | { type: 'game_over', result: 'villager_won' | 'werewolf_won' | 'werehamster_won' }

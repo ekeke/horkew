@@ -153,6 +153,12 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
         lines.push(`${playerName(event.voter)}→${playerName(event.target)}`)
         break
       }
+      case 'revote': {
+        lines.push('')
+        const targetNames = event.targets.map(t => playerName(t)).join('、')
+        lines.push(`再投票 ${targetNames}`)
+        break
+      }
       case 'execution': {
         lines.push('')
         lines.push(`${playerName(event.target)}処刑`)
