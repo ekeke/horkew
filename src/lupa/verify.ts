@@ -97,6 +97,7 @@ type FailedCheckpoint = {
 type VerifyResult = {
   failure: FailedCheckpoint | null
   skipped: boolean
+  retarMs: number
 }
 
 function verifyCheckpoint(
@@ -121,7 +122,7 @@ function verifyCheckpoint(
         config: configName, seed, checkpoint, howl: annotatedHowl,
         players: [{ name: '(parse)', message: `unknown statements: ${unknowns.map((s: any) => s.raw).join(', ')}` }],
       },
-      skipped: false,
+      skipped: false, retarMs: 0,
     }
   }
 
@@ -133,12 +134,14 @@ function verifyCheckpoint(
     const seatStatus = vs.statuses.get(player.seat)
     if (!seatStatus) continue
     if (!seatStatus.surviving && seatStatus.causeOfDeath === 'execution' && !seatStatus.claiming) {
-      return { failure: null, skipped: true }
+      return { failure: null, skipped: true, retarMs: 0 }
     }
   }
 
   const retar = new VillageRetar(vs, setup, lupaOptions)
+  const t0 = performance.now()
   const result = retar.analyze()
+  const retarMs = performance.now() - t0
 
   if (result.error) {
     const annotatedHowl = partialHowl.trimEnd() + '\n\n'
@@ -148,7 +151,7 @@ function verifyCheckpoint(
         config: configName, seed, checkpoint, howl: annotatedHowl,
         players: [{ name: '(analyze)', message: `${result.error}` }],
       },
-      skipped: false,
+      skipped: false, retarMs,
     }
   }
 
@@ -165,7 +168,7 @@ function verifyCheckpoint(
   }
 
   if (failedPlayers.length === 0) {
-    return { failure: null, skipped: false }
+    return { failure: null, skipped: false, retarMs }
   }
 
   // アノテーション付きhowlを生成
@@ -185,7 +188,7 @@ function verifyCheckpoint(
 
   return {
     failure: { config: configName, seed, checkpoint, howl: annotatedHowl, players: playerMessages },
-    skipped: false,
+    skipped: false, retarMs,
   }
 }
 
@@ -196,12 +199,12 @@ type GameConfig = {
 }
 
 const configs: GameConfig[] = [
-  { name: 'basic-5p', roles: { werewolf: 1, villager: 3, seer: 1 }, seeds: [0, 20] },
-  { name: 'standard-10p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, possessed: 1 }, seeds: [0, 15] },
-  { name: 'mason-10p', roles: { werewolf: 2, villager: 3, seer: 1, medium: 1, mason: 2, possessed: 1 }, seeds: [0, 10] },
-  { name: 'nekomata-6p', roles: { werewolf: 1, villager: 3, seer: 1, nekomata: 1 }, seeds: [0, 15] },
-  { name: 'hamster-11p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, werehamster: 1, possessed: 1 }, seeds: [0, 10] },
-  { name: 'full-15p', roles: { werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, possessed: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 5] },
+  { name: 'basic-5p', roles: { werewolf: 1, villager: 3, seer: 1 }, seeds: [0, 100] },
+  { name: 'standard-10p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, possessed: 1 }, seeds: [0, 100] },
+  { name: 'mason-10p', roles: { werewolf: 2, villager: 3, seer: 1, medium: 1, mason: 2, possessed: 1 }, seeds: [0, 50] },
+  { name: 'nekomata-6p', roles: { werewolf: 1, villager: 3, seer: 1, nekomata: 1 }, seeds: [0, 100] },
+  { name: 'hamster-11p', roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, werehamster: 1, possessed: 1 }, seeds: [0, 50] },
+  { name: 'full-15p', roles: { werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, possessed: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 50] },
 ]
 
 function parseArgs(): { outdir: string | null } {
@@ -220,6 +223,11 @@ function main() {
   let totalCheckpoints = 0
   let totalSkipped = 0
 
+  // 時間計測
+  const gameTimes: number[] = []
+  const retarTimes: number[] = []
+  const totalStart = performance.now()
+
   for (const gc of configs) {
     const lupaConfig: LupaConfig = {
       roles: new Map(Object.entries(gc.roles) as [SystemRole, number][]),
@@ -228,6 +236,7 @@ function main() {
     let configSkipped = 0
 
     for (let seed = gc.seeds[0]; seed < gc.seeds[1]; seed++) {
+      const gameStart = performance.now()
       lupaConfig.seed = seed
       const { events, state } = runGame(lupaConfig)
       totalGames++
@@ -236,20 +245,31 @@ function main() {
       for (const cp of checkpoints) {
         totalCheckpoints++
         configCheckpoints++
-        const { failure, skipped } = verifyCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
+        const { failure, skipped, retarMs } = verifyCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
         if (failure) allFailures.push(failure)
         if (skipped) {
           configSkipped++
           totalSkipped++
         }
+        if (retarMs > 0) retarTimes.push(retarMs)
       }
+      gameTimes.push(performance.now() - gameStart)
     }
 
     const skippedStr = configSkipped > 0 ? ` (${configSkipped} skipped)` : ''
     console.log(`  ${gc.name}: ${gc.seeds[1] - gc.seeds[0]} games, ${configCheckpoints} checkpoints${skippedStr}`)
   }
 
+  const totalMs = performance.now() - totalStart
+
   console.log(`\n合計: ${totalGames} games, ${totalCheckpoints} checkpoints, ${totalSkipped} skipped`)
+
+  // 時間統計
+  const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0
+  const max = (arr: number[]) => arr.length > 0 ? Math.max(...arr) : 0
+  console.log(`時間: total ${totalMs.toFixed(0)}ms`)
+  console.log(`  game: avg ${avg(gameTimes).toFixed(1)}ms, max ${max(gameTimes).toFixed(1)}ms (${totalGames} games)`)
+  console.log(`  retar: avg ${avg(retarTimes).toFixed(1)}ms, max ${max(retarTimes).toFixed(1)}ms (${retarTimes.length} runs)`)
 
   const verified = totalCheckpoints - totalSkipped
   if (allFailures.length === 0) {

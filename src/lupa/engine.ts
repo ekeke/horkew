@@ -144,10 +144,8 @@ export function runGame(config: LupaConfig): GameResult {
       }
     }
 
-    // 処刑後: 背徳者後追いチェック (妖狐が処刑された場合)
-    if (executedPlayer.role === 'werehamster') {
-      checkImmoralistFollow(state, events)
-    }
+    // 処刑後: 背徳者後追いチェック（処刑・猫又道連れ等いかなる理由でも狐が死亡したら発動）
+    checkImmoralistFollow(state, events)
 
     checkWinCondition(state)
     if (state.finished) {
