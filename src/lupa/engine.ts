@@ -20,14 +20,12 @@ export function runGame(config: LupaConfig): GameResult {
 
   const shuffledIndices = rng.shuffle(Array.from({ length: totalPlayers }, (_, i) => i))
 
-  // 役職配列を構築してシャッフル結果から割り当て順を決定
   const roleArray: SystemRole[] = []
   for (const [role, count] of config.roles) {
     for (let i = 0; i < count; i++) roleArray.push(role)
   }
   const assignedRoles = shuffledIndices.map(i => roleArray[i])
 
-  // 名前生成
   let names: string[]
   if (config.useRandomNames) {
     if (totalPlayers > RANDOM_NAMES.length) {
@@ -67,22 +65,18 @@ export function runGame(config: LupaConfig): GameResult {
       state.phase = 'night'
       const night = day - 1
 
-      // 全生存者に夜アクションを問い合わせ
       const actions: Array<{ player: typeof players[0], action: NightAction }> = []
       for (const player of alivePlayers(state)) {
         const action = decideNightAction(state, player, night, rng)
         actions.push({ player, action })
       }
 
-      // アクション適用
       for (const { player, action } of actions) {
         applyNightAction(state, player, night, action)
       }
 
-      // 夜の結果解決
-      resolveNight(state, actions, events)
+      resolveNight(state, actions, events, rng)
 
-      // 勝利判定
       checkWinCondition(state)
       if (state.finished) {
         events.push({ type: 'game_over', result: state.result! })
@@ -93,7 +87,7 @@ export function runGame(config: LupaConfig): GameResult {
     // ==== 昼フェーズ ====
     state.phase = 'day'
 
-    // COフェーズ: 全生存者にCO判断を問い合わせ
+    // COフェーズ
     for (const player of alivePlayers(state)) {
       const claim = decideDayClaim(state, player, day, lastExecutedSeat, rng)
       applyClaim(state, player, day, claim, events)
@@ -112,7 +106,22 @@ export function runGame(config: LupaConfig): GameResult {
     events.push({ type: 'execution', target: executedSeat })
     lastExecutedSeat = executedSeat
 
-    // 勝利判定
+    // 処刑後: 猫又道連れ
+    const executedPlayer = state.players.find(p => p.seat === executedSeat)!
+    if (executedPlayer.role === 'nekomata') {
+      const curseCandidates = alivePlayers(state)
+      if (curseCandidates.length > 0) {
+        const curseTarget = rng.pick(curseCandidates)
+        killPlayer(state, curseTarget.seat)
+        events.push({ type: 'curse_kill', target: curseTarget.seat })
+      }
+    }
+
+    // 処刑後: 背徳者後追いチェック (妖狐が処刑された場合)
+    if (executedPlayer.role === 'werehamster') {
+      checkImmoralistFollow(state, events)
+    }
+
     checkWinCondition(state)
     if (state.finished) {
       events.push({ type: 'game_over', result: state.result! })
@@ -128,7 +137,7 @@ export function runGame(config: LupaConfig): GameResult {
   return { events, state, config }
 }
 
-/** 夜アクションを状態に適用（記録のみ、kill処理はresolveNightで） */
+/** 夜アクションを状態に適用（記録のみ） */
 function applyNightAction(
   state: GameState, player: typeof state.players[0], night: number, action: NightAction,
 ): void {
@@ -148,18 +157,21 @@ function applyNightAction(
   }
 }
 
-/** 夜の結果を解決（呪殺、襲撃、護衛） */
+/** 夜の結果を解決 */
 function resolveNight(
   state: GameState,
   actions: Array<{ player: typeof state.players[0], action: NightAction }>,
   events: GameEvent[],
+  _rng: Rng,
 ): void {
   // 占い呪殺チェック
+  const foxKilled = new Set<number>()
   for (const { action } of actions) {
     if (action.type !== 'divine') continue
     const target = state.players.find(p => p.seat === action.target)!
     if (target.role === 'werehamster' && target.alive) {
       killPlayer(state, action.target)
+      foxKilled.add(action.target)
       events.push({ type: 'fox_kill', target: action.target })
     }
   }
@@ -174,7 +186,7 @@ function resolveNight(
   }
 
   // 襲撃処理
-  for (const { action } of actions) {
+  for (const { player: attacker, action } of actions) {
     if (action.type !== 'attack') continue
     const target = state.players.find(p => p.seat === action.target)!
 
@@ -182,15 +194,43 @@ function resolveNight(
       // 妖狐は襲撃されても死なない
     } else if (guardTarget === action.target) {
       // 護衛成功
+    } else if (target.role === 'nekomata') {
+      // 猫又襲撃: 猫又は死亡、襲撃した人狼を道連れ
+      killPlayer(state, action.target)
+      events.push({ type: 'night_kill', target: action.target })
+      // 襲撃元の人狼 (最小seat狼) を道連れ
+      const attackingWolf = alivePlayers(state).find(p => p.role === 'werewolf')
+        ?? attacker // フォールバック
+      killPlayer(state, attackingWolf.seat)
+      events.push({ type: 'curse_kill', target: attackingWolf.seat })
     } else {
       killPlayer(state, action.target)
       events.push({ type: 'night_kill', target: action.target })
     }
   }
 
+  // 妖狐死亡による背徳者後追い
+  if (foxKilled.size > 0) {
+    checkImmoralistFollow(state, events)
+  }
+
   // 夜の死者がいなければ平和
   if (!hasNightDeaths(events)) {
     events.push({ type: 'peace' })
+  }
+}
+
+/** 妖狐死亡時の背徳者後追いチェック */
+function checkImmoralistFollow(state: GameState, events: GameEvent[]): void {
+  // 生存妖狐がいるかチェック
+  const aliveHamsters = state.players.filter(p => p.role === 'werehamster' && p.alive)
+  if (aliveHamsters.length > 0) return
+
+  // 全妖狐が死亡 → 生存背徳者を後追い
+  const aliveImmoralists = state.players.filter(p => p.role === 'immoralist' && p.alive)
+  for (const imm of aliveImmoralists) {
+    killPlayer(state, imm.seat)
+    events.push({ type: 'follow_kill', target: imm.seat })
   }
 }
 
@@ -221,6 +261,16 @@ function applyClaim(
       player.claimedDay = day
       events.push({ type: 'bodyguard_claim', actor: player.seat, targets: claim.targets })
       break
+    case 'mason_co':
+      player.claimedRole = 'mason'
+      player.claimedDay = day
+      events.push({ type: 'mason_claim', actor: player.seat, partner: claim.partner })
+      break
+    case 'nekomata_co':
+      player.claimedRole = 'nekomata'
+      player.claimedDay = day
+      events.push({ type: 'nekomata_claim', actor: player.seat })
+      break
     case 'none':
       break
   }
@@ -229,7 +279,7 @@ function applyClaim(
 function hasNightDeaths(events: GameEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]
-    if (e.type === 'night_kill' || e.type === 'fox_kill') return true
+    if (e.type === 'night_kill' || e.type === 'fox_kill' || e.type === 'curse_kill' || e.type === 'follow_kill') return true
     if (e.type === 'execution' || e.type === 'game_over') return false
   }
   return false

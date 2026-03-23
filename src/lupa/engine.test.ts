@@ -83,4 +83,70 @@ describe('lupa engine', () => {
       assert.equal(unknowns.length, 0, `seed ${seed}: unknown statements: ${unknowns.map((s: any) => s.raw).join(', ')}`)
     }
   })
+
+  it('猫又処刑で道連れが発生する', () => {
+    let curseFound = false
+    for (let seed = 0; seed < 50; seed++) {
+      const config = makeConfig({ werewolf: 1, villager: 3, seer: 1, nekomata: 1 }, seed)
+      const { events } = runGame(config)
+      if (events.some(e => e.type === 'curse_kill')) {
+        curseFound = true
+        break
+      }
+    }
+    assert.ok(curseFound, '50 seed中に猫又道連れが1回も発生しなかった')
+  })
+
+  it('共有者入りゲームが正常動作する', () => {
+    for (let seed = 0; seed < 10; seed++) {
+      const config = makeConfig({ werewolf: 2, villager: 3, seer: 1, medium: 1, mason: 2 }, seed)
+      const { state, events } = runGame(config)
+      assert.ok(state.finished, `seed ${seed}: ゲームが終了していない`)
+      const howl = formatHowl(events, state, config)
+      const result = parse(howl)
+      const unknowns = result.statements.filter(s => s.type === 'unknown')
+      assert.equal(unknowns.length, 0, `seed ${seed}: unknown: ${unknowns.map((s: any) => s.raw).join(', ')}`)
+    }
+  })
+
+  it('背徳者が妖狐死亡時に後追いする', () => {
+    let followFound = false
+    for (let seed = 0; seed < 50; seed++) {
+      const config = makeConfig({ werewolf: 2, villager: 4, seer: 1, werehamster: 1, immoralist: 1 }, seed)
+      const { events } = runGame(config)
+      if (events.some(e => e.type === 'follow_kill')) {
+        followFound = true
+        break
+      }
+    }
+    assert.ok(followFound, '50 seed中に背徳者後追いが1回も発生しなかった')
+  })
+
+  it('狂信者入りゲームが正常動作する', () => {
+    for (let seed = 0; seed < 10; seed++) {
+      const config = makeConfig({ werewolf: 2, villager: 4, seer: 1, medium: 1, fanatic: 1 }, seed)
+      const { state, events } = runGame(config)
+      assert.ok(state.finished, `seed ${seed}: ゲームが終了していない`)
+      const howl = formatHowl(events, state, config)
+      const result = parse(howl)
+      const unknowns = result.statements.filter(s => s.type === 'unknown')
+      assert.equal(unknowns.length, 0, `seed ${seed}: unknown: ${unknowns.map((s: any) => s.raw).join(', ')}`)
+    }
+  })
+
+  it('全役職入りゲームがパースできる', () => {
+    for (let seed = 0; seed < 10; seed++) {
+      const config = makeConfig({
+        werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1,
+        mason: 2, nekomata: 1, possessed: 1, fanatic: 1,
+        werehamster: 1, immoralist: 1,
+      }, seed)
+      const { state, events } = runGame(config)
+      assert.ok(state.finished, `seed ${seed}: ゲームが終了していない`)
+      const howl = formatHowl(events, state, config)
+      const result = parse(howl)
+      const unknowns = result.statements.filter(s => s.type === 'unknown')
+      assert.equal(unknowns.length, 0, `seed ${seed}: unknown: ${unknowns.map((s: any) => s.raw).join(', ')}`)
+    }
+  })
 })

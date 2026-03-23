@@ -95,6 +95,28 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
         lines.push(`${playerName(event.actor)} 狩りCO${guardsStr ? ' ' + guardsStr : ''}`)
         break
       }
+      case 'mason_claim': {
+        if (lastType === 'night_kill' || lastType === 'fox_kill' || lastType === 'peace') {
+          lines.push('')
+        }
+        lines.push(`共有 ${playerName(event.actor)} ${playerName(event.partner)}`)
+        break
+      }
+      case 'nekomata_claim': {
+        if (lastType === 'night_kill' || lastType === 'fox_kill' || lastType === 'peace') {
+          lines.push('')
+        }
+        lines.push(`${playerName(event.actor)} 猫CO`)
+        break
+      }
+      case 'curse_kill': {
+        lines.push(`${playerName(event.target)} 道連れ`)
+        break
+      }
+      case 'follow_kill': {
+        lines.push(`${playerName(event.target)} 後追い`)
+        break
+      }
       case 'vote': {
         if (lastType !== 'vote') {
           lines.push('')

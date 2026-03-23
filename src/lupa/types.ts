@@ -42,6 +42,8 @@ export type DayClaim =
   | { type: 'medium_co' }
   | { type: 'medium_result', result: EnumSpecies }
   | { type: 'bodyguard_co', targets: number[] }
+  | { type: 'mason_co', partner: number }
+  | { type: 'nekomata_co' }
   | { type: 'none' }
 
 export type GameEvent =
@@ -53,6 +55,10 @@ export type GameEvent =
   | { type: 'medium_claim', actor: number }
   | { type: 'medium_result', actor: number, result: EnumSpecies }
   | { type: 'bodyguard_claim', actor: number, targets: number[] }
+  | { type: 'mason_claim', actor: number, partner: number }
+  | { type: 'nekomata_claim', actor: number }
+  | { type: 'curse_kill', target: number }
+  | { type: 'follow_kill', target: number }
   | { type: 'vote', voter: number, target: number }
   | { type: 'execution', target: number }
   | { type: 'game_over', result: 'villager_won' | 'werewolf_won' | 'werehamster_won' }

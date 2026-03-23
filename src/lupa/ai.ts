@@ -81,6 +81,14 @@ export function decideDayClaim(
       return decideWerehamsterClaim(state, player, day, lastExecutedSeat, rng)
     case 'bodyguard':
       return decideBodyguardClaim(state, player, day, rng)
+    case 'fanatic':
+      return decideFakeSeerClaim(state, player, day, rng)
+    case 'immoralist':
+      return decideWerehamsterClaim(state, player, day, lastExecutedSeat, rng)
+    case 'mason':
+      return decideMasonClaim(state, player, day, rng)
+    case 'nekomata':
+      return decideNekomataClam(state, player, day, rng)
     default:
       return { type: 'none' }
   }
@@ -208,6 +216,33 @@ function decideBodyguardClaim(
   return { type: 'bodyguard_co', targets }
 }
 
+// ---- 共有者 ----
+// 40%でCO。相方を宣言。
+function decideMasonClaim(
+  state: GameState, mason: PlayerState, _day: number, rng: Rng,
+): DayClaim {
+  if (mason.claimedRole) return { type: 'none' }
+
+  if (rng.next() >= CO_PROBABILITY) return { type: 'none' }
+
+  // 相方を探す
+  const partner = state.players.find(p =>
+    p.seat !== mason.seat && p.role === 'mason'
+  )
+  if (!partner) return { type: 'none' }
+  return { type: 'mason_co', partner: partner.seat }
+}
+
+// ---- 猫又 ----
+// 10%でCO。
+function decideNekomataClam(
+  _state: GameState, neko: PlayerState, _day: number, rng: Rng,
+): DayClaim {
+  if (neko.claimedRole) return { type: 'none' }
+  if (rng.next() >= 0.1) return { type: 'none' }
+  return { type: 'nekomata_co' }
+}
+
 // ============================================================
 // 偽CO共通ユーティリティ
 // ============================================================
@@ -275,6 +310,7 @@ export function decideVote(
     case 'werewolf':
       return decideWerewolfVote(candidates, rng)
     case 'possessed':
+    case 'fanatic':
       return decidePossessedVote(candidates, voter, rng)
     default:
       return decideDefaultVote(state, candidates, rng)
