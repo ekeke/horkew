@@ -83,7 +83,7 @@ export function buildRoleTestPlan(
       if (
         // 同じ役職の最初のCOがある日より前に、襲撃で死亡した人を候補に加える
         !status.surviving
-        && status.causeOfDeath !== 'execution'
+        && (status.causeOfDeath !== 'execution' || status.noCoOpportunity)
         && !status.claiming
         && (status.diedDay == null ? Infinity : status.diedDay) < minClaimDay[role]
       ) {

@@ -1,6 +1,6 @@
 import * as V from './vocabulary.ts'
 
-export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'unknown'
+export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf'
@@ -101,6 +101,10 @@ export type ForecastStatement = Statement & {
     type: 'forecast'
     actor: string
     target: string
+}
+
+export type GrelanStatement = Statement & {
+    type: 'grelan'
 }
 
 export type SetupStatement = Statement & {
@@ -262,6 +266,12 @@ export function parseRevealStatement(text: string, line: number): RevealStatemen
   const match = revealRegex.exec(text)
   if (!match) return null
   return { type: 'reveal', line, player: match[1].trim(), role: match[2].trim() }
+}
+
+export function parseGrelanStatement(text: string, line: number): GrelanStatement | null {
+  const grelanRegex = new RegExp(`^${V.optionalSpace}${V.grelan}${V.optionalSpace}$`)
+  if (!grelanRegex.test(text)) return null
+  return { type: 'grelan', line }
 }
 
 export function parseLynchStatement(text: string, line: number): LynchStatement | null {
@@ -481,6 +491,7 @@ export function parseStatement (text: string, line: number): Statement {
     parseVoteStatement,
     parseMultiVoteStatement,
     parseAttackStatement,
+    parseGrelanStatement,
     parseLynchStatement,
     parseCurseStatement,
     parseFollowStatement,

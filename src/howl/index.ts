@@ -22,6 +22,7 @@ export type {
   PeaceStatement,
   RevealStatement,
   UnknownStatement,
+  GrelanStatement,
 } from './statement.ts'
 export { FlexibleDictionary } from './flexibleDictionary.ts'
 export { Rules } from './ruleset.ts'

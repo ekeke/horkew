@@ -140,10 +140,10 @@ function checkAllOtherCosBusted({ village, analysis, seat, role, players, possib
         firstCoDay = coStatus.claimedAt
       }
     }
-    // CO日までに襲撃死した非CO者
+    // CO日までに襲撃死またはグレラン処刑された非CO者
     for (const [s, st] of village.statuses) {
       if (s === seat || coSeats.has(s)) continue
-      if (!st.surviving && !st.claiming && st.causeOfDeath === 'night_kill' && st.diedDay != null && st.diedDay < firstCoDay) {
+      if (!st.surviving && !st.claiming && (st.causeOfDeath === 'night_kill' || (st.causeOfDeath === 'execution' && st.noCoOpportunity)) && st.diedDay != null && st.diedDay < firstCoDay) {
         const roles = possibilities.get(s)
         if (roles && !roles.has(role)) {
           eliminatedCandidates.push({ seat: s, name: players?.get(s) ?? `${s}` })
@@ -254,7 +254,7 @@ function collectConsensus(
   let unknownTrueCandidates = 0
   for (const [s, st] of village.statuses) {
     if (coSeats.has(s)) continue
-    if (!st.surviving && !st.claiming && st.causeOfDeath === 'night_kill' && st.diedDay != null && st.diedDay < firstCoDay) {
+    if (!st.surviving && !st.claiming && (st.causeOfDeath === 'night_kill' || (st.causeOfDeath === 'execution' && st.noCoOpportunity)) && st.diedDay != null && st.diedDay < firstCoDay) {
       // retarでこの役職の可能性が残っているかチェック
       const roles = possibilities?.get(s)
       if (!roles || roles.has(claimRole)) {

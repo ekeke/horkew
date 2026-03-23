@@ -21,6 +21,7 @@ import type {
   OverStatement,
   AssertStatement,
   MasonStatement,
+  GrelanStatement,
 } from './statement.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
 
@@ -86,6 +87,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   let result: VillageResult = undefined
   let lastDeathEvent: 'execution' | 'night_kill' = 'execution'
   let claimCounter = 0
+  let pendingGrelan = false
   let voteOrderCounter = 0
   const voteFinalRule: 'revote' | 'final' = meta?.rules?.['vote.final'] === 'revote' ? 'revote' : 'final'
   let revoteTargets = new Set<number>()
@@ -212,6 +214,11 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         break
       }
 
+      case 'grelan': {
+        pendingGrelan = true
+        break
+      }
+
       case 'lynch': {
         const s = stmt as LynchStatement
         lastDeathEvent = 'execution'
@@ -222,10 +229,14 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           status.surviving = false
           status.causeOfDeath = 'execution'
           status.diedDay = day
+          if (pendingGrelan) {
+            status.noCoOpportunity = true
+          }
           const currentExec = executions.get(day) || []
           currentExec.push(targetSeat)
           executions.set(day, currentExec)
         }
+        pendingGrelan = false
         for (const status of statuses.values()) {
           status.voted = false
           status.votedCount = 0

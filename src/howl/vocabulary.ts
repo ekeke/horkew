@@ -30,6 +30,7 @@ export const peace  = `(?:平和)`
 export const curse  = `(?:道連れ|猫又の呪い)`
 export const follow = `(?:後追い)`
 export const forecast = `(?:予告)`
+export const grelan   = `(?:グレラン)`
 export const none   = `(?:者?(?:なし|無し|ナシ))`
 
 // ********************************* Basic Roles

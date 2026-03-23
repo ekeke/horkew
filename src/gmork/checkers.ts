@@ -186,6 +186,7 @@ function checkSilentExecution({ status, role }: CheckerInput): DenialReason | nu
     !status.surviving &&
     status.causeOfDeath === 'execution' &&
     !status.claiming &&
+    !status.noCoOpportunity &&
     villageSpecialRoles.includes(role)
   ) {
     return { type: 'silent_execution' }
@@ -537,7 +538,7 @@ function countCandidateFillingForRoles(
       if (st.causeOfDeath === 'cursed_by_killed_nekomata') continue
       if (st.causeOfDeath === 'cursed_by_executed_nekomata') continue
       if (st.causeOfDeath === 'follow_executed_hamster' || st.causeOfDeath === 'follow_killed_hamster') continue
-      if (st.causeOfDeath === 'execution' && !st.claiming) continue
+      if (st.causeOfDeath === 'execution' && !st.claiming && !st.noCoOpportunity) continue
     }
     if (st.claiming && (st.claimingRole === 'surrender' || st.claimingRole === 'villager')) continue
 
@@ -886,7 +887,7 @@ function checkPigeonholeVillageRole({ village, setup, seat, role, analysis, play
       if (st.causeOfDeath === 'cursed_by_killed_nekomata') continue
       if (st.causeOfDeath === 'cursed_by_executed_nekomata') continue
       if (st.causeOfDeath === 'follow_executed_hamster' || st.causeOfDeath === 'follow_killed_hamster') continue
-      if (st.causeOfDeath === 'execution' && !st.claiming) continue
+      if (st.causeOfDeath === 'execution' && !st.claiming && !st.noCoOpportunity) continue
     }
 
     // 降参CO / 村人CO → 村役職ではない

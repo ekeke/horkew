@@ -49,6 +49,7 @@ export type SeatStatus = {
   actions: PlayerAction
   assertions: Assertions
   forecasts: Map<Day, Seat>
+  noCoOpportunity?: boolean
 }
 
 export type VoteRecord = { voter: Seat, target: Seat }
