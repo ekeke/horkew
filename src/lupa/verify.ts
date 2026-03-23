@@ -340,6 +340,10 @@ function main() {
     return sum + (e - s)
   }, 0)
 
+  // outdir指定時は即時書き出し用に事前準備
+  const nameCount = new Map<string, number>()
+  if (outdir) mkdirSync(outdir, { recursive: true })
+
   for (const gc of activeConfigs) {
     const lupaConfig: LupaConfig = {
       roles: new Map(Object.entries(gc.roles) as [SystemRole, number][]),
@@ -368,6 +372,14 @@ function main() {
         if (failure) {
           allFailures.push(failure)
           gameFailed = true
+          // 即時ファイル書き出し
+          if (outdir) {
+            const base = `${failure.config}_s${failure.seed}_${failure.checkpoint.type}`
+            const count = nameCount.get(base) ?? 0
+            nameCount.set(base, count + 1)
+            const suffix = count > 0 ? `_${count + 1}` : ''
+            writeFileSync(join(outdir, `${base}${suffix}.howl`), failure.howl, 'utf-8')
+          }
         }
         if (skipped) {
           configSkipped++
@@ -407,18 +419,7 @@ function main() {
   console.error(`\n検証済み ${verified} checkpoints: ${allFailures.length} チェックポイントで失敗`)
 
   if (outdir) {
-    mkdirSync(outdir, { recursive: true })
-    const nameCount = new Map<string, number>()
-    for (const f of allFailures) {
-      const base = `${f.config}_s${f.seed}_${f.checkpoint.type}`
-      const count = nameCount.get(base) ?? 0
-      nameCount.set(base, count + 1)
-      const suffix = count > 0 ? `_${count + 1}` : ''
-      const filename = `${base}${suffix}.howl`
-      const filepath = join(outdir, filename)
-      writeFileSync(filepath, f.howl, 'utf-8')
-    }
-    console.log(`${allFailures.length} 件の .howl ファイルを ${outdir}/ に出力しました`)
+    console.log(`${allFailures.length} 件の .howl ファイルを ${outdir}/ に出力済み`)
   }
 
   // コンソールにもサマリー表示
