@@ -134,6 +134,10 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
         lines.push(`${playerName(event.actor)} 猫CO`)
         break
       }
+      case 'forecast': {
+        lines.push(`${playerName(event.actor)} 予告 ${playerName(event.target)}`)
+        break
+      }
       case 'curse_kill': {
         lines.push(`${playerName(event.target)} 道連れ`)
         break

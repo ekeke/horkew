@@ -28,6 +28,7 @@ export function assignRoles(
     divineHistory: new Map(),
     guardHistory: new Map(),
     fakeDivineHistory: new Map(),
+    forecastTarget: null,
   }))
 }
 

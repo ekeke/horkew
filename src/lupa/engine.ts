@@ -6,7 +6,7 @@ import {
   assignRoles, alivePlayers, getSeerResult,
   killPlayer, checkWinCondition,
 } from './roles.ts'
-import { decideNightAction, decideDayClaim, forceTrueRoleCO, decideVote, resolveVotes } from './ai.ts'
+import { decideNightAction, decideDayClaim, forceTrueRoleCO, decideForecast, decideVote, resolveVotes } from './ai.ts'
 
 export type GameResult = {
   events: GameEvent[]
@@ -97,6 +97,7 @@ export function runGame(config: LupaConfig): GameResult {
 
       for (const { player, action } of actions) {
         applyNightAction(state, player, night, action)
+        player.forecastTarget = null
       }
 
       resolveNight(state, actions, events, rng)
@@ -126,6 +127,15 @@ export function runGame(config: LupaConfig): GameResult {
       if (!hasClaimer) continue
       const forced = forceTrueRoleCO(state, player, day, lastExecutedSeat)
       applyClaim(state, player, day, forced, events)
+    }
+
+    // 予告フェーズ
+    for (const player of alivePlayers(state)) {
+      const forecast = decideForecast(state, player, rng)
+      if (forecast.type === 'forecast') {
+        player.forecastTarget = forecast.target
+        events.push({ type: 'forecast', actor: player.seat, target: forecast.target })
+      }
     }
 
     // 投票フェーズ
@@ -329,6 +339,7 @@ function applyClaim(
       player.claimedDay = day
       events.push({ type: 'nekomata_claim', actor: player.seat })
       break
+    case 'forecast':
     case 'none':
       break
   }

@@ -11,7 +11,7 @@ export function decideNightAction(
   state: GameState, player: PlayerState, _night: number, rng: Rng,
 ): NightAction {
   switch (player.role) {
-    case 'seer':      return decideSeerNight(state, player, rng)
+    case 'seer':      return decideSeerNight(state, player, _night, rng)
     case 'bodyguard':  return decideBodyguardNight(state, player, rng)
     case 'werewolf':   return decideWerewolfNight(state, player, rng)
     default:           return { type: 'none' }
@@ -19,9 +19,17 @@ export function decideNightAction(
 }
 
 // ---- 占い師 ----
-function decideSeerNight(state: GameState, seer: PlayerState, rng: Rng): NightAction {
+function decideSeerNight(state: GameState, seer: PlayerState, night: number, rng: Rng): NightAction {
   const all = alivePlayersExcept(state, seer.seat)
   if (all.length === 0) return { type: 'none' }
+
+  // 予告先が生存していればそちらを占う
+  const forecastTarget = seer.forecastTarget
+  if (forecastTarget != null) {
+    const target = all.find(p => p.seat === forecastTarget)
+    if (target) return { type: 'divine', target: target.seat }
+  }
+
   const divined = new Set(Array.from(seer.divineHistory.values()).map(d => d.target))
   const undivined = all.filter(p => !divined.has(p.seat))
   const candidates = undivined.length > 0 ? undivined : all
@@ -241,6 +249,32 @@ function decideNekomataClam(
   if (neko.claimedRole) return { type: 'none' }
   if (rng.next() >= 0.1) return { type: 'none' }
   return { type: 'nekomata_co' }
+}
+
+// ============================================================
+// 占い予告
+// ============================================================
+
+const FORECAST_PROBABILITY = 0.3
+
+/** 占いCO済みプレイヤーが予告するか決定 */
+export function decideForecast(
+  state: GameState, player: PlayerState, rng: Rng,
+): DayClaim {
+  if (player.claimedRole !== 'seer') return { type: 'none' }
+  if (rng.next() >= FORECAST_PROBABILITY) return { type: 'none' }
+
+  const all = alivePlayersExcept(state, player.seat)
+  if (all.length === 0) return { type: 'none' }
+
+  // 真占い師: 未占い先を優先
+  // 偽占い師: ランダム
+  const history = player.role === 'seer' ? player.divineHistory : player.fakeDivineHistory
+  const divined = new Set(Array.from(history.values()).map(d => d.target))
+  const undivined = all.filter(p => !divined.has(p.seat))
+  const candidates = undivined.length > 0 ? undivined : all
+
+  return { type: 'forecast', target: rng.pick(candidates).seat }
 }
 
 // ============================================================

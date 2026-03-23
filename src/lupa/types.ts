@@ -21,6 +21,8 @@ export type PlayerState = {
   guardHistory: Map<number, number>
   // 狂人: 偽占い結果
   fakeDivineHistory: Map<number, { target: number, result: EnumSpecies }>
+  // 予告先（次の夜に占う対象）
+  forecastTarget: number | null
 }
 
 export type GameState = {
@@ -45,6 +47,7 @@ export type DayClaim =
   | { type: 'bodyguard_co', targets: number[] }
   | { type: 'mason_co', partner: number }
   | { type: 'nekomata_co' }
+  | { type: 'forecast', target: number }
   | { type: 'none' }
 
 export type GameEvent =
@@ -58,6 +61,7 @@ export type GameEvent =
   | { type: 'bodyguard_claim', actor: number, targets: number[] }
   | { type: 'mason_claim', actor: number, partner: number }
   | { type: 'nekomata_claim', actor: number }
+  | { type: 'forecast', actor: number, target: number }
   | { type: 'curse_kill', target: number }
   | { type: 'follow_kill', target: number }
   | { type: 'vote', voter: number, target: number }
