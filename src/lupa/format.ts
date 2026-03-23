@@ -124,7 +124,7 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
         if (lastType === 'night_kill' || lastType === 'fox_kill' || lastType === 'peace') {
           lines.push('')
         }
-        lines.push(`共有 ${playerName(event.actor)} ${playerName(event.partner)}`)
+        lines.push(`${playerName(event.actor)} 共有CO ${playerName(event.partner)}白`)
         break
       }
       case 'nekomata_claim': {
