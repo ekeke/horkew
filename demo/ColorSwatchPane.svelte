@@ -48,6 +48,8 @@
     { label: 'accent',         var: '--color-accent',         ref: '--ctp-mauve' },
     { label: 'focus-ring',     var: '--color-focus-ring',     ref: '--ctp-mauve' },
     { label: 'link',           var: '--color-link',           ref: '--ctp-blue' },
+    { section: 'Domain: プレイヤー状態' },
+    { label: 'dead-player (opacity)', var: '--opacity-dead-player', ref: '0.5' },
     { section: 'Domain: 陣営' },
     { label: 'village',        var: '--color-village',        ref: '--ctp-green' },
     { label: 'wolf',           var: '--color-wolf',           ref: '--ctp-red' },
@@ -238,7 +240,7 @@
       <span class="player-dead" style="color: var(--color-village)">村側 鈴木</span>
       <span class="player-dead" style="color: var(--color-wolf)">狼側 田中</span>
     </div>
-    <code class="example-style">陣営: --color-village / --color-wolf / --color-fox / 不明は --color-text<br>死亡: opacity: 0.5（陣営色を維持）</code>
+    <code class="example-style">陣営: --color-village / --color-wolf / --color-fox / 不明は --color-text<br>死亡: --opacity-dead-player（陣営色を維持）</code>
   </div>
 
   <div class="example-group">
@@ -553,7 +555,7 @@
   }
 
   .player-dead {
-    opacity: 0.5;
+    opacity: var(--opacity-dead-player);
   }
 
   .error-sample {

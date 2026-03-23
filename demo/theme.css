@@ -70,6 +70,9 @@
   --color-focus-ring:     var(--ctp-mauve);      /* フォーカスリング */
   --color-link:           var(--ctp-blue);       /* リンク */
 
+  /* --- Domain: プレイヤー状態 --- */
+  --opacity-dead-player:  0.5;                   /* 死亡プレイヤーの透明度 */
+
   /* --- Domain: 陣営 --- */
   --color-village:        var(--ctp-green);      /* 村人陣営 */
   --color-wolf:           var(--ctp-red);        /* 人狼陣営 */

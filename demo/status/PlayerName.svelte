@@ -88,8 +88,7 @@
   }
 
   .dead {
-    opacity: 0.5;
-    text-decoration: line-through;
+    opacity: var(--opacity-dead-player);
   }
 
   .night-kill {
@@ -107,7 +106,7 @@
     position: absolute;
     inset: 0;
     white-space: nowrap;
-    color: var(--color-text);
+    color: inherit;
   }
 
   .executed {

@@ -1308,9 +1308,7 @@
     word-break: break-all;
   }
 
-  .output .dead {
-    color: var(--color-text-faint);
-  }
+  /* dead player opacity is handled by PlayerName component */
 
   .parsed-output {
     white-space: normal;
@@ -1478,9 +1476,7 @@
   .analysis-name-col.not-village { color: var(--color-unknown-team); }
   .analysis-name-col.role-fixed { font-weight: 700; }
 
-  .dead-row .analysis-name-col {
-    opacity: 0.6;
-  }
+  /* dead player opacity is handled by PlayerName component */
 
 
 

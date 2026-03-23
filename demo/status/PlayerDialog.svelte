@@ -545,7 +545,7 @@
   }
 
   .dead {
-    color: var(--color-error);
+    opacity: var(--opacity-dead-player);
   }
 
   .busted {
