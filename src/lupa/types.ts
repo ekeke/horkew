@@ -61,5 +61,6 @@ export type GameEvent =
   | { type: 'follow_kill', target: number }
   | { type: 'vote', voter: number, target: number }
   | { type: 'execution', target: number }
+  | { type: 'comment', text: string }
   | { type: 'game_over', result: 'villager_won' | 'werewolf_won' | 'werehamster_won' }
   | { type: 'reveal', seat: number, role: SystemRole }

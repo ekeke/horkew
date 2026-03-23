@@ -106,8 +106,12 @@ export function runGame(config: LupaConfig): GameResult {
     events.push({ type: 'execution', target: executedSeat })
     lastExecutedSeat = executedSeat
 
-    // 処刑後: 猫又道連れ
+    // 霊能結果コメント
     const executedPlayer = state.players.find(p => p.seat === executedSeat)!
+    const medResult = getSeerResult(executedPlayer.role)
+    events.push({ type: 'comment', text: `霊能: ${executedPlayer.name} = ${medResult === 'human' ? '○' : '●'}` })
+
+    // 処刑後: 猫又道連れ
     if (executedPlayer.role === 'nekomata') {
       const curseCandidates = alivePlayers(state)
       if (curseCandidates.length > 0) {
@@ -164,6 +168,27 @@ function resolveNight(
   events: GameEvent[],
   _rng: Rng,
 ): void {
+  const name = (seat: number) => state.players.find(p => p.seat === seat)!.name
+  const speciesLabel = (r: 'human' | 'wolf' | null) => r === 'human' ? '○' : r === 'wolf' ? '●' : '?'
+
+  // 夜行動コメント
+  for (const { player, action } of actions) {
+    switch (action.type) {
+      case 'divine': {
+        const result = player.divineHistory.get(state.day - 1)
+        const resultStr = result ? speciesLabel(result.result) : ''
+        events.push({ type: 'comment', text: `占い: ${name(player.seat)} → ${name(action.target)} ${resultStr}` })
+        break
+      }
+      case 'guard':
+        events.push({ type: 'comment', text: `護衛: ${name(player.seat)} → ${name(action.target)}` })
+        break
+      case 'attack':
+        events.push({ type: 'comment', text: `襲撃: ${name(player.seat)} → ${name(action.target)}` })
+        break
+    }
+  }
+
   // 占い呪殺チェック
   const foxKilled = new Set<number>()
   for (const { action } of actions) {

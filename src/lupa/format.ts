@@ -43,9 +43,16 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
 
   for (const event of events) {
     switch (event.type) {
+      case 'comment': {
+        if (lastType !== 'comment') {
+          lines.push('')
+        }
+        lines.push(`# ${event.text}`)
+        break
+      }
       case 'night_kill':
       case 'fox_kill': {
-        if (lastType !== 'night_kill' && lastType !== 'fox_kill') {
+        if (lastType !== 'night_kill' && lastType !== 'fox_kill' && lastType !== 'comment') {
           lines.push('')
         }
         lines.push(`${playerName(event.target)} 死亡`)
