@@ -430,6 +430,7 @@ export class VillageRetar {
 
     if ( this.totalLiarRoles <= (this.context.additionalLiars || 0) + this.knownFakeClaimCount ) {
       for ( const seat of this.vs.statuses.keys() ) {
+        if ( this.context.possibilities.isFixed(seat) ) continue
         const status = this.getStatus(seat)!
         if ( !status.claiming || status.claimingRole === 'villager' ) {
           this.context.possibilities.markAsNotLiar(seat)

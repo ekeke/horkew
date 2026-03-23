@@ -1,0 +1,28 @@
+@ 狼1 村3 占1 猫1
+
+# seed: 14
+++村１、狼、村２、占、猫、村３
+
+村１→猫
+狼→村１
+村２→占
+占→村１
+猫→狼
+村３→狼
+
+村１処刑
+
+# 霊能: 村１ = ○
+# 襲撃: 狼 → 猫
+# 占い: 占 → 村３ ○
+猫 死亡
+狼 道連れ
+
+村勝利
+
+# @expect 村１: [villager...]
+# @expect 狼: [werewolf...]
+# @expect 村２: [villager...]
+# @expect 占: [seer...]
+# @expect 猫: [nekomata...]
+# @expect 村３: [villager...]
