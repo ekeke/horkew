@@ -229,7 +229,7 @@ export class VillageRetar {
     }
     for ( const [seat, status] of village.statuses.entries() ) {
       if ( status.surviving ) continue
-      if ( status.causeOfDeath === 'night_kill' ) {
+      if ( status.causeOfDeath === 'night_kill' || status.causeOfDeath === 'cursed_by_killed_nekomata' ) {
         this.nightKillsByDay.set(status.diedDay!, [...(this.nightKillsByDay.get(status.diedDay!) || []), seat])
       }
     }
@@ -268,6 +268,15 @@ export class VillageRetar {
     if (this.lastDeaths.length === 0) return
 
     if (this.vs.result === 'villager_won') {
+      // 道連れ等で全狼が既に確定済みなら追加制約不要
+      let fixedWolfCount = 0
+      for (let i = 1; i < this.initialPossibilities.possibilities.length; i++) {
+        if (this.initialPossibilities.isFixed(i) && this.initialPossibilities.hasRole(i, 'werewolf')) {
+          fixedWolfCount++
+        }
+      }
+      if (fixedWolfCount >= (this.setup.get('werewolf') ?? 0)) return
+
       // 村勝利: 最終死者で最後の狼が死んだ → 単一なら狼確定
       if (this.lastDeaths.length === 1) {
         this.initialPossibilities.fixRole(this.lastDeaths[0], 'werewolf')
