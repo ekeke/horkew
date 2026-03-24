@@ -115,6 +115,39 @@ function isTsumi(
 }
 
 /**
+ * 全分岐が同じ trivial win に帰着する場合、夜分岐を圧縮して1つのノードにする。
+ * 例: 全夜分岐が「処刑 H → 村勝利」なら、夜ノードを省略して直接その結果を返す。
+ */
+function collapseBranches(branches: Record<ObservationKey, StrategyNode>): StrategyNode | null {
+  const values = Object.values(branches)
+  if (values.length === 0) return null
+
+  // 全分岐が { type: 'win' } なら直接 win
+  if (values.every(v => v.type === 'win')) return { type: 'win' }
+
+  // 全分岐が同一の trivial action (execute X → win) なら圧縮
+  let commonTarget: Seat | undefined
+  for (const v of values) {
+    if (v.type !== 'action') return null
+    const keys = Object.keys(v.branches)
+    if (keys.length !== 1 || keys[0] !== 'win') return null
+    if (v.action.execute === -1) return null
+    if (commonTarget === undefined) {
+      commonTarget = v.action.execute
+    } else if (commonTarget !== v.action.execute) {
+      return null
+    }
+  }
+
+  // 全分岐が「処刑 commonTarget → 村勝利」
+  return {
+    type: 'action',
+    action: { execute: commonTarget!, bodyguardTarget: null, seerTarget: null },
+    branches: { 'win': { type: 'win' } },
+  }
+}
+
+/**
  * 自明な詰み判定: 全ワールドで生存中の狼候補が1人だけなら、その席を処刑して即勝ち。
  * 妖狐が生存している可能性がある場合は自明でない（狼全滅で狐勝ちになりうる）。
  */
@@ -434,9 +467,13 @@ function tryNightAction(
     branches[obsKey] = result
   }
 
+  // 全分岐が同じ trivial win（同一候補の処刑→勝利）に帰着する場合、夜分岐を圧縮
+  const collapsed = collapseBranches(branches)
+  if (collapsed) return collapsed
+
   return {
     type: 'action',
-    action: { execute: -1, bodyguardTarget, seerTarget }, // execute=-1 は夜アクション
+    action: { execute: -1, bodyguardTarget, seerTarget },
     branches,
   }
 }
