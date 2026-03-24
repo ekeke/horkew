@@ -274,6 +274,23 @@ describe('Hati searchTsumi', () => {
       assert.equal(result.isTsumi, false)
     })
 
+    it('6人1狼: 占い師死亡後は占い結果なし → 詰みでない', () => {
+      // 占い師(1)が既に死亡。グレー4人(2,3,4,8)のうち1人が狼。確定白: 5,6(共有)
+      // 占い師不在なので新規情報なし。霊媒結果のみで判断
+      // 6人1狼: 処刑○→5人→夜→4人 / 処刑○→3人→夜→2人→パリティ
+      // 2回連続ミスで負け。4人中1狼では50%で2連ミス → 詰みでない
+      const worlds = [
+        makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'villager', 4: 'villager', 5: 'mason', 6: 'mason', 7: 'villager', 8: 'villager' }),
+        makeWorld({ 1: 'seer', 2: 'villager', 3: 'werewolf', 4: 'villager', 5: 'mason', 6: 'mason', 7: 'villager', 8: 'villager' }),
+        makeWorld({ 1: 'seer', 2: 'villager', 3: 'villager', 4: 'werewolf', 5: 'mason', 6: 'mason', 7: 'villager', 8: 'villager' }),
+        makeWorld({ 1: 'seer', 2: 'villager', 3: 'villager', 4: 'villager', 5: 'mason', 6: 'mason', 7: 'villager', 8: 'werewolf' }),
+      ]
+      // 1(占い師)と7は死亡。生存: 2,3,4,5,6,8
+      const alive = new Set([2, 3, 4, 5, 6, 8])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, false)
+    })
+
     it('5人1狼: 占い師+狩人 → 護衛込みで詰み', () => {
       // 1=占い師, 2=狩人, 3or4が狼, 5=村人
       // 戦略: 狩人が占い師を護衛、占い師がグレーを占う

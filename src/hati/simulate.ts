@@ -150,9 +150,9 @@ export function simulateNight(
     }
   }
 
-  // 占い結果
+  // 占い結果: 占い師がその夜を生き延びた場合のみ翌日報告できる
   let seerResult: EnumSpecies | undefined
-  if (seerTarget !== null && alive.has(world.seerSeat)) {
+  if (seerTarget !== null && nextAlive.has(world.seerSeat)) {
     seerResult = getSeerResult(world.roles.get(seerTarget)!)
   }
 
