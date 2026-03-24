@@ -1041,6 +1041,7 @@
   <div class="modal-overlay" onkeydown={onModalKeydown} onclick={cancelNew}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-title">新規作成</div>
       <input
         class="modal-input"
         type="text"
@@ -1049,14 +1050,13 @@
         onkeydown={onModalKeydown}
         autofocus
       />
-      <div class="modal-actions">
-        <button class="modal-cancel" onclick={cancelNew}>Cancel</button>
-        <div class="modal-presets">
-          {#each presets as preset}
-            <button class="preset-btn" onclick={() => createFromPreset(preset)}>{preset.label}</button>
-          {/each}
-        </div>
+      <div class="modal-hint">配役は後から変更できます</div>
+      <div class="modal-presets">
+        {#each presets as preset}
+          <button class="preset-btn" onclick={() => createFromPreset(preset)}>{preset.label}</button>
+        {/each}
       </div>
+      <button class="modal-cancel" onclick={cancelNew}>キャンセル</button>
     </div>
   </div>
 {/if}
@@ -1453,29 +1453,34 @@
     border-color: var(--color-accent);
   }
 
-  .modal-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+  .modal-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--color-text);
   }
 
-  .modal-cancel {
-    font-size: 12px;
+  .modal-hint {
+    font-size: 11px;
     color: var(--color-text-overlay);
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 4px 8px;
-  }
-
-  .modal-cancel:hover {
-    color: var(--color-text-muted);
   }
 
   .modal-presets {
     display: flex;
     gap: 0.5rem;
-    margin-left: auto;
+  }
+
+  .modal-cancel {
+    font-size: 11px;
+    color: var(--color-text-overlay);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 0;
+    align-self: flex-end;
+  }
+
+  .modal-cancel:hover {
+    color: var(--color-text-muted);
   }
 
   .preset-btn {
