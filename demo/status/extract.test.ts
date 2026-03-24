@@ -310,6 +310,7 @@ function makeVoteStatus(config: {
     totalVoters,
     hasAnyVotes: rows.length > 0,
     executionOccurred: false,
+    hasMultiVote: false,
   }
 }
 

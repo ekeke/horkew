@@ -1,4 +1,4 @@
-import type { VillageStatus, SeatStatus, CauseOfDeath, EnumSpecies, PlayerAction, Assertions, SystemRole } from '../../src/types/index.ts'
+import type { VillageStatus, CauseOfDeath, EnumSpecies, PlayerAction, Assertions, SystemRole } from '../../src/types/index.ts'
 import { systemRoles } from '../../src/types/index.ts'
 
 // --- Types ---
@@ -235,7 +235,7 @@ export function extractClaimGroups(vs: VillageStatus, players: Map<number, strin
  */
 export function buildAssertionTimeline(
   row: ClaimRow,
-  maxDay: number,
+  _maxDay: number,
   players: Map<number, string>,
 ): Map<number, DayAssertion> {
   const timeline = new Map<number, DayAssertion>()

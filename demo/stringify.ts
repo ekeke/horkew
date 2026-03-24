@@ -2,7 +2,7 @@ import type {
   Statement, JoinStatement, JoinMultiStatement, VoteStatement, MultiVoteStatement,
   AttackStatement, LynchStatement, CurseStatement, FollowStatement,
   RevoteStatement, OverStatement,
-  AssertStatement, PeaceStatement, RevealStatement, UnknownStatement,
+  AssertStatement, RevealStatement, UnknownStatement,
   Assertion,
 } from '../src/howl/statement.ts'
 import { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
@@ -21,10 +21,6 @@ const roleLabels: Record<string, string> = {
   mason: '共有者',
   nekomata: '猫又',
   nonVillage: '非村',
-}
-
-function speciesLabel(species: string): string {
-  return species === 'isWolf' ? '●' : '○'
 }
 
 export type StringifiedLine = {

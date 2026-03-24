@@ -30,9 +30,8 @@ self.onmessage = (e: MessageEvent<any>) => {
   }
 
   try {
-    const { vs, players: playersArr } = msg as RetarRequest
+    const { vs } = msg as RetarRequest
     const setup = new Map<SystemRole, number>(msg.setup)
-    const players = new Map<number, string>(playersArr)
 
     // Reconstruct Maps from serialized VillageStatus
     vs.statuses = new Map(vs.statuses as any)
@@ -41,7 +40,7 @@ self.onmessage = (e: MessageEvent<any>) => {
     vs.roles = new Map(vs.roles as any)
     vs.claims = new Map(vs.claims as any)
     vs.voteHistory = new Map(vs.voteHistory as any ?? [])
-    for (const [seat, status] of vs.statuses) {
+    for (const [_seat, status] of vs.statuses) {
       status.actions = new Map(status.actions as any)
       status.assertions = new Map(status.assertions as any)
     }

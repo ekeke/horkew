@@ -60,6 +60,11 @@ function createVillage(opts: {
     day: opts.day || 3,
     finished: opts.finished || false,
     result: opts.result,
+    voteHistory: new Map(),
+    revoteTargets: new Set<number>(),
+    voteFinalRule: 'revote' as const,
+    hasMultiVote: false,
+    multiVoteDays: new Set<number>(),
   }
 }
 
@@ -691,7 +696,7 @@ describe('gmork denial: confirmed_role_holder_exists', () => {
   })
 
   it('formats confirmed_role_holder_exists in Japanese', () => {
-    const reason = { type: 'confirmed_role_holder_exists' as const, confirmedSeat: 2 as number, confirmedRole: 'seer' as SystemRole }
+    const reason = { type: 'confirmed_role_holder_exists' as const, confirmedSeat: 2 as number, confirmedName: '2', confirmedRole: 'seer' as SystemRole }
     const result = formatReason(reason, 'seer')
     assert.match(result, /占い師.*真確定.*ありえない/)
   })
@@ -701,7 +706,7 @@ describe('gmork denial: confirmed_role_holder_exists', () => {
 
 describe('deadWerewolfBounds', () => {
   it('ゲーム続行中: 10人生存、人狼3 → 死亡人狼 1〜2', () => {
-    const village = createVillage({ playerCount: 13 })  // 全員生存ではなく…
+    // 全員生存ではなく…
     // 10人生存、3人死亡の状態を作る
     const v = createVillage({
       playerCount: 13,

@@ -19,7 +19,7 @@ export function decideNightAction(
 }
 
 // ---- 占い師 ----
-function decideSeerNight(state: GameState, seer: PlayerState, night: number, rng: Rng): NightAction {
+function decideSeerNight(state: GameState, seer: PlayerState, _night: number, rng: Rng): NightAction {
   const all = alivePlayersExcept(state, seer.seat)
   if (all.length === 0) return { type: 'none' }
 
@@ -295,8 +295,8 @@ export function decideForecast(
 
 /** 対抗が出ている真役職を強制的にCOさせる */
 export function forceTrueRoleCO(
-  state: GameState, player: PlayerState, day: number,
-  lastExecutedSeat: number | null,
+  state: GameState, player: PlayerState, _day: number,
+  _lastExecutedSeat: number | null,
 ): DayClaim {
   switch (player.role) {
     case 'seer': {

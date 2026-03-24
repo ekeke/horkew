@@ -87,8 +87,6 @@ function loadTargets(): BenchTarget[] {
     const { meta } = parse(content)
     const title = (meta.title || file) as string
     const { frontmatter, bodyLines, checkpoints } = extractCheckpoints(content)
-    const options = buildOptions(meta)
-
     // Each checkpoint as a target
     for (let i = 0; i < checkpoints.length; i++) {
       const cp = checkpoints[i]

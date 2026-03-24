@@ -1,5 +1,4 @@
 import type { RetarRequest, RetarResponse, SeatResult } from './analysis.worker.ts'
-import type { SystemRole } from '../src/types/index.ts'
 import { AnalysisScheduler, mergeResults } from './scheduler.ts'
 import type { AnalysisResult, AnalysisStats, SchedulerCallback } from './scheduler.ts'
 import AnalysisWorker from './analysis.worker.ts?worker'

@@ -1,4 +1,4 @@
-import { describe, test, beforeEach } from 'node:test'
+import { describe, test } from 'node:test'
 import assert from 'node:assert'
 import { AnalysisScheduler } from './scheduler.ts'
 import type { WorkerLike, WorkerResponse, AnalysisResult } from './scheduler.ts'
@@ -183,7 +183,7 @@ describe('AnalysisScheduler', () => {
   describe('abort with SAB', () => {
     test('sets abort signal when new request arrives while running', () => {
       const signal = new Int32Array(new SharedArrayBuffer(4))
-      const { scheduler, workers } = createScheduler(1, signal)
+      const { scheduler, workers: _workers } = createScheduler(1, signal)
 
       scheduler.request({ id: 'first' }, () => {})
       assert.strictEqual(signal[0], 0)

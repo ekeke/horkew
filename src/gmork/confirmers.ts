@@ -1,9 +1,7 @@
 import type { Seat, Day, VillageStatus, SystemRole } from '../types/index.ts'
-import { systemRoles } from '../types/index.ts'
 import type { ConfirmationChecker, ConfirmationCheckerInput, ConfirmationReason } from './reasons.ts'
 import { villageSideRoles } from './reasons.ts'
 import { isTrustworthy, analyzeSeer, analyzeMedium } from './analysis.ts'
-import type { BustReason } from './analysis.ts'
 import { formatBustReason, formatReason } from './format.ts'
 import { allCheckers } from './checkers.ts'
 
@@ -360,7 +358,7 @@ function checkDeadWerewolfCount({ village, setup, seat, role, status, possibilit
  * 合計数ぶんの人外がpossibilitiesで確定済みなら、残りは全員村人側。
  * CO者はそのCO役職に、非CO者は消去法で村人に確定する。
  */
-function checkAllEvilAccounted({ village, setup, seat, role, status, possibilities, players }: ConfirmationCheckerInput): ConfirmationReason | null {
+function checkAllEvilAccounted({ village: _village, setup, seat: _seat, role, status, possibilities, players }: ConfirmationCheckerInput): ConfirmationReason | null {
   if (!possibilities) return null
   if (!villageSideRoles.includes(role)) return null
   // CO者の場合はCO役職と一致すること

@@ -7,6 +7,7 @@ import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from './index.ts'
 import type { AnalyzeOptions } from './index.ts'
+import type { SystemRole } from '../types/index.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const scenariosDir = join(__dirname, 'scenarios')
@@ -154,12 +155,12 @@ function runCheckpoint(
         const expected = [...expectation.roles].sort()
 
         for (const neg of expectation.negated) {
-          assert.ok(!actual.includes(neg),
+          assert.ok(!actual.includes(neg as SystemRole),
             `${playerName}: expected NOT ${neg} but got [${actual}]`)
         }
 
         if (expectation.partial) {
-          const missing = expected.filter(r => !actual.includes(r))
+          const missing = expected.filter(r => !actual.includes(r as SystemRole))
           assert.deepStrictEqual(missing, [],
             `${playerName}: expected at least [${expected}] but got [${actual}], missing [${missing}]`)
         } else if (expected.length > 0) {

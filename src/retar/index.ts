@@ -1,7 +1,7 @@
 import type { CauseOfDeath, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import { Possibilities } from './possibilities.ts'
 import { generateCombinations } from './combinatorics.ts'
-import { roleTesterMap, cloneContext, saveContext, restoreContext } from './roleTesters.ts'
+import { roleTesterMap, saveContext, restoreContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
 import { buildRoleTestPlan, LiarRoles } from './planBuilder.ts'
 import type { RoleTest } from './planBuilder.ts'

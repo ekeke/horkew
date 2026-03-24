@@ -60,7 +60,7 @@ function checkConfirmedMediumResult({ village, analysis, seat, role, players }: 
   return null
 }
 
-function checkConfirmedRoleHolderExists({ village, setup, analysis, seat, role, status, players }: CheckerInput): DenialReason | null {
+function checkConfirmedRoleHolderExists({ village: _village, setup, analysis, seat, role, status, players }: CheckerInput): DenialReason | null {
   if (!analysis) return null
 
   // seer/medium CO者: analysis の破綻判定経由で確定者を探す
@@ -334,7 +334,7 @@ function checkMasonPartner({ village, seat, role, players }: CheckerInput): Deni
   return null
 }
 
-function checkRoleSlotsFilled({ village, setup, seat, status, role }: CheckerInput): DenialReason | null {
+function checkRoleSlotsFilled({ village, setup, seat: _seat, status, role }: CheckerInput): DenialReason | null {
   if (!villageSpecialRoles.includes(role)) return null
   if (status.claiming && status.claimingRole === role) return null
 
