@@ -210,7 +210,7 @@ type Category = 'player' | 'role' | 'action' | 'arrow' | 'co_role' | 'denial_co_
 
 type HowlCandidateDef = {
   label: string
-  reading: string            // カナ読み (kanaToRomajiで自動変換) またはASCII
+  reading: string | string[] // カナ読み (kanaToRomajiで自動変換)。配列で別名も指定可
   type: string
   category: Category
   categoryLabel: string
@@ -224,7 +224,11 @@ type HowlCandidate = HowlCandidateDef & {
 }
 
 function buildStaticCandidates(defs: HowlCandidateDef[]): HowlCandidate[] {
-  return defs.map(d => ({ ...d, romaji: kanaToRomaji(d.reading) }))
+  return defs.map(d => {
+    const readings = Array.isArray(d.reading) ? d.reading : [d.reading]
+    const romaji = readings.map(r => kanaToRomaji(r)).join('\0')
+    return { ...d, romaji }
+  })
 }
 
 // ---- 静的候補 ----
@@ -271,15 +275,15 @@ const coRoleCandidates: HowlCandidate[] = roleCandidates.flatMap(r => [
 ])
 
 const actionCandidates = buildStaticCandidates([
-  { label: '処刑',   reading: 'しょけい',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '投票により処刑された' },
-  { label: '吊り',   reading: 'つり',       type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '投票により処刑された' },
-  { label: '襲撃',   reading: 'しゅうげき', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
-  { label: '噛み',   reading: 'かみ',       type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
-  { label: '死亡',   reading: 'しぼう',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
-  { label: '護衛',   reading: 'ごえい',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard', info: '狩人が護衛した' },
-  { label: 'ガード', reading: 'がーど',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard', info: '狩人が護衛した' },
-  { label: '道連れ', reading: 'みちづれ',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'nekomata', info: '猫又の呪いで道連れ死' },
-  { label: '後追い', reading: 'あとおい',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'immoralist', info: '背徳者が妖狐の死を追って死亡' },
+  { label: '処刑',   reading: 'しょけい',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, info: '投票により処刑された' },
+  { label: '吊り',   reading: 'つり',       type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, info: '投票により処刑された' },
+  { label: '襲撃',   reading: 'しゅうげき', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, info: '人狼に襲撃された' },
+  { label: '噛み',   reading: 'かみ',       type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, info: '人狼に襲撃された' },
+  { label: '死亡',   reading: 'しぼう',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, info: '人狼に襲撃された' },
+  { label: '護衛',   reading: 'ごえい',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, requiredRole: 'bodyguard', info: '狩人が護衛した' },
+  { label: 'ガード', reading: 'がーど',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, requiredRole: 'bodyguard', info: '狩人が護衛した' },
+  { label: '道連れ', reading: 'みちづれ',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, requiredRole: 'nekomata', info: '猫又の呪いで道連れ死' },
+  { label: '後追い', reading: 'あとおい',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, requiredRole: 'immoralist', info: '背徳者が妖狐の死を追って死亡' },
   { label: '予告',   reading: 'よこく',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, info: '処刑先を予告する' },
 ])
 
@@ -308,8 +312,8 @@ const specialNameCandidates = buildStaticCandidates([
 ])
 
 const arrowCandidates = buildStaticCandidates([
-  { label: '→', reading: '->', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false, info: '投票先を指す' },
-  { label: '←', reading: '<-', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false, info: '得票者をまとめて記述' },
+  { label: '→', reading: ['->', 'とうひょう'], type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false, info: '投票先を指す' },
+  { label: '←', reading: ['<-', 'とくひょう'], type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false, info: '得票者をまとめて記述' },
 ])
 
 const allStaticCandidates = [
@@ -334,17 +338,21 @@ const coRoleLabels = new Set(coRoleCandidates.map(c => c.label))
 function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] | null {
   const trimmed = beforeCursor.trimEnd()
   if (trimmed === '') {
-    // 行頭: プレイヤー名 + スタンドアロンKW + 試合結果
-    return ['player', 'standalone', 'gameresult']
+    // 行頭: プレイヤー名 + アクション(転置記法) + スタンドアロンKW + 試合結果
+    return ['player', 'action', 'standalone', 'gameresult']
   }
 
   // 末尾トークンを取得 (最後のスペース/区切り文字以降)
   const lastTokenMatch = trimmed.match(/[^\s,;:、，；：]+$/)
-  if (!lastTokenMatch) return ['player', 'standalone', 'gameresult']
+  if (!lastTokenMatch) return ['player', 'action', 'standalone', 'gameresult']
   const lastToken = lastTokenMatch[0]
 
-  // アクション → チェーン終了
-  if (actionLabels.has(lastToken)) return null
+  // アクション: 行頭なら転置記法 → プレイヤー名、プレイヤー名の後なら → チェーン終了
+  if (actionLabels.has(lastToken)) {
+    const beforeAction = trimmed.slice(0, trimmed.length - lastToken.length).trimEnd()
+    if (beforeAction === '') return ['player'] // 転置記法: アクション → プレイヤー名
+    return null // 通常記法: プレイヤー名 アクション → 終了
+  }
 
   // 結果マーカー (○/●) → プレイヤー名 (次の結果対象)
   if (resultLabels.has(lastToken)) return ['player']
@@ -361,9 +369,13 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
   if (isPlayer) {
     const beforeLastToken = trimmed.slice(0, trimmed.length - lastToken.length).trimEnd()
 
-    // 矢印の後のプレイヤー名 → 投票文完成、チェーン終了
     const lastBeforeMatch = beforeLastToken.match(/[^\s,;:、，；：]+$/)
+
+    // 矢印の後のプレイヤー名 → 投票文完成、チェーン終了
     if (lastBeforeMatch && arrowRe.test(lastBeforeMatch[0])) return null
+
+    // アクションの後のプレイヤー名 → 転置記法完成、チェーン終了
+    if (lastBeforeMatch && actionLabels.has(lastBeforeMatch[0])) return null
 
     // CO文中のプレイヤー名 (結果対象) → 結果マーカー + 次のプレイヤー名
     if ([...coRoleLabels].some(cl => beforeLastToken.includes(cl))) return ['result']
