@@ -37,49 +37,55 @@ function kataToHira(ch: string): string {
   return ch
 }
 
+// ローマ字マップ: [ヘボン式, 訓令式] (同じ場合は1要素)
 // 拗音マップ (2文字 → ローマ字)
-const YOUON: Record<string, string> = {
-  'きゃ': 'kya', 'きゅ': 'kyu', 'きょ': 'kyo',
-  'しゃ': 'sha', 'しゅ': 'shu', 'しょ': 'sho',
-  'ちゃ': 'cha', 'ちゅ': 'chu', 'ちょ': 'cho',
-  'にゃ': 'nya', 'にゅ': 'nyu', 'にょ': 'nyo',
-  'ひゃ': 'hya', 'ひゅ': 'hyu', 'ひょ': 'hyo',
-  'みゃ': 'mya', 'みゅ': 'myu', 'みょ': 'myo',
-  'りゃ': 'rya', 'りゅ': 'ryu', 'りょ': 'ryo',
-  'ぎゃ': 'gya', 'ぎゅ': 'gyu', 'ぎょ': 'gyo',
-  'じゃ': 'ja',  'じゅ': 'ju',  'じょ': 'jo',
-  'びゃ': 'bya', 'びゅ': 'byu', 'びょ': 'byo',
-  'ぴゃ': 'pya', 'ぴゅ': 'pyu', 'ぴょ': 'pyo',
-  'てぃ': 'thi', 'でぃ': 'dhi',
-  'ふぁ': 'fa',  'ふぃ': 'fi',  'ふぇ': 'fe', 'ふぉ': 'fo',
+const YOUON: Record<string, string[]> = {
+  'きゃ': ['kya'], 'きゅ': ['kyu'], 'きょ': ['kyo'],
+  'しゃ': ['sha', 'sya'], 'しゅ': ['shu', 'syu'], 'しょ': ['sho', 'syo'],
+  'ちゃ': ['cha', 'tya'], 'ちゅ': ['chu', 'tyu'], 'ちょ': ['cho', 'tyo'],
+  'にゃ': ['nya'], 'にゅ': ['nyu'], 'にょ': ['nyo'],
+  'ひゃ': ['hya'], 'ひゅ': ['hyu'], 'ひょ': ['hyo'],
+  'みゃ': ['mya'], 'みゅ': ['myu'], 'みょ': ['myo'],
+  'りゃ': ['rya'], 'りゅ': ['ryu'], 'りょ': ['ryo'],
+  'ぎゃ': ['gya'], 'ぎゅ': ['gyu'], 'ぎょ': ['gyo'],
+  'じゃ': ['ja', 'zya'], 'じゅ': ['ju', 'zyu'], 'じょ': ['jo', 'zyo'],
+  'びゃ': ['bya'], 'びゅ': ['byu'], 'びょ': ['byo'],
+  'ぴゃ': ['pya'], 'ぴゅ': ['pyu'], 'ぴょ': ['pyo'],
+  'てぃ': ['thi'], 'でぃ': ['dhi'],
+  'ふぁ': ['fa'], 'ふぃ': ['fi'], 'ふぇ': ['fe'], 'ふぉ': ['fo'],
 }
 
 // 単音マップ (1文字 → ローマ字)
-const KANA: Record<string, string> = {
-  'あ': 'a',  'い': 'i',  'う': 'u',  'え': 'e',  'お': 'o',
-  'か': 'ka', 'き': 'ki', 'く': 'ku', 'け': 'ke', 'こ': 'ko',
-  'さ': 'sa', 'し': 'shi','す': 'su', 'せ': 'se', 'そ': 'so',
-  'た': 'ta', 'ち': 'chi','つ': 'tsu','て': 'te', 'と': 'to',
-  'な': 'na', 'に': 'ni', 'ぬ': 'nu', 'ね': 'ne', 'の': 'no',
-  'は': 'ha', 'ひ': 'hi', 'ふ': 'fu', 'へ': 'he', 'ほ': 'ho',
-  'ま': 'ma', 'み': 'mi', 'む': 'mu', 'め': 'me', 'も': 'mo',
-  'や': 'ya',             'ゆ': 'yu',             'よ': 'yo',
-  'ら': 'ra', 'り': 'ri', 'る': 'ru', 'れ': 're', 'ろ': 'ro',
-  'わ': 'wa', 'ゐ': 'wi',             'ゑ': 'we', 'を': 'wo',
-  'ん': 'n',
-  'が': 'ga', 'ぎ': 'gi', 'ぐ': 'gu', 'げ': 'ge', 'ご': 'go',
-  'ざ': 'za', 'じ': 'ji', 'ず': 'zu', 'ぜ': 'ze', 'ぞ': 'zo',
-  'だ': 'da', 'ぢ': 'di', 'づ': 'du', 'で': 'de', 'ど': 'do',
-  'ば': 'ba', 'び': 'bi', 'ぶ': 'bu', 'べ': 'be', 'ぼ': 'bo',
-  'ぱ': 'pa', 'ぴ': 'pi', 'ぷ': 'pu', 'ぺ': 'pe', 'ぽ': 'po',
-  'ぁ': 'a',  'ぃ': 'i',  'ぅ': 'u',  'ぇ': 'e',  'ぉ': 'o',
-  'ゃ': 'ya',             'ゅ': 'yu',             'ょ': 'yo',
-  'ー': '-',
+const KANA: Record<string, string[]> = {
+  'あ': ['a'],  'い': ['i'],  'う': ['u'],  'え': ['e'],  'お': ['o'],
+  'か': ['ka'], 'き': ['ki'], 'く': ['ku'], 'け': ['ke'], 'こ': ['ko'],
+  'さ': ['sa'], 'し': ['shi', 'si'], 'す': ['su'], 'せ': ['se'], 'そ': ['so'],
+  'た': ['ta'], 'ち': ['chi', 'ti'], 'つ': ['tsu', 'tu'], 'て': ['te'], 'と': ['to'],
+  'な': ['na'], 'に': ['ni'], 'ぬ': ['nu'], 'ね': ['ne'], 'の': ['no'],
+  'は': ['ha'], 'ひ': ['hi'], 'ふ': ['fu', 'hu'], 'へ': ['he'], 'ほ': ['ho'],
+  'ま': ['ma'], 'み': ['mi'], 'む': ['mu'], 'め': ['me'], 'も': ['mo'],
+  'や': ['ya'],               'ゆ': ['yu'],               'よ': ['yo'],
+  'ら': ['ra'], 'り': ['ri'], 'る': ['ru'], 'れ': ['re'], 'ろ': ['ro'],
+  'わ': ['wa'], 'ゐ': ['wi'],               'ゑ': ['we'], 'を': ['wo'],
+  'ん': ['n'],
+  'が': ['ga'], 'ぎ': ['gi'], 'ぐ': ['gu'], 'げ': ['ge'], 'ご': ['go'],
+  'ざ': ['za'], 'じ': ['ji', 'zi'], 'ず': ['zu'], 'ぜ': ['ze'], 'ぞ': ['zo'],
+  'だ': ['da'], 'ぢ': ['di'], 'づ': ['du', 'zu'], 'で': ['de'], 'ど': ['do'],
+  'ば': ['ba'], 'び': ['bi'], 'ぶ': ['bu'], 'べ': ['be'], 'ぼ': ['bo'],
+  'ぱ': ['pa'], 'ぴ': ['pi'], 'ぷ': ['pu'], 'ぺ': ['pe'], 'ぽ': ['po'],
+  'ぁ': ['a'],  'ぃ': ['i'],  'ぅ': ['u'],  'ぇ': ['e'],  'ぉ': ['o'],
+  'ゃ': ['ya'],               'ゅ': ['yu'],               'ょ': ['yo'],
+  'ー': ['-'],
 }
 
-/** カナ文字列をローマ字に変換。漢字等の非カナ文字はスキップ */
+/**
+ * カナ文字列をローマ字バリアントに変換。
+ * ヘボン式/訓令式の差異がある文字は全組み合わせを生成し、\0 区切りで返す。
+ * 漢字等の非カナ文字はスキップ。
+ */
 export function kanaToRomaji(text: string): string {
-  let result = ''
+  // variants[i] = i番目の位置までの全バリアント
+  let variants = ['']
   let i = 0
   while (i < text.length) {
     const ch = kataToHira(text[i])
@@ -87,17 +93,22 @@ export function kanaToRomaji(text: string): string {
     // 促音 (っ): 次の子音を重ねる
     if (ch === 'っ') {
       const next = i + 1 < text.length ? kataToHira(text[i + 1]) : ''
+      let prefixes: string[]
+      // 拗音チェック
       if (i + 2 < text.length) {
         const youon = next + kataToHira(text[i + 2])
-        if (YOUON[youon]) {
-          result += YOUON[youon][0]
+        const youonRomaji = YOUON[youon]
+        if (youonRomaji) {
+          prefixes = youonRomaji.map(r => r[0])
+          variants = expand(variants, dedupe(prefixes))
           i++
           continue
         }
       }
       const nextRomaji = KANA[next]
-      if (nextRomaji && nextRomaji.length > 0) {
-        result += nextRomaji[0]
+      if (nextRomaji) {
+        prefixes = nextRomaji.map(r => r[0])
+        variants = expand(variants, dedupe(prefixes))
       }
       i++
       continue
@@ -106,8 +117,9 @@ export function kanaToRomaji(text: string): string {
     // 拗音チェック (2文字)
     if (i + 1 < text.length) {
       const pair = ch + kataToHira(text[i + 1])
-      if (YOUON[pair]) {
-        result += YOUON[pair]
+      const youonRomaji = YOUON[pair]
+      if (youonRomaji) {
+        variants = expand(variants, youonRomaji)
         i += 2
         continue
       }
@@ -116,7 +128,7 @@ export function kanaToRomaji(text: string): string {
     // 単音
     const romaji = KANA[ch]
     if (romaji) {
-      result += romaji
+      variants = expand(variants, romaji)
       i++
       continue
     }
@@ -124,7 +136,7 @@ export function kanaToRomaji(text: string): string {
     // ASCII文字はそのまま通す
     const code = text.charCodeAt(i)
     if (code < 0x80) {
-      result += text[i].toLowerCase()
+      variants = expand(variants, [text[i].toLowerCase()])
       i++
       continue
     }
@@ -132,7 +144,28 @@ export function kanaToRomaji(text: string): string {
     // 漢字等の変換不能文字はスキップ
     i++
   }
+  return dedupe(variants).join('\0')
+}
+
+/** バリアント配列に各サフィックスを追加して展開 */
+function expand(variants: string[], suffixes: string[]): string[] {
+  if (suffixes.length === 1) {
+    // 最適化: 1つだけなら新配列を作らない
+    const s = suffixes[0]
+    for (let i = 0; i < variants.length; i++) variants[i] += s
+    return variants
+  }
+  const result: string[] = []
+  for (const v of variants) {
+    for (const s of suffixes) {
+      result.push(v + s)
+    }
+  }
   return result
+}
+
+function dedupe(arr: string[]): string[] {
+  return arr.length <= 1 ? arr : [...new Set(arr)]
 }
 
 // ---- プレイヤー名リストの管理 ----
