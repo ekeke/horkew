@@ -692,6 +692,7 @@
         editorView.dispatch({ effects: [
           editorModule!.setStatements.of({ statements: stmtInfo, cursorLine: getCursorLine(), playerNames: playerNameInfos }),
           editorModule!.setPlayerList.of(playerList),
+          editorModule!.setSetup.of(setup),
         ] })
       }
       cursorLine = getCursorLine()

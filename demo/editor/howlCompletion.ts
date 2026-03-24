@@ -188,9 +188,25 @@ const playerListField = StateField.define<PlayerEntry[]>({
   },
 })
 
+// ---- 配役情報の管理 ----
+
+type SystemRole = 'werewolf' | 'possessed' | 'fanatic' | 'werehamster' | 'immoralist' | 'villager' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata'
+
+export const setSetup = StateEffect.define<Map<string, number>>()
+
+const setupField = StateField.define<Map<string, number>>({
+  create() { return new Map() },
+  update(setup, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setSetup)) return e.value
+    }
+    return setup
+  },
+})
+
 // ---- 候補型と文脈型 ----
 
-type Category = 'player' | 'role' | 'action' | 'arrow' | 'co' | 'standalone'
+type Category = 'player' | 'role' | 'action' | 'arrow' | 'co_role' | 'denial_co_role' | 'standalone' | 'result' | 'gameresult'
 
 type HowlCandidate = {
   label: string
@@ -199,51 +215,102 @@ type HowlCandidate = {
   category: Category
   categoryLabel: string
   terminal: boolean  // true = チェーン終了 (スペース挿入しない)
+  requiredRole?: SystemRole  // この役職が配役にない場合、候補から除外
 }
 
 // ---- 静的候補 ----
 
 const roleCandidates: HowlCandidate[] = [
-  { label: '占い師', romaji: 'uranaishi', type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
-  { label: '霊媒師', romaji: 'reibaishi', type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
-  { label: '狩人',   romaji: 'kariudo',   type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
-  { label: '共有者', romaji: 'kyouyuusha', type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
-  { label: '猫又',   romaji: 'nekomata',  type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
-  { label: '人狼',   romaji: 'jinrou',    type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
-  { label: '狂人',   romaji: 'kyoujin',   type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
-  { label: '狂信者', romaji: 'kyoushinsha', type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
-  { label: '妖狐',   romaji: 'youko',     type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
-  { label: '背徳者', romaji: 'haitokusha', type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
-  { label: '村人',   romaji: 'murabito',  type: 'type', category: 'role', categoryLabel: '役職', terminal: false },
+  { label: '占い師', romaji: 'uranaishi', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'seer' },
+  { label: '霊媒師', romaji: 'reibaishi', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'medium' },
+  { label: '狩人',   romaji: 'kariudo',   type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'bodyguard' },
+  { label: '共有者', romaji: 'kyouyuusha', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'mason' },
+  { label: '猫又',   romaji: 'nekomata',  type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'nekomata' },
+  { label: '人狼',   romaji: 'jinrou',    type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'werewolf' },
+  { label: '狂人',   romaji: 'kyoujin',   type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'possessed' },
+  { label: '狂信者', romaji: 'kyoushinsha', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'fanatic' },
+  { label: '妖狐',   romaji: 'youko',     type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'werehamster' },
+  { label: '背徳者', romaji: 'haitokusha', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'immoralist' },
+  { label: '村人',   romaji: 'murabito',  type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'villager' },
 ]
 
+// 役職名CO 結合候補 (プレイヤー名の後に直接補完)
+// Howl文法: `占い師CO` (役職名が先、COが後)
+const coRoleCandidates: HowlCandidate[] = roleCandidates.flatMap(r => [
+  {
+    label: `${r.label}CO`,
+    romaji: r.romaji.split('\0').map(rom => `${rom}co`).join('\0'),
+    type: 'keyword',
+    category: 'co_role' as Category,
+    categoryLabel: 'CO',
+    terminal: false,
+    requiredRole: r.requiredRole,
+  },
+  {
+    label: `非${r.label}CO`,
+    romaji: r.romaji.split('\0').map(rom => `hi${rom}co`).join('\0'),
+    type: 'keyword',
+    category: 'denial_co_role' as Category,
+    categoryLabel: '非CO',
+    terminal: true,
+    requiredRole: r.requiredRole,
+  },
+])
+
 const actionCandidates: HowlCandidate[] = [
-  { label: 'CO',     romaji: 'co',        type: 'keyword', category: 'co',     categoryLabel: 'CO',       terminal: false },
   { label: '処刑',   romaji: 'shokei',    type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
+  { label: '吊り',   romaji: 'tsuri\0turi', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
   { label: '襲撃',   romaji: 'shuugeki',  type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
-  { label: '護衛',   romaji: 'goei',      type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
-  { label: '道連れ', romaji: 'michizure',  type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
-  { label: '後追い', romaji: 'atooi',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
+  { label: '噛み',   romaji: 'kami',      type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
+  { label: '死亡',   romaji: 'sibou\0shibou', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
+  { label: '護衛',   romaji: 'goei',      type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard' },
+  { label: 'ガード', romaji: 'ga-do\0gaado', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard' },
+  { label: '道連れ', romaji: 'michizure\0mitizure', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'nekomata' },
+  { label: '後追い', romaji: 'atooi',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'immoralist' },
+  { label: '予告',   romaji: 'yokoku',    type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false },
+]
+
+// 非 は 非役職名CO 結合候補に統合済み
+
+const resultCandidates: HowlCandidate[] = [
+  { label: '○',     romaji: 'maru\0siro\0shiro', type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false },
+  { label: '●',     romaji: 'kuro',      type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false },
 ]
 
 const standaloneCandidates: HowlCandidate[] = [
   { label: '平和',   romaji: 'heiwa',     type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true },
-  { label: '再投票', romaji: 'saitouhyou', type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true },
+  { label: '再投票', romaji: 'saitouhyou\0saitouhyou', type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true },
   { label: 'グレラン', romaji: 'gureran',  type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true },
+]
+
+const gameResultCandidates: HowlCandidate[] = [
+  { label: '村勝',   romaji: 'murashou\0murakachi', type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true },
+  { label: '狼勝',   romaji: 'ookamishou\0ookamikachi', type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true },
+  { label: '狐勝',   romaji: 'kituneshou\0kitunekachi\0kitsunekachi', type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true, requiredRole: 'werehamster' },
+  { label: '引き分け', romaji: 'hikiwake',  type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true },
+]
+
+const specialNameCandidates: HowlCandidate[] = [
+  { label: '生存者', romaji: 'seizonsha\0seizonsya', type: 'variable', category: 'player', categoryLabel: 'プレイヤー', terminal: false },
 ]
 
 const arrowCandidates: HowlCandidate[] = [
   { label: '→', romaji: '->', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false },
+  { label: '←', romaji: '<-', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false },
 ]
 
-const allStaticCandidates = [...roleCandidates, ...actionCandidates, ...standaloneCandidates, ...arrowCandidates]
+const allStaticCandidates = [
+  ...roleCandidates, ...coRoleCandidates, ...actionCandidates,
+  ...resultCandidates, ...standaloneCandidates, ...gameResultCandidates,
+  ...specialNameCandidates, ...arrowCandidates,
+]
 
 // ---- ラベルセットを事前計算 (文脈推定用) ----
 
 const arrowRe = new RegExp(`^(?:${V.rightArrow}|${V.leftArrow})$`)
-const roleLabels = new Set(roleCandidates.map(c => c.label))
-const actionLabels = new Set(actionCandidates.map(c => c.label))
-const coLabels = new Set(['CO', 'co', 'Co', 'cO', 'ｃｏ', 'ＣＯ', 'ｃＯ', 'Ｃｏ'])
+const actionLabels = new Set(actionCandidates.filter(c => c.category === 'action').map(c => c.label))
+const resultLabels = new Set(resultCandidates.map(c => c.label))
+const coRoleLabels = new Set(coRoleCandidates.map(c => c.label))
 
 // ---- 文脈推定 ----
 
@@ -254,30 +321,30 @@ const coLabels = new Set(['CO', 'co', 'Co', 'cO', 'ｃｏ', 'ＣＯ', 'ｃＯ', 
 function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] | null {
   const trimmed = beforeCursor.trimEnd()
   if (trimmed === '') {
-    // 行頭: プレイヤー名 + スタンドアロンKW
-    return ['player', 'standalone']
+    // 行頭: プレイヤー名 + スタンドアロンKW + 試合結果
+    return ['player', 'standalone', 'gameresult']
   }
 
   // 末尾トークンを取得 (最後のスペース/区切り文字以降)
   const lastTokenMatch = trimmed.match(/[^\s,;:、，；：]+$/)
-  if (!lastTokenMatch) return ['player', 'standalone']
+  if (!lastTokenMatch) return ['player', 'standalone', 'gameresult']
   const lastToken = lastTokenMatch[0]
 
   // アクション → チェーン終了
   if (actionLabels.has(lastToken)) return null
 
+  // 結果マーカー (○/●) → プレイヤー名 (次の結果対象)
+  if (resultLabels.has(lastToken)) return ['player']
+
   // 矢印 → プレイヤー名
   if (arrowRe.test(lastToken)) return ['player']
 
-  // CO → 役職名
-  if (coLabels.has(lastToken)) return ['role']
+  // 役職名CO / 非役職名CO → プレイヤー名 (結果対象)
+  if (coRoleLabels.has(lastToken)) return ['player']
 
-  // 役職名 → プレイヤー名 (結果対象)
-  if (roleLabels.has(lastToken)) return ['player']
-
-  // プレイヤー名 (メイン名・短縮名・エイリアスすべてで判定) → 矢印, CO, 役職名, アクション
+  // プレイヤー名 → 矢印, 役職名CO, 非役職名CO, アクション, 結果
   if (players.some(p => p.name === lastToken || p.shortName === lastToken || p.aliases.includes(lastToken)))
-    return ['arrow', 'co', 'role', 'action']
+    return ['arrow', 'co_role', 'denial_co_role', 'action', 'result']
 
   // 不明なトークン → フィルタなし (全候補)
   return null
@@ -319,10 +386,22 @@ function filterByCategories(candidates: HowlCandidate[], categories: Category[])
 
 const isAscii = /^[a-zA-Z0-9_\-]+$/
 
+const setupOrJoinRe = /^(?:[@＠]|\+\+?|#)/
+
 const howlCompletionSource: CompletionSource = (context) => {
+  // @行 (setup), +行 (join), ++行 (joinMulti), #行 (コメント) では補完無効
+  const curLine = context.state.doc.lineAt(context.pos)
+  if (setupOrJoinRe.test(curLine.text)) return null
+
   const players = context.state.field(playerListField)
+  const setup = context.state.field(setupField)
   const playerCandidates = buildPlayerCandidates(players)
-  const allCandidates = [...playerCandidates, ...allStaticCandidates]
+
+  // 配役に応じて候補をフィルタ (setupが空の場合は全候補を表示)
+  const staticFiltered = setup.size === 0
+    ? allStaticCandidates
+    : allStaticCandidates.filter(c => !c.requiredRole || (setup.get(c.requiredRole) ?? 0) > 0)
+  const allCandidates = [...playerCandidates, ...staticFiltered]
 
   const word = context.matchBefore(/[^\s,;:、，；：]+/)
 
@@ -394,6 +473,7 @@ const howlCompletionSource: CompletionSource = (context) => {
 
 export const howlCompletionExtension: Extension = [
   playerListField,
+  setupField,
   autocompletion({
     override: [howlCompletionSource],
     activateOnTyping: true,
