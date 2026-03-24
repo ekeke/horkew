@@ -5,3 +5,4 @@ tasks/
 tmp/
 z-ai/*
 z-ai/
+src/fenrir/checkpoints/
