@@ -168,7 +168,7 @@ export function runGame(config: LupaConfig): GameResult {
       const wolfRoles = new Set(['werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist'])
       for (const player of alivePlayers(state)) {
         if (wolfRoles.has(player.role) && player.claimedRole === null) {
-          const impact = analyzeCurrentCOImpact(events, state, config, player.seat)
+          const impact = analyzeCurrentCOImpact(events, state, config, player.seat, preCoRetar!)
           if (impact.ifSeerCO) {
             whatIfByPlayer.set(player.seat, impact.ifSeerCO)
           }

@@ -1,0 +1,258 @@
+/**
+ * tf.js-node-gpu ベースの NeuralNetwork 実装
+ *
+ * 既存の NeuralNetwork と同じインターフェースを維持しつつ、
+ * 内部で tf.js の GPU 加速を使用する。
+ */
+
+// @ts-ignore — tf.js-node-gpu は CJS だが ESM から import 可能
+import * as tf from '@tensorflow/tfjs-node-gpu'
+import type { NetworkConfig, ForwardResult } from './nn.ts'
+
+export class TfNeuralNetwork {
+  readonly config: NetworkConfig
+
+  private trunkWeights: tf.Variable[]  // [w, b, w, b, ...]
+  private headWeights: Map<string, [tf.Variable, tf.Variable]>
+  private valueWeights: [tf.Variable, tf.Variable]
+  private allVariables: tf.Variable[]
+
+  private optimizer: tf.AdamOptimizer
+
+  constructor(config: NetworkConfig, lr: number = 3e-4) {
+    this.config = config
+    this.trunkWeights = []
+    this.headWeights = new Map()
+    this.allVariables = []
+
+    // Trunk layers
+    let prevSize = config.inputSize
+    for (const hiddenSize of config.hiddenSizes) {
+      const w = tf.variable(
+        tf.randomNormal([prevSize, hiddenSize], 0, Math.sqrt(2 / prevSize)),
+        true, `trunk_w_${this.trunkWeights.length / 2}`,
+      )
+      const b = tf.variable(
+        tf.zeros([hiddenSize]),
+        true, `trunk_b_${this.trunkWeights.length / 2}`,
+      )
+      this.trunkWeights.push(w, b)
+      this.allVariables.push(w, b)
+      prevSize = hiddenSize
+    }
+
+    // Policy heads
+    for (const [name, outputSize] of Object.entries(config.heads)) {
+      const w = tf.variable(
+        tf.randomNormal([prevSize, outputSize], 0, Math.sqrt(2 / prevSize)),
+        true, `head_${name}_w`,
+      )
+      const b = tf.variable(tf.zeros([outputSize]), true, `head_${name}_b`)
+      this.headWeights.set(name, [w, b])
+      this.allVariables.push(w, b)
+    }
+
+    // Value head
+    const vw = tf.variable(
+      tf.randomNormal([prevSize, 1], 0, Math.sqrt(2 / prevSize)),
+      true, 'value_w',
+    )
+    const vb = tf.variable(tf.zeros([1]), true, 'value_b')
+    this.valueWeights = [vw, vb]
+    this.allVariables.push(vw, vb)
+
+    this.optimizer = tf.train.adam(lr)
+  }
+
+  /** 単一サンプルの推論（ゲーム内で使用） */
+  forward(input: Float32Array): ForwardResult {
+    const policies = new Map<string, Float32Array>()
+    let value = 0
+
+    tf.tidy(() => {
+      const x = this.forwardTrunk(tf.tensor2d(input, [1, this.config.inputSize]))
+
+      for (const [name, [w, b]] of this.headWeights) {
+        const logits = tf.add(tf.matMul(x, w), b)
+        policies.set(name, logits.dataSync() as Float32Array)
+      }
+
+      const [vw, vb] = this.valueWeights
+      const rawValue = tf.add(tf.matMul(x, vw), vb).dataSync()[0]
+      value = Math.tanh(rawValue)
+    })
+
+    return { policies, value }
+  }
+
+  /** trunk部分の forward（共有） */
+  private forwardTrunk(input: tf.Tensor): tf.Tensor {
+    let x = input
+    for (let i = 0; i < this.trunkWeights.length; i += 2) {
+      const w = this.trunkWeights[i]
+      const b = this.trunkWeights[i + 1]
+      x = tf.relu(tf.add(tf.matMul(x, w), b))
+    }
+    return x
+  }
+
+  /**
+   * PPOバッチ学習
+   *
+   * ミニバッチ全体を1回のGPU呼び出しで処理。
+   */
+  trainBatch(batch: {
+    observations: Float32Array[]
+    actionHeads: string[]
+    actionIndices: number[]
+    oldLogProbs: number[]
+    advantages: number[]
+    returns: number[]
+    clipEpsilon: number
+    valueLossCoeff: number
+    entropyCoeff: number
+  }): { policyLoss: number, valueLoss: number, entropy: number } {
+    const n = batch.observations.length
+    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0 }
+
+    const inputSize = this.config.inputSize
+
+    // バッチテンソル構築
+    const obsData = new Float32Array(n * inputSize)
+    for (let i = 0; i < n; i++) {
+      obsData.set(batch.observations[i], i * inputSize)
+    }
+
+    const result = { policyLoss: 0, valueLoss: 0, entropy: 0 }
+
+    // ヘッド別にグループ化してバッチ処理
+    const headGroups = new Map<string, number[]>()
+    for (let i = 0; i < n; i++) {
+      const head = batch.actionHeads[i]
+      if (!headGroups.has(head)) headGroups.set(head, [])
+      headGroups.get(head)!.push(i)
+    }
+
+    const lossFunc = () => {
+      const obsTensor = tf.tensor2d(obsData, [n, inputSize])
+      const trunk = this.forwardTrunk(obsTensor)
+
+      // Value loss
+      const [vw, vb] = this.valueWeights
+      const rawValues = tf.add(tf.matMul(trunk, vw), vb).squeeze([1])  // [n]
+      const values = tf.tanh(rawValues)
+      const returnsTensor = tf.tensor1d(batch.returns)
+      const vLoss = tf.mul(
+        tf.scalar(batch.valueLossCoeff),
+        tf.mean(tf.squaredDifference(values, returnsTensor)),
+      )
+
+      // Policy losses per head
+      let totalPolicyLoss = tf.scalar(0)
+      let totalEntropy = tf.scalar(0)
+
+      for (const [headName, indices] of headGroups) {
+        const [hw, hb] = this.headWeights.get(headName)!
+        const allLogits = tf.add(tf.matMul(trunk, hw), hb)  // [n, headSize]
+
+        // Gather rows for this head
+        const headLogits = tf.gather(allLogits, indices)  // [m, headSize]
+        const headProbs = tf.softmax(headLogits)
+
+        // Gather action probs
+        const headActions = indices.map(i => batch.actionIndices[i])
+        const headAdvantages = indices.map(i => batch.advantages[i])
+        const headOldLogProbs = indices.map(i => batch.oldLogProbs[i])
+
+        // log π(a|s) for selected actions
+        const actionMask = tf.oneHot(headActions, allLogits.shape[1]!)
+        const selectedProbs = tf.sum(tf.mul(headProbs, actionMask), 1)  // [m]
+        const newLogProbs = tf.log(tf.add(selectedProbs, tf.scalar(1e-8)))
+
+        // PPO ratio & clipped surrogate
+        const ratio = tf.exp(tf.sub(newLogProbs, tf.tensor1d(headOldLogProbs)))
+        const advTensor = tf.tensor1d(headAdvantages)
+        const surr1 = tf.mul(ratio, advTensor)
+        const surr2 = tf.mul(
+          tf.clipByValue(ratio, 1 - batch.clipEpsilon, 1 + batch.clipEpsilon),
+          advTensor,
+        )
+        const pLoss = tf.neg(tf.mean(tf.minimum(surr1, surr2)))
+
+        // Entropy
+        const ent = tf.neg(tf.mean(
+          tf.sum(tf.mul(headProbs, tf.log(tf.add(headProbs, tf.scalar(1e-8)))), 1)
+        ))
+
+        totalPolicyLoss = tf.add(totalPolicyLoss, pLoss)
+        totalEntropy = tf.add(totalEntropy, ent)
+      }
+
+      const entBonus = tf.mul(tf.scalar(-batch.entropyCoeff), totalEntropy)
+      const totalLoss = tf.add(tf.add(totalPolicyLoss, vLoss), entBonus) as tf.Scalar
+
+      // Record for logging (sync values)
+      result.policyLoss = totalPolicyLoss.dataSync()[0]
+      result.valueLoss = vLoss.dataSync()[0]
+      result.entropy = totalEntropy.dataSync()[0]
+
+      return totalLoss
+    }
+
+    this.optimizer.minimize(lossFunc, false, this.allVariables)
+
+    return result
+  }
+
+  /** 重みのクローン（チェックポイント用） */
+  cloneWeights(): Map<string, Float32Array> {
+    const weights = new Map<string, Float32Array>()
+    for (let i = 0; i < this.trunkWeights.length; i += 2) {
+      const layerIdx = i / 2
+      weights.set(`trunk_${layerIdx}_w`, this.trunkWeights[i].dataSync() as Float32Array)
+      weights.set(`trunk_${layerIdx}_b`, this.trunkWeights[i + 1].dataSync() as Float32Array)
+    }
+    for (const [name, [w, b]] of this.headWeights) {
+      weights.set(`head_${name}_w`, w.dataSync() as Float32Array)
+      weights.set(`head_${name}_b`, b.dataSync() as Float32Array)
+    }
+    weights.set('value_w', this.valueWeights[0].dataSync() as Float32Array)
+    weights.set('value_b', this.valueWeights[1].dataSync() as Float32Array)
+    return weights
+  }
+
+  /** 重みをロード */
+  loadWeights(weights: Map<string, Float32Array>): void {
+    for (let i = 0; i < this.trunkWeights.length; i += 2) {
+      const layerIdx = i / 2
+      const w = weights.get(`trunk_${layerIdx}_w`)!
+      const b = weights.get(`trunk_${layerIdx}_b`)!
+      this.trunkWeights[i].assign(tf.tensor(w, this.trunkWeights[i].shape))
+      this.trunkWeights[i + 1].assign(tf.tensor(b, this.trunkWeights[i + 1].shape))
+    }
+    for (const [name, [wVar, bVar]] of this.headWeights) {
+      const w = weights.get(`head_${name}_w`)!
+      const b = weights.get(`head_${name}_b`)!
+      wVar.assign(tf.tensor(w, wVar.shape))
+      bVar.assign(tf.tensor(b, bVar.shape))
+    }
+    const vw = weights.get('value_w')!
+    const vb = weights.get('value_b')!
+    this.valueWeights[0].assign(tf.tensor(vw, this.valueWeights[0].shape))
+    this.valueWeights[1].assign(tf.tensor(vb, this.valueWeights[1].shape))
+  }
+
+  /** 総パラメータ数 */
+  get totalParams(): number {
+    let total = 0
+    for (const v of this.allVariables) {
+      total += v.size
+    }
+    return total
+  }
+
+  /** リソース解放 */
+  dispose(): void {
+    for (const v of this.allVariables) v.dispose()
+  }
+}

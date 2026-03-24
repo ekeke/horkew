@@ -6,6 +6,10 @@
     "train": "node --experimental-strip-types src/cli.ts",
     "eval": "node --experimental-strip-types src/evaluate.ts",
     "play": "node --experimental-strip-types src/play.ts",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts"
+    "test": "node --experimental-strip-types --test src/**/*.test.ts",
+    "postinstall": "node -e \"const fs=require('fs'),s='node_modules/@tensorflow/tfjs-node-gpu/deps/lib/tensorflow.dll',d='node_modules/@tensorflow/tfjs-node-gpu/lib/napi-v8/tensorflow.dll';fs.existsSync(s)&&!fs.existsSync(d)&&fs.copyFileSync(s,d)\""
+  },
+  "dependencies": {
+    "@tensorflow/tfjs-node-gpu": "^4.22.0"
   }
 }

@@ -91,13 +91,13 @@ if (help) showHelp()
 
 const config: TrainingConfig = { ...DEFAULT_TRAINING_CONFIG, ...overrides }
 
-console.log('Fenrir - Werewolf ML Agent')
-console.log('Configuration:')
-console.log(`  Total iterations: ${config.totalIterations}`)
-console.log(`  Games per batch: ${config.gamesPerBatch}`)
-console.log(`  Learning rate: ${config.learningRate}`)
-console.log(`  Retar: ${config.enableRetar ? 'enabled' : 'disabled'}`)
-console.log(`  Checkpoint dir: ${config.checkpointDir}`)
-console.log('')
+console.error('Fenrir - Werewolf ML Agent')
+console.error('Configuration:')
+console.error(`  Total iterations: ${config.totalIterations}`)
+console.error(`  Games per batch: ${config.gamesPerBatch}`)
+console.error(`  Learning rate: ${config.learningRate}`)
+console.error(`  Retar: ${config.enableRetar ? 'enabled' : 'disabled'}`)
+console.error(`  Checkpoint dir: ${config.checkpointDir}`)
+console.error('')
 
 train(config)

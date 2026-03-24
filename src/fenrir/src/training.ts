@@ -7,8 +7,8 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import { runGame } from '../../lupa/engine.ts'
-import { NeuralNetwork, softmax } from './ml/nn.ts'
-import { AdamOptimizer } from './ml/optimizer.ts'
+import { NeuralNetwork } from './ml/nn.ts'
+import { TfNeuralNetwork } from './ml/nn-tf.ts'
 import { OBSERVATION_SIZE } from './observation.ts'
 import { HEAD_SIZES } from './action.ts'
 import { FenrirStrategy } from './policy.ts'
@@ -84,19 +84,27 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
 // Network Configuration
 // ============================================================
 
+const NETWORK_CONFIG = {
+  inputSize: OBSERVATION_SIZE,
+  hiddenSizes: [512, 256],
+  heads: {
+    night: HEAD_SIZES.night,
+    claim: HEAD_SIZES.claim,
+    vote: HEAD_SIZES.vote,
+    comm: HEAD_SIZES.comm,
+    leader: HEAD_SIZES.leader,
+    target: HEAD_SIZES.target,
+  },
+}
+
+/** 推論用（ゲーム内、ピュアJS — 単一forward が速い） */
 export function createNetwork(): NeuralNetwork {
-  return new NeuralNetwork({
-    inputSize: OBSERVATION_SIZE,
-    hiddenSizes: [512, 256],
-    heads: {
-      night: HEAD_SIZES.night,
-      claim: HEAD_SIZES.claim,
-      vote: HEAD_SIZES.vote,
-      comm: HEAD_SIZES.comm,
-      leader: HEAD_SIZES.leader,
-      target: HEAD_SIZES.target,
-    },
-  })
+  return new NeuralNetwork(NETWORK_CONFIG)
+}
+
+/** 学習用（PPOバッチ更新、tf.js GPU加速） */
+export function createTfNetwork(lr: number = 3e-4): TfNeuralNetwork {
+  return new TfNeuralNetwork(NETWORK_CONFIG, lr)
 }
 
 // ============================================================
@@ -160,12 +168,11 @@ function generateGame(
 }
 
 // ============================================================
-// PPO Update
+// PPO Update (tf.js GPU バッチ)
 // ============================================================
 
 function ppoUpdate(
-  network: NeuralNetwork,
-  optimizer: AdamOptimizer,
+  tfNetwork: TfNeuralNetwork,
   batch: ProcessedStep[],
   config: TrainingConfig,
 ): { policyLoss: number, valueLoss: number, entropy: number } {
@@ -174,7 +181,7 @@ function ppoUpdate(
   let totalPolicyLoss = 0
   let totalValueLoss = 0
   let totalEntropy = 0
-  let count = 0
+  let batchCount = 0
 
   // Shuffle batch
   for (let i = batch.length - 1; i > 0; i--) {
@@ -182,75 +189,33 @@ function ppoUpdate(
     ;[batch[i], batch[j]] = [batch[j], batch[i]]
   }
 
-  // Mini-batches
+  // Mini-batches → tf.js GPU
   for (let start = 0; start < batch.length; start += config.miniBatchSize) {
     const end = Math.min(start + config.miniBatchSize, batch.length)
     const miniBatch = batch.slice(start, end)
 
-    network.zeroGrad()
+    const result = tfNetwork.trainBatch({
+      observations: miniBatch.map(s => s.observation),
+      actionHeads: miniBatch.map(s => s.actionHead),
+      actionIndices: miniBatch.map(s => s.actionIdx),
+      oldLogProbs: miniBatch.map(s => s.logProb),
+      advantages: miniBatch.map(s => s.advantage),
+      returns: miniBatch.map(s => s.returnValue),
+      clipEpsilon: config.clipEpsilon,
+      valueLossCoeff: config.valueLossCoeff,
+      entropyCoeff: config.entropyCoeff,
+    })
 
-    for (const step of miniBatch) {
-      // Forward pass
-      const result = network.forward(step.observation)
-      const logits = result.policies.get(step.actionHead)
-      if (!logits) continue
-
-      const probs = softmax(logits)
-      const newLogProb = Math.log(probs[step.actionIdx] + 1e-8)
-
-      // PPO ratio
-      const ratio = Math.exp(newLogProb - step.logProb)
-      const clipped = Math.max(
-        Math.min(ratio, 1 + config.clipEpsilon),
-        1 - config.clipEpsilon,
-      )
-      const policyLoss = -Math.min(ratio * step.advantage, clipped * step.advantage)
-
-      // Value loss
-      const valueLoss = config.valueLossCoeff * (result.value - step.returnValue) ** 2
-
-      // Entropy bonus
-      let entropy = 0
-      for (let i = 0; i < probs.length; i++) {
-        if (probs[i] > 1e-8) entropy -= probs[i] * Math.log(probs[i])
-      }
-
-      totalPolicyLoss += policyLoss
-      totalValueLoss += valueLoss
-      totalEntropy += entropy
-      count++
-
-      // Backward: policy gradient on the active head
-      const policyGrad = new Float32Array(logits.length)
-      for (let i = 0; i < probs.length; i++) {
-        const isAction = i === step.actionIdx ? 1 : 0
-        // d(loss)/d(logit_i) = prob_i - 1(i=a) scaled by advantage
-        // Combined with clipped surrogate
-        const surrogateGrad = ratio <= 1 + config.clipEpsilon && ratio >= 1 - config.clipEpsilon
-          ? -step.advantage * (isAction - probs[i])
-          : 0
-        // Entropy gradient: d(-Σp*log(p))/d(logit_i) = p_i*(log(p_i) - Σ p_j*log(p_j)) + ?
-        // Simplified: use -entropy_coeff * (log(p_i) + 1) * p_i * (1 - p_i) is complex
-        // Practical: just use (prob - onehot)*advantage for policy + entropy bonus
-        policyGrad[i] = surrogateGrad - config.entropyCoeff * (probs[i] * (Math.log(probs[i] + 1e-8) + 1) - probs[i] * entropy)
-      }
-
-      // Value gradient
-      const valueGrad = 2 * config.valueLossCoeff * (result.value - step.returnValue) / miniBatch.length
-
-      const policyGrads = new Map<string, Float32Array>()
-      policyGrads.set(step.actionHead, policyGrad)
-
-      network.backward(policyGrads, valueGrad)
-    }
-
-    optimizer.update(network.getParams(), network.getGrads())
+    totalPolicyLoss += result.policyLoss
+    totalValueLoss += result.valueLoss
+    totalEntropy += result.entropy
+    batchCount++
   }
 
   return {
-    policyLoss: totalPolicyLoss / Math.max(count, 1),
-    valueLoss: totalValueLoss / Math.max(count, 1),
-    entropy: totalEntropy / Math.max(count, 1),
+    policyLoss: totalPolicyLoss / Math.max(batchCount, 1),
+    valueLoss: totalValueLoss / Math.max(batchCount, 1),
+    entropy: totalEntropy / Math.max(batchCount, 1),
   }
 }
 
@@ -303,14 +268,19 @@ export function evaluate(
 // Main Training Loop
 // ============================================================
 
+function log(msg: string): void {
+  process.stderr.write(msg + '\n')
+}
+
 export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG): void {
-  console.log('Fenrir Training Started')
-  console.log(`Observation size: ${OBSERVATION_SIZE}`)
+  log('Fenrir Training Started')
+  log(`Observation size: ${OBSERVATION_SIZE}`)
 
+  // 推論用 (ピュアJS、ゲーム内 forward が速い)
   const network = createNetwork()
-  console.log(`Network params: ${network.totalParams}`)
-
-  const optimizer = new AdamOptimizer(network.getParams(), { lr: config.learningRate })
+  // 学習用 (tf.js GPU、バッチ PPO が速い)
+  const tfNetwork = createTfNetwork(config.learningRate)
+  log(`Network params: ${network.totalParams} (JS inference + tf.js GPU training)`)
 
   // Pool for self-play (past checkpoints)
   const pool: Map<string, Float32Array>[] = []
@@ -371,19 +341,25 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG): void {
     // Normalize advantages
     normalizeAdvantages(allTrajectories)
 
-    // PPO update
+    // PPO update (tf.js GPU)
+    // 推論ネットワークの重みを学習ネットワークに同期
+    tfNetwork.loadWeights(network.cloneWeights())
+
     let totalPolicyLoss = 0
     let totalValueLoss = 0
     let totalEntropy = 0
 
     for (let epoch = 0; epoch < config.ppoEpochs; epoch++) {
       const { policyLoss, valueLoss, entropy } = ppoUpdate(
-        network, optimizer, allTrajectories, config,
+        tfNetwork, allTrajectories, config,
       )
       totalPolicyLoss += policyLoss
       totalValueLoss += valueLoss
       totalEntropy += entropy
     }
+
+    // 学習結果を推論ネットワークに同期
+    network.loadWeights(tfNetwork.cloneWeights())
 
     // Progress bar
     const iterMs = performance.now() - iterStart
@@ -410,7 +386,7 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG): void {
     if (iter % config.evalInterval === 0) {
       process.stderr.write('\r\x1b[K')
       const evalResult = evaluate(network, config, 30)
-      console.log(
+      log(
         `[${iter}] Eval: ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
         `avgLen=${evalResult.avgGameLength.toFixed(1)}`
       )
@@ -423,7 +399,7 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG): void {
       saveCheckpoint(network, path, { iteration: iter, winRate: 0 })
       pool.push(network.cloneWeights())
       if (pool.length > 5) pool.shift()
-      console.log(`[${iter}] Checkpoint saved: ${path}`)
+      log(`[${iter}] Checkpoint saved: ${path}`)
     }
   }
 
@@ -438,5 +414,6 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG): void {
   const timeStr = totalSec < 60 ? `${totalSec.toFixed(1)}s`
     : totalSec < 3600 ? `${(totalSec / 60).toFixed(1)}m`
     : `${(totalSec / 3600).toFixed(1)}h`
-  console.log(`Training complete! (${timeStr})`)
+  tfNetwork.dispose()
+  log(`Training complete! (${timeStr})`)
 }

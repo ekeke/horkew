@@ -119,6 +119,8 @@ export function analyzeCurrentCOImpact(
   state: GameState,
   config: LupaConfig,
   seat: number,
+  /** キャッシュ済みの通常分析結果（渡されれば再計算しない） */
+  cachedCurrent?: Map<number, Set<SystemRole>>,
 ): {
   /** 通常分析結果 */
   current: Map<number, Set<SystemRole>>
@@ -127,7 +129,7 @@ export function analyzeCurrentCOImpact(
   /** 霊能COした場合（未COの場合のみ） */
   ifMediumCO: Map<number, Set<SystemRole>> | null
 } {
-  const current = analyzeFromEvents(events, state, config)
+  const current = cachedCurrent ?? analyzeFromEvents(events, state, config)
 
   const player = state.players.find(p => p.seat === seat)
   if (!player || player.claimedRole !== null) {
