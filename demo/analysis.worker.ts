@@ -6,6 +6,7 @@ export type RetarRequest = {
   setup: [SystemRole, number][]
   players: [number, string][]
   assumptions: [number, SystemRole][]
+  wolfPairDenyals?: [number, number][]
   batches?: number
   batch?: number
 }
@@ -54,6 +55,7 @@ self.onmessage = (e: MessageEvent<any>) => {
       dayCountFrom: 1,
       hasFirstGhost: false,
       assumptions: new Map(msg.assumptions ?? []),
+      wolfPairDenyals: msg.wolfPairDenyals ?? [],
       hocusPocus: new Map(),
       id: 0,
       batches: msg.batches ?? 1,

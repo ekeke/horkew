@@ -38,6 +38,7 @@ const lupaOptions: AnalyzeOptions = {
   dayCountFrom: 1,
   hasFirstGhost: false,
   assumptions: new Map(),
+  wolfPairDenyals: [],
   hocusPocus: new Map(),
   id: 0,
   batches: 1,

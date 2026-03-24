@@ -37,6 +37,8 @@ export type AnalyzeOptions = {
 
   // ユーザーが仮定した役職
   assumptions: Map<Seat, SystemRole>
+  // ユーザーが指定した「狼同士を否定」ペア
+  wolfPairDenyals: [Seat, Seat][]
   hocusPocus: Map<Seat, boolean>
   // aggregate用の実行ID
   id: number
@@ -186,6 +188,16 @@ export class VillageRetar {
     if ( this.options.assumptions.size > 0 ) {
       for ( const [seat, role] of this.options.assumptions.entries() ) {
         fixedPositions.set(seat, role)
+      }
+    }
+
+    // 狼ペア否定の早期適用: 片方がwerewolf確定なら他方からdeny
+    for ( const [seatA, seatB] of this.options.wolfPairDenyals ) {
+      if ( fixedPositions.get(seatA) === 'werewolf' ) {
+        this.initialPossibilities.denyRole(seatB, 'werewolf')
+      }
+      if ( fixedPositions.get(seatB) === 'werewolf' ) {
+        this.initialPossibilities.denyRole(seatA, 'werewolf')
       }
     }
 
@@ -469,18 +481,50 @@ export class VillageRetar {
     }
     this.debugStash.preFinalizePasses++
 
-    if ( this.context.requireOneOf.length > 0 ) {
+    // 狼ペア否定をdenyOneOfグループに変換
+    // 各ペア(A,B) → 「Aからwerewolf deny」or「Bからwerewolf deny」の2択
+    const denyOneOf: { seat: Seat, role: SystemRole }[][] = []
+    for ( const [seatA, seatB] of this.options.wolfPairDenyals ) {
+      const aCanBeWolf = this.context.possibilities.hasRole(seatA, 'werewolf')
+      const bCanBeWolf = this.context.possibilities.hasRole(seatB, 'werewolf')
+      // 両方がwolf候補でなければ制約は既に満たされている
+      if ( !aCanBeWolf || !bCanBeWolf ) continue
+      denyOneOf.push([
+        { seat: seatA, role: 'werewolf' },
+        { seat: seatB, role: 'werewolf' },
+      ])
+    }
+
+    if ( this.context.requireOneOf.length > 0 || denyOneOf.length > 0 ) {
       const snapshot = saveContext(this.context)
+      // requireOneOf（fixRole）とdenyOneOf（denyRole）の全組み合わせを列挙
+      const fixGroups = this.context.requireOneOf
+      const denyGroups = denyOneOf
+      const fixVariations = fixGroups.length > 0 ? [...generateCombinations(fixGroups)] : [null]
+      const denyVariations = denyGroups.length > 0 ? [...generateCombinations(denyGroups)] : [null]
+
       VARIATION:
-      for ( const variation of generateCombinations(this.context.requireOneOf)) {
-        if (this.isAborted()) break
-        restoreContext(this.context, snapshot)
-        for ( const {seat, role} of variation ) {
-          if ( ! this.context.possibilities.fixRole(seat, role) ) {
-            continue VARIATION
+      for ( const fixVariation of fixVariations ) {
+        for ( const denyVariation of denyVariations ) {
+          if (this.isAborted()) break VARIATION
+          restoreContext(this.context, snapshot)
+          if ( fixVariation ) {
+            for ( const {seat, role} of fixVariation ) {
+              if ( ! this.context.possibilities.fixRole(seat, role) ) {
+                continue VARIATION
+              }
+            }
           }
+          if ( denyVariation ) {
+            for ( const {seat, role} of denyVariation ) {
+              this.context.possibilities.denyRole(seat, role)
+              if ( ! this.context.possibilities.fix(seat) ) {
+                continue VARIATION
+              }
+            }
+          }
+          this.finalize()
         }
-        this.finalize()
       }
     }
     else {

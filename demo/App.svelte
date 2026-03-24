@@ -11,6 +11,7 @@
   import PlayerName from './status/PlayerName.svelte'
   import { findReason, findConfirmationReason } from '../src/gmork/index.ts'
   import { formatReason, formatConfirmationReason } from '../src/gmork/format.ts'
+  import { scoreWolfPairs, type WolfPairSuggestion } from './status/wolfPairScorer.ts'
   import HelpPanel from './HelpPanel.svelte'
   import ColorSwatchPane from './ColorSwatchPane.svelte'
   import './theme.css'
@@ -183,7 +184,11 @@
       : new Map()
   )
   let assumptions: Map<number, SystemRole> = $state(new Map())
+  let denyWolfGroups: number[][] = $state([])
+  let showDenyWolfDialog = $state(false)
+  let denyWolfSelection: Set<number> = $state(new Set())
   let gmorkResult = $state('')
+  let wolfPairSuggestions: WolfPairSuggestion[] = $state([])
   let baseAnalysisSeats: SeatResult[] = []
   // Retar結果キャッシュ: 行番号 → {hash, cached}
   let analysisCache = new Map<number, { hash: string, cached: SeatResult[], stats: AnalysisStats | null }>()
@@ -209,6 +214,13 @@
     for (const [seat, role] of assumptionsMap) {
       h ^= seat * 31 + role.length
       h = Math.imul(h, 0x01000193)
+    }
+    // wolfPairDenyals をハッシュに混ぜる
+    for (const group of denyWolfGroups) {
+      for (const seat of group) {
+        h ^= seat * 37
+        h = Math.imul(h, 0x01000193)
+      }
     }
     return { key: effectiveLines, hash: (h >>> 0).toString(36) }
   }
@@ -559,6 +571,61 @@
     run()
   }
 
+  function clearAssumptions() {
+    assumptions = new Map()
+    denyWolfGroups = []
+    gmorkResult = ''
+    run()
+  }
+
+  function openDenyWolfDialog() {
+    denyWolfSelection = new Set()
+    showDenyWolfDialog = true
+  }
+
+  function closeDenyWolfDialog() {
+    showDenyWolfDialog = false
+  }
+
+  function toggleDenyWolfPlayer(seat: number) {
+    const next = new Set(denyWolfSelection)
+    if (next.has(seat)) {
+      next.delete(seat)
+    } else {
+      if (next.size >= 2) return
+      next.add(seat)
+    }
+    denyWolfSelection = next
+  }
+
+  function confirmDenyWolf() {
+    if (denyWolfSelection.size < 2) return
+    const group = [...denyWolfSelection].sort((a, b) => a - b)
+    // 重複チェック
+    const isDuplicate = denyWolfGroups.some(g =>
+      g.length === group.length && g.every((s, i) => s === group[i])
+    )
+    if (!isDuplicate) {
+      denyWolfGroups = [...denyWolfGroups, group]
+    }
+    showDenyWolfDialog = false
+    run()
+  }
+
+  function removeDenyWolfGroup(index: number) {
+    denyWolfGroups = denyWolfGroups.filter((_, i) => i !== index)
+    run()
+  }
+
+  function addSuggestion(suggestion: WolfPairSuggestion) {
+    const group = [suggestion.seatA, suggestion.seatB]
+    denyWolfGroups = [...denyWolfGroups, group]
+    if (villageStatus) {
+      wolfPairSuggestions = scoreWolfPairs(villageStatus, players, denyWolfGroups)
+    }
+    run()
+  }
+
   function extractRefNames(stmt: any): string[] {
     switch (stmt.type) {
       case 'vote': return [stmt.voter, stmt.target]
@@ -757,6 +824,10 @@
           .map(([seat]) => seat)
       )
 
+      wolfPairSuggestions = (setup.get('werewolf') ?? 0) >= 2
+        ? scoreWolfPairs(vs, playersMap, denyWolfGroups)
+        : []
+
       const roleOrder = [...systemRoles.keys()] as SystemRole[]
       analysisColumns = roleOrder.filter(r => setup.has(r as SystemRole))
 
@@ -765,6 +836,7 @@
         setup: [...setup],
         players: [...playersMap],
         assumptions: [...assumptions],
+        wolfPairDenyals: denyWolfGroups.map(g => [g[0], g[1]] as [number, number]),
       }
       analyzerJson = JSON.stringify(workerPayload, (_key, value) =>
         value instanceof Map ? Object.fromEntries(value) : value
@@ -934,9 +1006,45 @@
                 <div class="analysis-duration">total {analysisTotalElapsed}ms — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms){/if}</div>
               {/if}
             </div>
-            {#if gmorkResult}
-              <div class="gmork-results">{gmorkResult}</div>
-            {/if}
+            <div class="analysis-sidebar">
+              <div class="assumptions-list">
+                <div class="assumptions-header">
+                  仮説
+                  {#if (currentSetup.get('werewolf') ?? 0) >= 2}
+                    <button class="assumption-add" onclick={openDenyWolfDialog}>追加</button>
+                  {/if}
+                  {#if assumptions.size > 0 || denyWolfGroups.length > 0}
+                    <button class="assumption-clear" onclick={() => clearAssumptions()}>全削除</button>
+                  {/if}
+                </div>
+                {#each [...assumptions] as [seat, role]}
+                  <div class="assumption-item">
+                    <span class="assumption-text">{playerShortNames.get(seat) ?? players.get(seat) ?? `#${seat}`} = {systemRoles.get(role)?.name ?? role}</span>
+                    <button class="assumption-remove" onclick={() => toggleAssumption(seat, role)}>&times;</button>
+                  </div>
+                {/each}
+                {#each denyWolfGroups as group, i}
+                  <div class="assumption-item">
+                    <span class="assumption-text deny-wolf">{group.map(s => playerShortNames.get(s) ?? players.get(s) ?? `#${s}`).join(' & ')} は両狼でない</span>
+                    <button class="assumption-remove" onclick={() => removeDenyWolfGroup(i)}>&times;</button>
+                  </div>
+                {/each}
+                {#if wolfPairSuggestions.length > 0}
+                  <div class="suggestions-section">
+                    <div class="suggestions-label">提案</div>
+                    {#each wolfPairSuggestions as suggestion}
+                      <div class="suggestion-item">
+                        <span class="suggestion-text">{playerShortNames.get(suggestion.seatA) ?? players.get(suggestion.seatA) ?? `#${suggestion.seatA}`} & {playerShortNames.get(suggestion.seatB) ?? players.get(suggestion.seatB) ?? `#${suggestion.seatB}`}</span>
+                        <button class="suggestion-add" onclick={() => addSuggestion(suggestion)}>+</button>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+              {#if gmorkResult}
+                <div class="gmork-results">{gmorkResult}</div>
+              {/if}
+            </div>
           </div>
         {/if}
       </div>
@@ -1057,6 +1165,33 @@
         {/each}
       </div>
       <button class="modal-cancel" onclick={cancelNew}>キャンセル</button>
+    </div>
+  </div>
+{/if}
+
+{#if showDenyWolfDialog}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="modal-overlay" onclick={closeDenyWolfDialog}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal deny-wolf-modal" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-title">狼同士を否定</div>
+      <div class="modal-hint">両狼ではない2人を選択</div>
+      <div class="deny-wolf-players">
+        {#each [...players] as [seat, name]}
+          {@const selected = denyWolfSelection.has(seat)}
+          {@const disabled = !selected && denyWolfSelection.size >= 2}
+          <button
+            class="deny-wolf-player"
+            class:selected
+            {disabled}
+            onclick={() => toggleDenyWolfPlayer(seat)}
+          >{playerShortNames.get(seat) ?? name}</button>
+        {/each}
+      </div>
+      <div class="deny-wolf-actions">
+        <button class="deny-wolf-confirm" disabled={denyWolfSelection.size < 2} onclick={confirmDenyWolf}>追加</button>
+        <button class="modal-cancel" onclick={closeDenyWolfDialog}>キャンセル</button>
+      </div>
     </div>
   </div>
 {/if}
@@ -1574,9 +1709,169 @@
 
 
 
-  .gmork-results {
+  .analysis-sidebar {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .assumptions-list {
+    padding: 8px;
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-size: 13px;
+  }
+
+  .assumptions-header {
+    color: var(--color-text-muted);
+    margin-bottom: 4px;
+  }
+
+  .assumption-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 0;
+  }
+
+  .assumption-text {
+    color: var(--color-text);
+  }
+
+  .assumption-remove {
+    background: none;
+    border: none;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+    line-height: 1;
+  }
+
+  .assumption-remove:hover {
+    color: var(--color-text);
+  }
+
+  .assumption-add,
+  .assumption-clear {
+    background: none;
+    border: 1px solid var(--color-text-faint);
+    border-radius: 3px;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 1px 6px;
+    margin-left: 4px;
+  }
+
+  .assumption-add:hover,
+  .assumption-clear:hover {
+    color: var(--color-text);
+    border-color: var(--color-text-muted);
+  }
+
+  .deny-wolf {
+    color: var(--color-wolf);
+  }
+
+  .deny-wolf-modal {
+    max-width: 320px;
+  }
+
+  .deny-wolf-players {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .deny-wolf-player {
+    padding: 4px 12px;
+    font-size: 13px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .deny-wolf-player:hover:not(:disabled) {
+    border-color: var(--color-accent);
+  }
+
+  .deny-wolf-player.selected {
+    background: var(--color-accent);
+    color: var(--color-bg);
+    border-color: var(--color-accent);
+  }
+
+  .deny-wolf-player:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .deny-wolf-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .deny-wolf-confirm {
+    padding: 6px 16px;
+    font-size: 13px;
+    background: var(--color-accent);
+    color: var(--color-bg);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .deny-wolf-confirm:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .suggestions-section {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .suggestions-label {
+    font-size: 11px;
+    color: var(--color-text-faint);
+    margin-bottom: 4px;
+  }
+
+  .suggestion-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 0;
+  }
+
+  .suggestion-text {
+    color: var(--color-text-muted);
+    font-size: 12px;
+  }
+
+  .suggestion-add {
+    background: none;
+    border: 1px solid var(--color-text-faint);
+    border-radius: 3px;
+    color: var(--color-text-faint);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 5px;
+    line-height: 1.4;
+  }
+
+  .suggestion-add:hover {
+    color: var(--color-text);
+    border-color: var(--color-text-muted);
+  }
+
+  .gmork-results {
     padding: 8px;
     font-family: 'Consolas', 'Menlo', monospace;
     font-size: 13px;
