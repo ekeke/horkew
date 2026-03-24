@@ -216,6 +216,7 @@ type HowlCandidate = {
   categoryLabel: string
   terminal: boolean  // true = チェーン終了 (スペース挿入しない)
   requiredRole?: SystemRole  // この役職が配役にない場合、候補から除外
+  info?: string              // 候補選択時に表示する補足情報
 }
 
 // ---- 静的候補 ----
@@ -245,6 +246,7 @@ const coRoleCandidates: HowlCandidate[] = roleCandidates.flatMap(r => [
     categoryLabel: 'CO',
     terminal: false,
     requiredRole: r.requiredRole,
+    info: `${r.label}を名乗り出る`,
   },
   {
     label: `非${r.label}CO`,
@@ -254,33 +256,34 @@ const coRoleCandidates: HowlCandidate[] = roleCandidates.flatMap(r => [
     categoryLabel: '非CO',
     terminal: true,
     requiredRole: r.requiredRole,
+    info: `${r.label}ではないと宣言`,
   },
 ])
 
 const actionCandidates: HowlCandidate[] = [
-  { label: '処刑',   romaji: 'shokei',    type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
-  { label: '吊り',   romaji: 'tsuri\0turi', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
-  { label: '襲撃',   romaji: 'shuugeki',  type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
-  { label: '噛み',   romaji: 'kami',      type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
-  { label: '死亡',   romaji: 'sibou\0shibou', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true },
-  { label: '護衛',   romaji: 'goei',      type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard' },
-  { label: 'ガード', romaji: 'ga-do\0gaado', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard' },
-  { label: '道連れ', romaji: 'michizure\0mitizure', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'nekomata' },
-  { label: '後追い', romaji: 'atooi',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'immoralist' },
-  { label: '予告',   romaji: 'yokoku',    type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false },
+  { label: '処刑',   romaji: 'shokei',    type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '投票により処刑された' },
+  { label: '吊り',   romaji: 'tsuri\0turi', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '投票により処刑された' },
+  { label: '襲撃',   romaji: 'shuugeki',  type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
+  { label: '噛み',   romaji: 'kami',      type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
+  { label: '死亡',   romaji: 'sibou\0shibou', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
+  { label: '護衛',   romaji: 'goei',      type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard', info: '狩人が護衛した' },
+  { label: 'ガード', romaji: 'ga-do\0gaado', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard', info: '狩人が護衛した' },
+  { label: '道連れ', romaji: 'michizure\0mitizure', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'nekomata', info: '猫又の呪いで道連れ死' },
+  { label: '後追い', romaji: 'atooi',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'immoralist', info: '背徳者が妖狐の死を追って死亡' },
+  { label: '予告',   romaji: 'yokoku',    type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, info: '処刑先を予告する' },
 ]
 
 // 非 は 非役職名CO 結合候補に統合済み
 
 const resultCandidates: HowlCandidate[] = [
-  { label: '○',     romaji: 'maru\0siro\0shiro', type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false },
-  { label: '●',     romaji: 'kuro',      type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false },
+  { label: '○',     romaji: 'maru\0siro\0shiro', type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false, info: '人間 (白判定)' },
+  { label: '●',     romaji: 'kuro',      type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false, info: '人狼 (黒判定)' },
 ]
 
 const standaloneCandidates: HowlCandidate[] = [
-  { label: '平和',   romaji: 'heiwa',     type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true },
-  { label: '再投票', romaji: 'saitouhyou\0saitouhyou', type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true },
-  { label: 'グレラン', romaji: 'gureran',  type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true },
+  { label: '平和',   romaji: 'heiwa',     type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true, info: '夜の襲撃で死者なし' },
+  { label: '再投票', romaji: 'saitouhyou\0saitouhyou', type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true, info: '投票が割れて再投票になった' },
+  { label: 'グレラン', romaji: 'gureran',  type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true, info: 'グレーからランダムに投票' },
 ]
 
 const gameResultCandidates: HowlCandidate[] = [
@@ -295,8 +298,8 @@ const specialNameCandidates: HowlCandidate[] = [
 ]
 
 const arrowCandidates: HowlCandidate[] = [
-  { label: '→', romaji: '->', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false },
-  { label: '←', romaji: '<-', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false },
+  { label: '→', romaji: '->', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false, info: '投票先を指す' },
+  { label: '←', romaji: '<-', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false, info: '得票者をまとめて記述' },
 ]
 
 const allStaticCandidates = [
@@ -388,6 +391,7 @@ function candidatesToCompletions(candidates: HowlCandidate[]): Completion[] {
     apply: c.terminal ? c.label : c.label + ' ',
     detail: c.categoryLabel,
     type: c.type,
+    info: c.info,
   }))
 }
 
@@ -467,6 +471,7 @@ const howlCompletionSource: CompletionSource = (context) => {
         apply: c.terminal ? c.label : c.label + ' ',
         detail: c.categoryLabel,
         type: c.type,
+        info: c.info,
       })
     }
   }
@@ -488,6 +493,6 @@ export const howlCompletionExtension: Extension = [
   autocompletion({
     override: [howlCompletionSource],
     activateOnTyping: true,
-    activateOnCompletion: () => true,
+    activateOnCompletion: (c) => typeof c.apply === 'string' && c.apply.endsWith(' '),
   }),
 ]

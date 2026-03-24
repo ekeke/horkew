@@ -99,6 +99,16 @@ export const howlThemeExtension: Extension = EditorView.theme({
     backgroundColor: 'var(--ctp-surface1)',
     color: 'var(--color-text)',
   },
+  '.cm-completionInfo': {
+    padding: '4px 8px',
+    fontSize: '12px',
+    color: 'var(--color-text)',
+    fontFamily: "'Consolas', 'Menlo', monospace",
+    backgroundColor: 'var(--color-surface)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '4px',
+    marginLeft: '4px',
+  },
   '.cm-completionIcon': {
     display: 'none',
   },
