@@ -33,6 +33,9 @@ export type ClaimRow = {
   surviving: boolean
   causeOfDeath: CauseOfDeath
   diedDay: number | undefined
+  previousAssertions?: Map<number, { target: number, species: EnumSpecies }[]>
+  slidToRole?: string
+  slidDay?: number
 }
 
 export type ClaimGroup = {
@@ -41,11 +44,18 @@ export type ClaimGroup = {
   rows: ClaimRow[]
 }
 
+export type PreviousAssertion = {
+  targetSeat: number
+  targetName: string
+  species: EnumSpecies
+}
+
 export type DayAssertion = {
   targetSeat: number
   targetName: string
   species: EnumSpecies
   forecast?: boolean
+  previousAssertions?: PreviousAssertion[]
 } | null
 
 // --- Vote status types ---
@@ -149,11 +159,12 @@ export function extractClaimGroups(vs: VillageStatus, players: Map<number, strin
 
   for (const [seat, status] of vs.statuses) {
     if (!status.claiming) continue
+    const name = players.get(seat) ?? `#${seat}`
     const role = status.claimingRole
     if (!grouped.has(role)) grouped.set(role, [])
     grouped.get(role)!.push({
       seat,
-      name: players.get(seat) ?? `#${seat}`,
+      name,
       claimingRole: role,
       claimedAt: status.claimedAt,
       claimOrder: status.claimOrder,
@@ -163,7 +174,31 @@ export function extractClaimGroups(vs: VillageStatus, players: Map<number, strin
       surviving: status.surviving,
       causeOfDeath: status.causeOfDeath,
       diedDay: status.diedDay,
+      previousAssertions: status.previousAssertions,
     })
+
+    // Generate rows for previous claims (role slides)
+    if (status.previousClaims) {
+      for (const prev of status.previousClaims) {
+        const prevRole = prev.role
+        if (!grouped.has(prevRole)) grouped.set(prevRole, [])
+        grouped.get(prevRole)!.push({
+          seat,
+          name,
+          claimingRole: prevRole,
+          claimedAt: prev.claimedAt,
+          claimOrder: prev.claimOrder,
+          assertions: prev.assertions,
+          actions: prev.actions,
+          forecasts: prev.forecasts,
+          surviving: status.surviving,
+          causeOfDeath: status.causeOfDeath,
+          diedDay: status.diedDay,
+          slidToRole: prev.slidToRole,
+          slidDay: prev.slidDay,
+        })
+      }
+    }
   }
 
   // Sort groups by roleOrder, unknowns at end
@@ -218,10 +253,18 @@ export function buildAssertionTimeline(
     // Assertions are now day-keyed by bridge (right-aligned)
     for (const [night, { target: targetSeat, species }] of row.assertions) {
       if (night < 0) continue
+      const prevList = row.previousAssertions?.get(night)
       timeline.set(night, {
         targetSeat,
         targetName: players.get(targetSeat) ?? `#${targetSeat}`,
         species,
+        ...(prevList ? {
+          previousAssertions: prevList.map(p => ({
+            targetSeat: p.target,
+            targetName: players.get(p.target) ?? `#${p.target}`,
+            species: p.species,
+          })),
+        } : {}),
       })
     }
     // Forecasts: show for nights without a reported result

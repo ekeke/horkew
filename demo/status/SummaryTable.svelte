@@ -4,6 +4,8 @@
   import type { Writable } from 'svelte/store'
   import { getContext } from 'svelte'
   import { causeOfDeathLabel, buildAssertionTimeline } from './extract.ts'
+  import { systemRoles } from '../../src/types/index.ts'
+  import type { SystemRole } from '../../src/types/index.ts'
   import PlayerName from './PlayerName.svelte'
   import SpeciesIcon from './SpeciesIcon.svelte'
 
@@ -52,6 +54,9 @@
         if (!row.surviving && row.diedDay !== undefined && row.diedDay + 1 > m) {
           m = row.diedDay + 1
         }
+        if (row.slidDay !== undefined && row.slidDay + 1 > m) {
+          m = row.slidDay + 1
+        }
       }
     }
     return m
@@ -65,6 +70,7 @@
         if (d && (d.executions.length > 0 || d.nightKills.length > 0)) return true
         if (allTimelines.some(t => t.has(day - 1))) return true
         if (tableGroups.some(g => g.rows.some(r => !r.surviving && r.diedDay === day - 1))) return true
+        if (tableGroups.some(g => g.rows.some(r => r.slidDay === day - 1))) return true
         return false
       })
   )
@@ -133,8 +139,10 @@
             <td class="name-cell"><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} seat={row.seat}>{row.name}</PlayerName></td>
             {#each dayColumns as day}
               {@const assertion = timeline.get(day - 1) ?? null}
-              <td class="data-cell" class:human={assertion?.species === 'human' && !assertion?.forecast} class:wolf={assertion?.species === 'wolf' && !assertion?.forecast} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:forecast={assertion?.forecast} class:death-marker={!assertion && !row.surviving && row.diedDay === day - 1} class:active-hl-cell={$srcLines.claimCell.get(`${row.seat}:${day - 1}`) === $cursor}>
-                {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="forecast-label">(予)</span>{:else if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{:else if !row.surviving && row.diedDay === day - 1}<span class="death-marker-label">（{causeOfDeathLabel(row.causeOfDeath)}死）</span>{/if}
+              {@const isSlideMarker = !assertion && row.slidDay != null && row.slidDay === day - 1}
+              {@const isDeathMarker = !assertion && !isSlideMarker && !row.surviving && row.diedDay === day - 1}
+              <td class="data-cell" class:human={assertion?.species === 'human' && !assertion?.forecast} class:wolf={assertion?.species === 'wolf' && !assertion?.forecast} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:forecast={assertion?.forecast} class:death-marker={isDeathMarker} class:slide-marker={isSlideMarker} class:active-hl-cell={$srcLines.claimCell.get(`${row.seat}:${day - 1}`) === $cursor}>
+                {#if assertion}{#if assertion.previousAssertions}<span class="slide-prev">{#each assertion.previousAssertions as prev}{prev.targetName}<SpeciesIcon species={prev.species} />→{/each}</span>{/if}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="forecast-label">(予)</span>{:else if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{:else if isSlideMarker}<span class="slide-marker-label">（{systemRoles.get(row.slidToRole as SystemRole)?.shortName ?? row.slidToRole}スライド）</span>{:else if isDeathMarker}<span class="death-marker-label">（{causeOfDeathLabel(row.causeOfDeath)}死）</span>{/if}
               </td>
             {/each}
           </tr>
@@ -159,7 +167,7 @@
       <span class="extra-item" class:active-hl={masonGroup.rows.some(r => $srcLines.claimRow.get(r.seat) === $cursor)}><span class="extra-label">{masonGroup.roleShortName}</span>{#each buildMasonDisplay(masonGroup) as cluster, ci}{#if ci > 0}<span class="cluster-sep"> / </span>{/if}{#each cluster as member, i}{#if i > 0}<span class="mason-sep">-</span>{/if}<PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} seat={member.seat}>{member.name}</PlayerName>{/each}{/each}</span>
     {/if}
     {#if nekomataGroup}
-      <span class="extra-item"><span class="extra-label">{nekomataGroup.roleShortName}</span>{#each nekomataGroup.rows as row, i}{#if i > 0}、{/if}<PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} seat={row.seat}>{row.name}</PlayerName>{/each}</span>
+      <span class="extra-item"><span class="extra-label">{nekomataGroup.roleShortName}</span>{#each nekomataGroup.rows as row, i}{#if i > 0}、{/if}<PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} seat={row.seat}>{row.name}</PlayerName>{#if row.slidToRole}<span class="slide-marker-label">（{systemRoles.get(row.slidToRole as SystemRole)?.shortName ?? row.slidToRole}スライド）</span>{/if}{/each}</span>
     {/if}
   </div>
   {/if}
@@ -254,6 +262,19 @@
   }
 
   .death-marker-label {
+    font-size: 10px;
+  }
+
+  .slide-marker {
+    color: var(--color-text-faint);
+  }
+
+  .slide-marker-label {
+    font-size: 10px;
+  }
+
+  .slide-prev {
+    color: var(--color-text-faint);
     font-size: 10px;
   }
 

@@ -370,12 +370,26 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
               // 単独CO: 従来通り
               const sysRole = sysRoles[0]
               if (!actorStatus.claiming || actorStatus.claimingRole !== sysRole) {
+                if (actorStatus.claiming) {
+                  if (!actorStatus.previousClaims) actorStatus.previousClaims = []
+                  actorStatus.previousClaims.push({
+                    role: actorStatus.claimingRole,
+                    assertions: actorStatus.assertions,
+                    actions: actorStatus.actions,
+                    forecasts: actorStatus.forecasts,
+                    claimedAt: actorStatus.claimedAt,
+                    claimOrder: actorStatus.claimOrder,
+                    slidToRole: sysRole,
+                    slidDay: day,
+                  })
+                }
                 actorStatus.claiming = true
                 actorStatus.claimingRole = sysRole
                 actorStatus.claimedAt = day
                 actorStatus.claimOrder = ++claimCounter
                 actorStatus.actions = new Map()
                 actorStatus.assertions = new Map()
+                actorStatus.forecasts = new Map()
               }
             }
           }
@@ -397,6 +411,11 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           const lastNight = day - 1
           for (let i = 0; i < divinationResults.length; i++) {
             const night = lastNight - (divinationResults.length - 1 - i)
+            if (actorStatus.assertions.has(night)) {
+              if (!actorStatus.previousAssertions) actorStatus.previousAssertions = new Map()
+              if (!actorStatus.previousAssertions.has(night)) actorStatus.previousAssertions.set(night, [])
+              actorStatus.previousAssertions.get(night)!.push(actorStatus.assertions.get(night)!)
+            }
             actorStatus.assertions.set(night, divinationResults[i])
           }
         }

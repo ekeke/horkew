@@ -50,6 +50,19 @@ export type SeatStatus = {
   assertions: Assertions
   forecasts: Map<Day, Seat>
   noCoOpportunity?: boolean
+  previousAssertions?: Map<Day, Assertion[]>
+  previousClaims?: PreviousClaim[]
+}
+
+export type PreviousClaim = {
+  role: string
+  assertions: Assertions
+  actions: PlayerAction
+  forecasts: Map<Day, Seat>
+  claimedAt?: number
+  claimOrder?: number
+  slidToRole: string
+  slidDay: number
 }
 
 export type VoteRecord = { voter: Seat, target: Seat }
