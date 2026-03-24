@@ -17,9 +17,9 @@ export function constrainByDeathCounts(
   DAY:
   for ( const [day, killed] of nightKillsByDay.entries() ) {
     if ( vs.day <= day ) continue DAY
-    const deathChronicle = context.deathChronicle.get(day)
+    const addCount = context.deathChronicle.add[day]
     let expected = 1
-    if ( deathChronicle ) expected += deathChronicle.add
+    if ( addCount ) expected += addCount
     const actual = killed.length
     const immoralists = setup.get('immoralist') || 0
     if ( actual === expected ) continue DAY

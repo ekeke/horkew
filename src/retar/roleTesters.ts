@@ -1,9 +1,9 @@
 import type { CauseOfDeath, SeatStatus, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
 
-type DeathCounts = {
-  add: number,
-  sub: number
+type DeathChronicle = {
+  add: Int8Array
+  sub: Int8Array
 }
 
 export type AnalyzeContext = {
@@ -12,7 +12,7 @@ export type AnalyzeContext = {
   hamstersKilledBySeer: { day: number, seat: Seat }[]
   hamstersMaxSurvivingDay: number
   requireOneOf: { seat: Seat, role: SystemRole }[][]
-  deathChronicle: Map<Day, DeathCounts>
+  deathChronicle: DeathChronicle
 }
 
 export type RoleTesterEnv = {
@@ -30,7 +30,7 @@ export function cloneContext(context: AnalyzeContext): AnalyzeContext {
     hamstersKilledBySeer: context.hamstersKilledBySeer.map(x => ({ ...x })),
     hamstersMaxSurvivingDay: context.hamstersMaxSurvivingDay,
     requireOneOf: context.requireOneOf.map(arr => arr.map(x => ({ ...x }))),
-    deathChronicle: new Map(Array.from(context.deathChronicle.entries(), ([k, v]) => [k, { ...v }])),
+    deathChronicle: { add: new Int8Array(context.deathChronicle.add), sub: new Int8Array(context.deathChronicle.sub) },
     possibilities: context.possibilities.clone(),
   }
 }
@@ -42,14 +42,11 @@ export type ContextSnapshot = {
   needSeerAtDay: number | undefined
   hamstersKilledBySeerLen: number
   requireOneOfLen: number
-  deathChronicleEntries: [number, number, number][]
+  deathChronicleAdd: Int8Array
+  deathChronicleSub: Int8Array
 }
 
 export function saveContext(ctx: AnalyzeContext): ContextSnapshot {
-  const dc: [number, number, number][] = []
-  for (const [day, counts] of ctx.deathChronicle) {
-    dc.push([day, counts.add, counts.sub])
-  }
   return {
     possArr: new Uint16Array(ctx.possibilities.possibilities),
     possSetup: new Uint8Array(ctx.possibilities.setup),
@@ -57,7 +54,8 @@ export function saveContext(ctx: AnalyzeContext): ContextSnapshot {
     needSeerAtDay: ctx.needSeerAtDay,
     hamstersKilledBySeerLen: ctx.hamstersKilledBySeer.length,
     requireOneOfLen: ctx.requireOneOf.length,
-    deathChronicleEntries: dc,
+    deathChronicleAdd: new Int8Array(ctx.deathChronicle.add),
+    deathChronicleSub: new Int8Array(ctx.deathChronicle.sub),
   }
 }
 
@@ -68,10 +66,8 @@ export function restoreContext(ctx: AnalyzeContext, s: ContextSnapshot): void {
   ctx.needSeerAtDay = s.needSeerAtDay
   ctx.hamstersKilledBySeer.length = s.hamstersKilledBySeerLen
   ctx.requireOneOf.length = s.requireOneOfLen
-  ctx.deathChronicle.clear()
-  for (const [day, add, sub] of s.deathChronicleEntries) {
-    ctx.deathChronicle.set(day, { add, sub })
-  }
+  ctx.deathChronicle.add.set(s.deathChronicleAdd)
+  ctx.deathChronicle.sub.set(s.deathChronicleSub)
 }
 
 type RoleTester = (env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]) => boolean
@@ -106,14 +102,7 @@ function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat
     }
     else {
       if ( status.causeOfDeath === 'night_kill' ) {
-
-        const deathChronicle = context.deathChronicle.get(self.diedDay!)
-        if ( !deathChronicle ) {
-          context.deathChronicle.set(self.diedDay!, { add: 1, sub: 0 })
-        }
-        else {
-          deathChronicle.add += 1
-        }
+        context.deathChronicle.add[self.diedDay!] += 1
 
         context.hamstersKilledBySeer.push({ day: status.diedDay!, seat })
         if ( seerKilledHamsterAt < status.diedDay! ) {
@@ -388,14 +377,8 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
     }
     const self = getStatus(env, seat)
     if ( !self.surviving ) {
-      const deathChronicle = context.deathChronicle.get(self.diedDay!)
       if ( self.causeOfDeath === 'night_kill' ) {
-        if ( !deathChronicle ) {
-          context.deathChronicle.set(self.diedDay!, { add: 1, sub: 0 })
-        }
-        else {
-          deathChronicle.add += 1
-        }
+        context.deathChronicle.add[self.diedDay!] += 1
       }
       let ok = false
       for ( const [targetSeat, targetStatus] of env.vs.statuses.entries() ) {

@@ -124,7 +124,7 @@ export class VillageRetar {
     this.lastDeaths = this.findLastDeaths()
     this.applyGameEndConstraints()
 
-    const plan = buildRoleTestPlan(village, setup, multipleVictims)
+    const plan = buildRoleTestPlan(village, setup, multipleVictims, this.initialPossibilities)
     this.roleTests = plan.roleTests
     this.totalLiarRoles = plan.totalLiarRoles
     this.knownFakeClaimCount = plan.knownFakeClaimCount
@@ -300,6 +300,14 @@ export class VillageRetar {
     return this.options.signal != null && this.options.signal[0] !== 0
   }
 
+  private isSaturated(): boolean {
+    for (let i = 1; i < this.initialPossibilities.possibilities.length; i++) {
+      const initial = this.initialPossibilities.possibilities[i]
+      if ((this.conclusions.possibilities[i] & initial) !== initial) return false
+    }
+    return true
+  }
+
   getStatus(seat: Seat) {
     return this.vs.statuses.get(seat)
   }
@@ -389,10 +397,11 @@ export class VillageRetar {
 
   private runAnalysis(): void {
     // Initialize
+    const maxDay = this.vs.day + 1
     this.context = {
       hamstersKilledBySeer: [],
       requireOneOf: [],
-      deathChronicle: new Map(),
+      deathChronicle: { add: new Int8Array(maxDay), sub: new Int8Array(maxDay) },
       possibilities: this.initialPossibilities.clone(),
       hamstersMaxSurvivingDay: Infinity,
     }
@@ -411,13 +420,26 @@ export class VillageRetar {
     const { batches, batch } = this.options
     for (let i = 0; i < group.length; i++) {
       if (this.isAborted()) return
+      if (this.isSaturated()) return
 
       const myIndex = baseIndex + i * stride
       // Skip subtrees that contain no paths for this batch
       if (batches > 1 && !subtreeContainsBatch(myIndex, stride, batches, batch)) continue
 
+      const test = group[i]
+      if (test.role !== 'allpass') {
+        let skip = false
+        for (const seat of test.selected) {
+          if (!this.context.possibilities.hasRole(seat, test.role as SystemRole)) {
+            skip = true
+            break
+          }
+        }
+        if (skip) continue
+      }
+
       const snapshot = saveContext(this.context)
-      const result = this.testRole(group[i])
+      const result = this.testRole(test)
 
       if (result) {
         this.walkRoleTests(depth + 1, myIndex)
@@ -429,6 +451,7 @@ export class VillageRetar {
   }
 
   private tryFinalize(): void {
+    if (this.isSaturated()) return
     this.debugStash.preFinalizeTests++
     // 死体数の確認
     if (!constrainByDeathCounts(this.context, this.vs, this.nightKillsByDay, this.setup)) {

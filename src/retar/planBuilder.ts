@@ -1,4 +1,5 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
+import type { Possibilities } from './possibilities.ts'
 import { selectCombinationsFromArray } from './combinatorics.ts'
 
 export const LiarRoles: SystemRole[] = ['werewolf', 'werehamster', 'immoralist', 'possessed', 'fanatic']
@@ -23,6 +24,7 @@ export function buildRoleTestPlan(
   village: VillageStatus,
   setup: Map<SystemRole, number>,
   multipleVictims: Seat[],
+  initialPossibilities?: Possibilities,
 ): BuildPlanResult {
   // 露呈人外数の管理の準備
   let numLiars = 0
@@ -60,7 +62,10 @@ export function buildRoleTestPlan(
   // 狐の処理は面倒なので、最初に全員分のプランを作成しておく
   if (setup.has('werehamster') && setup.get('werehamster')! > 0 ) {
     const hamsterTests: RoleTest[] = []
-    const allSeats = Array.from(village.statuses.keys())
+    let allSeats = Array.from(village.statuses.keys())
+    if (initialPossibilities) {
+      allSeats = allSeats.filter(seat => initialPossibilities.hasRole(seat, 'werehamster'))
+    }
     const num = setup.get('werehamster')!
     const iter = selectCombinationsFromArray(allSeats, num, num)
     for ( const [selected, rest] of iter ) {
