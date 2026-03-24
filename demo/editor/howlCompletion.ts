@@ -342,9 +342,22 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
   // 役職名CO / 非役職名CO → プレイヤー名 (結果対象)
   if (coRoleLabels.has(lastToken)) return ['player']
 
-  // プレイヤー名 → 矢印, 役職名CO, 非役職名CO, アクション, 結果
-  if (players.some(p => p.name === lastToken || p.shortName === lastToken || p.aliases.includes(lastToken)))
+  // プレイヤー名の判定
+  const isPlayer = players.some(p => p.name === lastToken || p.shortName === lastToken || p.aliases.includes(lastToken))
+    || lastToken === '生存者'
+  if (isPlayer) {
+    const beforeLastToken = trimmed.slice(0, trimmed.length - lastToken.length).trimEnd()
+
+    // 矢印の後のプレイヤー名 → 投票文完成、チェーン終了
+    const lastBeforeMatch = beforeLastToken.match(/[^\s,;:、，；：]+$/)
+    if (lastBeforeMatch && arrowRe.test(lastBeforeMatch[0])) return null
+
+    // CO文中のプレイヤー名 (結果対象) → 結果マーカー + 次のプレイヤー名
+    if ([...coRoleLabels].some(cl => beforeLastToken.includes(cl))) return ['result']
+
+    // 行頭のプレイヤー名 → 矢印, 役職名CO, アクション
     return ['arrow', 'co_role', 'denial_co_role', 'action', 'result']
+  }
 
   // 不明なトークン → フィルタなし (全候補)
   return null
@@ -438,11 +451,9 @@ const howlCompletionSource: CompletionSource = (context) => {
   const beforeWord = line.text.slice(0, word.from - line.from)
   const categories = inferContext(beforeWord, players)
 
-  // 文脈フィルタ適用
-  let candidates = allCandidates
-  if (categories) {
-    candidates = filterByCategories(allCandidates, categories)
-  }
+  // 文脈フィルタ適用 (null = 文完成、補完停止)
+  if (!categories) return null
+  let candidates = filterByCategories(allCandidates, categories)
 
   // テキストマッチフィルタ
   const filtered: Completion[] = []
