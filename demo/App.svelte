@@ -1019,13 +1019,13 @@
                 </div>
                 {#each [...assumptions] as [seat, role]}
                   <div class="assumption-item">
-                    <span class="assumption-text">{playerShortNames.get(seat) ?? players.get(seat) ?? `#${seat}`} = {systemRoles.get(role)?.name ?? role}</span>
+                    <span class="assumption-text">{playerShortNames.get(seat) ?? players.get(seat) ?? `#${seat}`}は{systemRoles.get(role)?.name ?? role}である</span>
                     <button class="assumption-remove" onclick={() => toggleAssumption(seat, role)}>&times;</button>
                   </div>
                 {/each}
                 {#each denyWolfGroups as group, i}
                   <div class="assumption-item">
-                    <span class="assumption-text deny-wolf">{group.map(s => playerShortNames.get(s) ?? players.get(s) ?? `#${s}`).join(' & ')} は両狼でない</span>
+                    <span class="assumption-text deny-wolf">{group.map(s => playerShortNames.get(s) ?? players.get(s) ?? `#${s}`).join(' と ')} は両狼でない</span>
                     <button class="assumption-remove" onclick={() => removeDenyWolfGroup(i)}>&times;</button>
                   </div>
                 {/each}
@@ -1033,10 +1033,9 @@
                   <div class="suggestions-section">
                     <div class="suggestions-label">提案</div>
                     {#each wolfPairSuggestions as suggestion}
-                      <div class="suggestion-item">
-                        <span class="suggestion-text">{playerShortNames.get(suggestion.seatA) ?? players.get(suggestion.seatA) ?? `#${suggestion.seatA}`} & {playerShortNames.get(suggestion.seatB) ?? players.get(suggestion.seatB) ?? `#${suggestion.seatB}`}</span>
-                        <button class="suggestion-add" onclick={() => addSuggestion(suggestion)}>+</button>
-                      </div>
+                      <button class="suggestion-item" onclick={() => addSuggestion(suggestion)}>
+                        「{playerShortNames.get(suggestion.seatA) ?? players.get(suggestion.seatA) ?? `#${suggestion.seatA}`}と{playerShortNames.get(suggestion.seatB) ?? players.get(suggestion.seatB) ?? `#${suggestion.seatB}`}の両狼はない」仮説を追加する
+                      </button>
                     {/each}
                   </div>
                 {/if}
@@ -1844,31 +1843,19 @@
   }
 
   .suggestion-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 0;
-  }
-
-  .suggestion-text {
+    display: block;
+    background: none;
+    border: none;
     color: var(--color-text-muted);
     font-size: 12px;
-  }
-
-  .suggestion-add {
-    background: none;
-    border: 1px solid var(--color-text-faint);
-    border-radius: 3px;
-    color: var(--color-text-faint);
+    font-family: inherit;
+    padding: 2px 0;
     cursor: pointer;
-    font-size: 12px;
-    padding: 0 5px;
-    line-height: 1.4;
+    text-align: left;
   }
 
-  .suggestion-add:hover {
+  .suggestion-item:hover {
     color: var(--color-text);
-    border-color: var(--color-text-muted);
   }
 
   .gmork-results {
