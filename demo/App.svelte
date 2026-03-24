@@ -836,7 +836,7 @@
     </select>
 
     <button class="header-btn" onclick={deleteCurrent} disabled={!activeKey} title="Delete">Del</button>
-    <button class="header-btn" onclick={openNewModal}>New</button>
+    <button class="header-btn" onclick={openNewModal}>新規作成</button>
     {/if}
 
     <div class="header-spacer"></div>
@@ -884,7 +884,7 @@
         {#if activeKey || trialMode}
           <div class="input-editor" bind:this={editorParent}></div>
         {:else}
-          <div class="pane-placeholder"><span>New ボタンから開始してください</span></div>
+          <div class="pane-placeholder"><span>新規作成ボタンから開始してください</span></div>
         {/if}
       </div>
     </section>
