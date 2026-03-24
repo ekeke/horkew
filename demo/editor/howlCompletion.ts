@@ -206,7 +206,7 @@ const setupField = StateField.define<Map<string, number>>({
 
 // ---- 候補型と文脈型 ----
 
-type Category = 'player' | 'role' | 'action' | 'arrow' | 'co_role' | 'denial_co_role' | 'standalone' | 'result' | 'gameresult'
+type Category = 'player' | 'player_start' | 'role' | 'action' | 'arrow' | 'co_role' | 'denial_co_role' | 'standalone' | 'result' | 'gameresult'
 
 type HowlCandidateDef = {
   label: string
@@ -308,7 +308,7 @@ const gameResultCandidates = buildStaticCandidates([
 ])
 
 const specialNameCandidates = buildStaticCandidates([
-  { label: '生存者', reading: 'せいぞんしゃ', type: 'variable', category: 'player', categoryLabel: 'プレイヤー', terminal: false },
+  { label: '生存者', reading: 'せいぞんしゃ', type: 'variable', category: 'player_start', categoryLabel: 'プレイヤー', terminal: false },
 ])
 
 const arrowCandidates = buildStaticCandidates([
@@ -325,6 +325,8 @@ const allStaticCandidates = [
 // ---- ラベルセットを事前計算 (文脈推定用) ----
 
 const arrowRe = new RegExp(`^(?:${V.rightArrow}|${V.leftArrow})$`)
+const rightArrowRe = new RegExp(`^${V.rightArrow}$`)
+const leftArrowRe = new RegExp(`(?:${V.leftArrow})`)
 const actionLabels = new Set(actionCandidates.filter(c => c.category === 'action').map(c => c.label))
 const resultLabels = new Set(resultCandidates.map(c => c.label))
 const coRoleLabels = new Set(coRoleCandidates.map(c => c.label))
@@ -338,13 +340,13 @@ const coRoleLabels = new Set(coRoleCandidates.map(c => c.label))
 function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] | null {
   const trimmed = beforeCursor.trimEnd()
   if (trimmed === '') {
-    // 行頭: プレイヤー名 + アクション(転置記法) + スタンドアロンKW + 試合結果
-    return ['player', 'action', 'standalone', 'gameresult']
+    // 行頭: プレイヤー名 + 行頭専用名 + アクション(転置記法) + スタンドアロンKW + 試合結果
+    return ['player', 'player_start', 'action', 'standalone', 'gameresult']
   }
 
   // 末尾トークンを取得 (最後のスペース/区切り文字以降)
   const lastTokenMatch = trimmed.match(/[^\s,;:、，；：]+$/)
-  if (!lastTokenMatch) return ['player', 'action', 'standalone', 'gameresult']
+  if (!lastTokenMatch) return ['player', 'player_start', 'action', 'standalone', 'gameresult']
   const lastToken = lastTokenMatch[0]
 
   // アクション: 行頭なら転置記法 → プレイヤー名、プレイヤー名の後なら → チェーン終了
@@ -371,8 +373,14 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
 
     const lastBeforeMatch = beforeLastToken.match(/[^\s,;:、，；：]+$/)
 
-    // 矢印の後のプレイヤー名 → 投票文完成、チェーン終了
-    if (lastBeforeMatch && arrowRe.test(lastBeforeMatch[0])) return null
+    // →の後のプレイヤー名 → 投票文完成、チェーン終了
+    if (lastBeforeMatch && rightArrowRe.test(lastBeforeMatch[0])) return null
+
+    // ←の後のプレイヤー名 → 得票記法、さらにプレイヤー名を追加可能
+    if (lastBeforeMatch && leftArrowRe.test(lastBeforeMatch[0])) return ['player']
+
+    // ←を含む行でプレイヤー名が連続 → さらにプレイヤー名を追加可能
+    if (leftArrowRe.test(beforeLastToken)) return ['player']
 
     // アクションの後のプレイヤー名 → 転置記法完成、チェーン終了
     if (lastBeforeMatch && actionLabels.has(lastBeforeMatch[0])) return null
@@ -422,6 +430,28 @@ function filterByCategories(candidates: HowlCandidate[], categories: Category[])
   return candidates.filter(c => categories.includes(c.category))
 }
 
+/** ←行から除外すべき名前 (被投票者 + 既出投票者) を返す */
+function getLeftArrowExclusions(lineText: string): Set<string> {
+  const excluded = new Set<string>()
+  // ← で分割
+  const arrowMatch = lineText.match(new RegExp(V.leftArrow))
+  if (!arrowMatch || arrowMatch.index === undefined) return excluded
+
+  // ← より前: 被投票者
+  const beforeArrow = lineText.slice(0, arrowMatch.index).trim()
+  const target = beforeArrow.match(/[^\s,;:、，；：]+$/)
+  if (target) excluded.add(target[0])
+
+  // ← より後: 既出投票者
+  const afterArrow = lineText.slice(arrowMatch.index + arrowMatch[0].length)
+  const voterRe = /[^\s,;:、，；：]+/g
+  let m
+  while ((m = voterRe.exec(afterArrow)) !== null) {
+    excluded.add(m[0])
+  }
+  return excluded
+}
+
 // ---- 補完ソース ----
 
 const isAscii = /^[a-zA-Z0-9_\-]+$/
@@ -456,12 +486,36 @@ const howlCompletionSource: CompletionSource = (context) => {
     const categories = inferContext(beforeCursor, players)
     if (!categories) return null
 
-    const filtered = filterByCategories(allCandidates, categories)
+    let filtered = filterByCategories(allCandidates, categories)
+
+    // ←行: 被投票者と既出投票者を除外
+    if (leftArrowRe.test(beforeCursor)) {
+      const excluded = getLeftArrowExclusions(line.text)
+      if (excluded.size > 0) {
+        filtered = filtered.filter(c => !excluded.has(c.label))
+      }
+    }
+
     if (filtered.length === 0) return null
+
+    const options = candidatesToCompletions(filtered)
+
+    // ←の直後 (投票者がまだいない): 省略TIPS候補を先頭に追加
+    const lastTokenMatch = beforeCursor.trimEnd().match(/[^\s,;:、，；：]+$/)
+    if (lastTokenMatch && leftArrowRe.test(lastTokenMatch[0])) {
+      options.unshift({
+        label: '(省略 → 改行)',
+        apply: '',
+        detail: 'TIPS',
+        type: 'text',
+        info: '省略も出来ます（文脈に応じて全員、または被投票ゼロになります）',
+        boost: 99,
+      })
+    }
 
     return {
       from: context.pos,
-      options: candidatesToCompletions(filtered),
+      options,
       filter: false,
     }
   }
@@ -481,6 +535,14 @@ const howlCompletionSource: CompletionSource = (context) => {
   // 文脈フィルタ適用 (null = 文完成、補完停止)
   if (!categories) return null
   let candidates = filterByCategories(allCandidates, categories)
+
+  // ←行: 被投票者と既出投票者を除外
+  if (leftArrowRe.test(beforeWord)) {
+    const excluded = getLeftArrowExclusions(line.text)
+    if (excluded.size > 0) {
+      candidates = candidates.filter(c => !excluded.has(c.label))
+    }
+  }
 
   // テキストマッチフィルタ
   const filtered: Completion[] = []
