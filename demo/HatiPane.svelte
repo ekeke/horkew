@@ -28,41 +28,48 @@
     error = ''
     result = null
 
-    try {
-      const options: AnalyzeOptions = {
-        seerClaimingDueDate: 2,
-        mediumClaimingDueDate: 2,
-        bodyguardClaimingDueDate: 99,
-        masonClaimingDueDate: 2,
-        nekomataClaimingDueDate: 99,
-        dayCountFrom: 1,
-        hasFirstGhost: false,
-        assumptions: new Map(),
-        wolfPairDenyals: [],
-        hocusPocus: new Map(),
-        id: 0,
-        batches: 1,
-        batch: 0,
+    // setTimeout to let UI update before blocking
+    setTimeout(() => {
+      try {
+        const options: AnalyzeOptions = {
+          seerClaimingDueDate: 2,
+          mediumClaimingDueDate: 2,
+          bodyguardClaimingDueDate: 99,
+          masonClaimingDueDate: 2,
+          nekomataClaimingDueDate: 99,
+          dayCountFrom: 1,
+          hasFirstGhost: false,
+          assumptions: new Map(),
+          wolfPairDenyals: [],
+          hocusPocus: new Map(),
+          id: 0,
+          batches: 1,
+          batch: 0,
+        }
+        result = searchTsumi(vs!, setup, options)
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e)
+      } finally {
+        running = false
       }
-      result = searchTsumi(vs, setup, options)
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e)
-    } finally {
-      running = false
-    }
+    }, 10)
   }
 
-  function formatNode(node: StrategyNode, depth: number = 0): any {
-    if (node.type === 'win') return { type: 'win' }
-    return {
-      type: 'action',
-      execute: node.action.execute !== -1 ? playerName(node.action.execute) : null,
-      bodyguard: node.action.bodyguardTarget !== null ? playerName(node.action.bodyguardTarget) : null,
-      seer: node.action.seerTarget !== null ? playerName(node.action.seerTarget) : null,
-      branches: Object.fromEntries(
-        Object.entries(node.branches).map(([k, v]) => [k, formatNode(v, depth + 1)])
-      ),
-    }
+  function formatObsKey(key: string): string {
+    return key
+      .replace(/^m:wolf/, '霊媒●')
+      .replace(/^m:human/, '霊媒○')
+      .replace(/^m:null/, '霊媒?')
+      .replace(/^peace$/, '平和')
+      .replace(/^d:([\d,]+)/, (_, seats: string) =>
+        seats.split(',').map((s: string) => `${playerName(Number(s))}死亡`).join(' ')
+      )
+      .replace(/\|s:wolf/, ' 占●')
+      .replace(/\|s:human/, ' 占○')
+      .replace(/\|neko:(\d+)/, (_, s: string) => ` 猫道連れ:${playerName(Number(s))}`)
+      .replace(/\|follow:([\d,]+)/, (_, seats: string) =>
+        ` 後追:${seats.split(',').map((s: string) => playerName(Number(s))).join(',')}`
+      )
   }
 </script>
 
@@ -73,6 +80,11 @@
       onclick={runSearch}
       disabled={running || !vs || setup.size === 0}
     >{running ? '探索中...' : '詰み探索'}</button>
+    {#if result}
+      <span class="hati-stats">
+        {result.stats.worldsTotal}世界 / {result.stats.nodesVisited}ノード / {result.stats.elapsed.toFixed(1)}ms
+      </span>
+    {/if}
   </div>
 
   {#if error}
@@ -80,17 +92,52 @@
   {/if}
 
   {#if result}
-    <div class="hati-result" class:tsumi={result.isTsumi}>
-      <div class="hati-verdict">{result.isTsumi ? '詰み' : '詰みなし'}</div>
-      <div class="hati-stats">
-        ワールド: {result.stats.worldsTotal} /
-        ノード: {result.stats.nodesVisited} /
-        深度: {result.stats.maxDepth} /
-        {result.stats.elapsed.toFixed(1)}ms
-      </div>
+    <div class="hati-verdict-bar" class:tsumi={result.isTsumi}>
+      {result.isTsumi ? '詰み' : '詰みなし'}
     </div>
+
     {#if result.strategy}
-      <pre class="hati-json">{JSON.stringify(formatNode(result.strategy), null, 2)}</pre>
+      <div class="hati-tree">
+        {#snippet strategyNode(node: StrategyNode, depth: number)}
+          {#if node.type === 'win'}
+            <span class="hati-win">村勝利</span>
+          {:else}
+            <div class="hati-action" class:night={node.action.execute === -1}>
+              {#if node.action.execute !== -1}
+                <span class="hati-exec">処刑 {playerName(node.action.execute)}</span>
+              {/if}
+              {#if node.action.bodyguardTarget !== null}
+                <span class="hati-night-act">護衛→{playerName(node.action.bodyguardTarget)}</span>
+              {/if}
+              {#if node.action.seerTarget !== null}
+                <span class="hati-night-act">占い→{playerName(node.action.seerTarget)}</span>
+              {/if}
+            </div>
+            {#if Object.keys(node.branches).length === 1}
+              {@const [key, child] = Object.entries(node.branches)[0]}
+              <div class="hati-branch-inline">
+                <span class="hati-obs">{formatObsKey(key)}</span>
+                <span class="hati-arrow">→</span>
+                {@render strategyNode(child, depth + 1)}
+              </div>
+            {:else}
+              <div class="hati-branches">
+                {#each Object.entries(node.branches) as [key, child]}
+                  <div class="hati-branch">
+                    <div class="hati-branch-header">
+                      <span class="hati-obs">{formatObsKey(key)}</span>
+                    </div>
+                    <div class="hati-branch-body">
+                      {@render strategyNode(child, depth + 1)}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {/if}
+        {/snippet}
+        {@render strategyNode(result.strategy, 0)}
+      </div>
     {/if}
   {/if}
 </div>
@@ -102,10 +149,12 @@
     gap: 0.5rem;
     height: 100%;
     overflow: auto;
+    font-size: 0.85rem;
   }
 
   .hati-controls {
     display: flex;
+    align-items: center;
     gap: 0.5rem;
     flex-shrink: 0;
   }
@@ -129,52 +178,102 @@
     cursor: not-allowed;
   }
 
+  .hati-stats {
+    font-size: 0.7rem;
+    color: var(--ctp-subtext0);
+  }
+
   .hati-error {
     color: var(--ctp-red);
     font-size: 0.85rem;
   }
 
-  .hati-result {
-    padding: 0.4rem 0.6rem;
+  .hati-verdict-bar {
+    padding: 0.3rem 0.6rem;
     border-radius: 4px;
-    background: var(--ctp-surface0);
+    font-weight: bold;
+    font-size: 0.9rem;
     flex-shrink: 0;
   }
 
-  .hati-result.tsumi {
+  .hati-verdict-bar.tsumi {
+    background: color-mix(in srgb, var(--ctp-green) 15%, transparent);
+    color: var(--ctp-green);
     border-left: 3px solid var(--ctp-green);
   }
 
-  .hati-result:not(.tsumi) {
+  .hati-verdict-bar:not(.tsumi) {
+    background: var(--ctp-surface0);
+    color: var(--ctp-subtext0);
     border-left: 3px solid var(--ctp-surface2);
   }
 
-  .hati-verdict {
+  .hati-tree {
+    flex: 1;
+    overflow: auto;
+    padding: 0.3rem;
+  }
+
+  .hati-action {
+    display: inline-flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .hati-exec {
     font-weight: bold;
-    font-size: 1rem;
+    color: var(--ctp-red);
+    background: color-mix(in srgb, var(--ctp-red) 10%, transparent);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
   }
 
-  .hati-result.tsumi .hati-verdict {
+  .hati-night-act {
+    color: var(--ctp-blue);
+    font-size: 0.8rem;
+  }
+
+  .hati-win {
     color: var(--ctp-green);
+    font-weight: bold;
   }
 
-  .hati-stats {
+  .hati-branch-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .hati-arrow {
+    color: var(--ctp-overlay0);
+  }
+
+  .hati-obs {
     font-size: 0.75rem;
     color: var(--ctp-subtext0);
-    margin-top: 0.2rem;
+    background: var(--ctp-surface0);
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
   }
 
-  .hati-json {
-    font-family: 'Consolas', 'Menlo', monospace;
-    font-size: 0.75rem;
-    color: var(--ctp-text);
-    background: var(--ctp-mantle);
-    padding: 0.5rem;
-    border-radius: 4px;
-    overflow: auto;
-    flex: 1;
-    margin: 0;
-    white-space: pre-wrap;
-    word-break: break-word;
+  .hati-branches {
+    margin-top: 0.3rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .hati-branch {
+    border-left: 2px solid var(--ctp-surface1);
+    padding-left: 0.6rem;
+  }
+
+  .hati-branch-header {
+    margin-bottom: 0.15rem;
+  }
+
+  .hati-branch-body {
+    padding-left: 0.2rem;
   }
 </style>
