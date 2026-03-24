@@ -163,6 +163,8 @@
   let analyzing = $state(false)
   let analysisDuration = $state(0)
   let analysisStatsInfo = $state<AnalysisStats | null>(null)
+  let analysisCached = $state(false)
+  let analysisTotalElapsed = $state(0)
   let analysisStart = 0
   let survivorInfo = $state({ alive: 0, total: 0 })
   let deadSeats: Set<number> = $state(new Set())
@@ -183,6 +185,25 @@
   let assumptions: Map<number, SystemRole> = $state(new Map())
   let gmorkResult = $state('')
   let baseAnalysisSeats: SeatResult[] = []
+  // Retar結果キャッシュ: 行番号 → {hash, cached}
+  let analysisCache = new Map<number, { hash: string, cached: SeatResult[], stats: AnalysisStats | null }>()
+
+  function computeAnalysisHash(text: string, line: number, assumptionsMap: Map<number, SystemRole>): string {
+    // カーソル位置で巻いたテキスト + assumptions のハッシュ
+    const lines = text.split('\n')
+    const effective = lines.slice(0, line).join('\n')
+    let h = 0x811c9dc5 // FNV-1a offset basis
+    for (let i = 0; i < effective.length; i++) {
+      h ^= effective.charCodeAt(i)
+      h = Math.imul(h, 0x01000193)
+    }
+    // assumptions をハッシュに混ぜる
+    for (const [seat, role] of assumptionsMap) {
+      h ^= seat * 31 + role.length
+      h = Math.imul(h, 0x01000193)
+    }
+    return (h >>> 0).toString(36)
+  }
   let currentSetup: Map<SystemRole, number> = $state(new Map())
   let skin: Skin = $state(settings.skin)
   let devMode = $state(settings.devMode)
@@ -663,6 +684,7 @@
   }
 
   function run() {
+    const runStart = performance.now()
     analysisSeats = []
     analysisError = ''
     if (assumptions.size === 0) gmorkResult = ''
@@ -684,10 +706,20 @@
       if (editorView) {
         const stmtInfo: StatementInfo[] = statements.map((s: any) => ({ type: s.type, line: s.line }))
         const playerNameInfos = buildPlayerNames(statements, dict, editorView.state.doc.toString())
-        const playerList: { name: string, shortName?: string, aliases: string[] }[] = []
+        const playerList: { name: string, shortName?: string, aliases: string[], surviving: boolean }[] = []
+        let seat = 1
         for (const s of statements) {
-          if (s.type === 'join') playerList.push({ name: s.name, shortName: s.shortName, aliases: s.aliases })
-          else if (s.type === 'joinMulti') for (const p of s.players) playerList.push({ name: p, aliases: [] })
+          if (s.type === 'join') {
+            const surviving = vs.statuses.get(seat)?.surviving ?? true
+            playerList.push({ name: s.name, shortName: s.shortName, aliases: s.aliases, surviving })
+            seat++
+          } else if (s.type === 'joinMulti') {
+            for (const p of s.players) {
+              const surviving = vs.statuses.get(seat)?.surviving ?? true
+              playerList.push({ name: p, aliases: [], surviving })
+              seat++
+            }
+          }
         }
         editorView.dispatch({ effects: [
           editorModule!.setStatements.of({ statements: stmtInfo, cursorLine: getCursorLine(), playerNames: playerNameInfos }),
@@ -730,16 +762,35 @@
         value instanceof Map ? Object.fromEntries(value) : value
       , 2)
 
+      // キャッシュチェック: 同じ行で同じテキスト+assumptionsならRetar再計算をスキップ
+      const cacheKey = cursorLine
+      const cacheHash = computeAnalysisHash(input, cursorLine, assumptions)
+      const cached = analysisCache.get(cacheKey)
+      if (cached && cached.hash === cacheHash) {
+        analysisSeats = cached.cached
+        analysisError = ''
+        analysisStatsInfo = cached.stats
+        analysisCached = true
+        analysisTotalElapsed = Math.round(performance.now() - runStart)
+        if (assumptions.size === 0) baseAnalysisSeats = cached.cached
+        analyzing = false
+        return
+      }
+
       analyzing = true
+      analysisCached = false
       analysisStart = performance.now()
       requestAnalysis(workerPayload, (data) => {
         analyzing = false
         analysisDuration = Math.round(performance.now() - analysisStart)
+        analysisTotalElapsed = Math.round(performance.now() - runStart)
         if (data.type === 'result') {
           analysisSeats = data.seats
           analysisError = ''
           analysisStatsInfo = data.stats
           if (assumptions.size === 0) baseAnalysisSeats = data.seats
+          // キャッシュに保存
+          analysisCache.set(cacheKey, { hash: cacheHash, cached: data.seats, stats: data.stats })
         } else {
           analysisSeats = []
           analysisError = data.message
@@ -870,7 +921,9 @@
                   {/each}
                 </tbody>
               </table>
-              {#if analysisDuration > 0}
+              {#if analysisCached}
+                <div class="analysis-duration">analysed in {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms){/if} (cached)</div>
+              {:else if analysisDuration > 0}
                 <div class="analysis-duration">analysed in {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms){/if}</div>
               {/if}
             </div>

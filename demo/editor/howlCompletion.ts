@@ -174,6 +174,7 @@ export type PlayerEntry = {
   name: string          // メイン名 (補完時に挿入される)
   shortName?: string    // 短縮名 (あれば優先して挿入)
   aliases: string[]     // エイリアス (検索用のみ)
+  surviving: boolean    // 生存中かどうか
 }
 
 export const setPlayerList = StateEffect.define<PlayerEntry[]>()
@@ -430,9 +431,15 @@ function filterByCategories(candidates: HowlCandidate[], categories: Category[])
   return candidates.filter(c => categories.includes(c.category))
 }
 
-/** ←行から除外すべき名前 (被投票者 + 既出投票者) を返す */
-function getLeftArrowExclusions(lineText: string): Set<string> {
+/** ←行から除外すべき名前 (被投票者 + 既出投票者 + 死亡者) を返す */
+function getLeftArrowExclusions(lineText: string, players: PlayerEntry[]): Set<string> {
   const excluded = new Set<string>()
+
+  // 死亡者を除外
+  for (const p of players) {
+    if (!p.surviving) excluded.add(p.shortName || p.name)
+  }
+
   // ← で分割
   const arrowMatch = lineText.match(new RegExp(V.leftArrow))
   if (!arrowMatch || arrowMatch.index === undefined) return excluded
@@ -490,7 +497,7 @@ const howlCompletionSource: CompletionSource = (context) => {
 
     // ←行: 被投票者と既出投票者を除外
     if (leftArrowRe.test(beforeCursor)) {
-      const excluded = getLeftArrowExclusions(line.text)
+      const excluded = getLeftArrowExclusions(line.text, players)
       if (excluded.size > 0) {
         filtered = filtered.filter(c => !excluded.has(c.label))
       }
@@ -538,7 +545,7 @@ const howlCompletionSource: CompletionSource = (context) => {
 
   // ←行: 被投票者と既出投票者を除外
   if (leftArrowRe.test(beforeWord)) {
-    const excluded = getLeftArrowExclusions(line.text)
+    const excluded = getLeftArrowExclusions(line.text, players)
     if (excluded.size > 0) {
       candidates = candidates.filter(c => !excluded.has(c.label))
     }
