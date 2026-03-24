@@ -1,17 +1,55 @@
 import type { LupaConfig, GameState, GameEvent, NightAction, DayClaim } from './types.ts'
 import type { SystemRole } from '../types/index.ts'
+import type { Strategy, DecisionContext } from './strategy.ts'
+import type { SignalRecord } from './communication.ts'
+import type { Proposal } from './leadership.ts'
 import { Rng } from './random.ts'
 import { RANDOM_NAMES, generateRoleNames } from './names.ts'
 import {
   assignRoles, alivePlayers, getSeerResult,
   killPlayer, checkWinCondition,
 } from './roles.ts'
-import { decideNightAction, decideDayClaim, forceTrueRoleCO, decideForecast, decideVote, resolveVotes } from './ai.ts'
+import { HeuristicStrategy, forceTrueRoleCO, resolveVotes } from './heuristic.ts'
+import { detectCommander } from './leadership.ts'
+import { analyzeFromEvents as retarAnalyze, analyzeCurrentCOImpact } from './retar-bridge.ts'
 
 export type GameResult = {
   events: GameEvent[]
   state: GameState
   config: LupaConfig
+}
+
+const defaultStrategy = new HeuristicStrategy()
+
+function getStrategy(config: LupaConfig, seat: number): Strategy {
+  return config.strategies?.get(seat) ?? defaultStrategy
+}
+
+function buildContext(
+  state: GameState, player: typeof state.players[0],
+  events: GameEvent[], rng: Rng,
+  signals: SignalRecord[], proposals: Proposal[],
+  lastExecutedSeat: number | null,
+  retarPossibilities: Map<number, Set<SystemRole>> | null = null,
+  retarWhatIfPossibilities: Map<number, Set<SystemRole>> | null = null,
+): DecisionContext {
+  return {
+    mySeat: player.seat,
+    myRole: player.role,
+    myPlayer: player,
+    day: state.day,
+    phase: state.phase,
+    alivePlayers: alivePlayers(state).map(p => p.seat),
+    publicEvents: events,
+    signals,
+    commander: state.commander,
+    proposals,
+    rng,
+    gameState: state,
+    lastExecutedSeat,
+    retarPossibilities,
+    retarWhatIfPossibilities,
+  }
 }
 
 export function runGame(config: LupaConfig): GameResult {
@@ -44,13 +82,19 @@ export function runGame(config: LupaConfig): GameResult {
     finished: false,
     result: null,
     executionHistory: new Map(),
+    commander: null,
+    masonPartners: new Map(),
   }
 
   const events: GameEvent[] = []
+  const signals: SignalRecord[] = []
+  const proposals: Proposal[] = []
 
   // Night 0: 全員に夜アクションを問い合わせ
   for (const player of players) {
-    const action = decideNightAction(state, player, 0, rng)
+    const strategy = getStrategy(config, player.seat)
+    const ctx = buildContext(state, player, events, rng, signals, proposals, null)
+    const action = strategy.decideNightAction(ctx)
     applyNightAction(state, player, 0, action)
   }
 
@@ -92,7 +136,9 @@ export function runGame(config: LupaConfig): GameResult {
 
       const actions: Array<{ player: typeof players[0], action: NightAction }> = []
       for (const player of alivePlayers(state)) {
-        const action = decideNightAction(state, player, night, rng)
+        const strategy = getStrategy(config, player.seat)
+        const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat)
+        const action = strategy.decideNightAction(ctx)
         actions.push({ player, action })
       }
 
@@ -113,9 +159,29 @@ export function runGame(config: LupaConfig): GameResult {
     // ==== 昼フェーズ ====
     state.phase = 'day'
 
+    // ==== CO前Retar分析（人外向けWhat-Ifを含む） ====
+    let preCoRetar: Map<number, Set<SystemRole>> | null = null
+    const whatIfByPlayer = new Map<number, Map<number, Set<SystemRole>>>()
+    if (config.enableRetar) {
+      preCoRetar = retarAnalyze(events, state, config)
+      // 人外で未COのプレイヤーに占いCOシミュレーション
+      const wolfRoles = new Set(['werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist'])
+      for (const player of alivePlayers(state)) {
+        if (wolfRoles.has(player.role) && player.claimedRole === null) {
+          const impact = analyzeCurrentCOImpact(events, state, config, player.seat)
+          if (impact.ifSeerCO) {
+            whatIfByPlayer.set(player.seat, impact.ifSeerCO)
+          }
+        }
+      }
+    }
+
     // COフェーズ
     for (const player of alivePlayers(state)) {
-      const claim = decideDayClaim(state, player, day, lastExecutedSeat, rng)
+      const strategy = getStrategy(config, player.seat)
+      const whatIf = whatIfByPlayer.get(player.seat) ?? null
+      const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar, whatIf)
+      const claim = strategy.decideDayClaim(ctx)
       applyClaim(state, player, day, claim, events)
     }
 
@@ -130,9 +196,78 @@ export function runGame(config: LupaConfig): GameResult {
       applyClaim(state, player, day, forced, events)
     }
 
+    // ==== CO後Retar分析（シグナル/投票用） ====
+    let retarPossibilities: Map<number, Set<SystemRole>> | null = null
+    if (config.enableRetar) {
+      retarPossibilities = retarAnalyze(events, state, config)
+    }
+
+    // ==== シグナルフェーズ ====
+    // 指揮者判定
+    state.commander = detectCommander(state)
+    if (state.commander !== null) {
+      events.push({ type: 'commander_appointed', seat: state.commander })
+    }
+
+    // 当日シグナルをリセット
+    const daySignals: SignalRecord[] = []
+    let signalIdCounter = signals.length
+
+    // 指揮者提案
+    const dayProposals: Proposal[] = []
+    if (state.commander !== null) {
+      const commander = state.players.find(p => p.seat === state.commander)!
+      if (commander.alive) {
+        const strategy = getStrategy(config, commander.seat)
+        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        const proposal = strategy.decideProposal(ctx)
+        if (proposal) {
+          dayProposals.push(proposal)
+          events.push({ type: 'proposal', actor: commander.seat, proposal })
+
+          // 他プレイヤーの応答
+          for (const player of alivePlayers(state)) {
+            if (player.seat === state.commander) continue
+            const pStrategy = getStrategy(config, player.seat)
+            const pCtx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+            const response = pStrategy.decideLeadershipResponse(pCtx, proposal)
+            events.push({ type: 'leadership_response', actor: player.seat, response })
+          }
+        }
+      }
+    }
+
+    // シグナルラウンド1
+    for (const player of alivePlayers(state)) {
+      const strategy = getStrategy(config, player.seat)
+      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+      const signal = strategy.decideCommunication(ctx)
+      const record: SignalRecord = { id: signalIdCounter++, sender: player.seat, day, signal }
+      daySignals.push(record)
+      signals.push(record)
+      if (signal.type !== 'no_signal') {
+        events.push({ type: 'signal', actor: player.seat, signal })
+      }
+    }
+
+    // シグナルラウンド2
+    for (const player of alivePlayers(state)) {
+      const strategy = getStrategy(config, player.seat)
+      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+      const signal = strategy.decideCommunication(ctx)
+      const record: SignalRecord = { id: signalIdCounter++, sender: player.seat, day, signal }
+      daySignals.push(record)
+      signals.push(record)
+      if (signal.type !== 'no_signal') {
+        events.push({ type: 'signal', actor: player.seat, signal })
+      }
+    }
+
     // 予告フェーズ
     for (const player of alivePlayers(state)) {
-      const forecast = decideForecast(state, player, rng)
+      const strategy = getStrategy(config, player.seat)
+      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+      const forecast = strategy.decideForecast(ctx)
       if (forecast.type === 'forecast') {
         player.forecastTarget = forecast.target
         events.push({ type: 'forecast', actor: player.seat, target: forecast.target })
@@ -149,9 +284,14 @@ export function runGame(config: LupaConfig): GameResult {
       const votes = new Map<number, number>()
       const voters = alivePlayers(state)
       for (const voter of voters) {
-        const target = revoteCandidates
-          ? revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
-          : decideVote(state, voter, rng)
+        let target: number
+        if (revoteCandidates) {
+          target = revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
+        } else {
+          const strategy = getStrategy(config, voter.seat)
+          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+          target = strategy.decideVote(ctx)
+        }
         votes.set(voter.seat, target)
         events.push({ type: 'vote', voter: voter.seat, target })
       }
@@ -193,8 +333,14 @@ export function runGame(config: LupaConfig): GameResult {
       }
     }
 
-    // 処刑後: 背徳者後追いチェック（処刑・猫又道連れ等いかなる理由でも狐が死亡したら発動）
+    // 処刑後: 背徳者後追いチェック
     checkImmoralistFollow(state, events)
+
+    // 指揮者が死亡した場合のリセット
+    if (state.commander !== null) {
+      const cmd = state.players.find(p => p.seat === state.commander)
+      if (cmd && !cmd.alive) state.commander = null
+    }
 
     checkWinCondition(state)
     if (state.finished) {
@@ -317,11 +463,9 @@ function resolveNight(
 
 /** 妖狐死亡時の背徳者後追いチェック */
 function checkImmoralistFollow(state: GameState, events: GameEvent[]): void {
-  // 生存妖狐がいるかチェック
   const aliveHamsters = state.players.filter(p => p.role === 'werehamster' && p.alive)
   if (aliveHamsters.length > 0) return
 
-  // 全妖狐が死亡 → 生存背徳者を後追い
   const aliveImmoralists = state.players.filter(p => p.role === 'immoralist' && p.alive)
   for (const imm of aliveImmoralists) {
     killPlayer(state, imm.seat)
@@ -360,6 +504,9 @@ function applyClaim(
       player.claimedRole = 'mason'
       player.claimedDay = day
       events.push({ type: 'mason_claim', actor: player.seat, partner: claim.partner })
+      // masonPartnersを記録
+      if (!state.masonPartners) state.masonPartners = new Map()
+      state.masonPartners.set(player.seat, claim.partner)
       break
     case 'nekomata_co':
       player.claimedRole = 'nekomata'

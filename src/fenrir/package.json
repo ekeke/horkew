@@ -1,0 +1,11 @@
+{
+  "name": "fenrir",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "train": "node --experimental-strip-types src/cli.ts",
+    "eval": "node --experimental-strip-types src/evaluate.ts",
+    "play": "node --experimental-strip-types src/play.ts",
+    "test": "node --experimental-strip-types --test src/**/*.test.ts"
+  }
+}

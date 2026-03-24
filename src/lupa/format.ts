@@ -179,6 +179,12 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
         lines.push(`${playerName(event.seat)}＝${ROLE_DISPLAY[event.role]}`)
         break
       }
+      // 新プロトコルイベント（howl出力では無視）
+      case 'signal':
+      case 'commander_appointed':
+      case 'proposal':
+      case 'leadership_response':
+        break
     }
 
     lastType = event.type

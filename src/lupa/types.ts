@@ -1,4 +1,6 @@
 import type { SystemRole, EnumSpecies } from '../types/index.ts'
+import type { Strategy } from './strategy.ts'
+import type { Signal } from './communication.ts'
 
 export type LupaConfig = {
   roles: Map<SystemRole, number>
@@ -6,6 +8,10 @@ export type LupaConfig = {
   verify?: boolean
   useRandomNames?: boolean
   hasFirstGhost?: boolean
+  /** プレイヤーごとの戦略（未指定はHeuristicStrategy） */
+  strategies?: Map<number, Strategy>
+  /** Retar論理推論を有効化（昼CO後に自動実行） */
+  enableRetar?: boolean
 }
 
 export type PlayerState = {
@@ -33,6 +39,10 @@ export type GameState = {
   result: 'villager_won' | 'werewolf_won' | 'werehamster_won' | null
   /** 処刑履歴: day → seat */
   executionHistory: Map<number, number>
+  /** 現在の指揮者 (seat) */
+  commander: number | null
+  /** 共有CO時のpartner記録: seat → partnerSeat */
+  masonPartners?: Map<number, number>
 }
 
 export type NightAction =
@@ -72,3 +82,7 @@ export type GameEvent =
   | { type: 'comment', text: string }
   | { type: 'game_over', result: 'villager_won' | 'werewolf_won' | 'werehamster_won' }
   | { type: 'reveal', seat: number, role: SystemRole }
+  | { type: 'signal', actor: number, signal: Signal }
+  | { type: 'commander_appointed', seat: number }
+  | { type: 'proposal', actor: number, proposal: import('./leadership.ts').Proposal }
+  | { type: 'leadership_response', actor: number, response: import('./leadership.ts').LeadershipResponse }
