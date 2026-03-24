@@ -47,8 +47,8 @@ export function formatStrategy(node: StrategyNode, indent: number = 0): string {
 
 function formatObservationKey(key: string): string {
   return key
-    .replace(/^m:wolf$/, '霊媒●')
-    .replace(/^m:human$/, '霊媒○')
+    .replace(/^m:wolf$/, '●の場合')
+    .replace(/^m:human$/, '○の場合')
     .replace(/^peace$/, '平和')
     .replace(/^d:/, '死亡:')
     .replace(/\|s:wolf$/, ' 占い●')

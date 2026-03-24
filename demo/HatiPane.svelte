@@ -57,9 +57,9 @@
 
   function formatObsKey(key: string): string {
     return key
-      .replace(/^m:wolf/, '霊媒●')
-      .replace(/^m:human/, '霊媒○')
-      .replace(/^m:null/, '霊媒?')
+      .replace(/^m:wolf/, '●の場合')
+      .replace(/^m:human/, '○の場合')
+      .replace(/^m:null/, '?の場合')
       .replace(/^peace$/, '平和')
       .replace(/^d:([\d,]+)/, (_, seats: string) =>
         seats.split(',').map((s: string) => `${playerName(Number(s))}死亡`).join(' ')
