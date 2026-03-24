@@ -41,13 +41,16 @@
     tableGroups.flatMap(g => g.rows.map(row => buildAssertionTimeline(row, maxDay, players)))
   )
 
-  // Max day extended by forecasts (forecast on day D targets night D, displayed in column D+1)
+  // Max day extended by forecasts and death markers
   let maxDayExtended = $derived.by(() => {
     let m = maxDay
     for (const group of tableGroups) {
       for (const row of group.rows) {
         for (const night of row.forecasts.keys()) {
           if (night + 1 > m) m = night + 1
+        }
+        if (!row.surviving && row.diedDay !== undefined && row.diedDay + 1 > m) {
+          m = row.diedDay + 1
         }
       }
     }
@@ -61,6 +64,7 @@
         const d = deathByDay.get(day)
         if (d && (d.executions.length > 0 || d.nightKills.length > 0)) return true
         if (allTimelines.some(t => t.has(day - 1))) return true
+        if (tableGroups.some(g => g.rows.some(r => !r.surviving && r.diedDay === day - 1))) return true
         return false
       })
   )
@@ -129,8 +133,8 @@
             <td class="name-cell"><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} seat={row.seat}>{row.name}</PlayerName></td>
             {#each dayColumns as day}
               {@const assertion = timeline.get(day - 1) ?? null}
-              <td class="data-cell" class:human={assertion?.species === 'human' && !assertion?.forecast} class:wolf={assertion?.species === 'wolf' && !assertion?.forecast} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:forecast={assertion?.forecast} class:active-hl-cell={$srcLines.claimCell.get(`${row.seat}:${day - 1}`) === $cursor}>
-                {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="forecast-label">(予)</span>{:else if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{/if}
+              <td class="data-cell" class:human={assertion?.species === 'human' && !assertion?.forecast} class:wolf={assertion?.species === 'wolf' && !assertion?.forecast} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:forecast={assertion?.forecast} class:death-marker={!assertion && !row.surviving && row.diedDay === day - 1} class:active-hl-cell={$srcLines.claimCell.get(`${row.seat}:${day - 1}`) === $cursor}>
+                {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="forecast-label">(予)</span>{:else if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{:else if !row.surviving && row.diedDay === day - 1}<span class="death-marker-label">（{causeOfDeathLabel(row.causeOfDeath)}死）</span>{/if}
               </td>
             {/each}
           </tr>
@@ -242,6 +246,14 @@
   }
 
   .forecast-label {
+    font-size: 10px;
+  }
+
+  .death-marker {
+    color: var(--color-text-faint);
+  }
+
+  .death-marker-label {
     font-size: 10px;
   }
 

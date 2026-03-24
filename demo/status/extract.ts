@@ -31,6 +31,8 @@ export type ClaimRow = {
   actions: PlayerAction
   forecasts: Map<number, number>
   surviving: boolean
+  causeOfDeath: CauseOfDeath
+  diedDay: number | undefined
 }
 
 export type ClaimGroup = {
@@ -159,6 +161,8 @@ export function extractClaimGroups(vs: VillageStatus, players: Map<number, strin
       actions: status.actions,
       forecasts: status.forecasts,
       surviving: status.surviving,
+      causeOfDeath: status.causeOfDeath,
+      diedDay: status.diedDay,
     })
   }
 
