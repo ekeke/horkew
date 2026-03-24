@@ -188,10 +188,12 @@
   // Retar結果キャッシュ: 行番号 → {hash, cached}
   let analysisCache = new Map<number, { hash: string, cached: SeatResult[], stats: AnalysisStats | null }>()
 
-  function computeAnalysisHash(text: string, line: number, assumptionsMap: Map<number, SystemRole>): string {
+  function computeAnalysisHash(text: string, line: number, assumptionsMap: Map<number, SystemRole>): { key: number, hash: string } {
     // カーソル位置で巻いたテキスト + assumptions のハッシュ
     const lines = text.split('\n')
-    const effective = lines.slice(0, line).join('\n')
+    let end = line
+    while (end > 0 && lines[end - 1].trim() === '') end--
+    const effective = lines.slice(0, end).join('\n')
     let h = 0x811c9dc5 // FNV-1a offset basis
     for (let i = 0; i < effective.length; i++) {
       h ^= effective.charCodeAt(i)
@@ -202,7 +204,7 @@
       h ^= seat * 31 + role.length
       h = Math.imul(h, 0x01000193)
     }
-    return (h >>> 0).toString(36)
+    return { key: end, hash: (h >>> 0).toString(36) }
   }
   let currentSetup: Map<SystemRole, number> = $state(new Map())
   let skin: Skin = $state(settings.skin)
@@ -763,8 +765,7 @@
       , 2)
 
       // キャッシュチェック: 同じ行で同じテキスト+assumptionsならRetar再計算をスキップ
-      const cacheKey = cursorLine
-      const cacheHash = computeAnalysisHash(input, cursorLine, assumptions)
+      const { key: cacheKey, hash: cacheHash } = computeAnalysisHash(input, cursorLine, assumptions)
       const cached = analysisCache.get(cacheKey)
       if (cached && cached.hash === cacheHash) {
         analysisSeats = cached.cached
@@ -922,9 +923,9 @@
                 </tbody>
               </table>
               {#if analysisCached}
-                <div class="analysis-duration">analysed in {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms){/if} (cached)</div>
+                <div class="analysis-duration">total {analysisTotalElapsed}ms (cached) — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms){/if}</div>
               {:else if analysisDuration > 0}
-                <div class="analysis-duration">analysed in {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms){/if}</div>
+                <div class="analysis-duration">total {analysisTotalElapsed}ms — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms){/if}</div>
               {/if}
             </div>
             {#if gmorkResult}
