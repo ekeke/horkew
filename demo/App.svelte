@@ -189,14 +189,20 @@
   let analysisCache = new Map<number, { hash: string, cached: SeatResult[], stats: AnalysisStats | null }>()
 
   function computeAnalysisHash(text: string, line: number, assumptionsMap: Map<number, SystemRole>): { key: number, hash: string } {
-    // カーソル位置で巻いたテキスト + assumptions のハッシュ
-    const lines = text.split('\n')
-    let end = line
-    while (end > 0 && lines[end - 1].trim() === '') end--
-    const effective = lines.slice(0, end).join('\n')
+    // カーソル位置で巻いたテキスト（空行・末尾空白・コメント行を除去）+ assumptions のハッシュ
+    const rawLines = text.split('\n').slice(0, line)
     let h = 0x811c9dc5 // FNV-1a offset basis
-    for (let i = 0; i < effective.length; i++) {
-      h ^= effective.charCodeAt(i)
+    let effectiveLines = 0
+    for (const raw of rawLines) {
+      const trimmed = raw.trim()
+      if (trimmed.length === 0 || trimmed.startsWith('#')) continue
+      effectiveLines++
+      for (let i = 0; i < trimmed.length; i++) {
+        h ^= trimmed.charCodeAt(i)
+        h = Math.imul(h, 0x01000193)
+      }
+      // 行区切りをハッシュに混ぜる
+      h ^= 0x0a
       h = Math.imul(h, 0x01000193)
     }
     // assumptions をハッシュに混ぜる
@@ -204,7 +210,7 @@
       h ^= seat * 31 + role.length
       h = Math.imul(h, 0x01000193)
     }
-    return { key: end, hash: (h >>> 0).toString(36) }
+    return { key: effectiveLines, hash: (h >>> 0).toString(36) }
   }
   let currentSetup: Map<SystemRole, number> = $state(new Map())
   let skin: Skin = $state(settings.skin)
