@@ -81,6 +81,18 @@ function isTsumi(
   const key = memoKey(worlds, state.alive)
   if (ss.memo.has(key)) return ss.memo.get(key)!
 
+  // 自明な詰み: 生存者中の狼候補が1人だけなら即処刑で勝ち
+  const trivial = findTrivialTsumi(worlds, state.alive)
+  if (trivial !== null) {
+    const result: StrategyNode = {
+      type: 'action',
+      action: { execute: trivial, bodyguardTarget: null, seerTarget: null },
+      branches: { 'win': { type: 'win' } },
+    }
+    ss.memo.set(key, result)
+    return result
+  }
+
   // パリティ事前チェック: 最善ケースでもパリティ負けなら即不可
   if (!canPossiblyWin(worlds, state.alive)) {
     ss.memo.set(key, null)
@@ -100,6 +112,23 @@ function isTsumi(
 
   ss.memo.set(key, null)
   return null
+}
+
+/**
+ * 自明な詰み判定: 全ワールドで生存中の狼候補が1人だけなら、その席を処刑して即勝ち。
+ * 妖狐が生存している可能性がある場合は自明でない（狼全滅で狐勝ちになりうる）。
+ */
+function findTrivialTsumi(worlds: World[], alive: Set<Seat>): Seat | null {
+  const wolfCandidates = new Set<Seat>()
+  for (const w of worlds) {
+    for (const seat of alive) {
+      if (w.wolfSeats.has(seat)) wolfCandidates.add(seat)
+    }
+    // 妖狐が生存しうる場合は自明でない（処刑後に狐勝ちの可能性）
+    if (w.hamsterSeat !== -1 && alive.has(w.hamsterSeat)) return null
+  }
+  if (wolfCandidates.size !== 1) return null
+  return wolfCandidates.values().next().value!
 }
 
 /**

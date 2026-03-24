@@ -37,9 +37,13 @@ export function formatStrategy(node: StrategyNode, indent: number = 0): string {
   }
 
   for (const [obsKey, child] of Object.entries(node.branches)) {
-    const obsLabel = formatObservationKey(obsKey)
-    lines.push(`${pad}  [${obsLabel}]`)
-    lines.push(formatStrategy(child, indent + 2))
+    if (obsKey === 'win') {
+      lines.push(formatStrategy(child, indent + 1))
+    } else {
+      const obsLabel = formatObservationKey(obsKey)
+      lines.push(`${pad}  [${obsLabel}]`)
+      lines.push(formatStrategy(child, indent + 2))
+    }
   }
 
   return lines.join('\n')

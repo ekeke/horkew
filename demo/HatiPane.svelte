@@ -116,7 +116,9 @@
             {#if Object.keys(node.branches).length === 1}
               {@const [key, child] = Object.entries(node.branches)[0]}
               <div class="hati-branch-inline">
-                <span class="hati-obs">{formatObsKey(key)}</span>
+                {#if key !== 'win'}
+                  <span class="hati-obs">{formatObsKey(key)}</span>
+                {/if}
                 <span class="hati-arrow">→</span>
                 {@render strategyNode(child, depth + 1)}
               </div>

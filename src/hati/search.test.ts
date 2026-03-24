@@ -312,6 +312,46 @@ describe('Hati searchTsumi', () => {
     })
   })
 
+  describe('trivial tsumi shortcut', () => {
+    it('5人1狼: 狼が確定 → 分岐なしの簡潔な出力', () => {
+      // 全ワールドで7が狼 → 処刑 7 → win のみ
+      const worlds = [
+        makeWorld({ 1: 'seer', 2: 'villager', 3: 'villager', 4: 'mason', 5: 'mason' }),
+      ]
+      // seat 3 is the only non-confirmed → but all worlds agree seat 3 is villager
+      // Actually let's make 3 the wolf:
+      const worlds2 = [
+        makeWorld({ 1: 'seer', 2: 'villager', 3: 'werewolf', 4: 'mason', 5: 'mason' }),
+      ]
+      const alive = new Set([1, 2, 3, 4, 5])
+      const result = searchTsumiDirect(worlds2, alive)
+      assert.equal(result.isTsumi, true)
+      assert.notEqual(result.strategy, null)
+      if (result.strategy?.type === 'action') {
+        assert.equal(result.strategy.action.execute, 3)
+        // branches should have only 'win', no night observation branches
+        const keys = Object.keys(result.strategy.branches)
+        assert.equal(keys.length, 1)
+        assert.equal(keys[0], 'win')
+      }
+    })
+
+    it('5人1狼: 2候補 → 分岐ありだがショートカットで最終日は簡潔', () => {
+      // 狼は1か2のどちらか。処刑→○→翌日もう1人を処刑
+      // 翌日の状態では狼候補が1人に絞られる → trivial shortcut適用
+      const worlds = [
+        makeWorld({ 1: 'werewolf', 2: 'villager', 3: 'villager', 4: 'mason', 5: 'mason' }),
+        makeWorld({ 1: 'villager', 2: 'werewolf', 3: 'villager', 4: 'mason', 5: 'mason' }),
+      ]
+      const alive = new Set([1, 2, 3, 4, 5])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, true)
+      // Print for visual inspection
+      const text = formatTsumiResult(result)
+      console.log(text)
+    })
+  })
+
   describe('format', () => {
     it('戦略木をフォーマットできる', () => {
       const worlds = [
