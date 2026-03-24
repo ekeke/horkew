@@ -3,3 +3,5 @@ demo/dist/
 .claude/*.local.*
 tasks/
 tmp/
+z-ai/*
+z-ai/
