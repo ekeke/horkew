@@ -208,39 +208,48 @@ const setupField = StateField.define<Map<string, number>>({
 
 type Category = 'player' | 'role' | 'action' | 'arrow' | 'co_role' | 'denial_co_role' | 'standalone' | 'result' | 'gameresult'
 
-type HowlCandidate = {
+type HowlCandidateDef = {
   label: string
-  romaji: string
+  reading: string            // カナ読み (kanaToRomajiで自動変換) またはASCII
   type: string
   category: Category
   categoryLabel: string
-  terminal: boolean  // true = チェーン終了 (スペース挿入しない)
-  requiredRole?: SystemRole  // この役職が配役にない場合、候補から除外
-  info?: string              // 候補選択時に表示する補足情報
+  terminal: boolean
+  requiredRole?: SystemRole
+  info?: string
+}
+
+type HowlCandidate = HowlCandidateDef & {
+  romaji: string             // reading から自動生成
+}
+
+function buildStaticCandidates(defs: HowlCandidateDef[]): HowlCandidate[] {
+  return defs.map(d => ({ ...d, romaji: kanaToRomaji(d.reading) }))
 }
 
 // ---- 静的候補 ----
 
-const roleCandidates: HowlCandidate[] = [
-  { label: '占い師', romaji: 'uranaishi', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'seer' },
-  { label: '霊媒師', romaji: 'reibaishi', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'medium' },
-  { label: '狩人',   romaji: 'kariudo',   type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'bodyguard' },
-  { label: '共有者', romaji: 'kyouyuusha', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'mason' },
-  { label: '猫又',   romaji: 'nekomata',  type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'nekomata' },
-  { label: '人狼',   romaji: 'jinrou',    type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'werewolf' },
-  { label: '狂人',   romaji: 'kyoujin',   type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'possessed' },
-  { label: '狂信者', romaji: 'kyoushinsha', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'fanatic' },
-  { label: '妖狐',   romaji: 'youko',     type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'werehamster' },
-  { label: '背徳者', romaji: 'haitokusha', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'immoralist' },
-  { label: '村人',   romaji: 'murabito',  type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'villager' },
-]
+const roleCandidates = buildStaticCandidates([
+  { label: '占い師', reading: 'うらないし', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'seer' },
+  { label: '霊媒師', reading: 'れいばいし', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'medium' },
+  { label: '狩人',   reading: 'かりうど',   type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'bodyguard' },
+  { label: '共有者', reading: 'きょうゆうしゃ', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'mason' },
+  { label: '猫又',   reading: 'ねこまた',  type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'nekomata' },
+  { label: '人狼',   reading: 'じんろう',    type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'werewolf' },
+  { label: '狂人',   reading: 'きょうじん',   type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'possessed' },
+  { label: '狂信者', reading: 'きょうしんしゃ', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'fanatic' },
+  { label: '妖狐',   reading: 'ようこ',     type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'werehamster' },
+  { label: '背徳者', reading: 'はいとくしゃ', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'immoralist' },
+  { label: '村人',   reading: 'むらびと',  type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'villager' },
+])
 
 // 役職名CO 結合候補 (プレイヤー名の後に直接補完)
 // Howl文法: `占い師CO` (役職名が先、COが後)
 const coRoleCandidates: HowlCandidate[] = roleCandidates.flatMap(r => [
   {
     label: `${r.label}CO`,
-    romaji: r.romaji.split('\0').map(rom => `${rom}co`).join('\0'),
+    reading: `${r.reading}co`,
+    romaji: kanaToRomaji(`${r.reading}co`),
     type: 'keyword',
     category: 'co_role' as Category,
     categoryLabel: 'CO',
@@ -250,7 +259,8 @@ const coRoleCandidates: HowlCandidate[] = roleCandidates.flatMap(r => [
   },
   {
     label: `非${r.label}CO`,
-    romaji: r.romaji.split('\0').map(rom => `hi${rom}co`).join('\0'),
+    reading: `ひ${r.reading}co`,
+    romaji: kanaToRomaji(`ひ${r.reading}co`),
     type: 'keyword',
     category: 'denial_co_role' as Category,
     categoryLabel: '非CO',
@@ -260,47 +270,47 @@ const coRoleCandidates: HowlCandidate[] = roleCandidates.flatMap(r => [
   },
 ])
 
-const actionCandidates: HowlCandidate[] = [
-  { label: '処刑',   romaji: 'shokei',    type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '投票により処刑された' },
-  { label: '吊り',   romaji: 'tsuri\0turi', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '投票により処刑された' },
-  { label: '襲撃',   romaji: 'shuugeki',  type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
-  { label: '噛み',   romaji: 'kami',      type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
-  { label: '死亡',   romaji: 'sibou\0shibou', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
-  { label: '護衛',   romaji: 'goei',      type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard', info: '狩人が護衛した' },
-  { label: 'ガード', romaji: 'ga-do\0gaado', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard', info: '狩人が護衛した' },
-  { label: '道連れ', romaji: 'michizure\0mitizure', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'nekomata', info: '猫又の呪いで道連れ死' },
-  { label: '後追い', romaji: 'atooi',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'immoralist', info: '背徳者が妖狐の死を追って死亡' },
-  { label: '予告',   romaji: 'yokoku',    type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, info: '処刑先を予告する' },
-]
+const actionCandidates = buildStaticCandidates([
+  { label: '処刑',   reading: 'しょけい',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '投票により処刑された' },
+  { label: '吊り',   reading: 'つり',       type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '投票により処刑された' },
+  { label: '襲撃',   reading: 'しゅうげき', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
+  { label: '噛み',   reading: 'かみ',       type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
+  { label: '死亡',   reading: 'しぼう',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, info: '人狼に襲撃された' },
+  { label: '護衛',   reading: 'ごえい',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard', info: '狩人が護衛した' },
+  { label: 'ガード', reading: 'がーど',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'bodyguard', info: '狩人が護衛した' },
+  { label: '道連れ', reading: 'みちづれ',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'nekomata', info: '猫又の呪いで道連れ死' },
+  { label: '後追い', reading: 'あとおい',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: true, requiredRole: 'immoralist', info: '背徳者が妖狐の死を追って死亡' },
+  { label: '予告',   reading: 'よこく',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, info: '処刑先を予告する' },
+])
 
 // 非 は 非役職名CO 結合候補に統合済み
 
-const resultCandidates: HowlCandidate[] = [
-  { label: '○',     romaji: 'maru\0siro\0shiro', type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false, info: '人間 (白判定)' },
-  { label: '●',     romaji: 'kuro',      type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false, info: '人狼 (黒判定)' },
-]
+const resultCandidates = buildStaticCandidates([
+  { label: '○',     reading: 'まる',     type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false, info: '人間 (白判定)' },
+  { label: '●',     reading: 'くろ',     type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false, info: '人狼 (黒判定)' },
+])
 
-const standaloneCandidates: HowlCandidate[] = [
-  { label: '平和',   romaji: 'heiwa',     type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true, info: '夜の襲撃で死者なし' },
-  { label: '再投票', romaji: 'saitouhyou\0saitouhyou', type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true, info: '投票が割れて再投票になった' },
-  { label: 'グレラン', romaji: 'gureran',  type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true, info: 'グレーからランダムに投票' },
-]
+const standaloneCandidates = buildStaticCandidates([
+  { label: '平和',   reading: 'へいわ',       type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true, info: '夜の襲撃で死者なし' },
+  { label: '再投票', reading: 'さいとうひょう', type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true, info: '投票が割れて再投票になった' },
+  { label: 'グレラン', reading: 'ぐれらん',   type: 'keyword', category: 'standalone', categoryLabel: 'アクション', terminal: true, info: 'グレーからランダムに投票' },
+])
 
-const gameResultCandidates: HowlCandidate[] = [
-  { label: '村勝',   romaji: 'murashou\0murakachi', type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true },
-  { label: '狼勝',   romaji: 'ookamishou\0ookamikachi', type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true },
-  { label: '狐勝',   romaji: 'kituneshou\0kitunekachi\0kitsunekachi', type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true, requiredRole: 'werehamster' },
-  { label: '引き分け', romaji: 'hikiwake',  type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true },
-]
+const gameResultCandidates = buildStaticCandidates([
+  { label: '村勝',   reading: 'むらかち',       type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true },
+  { label: '狼勝',   reading: 'おおかみかち',   type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true },
+  { label: '狐勝',   reading: 'きつねかち',     type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true, requiredRole: 'werehamster' },
+  { label: '引き分け', reading: 'ひきわけ',     type: 'keyword', category: 'gameresult', categoryLabel: '結果', terminal: true },
+])
 
-const specialNameCandidates: HowlCandidate[] = [
-  { label: '生存者', romaji: 'seizonsha\0seizonsya', type: 'variable', category: 'player', categoryLabel: 'プレイヤー', terminal: false },
-]
+const specialNameCandidates = buildStaticCandidates([
+  { label: '生存者', reading: 'せいぞんしゃ', type: 'variable', category: 'player', categoryLabel: 'プレイヤー', terminal: false },
+])
 
-const arrowCandidates: HowlCandidate[] = [
-  { label: '→', romaji: '->', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false, info: '投票先を指す' },
-  { label: '←', romaji: '<-', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false, info: '得票者をまとめて記述' },
-]
+const arrowCandidates = buildStaticCandidates([
+  { label: '→', reading: '->', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false, info: '投票先を指す' },
+  { label: '←', reading: '<-', type: 'keyword', category: 'arrow', categoryLabel: '矢印', terminal: false, info: '得票者をまとめて記述' },
+])
 
 const allStaticCandidates = [
   ...roleCandidates, ...coRoleCandidates, ...actionCandidates,
@@ -376,6 +386,7 @@ function buildPlayerCandidates(players: PlayerEntry[]): HowlCandidate[] {
     const allRomaji = allNames.map(n => kanaToRomaji(n))
     return {
       label: displayName,
+      reading: displayName,
       romaji: allRomaji.join('\0'), // \0 区切りで複数ローマ字を保持
       type: 'variable',
       category: 'player' as Category,
