@@ -102,6 +102,8 @@
           {#if node.type === 'win'}
             <span class="hati-win">村勝利</span>
           {:else}
+            {@const entries = Object.entries(node.branches)}
+            {@const isTrivialWin = entries.length === 1 && entries[0][0] === 'win'}
             <div class="hati-action" class:night={node.action.execute === -1}>
               {#if node.action.execute !== -1}
                 <span class="hati-exec">処刑 {playerName(node.action.execute)}</span>
@@ -112,17 +114,19 @@
               {#if node.action.seerTarget !== null}
                 <span class="hati-night-act">占い→{playerName(node.action.seerTarget)}</span>
               {/if}
+              {#if isTrivialWin}
+                <span class="hati-arrow">→</span>
+                <span class="hati-win">村勝利</span>
+              {/if}
             </div>
-            {#if Object.keys(node.branches).length === 1}
-              {@const [key, child] = Object.entries(node.branches)[0]}
+            {#if !isTrivialWin && entries.length === 1}
+              {@const [key, child] = entries[0]}
               <div class="hati-branch-inline">
-                {#if key !== 'win'}
-                  <span class="hati-obs">{formatObsKey(key)}</span>
-                {/if}
+                <span class="hati-obs">{formatObsKey(key)}</span>
                 <span class="hati-arrow">→</span>
                 {@render strategyNode(child, depth + 1)}
               </div>
-            {:else}
+            {:else if !isTrivialWin}
               <div class="hati-branches">
                 {#each Object.entries(node.branches) as [key, child]}
                   <div class="hati-branch">
