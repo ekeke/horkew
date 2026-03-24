@@ -620,9 +620,10 @@
   function addSuggestion(suggestion: WolfPairSuggestion) {
     const group = [suggestion.seatA, suggestion.seatB]
     denyWolfGroups = [...denyWolfGroups, group]
-    if (villageStatus) {
-      wolfPairSuggestions = scoreWolfPairs(villageStatus, players, denyWolfGroups)
-    }
+    // 即座にUIから除外し、run()後にRetar結果で再計算される
+    wolfPairSuggestions = wolfPairSuggestions.filter(s =>
+      !(s.seatA === suggestion.seatA && s.seatB === suggestion.seatB)
+    )
     run()
   }
 
@@ -824,10 +825,6 @@
           .map(([seat]) => seat)
       )
 
-      wolfPairSuggestions = (setup.get('werewolf') ?? 0) >= 2
-        ? scoreWolfPairs(vs, playersMap, denyWolfGroups)
-        : []
-
       const roleOrder = [...systemRoles.keys()] as SystemRole[]
       analysisColumns = roleOrder.filter(r => setup.has(r as SystemRole))
 
@@ -868,6 +865,11 @@
           analysisError = ''
           analysisStatsInfo = data.stats
           if (assumptions.size === 0) baseAnalysisSeats = data.seats
+          // Retar結果から狼候補を抽出し提案を更新
+          const wolfCandidates = new Set(data.seats.filter(s => s.roles.includes('werewolf')).map(s => s.seat))
+          if (villageStatus && (currentSetup.get('werewolf') ?? 0) >= 2) {
+            wolfPairSuggestions = scoreWolfPairs(villageStatus, players, denyWolfGroups, wolfCandidates)
+          }
           // キャッシュに保存
           analysisCache.set(cacheKey, { hash: cacheHash, cached: data.seats, stats: data.stats })
         } else {

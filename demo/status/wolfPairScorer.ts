@@ -24,7 +24,8 @@ function canonicalPair(a: number, b: number): [number, number] {
 export function scoreWolfPairs(
   vs: VillageStatus,
   players: Map<number, string>,
-  existingPairs: number[][]
+  existingPairs: number[][],
+  canBeWolf?: Set<number>
 ): WolfPairSuggestion[] {
   const allSeats = [...players.keys()]
   if (allSeats.length < 2) return []
@@ -125,7 +126,10 @@ export function scoreWolfPairs(
 
   // Filter, sort, return top 3
   return [...scores.values()]
-    .filter(s => s.score > 0 && !existingKeys.has(pairKey(s.seatA, s.seatB)))
+    .filter(s => s.score > 0
+      && !existingKeys.has(pairKey(s.seatA, s.seatB))
+      && (!canBeWolf || (canBeWolf.has(s.seatA) && canBeWolf.has(s.seatB)))
+    )
     .sort((a, b) => b.score - a.score)
     .slice(0, 3)
     .map(({ seatA, seatB, score, reasons }) => ({
