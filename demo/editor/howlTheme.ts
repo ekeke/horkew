@@ -73,4 +73,33 @@ export const howlThemeExtension: Extension = EditorView.theme({
   },
   '.hwl-gutter .cm-gutterElement span': { fontSize: '1em', lineHeight: '1' },
   '.hwg-unknown': { color: 'var(--color-editor-unresolved)' },
+
+  // Autocomplete tooltip
+  '.cm-tooltip.cm-tooltip-autocomplete': {
+    backgroundColor: 'var(--color-surface)',
+    border: '1px solid var(--color-border)',
+    borderRadius: '4px',
+    fontFamily: "'Consolas', 'Menlo', monospace",
+    fontSize: '13px',
+  },
+  '.cm-tooltip-autocomplete ul li': {
+    padding: '2px 8px',
+    color: 'var(--color-text)',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  '.cm-completionDetail': {
+    marginLeft: '1.5em',
+    fontSize: '11px',
+    color: 'var(--color-text-overlay)',
+    fontStyle: 'normal',
+  },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': {
+    backgroundColor: 'var(--ctp-surface1)',
+    color: 'var(--color-text)',
+  },
+  '.cm-completionIcon': {
+    display: 'none',
+  },
 }, { dark: true })

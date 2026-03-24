@@ -1,11 +1,14 @@
 import { EditorState } from '@codemirror/state'
 import { EditorView, drawSelection, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import { completionKeymap } from '@codemirror/autocomplete'
 import { howlLanguageExtension, setStatements, type StatementInfo } from './howlLanguage.ts'
 import { howlThemeExtension } from './howlTheme.ts'
+import { howlCompletionExtension, setPlayerList } from './howlCompletion.ts'
 
 export { EditorView } from '@codemirror/view'
 export { setStatements, type StatementInfo, type HighlightPayload, type PlayerNameInfo } from './howlLanguage.ts'
+export { setPlayerList, type PlayerEntry } from './howlCompletion.ts'
 
 export function createHowlEditor(parent: HTMLElement, opts: {
   doc: string
@@ -21,7 +24,8 @@ export function createHowlEditor(parent: HTMLElement, opts: {
       history(),
       drawSelection(),
       highlightActiveLine(),
-      keymap.of([...defaultKeymap, ...historyKeymap]),
+      howlCompletionExtension,
+      keymap.of([...defaultKeymap, ...historyKeymap, ...completionKeymap]),
       EditorView.updateListener.of(update => {
         if (update.docChanged) {
           opts.onChange(update.state.doc.toString())

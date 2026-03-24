@@ -60,9 +60,11 @@
 //   assertのみ:
 //     claim (CO)             → hw-co     (紫 / CO キーワード)
 //     anyRole                → hw-role   (黄 / 占い, 霊媒, 狩人 等)
+//     ※ プレイヤー名領域と重なるマッチは除外
 //
 //   revealのみ:
 //     anyRole                → hw-role   (黄 / 役職名)
+//     ※ プレイヤー名領域と重なるマッチは除外
 //
 //   unknownのみ:
 //     行全体                 → hwl-unknown-text  (ツールチップ: 「この行はHowl記法として認識できません」)
@@ -281,6 +283,23 @@ function buildDecorations(
     }
   }
 
+  // プレイヤー名の絶対位置範囲を行番号でインデックス化 (Layer 2で役職名マッチの除外に使用)
+  const playerNameRanges = new Map<number, [number, number][]>()
+  for (const pn of playerNames) {
+    if (pn.line < 1 || pn.line > doc.lines) continue
+    const line = doc.line(pn.line)
+    const from = line.from + pn.offset
+    const to = from + pn.length
+    if (from >= line.from && to <= line.to && to > from) {
+      let ranges = playerNameRanges.get(pn.line)
+      if (!ranges) {
+        ranges = []
+        playerNameRanges.set(pn.line, ranges)
+      }
+      ranges.push([from, to])
+    }
+  }
+
   // Layer 1 + 2: Statement行の装飾
   for (const stmt of statements) {
     if (stmt.line < 1 || stmt.line > doc.lines) continue
@@ -312,19 +331,23 @@ function buildDecorations(
       builder.push({ from: f, to: t, deco: markDeco.wolf })
     }
 
-    // assert: CO キーワード + 役職名
+    // assert: CO キーワード + 役職名 (プレイヤー名と重なる範囲は除外)
     if (stmt.type === 'assert') {
       for (const [f, t] of findMatches(coRe, lineText, base)) {
         builder.push({ from: f, to: t, deco: markDeco.co })
       }
+      const nameRanges = playerNameRanges.get(stmt.line)
       for (const [f, t] of findMatches(roleRe, lineText, base)) {
+        if (nameRanges && nameRanges.some(([nf, nt]) => f < nt && t > nf)) continue
         builder.push({ from: f, to: t, deco: markDeco.role })
       }
     }
 
-    // reveal: 役職名
+    // reveal: 役職名 (プレイヤー名と重なる範囲は除外)
     if (stmt.type === 'reveal') {
+      const nameRanges = playerNameRanges.get(stmt.line)
       for (const [f, t] of findMatches(roleRe, lineText, base)) {
+        if (nameRanges && nameRanges.some(([nf, nt]) => f < nt && t > nf)) continue
         builder.push({ from: f, to: t, deco: markDeco.role })
       }
     }

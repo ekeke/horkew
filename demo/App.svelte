@@ -684,7 +684,15 @@
       if (editorView) {
         const stmtInfo: StatementInfo[] = statements.map((s: any) => ({ type: s.type, line: s.line }))
         const playerNameInfos = buildPlayerNames(statements, dict, editorView.state.doc.toString())
-        editorView.dispatch({ effects: editorModule!.setStatements.of({ statements: stmtInfo, cursorLine: getCursorLine(), playerNames: playerNameInfos }) })
+        const playerList: { name: string, shortName?: string, aliases: string[] }[] = []
+        for (const s of statements) {
+          if (s.type === 'join') playerList.push({ name: s.name, shortName: s.shortName, aliases: s.aliases })
+          else if (s.type === 'joinMulti') for (const p of s.players) playerList.push({ name: p, aliases: [] })
+        }
+        editorView.dispatch({ effects: [
+          editorModule!.setStatements.of({ statements: stmtInfo, cursorLine: getCursorLine(), playerNames: playerNameInfos }),
+          editorModule!.setPlayerList.of(playerList),
+        ] })
       }
       cursorLine = getCursorLine()
       players = playersMap
