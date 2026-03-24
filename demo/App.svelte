@@ -14,6 +14,7 @@
   import { scoreWolfPairs, type WolfPairSuggestion } from './status/wolfPairScorer.ts'
   import HelpPanel from './HelpPanel.svelte'
   import ColorSwatchPane from './ColorSwatchPane.svelte'
+  import HatiPane from './HatiPane.svelte'
   import './theme.css'
   import { runGame } from '../src/lupa/engine.ts'
   import { formatHowl } from '../src/lupa/format.ts'
@@ -81,6 +82,7 @@
     { id: 'analyzerInput', label: 'Analyzer Input' },
     { id: 'analysis', label: 'Analysis' },
     { id: 'colorSwatch', label: 'Color Swatch' },
+    { id: 'hati', label: 'Hati (詰み)' },
   ] as const
 
   type PaneId = typeof paneEntries[number]['id']
@@ -93,7 +95,7 @@
     panes: Record<PaneId, boolean>
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true }
+  const defaultPanes: Record<PaneId, boolean> = { rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: false, panes: { ...defaultPanes } }
@@ -1124,6 +1126,15 @@
       <div class="pane-header">Color Swatch</div>
       <div class="pane-body">
         <ColorSwatchPane />
+      </div>
+    </section>
+    {/if}
+
+    {#if paneVisible.hati}
+    <section class="pane">
+      <div class="pane-header">Hati (詰み探索)</div>
+      <div class="pane-body">
+        <HatiPane vs={villageStatus} setup={currentSetup} {players} />
       </div>
     </section>
     {/if}
