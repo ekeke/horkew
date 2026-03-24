@@ -30,13 +30,13 @@
 
     try {
       const options: AnalyzeOptions = {
-        seerClaimingDueDate: 999,
-        mediumClaimingDueDate: 999,
-        bodyguardClaimingDueDate: 999,
-        masonClaimingDueDate: 999,
-        nekomataClaimingDueDate: 999,
+        seerClaimingDueDate: 2,
+        mediumClaimingDueDate: 2,
+        bodyguardClaimingDueDate: 99,
+        masonClaimingDueDate: 2,
+        nekomataClaimingDueDate: 99,
         dayCountFrom: 1,
-        hasFirstGhost: true,
+        hasFirstGhost: false,
         assumptions: new Map(),
         wolfPairDenyals: [],
         hocusPocus: new Map(),
