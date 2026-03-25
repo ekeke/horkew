@@ -349,6 +349,17 @@ const actionLabels = new Set(actionCandidates.filter(c => c.category === 'action
 const resultLabels = new Set(resultCandidates.map(c => c.label))
 const coRoleLabels = new Set(coRoleCandidates.map(c => c.label))
 
+/** CO宣言キーワード (占い師CO等、非COを除く) */
+const coKeywordLabels = new Set(coRoleCandidates.filter(c => c.category === 'co_role').map(c => c.label))
+
+/** 行内にCOキーワード(占い師CO等)があるか — CO宣言行でのみ複数結果チェーンを許可 */
+function hasCoKeyword(lineText: string): boolean {
+  for (const label of coKeywordLabels) {
+    if (lineText.includes(label)) return true
+  }
+  return false
+}
+
 // ---- CO種別検出 ----
 
 type CoType = 'seer' | 'medium' | 'bodyguard' | 'mason' | 'other'
@@ -414,6 +425,7 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
 
   // 結果マーカー (○/●) → CO種別に応じた候補 (次のエントリは日付から始められる)
   if (resultLabels.has(lastToken)) {
+    if (!hasCoKeyword(trimmed)) return null // 結果報告行: 1結果で終了
     const coType = detectCoType(trimmed, players)
     if (coType === 'medium') return ['day', 'result']
     return ['day', 'player']
@@ -458,7 +470,10 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
       const coType = detectCoType(trimmed, players)
       if (coType !== 'other') {
         if (coType === 'mason') return ['player']
-        if (coType === 'bodyguard') return ['day', 'player']
+        if (coType === 'bodyguard') {
+          if (!hasCoKeyword(trimmed)) return null // 結果報告行: 1護衛先で終了
+          return ['day', 'player']
+        }
         if (coType === 'medium') return ['day', 'result']
         return ['result'] // seer: プレイヤー名の直後は結果 (日付はプレイヤーの前)
       }
