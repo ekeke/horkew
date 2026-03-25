@@ -11,6 +11,20 @@ import {
   getMediumResult, isConfirmedVillagerInAllWorlds,
 } from './simulate.ts'
 
+/** 6人以下のエンドゲームテーブル（正規形キー → 詰み可否） */
+const endgameTable = new Map<string, boolean>()
+
+/** エンドゲームテーブルのヒット数 */
+let endgameHits = 0
+
+/** 統計リセット */
+export function resetEndgameStats(): void { endgameHits = 0 }
+export function getEndgameStats(): { size: number, hits: number } {
+  return { size: endgameTable.size, hits: endgameHits }
+}
+
+const ENDGAME_THRESHOLD = 6
+
 type SearchState = {
   nodesVisited: number
   maxDepthReached: number
@@ -87,7 +101,21 @@ function isTsumi(
   if (anyWorldVillageLoss(worlds, state.alive)) return null
   if (depth >= ss.options.maxDepth) return null
 
-  // メモ化チェック
+  // エンドゲームテーブル参照（≤6人: seat番号に依存しない正規形キーで検索）
+  const aliveCount = popCount32(state.alive)
+  let canonKey: string | undefined
+  if (aliveCount <= ENDGAME_THRESHOLD) {
+    canonKey = canonicalKey(worlds, state.alive)
+    const cached = endgameTable.get(canonKey)
+    if (cached !== undefined) {
+      endgameHits++
+      // テーブルは詰み可否のみ保持。詰みなら再計算して戦略木を返す（高速）
+      if (!cached) return null
+      // 詰みの場合はフォールスルーして戦略木を構築
+    }
+  }
+
+  // メモ化チェック（seat番号依存、同一探索内キャッシュ）
   const key = memoKey(worlds, state.alive)
   if (ss.memo.has(key)) return ss.memo.get(key)!
 
@@ -125,12 +153,37 @@ function isTsumi(
     const result = tryExecution(worlds, state, target, depth, ss)
     if (result !== null) {
       ss.memo.set(key, result)
+      if (canonKey !== undefined) endgameTable.set(canonKey, true)
       return result
     }
   }
 
   ss.memo.set(key, null)
+  if (canonKey !== undefined) endgameTable.set(canonKey, false)
   return null
+}
+
+/**
+ * エンドゲームテーブル用の正規形キー。
+ * seat番号に依存せず、各ワールドの生存者役職パターン（ソート済み）で構成。
+ * 重複ワールドは除去。
+ */
+function canonicalKey(worlds: World[], alive: number): string {
+  const tuples: string[] = []
+  for (const w of worlds) {
+    const roles: string[] = []
+    let mask = alive
+    while (mask !== 0) {
+      const bit = mask & (-mask)
+      const seat = 31 - Math.clz32(bit)
+      roles.push(w.roles[seat])
+      mask ^= bit
+    }
+    roles.sort()
+    tuples.push(roles.join(','))
+  }
+  tuples.sort()
+  return tuples.join('|')
 }
 
 /**
