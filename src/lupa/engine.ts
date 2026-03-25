@@ -781,7 +781,8 @@ function resolveNight(
       // 襲撃者を道連れ (チーム選択 or 襲撃実行者)
       const curseTarget = chosenAttacker ?? attacker.seat
       killPlayer(state, curseTarget)
-      events.push({ type: 'curse_kill', target: curseTarget })
+      // 道連れの死因は非公開 — 外からは通常の夜死亡に見える
+      events.push({ type: 'night_kill', target: curseTarget })
     } else {
       killPlayer(state, action.target)
       events.push({ type: 'night_kill', target: action.target })
