@@ -14,6 +14,8 @@ import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
+import { searchTsumi } from '../hati/index.ts'
+import type { TsumiResult } from '../hati/index.ts'
 import { Worker } from 'node:worker_threads'
 import { availableParallelism } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -65,6 +67,35 @@ export function analyzeFromEvents(
   }
 
   return result.result
+}
+
+/**
+ * Hati詰み探索をイベント列から実行
+ *
+ * analyzeFromEventsと同じHowl→parse→buildVillageStatusパイプラインを使い、
+ * searchTsumiで村側の詰み進行を探索する。
+ */
+export function searchTsumiFromEvents(
+  events: GameEvent[],
+  state: GameState,
+  config: LupaConfig,
+  maxDepth: number = 4,
+): TsumiResult | null {
+  const howl = formatHowl(events, state, config)
+  const { meta, statements } = parse(howl)
+  const unknowns = statements.filter(s => s.type === 'unknown')
+  if (unknowns.length > 0) return null
+
+  const { vs, setup } = buildVillageStatus(statements, meta)
+  const options: AnalyzeOptions = config.hasFirstGhost
+    ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
+    : DEFAULT_RETAR_OPTIONS
+
+  try {
+    return searchTsumi(vs, setup, options, { maxDepth })
+  } catch {
+    return null
+  }
 }
 
 // ============================================================
