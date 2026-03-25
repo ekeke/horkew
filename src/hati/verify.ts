@@ -20,6 +20,7 @@ import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi } from './index.ts'
+import { getEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import type { StrategyNode, World } from './types.ts'
 import { hasSeat, removeSeat, forEachSeat } from './types.ts'
@@ -373,6 +374,9 @@ function runVerify(args: Args): void {
   if (hatiCount > 0) {
     console.log(`時間: hati avg ${(totalHatiMs / hatiCount).toFixed(1)}ms / max ${maxHatiMs.toFixed(1)}ms`)
   }
+
+  const eg = getEndgameStats()
+  console.log(`エンドゲームテーブル: ${eg.size}エントリ, ${eg.hits}ヒット`)
 
   if (failures.length === 0) {
     console.log('検証結果: 全通過')
