@@ -15,7 +15,7 @@ import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import { terminalReward, intermediateReward, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
-import { saveCheckpoint } from './ml/checkpoint.ts'
+import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 
 // ============================================================
 // Training Config
@@ -399,7 +399,58 @@ function log(msg: string): void {
   process.stderr.write(msg + '\n')
 }
 
-export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG): void {
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
+
+/**
+ * チェックポイントディレクトリから最新のイテレーション番号を検出し、
+ * 3ネットワークのパスを返す。見つからなければnull。
+ */
+function findLatestCheckpoint(dir: string): {
+  iteration: number
+  individual: string
+  wolfTeam: string
+  masonTeam: string
+} | null {
+  if (!existsSync(dir)) return null
+
+  const files = readdirSync(dir)
+
+  // final があればそれを優先
+  if (files.includes('final.json') && files.includes('wolf_team_final.json') && files.includes('mason_team_final.json')) {
+    // finalのiterationを読む
+    const raw = JSON.parse(readFileSync(`${dir}/final.json`, 'utf-8'))
+    return {
+      iteration: raw.metadata?.iteration ?? 0,
+      individual: `${dir}/final.json`,
+      wolfTeam: `${dir}/wolf_team_final.json`,
+      masonTeam: `${dir}/mason_team_final.json`,
+    }
+  }
+
+  // checkpoint_<iter>.json から最大iterを探す
+  let maxIter = 0
+  for (const f of files) {
+    const m = f.match(/^checkpoint_(\d+)\.json$/)
+    if (m) {
+      const iter = parseInt(m[1])
+      if (iter > maxIter) maxIter = iter
+    }
+  }
+
+  if (maxIter === 0) return null
+
+  const individual = `${dir}/checkpoint_${maxIter}.json`
+  const wolfTeam = `${dir}/wolf_team_${maxIter}.json`
+  const masonTeam = `${dir}/mason_team_${maxIter}.json`
+
+  if (!existsSync(individual) || !existsSync(wolfTeam) || !existsSync(masonTeam)) {
+    return null
+  }
+
+  return { iteration: maxIter, individual, wolfTeam, masonTeam }
+}
+
+export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDir?: string): void {
   log('Fenrir Training Started')
   log(`Observation size: individual=${OBSERVATION_SIZE}, team=${TEAM_OBSERVATION_SIZE}`)
 
@@ -418,6 +469,21 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG): void {
   const masonTeamTf = createMasonTeamTfNetwork(config.learningRate)
   log(`Mason team network: ${masonTeamNet.totalParams} params`)
 
+  // === Resume ===
+  let startIter = 1
+  if (resumeDir) {
+    const ckpt = findLatestCheckpoint(resumeDir)
+    if (ckpt) {
+      loadCheckpoint(network, ckpt.individual)
+      loadCheckpoint(wolfTeamNet, ckpt.wolfTeam)
+      loadCheckpoint(masonTeamNet, ckpt.masonTeam)
+      startIter = ckpt.iteration + 1
+      log(`Resumed from iteration ${ckpt.iteration} (${resumeDir})`)
+    } else {
+      log(`Warning: no checkpoint found in ${resumeDir}, starting from scratch`)
+    }
+  }
+
   // Pool for self-play (past checkpoints)
   const pool: Map<string, Float32Array>[] = []
 
@@ -426,7 +492,7 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG): void {
 
   const trainingStart = performance.now()
 
-  for (let iter = 1; iter <= config.totalIterations; iter++) {
+  for (let iter = startIter; iter <= config.totalIterations; iter++) {
     const iterStart = performance.now()
 
     const useHeuristic = iter <= config.phase1End
