@@ -12,7 +12,7 @@ import {
 import { RandomStrategy } from './random-strategy.ts'
 import { forceTrueRoleCO, resolveVotes } from './heuristic.ts'
 import { detectCommander } from './leadership.ts'
-import { analyzeFromEvents as retarAnalyze } from './retar-bridge.ts'
+import { analyzeFromEvents as retarAnalyze } from './retar-browser-bridge.ts'
 
 export type GameResult = {
   events: GameEvent[]

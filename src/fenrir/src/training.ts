@@ -7,7 +7,7 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
 import { runGame, runGameAsync } from '../../lupa/engine.ts'
-import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-bridge.ts'
+import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-node-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
 import { TfNeuralNetwork } from './ml/nn-tf.ts'
 import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE } from './observation.ts'

@@ -15,7 +15,7 @@ import type { Proposal, LeadershipResponse } from './leadership.ts'
 import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from './strategy.ts'
 import { alivePlayers, alivePlayersExcept, getMediumResult, isWerewolfAligned } from './roles.ts'
 import type { Rng } from './random.ts'
-import { searchTsumiFromEvents } from './retar-bridge.ts'
+import { searchTsumiFromEvents } from './retar-browser-bridge.ts'
 
 // ============================================================
 // 定数
