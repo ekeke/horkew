@@ -3,30 +3,34 @@ import { systemRoles } from '../types/index.ts'
 import type { LupaConfig } from './types.ts'
 import { runGame } from './engine.ts'
 import { formatHowl } from './format.ts'
+import { parse } from '../howl/index.ts'
+import { buildVillageStatus } from '../howl/bridge.ts'
+import { searchTsumi } from '../hati/index.ts'
+import type { AnalyzeOptions } from '../retar/index.ts'
 
-function parseArgs(args: string[]): LupaConfig {
+type CliOptions = {
+  config: LupaConfig
+  tsumi: boolean
+  games: number
+}
+
+function parseArgs(args: string[]): CliOptions {
   const roles = new Map<SystemRole, number>()
   let seed: number | undefined
   let verify = false
   let useRandomNames = false
+  let tsumi = false
+  let games = 1
 
-  for (const arg of args) {
-    if (arg === '--test') {
-      verify = true
-      continue
-    }
-    if (arg === '--use-random-names') {
-      useRandomNames = true
-      continue
-    }
-    if (arg.startsWith('--seed=')) {
-      seed = parseInt(arg.slice(7), 10)
-      continue
-    }
-    if (arg.startsWith('--seed')) {
-      // --seed 42 形式は次の引数で処理
-      continue
-    }
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (arg === '--test') { verify = true; continue }
+    if (arg === '--use-random-names') { useRandomNames = true; continue }
+    if (arg === '--tsumi') { tsumi = true; continue }
+    if (arg.startsWith('--seed=')) { seed = parseInt(arg.slice(7), 10); continue }
+    if (arg === '--seed' && i + 1 < args.length) { seed = parseInt(args[++i], 10); continue }
+    if (arg.startsWith('--games=')) { games = parseInt(arg.slice(8), 10); continue }
+    if (arg === '--games' && i + 1 < args.length) { games = parseInt(args[++i], 10); continue }
 
     const match = arg.match(/^(\w+):(\d+)$/)
     if (match) {
@@ -40,23 +44,137 @@ function parseArgs(args: string[]): LupaConfig {
     }
   }
 
-  // --seed N 形式の処理
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--seed' && i + 1 < args.length) {
-      seed = parseInt(args[i + 1], 10)
-    }
-  }
-
   if (roles.size === 0) {
-    console.error('使用法: node --experimental-strip-types src/lupa/cli.ts <role:count>... [--seed N] [--test]')
-    console.error('例: node --experimental-strip-types src/lupa/cli.ts werewolf:2 villager:5 seer:1 medium:1 bodyguard:1')
+    console.error('使用法: node --experimental-strip-types src/lupa/cli.ts <role:count>... [--seed N] [--tsumi] [--games N]')
+    console.error('例: node --experimental-strip-types src/lupa/cli.ts werewolf:1 villager:4 seer:1 mason:2 --tsumi --games 100')
     process.exit(1)
   }
 
-  return { roles, seed, verify, useRandomNames }
+  return { config: { roles, seed, verify, useRandomNames }, tsumi, games }
 }
 
-const config = parseArgs(process.argv.slice(2))
-const { events, state } = runGame(config)
-const howl = formatHowl(events, state, config)
-console.log(howl)
+const ANALYZE_OPTIONS: AnalyzeOptions = {
+  seerClaimingDueDate: 2,
+  mediumClaimingDueDate: 2,
+  bodyguardClaimingDueDate: 99,
+  masonClaimingDueDate: 2,
+  nekomataClaimingDueDate: 99,
+  dayCountFrom: 1,
+  hasFirstGhost: false,
+  assumptions: new Map(),
+  wolfPairDenyals: [],
+  hocusPocus: new Map(),
+  id: 0,
+  batches: 1,
+  batch: 0,
+}
+
+function findExecutionLines(howl: string): number[] {
+  const lines = howl.split('\n')
+  const result: number[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].match(/処刑$/)) {
+      result.push(i + 1) // 1-indexed
+    }
+  }
+  return result
+}
+
+function truncateHowl(howl: string, upToLine: number): string {
+  return howl.split('\n').slice(0, upToLine - 1).join('\n')
+}
+
+function strategyOneLiner(node: import('../hati/types.ts').StrategyNode): string {
+  if (node.type === 'win') return '村勝利'
+  const parts: string[] = []
+  if (node.action.execute !== -1) parts.push(`処刑 ${node.action.execute}`)
+  const entries = Object.entries(node.branches)
+  if (entries.length === 1 && entries[0][0] === 'win') {
+    parts.push('→ 村勝利')
+  }
+  return parts.join(' ')
+}
+
+function runTsumiCheck(howl: string, execLine: number, _day: number): {
+  found: boolean
+  worlds: number
+  elapsed: number
+  summary: string
+} {
+  const truncated = truncateHowl(howl, execLine)
+  try {
+    const { meta, statements } = parse(truncated)
+    const { vs, setup } = buildVillageStatus(statements, meta)
+    const result = searchTsumi(vs, setup, ANALYZE_OPTIONS)
+    const summary = result.isTsumi && result.strategy
+      ? strategyOneLiner(result.strategy)
+      : ''
+    return {
+      found: result.isTsumi,
+      worlds: result.stats.worldsTotal,
+      elapsed: result.stats.elapsed,
+      summary,
+    }
+  } catch {
+    return { found: false, worlds: 0, elapsed: 0, summary: '' }
+  }
+}
+
+const { config, tsumi, games } = parseArgs(process.argv.slice(2))
+
+if (!tsumi) {
+  // 通常モード: howl出力のみ
+  const { events, state } = runGame(config)
+  console.log(formatHowl(events, state, config))
+} else if (games === 1) {
+  // 単発tsumi: howl出力 + 各日の詰みチェック
+  const seed = config.seed ?? Date.now()
+  const { events, state } = runGame({ ...config, seed })
+  const howl = formatHowl(events, state, { ...config, seed })
+  const execLines = findExecutionLines(howl)
+
+  console.log(howl)
+  console.log('')
+
+  for (let i = 0; i < execLines.length; i++) {
+    const day = i + 1
+    const check = runTsumiCheck(howl, execLines[i], day)
+    if (check.found) {
+      console.log(`# [Hati] Day ${day}: 詰み → ${check.summary} (${check.worlds}世界, ${check.elapsed.toFixed(1)}ms)`)
+    } else {
+      console.log(`# [Hati] Day ${day}: 詰みなし (${check.worlds}世界, ${check.elapsed.toFixed(1)}ms)`)
+    }
+  }
+} else {
+  // 複数ゲーム: 統計モード
+  let tsumiGames = 0
+  const baseSeed = config.seed ?? Date.now()
+
+  for (let g = 0; g < games; g++) {
+    const seed = baseSeed + g
+    try {
+      const { events, state } = runGame({ ...config, seed })
+      const howl = formatHowl(events, state, { ...config, seed })
+      const execLines = findExecutionLines(howl)
+
+      let found = false
+      for (let i = 0; i < execLines.length; i++) {
+        const day = i + 1
+        const check = runTsumiCheck(howl, execLines[i], day)
+        if (check.found) {
+          console.log(`seed=${seed} Day${day} 詰み → ${check.summary} (${check.worlds}世界, ${check.elapsed.toFixed(1)}ms)`)
+          found = true
+          break // 最初の詰みのみ報告
+        }
+      }
+      if (!found) {
+        console.log(`seed=${seed} 詰みなし`)
+      }
+      if (found) tsumiGames++
+    } catch (e) {
+      console.log(`seed=${seed} エラー: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  console.log(`\n=== ${games}ゲーム / 詰み発見: ${tsumiGames} (${(tsumiGames / games * 100).toFixed(1)}%) ===`)
+}
