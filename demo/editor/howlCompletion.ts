@@ -307,8 +307,8 @@ const actionCandidates = buildStaticCandidates([
 // 非 は 非役職名CO 結合候補に統合済み
 
 const resultCandidates = buildStaticCandidates([
-  { label: '○',     reading: 'まる',     type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false, info: '人間 (白判定)' },
-  { label: '●',     reading: 'くろ',     type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false, info: '人狼 (黒判定)' },
+  { label: '○',     reading: ['まる', 'しろ', 'にんげん'],           type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false, info: '人間 (白判定)' },
+  { label: '●',     reading: ['くろ', 'おおかみ', 'じんろう'],     type: 'keyword', category: 'result', categoryLabel: '結果', terminal: false, info: '人狼 (黒判定)' },
 ])
 
 const standaloneCandidates = buildStaticCandidates([
