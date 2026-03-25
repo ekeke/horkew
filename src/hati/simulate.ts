@@ -1,6 +1,7 @@
 import type { Seat, SystemRole, EnumSpecies } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
-import type { World, NightObservation, ObservationKey } from './types.ts'
+import type { World, ObservationKey } from './types.ts'
+import { hasSeat, removeSeat, popCount32, seatsFromMask } from './types.ts'
 
 // --- 種族判定 ---
 
@@ -18,47 +19,31 @@ export type GameOutcome = 'village_win' | 'wolf_win' | 'hamster_win' | 'ongoing'
 
 /**
  * 特定のワールドにおける勝利判定。
- * lupa/roles.ts の checkWinCondition と同じロジック。
  */
-export function checkOutcome(world: World, alive: Set<Seat>): GameOutcome {
-  let wolfCount = 0
-  let hamsterAlive = false
-  let nonWolfNonHamsterCount = 0
+export function checkOutcome(world: World, alive: number): GameOutcome {
+  const aliveWolves = popCount32(world.wolfMask & alive)
+  const hamsterAlive = world.hamsterSeat !== -1 && hasSeat(alive, world.hamsterSeat)
+  // 妖狐を除いた非狼カウント
+  let nonWolfNonHamster = popCount32(alive) - aliveWolves
+  if (hamsterAlive) nonWolfNonHamster--
 
-  for (const seat of alive) {
-    const role = world.roles.get(seat)!
-    if (role === 'werewolf') {
-      wolfCount++
-    } else if (role === 'werehamster') {
-      hamsterAlive = true
-    } else {
-      nonWolfNonHamsterCount++
-    }
-  }
-
-  if (wolfCount === 0) {
+  if (aliveWolves === 0) {
     return hamsterAlive ? 'hamster_win' : 'village_win'
   }
-  if (wolfCount >= nonWolfNonHamsterCount) {
+  if (aliveWolves >= nonWolfNonHamster) {
     return hamsterAlive ? 'hamster_win' : 'wolf_win'
   }
   return 'ongoing'
 }
 
-/**
- * 全ワールドで村勝利か判定
- */
-export function allWorldsVillageWin(worlds: World[], alive: Set<Seat>): boolean {
+export function allWorldsVillageWin(worlds: World[], alive: number): boolean {
   for (const w of worlds) {
     if (checkOutcome(w, alive) !== 'village_win') return false
   }
   return true
 }
 
-/**
- * いずれかのワールドで村が負け（狼勝ち or 狐勝ち）か判定
- */
-export function anyWorldVillageLoss(worlds: World[], alive: Set<Seat>): boolean {
+export function anyWorldVillageLoss(worlds: World[], alive: number): boolean {
   for (const w of worlds) {
     const outcome = checkOutcome(w, alive)
     if (outcome === 'wolf_win' || outcome === 'hamster_win') return true
@@ -68,138 +53,113 @@ export function anyWorldVillageLoss(worlds: World[], alive: Set<Seat>): boolean 
 
 // --- 処刑シミュレーション ---
 
-/**
- * 処刑を適用した後の状態を返す。
- * 猫又道連れ・背徳者後追いは含まない（別途分岐処理が必要）。
- */
-export function applyExecution(alive: Set<Seat>, target: Seat): Set<Seat> {
-  const next = new Set(alive)
-  next.delete(target)
-  return next
-}
-
-/**
- * 処刑後の観測を計算する（特定ワールド内）。
- * 猫又道連れのランダム先は呼び出し側が分岐するため、ここでは猫又かどうかのみ判定。
- */
-export function getExecutionObservation(
-  world: World, _alive: Set<Seat>, target: Seat,
-): { mediumResult: EnumSpecies, isNekomata: boolean } {
-  const role = world.roles.get(target)!
-  return {
-    mediumResult: getMediumResult(role),
-    isNekomata: role === 'nekomata',
-  }
+export function applyExecution(alive: number, target: Seat): number {
+  return removeSeat(alive, target)
 }
 
 // --- 夜シミュレーション ---
 
 /**
- * 1つのワールドで、村の夜行動と狼の噛み先を指定して夜を解決する。
- * 返値: 夜の後の生存者集合と観測。
+ * 1つのワールドで夜を解決する。ビットマスクベース。
+ * 返値: 夜後の生存者ビットマスクと観測キー（数値パック）。
  */
 export function simulateNight(
   world: World,
-  alive: Set<Seat>,
+  alive: number,
   wolfBiteTarget: Seat,
   bodyguardTarget: Seat | null,
   seerTarget: Seat | null,
-): { nextAlive: Set<Seat>, observation: NightObservation } {
-  const deaths: Seat[] = []
-  const nextAlive = new Set(alive)
-  const targetRole = world.roles.get(wolfBiteTarget)!
+): { nextAlive: number, obsKey: number } {
+  let nextAlive = alive
+  let deathMask = 0
+  const targetRole = world.roles[wolfBiteTarget]
 
   // 占い呪殺チェック
-  if (seerTarget !== null && alive.has(world.seerSeat)) {
-    const seerTargetRole = world.roles.get(seerTarget)
-    if (seerTargetRole === 'werehamster' && nextAlive.has(seerTarget)) {
-      nextAlive.delete(seerTarget)
-      deaths.push(seerTarget)
+  if (seerTarget !== null && hasSeat(alive, world.seerSeat)) {
+    if (world.roles[seerTarget] === 'werehamster' && hasSeat(nextAlive, seerTarget)) {
+      nextAlive = removeSeat(nextAlive, seerTarget)
+      deathMask |= (1 << seerTarget)
       // 背徳者後追い
-      if (world.immoralistSeat !== -1 && nextAlive.has(world.immoralistSeat)) {
-        nextAlive.delete(world.immoralistSeat)
-        deaths.push(world.immoralistSeat)
+      if (world.immoralistSeat !== -1 && hasSeat(nextAlive, world.immoralistSeat)) {
+        nextAlive = removeSeat(nextAlive, world.immoralistSeat)
+        deathMask |= (1 << world.immoralistSeat)
       }
     }
   }
 
   // 狼の噛み解決
   if (targetRole === 'werehamster') {
-    // 妖狐は噛まれても死なない → 平和に見える
-  } else if (bodyguardTarget === wolfBiteTarget && alive.has(world.bodyguardSeat)) {
-    // 護衛成功 → 平和
+    // 妖狐は噛まれても死なない
+  } else if (bodyguardTarget === wolfBiteTarget && hasSeat(alive, world.bodyguardSeat)) {
+    // 護衛成功
   } else if (targetRole === 'nekomata') {
     // 猫又噛み: 猫又死亡 + 噛んだ狼1匹死亡
-    if (nextAlive.has(wolfBiteTarget)) {
-      nextAlive.delete(wolfBiteTarget)
-      deaths.push(wolfBiteTarget)
+    if (hasSeat(nextAlive, wolfBiteTarget)) {
+      nextAlive = removeSeat(nextAlive, wolfBiteTarget)
+      deathMask |= (1 << wolfBiteTarget)
     }
-    // 狼の1匹が道連れ（生存中の狼から1匹）
-    for (const wolfSeat of world.wolfSeats) {
-      if (nextAlive.has(wolfSeat)) {
-        nextAlive.delete(wolfSeat)
-        deaths.push(wolfSeat)
-        break // 1匹だけ
-      }
+    // 狼の1匹が道連れ
+    const aliveWolves = world.wolfMask & nextAlive
+    if (aliveWolves !== 0) {
+      const lowestWolf = 31 - Math.clz32(aliveWolves & (-aliveWolves))
+      nextAlive = removeSeat(nextAlive, lowestWolf)
+      deathMask |= (1 << lowestWolf)
     }
   } else {
     // 通常の噛み殺し
-    if (nextAlive.has(wolfBiteTarget)) {
-      nextAlive.delete(wolfBiteTarget)
-      deaths.push(wolfBiteTarget)
+    if (hasSeat(nextAlive, wolfBiteTarget)) {
+      nextAlive = removeSeat(nextAlive, wolfBiteTarget)
+      deathMask |= (1 << wolfBiteTarget)
     }
   }
 
   // 占い結果: 占い師がその夜を生き延びた場合のみ翌日報告できる
-  let seerResult: EnumSpecies | undefined
-  if (seerTarget !== null && nextAlive.has(world.seerSeat)) {
-    seerResult = getSeerResult(world.roles.get(seerTarget)!)
+  let seerResultCode = 0 // 0=none, 1=human, 2=wolf
+  if (seerTarget !== null && hasSeat(nextAlive, world.seerSeat)) {
+    const result = getSeerResult(world.roles[seerTarget])
+    seerResultCode = result === 'wolf' ? 2 : 1
   }
 
-  deaths.sort((a, b) => a - b)
+  // 観測キー: deathMask (上位ビット) + seerResult (下位2ビット)
+  const obsKey = (deathMask << 2) | seerResultCode
 
-  return {
-    nextAlive,
-    observation: { deaths, seerResult },
-  }
+  return { nextAlive, obsKey }
 }
 
 /**
  * 特定ワールドにおける狼の有効な噛み先を列挙。
- * 狼は自陣営（他の狼）を噛まない。
  */
-export function validBiteTargets(world: World, alive: Set<Seat>): Seat[] {
-  const targets: Seat[] = []
+export function validBiteTargets(world: World, alive: number): Seat[] {
   // 生存中の狼がいなければ空
-  let hasAliveWolf = false
-  for (const w of world.wolfSeats) {
-    if (alive.has(w)) { hasAliveWolf = true; break }
-  }
-  if (!hasAliveWolf) return targets
+  if ((world.wolfMask & alive) === 0) return []
 
-  for (const seat of alive) {
-    if (!world.wolfSeats.has(seat)) {
-      targets.push(seat)
-    }
-  }
-  return targets
+  const nonWolfAlive = alive & ~world.wolfMask
+  return seatsFromMask(nonWolfAlive)
 }
 
-// --- 観測キー ---
+// --- 観測キー変換（数値 → 文字列、出力用） ---
 
-export function nightObservationKey(obs: NightObservation): ObservationKey {
-  const deathPart = obs.deaths.length > 0 ? `d:${obs.deaths.join(',')}` : 'peace'
-  const seerPart = obs.seerResult !== undefined ? `|s:${obs.seerResult}` : ''
-  return deathPart + seerPart
+export function obsKeyToString(obsKey: number): ObservationKey {
+  const seerCode = obsKey & 3
+  const deathMask = obsKey >>> 2
+
+  let deathPart: string
+  if (deathMask === 0) {
+    deathPart = 'peace'
+  } else {
+    const seats = seatsFromMask(deathMask)
+    deathPart = `d:${seats.join(',')}`
+  }
+
+  if (seerCode === 0) return deathPart
+  return deathPart + (seerCode === 2 ? '|s:wolf' : '|s:human')
 }
 
-export function executionObservationKey(
+export function executionObsKeyToString(
   mediumResult: EnumSpecies, nekomataCurseTarget: Seat | null,
-  immoralistFollowDeaths: Seat[],
 ): ObservationKey {
   let key = `m:${mediumResult}`
   if (nekomataCurseTarget !== null) key += `|neko:${nekomataCurseTarget}`
-  if (immoralistFollowDeaths.length > 0) key += `|follow:${immoralistFollowDeaths.join(',')}`
   return key
 }
 
@@ -211,7 +171,7 @@ export function isConfirmedVillagerInAllWorlds(worlds: World[], seat: Seat): boo
     'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
   ])
   for (const w of worlds) {
-    if (!villagerRoles.has(w.roles.get(seat)!)) return false
+    if (!villagerRoles.has(w.roles[seat])) return false
   }
   return true
 }

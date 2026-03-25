@@ -4,10 +4,6 @@
  * Lupaで生成したゲームをHatiに通し、
  * 「詰み」と判定された戦略が真の役職配置で実際に勝てるかを検証する。
  *
- * 検証する性質:
- * - 健全性: Hatiが詰みと判定 → 返された戦略が真のワールドで実際に村勝利に到達
- * - 戦略のカバレッジ: 全ての観測分岐が存在し、辿れること
- *
  * 実行:
  *   node --experimental-strip-types src/hati/verify.ts
  *   node --experimental-strip-types src/hati/verify.ts --outdir tmp/verify-hati
@@ -17,7 +13,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { SystemRole, Seat } from '../types/index.ts'
+import type { SystemRole } from '../types/index.ts'
 import type { GameEvent, GameState } from '../lupa/types.ts'
 import { runGame } from '../lupa/engine.ts'
 import { formatHowl } from '../lupa/format.ts'
@@ -26,9 +22,10 @@ import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi } from './index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import type { StrategyNode, World } from './types.ts'
+import { hasSeat, removeSeat, forEachSeat } from './types.ts'
 import {
   checkOutcome, simulateNight, validBiteTargets, getMediumResult,
-  executionObservationKey, nightObservationKey,
+  executionObsKeyToString, obsKeyToString,
 } from './simulate.ts'
 
 const ANALYZE_OPTIONS: AnalyzeOptions = {
@@ -53,12 +50,12 @@ type VerifyTrace = { valid: boolean, trace: string[] }
 
 /**
  * 真の役職配置で戦略木を辿り、村勝利に到達するか検証する。
- * 狼の噛み先は全パターンを試す（最悪ケースで勝てることが必要）。
+ * alive はビットマスク。
  */
 function verifyStrategy(
   node: StrategyNode,
   world: World,
-  alive: Set<Seat>,
+  alive: number,
 ): VerifyTrace {
   if (node.type === 'win') {
     const outcome = checkOutcome(world, alive)
@@ -71,65 +68,59 @@ function verifyStrategy(
   const { action, branches } = node
 
   if (action.execute !== -1) {
-    // 処刑アクション
     const target = action.execute
-    if (!alive.has(target)) {
+    if (!hasSeat(alive, target)) {
       return { valid: false, trace: [`処刑対象 ${target} が生存していない`] }
     }
 
-    const afterExec = new Set(alive)
-    afterExec.delete(target)
-
-    // 霊媒結果を算出
-    const trueRole = world.roles.get(target)!
+    let afterExec = removeSeat(alive, target)
+    const trueRole = world.roles[target]
     const mediumResult = getMediumResult(trueRole)
 
-    // 猫又道連れ: 処刑対象が猫又なら全生存者が道連れ候補
-    // ここでは猫又道連れのAND分岐を検証
     if (trueRole === 'nekomata') {
-      // 猫又処刑: 各道連れ先で戦略が勝てるか確認
-      for (const curseTarget of afterExec) {
-        const afterCurse = new Set(afterExec)
-        afterCurse.delete(curseTarget)
-
-        // 背徳者後追い
-        const afterFollow = applyFollowDeaths(afterCurse, world)
-
-        const obsKey = executionObservationKey(mediumResult, curseTarget, [])
+      // 猫又処刑: 各道連れ先で検証
+      let allOk = true
+      const failTrace: string[] = []
+      forEachSeat(afterExec, curseTarget => {
+        if (!allOk) return
+        let afterCurse = removeSeat(afterExec, curseTarget)
+        afterCurse = applyFollowDeaths(afterCurse, world)
+        const obsKey = executionObsKeyToString(mediumResult, curseTarget)
         const branch = branches[obsKey] ?? branches['win']
         if (!branch) {
-          return { valid: false, trace: [`猫又道連れ ${curseTarget} の分岐 '${obsKey}' が戦略に存在しない`] }
+          allOk = false
+          failTrace.push(`猫又道連れ ${curseTarget} の分岐 '${obsKey}' が存在しない`)
+          return
         }
-        const sub = verifyStrategy(branch, world, afterFollow)
+        const sub = verifyStrategy(branch, world, afterCurse)
         if (!sub.valid) {
-          return { valid: false, trace: [`処刑 ${target} (猫又) 道連れ ${curseTarget}`, ...sub.trace] }
+          allOk = false
+          failTrace.push(`処刑 ${target} (猫又) 道連れ ${curseTarget}`, ...sub.trace)
         }
-      }
-      return { valid: true, trace: [`処刑 ${target} (猫又) 全道連れ先で勝利確認`] }
+      })
+      return allOk
+        ? { valid: true, trace: [`処刑 ${target} (猫又) 全道連れ先で勝利確認`] }
+        : { valid: false, trace: failTrace }
     }
 
-    // 背徳者後追い
-    const afterFollow = applyFollowDeaths(afterExec, world)
+    afterExec = applyFollowDeaths(afterExec, world)
 
-    const obsKey = executionObservationKey(mediumResult, null, [])
-    // 霊媒結果の分岐を探す。なければ win 分岐（trivial tsumi shortcut）にフォールバック
+    const obsKey = executionObsKeyToString(mediumResult, null)
     const branch = branches[obsKey] ?? branches['win']
     if (!branch) {
-      return { valid: false, trace: [`処刑 ${target} の分岐 '${obsKey}' が戦略に存在しない`] }
+      return { valid: false, trace: [`処刑 ${target} の分岐 '${obsKey}' が存在しない`] }
     }
 
-    const sub = verifyStrategy(branch, world, afterFollow)
+    const sub = verifyStrategy(branch, world, afterExec)
     return { valid: sub.valid, trace: [`処刑 ${target} → ${obsKey}`, ...sub.trace] }
   }
 
-  // 夜アクション (execute === -1)
+  // 夜アクション
   const { bodyguardTarget, seerTarget } = action
   const biteTargets = validBiteTargets(world, alive)
 
   if (biteTargets.length === 0) {
-    // 狼全滅 → 噛みなし
-    const obs = { deaths: [] as Seat[], seerResult: undefined }
-    const key = nightObservationKey(obs)
+    const key = obsKeyToString(0)
     const branch = branches[key] ?? branches['win']
     if (!branch) {
       return { valid: false, trace: [`夜: 狼全滅だが分岐 '${key}' が存在しない`] }
@@ -137,18 +128,16 @@ function verifyStrategy(
     return verifyStrategy(branch, world, alive)
   }
 
-  // 全噛み先で検証（最悪ケース）
   for (const biteTarget of biteTargets) {
-    const { nextAlive, observation } = simulateNight(
+    const { nextAlive, obsKey: numKey } = simulateNight(
       world, alive, biteTarget, bodyguardTarget, seerTarget,
     )
-    const key = nightObservationKey(observation)
+    const key = obsKeyToString(numKey)
     const branch = branches[key] ?? branches['win']
     if (!branch) {
       return { valid: false, trace: [`夜: 噛み ${biteTarget} の分岐 '${key}' が存在しない`] }
     }
 
-    // win分岐の場合、夜後の状態で勝利確認
     if (branch.type === 'win') {
       const outcome = checkOutcome(world, nextAlive)
       if (outcome !== 'village_win') {
@@ -166,13 +155,10 @@ function verifyStrategy(
   return { valid: true, trace: ['全噛み先で勝利確認'] }
 }
 
-function applyFollowDeaths(alive: Set<Seat>, world: World): Set<Seat> {
-  // 妖狐が死んでいれば背徳者後追い
-  if (world.hamsterSeat !== -1 && !alive.has(world.hamsterSeat)) {
-    if (world.immoralistSeat !== -1 && alive.has(world.immoralistSeat)) {
-      const result = new Set(alive)
-      result.delete(world.immoralistSeat)
-      return result
+function applyFollowDeaths(alive: number, world: World): number {
+  if (world.hamsterSeat !== -1 && !hasSeat(alive, world.hamsterSeat)) {
+    if (world.immoralistSeat !== -1 && hasSeat(alive, world.immoralistSeat)) {
+      return removeSeat(alive, world.immoralistSeat)
     }
   }
   return alive
@@ -321,15 +307,15 @@ function runVerify(args: Args): void {
         const truncated = howl.split('\n').slice(0, cp.line - 1).join('\n')
 
         let tsumiResult
-        let alive: Set<Seat>
+        let alive: number
         try {
           const { meta, statements } = parse(truncated)
           const { vs, setup } = buildVillageStatus(statements, meta)
           const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
           tsumiResult = searchTsumi(vs, setup, opts)
-          alive = new Set<Seat>()
+          alive = 0
           for (const [seat, status] of vs.statuses) {
-            if (status.surviving) alive.add(seat)
+            if (status.surviving) alive |= (1 << seat)
           }
         } catch {
           continue
@@ -399,8 +385,9 @@ function runVerify(args: Args): void {
 }
 
 function buildTrueWorld(state: GameState): World {
-  const roles = new Map<Seat, SystemRole>()
-  const wolfSeats = new Set<Seat>()
+  const maxSeat = Math.max(...state.players.map(p => p.seat))
+  const roles: SystemRole[] = new Array(maxSeat + 1)
+  let wolfMask = 0
   let hamsterSeat = -1
   let immoralistSeat = -1
   let seerSeat = -1
@@ -409,9 +396,9 @@ function buildTrueWorld(state: GameState): World {
   let mediumSeat = -1
 
   for (const p of state.players) {
-    roles.set(p.seat, p.role)
+    roles[p.seat] = p.role
     switch (p.role) {
-      case 'werewolf': wolfSeats.add(p.seat); break
+      case 'werewolf': wolfMask |= (1 << p.seat); break
       case 'werehamster': hamsterSeat = p.seat; break
       case 'immoralist': immoralistSeat = p.seat; break
       case 'seer': seerSeat = p.seat; break
@@ -421,7 +408,7 @@ function buildTrueWorld(state: GameState): World {
     }
   }
 
-  return { roles, wolfSeats, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
+  return { roles, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
 }
 
 // --- 実行 ---

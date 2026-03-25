@@ -1,11 +1,46 @@
-import type { Seat, SystemRole, EnumSpecies } from '../types/index.ts'
+import type { Seat, SystemRole } from '../types/index.ts'
+
+// --- ビットマスクユーティリティ ---
+
+/** seat → ビットマスク (bit N = seat N) */
+export function seatBit(seat: Seat): number { return 1 << seat }
+/** ビットマスクに seat が含まれるか */
+export function hasSeat(mask: number, seat: Seat): boolean { return (mask & (1 << seat)) !== 0 }
+/** ビットマスクから seat を除去 */
+export function removeSeat(mask: number, seat: Seat): number { return mask & ~(1 << seat) }
+/** ビットマスクの立っているビット数 */
+export function popCount32(x: number): number {
+  x = x - ((x >>> 1) & 0x55555555)
+  x = (x & 0x33333333) + ((x >>> 2) & 0x33333333)
+  return (((x + (x >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24
+}
+/** ビットマスクの各 seat に対してコールバック実行 */
+export function forEachSeat(mask: number, fn: (seat: Seat) => void): void {
+  while (mask !== 0) {
+    const bit = mask & (-mask) // lowest set bit
+    fn(31 - Math.clz32(bit))
+    mask ^= bit
+  }
+}
+/** ビットマスクの各 seat を配列で返す */
+export function seatsFromMask(mask: number): Seat[] {
+  const result: Seat[] = []
+  forEachSeat(mask, s => result.push(s))
+  return result
+}
+/** seat 配列からビットマスクを構築 */
+export function maskFromSeats(seats: Iterable<Seat>): number {
+  let mask = 0
+  for (const s of seats) mask |= (1 << s)
+  return mask
+}
 
 /** 1つの有効な役職配置（ワールド） */
 export type World = {
-  /** seat → 役職 の完全な割り当て */
-  roles: Map<Seat, SystemRole>
-  /** 人狼のseat集合 */
-  wolfSeats: Set<Seat>
+  /** 役職配列（seat インデックス、0 番は未使用） */
+  roles: SystemRole[]
+  /** 人狼のseatビットマスク */
+  wolfMask: number
   /** 妖狐のseat（いなければ -1） */
   hamsterSeat: number
   /** 背徳者のseat（いなければ -1） */
@@ -22,7 +57,8 @@ export type World = {
 
 /** 探索中のシミュレーション状態 */
 export type SimState = {
-  alive: Set<Seat>
+  /** 生存者ビットマスク (bit N = seat N が生存) */
+  alive: number
   day: number
 }
 
@@ -33,26 +69,8 @@ export type VillageAction = {
   seerTarget: Seat | null
 }
 
-/** 夜の観測結果（村が区別できるもの） */
-export type NightObservation = {
-  /** 夜に死んだプレイヤー（ソート済み） */
-  deaths: Seat[]
-  /** 占い結果（真占い師のワールドでのみ有効） */
-  seerResult: EnumSpecies | undefined
-}
-
-/** 観測のシリアライズキー */
+/** 観測のシリアライズキー（文字列: 出力用） */
 export type ObservationKey = string
-
-/** 処刑後の観測（霊媒結果） */
-export type ExecutionObservation = {
-  /** 処刑対象の霊媒結果 */
-  mediumResult: EnumSpecies
-  /** 猫又道連れで死んだプレイヤー（なければ null） */
-  nekomataCurseTarget: Seat | null
-  /** 背徳者後追いで死んだプレイヤー群 */
-  immoralistFollowDeaths: Seat[]
-}
 
 /** 戦略の決定木（JSON-serializable） */
 export type StrategyNode =

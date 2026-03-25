@@ -50,9 +50,9 @@ export function searchTsumi(
   }
 
   // 3. 初期状態の構築
-  const alive = new Set<Seat>()
+  let alive = 0
   for (const [seat, status] of vs.statuses) {
-    if (status.surviving) alive.add(seat)
+    if (status.surviving) alive |= (1 << seat)
   }
 
   const initialState: SimState = { alive, day: vs.day }
@@ -77,11 +77,12 @@ export function searchTsumi(
  */
 export function searchTsumiDirect(
   worlds: import('./types.ts').World[],
-  alive: Set<Seat>,
+  alive: number | Set<Seat>,
   searchOptions: SearchOptions = DEFAULT_SEARCH_OPTIONS,
 ): TsumiResult {
   const t0 = performance.now()
-  const initialState: SimState = { alive, day: 1 }
+  const aliveMask = typeof alive === 'number' ? alive : (() => { let m = 0; for (const s of alive) m |= (1 << s); return m })()
+  const initialState: SimState = { alive: aliveMask, day: 1 }
   const { result, nodesVisited, maxDepthReached } = runSearch(worlds, initialState, searchOptions)
   const searchElapsed = performance.now() - t0
 

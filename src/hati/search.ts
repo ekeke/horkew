@@ -1,12 +1,13 @@
 import type { Seat, EnumSpecies } from '../types/index.ts'
 import type {
   World, SimState, StrategyNode,
-  NightObservation, ObservationKey, SearchOptions,
+  ObservationKey, SearchOptions,
 } from './types.ts'
+import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
 import {
   allWorldsVillageWin, anyWorldVillageLoss,
   applyExecution, simulateNight, validBiteTargets,
-  nightObservationKey, executionObservationKey,
+  obsKeyToString, executionObsKeyToString,
   getMediumResult, isConfirmedVillagerInAllWorlds,
 } from './simulate.ts'
 
@@ -19,7 +20,6 @@ type SearchState = {
 
 /**
  * AND-OR探索の本体。
- * 村が詰み（必ず勝てる）かどうかを判定し、勝利戦略の決定木を返す。
  */
 export function searchTsumi(
   worlds: World[],
@@ -42,21 +42,31 @@ export function searchTsumi(
 }
 
 /**
- * メモ化キーの生成
+ * 数値ハッシュベースのメモ化キー。
+ * alive はビットマスクそのまま、ワールドは役職ハッシュの組み合わせ。
  */
-function memoKey(worlds: World[], alive: Set<Seat>): string {
-  const aliveSorted = Array.from(alive).sort((a, b) => a - b)
-  // ワールドの識別: 生存者の役職配置のソートされたリスト
-  const worldKeys: string[] = []
-  for (const w of worlds) {
-    const parts: string[] = []
-    for (const s of aliveSorted) {
-      parts.push(w.roles.get(s)!)
+function memoKey(worlds: World[], alive: number): string {
+  // FNV-1a ベースのハッシュでワールド署名を生成
+  const worldHashes: number[] = new Array(worlds.length)
+  for (let wi = 0; wi < worlds.length; wi++) {
+    let h = 0x811c9dc5
+    let mask = alive
+    while (mask !== 0) {
+      const bit = mask & (-mask)
+      const seat = 31 - Math.clz32(bit)
+      const role = worlds[wi].roles[seat]
+      // role の最初の2文字で十分ユニーク
+      h ^= role.charCodeAt(0)
+      h = Math.imul(h, 0x01000193)
+      h ^= role.charCodeAt(1)
+      h = Math.imul(h, 0x01000193)
+      mask ^= bit
     }
-    worldKeys.push(parts.join(','))
+    worldHashes[wi] = h >>> 0
   }
-  worldKeys.sort()
-  return `${aliveSorted.join(',')}|${worldKeys.join(';')}`
+  worldHashes.sort()
+  // alive ビットマスク + ソート済みワールドハッシュ配列
+  return `${alive}|${worldHashes.join(',')}`
 }
 
 /**
@@ -93,7 +103,7 @@ function isTsumi(
     return result
   }
 
-  // パリティ事前チェック: 最善ケースでもパリティ負けなら即不可
+  // パリティ事前チェック
   if (!canPossiblyWin(worlds, state.alive)) {
     ss.memo.set(key, null)
     return null
@@ -115,17 +125,13 @@ function isTsumi(
 }
 
 /**
- * 全分岐が同じ trivial win に帰着する場合、夜分岐を圧縮して1つのノードにする。
- * 例: 全夜分岐が「処刑 H → 村勝利」なら、夜ノードを省略して直接その結果を返す。
+ * 全分岐が同じ trivial win に帰着する場合、夜分岐を圧縮。
  */
 function collapseBranches(branches: Record<ObservationKey, StrategyNode>): StrategyNode | null {
   const values = Object.values(branches)
   if (values.length === 0) return null
-
-  // 全分岐が { type: 'win' } なら直接 win
   if (values.every(v => v.type === 'win')) return { type: 'win' }
 
-  // 全分岐が同一の trivial action (execute X → win) なら圧縮
   let commonTarget: Seat | undefined
   for (const v of values) {
     if (v.type !== 'action') return null
@@ -139,7 +145,6 @@ function collapseBranches(branches: Record<ObservationKey, StrategyNode>): Strat
     }
   }
 
-  // 全分岐が「処刑 commonTarget → 村勝利」
   return {
     type: 'action',
     action: { execute: commonTarget!, bodyguardTarget: null, seerTarget: null },
@@ -148,47 +153,28 @@ function collapseBranches(branches: Record<ObservationKey, StrategyNode>): Strat
 }
 
 /**
- * 自明な詰み判定: 全ワールドで生存中の狼候補が1人だけなら、その席を処刑して即勝ち。
- * 妖狐が生存している可能性がある場合は自明でない（狼全滅で狐勝ちになりうる）。
+ * 自明な詰み判定。
  */
-function findTrivialTsumi(worlds: World[], alive: Set<Seat>): Seat | null {
-  const wolfCandidates = new Set<Seat>()
+function findTrivialTsumi(worlds: World[], alive: number): Seat | null {
+  let wolfUnion = 0
   for (const w of worlds) {
-    for (const seat of alive) {
-      if (w.wolfSeats.has(seat)) wolfCandidates.add(seat)
-    }
-    // 妖狐が生存しうる場合は自明でない（処刑後に狐勝ちの可能性）
-    if (w.hamsterSeat !== -1 && alive.has(w.hamsterSeat)) return null
+    wolfUnion |= (w.wolfMask & alive)
+    if (w.hamsterSeat !== -1 && hasSeat(alive, w.hamsterSeat)) return null
   }
-  if (wolfCandidates.size !== 1) return null
-  return wolfCandidates.values().next().value!
+  if (popCount32(wolfUnion) !== 1) return null
+  return 31 - Math.clz32(wolfUnion)
 }
 
 /**
  * パリティの事前チェック。
- * 最善ケース（毎回狼を処刑、護衛成功で噛み不発）でもパリティ負けするなら詰み不可。
  */
-function canPossiblyWin(worlds: World[], alive: Set<Seat>): boolean {
+function canPossiblyWin(worlds: World[], alive: number): boolean {
+  const aliveCount = popCount32(alive)
   for (const w of worlds) {
-    let wolfCount = 0
-    let nonWolfNonHamsterCount = 0
-    for (const seat of alive) {
-      const role = w.roles.get(seat)!
-      if (role === 'werewolf') wolfCount++
-      else if (role !== 'werehamster') nonWolfNonHamsterCount++
-    }
-    // 最善: 毎日1狼処刑、夜は護衛成功で死者なし
-    // wolfCount日で全狼処刑 → その間村人は減らない（護衛成功想定）
-    // 最善でも村が足りるか？
-    // 実際には毎日処刑で1人減り、夜に1人減る（護衛失敗時）
-    // 最善想定: 狼を毎回処刑 + 護衛毎回成功 → wolfCount日で終了
-    // その間の人数推移: alive - 1 (処刑) → 翌日 alive - 1 → ...
-    // 護衛成功なら夜の死者なし → 処刑だけで人数が減る
-    // wolfCount回の処刑後: alive - wolfCount 人生存、狼0
-    // 途中でパリティチェック: 各ステップで残り狼 >= 残り非狼非狐 なら負け
-
-    // 簡易チェック: 現在の狼数が非狼非狐数以上なら即負け（既にチェック済みだが念のため）
-    if (wolfCount >= nonWolfNonHamsterCount) return false
+    const wolfCount = popCount32(w.wolfMask & alive)
+    let nonWolfNonHamster = aliveCount - wolfCount
+    if (w.hamsterSeat !== -1 && hasSeat(alive, w.hamsterSeat)) nonWolfNonHamster--
+    if (wolfCount >= nonWolfNonHamster) return false
   }
   return true
 }
@@ -196,22 +182,27 @@ function canPossiblyWin(worlds: World[], alive: Set<Seat>): boolean {
 /**
  * 処刑候補の列挙（枝刈り込み）
  */
-function getExecutionCandidates(worlds: World[], alive: Set<Seat>): Seat[] {
+function getExecutionCandidates(worlds: World[], alive: number): Seat[] {
   const candidates: Seat[] = []
-  // 等価クラスの重複排除
-  const seen = new Set<string>()
+  const seen = new Set<number>()
 
-  for (const seat of alive) {
-    // 全ワールドで確定村人なら処刑しない
-    if (isConfirmedVillagerInAllWorlds(worlds, seat)) continue
+  forEachSeat(alive, seat => {
+    if (isConfirmedVillagerInAllWorlds(worlds, seat)) return
 
-    // 等価クラス: 全ワールドでの役職パターンが同一のseatは1つだけ試す
-    const eqKey = worlds.map(w => w.roles.get(seat)!).sort().join(',')
-    if (seen.has(eqKey)) continue
-    seen.add(eqKey)
+    // 等価クラス: 全ワールドでの役職ハッシュが同一なら1つだけ試す
+    let h = 0x811c9dc5
+    for (const w of worlds) {
+      h ^= w.roles[seat].charCodeAt(0)
+      h = Math.imul(h, 0x01000193)
+      h ^= w.roles[seat].charCodeAt(1)
+      h = Math.imul(h, 0x01000193)
+    }
+    h = h >>> 0
+    if (seen.has(h)) return
+    seen.add(h)
 
     candidates.push(seat)
-  }
+  })
 
   return candidates
 }
@@ -226,19 +217,15 @@ function tryExecution(
   depth: number,
   ss: SearchState,
 ): StrategyNode | null {
-  // 処刑後の生存者
   const afterExecAlive = applyExecution(state.alive, target)
 
-  // ワールドを霊媒結果で分岐
-  // さらに猫又道連れ・背徳者後追いで分岐
-  const obsGroups = partitionWorldsByExecution(worlds, state.alive, afterExecAlive, target)
+  const obsGroups = partitionWorldsByExecution(worlds, afterExecAlive, target)
 
   const branches = {} as Record<ObservationKey, StrategyNode>
 
   for (const [obsKey, group] of obsGroups) {
     const { worlds: groupWorlds, alive: groupAlive } = group
 
-    // 処刑後の即座の勝利チェック
     if (allWorldsVillageWin(groupWorlds, groupAlive)) {
       branches[obsKey] = { type: 'win' }
       continue
@@ -247,7 +234,6 @@ function tryExecution(
       return null
     }
 
-    // 夜フェーズ探索
     const nightResult = searchNight(groupWorlds, groupAlive, state.day, depth, ss)
     if (nightResult === null) return null
     branches[obsKey] = nightResult
@@ -261,99 +247,59 @@ function tryExecution(
 }
 
 /**
- * ワールドを処刑後の観測（霊媒結果 + 猫又道連れ + 背徳者後追い）で分割
+ * ワールドを処刑後の観測で分割
  */
 function partitionWorldsByExecution(
   worlds: World[],
-  _aliveBefore: Set<Seat>,
-  aliveAfterExec: Set<Seat>,
+  aliveAfterExec: number,
   target: Seat,
-): Map<ObservationKey, { worlds: World[], alive: Set<Seat> }> {
-  // まず霊媒結果で分割
+): Map<ObservationKey, { worlds: World[], alive: number }> {
   const byMedium = new Map<string, World[]>()
   for (const w of worlds) {
-    const medium = getMediumResult(w.roles.get(target)!)
+    const medium = getMediumResult(w.roles[target])
     const key = medium ?? 'null'
     if (!byMedium.has(key)) byMedium.set(key, [])
     byMedium.get(key)!.push(w)
   }
 
-  const result = new Map<ObservationKey, { worlds: World[], alive: Set<Seat> }>()
+  const result = new Map<ObservationKey, { worlds: World[], alive: number }>()
 
   for (const [mediumKey, mediumWorlds] of byMedium) {
     const mediumResult = mediumKey === 'null' ? null : mediumKey as EnumSpecies
 
-    // 猫又道連れの可能性チェック
-    const hasNekomata = mediumWorlds.some(w => w.roles.get(target) === 'nekomata')
-    const hasNonNekomata = mediumWorlds.some(w => w.roles.get(target) !== 'nekomata')
+    const hasNekomata = mediumWorlds.some(w => w.roles[target] === 'nekomata')
+    const hasNonNekomata = mediumWorlds.some(w => w.roles[target] !== 'nekomata')
 
     if (!hasNekomata) {
-      // 猫又なし: 背徳者後追いチェックのみ
-      const { obsKey, alive } = resolveFollowDeaths(mediumWorlds, aliveAfterExec, target, mediumResult, null)
-      addToPartition(result, obsKey, mediumWorlds, alive)
+      const obsKey = executionObsKeyToString(mediumResult, null)
+      addToPartition(result, obsKey, mediumWorlds, aliveAfterExec)
     } else if (!hasNonNekomata) {
-      // 全ワールドで猫又: 各道連れ先で分岐（AND）
-      for (const curseTarget of aliveAfterExec) {
-        const aliveAfterCurse = new Set(aliveAfterExec)
-        aliveAfterCurse.delete(curseTarget)
-
-        const { obsKey, alive } = resolveFollowDeaths(
-          mediumWorlds, aliveAfterCurse, target, mediumResult, curseTarget,
-        )
-        addToPartition(result, obsKey, mediumWorlds, alive)
-      }
+      forEachSeat(aliveAfterExec, curseTarget => {
+        const aliveAfterCurse = removeSeat(aliveAfterExec, curseTarget)
+        const obsKey = executionObsKeyToString(mediumResult, curseTarget)
+        addToPartition(result, obsKey, mediumWorlds, aliveAfterCurse)
+      })
     } else {
-      // 一部が猫又: 猫又ワールドと非猫又ワールドを分離
-      const nekoWorlds = mediumWorlds.filter(w => w.roles.get(target) === 'nekomata')
-      const nonNekoWorlds = mediumWorlds.filter(w => w.roles.get(target) !== 'nekomata')
+      const nekoWorlds = mediumWorlds.filter(w => w.roles[target] === 'nekomata')
+      const nonNekoWorlds = mediumWorlds.filter(w => w.roles[target] !== 'nekomata')
 
-      // 非猫又ワールド
-      const { obsKey: nonNekoObs, alive: nonNekoAlive } = resolveFollowDeaths(
-        nonNekoWorlds, aliveAfterExec, target, mediumResult, null,
-      )
-      addToPartition(result, nonNekoObs, nonNekoWorlds, nonNekoAlive)
+      const obsKey = executionObsKeyToString(mediumResult, null)
+      addToPartition(result, obsKey, nonNekoWorlds, aliveAfterExec)
 
-      // 猫又ワールド: 各道連れ先で分岐
-      for (const curseTarget of aliveAfterExec) {
-        const aliveAfterCurse = new Set(aliveAfterExec)
-        aliveAfterCurse.delete(curseTarget)
-
-        const { obsKey, alive } = resolveFollowDeaths(
-          nekoWorlds, aliveAfterCurse, target, mediumResult, curseTarget,
-        )
-        addToPartition(result, obsKey, nekoWorlds, alive)
-      }
+      forEachSeat(aliveAfterExec, curseTarget => {
+        const aliveAfterCurse = removeSeat(aliveAfterExec, curseTarget)
+        const nekoObsKey = executionObsKeyToString(mediumResult, curseTarget)
+        addToPartition(result, nekoObsKey, nekoWorlds, aliveAfterCurse)
+      })
     }
   }
 
   return result
 }
 
-function resolveFollowDeaths(
-  _worlds: World[], alive: Set<Seat>, _executedTarget: Seat,
-  mediumResult: EnumSpecies, nekomataCurseTarget: Seat | null,
-): { obsKey: ObservationKey, alive: Set<Seat> } {
-  // 背徳者後追い: 処刑先が妖狐 or 猫又道連れ先が妖狐の場合
-  // いずれかのワールドで妖狐が死んだ場合の背徳者後追いを計算
-  const followDeaths: Seat[] = []
-  const resultAlive = new Set(alive)
-
-  // 処刑先が妖狐のワールドがあるか？
-  // 猫又道連れ先が妖狐のワールドがあるか？
-  // → 観測上、後追いが起きるかは実際の役職次第
-  // ここでは全ワールドで共通する後追いのみ処理
-  // （後追いが起きるワールドと起きないワールドが混在する場合、観測で区別可能）
-
-  // 簡略化: 後追いは観測可能なので、後追いの有無でさらに分岐する必要がある
-  // ここでは後追いなしケースで返す（実際の分岐はsearchが行う）
-
-  const obsKey = executionObservationKey(mediumResult, nekomataCurseTarget, followDeaths)
-  return { obsKey, alive: resultAlive }
-}
-
 function addToPartition(
-  partition: Map<ObservationKey, { worlds: World[], alive: Set<Seat> }>,
-  obsKey: ObservationKey, worlds: World[], alive: Set<Seat>,
+  partition: Map<ObservationKey, { worlds: World[], alive: number }>,
+  obsKey: ObservationKey, worlds: World[], alive: number,
 ): void {
   const existing = partition.get(obsKey)
   if (existing) {
@@ -365,19 +311,15 @@ function addToPartition(
 
 /**
  * 夜フェーズの探索。
- * 護衛先・占い先の組み合わせを試し（OR）、
- * 単調性定理を使って狼の噛み先を処理する（AND）。
  */
 function searchNight(
   worlds: World[],
-  alive: Set<Seat>,
+  alive: number,
   day: number,
   depth: number,
   ss: SearchState,
 ): StrategyNode | null {
-  // 護衛候補: 生存中の狩人がいるワールドがあれば護衛を最適化
   const bodyguardCandidates = getBodyguardCandidates(worlds, alive)
-  // 占い候補: 生存中の占い師がいるワールドがあれば占い先を最適化
   const seerCandidates = getSeerCandidates(worlds, alive)
 
   for (const bgTarget of bodyguardCandidates) {
@@ -390,84 +332,76 @@ function searchNight(
   return null
 }
 
-function getBodyguardCandidates(worlds: World[], alive: Set<Seat>): (Seat | null)[] {
-  // 狩人が生存しているワールドがあるか？
-  const hasAliveBodyguard = worlds.some(w => w.bodyguardSeat !== -1 && alive.has(w.bodyguardSeat))
+function getBodyguardCandidates(worlds: World[], alive: number): (Seat | null)[] {
+  const hasAliveBodyguard = worlds.some(w => w.bodyguardSeat !== -1 && hasSeat(alive, w.bodyguardSeat))
   if (!hasAliveBodyguard) return [null]
 
-  // 護衛候補: 自分以外の生存者
-  const candidates: (Seat | null)[] = [null] // nullは護衛なし（狩人が偽のワールドもある）
-  for (const seat of alive) {
-    candidates.push(seat)
-  }
+  const candidates: (Seat | null)[] = [null]
+  forEachSeat(alive, seat => candidates.push(seat))
   return candidates
 }
 
-function getSeerCandidates(worlds: World[], alive: Set<Seat>): (Seat | null)[] {
-  const hasAliveSeer = worlds.some(w => w.seerSeat !== -1 && alive.has(w.seerSeat))
+function getSeerCandidates(worlds: World[], alive: number): (Seat | null)[] {
+  const hasAliveSeer = worlds.some(w => w.seerSeat !== -1 && hasSeat(alive, w.seerSeat))
   if (!hasAliveSeer) return [null]
 
   const candidates: (Seat | null)[] = [null]
-  for (const seat of alive) {
-    candidates.push(seat)
-  }
+  forEachSeat(alive, seat => candidates.push(seat))
   return candidates
 }
 
 /**
  * 特定の護衛先・占い先での夜の探索。
- * 単調性定理を適用: 各観測 o について POSSIBLE(o) を計算し、全てが詰みなら詰み。
+ * 単調性定理を適用。数値観測キーを使用。
  */
 function tryNightAction(
   worlds: World[],
-  alive: Set<Seat>,
+  alive: number,
   day: number,
   bodyguardTarget: Seat | null,
   seerTarget: Seat | null,
   depth: number,
   ss: SearchState,
 ): StrategyNode | null {
-  // 単調性定理: 各観測について、その観測を生み出しうるワールドの最大集合を計算
-  const possibleByObs = new Map<ObservationKey, { worlds: Set<World>, alive: Set<Seat> }>()
+  // 数値キーでグルーピング（高速）
+  const possibleByObs = new Map<number, { worlds: Set<World>, alive: number }>()
 
   for (const world of worlds) {
     const biteTargets = validBiteTargets(world, alive)
     if (biteTargets.length === 0) {
-      // 狼が全滅しているワールド → 噛みなし → 即座の観測
-      const obs: NightObservation = { deaths: [], seerResult: undefined }
-      const key = nightObservationKey(obs)
-      if (!possibleByObs.has(key)) {
-        possibleByObs.set(key, { worlds: new Set(), alive: new Set(alive) })
+      const numKey = 0 // no deaths, no seer result
+      if (!possibleByObs.has(numKey)) {
+        possibleByObs.set(numKey, { worlds: new Set(), alive })
       }
-      possibleByObs.get(key)!.worlds.add(world)
+      possibleByObs.get(numKey)!.worlds.add(world)
       continue
     }
 
     for (const biteTarget of biteTargets) {
-      const { nextAlive, observation } = simulateNight(
+      const { nextAlive, obsKey: numKey } = simulateNight(
         world, alive, biteTarget, bodyguardTarget, seerTarget,
       )
-      const key = nightObservationKey(observation)
-      if (!possibleByObs.has(key)) {
-        possibleByObs.set(key, { worlds: new Set(), alive: nextAlive })
+      if (!possibleByObs.has(numKey)) {
+        possibleByObs.set(numKey, { worlds: new Set(), alive: nextAlive })
       }
-      possibleByObs.get(key)!.worlds.add(world)
+      possibleByObs.get(numKey)!.worlds.add(world)
     }
   }
 
   // 全観測分岐で詰みか？（AND）
   const branches = {} as Record<ObservationKey, StrategyNode>
 
-  for (const [obsKey, group] of possibleByObs) {
+  for (const [numKey, group] of possibleByObs) {
     const groupWorlds = Array.from(group.worlds)
     const nextState: SimState = { alive: group.alive, day: day + 1 }
 
     const result = isTsumi(groupWorlds, nextState, depth + 1, ss)
     if (result === null) return null
-    branches[obsKey] = result
+    // 数値キーを文字列に変換（出力用）
+    branches[obsKeyToString(numKey)] = result
   }
 
-  // 全分岐が同じ trivial win（同一候補の処刑→勝利）に帰着する場合、夜分岐を圧縮
+  // 全分岐が同じ trivial win に帰着する場合、夜分岐を圧縮
   const collapsed = collapseBranches(branches)
   if (collapsed) return collapsed
 

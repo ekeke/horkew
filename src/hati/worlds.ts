@@ -5,9 +5,6 @@ import type { Possibilities } from '../retar/possibilities.ts'
 
 /**
  * Retarの可能性からすべての有効なワールド（役職配置）を列挙する。
- *
- * 各seatの可能性ビットマスクとsetup（役職数）を使い、
- * バックトラッキングで全有効配置を列挙する。
  */
 export function enumerateWorlds(
   possibilities: Possibilities,
@@ -26,15 +23,14 @@ export function enumerateWorlds(
   }
 
   const worlds: World[] = []
-  const assignment = new Map<Seat, SystemRole>()
+  const assignment: SystemRole[] = new Array(seats.length > 0 ? seats[seats.length - 1] + 1 : 0)
 
   function backtrack(idx: number): void {
     if (idx === seats.length) {
-      // 全役職が使い切られているか確認
       for (let i = 0; i < ROLE_COUNT; i++) {
         if (roleCount[i] !== 0) return
       }
-      worlds.push(createWorld(assignment))
+      worlds.push(createWorld(assignment, seats))
       return
     }
 
@@ -46,20 +42,19 @@ export function enumerateWorlds(
       if (roleCount[bitIdx] <= 0) continue
       const role = RoleSignatureBitsReverseMap.get(1 << bitIdx)!
       roleCount[bitIdx]--
-      assignment.set(seat, role)
+      assignment[seat] = role
       backtrack(idx + 1)
       roleCount[bitIdx]++
     }
-    assignment.delete(seat)
   }
 
   backtrack(0)
   return worlds
 }
 
-function createWorld(assignment: Map<Seat, SystemRole>): World {
-  const roles = new Map(assignment)
-  const wolfSeats = new Set<Seat>()
+function createWorld(roles: SystemRole[], seats: Seat[]): World {
+  const rolesArr: SystemRole[] = new Array(roles.length)
+  let wolfMask = 0
   let hamsterSeat = -1
   let immoralistSeat = -1
   let seerSeat = -1
@@ -67,9 +62,11 @@ function createWorld(assignment: Map<Seat, SystemRole>): World {
   let nekomataSeat = -1
   let mediumSeat = -1
 
-  for (const [seat, role] of roles) {
+  for (const seat of seats) {
+    const role = roles[seat]
+    rolesArr[seat] = role
     switch (role) {
-      case 'werewolf': wolfSeats.add(seat); break
+      case 'werewolf': wolfMask |= (1 << seat); break
       case 'werehamster': hamsterSeat = seat; break
       case 'immoralist': immoralistSeat = seat; break
       case 'seer': seerSeat = seat; break
@@ -79,18 +76,5 @@ function createWorld(assignment: Map<Seat, SystemRole>): World {
     }
   }
 
-  return { roles, wolfSeats, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
-}
-
-/**
- * 生存者の役職配置が同一のワールドを等価クラスとしてまとめる。
- * 探索の枝刈りに使用。
- */
-export function worldEquivalenceKey(world: World, alive: Set<Seat>): string {
-  const parts: string[] = []
-  const sorted = Array.from(alive).sort((a, b) => a - b)
-  for (const seat of sorted) {
-    parts.push(`${seat}:${world.roles.get(seat)}`)
-  }
-  return parts.join(',')
+  return { roles: rolesArr, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
 }

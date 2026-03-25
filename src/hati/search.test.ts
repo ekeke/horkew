@@ -1,14 +1,15 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import type { Seat, SystemRole } from '../types/index.ts'
+import type { SystemRole } from '../types/index.ts'
 import type { World } from './types.ts'
 import { searchTsumiDirect } from './index.ts'
 import { formatTsumiResult } from './format.ts'
 
 // ヘルパー: ワールドを簡単に作成
 function makeWorld(assignments: Record<number, SystemRole>): World {
-  const roles = new Map<Seat, SystemRole>()
-  const wolfSeats = new Set<Seat>()
+  const maxSeat = Math.max(...Object.keys(assignments).map(Number))
+  const roles: SystemRole[] = new Array(maxSeat + 1)
+  let wolfMask = 0
   let hamsterSeat = -1
   let immoralistSeat = -1
   let seerSeat = -1
@@ -18,9 +19,9 @@ function makeWorld(assignments: Record<number, SystemRole>): World {
 
   for (const [seatStr, role] of Object.entries(assignments)) {
     const seat = Number(seatStr)
-    roles.set(seat, role)
+    roles[seat] = role
     switch (role) {
-      case 'werewolf': wolfSeats.add(seat); break
+      case 'werewolf': wolfMask |= (1 << seat); break
       case 'werehamster': hamsterSeat = seat; break
       case 'immoralist': immoralistSeat = seat; break
       case 'seer': seerSeat = seat; break
@@ -30,7 +31,7 @@ function makeWorld(assignments: Record<number, SystemRole>): World {
     }
   }
 
-  return { roles, wolfSeats, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
+  return { roles, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
 }
 
 describe('Hati searchTsumi', () => {
