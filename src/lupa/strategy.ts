@@ -22,8 +22,6 @@ export type DecisionContext = {
   lastExecutedSeat: number | null
   /** Retarの分析結果（enableRetar時にエンジンが注入、それ以外はnull） */
   retarPossibilities: Map<number, Set<SystemRole>> | null
-  /** 人外向け: 占いCOした場合のRetar分析結果（enableRetar時、未CO人外にのみ注入） */
-  retarWhatIfPossibilities: Map<number, Set<SystemRole>> | null
   /** 人狼 → 他の人狼のseat一覧 (人狼以外はnull) */
   wolfTeammates: number[] | null
   /** 狂信者 → 人狼のseat一覧 (狂信者以外はnull) */

@@ -11,7 +11,7 @@ import {
 } from './roles.ts'
 import { HeuristicStrategy, forceTrueRoleCO, resolveVotes } from './heuristic.ts'
 import { detectCommander } from './leadership.ts'
-import { analyzeFromEvents as retarAnalyze, analyzeCurrentCOImpact } from './retar-bridge.ts'
+import { analyzeFromEvents as retarAnalyze } from './retar-bridge.ts'
 
 export type GameResult = {
   events: GameEvent[]
@@ -76,7 +76,6 @@ function buildContext(
   signals: SignalRecord[], proposals: Proposal[],
   lastExecutedSeat: number | null,
   retarPossibilities: Map<number, Set<SystemRole>> | null = null,
-  retarWhatIfPossibilities: Map<number, Set<SystemRole>> | null = null,
   revoteRound: number | null = null,
   revoteCandidates: number[] | null = null,
 ): DecisionContext {
@@ -117,7 +116,6 @@ function buildContext(
     gameState: state,
     lastExecutedSeat,
     retarPossibilities,
-    retarWhatIfPossibilities,
     wolfTeammates,
     knownWolves,
     knownHamster,
@@ -258,27 +256,15 @@ export function runGame(config: LupaConfig): GameResult {
     // ==== 昼フェーズ ====
     state.phase = 'day'
 
-    // ==== CO前Retar分析（人外向けWhat-Ifを含む） ====
+    // ==== CO前Retar分析 ====
     let preCoRetar: Map<number, Set<SystemRole>> | null = null
-    const whatIfByPlayer = new Map<number, Map<number, Set<SystemRole>>>()
     if (config.enableRetar) {
       preCoRetar = retarAnalyze(events, state, config)
-      // 人外で未COのプレイヤーに占いCOシミュレーション
-      const wolfRoles = new Set(['werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist'])
-      for (const player of alivePlayers(state)) {
-        if (wolfRoles.has(player.role) && player.claimedRole === null) {
-          const impact = analyzeCurrentCOImpact(events, state, config, player.seat, preCoRetar!)
-          if (impact.ifSeerCO) {
-            whatIfByPlayer.set(player.seat, impact.ifSeerCO)
-          }
-        }
-      }
     }
 
     // COフェーズ
     for (const player of alivePlayers(state)) {
-      const whatIf = whatIfByPlayer.get(player.seat) ?? null
-      const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar, whatIf)
+      const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar)
       const claim = decideForPlayer(config, state, player, ctx,
         (s, c) => s.decideDayClaim(c),
         (s, c) => s.decideDayClaim(c),
@@ -392,7 +378,7 @@ export function runGame(config: LupaConfig): GameResult {
           target = revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
         } else {
           // 初回投票 or full_revote: Strategyに委任
-          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, revoteCount, revoteCandidates)
+          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates)
           target = decideForPlayer(config, state, voter, ctx,
             (s, c) => s.decideVote(c),
             (s, c) => s.decideVote(c),

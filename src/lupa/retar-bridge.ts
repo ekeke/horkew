@@ -5,7 +5,7 @@
  * verify.tsと同じパイプライン: GameEvents → formatHowl → parse → buildVillageStatus → VillageRetar
  */
 
-import type { SystemRole, EnumSpecies } from '../types/index.ts'
+import type { SystemRole } from '../types/index.ts'
 import type { LupaConfig, GameState, GameEvent } from './types.ts'
 import { formatHowl } from './format.ts'
 import { parse } from '../howl/parser.ts'
@@ -64,97 +64,3 @@ export function analyzeFromEvents(
   return result.result
 }
 
-/**
- * 人外向け: 仮のCOイベントを追加した上でRetarを実行
- *
- * 「自分が占いCOしたら他プレイヤーの可能性はどう変わるか」をシミュレート。
- * 実際のイベント列を汚さず、コピーに仮イベントを追加して分析する。
- */
-export type FakeClaim = {
-  type: 'seer_co'
-  results: Array<{ target: number, result: EnumSpecies }>
-} | {
-  type: 'medium_co'
-  pastResults?: EnumSpecies[]
-}
-
-export function simulateCO(
-  events: GameEvent[],
-  state: GameState,
-  config: LupaConfig,
-  seat: number,
-  fakeClaim: FakeClaim,
-): Map<number, Set<SystemRole>> {
-  // イベント列のコピーに仮COイベントを追加
-  const simEvents: GameEvent[] = [...events]
-
-  switch (fakeClaim.type) {
-    case 'seer_co':
-      simEvents.push({
-        type: 'seer_claim',
-        actor: seat,
-        results: fakeClaim.results,
-      })
-      break
-    case 'medium_co':
-      simEvents.push({
-        type: 'medium_claim',
-        actor: seat,
-        pastResults: fakeClaim.pastResults,
-      })
-      break
-  }
-
-  return analyzeFromEvents(simEvents, state, config)
-}
-
-/**
- * 人外向け: 現在のCO状況でのRetar分析
- *
- * すでにCOしている場合、その状態での他プレイヤーの可能性を返す。
- * COしていない場合は通常分析と同じ。
- */
-export function analyzeCurrentCOImpact(
-  events: GameEvent[],
-  state: GameState,
-  config: LupaConfig,
-  seat: number,
-  /** キャッシュ済みの通常分析結果（渡されれば再計算しない） */
-  cachedCurrent?: Map<number, Set<SystemRole>>,
-): {
-  /** 通常分析結果 */
-  current: Map<number, Set<SystemRole>>
-  /** 占いCOした場合（未COの場合のみ） */
-  ifSeerCO: Map<number, Set<SystemRole>> | null
-  /** 霊能COした場合（未COの場合のみ） */
-  ifMediumCO: Map<number, Set<SystemRole>> | null
-} {
-  const current = cachedCurrent ?? analyzeFromEvents(events, state, config)
-
-  const player = state.players.find(p => p.seat === seat)
-  if (!player || player.claimedRole !== null) {
-    // すでにCO済み or プレイヤー不明 → What-Ifなし
-    return { current, ifSeerCO: null, ifMediumCO: null }
-  }
-
-  // 占いCOシミュレーション（ダミー結果: 全員白）
-  const alivePlayers = state.players.filter(p => p.alive && p.seat !== seat)
-  const dummySeerResults: Array<{ target: number, result: EnumSpecies }> = []
-  for (const p of alivePlayers.slice(0, Math.min(state.day, alivePlayers.length))) {
-    dummySeerResults.push({ target: p.seat, result: 'human' })
-  }
-
-  const ifSeerCO = dummySeerResults.length > 0
-    ? simulateCO(events, state, config, seat, {
-        type: 'seer_co',
-        results: dummySeerResults,
-      })
-    : null
-
-  // 霊能COシミュレーション
-  const ifMediumCO = simulateCO(events, state, config, seat, {
-    type: 'medium_co',
-  })
-
-  return { current, ifSeerCO, ifMediumCO }
-}

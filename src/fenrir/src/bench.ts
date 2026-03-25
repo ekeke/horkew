@@ -117,7 +117,7 @@ console.log('=== encodeObservation only (1000 calls) ===')
     day: 3, phase: 'day' as const, alivePlayers: state.players.filter(p => p.alive).map(p => p.seat),
     publicEvents: [], signals: [], commander: null, proposals: [],
     rng: null as any, gameState: state, lastExecutedSeat: null,
-    retarPossibilities: null, retarWhatIfPossibilities: null,
+    retarPossibilities: null,
     wolfTeammates: null, knownWolves: null, knownHamster: null, masonPartner: null,
     revoteRound: null, revoteCandidates: null,
   }

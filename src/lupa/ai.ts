@@ -28,7 +28,6 @@ function makeCompatCtx(
     gameState: state,
     lastExecutedSeat,
     retarPossibilities: null,
-    retarWhatIfPossibilities: null,
     wolfTeammates: null,
     knownWolves: null,
     knownHamster: null,

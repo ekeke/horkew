@@ -36,10 +36,7 @@ const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 210
 
 // Retar可能性: per-seat × roles (0/1)
 const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
-// What-If CO: 占いCOシミュレーション後の可能性
-const RETAR_WHATIF_SIZE = SEATS * NUM_ROLES  // 154
-
-export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + RETAR_WHATIF_SIZE
+export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE
 
 export function encodeObservation(ctx: DecisionContext): Float32Array {
   const obs = new Float32Array(OBSERVATION_SIZE)
@@ -301,22 +298,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
       }
     }
   }
-  offset += RETAR_POSSIBILITIES_SIZE
-
-  // ========== What-If CO (人外向け) ==========
-  if (ctx.retarWhatIfPossibilities) {
-    for (let seat = 1; seat <= SEATS; seat++) {
-      const roles = ctx.retarWhatIfPossibilities.get(seat)
-      if (!roles) continue
-      for (const role of roles) {
-        const rIdx = ROLE_INDEX.get(role)
-        if (rIdx !== undefined) {
-          obs[offset + (seat - 1) * NUM_ROLES + rIdx] = 1
-        }
-      }
-    }
-  }
-  // offset += RETAR_WHATIF_SIZE
+  // offset += RETAR_POSSIBILITIES_SIZE
 
   return obs
 }
