@@ -54,6 +54,7 @@ export function enumerateWorlds(
 
 function createWorld(roles: SystemRole[], seats: Seat[]): World {
   const rolesArr: SystemRole[] = new Array(roles.length)
+  const roleIds = new Uint8Array(roles.length)
   let wolfMask = 0
   let hamsterSeat = -1
   let immoralistSeat = -1
@@ -65,6 +66,7 @@ function createWorld(roles: SystemRole[], seats: Seat[]): World {
   for (const seat of seats) {
     const role = roles[seat]
     rolesArr[seat] = role
+    roleIds[seat] = RoleBitIndex[role]
     switch (role) {
       case 'werewolf': wolfMask |= (1 << seat); break
       case 'werehamster': hamsterSeat = seat; break
@@ -76,5 +78,5 @@ function createWorld(roles: SystemRole[], seats: Seat[]): World {
     }
   }
 
-  return { roles: rolesArr, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
+  return { roles: rolesArr, roleIds, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
 }

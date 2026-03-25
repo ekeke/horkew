@@ -6,10 +6,18 @@ import type {
 import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
 import {
   checkOutcome, allWorldsVillageWin, anyWorldVillageLoss,
-  applyExecution, simulateNight, validBiteTargets,
+  applyExecution, simulateNight, validBiteTargetsMask,
   obsKeyToString, executionObsKeyToString,
-  getMediumResult, isConfirmedVillagerInAllWorlds,
+  getMediumResult,
 } from './simulate.ts'
+import { RoleBitIndex } from '../retar/possibilities.ts'
+
+/** 村人側role IDセット（数値判定用） */
+const VILLAGER_ROLE_IDS: Set<number> = new Set([
+  RoleBitIndex.villager, RoleBitIndex.seer, RoleBitIndex.medium,
+  RoleBitIndex.bodyguard, RoleBitIndex.mason, RoleBitIndex.nekomata,
+])
+const NEKOMATA_ROLE_ID = RoleBitIndex.nekomata
 
 /** 6人以下のエンドゲームテーブル（正規形キー → 詰み可否） */
 const endgameTable = new Map<string, boolean>()
@@ -57,30 +65,32 @@ export function searchTsumi(
 
 /**
  * 数値ハッシュベースのメモ化キー。
- * alive はビットマスクそのまま、ワールドは役職ハッシュの組み合わせ。
+ * alive はビットマスクそのまま、ワールドは役職IDハッシュの組み合わせ。
+ * ワールドハッシュをソートして単一数値に畳み込み → `alive|hash` で文字列キー化。
  */
 function memoKey(worlds: World[], alive: number): string {
-  // FNV-1a ベースのハッシュでワールド署名を生成
   const worldHashes: number[] = new Array(worlds.length)
   for (let wi = 0; wi < worlds.length; wi++) {
     let h = 0x811c9dc5
+    const ids = worlds[wi].roleIds
     let mask = alive
     while (mask !== 0) {
       const bit = mask & (-mask)
       const seat = 31 - Math.clz32(bit)
-      const role = worlds[wi].roles[seat]
-      // role の最初の2文字で十分ユニーク
-      h ^= role.charCodeAt(0)
-      h = Math.imul(h, 0x01000193)
-      h ^= role.charCodeAt(1)
+      h ^= ids[seat]
       h = Math.imul(h, 0x01000193)
       mask ^= bit
     }
     worldHashes[wi] = h >>> 0
   }
   worldHashes.sort()
-  // alive ビットマスク + ソート済みワールドハッシュ配列
-  return `${alive}|${worldHashes.join(',')}`
+  // ソート済みハッシュを単一数値に畳み込み
+  let combined = 0x811c9dc5
+  for (let i = 0; i < worldHashes.length; i++) {
+    combined ^= worldHashes[i]
+    combined = Math.imul(combined, 0x01000193)
+  }
+  return `${alive}|${combined >>> 0}`
 }
 
 /**
@@ -142,15 +152,19 @@ function isTsumi(
 
   // 各処刑候補を試す（OR節点）
   // ムーブオーダリング: 狼である可能性が高い候補を先に試す（●→即勝ちの確率UP）
+  // #8: 一括で狼カウントを計算
   const candidates = getExecutionCandidates(worlds, state.alive)
-  candidates.sort((a, b) => {
-    let wa = 0, wb = 0
-    for (const w of worlds) {
-      if (hasSeat(w.wolfMask, a)) wa++
-      if (hasSeat(w.wolfMask, b)) wb++
+  const wolfCounts = new Uint16Array(32)
+  for (const w of worlds) {
+    const wolvesAlive = w.wolfMask & state.alive
+    let mask = wolvesAlive
+    while (mask !== 0) {
+      const bit = mask & (-mask)
+      wolfCounts[31 - Math.clz32(bit)]++
+      mask ^= bit
     }
-    return wb - wa
-  })
+  }
+  candidates.sort((a, b) => wolfCounts[b] - wolfCounts[a])
 
   for (const target of candidates) {
     const result = tryExecution(worlds, state, target, depth, ss)
@@ -169,27 +183,27 @@ function isTsumi(
 /**
  * 生存者の役職配置が同一のワールドを統合する。
  * 死亡者の役職は探索に影響しないため、生存者部分のみで等価判定。
+ * #2: Set<number> を使用（文字列変換不要）
  */
 function deduplicateWorlds(worlds: World[], alive: number): World[] {
   if (worlds.length <= 1) return worlds
-  const seen = new Set<string>()
+  const seen = new Set<number>()
   const result: World[] = []
   for (const w of worlds) {
-    // 生存者の役職のみでハッシュキーを構築
+    // 生存者の役職IDのみでハッシュキーを構築
     let h = 0x811c9dc5
+    const ids = w.roleIds
     let mask = alive
     while (mask !== 0) {
       const bit = mask & (-mask)
       const seat = 31 - Math.clz32(bit)
-      h ^= w.roles[seat].charCodeAt(0)
-      h = Math.imul(h, 0x01000193)
-      h ^= w.roles[seat].charCodeAt(1)
+      h ^= ids[seat]
       h = Math.imul(h, 0x01000193)
       h ^= seat
       h = Math.imul(h, 0x01000193)
       mask ^= bit
     }
-    const key = String(h >>> 0)
+    const key = h >>> 0
     if (!seen.has(key)) {
       seen.add(key)
       result.push(w)
@@ -202,20 +216,29 @@ function deduplicateWorlds(worlds: World[], alive: number): World[] {
  * エンドゲームテーブル用の正規形キー。
  * seat番号に依存せず、各ワールドの生存者役職パターン（ソート済み）で構成。
  * 重複ワールドは除去。
+ * #3: 数値ID配列でソート → 数値パック化
  */
 function canonicalKey(worlds: World[], alive: number): string {
+  const aliveCount = popCount32(alive)
   const tuples: string[] = []
+  // 再利用バッファ
+  const buf = new Uint8Array(aliveCount)
   for (const w of worlds) {
-    const roles: string[] = []
+    let idx = 0
     let mask = alive
     while (mask !== 0) {
       const bit = mask & (-mask)
-      const seat = 31 - Math.clz32(bit)
-      roles.push(w.roles[seat])
+      buf[idx++] = w.roleIds[31 - Math.clz32(bit)]
       mask ^= bit
     }
-    roles.sort()
-    tuples.push(roles.join(','))
+    buf.sort()
+    // Uint8Array → 軽量文字列化
+    let s = ''
+    for (let i = 0; i < aliveCount; i++) {
+      if (i > 0) s += ','
+      s += buf[i]
+    }
+    tuples.push(s)
   }
   tuples.sort()
   return tuples.join('|')
@@ -278,20 +301,25 @@ function canPossiblyWin(worlds: World[], alive: number): boolean {
 
 /**
  * 処刑候補の列挙（枝刈り込み）
+ * #4: isConfirmedVillagerInAllWorlds を数値ID版で判定
+ * #7: roleIds で等価クラスハッシュ
  */
 function getExecutionCandidates(worlds: World[], alive: number): Seat[] {
   const candidates: Seat[] = []
   const seen = new Set<number>()
 
   forEachSeat(alive, seat => {
-    if (isConfirmedVillagerInAllWorlds(worlds, seat)) return
+    // #4: 数値IDで村人確定判定（Set再生成不要）
+    let isVillager = true
+    for (const w of worlds) {
+      if (!VILLAGER_ROLE_IDS.has(w.roleIds[seat])) { isVillager = false; break }
+    }
+    if (isVillager) return
 
-    // 等価クラス: 全ワールドでの役職ハッシュが同一なら1つだけ試す
+    // 等価クラス: 全ワールドでの役職IDハッシュが同一なら1つだけ試す
     let h = 0x811c9dc5
     for (const w of worlds) {
-      h ^= w.roles[seat].charCodeAt(0)
-      h = Math.imul(h, 0x01000193)
-      h ^= w.roles[seat].charCodeAt(1)
+      h ^= w.roleIds[seat]
       h = Math.imul(h, 0x01000193)
     }
     h = h >>> 0
@@ -349,6 +377,7 @@ function tryExecution(
 
 /**
  * ワールドを処刑後の観測で分割
+ * #7: roleIds で猫又判定
  */
 function partitionWorldsByExecution(
   worlds: World[],
@@ -368,8 +397,8 @@ function partitionWorldsByExecution(
   for (const [mediumKey, mediumWorlds] of byMedium) {
     const mediumResult = mediumKey === 'null' ? null : mediumKey as EnumSpecies
 
-    const hasNekomata = mediumWorlds.some(w => w.roles[target] === 'nekomata')
-    const hasNonNekomata = mediumWorlds.some(w => w.roles[target] !== 'nekomata')
+    const hasNekomata = mediumWorlds.some(w => w.roleIds[target] === NEKOMATA_ROLE_ID)
+    const hasNonNekomata = mediumWorlds.some(w => w.roleIds[target] !== NEKOMATA_ROLE_ID)
 
     if (!hasNekomata) {
       const obsKey = executionObsKeyToString(mediumResult, null)
@@ -381,8 +410,8 @@ function partitionWorldsByExecution(
         addToPartition(result, obsKey, mediumWorlds, aliveAfterCurse)
       })
     } else {
-      const nekoWorlds = mediumWorlds.filter(w => w.roles[target] === 'nekomata')
-      const nonNekoWorlds = mediumWorlds.filter(w => w.roles[target] !== 'nekomata')
+      const nekoWorlds = mediumWorlds.filter(w => w.roleIds[target] === NEKOMATA_ROLE_ID)
+      const nonNekoWorlds = mediumWorlds.filter(w => w.roleIds[target] !== NEKOMATA_ROLE_ID)
 
       const obsKey = executionObsKeyToString(mediumResult, null)
       addToPartition(result, obsKey, nonNekoWorlds, aliveAfterExec)
@@ -433,21 +462,22 @@ function searchNight(
   return null
 }
 
+/**
+ * #7: roleIds で等価クラスハッシュ
+ */
 function getBodyguardCandidates(worlds: World[], alive: number): (Seat | null)[] {
   const hasAliveBodyguard = worlds.some(w => w.bodyguardSeat !== -1 && hasSeat(alive, w.bodyguardSeat))
   if (!hasAliveBodyguard) return [null]
 
-  // 護衛候補: 確定狼を護衛しても無意味。狩人自身も護衛不可だが
-  // 真の狩人seatは不明なので全員候補にする（nullは護衛なし）
   const candidates: (Seat | null)[] = [null]
   const seen = new Set<number>()
   forEachSeat(alive, seat => {
     // 全ワールドで狼確定の席は護衛しても無意味
     if (worlds.every(w => hasSeat(w.wolfMask, seat))) return
-    // 等価クラス: 護衛先の役職パターンが同一なら1つだけ
+    // 等価クラス: 護衛先の役職IDパターンが同一なら1つだけ
     let h = 0x811c9dc5
     for (const w of worlds) {
-      h ^= w.roles[seat].charCodeAt(0)
+      h ^= w.roleIds[seat]
       h = Math.imul(h, 0x01000193)
     }
     h = h >>> 0
@@ -458,27 +488,29 @@ function getBodyguardCandidates(worlds: World[], alive: number): (Seat | null)[]
   return candidates
 }
 
+/**
+ * #7: roleIds で等価クラスハッシュ + 情報ゲイン判定
+ */
 function getSeerCandidates(worlds: World[], alive: number): (Seat | null)[] {
   const hasAliveSeer = worlds.some(w => w.seerSeat !== -1 && hasSeat(alive, w.seerSeat))
   if (!hasAliveSeer) return [null]
 
-  // 占い候補: 全ワールドで同一役職の確定席を占っても新情報なし
   const candidates: (Seat | null)[] = [null]
   const seen = new Set<number>()
   forEachSeat(alive, seat => {
-    // 全ワールドで同じ占い結果になる → 情報ゲインなし → スキップ
-    let allSame = true
-    let firstResult: string | undefined
-    for (const w of worlds) {
-      const r = w.roles[seat]
-      if (firstResult === undefined) firstResult = r
-      else if (r !== firstResult) { allSame = false; break }
+    // 全ワールドで同じ役職 → 情報ゲインなし → スキップ
+    if (worlds.length > 1) {
+      const firstId = worlds[0].roleIds[seat]
+      let allSame = true
+      for (let i = 1; i < worlds.length; i++) {
+        if (worlds[i].roleIds[seat] !== firstId) { allSame = false; break }
+      }
+      if (allSame) return
     }
-    if (allSame && worlds.length > 1) return
     // 等価クラス
     let h = 0x811c9dc5
     for (const w of worlds) {
-      h ^= w.roles[seat].charCodeAt(0)
+      h ^= w.roleIds[seat]
       h = Math.imul(h, 0x01000193)
     }
     h = h >>> 0
@@ -491,7 +523,8 @@ function getSeerCandidates(worlds: World[], alive: number): (Seat | null)[] {
 
 /**
  * 特定の護衛先・占い先での夜の探索。
- * 単調性定理を適用。数値観測キーを使用。
+ * #5: Set<World> → 配列 + includes重複チェック
+ * #6: validBiteTargetsMask でビットマスク直接操作（配列alloc削減）
  */
 function tryNightAction(
   worlds: World[],
@@ -503,20 +536,28 @@ function tryNightAction(
   ss: SearchState,
 ): StrategyNode | null {
   // 数値キーでグルーピング（高速）
-  const possibleByObs = new Map<number, { worlds: Set<World>, alive: number }>()
+  const possibleByObs = new Map<number, { worlds: World[], alive: number }>()
 
   for (const world of worlds) {
-    const biteTargets = validBiteTargets(world, alive)
-    if (biteTargets.length === 0) {
-      const numKey = 0 // no deaths, no seer result
-      if (!possibleByObs.has(numKey)) {
-        possibleByObs.set(numKey, { worlds: new Set(), alive })
+    // #6: ビットマスクで噛み先を列挙（配列alloc不要）
+    const biteMask = validBiteTargetsMask(world, alive)
+    if (biteMask === 0) {
+      const numKey = 0
+      const group = possibleByObs.get(numKey)
+      if (group) {
+        group.worlds.push(world)
+      } else {
+        possibleByObs.set(numKey, { worlds: [world], alive })
       }
-      possibleByObs.get(numKey)!.worlds.add(world)
       continue
     }
 
-    for (const biteTarget of biteTargets) {
+    let remainBite = biteMask
+    while (remainBite !== 0) {
+      const biteBit = remainBite & (-remainBite)
+      const biteTarget = 31 - Math.clz32(biteBit)
+      remainBite ^= biteBit
+
       const { nextAlive, obsKey: numKey } = simulateNight(
         world, alive, biteTarget, bodyguardTarget, seerTarget,
       )
@@ -524,25 +565,27 @@ function tryNightAction(
       const outcome = checkOutcome(world, nextAlive)
       if (outcome === 'wolf_win' || outcome === 'hamster_win') return null
 
-      if (!possibleByObs.has(numKey)) {
-        possibleByObs.set(numKey, { worlds: new Set(), alive: nextAlive })
+      const group = possibleByObs.get(numKey)
+      if (group) {
+        // #5: 配列 + indexOf で重複回避（Setの代わり）
+        if (!group.worlds.includes(world)) group.worlds.push(world)
+      } else {
+        possibleByObs.set(numKey, { worlds: [world], alive: nextAlive })
       }
-      possibleByObs.get(numKey)!.worlds.add(world)
     }
   }
 
   // 全観測分岐で詰みか？（AND）
   // ムーブオーダリング: ワールド数が多い（難しい）分岐を先に試す → 失敗時の早期打ち切り
   const sortedObs = [...possibleByObs.entries()]
-    .sort((a, b) => b[1].worlds.size - a[1].worlds.size)
+    .sort((a, b) => b[1].worlds.length - a[1].worlds.length)
 
   const branches = {} as Record<ObservationKey, StrategyNode>
 
   for (const [numKey, group] of sortedObs) {
-    const groupWorlds = Array.from(group.worlds)
     const nextState: SimState = { alive: group.alive, day: day + 1 }
 
-    const result = isTsumi(groupWorlds, nextState, depth + 1, ss)
+    const result = isTsumi(group.worlds, nextState, depth + 1, ss)
     if (result === null) return null
     branches[obsKeyToString(numKey)] = result
   }

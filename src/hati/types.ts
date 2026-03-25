@@ -39,6 +39,8 @@ export function maskFromSeats(seats: Iterable<Seat>): number {
 export type World = {
   /** 役職配列（seat インデックス、0 番は未使用） */
   roles: SystemRole[]
+  /** 役職の数値ID配列（RoleBitIndex準拠、ホットパス用） */
+  roleIds: Uint8Array
   /** 人狼のseatビットマスク */
   wolfMask: number
   /** 妖狐のseat（いなければ -1） */

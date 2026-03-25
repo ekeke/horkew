@@ -2,8 +2,24 @@ import type { Seat, SystemRole, EnumSpecies } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 import type { World, ObservationKey } from './types.ts'
 import { hasSeat, removeSeat, popCount32, seatsFromMask } from './types.ts'
+import { RoleBitIndex } from '../retar/possibilities.ts'
 
 // --- 種族判定 ---
+
+/** 数値roleId→霊媒結果のルックアップテーブル */
+const MEDIUM_RESULT_TABLE: EnumSpecies[] = (() => {
+  const table: EnumSpecies[] = new Array(11).fill('human')
+  // werewolfのみwolf
+  table[RoleBitIndex.werewolf] = 'wolf'
+  return table
+})()
+
+/** 数値roleId→占い結果のルックアップテーブル */
+const SEER_RESULT_TABLE: EnumSpecies[] = (() => {
+  const table: EnumSpecies[] = new Array(11).fill('human')
+  table[RoleBitIndex.werewolf] = 'wolf'
+  return table
+})()
 
 export function getMediumResult(role: SystemRole): EnumSpecies {
   return systemRoles.get(role)?.mediumResult ?? 'human'
@@ -11,6 +27,16 @@ export function getMediumResult(role: SystemRole): EnumSpecies {
 
 export function getSeerResult(role: SystemRole): EnumSpecies {
   return systemRoles.get(role)?.seerResult ?? 'human'
+}
+
+/** 数値roleIdから霊媒結果を取得（ホットパス用） */
+export function getMediumResultById(roleId: number): EnumSpecies {
+  return MEDIUM_RESULT_TABLE[roleId]
+}
+
+/** 数値roleIdから占い結果を取得（ホットパス用） */
+export function getSeerResultById(roleId: number): EnumSpecies {
+  return SEER_RESULT_TABLE[roleId]
 }
 
 // --- 勝利判定 ---
@@ -59,9 +85,13 @@ export function applyExecution(alive: number, target: Seat): number {
 
 // --- 夜シミュレーション ---
 
+const WEREHAMSTER_ID = RoleBitIndex.werehamster
+const NEKOMATA_ID = RoleBitIndex.nekomata
+
 /**
  * 1つのワールドで夜を解決する。ビットマスクベース。
  * 返値: 夜後の生存者ビットマスクと観測キー（数値パック）。
+ * #7: roleIds でホットパス判定
  */
 export function simulateNight(
   world: World,
@@ -72,11 +102,11 @@ export function simulateNight(
 ): { nextAlive: number, obsKey: number } {
   let nextAlive = alive
   let deathMask = 0
-  const targetRole = world.roles[wolfBiteTarget]
+  const targetRoleId = world.roleIds[wolfBiteTarget]
 
   // 占い呪殺チェック
   if (seerTarget !== null && hasSeat(alive, world.seerSeat)) {
-    if (world.roles[seerTarget] === 'werehamster' && hasSeat(nextAlive, seerTarget)) {
+    if (world.roleIds[seerTarget] === WEREHAMSTER_ID && hasSeat(nextAlive, seerTarget)) {
       nextAlive = removeSeat(nextAlive, seerTarget)
       deathMask |= (1 << seerTarget)
       // 背徳者後追い
@@ -88,11 +118,11 @@ export function simulateNight(
   }
 
   // 狼の噛み解決
-  if (targetRole === 'werehamster') {
+  if (targetRoleId === WEREHAMSTER_ID) {
     // 妖狐は噛まれても死なない
   } else if (bodyguardTarget === wolfBiteTarget && hasSeat(alive, world.bodyguardSeat)) {
     // 護衛成功
-  } else if (targetRole === 'nekomata') {
+  } else if (targetRoleId === NEKOMATA_ID) {
     // 猫又噛み: 猫又死亡 + 噛んだ狼1匹死亡
     if (hasSeat(nextAlive, wolfBiteTarget)) {
       nextAlive = removeSeat(nextAlive, wolfBiteTarget)
@@ -116,7 +146,7 @@ export function simulateNight(
   // 占い結果: 占い師がその夜を生き延びた場合のみ翌日報告できる
   let seerResultCode = 0 // 0=none, 1=human, 2=wolf
   if (seerTarget !== null && hasSeat(nextAlive, world.seerSeat)) {
-    const result = getSeerResult(world.roles[seerTarget])
+    const result = SEER_RESULT_TABLE[world.roleIds[seerTarget]]
     seerResultCode = result === 'wolf' ? 2 : 1
   }
 
@@ -135,6 +165,14 @@ export function validBiteTargets(world: World, alive: number): Seat[] {
 
   const nonWolfAlive = alive & ~world.wolfMask
   return seatsFromMask(nonWolfAlive)
+}
+
+/**
+ * #6: 噛み先をビットマスクで返す（配列alloc不要）
+ */
+export function validBiteTargetsMask(world: World, alive: number): number {
+  if ((world.wolfMask & alive) === 0) return 0
+  return alive & ~world.wolfMask
 }
 
 // --- 観測キー変換（数値 → 文字列、出力用） ---
@@ -165,11 +203,12 @@ export function executionObsKeyToString(
 
 /**
  * 全ワールドで指定seatが確定村人側かチェック（枝刈り用）
+ * #4: モジュールスコープ定数Set（毎回再生成しない）
  */
+const villagerRoles: Set<SystemRole> = new Set([
+  'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
+])
 export function isConfirmedVillagerInAllWorlds(worlds: World[], seat: Seat): boolean {
-  const villagerRoles: Set<SystemRole> = new Set([
-    'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
-  ])
   for (const w of worlds) {
     if (!villagerRoles.has(w.roles[seat])) return false
   }

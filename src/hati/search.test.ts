@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { SystemRole } from '../types/index.ts'
 import type { World } from './types.ts'
+import { RoleBitIndex } from '../retar/possibilities.ts'
 import { searchTsumiDirect } from './index.ts'
 import { formatTsumiResult } from './format.ts'
 
@@ -9,6 +10,7 @@ import { formatTsumiResult } from './format.ts'
 function makeWorld(assignments: Record<number, SystemRole>): World {
   const maxSeat = Math.max(...Object.keys(assignments).map(Number))
   const roles: SystemRole[] = new Array(maxSeat + 1)
+  const roleIds = new Uint8Array(maxSeat + 1)
   let wolfMask = 0
   let hamsterSeat = -1
   let immoralistSeat = -1
@@ -20,6 +22,7 @@ function makeWorld(assignments: Record<number, SystemRole>): World {
   for (const [seatStr, role] of Object.entries(assignments)) {
     const seat = Number(seatStr)
     roles[seat] = role
+    roleIds[seat] = RoleBitIndex[role]
     switch (role) {
       case 'werewolf': wolfMask |= (1 << seat); break
       case 'werehamster': hamsterSeat = seat; break
@@ -31,7 +34,7 @@ function makeWorld(assignments: Record<number, SystemRole>): World {
     }
   }
 
-  return { roles, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
+  return { roles, roleIds, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
 }
 
 describe('Hati searchTsumi', () => {
