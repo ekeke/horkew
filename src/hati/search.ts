@@ -5,7 +5,7 @@ import type {
 } from './types.ts'
 import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
 import {
-  allWorldsVillageWin, anyWorldVillageLoss,
+  checkOutcome, allWorldsVillageWin, anyWorldVillageLoss,
   applyExecution, simulateNight, validBiteTargets,
   obsKeyToString, executionObsKeyToString,
   getMediumResult, isConfirmedVillagerInAllWorlds,
@@ -381,6 +381,10 @@ function tryNightAction(
       const { nextAlive, obsKey: numKey } = simulateNight(
         world, alive, biteTarget, bodyguardTarget, seerTarget,
       )
+      // 早期打ち切り: この噛み先で村が負ける → この夜行動は詰みでない
+      const outcome = checkOutcome(world, nextAlive)
+      if (outcome === 'wolf_win' || outcome === 'hamster_win') return null
+
       if (!possibleByObs.has(numKey)) {
         possibleByObs.set(numKey, { worlds: new Set(), alive: nextAlive })
       }
