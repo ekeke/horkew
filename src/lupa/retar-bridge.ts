@@ -117,9 +117,11 @@ export function initRetarWorkerPool(numWorkers?: number): void {
   if (poolReady) return
   const n = numWorkers ?? Math.max(1, (availableParallelism?.() ?? 4) - 1)
   for (let i = 0; i < n; i++) {
-    workerPool.push(new Worker(WORKER_PATH, {
+    const w = new Worker(WORKER_PATH, {
       execArgv: ['--experimental-strip-types'],
-    }))
+    })
+    w.setMaxListeners(100)
+    workerPool.push(w)
   }
   poolReady = true
 }
