@@ -110,7 +110,16 @@ function isTsumi(
   }
 
   // 各処刑候補を試す（OR節点）
+  // ムーブオーダリング: 狼である可能性が高い候補を先に試す（●→即勝ちの確率UP）
   const candidates = getExecutionCandidates(worlds, state.alive)
+  candidates.sort((a, b) => {
+    let wa = 0, wb = 0
+    for (const w of worlds) {
+      if (hasSeat(w.wolfMask, a)) wa++
+      if (hasSeat(w.wolfMask, b)) wb++
+    }
+    return wb - wa
+  })
 
   for (const target of candidates) {
     const result = tryExecution(worlds, state, target, depth, ss)
@@ -221,9 +230,13 @@ function tryExecution(
 
   const obsGroups = partitionWorldsByExecution(worlds, afterExecAlive, target)
 
+  // ムーブオーダリング: ワールド数が多い分岐を先に（AND節点の早期打ち切り）
+  const sortedExecObs = [...obsGroups.entries()]
+    .sort((a, b) => b[1].worlds.length - a[1].worlds.length)
+
   const branches = {} as Record<ObservationKey, StrategyNode>
 
-  for (const [obsKey, group] of obsGroups) {
+  for (const [obsKey, group] of sortedExecObs) {
     const { worlds: groupWorlds, alive: groupAlive } = group
 
     if (allWorldsVillageWin(groupWorlds, groupAlive)) {
@@ -393,15 +406,18 @@ function tryNightAction(
   }
 
   // 全観測分岐で詰みか？（AND）
+  // ムーブオーダリング: ワールド数が多い（難しい）分岐を先に試す → 失敗時の早期打ち切り
+  const sortedObs = [...possibleByObs.entries()]
+    .sort((a, b) => b[1].worlds.size - a[1].worlds.size)
+
   const branches = {} as Record<ObservationKey, StrategyNode>
 
-  for (const [numKey, group] of possibleByObs) {
+  for (const [numKey, group] of sortedObs) {
     const groupWorlds = Array.from(group.worlds)
     const nextState: SimState = { alive: group.alive, day: day + 1 }
 
     const result = isTsumi(groupWorlds, nextState, depth + 1, ss)
     if (result === null) return null
-    // 数値キーを文字列に変換（出力用）
     branches[obsKeyToString(numKey)] = result
   }
 
