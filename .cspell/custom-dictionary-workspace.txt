@@ -3,6 +3,7 @@ combinatorially
 decos
 frontmatter
 immoralists
+lupa
 neko
 nekomata
 Pocus

@@ -199,6 +199,8 @@ type GameConfig = {
   name: string
   roles: Record<string, number>
   seeds: [number, number]
+  hasFirstGhost?: boolean
+  revoteConfig?: import('../lupa/types.ts').RevoteConfig
 }
 
 const configs: GameConfig[] = [
@@ -207,6 +209,7 @@ const configs: GameConfig[] = [
   { name: 'mason-8p', roles: { werewolf: 1, villager: 3, seer: 1, medium: 1, mason: 2 }, seeds: [0, 500] },
   { name: 'guard-8p', roles: { werewolf: 1, villager: 3, seer: 1, bodyguard: 1, mason: 2 }, seeds: [0, 500] },
   { name: 'nekomata-8p', roles: { werewolf: 1, villager: 3, seer: 1, nekomata: 1, mason: 2 }, seeds: [0, 300] },
+  { name: '14d-neko', roles: { werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 200], hasFirstGhost: true },
 ]
 
 type Failure = {
@@ -292,7 +295,12 @@ function runVerify(args: Args): void {
       let events: GameEvent[]
       let state: GameState
       try {
-        const result = runGame({ roles, seed })
+        const lupaConfig = {
+          roles, seed,
+          hasFirstGhost: cfg.hasFirstGhost,
+          revoteConfig: cfg.revoteConfig ?? { maxRevotes: 2, style: 'full_revote' as const, tiebreaker: 'draw' as const },
+        }
+        const result = runGame(lupaConfig)
         events = result.events
         state = result.state
       } catch {
@@ -300,7 +308,12 @@ function runVerify(args: Args): void {
       }
       gameCount++
 
-      const howl = formatHowl(events, state, { roles, seed })
+      const lupaConfigForFormat = {
+        roles, seed,
+        hasFirstGhost: cfg.hasFirstGhost,
+        revoteConfig: cfg.revoteConfig,
+      }
+      const howl = formatHowl(events, state, lupaConfigForFormat)
       const checkpoints = findExecutionCheckpoints(howl)
 
       for (const cp of checkpoints) {
@@ -312,7 +325,8 @@ function runVerify(args: Args): void {
         try {
           const { meta, statements } = parse(truncated)
           const { vs, setup } = buildVillageStatus(statements, meta)
-          tsumiResult = searchTsumi(vs, setup, ANALYZE_OPTIONS)
+          const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+          tsumiResult = searchTsumi(vs, setup, opts)
           alive = new Set<Seat>()
           for (const [seat, status] of vs.statuses) {
             if (status.surviving) alive.add(seat)
