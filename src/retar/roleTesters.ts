@@ -193,7 +193,7 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
         seerTargets.set(d, [forecastTarget ?? 'unknown'])
       }
     }
-    for (const [, { target: targetSeat, species }] of self.assertions) {
+    for (const [assertionNight, { target: targetSeat, species }] of self.assertions) {
       if ( species === 'wolf' ) {
         if ( ! context.possibilities.fixRole(targetSeat,'werewolf') ) {
           return false
@@ -209,6 +209,8 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
       else if ( context.possibilities.isActualRole(targetSeat, 'werehamster') ) {
         const targetStatus = getStatus(env, targetSeat)
         if ( targetStatus.surviving ) return false
+        // 占い師がN夜に狐を占った場合、狐はN夜に呪殺される。死亡日が異なれば矛盾。
+        if ( assertionNight >= 0 && targetStatus.diedDay !== assertionNight ) return false
         const targetsOnDeathDay = seerTargets.get(targetStatus.diedDay!) || []
         if ( !targetsOnDeathDay.includes(targetSeat) && !targetsOnDeathDay.includes('unknown') ) return false
       }
@@ -223,6 +225,7 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
       if ( context.possibilities.isActualRole(forecastTarget, 'werehamster') ) {
         const targetStatus = getStatus(env, forecastTarget)
         if ( targetStatus.surviving ) return false
+        if ( targetStatus.diedDay !== night ) return false
         const targetsOnDeathDay = seerTargets.get(targetStatus.diedDay!) || []
         if ( !targetsOnDeathDay.includes(forecastTarget) && !targetsOnDeathDay.includes('unknown') ) return false
       }
