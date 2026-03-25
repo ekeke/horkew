@@ -48,7 +48,7 @@ const YOUON: Record<string, string[]> = {
   'みゃ': ['mya'], 'みゅ': ['myu'], 'みょ': ['myo'],
   'りゃ': ['rya'], 'りゅ': ['ryu'], 'りょ': ['ryo'],
   'ぎゃ': ['gya'], 'ぎゅ': ['gyu'], 'ぎょ': ['gyo'],
-  'じゃ': ['ja', 'zya'], 'じゅ': ['ju', 'zyu'], 'じょ': ['jo', 'zyo'],
+  'じゃ': ['ja', 'zya', 'jya'], 'じゅ': ['ju', 'zyu', 'jyu'], 'じょ': ['jo', 'zyo', 'jyo'],
   'びゃ': ['bya'], 'びゅ': ['byu'], 'びょ': ['byo'],
   'ぴゃ': ['pya'], 'ぴゅ': ['pyu'], 'ぴょ': ['pyo'],
   'てぃ': ['thi'], 'でぃ': ['dhi'],
@@ -175,6 +175,7 @@ export type PlayerEntry = {
   shortName?: string    // 短縮名 (あれば優先して挿入)
   aliases: string[]     // エイリアス (検索用のみ)
   surviving: boolean    // 生存中かどうか
+  claimingRole?: string // CO済み役職 (VillageStatusから)
 }
 
 export const setPlayerList = StateEffect.define<PlayerEntry[]>()
@@ -286,6 +287,7 @@ const actionCandidates = buildStaticCandidates([
   { label: '道連れ', reading: 'みちづれ',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, requiredRole: 'nekomata', info: '猫又の呪いで道連れ死' },
   { label: '後追い', reading: 'あとおい',   type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, requiredRole: 'immoralist', info: '背徳者が妖狐の死を追って死亡' },
   { label: '予告',   reading: 'よこく',     type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, info: '処刑先を予告する' },
+  { label: '共有',   reading: 'きょうゆう', type: 'keyword', category: 'action', categoryLabel: 'アクション', terminal: false, requiredRole: 'mason', info: '共有者のペアを宣言' },
 ])
 
 // 非 は 非役職名CO 結合候補に統合済み
@@ -332,6 +334,36 @@ const actionLabels = new Set(actionCandidates.filter(c => c.category === 'action
 const resultLabels = new Set(resultCandidates.map(c => c.label))
 const coRoleLabels = new Set(coRoleCandidates.map(c => c.label))
 
+// ---- CO種別検出 ----
+
+type CoType = 'seer' | 'medium' | 'bodyguard' | 'mason' | 'other'
+
+const claimingRoleToCoType: Record<string, CoType> = {
+  seer: 'seer', medium: 'medium', bodyguard: 'bodyguard', mason: 'mason',
+}
+
+/**
+ * 行の先頭プレイヤーのCO種別を判定する。
+ * まずVillageStatusのCO情報を参照し、未登録なら行テキストのCOキーワードで判定する。
+ */
+function detectCoType(lineText: string, players: PlayerEntry[]): CoType {
+  // VillageStatus: 行頭のプレイヤー名からCO種別を取得
+  const firstToken = lineText.match(/^(\S+)/)?.[1]
+  if (firstToken) {
+    const player = players.find(p => p.name === firstToken || p.shortName === firstToken)
+    if (player?.claimingRole) {
+      return claimingRoleToCoType[player.claimingRole] ?? 'other'
+    }
+  }
+
+  // フォールバック: 行テキストのCOキーワードで判定 (CO宣言行)
+  if (lineText.includes('占い師CO')) return 'seer'
+  if (lineText.includes('霊媒師CO') || lineText.includes('霊媒CO')) return 'medium'
+  if (lineText.includes('狩人CO')) return 'bodyguard'
+  if (lineText.includes('共有者CO') || lineText.includes('共有CO')) return 'mason'
+  return 'other'
+}
+
 // ---- 文脈推定 ----
 
 /**
@@ -357,14 +389,22 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
     return null // 通常記法: プレイヤー名 アクション → 終了
   }
 
-  // 結果マーカー (○/●) → プレイヤー名 (次の結果対象)
-  if (resultLabels.has(lastToken)) return ['player']
+  // 結果マーカー (○/●) → CO種別に応じた候補
+  if (resultLabels.has(lastToken)) {
+    const coType = detectCoType(trimmed, players)
+    if (coType === 'medium') return ['result']
+    return ['player']
+  }
 
   // 矢印 → プレイヤー名
   if (arrowRe.test(lastToken)) return ['player']
 
-  // 役職名CO / 非役職名CO → プレイヤー名 (結果対象)
-  if (coRoleLabels.has(lastToken)) return ['player']
+  // 役職名CO / 非役職名CO → CO種別に応じた候補
+  if (coRoleLabels.has(lastToken)) {
+    const coType = detectCoType(trimmed, players)
+    if (coType === 'medium') return ['result']
+    return ['player']
+  }
 
   // プレイヤー名の判定
   const isPlayer = players.some(p => p.name === lastToken || p.shortName === lastToken || p.aliases.includes(lastToken))
@@ -383,13 +423,32 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
     // ←を含む行でプレイヤー名が連続 → さらにプレイヤー名を追加可能
     if (leftArrowRe.test(beforeLastToken)) return ['player']
 
+    // 共有行: プレイヤー名を連続で追加可能
+    if (lastBeforeMatch && lastBeforeMatch[0] === '共有') return ['player']
+    if (/^共有\s/.test(trimmed)) return ['player']
+
     // アクションの後のプレイヤー名 → 転置記法完成、チェーン終了
     if (lastBeforeMatch && actionLabels.has(lastBeforeMatch[0])) return null
 
-    // CO文中のプレイヤー名 (結果対象) → 結果マーカー + 次のプレイヤー名
-    if ([...coRoleLabels].some(cl => beforeLastToken.includes(cl))) return ['result']
+    // CO文中のプレイヤー名 (2トークン目以降) → CO種別に応じた候補
+    if (beforeLastToken !== '') {
+      const coType = detectCoType(trimmed, players)
+      if (coType !== 'other') {
+        if (coType === 'bodyguard' || coType === 'mason') return ['player']
+        if (coType === 'medium') return ['result']
+        return ['result'] // seer
+      }
+    }
 
-    // 行頭のプレイヤー名 → 矢印, 役職名CO, アクション
+    // 行頭のプレイヤー名 → CO済みなら役職に応じた候補を優先
+    if (beforeLastToken === '') {
+      const firstPlayer = players.find(p => p.name === lastToken || p.shortName === lastToken)
+      const firstCoType = firstPlayer?.claimingRole ? claimingRoleToCoType[firstPlayer.claimingRole] : undefined
+      if (firstCoType === 'seer') return ['player', 'arrow', 'co_role', 'denial_co_role', 'action', 'result']
+      if (firstCoType === 'medium') return ['result', 'arrow', 'co_role', 'denial_co_role', 'action']
+      if (firstCoType === 'bodyguard') return ['player', 'arrow', 'co_role', 'denial_co_role', 'action']
+      if (firstCoType === 'mason') return ['player', 'arrow', 'co_role', 'denial_co_role', 'action']
+    }
     return ['arrow', 'co_role', 'denial_co_role', 'action', 'result']
   }
 

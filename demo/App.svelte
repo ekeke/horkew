@@ -784,17 +784,21 @@
       if (editorView) {
         const stmtInfo: StatementInfo[] = statements.map((s: any) => ({ type: s.type, line: s.line }))
         const playerNameInfos = buildPlayerNames(statements, dict, editorView.state.doc.toString())
-        const playerList: { name: string, shortName?: string, aliases: string[], surviving: boolean }[] = []
+        const playerList: { name: string, shortName?: string, aliases: string[], surviving: boolean, claimingRole?: string }[] = []
         let seat = 1
         for (const s of statements) {
           if (s.type === 'join') {
-            const surviving = vs.statuses.get(seat)?.surviving ?? true
-            playerList.push({ name: s.name, shortName: s.shortName, aliases: s.aliases, surviving })
+            const status = vs.statuses.get(seat)
+            const surviving = status?.surviving ?? true
+            const claimingRole = status?.claiming ? status.claimingRole : undefined
+            playerList.push({ name: s.name, shortName: s.shortName, aliases: s.aliases, surviving, claimingRole })
             seat++
           } else if (s.type === 'joinMulti') {
             for (const p of s.players) {
-              const surviving = vs.statuses.get(seat)?.surviving ?? true
-              playerList.push({ name: p, aliases: [], surviving })
+              const status = vs.statuses.get(seat)
+              const surviving = status?.surviving ?? true
+              const claimingRole = status?.claiming ? status.claimingRole : undefined
+              playerList.push({ name: p, aliases: [], surviving, claimingRole })
               seat++
             }
           }
