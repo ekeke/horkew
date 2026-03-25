@@ -615,7 +615,7 @@ const howlCompletionSource: CompletionSource = (context) => {
     if (lastTokenMatch && leftArrowRe.test(lastTokenMatch[0])) {
       options.unshift({
         label: '(省略 → 改行)',
-        apply: '',
+        apply: '\n',
         detail: 'TIPS',
         type: 'text',
         info: '省略も出来ます（文脈に応じて全員、または被投票ゼロになります）',
