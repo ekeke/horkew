@@ -9,7 +9,8 @@ import {
   assignRoles, alivePlayers, getSeerResult,
   killPlayer, checkWinCondition,
 } from './roles.ts'
-import { HeuristicStrategy, forceTrueRoleCO, resolveVotes } from './heuristic.ts'
+import { RandomStrategy } from './random-strategy.ts'
+import { forceTrueRoleCO, resolveVotes } from './heuristic.ts'
 import { detectCommander } from './leadership.ts'
 import { analyzeFromEvents as retarAnalyze } from './retar-bridge.ts'
 
@@ -19,7 +20,7 @@ export type GameResult = {
   config: LupaConfig
 }
 
-const defaultStrategy = new HeuristicStrategy()
+const defaultStrategy = new RandomStrategy()
 
 function getStrategy(config: LupaConfig, seat: number): Strategy {
   return config.strategies?.get(seat) ?? defaultStrategy
