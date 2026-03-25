@@ -95,6 +95,9 @@ function isTsumi(
   ss.nodesVisited++
   if (depth > ss.maxDepthReached) ss.maxDepthReached = depth
 
+  // ワールド縮約: 生存者の役職が同一のワールドを統合
+  worlds = deduplicateWorlds(worlds, state.alive)
+
   // 終端チェック
   if (worlds.length === 0) return { type: 'win' }
   if (allWorldsVillageWin(worlds, state.alive)) return { type: 'win' }
@@ -161,6 +164,38 @@ function isTsumi(
   ss.memo.set(key, null)
   if (canonKey !== undefined) endgameTable.set(canonKey, false)
   return null
+}
+
+/**
+ * 生存者の役職配置が同一のワールドを統合する。
+ * 死亡者の役職は探索に影響しないため、生存者部分のみで等価判定。
+ */
+function deduplicateWorlds(worlds: World[], alive: number): World[] {
+  if (worlds.length <= 1) return worlds
+  const seen = new Set<string>()
+  const result: World[] = []
+  for (const w of worlds) {
+    // 生存者の役職のみでハッシュキーを構築
+    let h = 0x811c9dc5
+    let mask = alive
+    while (mask !== 0) {
+      const bit = mask & (-mask)
+      const seat = 31 - Math.clz32(bit)
+      h ^= w.roles[seat].charCodeAt(0)
+      h = Math.imul(h, 0x01000193)
+      h ^= w.roles[seat].charCodeAt(1)
+      h = Math.imul(h, 0x01000193)
+      h ^= seat
+      h = Math.imul(h, 0x01000193)
+      mask ^= bit
+    }
+    const key = String(h >>> 0)
+    if (!seen.has(key)) {
+      seen.add(key)
+      result.push(w)
+    }
+  }
+  return result
 }
 
 /**
@@ -402,8 +437,24 @@ function getBodyguardCandidates(worlds: World[], alive: number): (Seat | null)[]
   const hasAliveBodyguard = worlds.some(w => w.bodyguardSeat !== -1 && hasSeat(alive, w.bodyguardSeat))
   if (!hasAliveBodyguard) return [null]
 
+  // 護衛候補: 確定狼を護衛しても無意味。狩人自身も護衛不可だが
+  // 真の狩人seatは不明なので全員候補にする（nullは護衛なし）
   const candidates: (Seat | null)[] = [null]
-  forEachSeat(alive, seat => candidates.push(seat))
+  const seen = new Set<number>()
+  forEachSeat(alive, seat => {
+    // 全ワールドで狼確定の席は護衛しても無意味
+    if (worlds.every(w => hasSeat(w.wolfMask, seat))) return
+    // 等価クラス: 護衛先の役職パターンが同一なら1つだけ
+    let h = 0x811c9dc5
+    for (const w of worlds) {
+      h ^= w.roles[seat].charCodeAt(0)
+      h = Math.imul(h, 0x01000193)
+    }
+    h = h >>> 0
+    if (seen.has(h)) return
+    seen.add(h)
+    candidates.push(seat)
+  })
   return candidates
 }
 
@@ -411,8 +462,30 @@ function getSeerCandidates(worlds: World[], alive: number): (Seat | null)[] {
   const hasAliveSeer = worlds.some(w => w.seerSeat !== -1 && hasSeat(alive, w.seerSeat))
   if (!hasAliveSeer) return [null]
 
+  // 占い候補: 全ワールドで同一役職の確定席を占っても新情報なし
   const candidates: (Seat | null)[] = [null]
-  forEachSeat(alive, seat => candidates.push(seat))
+  const seen = new Set<number>()
+  forEachSeat(alive, seat => {
+    // 全ワールドで同じ占い結果になる → 情報ゲインなし → スキップ
+    let allSame = true
+    let firstResult: string | undefined
+    for (const w of worlds) {
+      const r = w.roles[seat]
+      if (firstResult === undefined) firstResult = r
+      else if (r !== firstResult) { allSame = false; break }
+    }
+    if (allSame && worlds.length > 1) return
+    // 等価クラス
+    let h = 0x811c9dc5
+    for (const w of worlds) {
+      h ^= w.roles[seat].charCodeAt(0)
+      h = Math.imul(h, 0x01000193)
+    }
+    h = h >>> 0
+    if (seen.has(h)) return
+    seen.add(h)
+    candidates.push(seat)
+  })
   return candidates
 }
 
