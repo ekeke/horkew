@@ -22,6 +22,7 @@ import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi } from './index.ts'
 import { getEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
+import { RoleBitIndex } from '../retar/possibilities.ts'
 import type { StrategyNode, World } from './types.ts'
 import { hasSeat, removeSeat, forEachSeat } from './types.ts'
 import {
@@ -391,6 +392,7 @@ function runVerify(args: Args): void {
 function buildTrueWorld(state: GameState): World {
   const maxSeat = Math.max(...state.players.map(p => p.seat))
   const roles: SystemRole[] = new Array(maxSeat + 1)
+  const roleIds = new Uint8Array(maxSeat + 1)
   let wolfMask = 0
   let hamsterSeat = -1
   let immoralistSeat = -1
@@ -401,6 +403,7 @@ function buildTrueWorld(state: GameState): World {
 
   for (const p of state.players) {
     roles[p.seat] = p.role
+    roleIds[p.seat] = RoleBitIndex[p.role]
     switch (p.role) {
       case 'werewolf': wolfMask |= (1 << p.seat); break
       case 'werehamster': hamsterSeat = p.seat; break
@@ -412,7 +415,7 @@ function buildTrueWorld(state: GameState): World {
     }
   }
 
-  return { roles, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
+  return { roles, roleIds, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
 }
 
 // --- 実行 ---
