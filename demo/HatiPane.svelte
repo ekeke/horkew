@@ -82,7 +82,7 @@
     >{running ? '探索中...' : '詰み探索'}</button>
     {#if result}
       <span class="hati-stats">
-        {result.stats.worldsTotal}世界 / {result.stats.nodesVisited}ノード / retar {result.stats.retarElapsed.toFixed(1)}ms + search {result.stats.searchElapsed.toFixed(1)}ms
+        {result.stats.worldsTotal}世界 / {result.stats.nodesVisited}ノード / retar {result.stats.retarElapsed.toFixed(1)}ms + hati {result.stats.searchElapsed.toFixed(1)}ms
       </span>
     {/if}
   </div>
