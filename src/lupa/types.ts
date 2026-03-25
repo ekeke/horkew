@@ -16,6 +16,8 @@ export type LupaConfig = {
   masonTeamStrategy?: TeamStrategy
   /** Retar論理推論を有効化（昼CO後に自動実行） */
   enableRetar?: boolean
+  /** カスタムRetar実行関数（並列版等を注入する場合） */
+  retarFn?: (events: GameEvent[], state: GameState, config: LupaConfig) => Promise<Map<number, Set<SystemRole>>>
   /** 再投票設定 (未指定時はデフォルト: 候補者限定ランダム、3回、最小seat処刑) */
   revoteConfig?: RevoteConfig
   /** 投票確定後のCO許可 (デフォルト: true) */

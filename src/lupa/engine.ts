@@ -470,6 +470,230 @@ export function runGame(config: LupaConfig): GameResult {
   return { events, state, config }
 }
 
+/**
+ * 非同期版 runGame — Retar分析をawaitで呼ぶ。
+ * worker_threads並列Retarと併用する場合に使用。
+ * 複数ゲームをPromise.allで同時起動すると、Retarの待ち時間に他ゲームが進む。
+ */
+export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
+  const retarFn = config.retarFn ?? ((e, s, c) => Promise.resolve(retarAnalyze(e, s, c)))
+  const rng = new Rng(config.seed)
+  const totalPlayers = Array.from(config.roles.values()).reduce((a, b) => a + b, 0)
+  const shuffledIndices = rng.shuffle(Array.from({ length: totalPlayers }, (_, i) => i))
+  const roleArray: SystemRole[] = []
+  for (const [role, count] of config.roles) {
+    for (let i = 0; i < count; i++) roleArray.push(role)
+  }
+  const assignedRoles = shuffledIndices.map(i => roleArray[i])
+  let names: string[]
+  if (config.useRandomNames) {
+    if (totalPlayers > RANDOM_NAMES.length) throw new Error(`プレイヤー名が足りません`)
+    names = RANDOM_NAMES.slice(0, totalPlayers)
+  } else {
+    names = generateRoleNames(assignedRoles)
+  }
+  const players = assignRoles(config.roles, names, shuffledIndices)
+  const state: GameState = { players, day: 0, phase: 'night', finished: false, result: null, executionHistory: new Map(), commander: null, masonPartners: new Map() }
+  const events: GameEvent[] = []
+  const signals: SignalRecord[] = []
+  const proposals: Proposal[] = []
+
+  // Night 0
+  for (const player of players) {
+    const strategy = getStrategy(config, player.seat)
+    const ctx = buildContext(state, player, events, rng, signals, proposals, null)
+    applyNightAction(state, player, 0, strategy.decideNightAction(ctx))
+  }
+  for (const player of players) {
+    const divine = player.divineHistory.get(0)
+    if (!divine) continue
+    const target = players.find(p => p.seat === divine.target)!
+    if (target.role === 'werehamster' && target.alive) {
+      killPlayer(state, target.seat)
+      events.push({ type: 'fox_kill', target: target.seat })
+      checkImmoralistFollow(state, events)
+    }
+  }
+  if (config.hasFirstGhost) {
+    const immuneRoles: SystemRole[] = ['werewolf', 'nekomata', 'werehamster']
+    const candidates = alivePlayers(state).filter(p => !immuneRoles.includes(p.role))
+    if (candidates.length > 0) {
+      const victim = rng.pick(candidates)
+      killPlayer(state, victim.seat)
+      events.push({ type: 'night_kill', target: victim.seat })
+      checkImmoralistFollow(state, events)
+    }
+  }
+
+  let lastExecutedSeat: number | null = null
+  const MAX_DAYS = 50
+
+  for (let day = 1; day <= MAX_DAYS && !state.finished; day++) {
+    state.day = day
+
+    // 夜フェーズ (day 2+)
+    if (day > 1) {
+      state.phase = 'night'
+      const night = day - 1
+      const actions: Array<{ player: typeof players[0], action: NightAction }> = []
+      let chosenAttacker: number | null = null
+      if (config.wolfTeamStrategy) {
+        const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
+        if (aliveWolves.length > 0) {
+          const leader = aliveWolves[0]
+          const ctx = buildContext(state, leader, events, rng, signals, proposals, lastExecutedSeat)
+          const teamCtx = buildTeamContext(ctx, state, 'werewolf')
+          const wolfAction = config.wolfTeamStrategy.decideNightAction(teamCtx) as WolfNightAction
+          chosenAttacker = wolfAction.attacker
+          for (const wolf of aliveWolves) {
+            if (wolf.seat === wolfAction.attacker) {
+              actions.push({ player: wolf, action: { type: 'attack', target: wolfAction.target } })
+            } else {
+              actions.push({ player: wolf, action: { type: 'none' } })
+            }
+          }
+        }
+      }
+      for (const player of alivePlayers(state)) {
+        if (config.wolfTeamStrategy && player.role === 'werewolf') continue
+        const strategy = getStrategy(config, player.seat)
+        const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat)
+        actions.push({ player, action: strategy.decideNightAction(ctx) })
+      }
+      for (const { player, action } of actions) {
+        applyNightAction(state, player, night, action)
+        player.forecastTarget = null
+      }
+      resolveNight(state, actions, events, rng, chosenAttacker)
+      checkWinCondition(state)
+      if (state.finished) { events.push({ type: 'game_over', result: state.result! }); break }
+    }
+
+    // 昼フェーズ
+    state.phase = 'day'
+
+    // CO前Retar (async)
+    let preCoRetar: Map<number, Set<SystemRole>> | null = null
+    if (config.enableRetar) {
+      preCoRetar = await retarFn(events, state, config)
+    }
+
+    // COフェーズ
+    for (const player of alivePlayers(state)) {
+      const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar)
+      const claim = decideForPlayer(config, state, player, ctx, (s, c) => s.decideDayClaim(c), (s, c) => s.decideDayClaim(c))
+      applyClaim(state, player, day, claim, events)
+    }
+    for (const player of alivePlayers(state)) {
+      if (player.claimedRole !== null) continue
+      if (!alivePlayers(state).some(p => p.seat !== player.seat && p.claimedRole === player.role)) continue
+      applyClaim(state, player, day, forceTrueRoleCO(state, player, day, lastExecutedSeat), events)
+    }
+
+    // CO後Retar (async)
+    let retarPossibilities: Map<number, Set<SystemRole>> | null = null
+    if (config.enableRetar) {
+      retarPossibilities = await retarFn(events, state, config)
+    }
+
+    // シグナルフェーズ
+    state.commander = detectCommander(state)
+    if (state.commander !== null) events.push({ type: 'commander_appointed', seat: state.commander })
+    const daySignals: SignalRecord[] = []
+    let signalIdCounter = signals.length
+    const dayProposals: Proposal[] = []
+    if (state.commander !== null) {
+      const commander = state.players.find(p => p.seat === state.commander)!
+      if (commander.alive) {
+        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        const proposal = decideForPlayer(config, state, commander, ctx, (s, c) => s.decideProposal(c), (s, c) => s.decideProposal(c))
+        if (proposal) {
+          dayProposals.push(proposal)
+          events.push({ type: 'proposal', actor: commander.seat, proposal })
+          for (const player of alivePlayers(state)) {
+            if (player.seat === state.commander) continue
+            const pCtx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+            events.push({ type: 'leadership_response', actor: player.seat, response: decideForPlayer(config, state, player, pCtx, (s, c) => s.decideLeadershipResponse(c, proposal), (s, c) => s.decideLeadershipResponse(c, proposal)) })
+          }
+        }
+      }
+    }
+    for (let round = 0; round < 3; round++) {
+      for (const player of alivePlayers(state)) {
+        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        applyCommAction(state, player, day, decideForPlayer(config, state, player, ctx, (s, c) => s.decideCommunication(c), (s, c) => s.decideCommunication(c)), events, daySignals, signals, signalIdCounter)
+        signalIdCounter += 1
+      }
+    }
+    for (const player of alivePlayers(state)) {
+      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+      const forecast = decideForPlayer(config, state, player, ctx, (s, c) => s.decideForecast(c), (s, c) => s.decideForecast(c))
+      if (forecast.type === 'forecast') { player.forecastTarget = forecast.target; events.push({ type: 'forecast', actor: player.seat, target: forecast.target }) }
+    }
+
+    // 投票
+    const isGrelan = rng.next() < 0.3
+    if (isGrelan) events.push({ type: 'grelan' })
+    const revoteStyle = config.revoteConfig?.style ?? 'random_tied'
+    const revoteTiebreaker = config.revoteConfig?.tiebreaker ?? 'lowest_seat'
+    const maxRevotes = config.revoteConfig?.maxRevotes ?? 3
+    let executedSeat: number | null = null
+    let revoteCount = 0
+    let revoteCandidates: number[] | null = null
+    while (true) {
+      const votes = new Map<number, number>()
+      for (const voter of alivePlayers(state)) {
+        let target: number
+        if (revoteCandidates && revoteStyle === 'random_tied') {
+          target = revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
+        } else {
+          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates)
+          target = decideForPlayer(config, state, voter, ctx, (s, c) => s.decideVote(c), (s, c) => s.decideVote(c))
+        }
+        votes.set(voter.seat, target)
+        events.push({ type: 'vote', voter: voter.seat, target })
+      }
+      const result = resolveVotes(votes)
+      if ('decided' in result) { executedSeat = result.decided; break }
+      revoteCount++
+      if (revoteCount > maxRevotes) {
+        if (revoteTiebreaker === 'draw') { state.finished = true; state.result = 'draw'; events.push({ type: 'game_over', result: 'draw' }); break }
+        else { executedSeat = result.tied[0]; break }
+      }
+      events.push({ type: 'revote', targets: result.tied })
+      revoteCandidates = result.tied
+    }
+    if (state.finished) break
+
+    // 処刑後
+    if (!isGrelan && config.allowPostVoteCO !== false) {
+      const target = state.players.find(p => p.seat === executedSeat!)!
+      const villageRoles: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+      if (villageRoles.includes(target.role) && target.claimedRole === null) {
+        applyClaim(state, target, day, forceTrueRoleCO(state, target, day, lastExecutedSeat), events)
+      }
+    }
+    killPlayer(state, executedSeat!)
+    events.push({ type: 'execution', target: executedSeat! })
+    lastExecutedSeat = executedSeat!
+    state.executionHistory.set(day, executedSeat!)
+    const executedPlayer = state.players.find(p => p.seat === executedSeat!)!
+    const medResult = getSeerResult(executedPlayer.role)
+    events.push({ type: 'comment', text: `霊能: ${executedPlayer.name} = ${medResult === 'human' ? '○' : '●'}` })
+    if (executedPlayer.role === 'nekomata') {
+      const curseCandidates = alivePlayers(state)
+      if (curseCandidates.length > 0) { const ct = rng.pick(curseCandidates); killPlayer(state, ct.seat); events.push({ type: 'curse_kill', target: ct.seat }) }
+    }
+    checkImmoralistFollow(state, events)
+    if (state.commander !== null) { const cmd = state.players.find(p => p.seat === state.commander); if (cmd && !cmd.alive) state.commander = null }
+    checkWinCondition(state)
+    if (state.finished) { events.push({ type: 'game_over', result: state.result! }); break }
+  }
+
+  for (const player of state.players) events.push({ type: 'reveal', seat: player.seat, role: player.role })
+  return { events, state, config }
+}
+
 /** 夜アクションを状態に適用（記録のみ） */
 function applyNightAction(
   state: GameState, player: typeof state.players[0], night: number, action: NightAction,

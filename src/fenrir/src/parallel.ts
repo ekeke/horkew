@@ -72,6 +72,17 @@ export function packWeights(network: NeuralNetwork): SharedWeights {
     offset += head.biases.length
   }
 
+  // Sigmoid heads
+  for (const [name, head] of network.sigmoidHeads) {
+    layout.push({ name: `head_${name}_w`, offset, length: head.weights.length })
+    view.set(head.weights, offset)
+    offset += head.weights.length
+
+    layout.push({ name: `head_${name}_b`, offset, length: head.biases.length })
+    view.set(head.biases, offset)
+    offset += head.biases.length
+  }
+
   // Value head
   layout.push({ name: 'value_w', offset, length: network.valueHead.weights.length })
   view.set(network.valueHead.weights, offset)
@@ -102,68 +113,70 @@ export function unpackWeights(network: NeuralNetwork, shared: SharedWeights): vo
 /** メインスレッド → Worker */
 export type WorkerRequest = {
   type: 'generate'
-  /** 共有重みへの参照 */
+  /** 個人エージェントの重み */
   weights: SharedWeights
-  /** ゲーム設定 */
+  /** 狼チームの重み (Phase 2+) */
+  wolfTeamWeights?: SharedWeights
+  /** 共有者チームの重み (Phase 2+) */
+  masonTeamWeights?: SharedWeights
+  /** ゲーム設定 (JSON-safe) */
   trainingConfig: TrainingConfig
   /** このバッチの seed 範囲 */
   seeds: number[]
-  /** ML を使う seat の一覧（それ以外は heuristic） */
-  mlSeats: number[]
+  /** Phase: 1=heuristic, 2=self-play, 3=pool */
+  phase: number
 }
 
 /** Worker → メインスレッド */
 export type WorkerResult = {
   type: 'result'
-  /** 全ゲームの trajectory（シリアライズ済み） */
-  trajectories: SerializedTrajectory[]
-  /** ゲーム結果のサマリ */
-  results: string[]
+  /** 個人エージェントのトラジェクトリ: seat → steps */
+  individualSteps: Array<{ seat: number, steps: SerializedStep[] }>
+  /** 狼チームのトラジェクトリ */
+  wolfTeamSteps: SerializedStep[]
+  /** 共有者チームのトラジェクトリ */
+  masonTeamSteps: SerializedStep[]
 }
 
-/** TrajectoryStep のシリアライズ形式（SharedArrayBuffer 非対応環境用） */
-export type SerializedTrajectory = {
+/** TrajectoryStep のシリアライズ形式（worker_threads メッセージ用） */
+export type SerializedStep = {
   seat: number
-  steps: Array<{
-    observation: number[]  // Float32Array → number[] に変換
-    actionHead: string
-    actionIdx: number
-    logProb: number
-    reward: number
-    value: number
-    done: boolean
-  }>
+  observation: number[]
+  actionHead: string
+  actionIdx: number
+  logProb: number
+  reward: number
+  value: number
+  done: boolean
+  sigmoidActions?: number[]
 }
 
-/** TrajectoryStep[] → SerializedTrajectory */
-export function serializeTrajectory(seat: number, steps: TrajectoryStep[]): SerializedTrajectory {
+/** TrajectoryStep → SerializedStep */
+export function serializeStep(step: TrajectoryStep): SerializedStep {
   return {
-    seat,
-    steps: steps.map(s => ({
-      observation: Array.from(s.observation),
-      actionHead: s.actionHead,
-      actionIdx: s.actionIdx,
-      logProb: s.logProb,
-      reward: s.reward,
-      value: s.value,
-      done: s.done,
-    })),
+    seat: step.seat,
+    observation: Array.from(step.observation),
+    actionHead: step.actionHead,
+    actionIdx: step.actionIdx,
+    logProb: step.logProb,
+    reward: step.reward,
+    value: step.value,
+    done: step.done,
+    sigmoidActions: step.sigmoidActions ? Array.from(step.sigmoidActions) : undefined,
   }
 }
 
-/** SerializedTrajectory → TrajectoryStep[] */
-export function deserializeTrajectory(ser: SerializedTrajectory): { seat: number, steps: TrajectoryStep[] } {
+/** SerializedStep → TrajectoryStep */
+export function deserializeStep(s: SerializedStep): TrajectoryStep {
   return {
-    seat: ser.seat,
-    steps: ser.steps.map(s => ({
-      seat: ser.seat,
-      observation: new Float32Array(s.observation),
-      actionHead: s.actionHead,
-      actionIdx: s.actionIdx,
-      logProb: s.logProb,
-      reward: s.reward,
-      value: s.value,
-      done: s.done,
-    })),
+    seat: s.seat,
+    observation: new Float32Array(s.observation),
+    actionHead: s.actionHead,
+    actionIdx: s.actionIdx,
+    logProb: s.logProb,
+    reward: s.reward,
+    value: s.value,
+    done: s.done,
+    sigmoidActions: s.sigmoidActions ? new Float32Array(s.sigmoidActions) : undefined,
   }
 }

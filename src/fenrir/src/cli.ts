@@ -127,4 +127,4 @@ console.error(`  Checkpoint dir: ${config.checkpointDir}`)
 if (resumeDir) console.error(`  Resume from: ${resumeDir}`)
 console.error('')
 
-train(config, resumeDir)
+train(config, resumeDir).catch(e => { console.error(e); process.exit(1) })

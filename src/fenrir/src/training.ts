@@ -6,7 +6,8 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
-import { runGame } from '../../lupa/engine.ts'
+import { runGame, runGameAsync } from '../../lupa/engine.ts'
+import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
 import { TfNeuralNetwork } from './ml/nn-tf.ts'
 import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE } from './observation.ts'
@@ -278,6 +279,66 @@ function generateGame(
   }
 }
 
+/** 非同期版: runGameAsync + 並列Retarを使用 */
+async function generateGameAsync(
+  config: TrainingConfig,
+  agents: GameAgents,
+  seed: number,
+): Promise<GameTrajectories> {
+  const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
+
+  const lupaConfig: LupaConfig = {
+    roles,
+    seed,
+    strategies: new Map(agents.strategies),
+    enableRetar: config.enableRetar,
+    hasFirstGhost: config.hasFirstGhost,
+    revoteConfig: config.revoteConfig,
+    wolfTeamStrategy: agents.wolfTeamStrategy,
+    masonTeamStrategy: agents.masonTeamStrategy,
+    retarFn: analyzeFromEventsParallel,
+  }
+
+  for (const s of agents.strategies.values()) s.resetTrajectory()
+  agents.wolfTeamStrategy?.resetTrajectory()
+  agents.masonTeamStrategy?.resetTrajectory()
+
+  const { state, events } = await runGameAsync(lupaConfig)
+
+  // 以降はgenerateGameと同一のトラジェクトリ収集
+  const allSteps = new Map<number, TrajectoryStep[]>()
+  for (const [seat, strategy] of agents.strategies) {
+    const steps = strategy.trajectory
+    if (steps.length > 0) {
+      steps[steps.length - 1].done = true
+      const player = state.players.find(p => p.seat === seat)!
+      steps[steps.length - 1].reward += terminalReward(player.role, state.result ?? '', config.rewardConfig)
+    }
+    allSteps.set(seat, steps)
+  }
+  const wolfTeamSteps = agents.wolfTeamStrategy?.trajectory ?? []
+  if (wolfTeamSteps.length > 0) {
+    wolfTeamSteps[wolfTeamSteps.length - 1].done = true
+    wolfTeamSteps[wolfTeamSteps.length - 1].reward += terminalReward('werewolf', state.result ?? '', config.rewardConfig)
+  }
+  const masonTeamSteps = agents.masonTeamStrategy?.trajectory ?? []
+  if (masonTeamSteps.length > 0) {
+    masonTeamSteps[masonTeamSteps.length - 1].done = true
+    masonTeamSteps[masonTeamSteps.length - 1].reward += terminalReward('mason', state.result ?? '', config.rewardConfig)
+  }
+  for (const event of events) {
+    const rewards = intermediateReward(event, state, config.rewardConfig)
+    for (const [seat, reward] of rewards) {
+      const steps = allSteps.get(seat)
+      if (steps && steps.length > 0) steps[steps.length - 1].reward += reward
+      const player = state.players.find(p => p.seat === seat)
+      if (player?.role === 'werewolf' && wolfTeamSteps.length > 0) wolfTeamSteps[wolfTeamSteps.length - 1].reward += reward
+      if (player?.role === 'mason' && masonTeamSteps.length > 0) masonTeamSteps[masonTeamSteps.length - 1].reward += reward
+    }
+  }
+  return { steps: allSteps, wolfTeamSteps, masonTeamSteps, result: state.result ?? 'unknown' }
+}
+
 // ============================================================
 // PPO Update (tf.js GPU バッチ)
 // ============================================================
@@ -450,7 +511,7 @@ function findLatestCheckpoint(dir: string): {
   return { iteration: maxIter, individual, wolfTeam, masonTeam }
 }
 
-export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDir?: string): void {
+export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDir?: string): Promise<void> {
   log('Fenrir Training Started')
   log(`Observation size: individual=${OBSERVATION_SIZE}, team=${TEAM_OBSERVATION_SIZE}`)
 
@@ -468,6 +529,12 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDi
   const masonTeamNet = createMasonTeamNetwork()
   const masonTeamTf = createMasonTeamTfNetwork(config.learningRate)
   log(`Mason team network: ${masonTeamNet.totalParams} params`)
+
+  // === Retarワーカープール ===
+  if (config.enableRetar) {
+    initRetarWorkerPool()
+    log('Retar worker pool initialized')
+  }
 
   // === Resume ===
   let startIter = 1
@@ -503,10 +570,13 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDi
     const allWolfTeamTrajectories: ProcessedStep[] = []
     const allMasonTeamTrajectories: ProcessedStep[] = []
 
+    // ゲーム生成: Retar有効時はPromise.allで並行実行（worker_threadsのRetar並列化を活用）
+    const useAsync = config.enableRetar
+    const gamePromises: Array<Promise<{ game: GameTrajectories, strategies: Map<number, FenrirStrategy>, wolfTeamStrategy?: WolfTeamStrategy, masonTeamStrategy?: MasonTeamStrategy }>> = []
+
     for (let g = 0; g < config.gamesPerBatch; g++) {
       const strategies = new Map<number, FenrirStrategy>()
 
-      // 個人エージェント (非狼・非共有者席)
       for (let seat = 1; seat <= totalPlayers; seat++) {
         if (useHeuristic && seat % 2 !== 0) continue
 
@@ -520,23 +590,29 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDi
         }
       }
 
-      // チームエージェント
       let wolfTeamStrategy: WolfTeamStrategy | undefined
       let masonTeamStrategy: MasonTeamStrategy | undefined
-
-      if (useHeuristic) {
-        // Phase 1: ヒューリスティックチーム
-        wolfTeamStrategy = undefined   // engine falls back to heuristic via individual
-        masonTeamStrategy = undefined
-      } else {
+      if (!useHeuristic) {
         wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
         masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
       }
 
       const seed = iter * config.gamesPerBatch + g
-      const game = generateGame(config, { strategies, wolfTeamStrategy, masonTeamStrategy }, seed)
+      const agents = { strategies, wolfTeamStrategy, masonTeamStrategy }
 
-      // 個人エージェントのトラジェクトリ (current network分のみ)
+      if (useAsync) {
+        gamePromises.push(
+          generateGameAsync(config, agents, seed).then(game => ({ game, strategies, wolfTeamStrategy, masonTeamStrategy }))
+        )
+      } else {
+        const game = generateGame(config, agents, seed)
+        gamePromises.push(Promise.resolve({ game, strategies, wolfTeamStrategy, masonTeamStrategy }))
+      }
+    }
+
+    const gameResults = await Promise.all(gamePromises)
+
+    for (const { game, strategies, wolfTeamStrategy, masonTeamStrategy } of gameResults) {
       const currentNetSteps = new Map<number, TrajectoryStep[]>()
       for (const [seat, steps] of game.steps) {
         const strategy = strategies.get(seat)
@@ -547,17 +623,11 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDi
       allIndividualTrajectories.push(
         ...processTrajectories(currentNetSteps, config.gamma, config.lambda)
       )
-
-      // 狼チームトラジェクトリ
       if (wolfTeamStrategy && game.wolfTeamSteps.length > 0) {
-        const processed = computeGAE(game.wolfTeamSteps, config.gamma, config.lambda, 0)
-        allWolfTeamTrajectories.push(...processed)
+        allWolfTeamTrajectories.push(...computeGAE(game.wolfTeamSteps, config.gamma, config.lambda, 0))
       }
-
-      // 共有者チームトラジェクトリ
       if (masonTeamStrategy && game.masonTeamSteps.length > 0) {
-        const processed = computeGAE(game.masonTeamSteps, config.gamma, config.lambda, 0)
-        allMasonTeamTrajectories.push(...processed)
+        allMasonTeamTrajectories.push(...computeGAE(game.masonTeamSteps, config.gamma, config.lambda, 0))
       }
     }
 
@@ -650,5 +720,6 @@ export function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDi
   tfNetwork.dispose()
   wolfTeamTf.dispose()
   masonTeamTf.dispose()
+  if (config.enableRetar) terminateRetarWorkerPool()
   log(`Training complete! (${timeStr})`)
 }
