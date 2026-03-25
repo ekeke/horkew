@@ -9,6 +9,8 @@
 import * as tf from '@tensorflow/tfjs-node-gpu'
 import type { NetworkConfig, ForwardResult } from './nn.ts'
 
+let _tfNNInstanceId = 0
+
 export class TfNeuralNetwork {
   readonly config: NetworkConfig
 
@@ -21,6 +23,7 @@ export class TfNeuralNetwork {
   private optimizer: tf.AdamOptimizer
 
   constructor(config: NetworkConfig, lr: number = 3e-4) {
+    const prefix = `nn${_tfNNInstanceId++}_`
     this.config = config
     this.trunkWeights = []
     this.headWeights = new Map()
@@ -32,11 +35,11 @@ export class TfNeuralNetwork {
     for (const hiddenSize of config.hiddenSizes) {
       const w = tf.variable(
         tf.randomNormal([prevSize, hiddenSize], 0, Math.sqrt(2 / prevSize)),
-        true, `trunk_w_${this.trunkWeights.length / 2}`,
+        true, `${prefix}trunk_w_${this.trunkWeights.length / 2}`,
       )
       const b = tf.variable(
         tf.zeros([hiddenSize]),
-        true, `trunk_b_${this.trunkWeights.length / 2}`,
+        true, `${prefix}trunk_b_${this.trunkWeights.length / 2}`,
       )
       this.trunkWeights.push(w, b)
       this.allVariables.push(w, b)
@@ -47,9 +50,9 @@ export class TfNeuralNetwork {
     for (const [name, outputSize] of Object.entries(config.heads)) {
       const w = tf.variable(
         tf.randomNormal([prevSize, outputSize], 0, Math.sqrt(2 / prevSize)),
-        true, `head_${name}_w`,
+        true, `${prefix}head_${name}_w`,
       )
-      const b = tf.variable(tf.zeros([outputSize]), true, `head_${name}_b`)
+      const b = tf.variable(tf.zeros([outputSize]), true, `${prefix}head_${name}_b`)
       this.headWeights.set(name, [w, b])
       this.allVariables.push(w, b)
     }
@@ -58,9 +61,9 @@ export class TfNeuralNetwork {
     for (const [name, outputSize] of Object.entries(config.sigmoidHeads ?? {})) {
       const w = tf.variable(
         tf.randomNormal([prevSize, outputSize], 0, Math.sqrt(2 / prevSize)),
-        true, `head_${name}_w`,
+        true, `${prefix}head_${name}_w`,
       )
-      const b = tf.variable(tf.zeros([outputSize]), true, `head_${name}_b`)
+      const b = tf.variable(tf.zeros([outputSize]), true, `${prefix}head_${name}_b`)
       this.sigmoidHeadWeights.set(name, [w, b])
       this.allVariables.push(w, b)
     }
@@ -68,9 +71,9 @@ export class TfNeuralNetwork {
     // Value head
     const vw = tf.variable(
       tf.randomNormal([prevSize, 1], 0, Math.sqrt(2 / prevSize)),
-      true, 'value_w',
+      true, `${prefix}value_w`,
     )
-    const vb = tf.variable(tf.zeros([1]), true, 'value_b')
+    const vb = tf.variable(tf.zeros([1]), true, `${prefix}value_b`)
     this.valueWeights = [vw, vb]
     this.allVariables.push(vw, vb)
 

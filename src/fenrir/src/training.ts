@@ -5,7 +5,7 @@
  */
 
 import type { SystemRole } from '../../types/index.ts'
-import type { LupaConfig } from '../../lupa/types.ts'
+import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
 import { runGame } from '../../lupa/engine.ts'
 import { NeuralNetwork } from './ml/nn.ts'
 import { TfNeuralNetwork } from './ml/nn-tf.ts'
@@ -57,10 +57,20 @@ export type TrainingConfig = {
   learningRate: number
   /** Retar論理推論を有効化 */
   enableRetar: boolean
+  /** 初日犠牲者あり */
+  hasFirstGhost: boolean
+  /** 再投票設定 */
+  revoteConfig?: RevoteConfig
 }
 
 export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
-  roles: { werewolf: 2, villager: 4, seer: 1, medium: 1, bodyguard: 1, mason: 2 },
+  // 14D猫: 14人、初日犠牲者あり、完全再投票→引き分け
+  roles: {
+    werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1,
+    mason: 2, nekomata: 1, fanatic: 1, werehamster: 1, immoralist: 1,
+  },
+  hasFirstGhost: true,
+  revoteConfig: { maxRevotes: 2, style: 'full_revote', tiebreaker: 'draw' },
   gamesPerBatch: 64,
   ppoEpochs: 4,
   miniBatchSize: 256,
@@ -195,6 +205,8 @@ function generateGame(
     seed,
     strategies: new Map(agents.strategies),
     enableRetar: config.enableRetar,
+    hasFirstGhost: config.hasFirstGhost,
+    revoteConfig: config.revoteConfig,
     wolfTeamStrategy: agents.wolfTeamStrategy,
     masonTeamStrategy: agents.masonTeamStrategy,
   }
@@ -354,6 +366,8 @@ export function evaluate(
       seed: 10000 + i,
       strategies,
       enableRetar: config.enableRetar,
+      hasFirstGhost: config.hasFirstGhost,
+      revoteConfig: config.revoteConfig,
       wolfTeamStrategy: wolfTeamNet
         ? new WolfTeamStrategy(wolfTeamNet, { explore: false })
         : new WolfTeamHeuristic(),
