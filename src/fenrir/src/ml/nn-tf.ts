@@ -291,29 +291,31 @@ export class TfNeuralNetwork {
 
   /** 重みをロード */
   loadWeights(weights: Map<string, Float32Array>): void {
-    for (let i = 0; i < this.trunkWeights.length; i += 2) {
-      const layerIdx = i / 2
-      const w = weights.get(`trunk_${layerIdx}_w`)!
-      const b = weights.get(`trunk_${layerIdx}_b`)!
-      this.trunkWeights[i].assign(tf.tensor(w, this.trunkWeights[i].shape))
-      this.trunkWeights[i + 1].assign(tf.tensor(b, this.trunkWeights[i + 1].shape))
-    }
-    for (const [name, [wVar, bVar]] of this.headWeights) {
-      const w = weights.get(`head_${name}_w`)!
-      const b = weights.get(`head_${name}_b`)!
-      wVar.assign(tf.tensor(w, wVar.shape))
-      bVar.assign(tf.tensor(b, bVar.shape))
-    }
-    for (const [name, [wVar, bVar]] of this.sigmoidHeadWeights) {
-      const w = weights.get(`head_${name}_w`)!
-      const b = weights.get(`head_${name}_b`)!
-      wVar.assign(tf.tensor(w, wVar.shape))
-      bVar.assign(tf.tensor(b, bVar.shape))
-    }
-    const vw = weights.get('value_w')!
-    const vb = weights.get('value_b')!
-    this.valueWeights[0].assign(tf.tensor(vw, this.valueWeights[0].shape))
-    this.valueWeights[1].assign(tf.tensor(vb, this.valueWeights[1].shape))
+    tf.tidy(() => {
+      for (let i = 0; i < this.trunkWeights.length; i += 2) {
+        const layerIdx = i / 2
+        const w = weights.get(`trunk_${layerIdx}_w`)!
+        const b = weights.get(`trunk_${layerIdx}_b`)!
+        this.trunkWeights[i].assign(tf.tensor(w, this.trunkWeights[i].shape))
+        this.trunkWeights[i + 1].assign(tf.tensor(b, this.trunkWeights[i + 1].shape))
+      }
+      for (const [name, [wVar, bVar]] of this.headWeights) {
+        const w = weights.get(`head_${name}_w`)!
+        const b = weights.get(`head_${name}_b`)!
+        wVar.assign(tf.tensor(w, wVar.shape))
+        bVar.assign(tf.tensor(b, bVar.shape))
+      }
+      for (const [name, [wVar, bVar]] of this.sigmoidHeadWeights) {
+        const w = weights.get(`head_${name}_w`)!
+        const b = weights.get(`head_${name}_b`)!
+        wVar.assign(tf.tensor(w, wVar.shape))
+        bVar.assign(tf.tensor(b, bVar.shape))
+      }
+      const vw = weights.get('value_w')!
+      const vb = weights.get('value_b')!
+      this.valueWeights[0].assign(tf.tensor(vw, this.valueWeights[0].shape))
+      this.valueWeights[1].assign(tf.tensor(vb, this.valueWeights[1].shape))
+    })
   }
 
   /** 総パラメータ数 */
