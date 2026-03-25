@@ -14,7 +14,8 @@
  * - target:   SEATS (対象選択: 占い先、護衛先、共有相方等)
  */
 
-import type { DecisionContext } from '../../lupa/strategy.ts'
+import type { DecisionContext, TeamDecisionContext } from '../../lupa/strategy.ts'
+import type { WolfNightAction } from '../../lupa/strategy.ts'
 import type { NightAction, DayClaim } from '../../lupa/types.ts'
 import type { Signal, RolePrediction } from '../../lupa/communication.ts'
 import type { LeadershipResponse } from '../../lupa/leadership.ts'
@@ -363,5 +364,61 @@ export function decodeLeader(actionIdx: number): LeadershipResponse {
     case 0: return 'follow'
     case 1: return 'defy'
     default: return 'no_response'
+  }
+}
+
+// ============================================================
+// 狼チーム専用ヘッド
+// ============================================================
+
+export const MAX_WOLVES = 3
+
+/** 狼チーム夜行動用の追加ヘッド */
+export const TEAM_HEAD_SIZES = {
+  attack_target: SEATS,    // 襲撃先 softmax
+  attacker: MAX_WOLVES,    // 襲撃者選択 softmax (チーム内インデックス)
+} as const
+
+/** 襲撃先マスク: 生存者で非狼 */
+export function maskAttackTarget(ctx: TeamDecisionContext): Float32Array {
+  const mask = new Float32Array(TEAM_HEAD_SIZES.attack_target).fill(-Infinity)
+  const teamSet = new Set(ctx.teamSeats)
+  for (const seat of ctx.alivePlayers) {
+    if (!teamSet.has(seat) && seat <= SEATS) {
+      mask[seat - 1] = 0
+    }
+  }
+  return mask
+}
+
+/** 襲撃者マスク: 生存狼のみ (チーム内インデックス) */
+export function maskAttacker(ctx: TeamDecisionContext): Float32Array {
+  const mask = new Float32Array(TEAM_HEAD_SIZES.attacker).fill(-Infinity)
+  const aliveSet = new Set(ctx.alivePlayers)
+  for (let i = 0; i < ctx.teamSeats.length && i < MAX_WOLVES; i++) {
+    if (aliveSet.has(ctx.teamSeats[i])) {
+      mask[i] = 0
+    }
+  }
+  return mask
+}
+
+/** 襲撃先デコード: index → seat番号 */
+export function decodeAttackTarget(actionIdx: number): number {
+  return actionIdx + 1
+}
+
+/** 襲撃者デコード: チーム内index → seat番号 */
+export function decodeAttacker(actionIdx: number, teamSeats: number[]): number {
+  return teamSeats[actionIdx] ?? teamSeats[0]
+}
+
+/** attack_target + attacker → WolfNightAction */
+export function decodeWolfNightAction(
+  attackTargetIdx: number, attackerIdx: number, teamSeats: number[],
+): WolfNightAction {
+  return {
+    target: decodeAttackTarget(attackTargetIdx),
+    attacker: decodeAttacker(attackerIdx, teamSeats),
   }
 }

@@ -2,7 +2,7 @@ import type { EnumSpecies } from '../types/index.ts'
 import type { GameState, PlayerState, NightAction, DayClaim } from './types.ts'
 import type { Signal, CommunicationAction } from './communication.ts'
 import type { Proposal, LeadershipResponse } from './leadership.ts'
-import type { Strategy, DecisionContext } from './strategy.ts'
+import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from './strategy.ts'
 import { alivePlayers, alivePlayersExcept, getMediumResult, isWerewolfAligned } from './roles.ts'
 import type { Rng } from './random.ts'
 
@@ -638,6 +638,146 @@ export function forceTrueRoleCO(
       return { type: 'nekomata_co' }
     default:
       return { type: 'none' }
+  }
+}
+
+// ============================================================
+// 狼チームヒューリスティック
+// ============================================================
+
+export class WolfTeamHeuristic implements TeamStrategy {
+  private individual = new HeuristicStrategy()
+
+  decideNightAction(ctx: TeamDecisionContext): WolfNightAction {
+    const state = ctx.gameState
+    const aliveWolves = ctx.teamPlayers.filter(p => p.alive)
+    if (aliveWolves.length === 0) return { target: 1, attacker: ctx.teamSeats[0] }
+
+    const wolfSeats = new Set(ctx.teamSeats)
+    const candidates = alivePlayers(state).filter(p => !wolfSeats.has(p.seat))
+    if (candidates.length === 0) return { target: 1, attacker: aliveWolves[0].seat }
+
+    const rng = ctx.rng
+
+    // 襲撃先: CO者優先
+    let target: number
+    if (rng.next() < 0.5) {
+      const claimers = candidates.filter(p => p.claimedRole !== null)
+      target = claimers.length > 0 ? rng.pick(claimers).seat : rng.pick(candidates).seat
+    } else {
+      target = rng.pick(candidates).seat
+    }
+
+    // 襲撃者: 猫又対策 — 猫又COがいれば処刑されにくい狼を選ぶ（＝最もCOしている狼）
+    // 単純にはランダム、猫又がいそうなら最小seatを避ける
+    const nekoExists = state.players.some(p => p.alive && p.claimedRole === 'nekomata')
+    let attacker: number
+    if (nekoExists && aliveWolves.length > 1) {
+      // 猫又道連れリスク: 一番消えても影響が少ない狼を選ぶ (CO無し優先)
+      const nonCO = aliveWolves.filter(p => p.claimedRole === null)
+      attacker = nonCO.length > 0 ? rng.pick(nonCO).seat : rng.pick(aliveWolves).seat
+    } else {
+      attacker = rng.pick(aliveWolves).seat
+    }
+
+    return { target, attacker }
+  }
+
+  decideDayClaim(ctx: TeamDecisionContext): DayClaim {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideDayClaim(actorCtx)
+  }
+
+  decideForecast(ctx: TeamDecisionContext): DayClaim {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideForecast(actorCtx)
+  }
+
+  decideVote(ctx: TeamDecisionContext): number {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideVote(actorCtx)
+  }
+
+  decideCommunication(ctx: TeamDecisionContext): CommunicationAction {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideCommunication(actorCtx)
+  }
+
+  decideProposal(ctx: TeamDecisionContext): Proposal | null {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideProposal(actorCtx)
+  }
+
+  decideLeadershipResponse(ctx: TeamDecisionContext, proposal: Proposal): LeadershipResponse {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideLeadershipResponse(actorCtx, proposal)
+  }
+
+  private buildActorCtx(ctx: TeamDecisionContext): DecisionContext {
+    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
+    const player = ctx.gameState.players.find(p => p.seat === seat)!
+    return {
+      ...ctx,
+      mySeat: seat,
+      myRole: player.role,
+      myPlayer: player,
+      wolfTeammates: ctx.teamSeats.filter(s => s !== seat),
+    }
+  }
+}
+
+// ============================================================
+// 共有者チームヒューリスティック
+// ============================================================
+
+export class MasonTeamHeuristic implements TeamStrategy {
+  private individual = new HeuristicStrategy()
+
+  decideNightAction(_ctx: TeamDecisionContext): NightAction {
+    return { type: 'none' }
+  }
+
+  decideDayClaim(ctx: TeamDecisionContext): DayClaim {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideDayClaim(actorCtx)
+  }
+
+  decideForecast(ctx: TeamDecisionContext): DayClaim {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideForecast(actorCtx)
+  }
+
+  decideVote(ctx: TeamDecisionContext): number {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideVote(actorCtx)
+  }
+
+  decideCommunication(ctx: TeamDecisionContext): CommunicationAction {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideCommunication(actorCtx)
+  }
+
+  decideProposal(ctx: TeamDecisionContext): Proposal | null {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideProposal(actorCtx)
+  }
+
+  decideLeadershipResponse(ctx: TeamDecisionContext, proposal: Proposal): LeadershipResponse {
+    const actorCtx = this.buildActorCtx(ctx)
+    return this.individual.decideLeadershipResponse(actorCtx, proposal)
+  }
+
+  private buildActorCtx(ctx: TeamDecisionContext): DecisionContext {
+    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
+    const player = ctx.gameState.players.find(p => p.seat === seat)!
+    const partner = ctx.teamSeats.find(s => s !== seat) ?? null
+    return {
+      ...ctx,
+      mySeat: seat,
+      myRole: player.role,
+      myPlayer: player,
+      masonPartner: partner,
+    }
   }
 }
 

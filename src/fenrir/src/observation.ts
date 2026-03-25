@@ -7,7 +7,7 @@
  * 公開情報(publicEvents, signals)と自分の秘密情報(myPlayer)のみからエンコード。
  */
 
-import type { DecisionContext } from '../../lupa/strategy.ts'
+import type { DecisionContext, TeamDecisionContext } from '../../lupa/strategy.ts'
 import type { SystemRole } from '../../types/index.ts'
 
 /** 14D猫専用: 席数固定 */
@@ -317,6 +317,76 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
     }
   }
   // offset += RETAR_WHATIF_SIZE
+
+  return obs
+}
+
+// ============================================================
+// チームエージェント用観測エンコーダ
+// ============================================================
+
+// チーム追加セクション:
+//   global: +1 (my_team_size)
+//   per-seat: +1 (is_my_team) + 1 (is_current_actor) = +2 per seat
+//   private: +SEATS (全チームメンバーの偽占い結果統合)
+const TEAM_GLOBAL_EXTRA = 1
+const TEAM_PER_SEAT_EXTRA = 2
+const TEAM_PRIVATE_EXTRA = SEATS
+
+export const TEAM_OBSERVATION_SIZE =
+  OBSERVATION_SIZE + TEAM_GLOBAL_EXTRA + SEATS * TEAM_PER_SEAT_EXTRA + TEAM_PRIVATE_EXTRA
+
+/**
+ * チームエージェント用の観測エンコード
+ *
+ * 個人観測をベースに、チーム固有の情報を末尾に追加:
+ * 1. my_team_size (global)
+ * 2. is_my_team per seat (14-dim)
+ * 3. is_current_actor per seat (14-dim)
+ * 4. 全チームメンバーの偽占い結果統合 (14-dim)
+ */
+export function encodeTeamObservation(ctx: TeamDecisionContext): Float32Array {
+  const obs = new Float32Array(TEAM_OBSERVATION_SIZE)
+
+  // 個人観測をベースにコピー
+  const base = encodeObservation(ctx)
+  obs.set(base)
+
+  let offset = OBSERVATION_SIZE
+
+  // ========== Team global ==========
+  obs[offset++] = ctx.teamSeats.length / SEATS  // normalized team size
+
+  // ========== Team per-seat flags ==========
+  const teamSet = new Set(ctx.teamSeats)
+
+  // is_my_team (14-dim)
+  for (let seat = 1; seat <= SEATS; seat++) {
+    obs[offset++] = teamSet.has(seat) ? 1 : 0
+  }
+
+  // is_current_actor (14-dim) — 昼行動で今誰の番か
+  for (let seat = 1; seat <= SEATS; seat++) {
+    obs[offset++] = ctx.currentActorSeat === seat ? 1 : 0
+  }
+
+  // ========== Team unified private info ==========
+  // 全チームメンバーの偽占い結果を統合 (狼チーム用)
+  // seat → 0=unknown, 0.5=human偽報告, 1.0=wolf偽報告
+  for (let seat = 1; seat <= SEATS; seat++) {
+    let fakeResult = 0
+    for (const tp of ctx.teamPlayers) {
+      const fake = tp.fakeDivineHistory
+      if (fake) {
+        for (const [, entry] of fake) {
+          if (entry.target === seat) {
+            fakeResult = entry.result === 'human' ? 0.5 : 1.0
+          }
+        }
+      }
+    }
+    obs[offset++] = fakeResult
+  }
 
   return obs
 }
