@@ -46,15 +46,16 @@ export function searchTsumi(
   const wolfBit = RoleSignatureBits.werewolf
   const hamsterBit = RoleSignatureBits.werehamster
   let wolfCandidates = 0
+  let hamsterCandidates = 0
   let hasAliveHamster = false
   for (let seat = 1; seat < retar.conclusions.possibilities.length; seat++) {
     if (!(alive & (1 << seat))) continue
     const p = retar.conclusions.possibilities[seat]
     if (p & wolfBit) wolfCandidates++
-    if (p & hamsterBit) hasAliveHamster = true
+    if (p & hamsterBit) { hamsterCandidates++; hasAliveHamster = true }
   }
   const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
-  if (wolfCandidates > nawa) {
+  if (wolfCandidates > nawa || (hasAliveHamster && hamsterCandidates > 2 * nawa - wolfCandidates)) {
     const t2 = performance.now()
     return {
       isTsumi: false,

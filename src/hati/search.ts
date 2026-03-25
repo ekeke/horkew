@@ -283,6 +283,7 @@ const PRECHECK_CONTINUE = -2
 function precheckWorlds(worlds: World[], alive: number): number {
   const aliveCount = popCount32(alive)
   let wolfUnion = 0
+  let hamsterUnion = 0
   let hasAliveHamster = false
 
   for (const w of worlds) {
@@ -293,6 +294,7 @@ function precheckWorlds(worlds: World[], alive: number): number {
     if (w.hamsterSeat !== -1 && hasSeat(alive, w.hamsterSeat)) {
       nonWolfNonHamster--
       hasAliveHamster = true
+      hamsterUnion |= (1 << w.hamsterSeat)
     }
     // パリティチェック（per-world）
     if (wolfCount >= nonWolfNonHamster) return PRECHECK_PRUNED
@@ -308,6 +310,15 @@ function precheckWorlds(worlds: World[], alive: number): number {
   // よってwolfCountに依存せず、alive人数のみで決まる
   const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
   if (popCount32(wolfUnion) > nawa) return PRECHECK_PRUNED
+
+  // 狐候補数 > 処刑+占い+消去法のカバー可能数 → 詰みなし
+  // nawaラウンド中、wolfCandidates回は狼処刑に使う可能性がある。
+  // 残り nawa-wolfCandidates ラウンドで狐を処刑（AND-OR分岐でカバー）。
+  // 占いは狼処刑ラウンドの夜にも使える → 占い回数 = nawa-1（最終日夜なし）。
+  // 最後の1候補は消去法で特定。
+  // カバー可能 = (nawa-wolfCandidates) + (nawa-1) + 1 = 2*nawa - wolfCandidates
+  const wolfCandidates = popCount32(wolfUnion)
+  if (hasAliveHamster && popCount32(hamsterUnion) > 2 * nawa - wolfCandidates) return PRECHECK_PRUNED
 
   return PRECHECK_CONTINUE
 }

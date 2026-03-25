@@ -24,7 +24,7 @@ import { getEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { RoleBitIndex } from '../retar/possibilities.ts'
 import type { StrategyNode, World } from './types.ts'
-import { hasSeat, removeSeat, forEachSeat } from './types.ts'
+import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
 import {
   checkOutcome, simulateNight, validBiteTargets, getMediumResult,
   executionObsKeyToString, obsKeyToString,
@@ -266,9 +266,9 @@ function runVerify(args: Args): void {
   let totalTsumi = 0
   let totalVerified = 0
   const failures: Failure[] = []
-  let maxHatiMs = 0
   let totalHatiMs = 0
   let hatiCount = 0
+  const allTimings: { ms: number, seed: number, day: number, config: string }[] = []
 
   for (const cfg of selectedConfigs) {
     const roles = new Map(Object.entries(cfg.roles) as [SystemRole, number][])
@@ -278,6 +278,9 @@ function runVerify(args: Args): void {
     let tsumiCount = 0
     let verifiedCount = 0
     let configFailures = 0
+    let maxAlive = 0
+    let maxAliveSeed = -1
+    let maxAliveDay = -1
 
     for (let seed = seedFrom; seed < seedTo; seed++) {
       let events: GameEvent[]
@@ -325,10 +328,17 @@ function runVerify(args: Args): void {
 
         totalHatiMs += tsumiResult.stats.searchElapsed
         hatiCount++
-        if (tsumiResult.stats.searchElapsed > maxHatiMs) maxHatiMs = tsumiResult.stats.searchElapsed
+        allTimings.push({ ms: tsumiResult.stats.searchElapsed, seed, day: cp.day, config: cfg.name })
 
         if (!tsumiResult.isTsumi || !tsumiResult.strategy) continue
         tsumiCount++
+
+        const aliveCount = popCount32(alive)
+        if (aliveCount > maxAlive) {
+          maxAlive = aliveCount
+          maxAliveSeed = seed
+          maxAliveDay = cp.day
+        }
 
         const trueWorld = buildTrueWorld(state)
 
@@ -366,14 +376,31 @@ function runVerify(args: Args): void {
 
     console.log(`  ${cfg.name}: ${gameCount} games, ${checkpointCount} checkpoints`)
     console.log(`    詰み発見: ${tsumiCount} (${checkpointCount > 0 ? (tsumiCount / checkpointCount * 100).toFixed(1) : 0}%)`)
+    if (tsumiCount > 0) {
+      console.log(`    最長詰み: ${maxAlive}人生存 (seed=${maxAliveSeed} Day${maxAliveDay})`)
+    }
     console.log(`    戦略検証: ${configFailures === 0 ? '全通過' : `${configFailures}失敗`}`)
   }
 
   console.log('')
   console.log(`合計: ${totalGames} games, ${totalCheckpoints} checkpoints`)
   console.log(`詰み発見: ${totalTsumi}, 検証済み: ${totalVerified}`)
-  if (hatiCount > 0) {
-    console.log(`時間: hati avg ${(totalHatiMs / hatiCount).toFixed(1)}ms / max ${maxHatiMs.toFixed(1)}ms`)
+  if (allTimings.length > 0) {
+    allTimings.sort((a, b) => a.ms - b.ms)
+    const pct = (p: number) => {
+      const idx = Math.min(Math.ceil(allTimings.length * p / 100) - 1, allTimings.length - 1)
+      return allTimings[idx]
+    }
+    const fmt = (t: { ms: number, seed: number, day: number, config: string }) =>
+      `${t.ms.toFixed(1)}ms (${t.config} seed=${t.seed} Day${t.day})`
+    console.log(`時間: avg ${(totalHatiMs / hatiCount).toFixed(1)}ms`)
+    console.log(`  p90: ${fmt(pct(90))}`)
+    console.log(`  p95: ${fmt(pct(95))}`)
+    console.log(`  p99: ${fmt(pct(99))}`)
+    console.log(`  worst 10:`)
+    for (const t of allTimings.slice(-10).reverse()) {
+      console.log(`    ${fmt(t)}`)
+    }
   }
 
   const eg = getEndgameStats()
