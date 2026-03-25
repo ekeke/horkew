@@ -63,6 +63,16 @@ Key modules in `common/`:
 
 The pipeline connection: Howl parser output → (mapped to events) → VillageStatus → Retar → per-player role possibilities.
 
+## Performance (Hati / Retar)
+
+Hati（詰み探索）とRetar（役職推理）は機械学習パイプラインに組み込む前提のため、**パフォーマンスが最優先**。以下を厳守:
+
+- **GC圧を最小化**: 不要なオブジェクト生成を避ける。ホットパスでの配列・オブジェクトの一時生成禁止。ビットマスク・Uint8Array・数値ハッシュで代替。
+- **メモリ確保は遅延**: 大量データ（ワールド列挙など）は逐次処理（コールバック/ストリーミング）を基本とし、配列への一括収集は必要な場合のみ。
+- **永続キャッシュ禁止**: モジュールスコープのMap等でゲームをまたいでデータを保持しない。メモ化は探索単位のスコープに限定。
+- **枝刈りを先に**: 重い計算（ワールド列挙、探索）の前に安価なチェック（縄数、パリティ）で早期棄却。
+- **ベンチマーク必須**: `src/hati/bench.ts` でBEFORE/AFTERを計測し `src/hati/Performance.md` に記録。`src/hati/verify.ts` で正しさを検証。
+
 ## Coding Conventions
 
 - **No semicolons**

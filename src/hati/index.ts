@@ -2,9 +2,10 @@ import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { TsumiResult, SearchOptions, SimState } from './types.ts'
-import { DEFAULT_SEARCH_OPTIONS } from './types.ts'
-import { enumerateWorlds } from './worlds.ts'
+import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
+import { collectWorlds } from './worlds.ts'
 import { searchTsumi as runSearch } from './search.ts'
+import { RoleBitIndex, RoleSignatureBits } from '../retar/possibilities.ts'
 
 export type { TsumiResult, SearchOptions } from './types.ts'
 export type { StrategyNode, World, VillageAction } from './types.ts'
@@ -34,11 +35,42 @@ export function searchTsumi(
   retar.analyze()
   const t1 = performance.now()
 
-  // 2. Retarの内部Possibilitiesからワールド列挙
-  const worlds = enumerateWorlds(retar.conclusions, setup)
+  // 2. 狼候補数による早期枝刈り（Retarから直接取得、ワールド列挙前）
+  // 縄数 = floor((alive - 1 - hamster) / 2): wolfCountに依存しない
+  let alive = 0
+  for (const [seat, status] of vs.statuses) {
+    if (status.surviving) alive |= (1 << seat)
+  }
+  const aliveCount = popCount32(alive)
+
+  const wolfBit = RoleSignatureBits.werewolf
+  const hamsterBit = RoleSignatureBits.werehamster
+  let wolfCandidates = 0
+  let hasAliveHamster = false
+  for (let seat = 1; seat < retar.conclusions.possibilities.length; seat++) {
+    if (!(alive & (1 << seat))) continue
+    const p = retar.conclusions.possibilities[seat]
+    if (p & wolfBit) wolfCandidates++
+    if (p & hamsterBit) hasAliveHamster = true
+  }
+  const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
+  if (wolfCandidates > nawa) {
+    const t2 = performance.now()
+    return {
+      isTsumi: false,
+      strategy: null,
+      stats: {
+        worldsTotal: 0, nodesVisited: 0, maxDepth: 0,
+        elapsed: t2 - t0, retarElapsed: t1 - t0, enumerateElapsed: 0, searchElapsed: 0,
+      },
+    }
+  }
+
+  // 3. Retarの内部Possibilitiesからワールド列挙
+  const worlds = collectWorlds(retar.conclusions, setup)
   const t2 = performance.now()
 
-  if (worlds.length === 0) {
+  if (worlds === null || worlds.length === 0) {
     return {
       isTsumi: false,
       strategy: null,
@@ -47,12 +79,6 @@ export function searchTsumi(
         elapsed: t2 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: 0,
       },
     }
-  }
-
-  // 3. 初期状態の構築
-  let alive = 0
-  for (const [seat, status] of vs.statuses) {
-    if (status.surviving) alive |= (1 << seat)
   }
 
   const initialState: SimState = { alive, day: vs.day }

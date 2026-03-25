@@ -4,12 +4,15 @@ import { RoleBitIndex, ROLE_COUNT, RoleSignatureBitsReverseMap, bitIndicesFromMa
 import type { Possibilities } from '../retar/possibilities.ts'
 
 /**
- * Retarの可能性からすべての有効なワールド（役職配置）を列挙する。
+ * Retarの可能性からすべての有効なワールド（役職配置）を逐次列挙する。
+ * 各ワールドが見つかるたびに emit コールバックを呼ぶ。
+ * emit が false を返すと列挙を中断する（早期打ち切り）。
  */
 export function enumerateWorlds(
   possibilities: Possibilities,
   setup: Map<SystemRole, number>,
-): World[] {
+  emit: (world: World) => boolean | void,
+): void {
   const seats: Seat[] = []
   for (let i = 1; i < possibilities.possibilities.length; i++) {
     if (possibilities.possibilities[i] !== 0) {
@@ -22,15 +25,16 @@ export function enumerateWorlds(
     roleCount[RoleBitIndex[role]] = count
   }
 
-  const worlds: World[] = []
   const assignment: SystemRole[] = new Array(seats.length > 0 ? seats[seats.length - 1] + 1 : 0)
+  let stopped = false
 
   function backtrack(idx: number): void {
+    if (stopped) return
     if (idx === seats.length) {
       for (let i = 0; i < ROLE_COUNT; i++) {
         if (roleCount[i] !== 0) return
       }
-      worlds.push(createWorld(assignment, seats))
+      if (emit(createWorld(assignment, seats)) === false) stopped = true
       return
     }
 
@@ -39,6 +43,7 @@ export function enumerateWorlds(
     const indices = bitIndicesFromMask(mask)
 
     for (const bitIdx of indices) {
+      if (stopped) return
       if (roleCount[bitIdx] <= 0) continue
       const role = RoleSignatureBitsReverseMap.get(1 << bitIdx)!
       roleCount[bitIdx]--
@@ -49,7 +54,24 @@ export function enumerateWorlds(
   }
 
   backtrack(0)
-  return worlds
+}
+
+/**
+ * 全ワールドを配列に収集するヘルパー。
+ * maxCount を超えたら null を返す（OOM防止）。
+ */
+export function collectWorlds(
+  possibilities: Possibilities,
+  setup: Map<SystemRole, number>,
+  maxCount: number = Infinity,
+): World[] | null {
+  const worlds: World[] = []
+  let overflow = false
+  enumerateWorlds(possibilities, setup, w => {
+    worlds.push(w)
+    if (worlds.length > maxCount) { overflow = true; return false }
+  })
+  return overflow ? null : worlds
 }
 
 function createWorld(roles: SystemRole[], seats: Seat[]): World {

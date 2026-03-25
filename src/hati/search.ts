@@ -132,20 +132,19 @@ function isTsumi(
   const key = memoKey(worlds, state.alive)
   if (ss.memo.has(key)) return ss.memo.get(key)!
 
-  // 自明な詰み: 生存者中の狼候補が1人だけなら即処刑で勝ち
-  const trivial = findTrivialTsumi(worlds, state.alive)
-  if (trivial !== null) {
+  // 統合事前チェック: 自明詰み / パリティ / 狼候補数
+  const precheck = precheckWorlds(worlds, state.alive)
+  if (precheck >= 0) {
+    // 自明な詰み: seat = precheck を処刑して即勝ち
     const result: StrategyNode = {
       type: 'action',
-      action: { execute: trivial, bodyguardTarget: null, seerTarget: null },
+      action: { execute: precheck, bodyguardTarget: null, seerTarget: null },
       branches: { 'win': { type: 'win' } },
     }
     ss.memo.set(key, result)
     return result
   }
-
-  // パリティ事前チェック
-  if (!canPossiblyWin(worlds, state.alive)) {
+  if (precheck === PRECHECK_PRUNED) {
     ss.memo.set(key, null)
     return null
   }
@@ -273,30 +272,44 @@ function collapseBranches(branches: Record<ObservationKey, StrategyNode>): Strat
 }
 
 /**
- * 自明な詰み判定。
+ * 統合事前チェック: 自明詰み / パリティ / 狼候補数。
+ * ワールドを1回だけ走査して3つの判定を行う。
+ *
+ * @returns >= 0: 自明詰みの処刑先seat, -1: 枝刈り(詰み不可能), -2: 探索続行
  */
-function findTrivialTsumi(worlds: World[], alive: number): Seat | null {
-  let wolfUnion = 0
-  for (const w of worlds) {
-    wolfUnion |= (w.wolfMask & alive)
-    if (w.hamsterSeat !== -1 && hasSeat(alive, w.hamsterSeat)) return null
-  }
-  if (popCount32(wolfUnion) !== 1) return null
-  return 31 - Math.clz32(wolfUnion)
-}
+const PRECHECK_PRUNED = -1
+const PRECHECK_CONTINUE = -2
 
-/**
- * パリティの事前チェック。
- */
-function canPossiblyWin(worlds: World[], alive: number): boolean {
+function precheckWorlds(worlds: World[], alive: number): number {
   const aliveCount = popCount32(alive)
+  let wolfUnion = 0
+  let hasAliveHamster = false
+
   for (const w of worlds) {
-    const wolfCount = popCount32(w.wolfMask & alive)
+    const wolvesAlive = w.wolfMask & alive
+    wolfUnion |= wolvesAlive
+    const wolfCount = popCount32(wolvesAlive)
     let nonWolfNonHamster = aliveCount - wolfCount
-    if (w.hamsterSeat !== -1 && hasSeat(alive, w.hamsterSeat)) nonWolfNonHamster--
-    if (wolfCount >= nonWolfNonHamster) return false
+    if (w.hamsterSeat !== -1 && hasSeat(alive, w.hamsterSeat)) {
+      nonWolfNonHamster--
+      hasAliveHamster = true
+    }
+    // パリティチェック（per-world）
+    if (wolfCount >= nonWolfNonHamster) return PRECHECK_PRUNED
   }
-  return true
+
+  // 自明な詰み: 狼候補が1人 & 妖狐なし → 即処刑で勝ち
+  if (!hasAliveHamster && popCount32(wolfUnion) === 1) {
+    return 31 - Math.clz32(wolfUnion)
+  }
+
+  // 縄数 = floor((alive - 1 - hamster) / 2)
+  // 狼命中は縄を消費しない（gap±0）、空振りは縄-1（gap-2→処刑1回分）
+  // よってwolfCountに依存せず、alive人数のみで決まる
+  const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
+  if (popCount32(wolfUnion) > nawa) return PRECHECK_PRUNED
+
+  return PRECHECK_CONTINUE
 }
 
 /**
