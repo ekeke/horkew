@@ -27,24 +27,24 @@ export function searchTsumi(
   analyzeOptions: AnalyzeOptions,
   searchOptions: SearchOptions = DEFAULT_SEARCH_OPTIONS,
 ): TsumiResult {
-  const startTime = performance.now()
+  const t0 = performance.now()
 
   // 1. Retar解析で可能性を取得
   const retar = new VillageRetar(vs, setup, analyzeOptions)
   retar.analyze()
+  const t1 = performance.now()
 
   // 2. Retarの内部Possibilitiesからワールド列挙
   const worlds = enumerateWorlds(retar.conclusions, setup)
+  const t2 = performance.now()
 
   if (worlds.length === 0) {
     return {
       isTsumi: false,
       strategy: null,
       stats: {
-        worldsTotal: 0,
-        nodesVisited: 0,
-        elapsed: performance.now() - startTime,
-        maxDepth: 0,
+        worldsTotal: 0, nodesVisited: 0, maxDepth: 0,
+        elapsed: t2 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: 0,
       },
     }
   }
@@ -55,22 +55,18 @@ export function searchTsumi(
     if (status.surviving) alive.add(seat)
   }
 
-  const initialState: SimState = {
-    alive,
-    day: vs.day,
-  }
+  const initialState: SimState = { alive, day: vs.day }
 
   // 4. 探索実行
   const { result, nodesVisited, maxDepthReached } = runSearch(worlds, initialState, searchOptions)
+  const t3 = performance.now()
 
   return {
     isTsumi: result !== null,
     strategy: result,
     stats: {
-      worldsTotal: worlds.length,
-      nodesVisited,
-      elapsed: performance.now() - startTime,
-      maxDepth: maxDepthReached,
+      worldsTotal: worlds.length, nodesVisited, maxDepth: maxDepthReached,
+      elapsed: t3 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: t3 - t2,
     },
   }
 }
@@ -84,19 +80,17 @@ export function searchTsumiDirect(
   alive: Set<Seat>,
   searchOptions: SearchOptions = DEFAULT_SEARCH_OPTIONS,
 ): TsumiResult {
-  const startTime = performance.now()
-
+  const t0 = performance.now()
   const initialState: SimState = { alive, day: 1 }
   const { result, nodesVisited, maxDepthReached } = runSearch(worlds, initialState, searchOptions)
+  const searchElapsed = performance.now() - t0
 
   return {
     isTsumi: result !== null,
     strategy: result,
     stats: {
-      worldsTotal: worlds.length,
-      nodesVisited,
-      elapsed: performance.now() - startTime,
-      maxDepth: maxDepthReached,
+      worldsTotal: worlds.length, nodesVisited, maxDepth: maxDepthReached,
+      elapsed: searchElapsed, retarElapsed: 0, enumerateElapsed: 0, searchElapsed,
     },
   }
 }

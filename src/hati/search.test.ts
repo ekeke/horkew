@@ -314,12 +314,7 @@ describe('Hati searchTsumi', () => {
 
   describe('trivial tsumi shortcut', () => {
     it('5人1狼: 狼が確定 → 分岐なしの簡潔な出力', () => {
-      // 全ワールドで7が狼 → 処刑 7 → win のみ
-      const worlds = [
-        makeWorld({ 1: 'seer', 2: 'villager', 3: 'villager', 4: 'mason', 5: 'mason' }),
-      ]
-      // seat 3 is the only non-confirmed → but all worlds agree seat 3 is villager
-      // Actually let's make 3 the wolf:
+      // 全ワールドで3が狼 → 処刑 3 → win のみ
       const worlds2 = [
         makeWorld({ 1: 'seer', 2: 'villager', 3: 'werewolf', 4: 'mason', 5: 'mason' }),
       ]

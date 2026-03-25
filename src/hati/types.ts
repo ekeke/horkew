@@ -75,7 +75,14 @@ export type TsumiResult = {
 export type SearchStats = {
   worldsTotal: number
   nodesVisited: number
+  /** Retar解析 + ワールド列挙 + 探索の合計時間 (ms) */
   elapsed: number
+  /** Retar解析の時間 (ms) */
+  retarElapsed: number
+  /** ワールド列挙の時間 (ms) */
+  enumerateElapsed: number
+  /** Hati探索単体の時間 (ms) */
+  searchElapsed: number
   maxDepth: number
 }
 
