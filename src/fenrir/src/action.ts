@@ -1,20 +1,25 @@
 /**
  * アクション空間定義 + マスキング + デコード
  *
- * 6つのアクションヘッド:
- * - night:  MAX_SEATS+1 (target seats + none)
- * - claim:  10 (CO種別)
- * - vote:   MAX_SEATS (投票先)
- * - comm:   MAX_SEATS*3+3 (signal types × targets + agree/disagree/pass)
- * - leader: 3 (follow/defy/no_response)
- * - target: MAX_SEATS (対象選択: 占い先、護衛先、共有相方等)
+ * 14D猫専用 (SEATS=14)
+ *
+ * 8つのアクションヘッド:
+ * - night:    SEATS+1 (target seats + none)
+ * - claim:    10 (CO種別)
+ * - vote:     SEATS (投票先)
+ * - comm:     SEATS*7+7 (softmax: シグナル種別×対象 + 宣言系)
+ * - propose:  SEATS (sigmoid: 処刑提案、複数同時選択可)
+ * - predict:  SEATS*11 (sigmoid: 配役予想、submit_prediction時のみ)
+ * - leader:   3 (follow/defy/no_response)
+ * - target:   SEATS (対象選択: 占い先、護衛先、共有相方等)
  */
 
 import type { DecisionContext } from '../../lupa/strategy.ts'
 import type { NightAction, DayClaim } from '../../lupa/types.ts'
-import type { Signal } from '../../lupa/communication.ts'
+import type { Signal, RolePrediction } from '../../lupa/communication.ts'
 import type { LeadershipResponse } from '../../lupa/leadership.ts'
-import { MAX_SEATS } from './observation.ts'
+import type { SystemRole } from '../../types/index.ts'
+import { SEATS, NUM_ROLES } from './observation.ts'
 import { softmax } from './ml/nn.ts'
 
 // ============================================================
@@ -22,12 +27,14 @@ import { softmax } from './ml/nn.ts'
 // ============================================================
 
 export const HEAD_SIZES = {
-  night: MAX_SEATS + 1,       // seat 1..MAX_SEATS + none
+  night: SEATS + 1,            // seat 1..SEATS + none
   claim: 10,                   // seer_co, medium_co, bodyguard_co, mason_co, nekomata_co, seer_result, medium_result, forecast, villager_co(fake), none
-  vote: MAX_SEATS,             // seat 1..MAX_SEATS
-  comm: MAX_SEATS * 3 + 3,    // execute_proposal(20) + suspicion(20) + trust(20) + agree + disagree + pass
+  vote: SEATS,                 // seat 1..SEATS
+  comm: SEATS * 7 + 7,        // suspicion(14) + trust(14) + vote_intent(14) + accuse_wolf(14) + accuse_fox(14) + agree(14) + disagree(14) + demand_wolf_co + werewolf_co + fanatic_co + werehamster_co + immoralist_co + submit_prediction + no_signal
+  propose: SEATS,              // sigmoid: 処刑提案 (複数同時選択可)
+  predict: SEATS * NUM_ROLES,  // sigmoid: 配役予想 (submit_prediction時のみ)
   leader: 3,                   // follow, defy, no_response
-  target: MAX_SEATS,           // seat 1..MAX_SEATS
+  target: SEATS,               // seat 1..SEATS
 } as const
 
 // Claim indices
@@ -48,46 +55,67 @@ const CLAIM = {
 // アクションマスキング
 // ============================================================
 
+// Comm head index layout
+const COMM = {
+  SUSPICION: 0,                          // 0..SEATS-1
+  TRUST: SEATS,                          // SEATS..SEATS*2-1
+  VOTE_INTENT: SEATS * 2,               // SEATS*2..SEATS*3-1
+  ACCUSE_WOLF: SEATS * 3,               // SEATS*3..SEATS*4-1
+  ACCUSE_FOX: SEATS * 4,                // SEATS*4..SEATS*5-1
+  AGREE: SEATS * 5,                     // SEATS*5..SEATS*6-1
+  DISAGREE: SEATS * 6,                  // SEATS*6..SEATS*7-1
+  DEMAND_WOLF_CO: SEATS * 7,            // SEATS*7
+  WEREWOLF_CO: SEATS * 7 + 1,           // SEATS*7+1
+  FANATIC_CO: SEATS * 7 + 2,            // SEATS*7+2
+  WEREHAMSTER_CO: SEATS * 7 + 3,        // SEATS*7+3
+  IMMORALIST_CO: SEATS * 7 + 4,         // SEATS*7+4
+  SUBMIT_PREDICTION: SEATS * 7 + 5,     // SEATS*7+5
+  NO_SIGNAL: SEATS * 7 + 6,             // SEATS*7+6
+} as const
+
+// Roles ordered for prediction head (must match NUM_ROLES)
+const ROLE_ORDER: SystemRole[] = [
+  'villager', 'seer', 'medium', 'bodyguard', 'mason',
+  'nekomata', 'werewolf', 'possessed', 'fanatic',
+  'werehamster', 'immoralist',
+]
+
 export function maskNightAction(ctx: DecisionContext): Float32Array {
   const mask = new Float32Array(HEAD_SIZES.night).fill(-Infinity)
 
   switch (ctx.myRole) {
     case 'seer':
-      // 自分以外の生存者を占える
       for (const seat of ctx.alivePlayers) {
-        if (seat !== ctx.mySeat && seat <= MAX_SEATS) {
+        if (seat !== ctx.mySeat && seat <= SEATS) {
           mask[seat - 1] = 0
         }
       }
       break
     case 'bodyguard':
-      // 自分以外の生存者を護衛できる（連続護衛禁止はヒューリスティックのルール）
       for (const seat of ctx.alivePlayers) {
-        if (seat !== ctx.mySeat && seat <= MAX_SEATS) {
+        if (seat !== ctx.mySeat && seat <= SEATS) {
           mask[seat - 1] = 0
         }
       }
       break
     case 'werewolf': {
-      // 狼以外の生存者を襲撃
       const wolves = new Set(
         ctx.gameState.players.filter(p => p.role === 'werewolf').map(p => p.seat)
       )
-      // 最小seat狼のみが行動
       const minWolf = Math.min(...ctx.alivePlayers.filter(s => wolves.has(s)))
       if (ctx.mySeat === minWolf) {
         for (const seat of ctx.alivePlayers) {
-          if (!wolves.has(seat) && seat <= MAX_SEATS) {
+          if (!wolves.has(seat) && seat <= SEATS) {
             mask[seat - 1] = 0
           }
         }
       } else {
-        mask[MAX_SEATS] = 0  // none
+        mask[SEATS] = 0  // none
       }
       break
     }
     default:
-      mask[MAX_SEATS] = 0  // none
+      mask[SEATS] = 0  // none
   }
 
   return mask
@@ -120,27 +148,68 @@ export function maskClaim(ctx: DecisionContext): Float32Array {
 export function maskVote(ctx: DecisionContext): Float32Array {
   const mask = new Float32Array(HEAD_SIZES.vote).fill(-Infinity)
   for (const seat of ctx.alivePlayers) {
-    if (seat !== ctx.mySeat && seat <= MAX_SEATS) {
+    if (seat !== ctx.mySeat && seat <= SEATS) {
       mask[seat - 1] = 0
     }
   }
   return mask
 }
 
-export function maskComm(_ctx: DecisionContext): Float32Array {
-  // ほぼ全アクションが有効（passは常に有効）
-  const mask = new Float32Array(HEAD_SIZES.comm).fill(0)
+export function maskComm(ctx: DecisionContext): Float32Array {
+  const mask = new Float32Array(HEAD_SIZES.comm).fill(-Infinity)
+
+  // target系シグナル (7種): 生存者+非自分に制限
+  const targetOffsets = [
+    COMM.SUSPICION, COMM.TRUST, COMM.VOTE_INTENT,
+    COMM.ACCUSE_WOLF, COMM.ACCUSE_FOX, COMM.AGREE, COMM.DISAGREE,
+  ]
+  for (const offset of targetOffsets) {
+    for (const seat of ctx.alivePlayers) {
+      if (seat !== ctx.mySeat && seat <= SEATS) {
+        mask[offset + seat - 1] = 0
+      }
+    }
+  }
+
+  // 宣言系: 常に許可 (ノーマスク)
+  mask[COMM.DEMAND_WOLF_CO] = 0
+  mask[COMM.WEREWOLF_CO] = 0
+  mask[COMM.FANATIC_CO] = 0
+  mask[COMM.WEREHAMSTER_CO] = 0
+  mask[COMM.IMMORALIST_CO] = 0
+  mask[COMM.SUBMIT_PREDICTION] = 0
+  mask[COMM.NO_SIGNAL] = 0
+
   return mask
 }
 
+export function maskPropose(ctx: DecisionContext): Float32Array {
+  // sigmoid: 0 = no bias, -Infinity = masked out
+  const mask = new Float32Array(HEAD_SIZES.propose).fill(-Infinity)
+  for (const seat of ctx.alivePlayers) {
+    if (seat !== ctx.mySeat && seat <= SEATS) {
+      mask[seat - 1] = 0
+    }
+  }
+  return mask
+}
+
+export function maskPredict(commActionIdx: number): Float32Array {
+  // submit_prediction 選択時のみ全有効、それ以外は全マスク
+  if (commActionIdx === COMM.SUBMIT_PREDICTION) {
+    return new Float32Array(HEAD_SIZES.predict).fill(0)
+  }
+  return new Float32Array(HEAD_SIZES.predict).fill(-Infinity)
+}
+
 export function maskLeader(_ctx: DecisionContext): Float32Array {
-  return new Float32Array(HEAD_SIZES.leader).fill(0)  // 全選択肢有効
+  return new Float32Array(HEAD_SIZES.leader).fill(0)
 }
 
 export function maskTarget(ctx: DecisionContext): Float32Array {
   const mask = new Float32Array(HEAD_SIZES.target).fill(-Infinity)
   for (const seat of ctx.alivePlayers) {
-    if (seat !== ctx.mySeat && seat <= MAX_SEATS) {
+    if (seat !== ctx.mySeat && seat <= SEATS) {
       mask[seat - 1] = 0
     }
   }
@@ -177,13 +246,12 @@ export function sampleMasked(logits: Float32Array, mask: Float32Array): { action
 // ============================================================
 
 export function decodeNightAction(actionIdx: number): NightAction {
-  if (actionIdx === MAX_SEATS) return { type: 'none' }
-  // actionIdx is seat-1
-  return { type: 'divine', target: actionIdx + 1 }  // decoded by caller to correct type
+  if (actionIdx === SEATS) return { type: 'none' }
+  return { type: 'divine', target: actionIdx + 1 }
 }
 
 export function decodeNightActionWithRole(actionIdx: number, role: string): NightAction {
-  if (actionIdx === MAX_SEATS) return { type: 'none' }
+  if (actionIdx === SEATS) return { type: 'none' }
   const target = actionIdx + 1
   switch (role) {
     case 'seer': return { type: 'divine', target }
@@ -243,22 +311,51 @@ export function decodeClaim(
 }
 
 export function decodeComm(actionIdx: number): Signal {
-  if (actionIdx < MAX_SEATS) {
-    return { type: 'execute_proposal', target: actionIdx + 1 }
+  // target系シグナル (7種 × SEATS)
+  if (actionIdx < SEATS * 7) {
+    const signalType = Math.floor(actionIdx / SEATS)
+    const target = (actionIdx % SEATS) + 1
+    const types: Signal['type'][] = [
+      'suspicion', 'trust', 'vote_intent',
+      'accuse_wolf', 'accuse_fox', 'agree', 'disagree',
+    ]
+    return { type: types[signalType], target } as Signal
   }
-  if (actionIdx < MAX_SEATS * 2) {
-    return { type: 'suspicion', target: actionIdx - MAX_SEATS + 1 }
+  // 宣言系シグナル
+  const declIdx = actionIdx - SEATS * 7
+  const declTypes: Signal['type'][] = [
+    'demand_wolf_co', 'werewolf_co', 'fanatic_co',
+    'werehamster_co', 'immoralist_co', 'submit_prediction', 'no_signal',
+  ]
+  return { type: declTypes[declIdx] ?? 'no_signal' } as Signal
+}
+
+/** sigmoid出力から処刑提案対象リストをデコード */
+export function decodePropose(sigmoidOutput: Float32Array, threshold = 0.5): number[] {
+  const targets: number[] = []
+  for (let i = 0; i < SEATS; i++) {
+    if (sigmoidOutput[i] >= threshold) {
+      targets.push(i + 1) // seat番号は1-indexed
+    }
   }
-  if (actionIdx < MAX_SEATS * 3) {
-    return { type: 'trust', target: actionIdx - MAX_SEATS * 2 + 1 }
+  return targets
+}
+
+/** sigmoid出力から配役予想をデコード */
+export function decodePredict(sigmoidOutput: Float32Array, threshold = 0.5): RolePrediction {
+  const predictions: RolePrediction = new Map()
+  for (let seat = 0; seat < SEATS; seat++) {
+    const roles: SystemRole[] = []
+    for (let role = 0; role < NUM_ROLES; role++) {
+      if (sigmoidOutput[seat * NUM_ROLES + role] >= threshold) {
+        roles.push(ROLE_ORDER[role])
+      }
+    }
+    if (roles.length > 0) {
+      predictions.set(seat + 1, roles)
+    }
   }
-  if (actionIdx === MAX_SEATS * 3) {
-    return { type: 'agree', signalId: 0 }  // simplified
-  }
-  if (actionIdx === MAX_SEATS * 3 + 1) {
-    return { type: 'disagree', signalId: 0 }
-  }
-  return { type: 'no_signal' }
+  return predictions
 }
 
 export function decodeLeader(actionIdx: number): LeadershipResponse {

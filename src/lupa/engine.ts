@@ -1,7 +1,7 @@
 import type { LupaConfig, GameState, GameEvent, NightAction, DayClaim } from './types.ts'
 import type { SystemRole } from '../types/index.ts'
 import type { Strategy, DecisionContext } from './strategy.ts'
-import type { SignalRecord } from './communication.ts'
+import type { SignalRecord, CommunicationAction } from './communication.ts'
 import type { Proposal } from './leadership.ts'
 import { Rng } from './random.ts'
 import { RANDOM_NAMES, generateRoleNames } from './names.ts'
@@ -267,29 +267,14 @@ export function runGame(config: LupaConfig): GameResult {
       }
     }
 
-    // シグナルラウンド1
-    for (const player of alivePlayers(state)) {
-      const strategy = getStrategy(config, player.seat)
-      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
-      const signal = strategy.decideCommunication(ctx)
-      const record: SignalRecord = { id: signalIdCounter++, sender: player.seat, day, signal }
-      daySignals.push(record)
-      signals.push(record)
-      if (signal.type !== 'no_signal') {
-        events.push({ type: 'signal', actor: player.seat, signal })
-      }
-    }
-
-    // シグナルラウンド2
-    for (const player of alivePlayers(state)) {
-      const strategy = getStrategy(config, player.seat)
-      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
-      const signal = strategy.decideCommunication(ctx)
-      const record: SignalRecord = { id: signalIdCounter++, sender: player.seat, day, signal }
-      daySignals.push(record)
-      signals.push(record)
-      if (signal.type !== 'no_signal') {
-        events.push({ type: 'signal', actor: player.seat, signal })
+    // シグナルラウンド (3ラウンド)
+    for (let round = 0; round < 3; round++) {
+      for (const player of alivePlayers(state)) {
+        const strategy = getStrategy(config, player.seat)
+        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        const commAction = strategy.decideCommunication(ctx)
+        applyCommAction(state, player, day, commAction, events, daySignals, signals, signalIdCounter)
+        signalIdCounter += 1
       }
     }
 
@@ -577,6 +562,48 @@ function applyClaim(
     case 'forecast':
     case 'none':
       break
+  }
+}
+
+const ROLE_CO_SIGNALS: Map<string, SystemRole> = new Map([
+  ['werewolf_co', 'werewolf'],
+  ['fanatic_co', 'fanatic'],
+  ['werehamster_co', 'werehamster'],
+  ['immoralist_co', 'immoralist'],
+])
+
+/** CommunicationAction を状態に適用 */
+function applyCommAction(
+  state: GameState, player: typeof state.players[0], day: number,
+  commAction: CommunicationAction, events: GameEvent[],
+  daySignals: SignalRecord[], signals: SignalRecord[], signalId: number,
+): void {
+  const { signal, proposals, predictions } = commAction
+
+  // シグナル記録
+  const record: SignalRecord = { id: signalId, sender: player.seat, day, signal }
+  daySignals.push(record)
+  signals.push(record)
+  if (signal.type !== 'no_signal') {
+    events.push({ type: 'signal', actor: player.seat, signal })
+  }
+
+  // 役職COシグナルの処理
+  const coRole = ROLE_CO_SIGNALS.get(signal.type)
+  if (coRole) {
+    player.claimedRole = coRole
+    player.claimedDay = day
+    events.push({ type: 'wolf_claim', actor: player.seat, claimedRole: coRole })
+  }
+
+  // 処刑提案イベント
+  if (proposals.length > 0) {
+    events.push({ type: 'execute_proposals', actor: player.seat, targets: proposals })
+  }
+
+  // 配役予想イベント
+  if (signal.type === 'submit_prediction' && predictions) {
+    events.push({ type: 'prediction', actor: player.seat, predictions })
   }
 }
 

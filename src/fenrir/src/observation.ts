@@ -10,7 +10,10 @@
 import type { DecisionContext } from '../../lupa/strategy.ts'
 import type { SystemRole } from '../../types/index.ts'
 
-export const MAX_SEATS = 20
+/** 14D猫専用: 席数固定 */
+export const SEATS = 14
+/** @deprecated MAX_SEATS は SEATS に移行中 */
+export const MAX_SEATS = SEATS
 export const MAX_DAYS = 50
 export const HISTORY_WINDOW = 3
 
@@ -20,21 +23,21 @@ const ROLES: SystemRole[] = [
   'werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist',
 ]
 const ROLE_INDEX = new Map(ROLES.map((r, i) => [r, i]))
-const NUM_ROLES = ROLES.length
+export const NUM_ROLES = ROLES.length
 
 // セクションサイズ
-const GLOBAL_SIZE = 2 + 1 + NUM_ROLES + 1 + 1  // day, phase, alive_ratio, role_onehot, commander, progress = 16
-const PER_SEAT_SIZE = 1 + (NUM_ROLES + 1) + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 // alive, claimed_role, is_me, black_count, white_count, vote_received, suspicion, trust, execute_proposal, is_commander = 21
-const SEAT_SECTION_SIZE = MAX_SEATS * PER_SEAT_SIZE  // 420
-const PRIVATE_SIZE = MAX_SEATS + MAX_SEATS + 1 + MAX_SEATS + 1  // divine_results + wolf_teammates + mason_partner + guard_history + known_hamster = 62
-const REVOTE_SIZE = 1 + MAX_SEATS  // revote_round + revote_candidates_mask = 21
-const HISTORY_DAY_SIZE = MAX_SEATS * 5  // per day: voted_for, executed, killed, claimed, signaled = 100
-const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 300
+const GLOBAL_SIZE = 2 + 1 + NUM_ROLES + 1 + 1 + 1  // day, phase, alive_ratio, role_onehot, commander, progress, demand_wolf_co_count = 17
+const PER_SEAT_SIZE = 1 + (NUM_ROLES + 1) + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 // alive, claimed_role, is_me, black_count, white_count, vote_received, suspicion, trust, execute_proposal, is_commander, accuse_wolf, accuse_fox, vote_intent = 24
+const SEAT_SECTION_SIZE = SEATS * PER_SEAT_SIZE  // 336
+const PRIVATE_SIZE = SEATS + SEATS + 1 + SEATS + 1  // divine_results + wolf_teammates + mason_partner + guard_history + known_hamster = 43
+const REVOTE_SIZE = 1 + SEATS  // revote_round + revote_candidates_mask = 15
+const HISTORY_DAY_SIZE = SEATS * 5  // per day: voted_for, executed, killed, claimed, signaled = 70
+const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 210
 
 // Retar可能性: per-seat × roles (0/1)
-const RETAR_POSSIBILITIES_SIZE = MAX_SEATS * NUM_ROLES  // 220
+const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
 // What-If CO: 占いCOシミュレーション後の可能性
-const RETAR_WHATIF_SIZE = MAX_SEATS * NUM_ROLES  // 220
+const RETAR_WHATIF_SIZE = SEATS * NUM_ROLES  // 154
 
 export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + RETAR_WHATIF_SIZE
 
@@ -45,7 +48,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   // ========== Global features ==========
   obs[offset++] = ctx.day / MAX_DAYS                    // normalized day
   obs[offset++] = ctx.phase === 'night' ? 0 : 1         // phase
-  obs[offset++] = ctx.alivePlayers.length / MAX_SEATS    // alive ratio
+  obs[offset++] = ctx.alivePlayers.length / SEATS        // alive ratio
 
   // my_role one-hot
   const roleIdx = ROLE_INDEX.get(ctx.myRole) ?? 0
@@ -53,8 +56,17 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
     obs[offset++] = i === roleIdx ? 1 : 0
   }
 
-  obs[offset++] = ctx.commander !== null ? ctx.commander / MAX_SEATS : 0  // commander
-  obs[offset++] = ctx.day / MAX_DAYS  // game progress (same as day, but explicit)
+  obs[offset++] = ctx.commander !== null ? ctx.commander / SEATS : 0  // commander
+  obs[offset++] = ctx.day / MAX_DAYS  // game progress
+
+  // demand_wolf_co_count: 当日のdemand_wolf_coシグナル数
+  let demandWolfCoCount = 0
+  for (const event of ctx.publicEvents) {
+    if (event.type === 'signal' && event.signal.type === 'demand_wolf_co') {
+      demandWolfCoCount++
+    }
+  }
+  obs[offset++] = Math.min(demandWolfCoCount / 5, 1)
 
   // ========== Per-seat features ==========
   const aliveSet = new Set(ctx.alivePlayers)
@@ -67,6 +79,9 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   const suspicionCounts = new Map<number, number>()
   const trustCounts = new Map<number, number>()
   const executeCounts = new Map<number, number>()
+  const accuseWolfCounts = new Map<number, number>()
+  const accuseFoxCounts = new Map<number, number>()
+  const voteIntentCounts = new Map<number, number>()
 
   for (const event of ctx.publicEvents) {
     switch (event.type) {
@@ -93,24 +108,35 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
       case 'nekomata_claim':
         claimedRoles.set(event.actor, 'nekomata')
         break
+      case 'wolf_claim':
+        claimedRoles.set(event.actor, event.claimedRole)
+        break
       case 'vote':
-        if (event.type === 'vote') {
-          voteCounts.set(event.target, (voteCounts.get(event.target) ?? 0) + 1)
+        voteCounts.set(event.target, (voteCounts.get(event.target) ?? 0) + 1)
+        break
+      case 'signal': {
+        const sig = event.signal
+        if ('target' in sig) {
+          const t = sig.target
+          switch (sig.type) {
+            case 'suspicion': suspicionCounts.set(t, (suspicionCounts.get(t) ?? 0) + 1); break
+            case 'trust': trustCounts.set(t, (trustCounts.get(t) ?? 0) + 1); break
+            case 'accuse_wolf': accuseWolfCounts.set(t, (accuseWolfCounts.get(t) ?? 0) + 1); break
+            case 'accuse_fox': accuseFoxCounts.set(t, (accuseFoxCounts.get(t) ?? 0) + 1); break
+            case 'vote_intent': voteIntentCounts.set(t, (voteIntentCounts.get(t) ?? 0) + 1); break
+          }
         }
         break
-      case 'signal':
-        if (event.signal.type === 'suspicion') {
-          suspicionCounts.set(event.signal.target, (suspicionCounts.get(event.signal.target) ?? 0) + 1)
-        } else if (event.signal.type === 'trust') {
-          trustCounts.set(event.signal.target, (trustCounts.get(event.signal.target) ?? 0) + 1)
-        } else if (event.signal.type === 'execute_proposal') {
-          executeCounts.set(event.signal.target, (executeCounts.get(event.signal.target) ?? 0) + 1)
+      }
+      case 'execute_proposals':
+        for (const t of event.targets) {
+          executeCounts.set(t, (executeCounts.get(t) ?? 0) + 1)
         }
         break
     }
   }
 
-  for (let seat = 1; seat <= MAX_SEATS; seat++) {
+  for (let seat = 1; seat <= SEATS; seat++) {
     const base = offset + (seat - 1) * PER_SEAT_SIZE
     let o = base
 
@@ -131,6 +157,9 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
     obs[o++] = Math.min((trustCounts.get(seat) ?? 0) / 5, 1)
     obs[o++] = Math.min((executeCounts.get(seat) ?? 0) / 5, 1)
     obs[o++] = ctx.commander === seat ? 1 : 0
+    obs[o++] = Math.min((accuseWolfCounts.get(seat) ?? 0) / 5, 1)
+    obs[o++] = Math.min((accuseFoxCounts.get(seat) ?? 0) / 5, 1)
+    obs[o++] = Math.min((voteIntentCounts.get(seat) ?? 0) / 5, 1)
   }
   offset += SEAT_SECTION_SIZE
 
@@ -141,48 +170,48 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   if (ctx.myRole === 'seer') {
     for (const [, result] of ctx.myPlayer.divineHistory) {
       const seat = result.target
-      if (seat >= 1 && seat <= MAX_SEATS) {
+      if (seat >= 1 && seat <= SEATS) {
         obs[privateBase + (seat - 1)] = result.result === 'human' ? 0.5 : 1.0
       }
     }
   }
-  offset += MAX_SEATS
+  offset += SEATS
 
   // Wolf teammates mask (人狼: 仲間の狼, 狂信者: 狼の位置)
   if (ctx.wolfTeammates) {
     for (const seat of ctx.wolfTeammates) {
-      if (seat >= 1 && seat <= MAX_SEATS) {
+      if (seat >= 1 && seat <= SEATS) {
         obs[offset + (seat - 1)] = 1
       }
     }
   } else if (ctx.knownWolves) {
     for (const seat of ctx.knownWolves) {
-      if (seat >= 1 && seat <= MAX_SEATS) {
+      if (seat >= 1 && seat <= SEATS) {
         obs[offset + (seat - 1)] = 1
       }
     }
   }
-  offset += MAX_SEATS
+  offset += SEATS
 
   // Mason partner
-  if (ctx.masonPartner !== null && ctx.masonPartner >= 1 && ctx.masonPartner <= MAX_SEATS) {
-    obs[offset] = ctx.masonPartner / MAX_SEATS
+  if (ctx.masonPartner !== null && ctx.masonPartner >= 1 && ctx.masonPartner <= SEATS) {
+    obs[offset] = ctx.masonPartner / SEATS
   }
   offset += 1
 
   // Bodyguard guard history: per seat (1 if ever guarded)
   if (ctx.myRole === 'bodyguard') {
     for (const [, target] of ctx.myPlayer.guardHistory) {
-      if (target >= 1 && target <= MAX_SEATS) {
+      if (target >= 1 && target <= SEATS) {
         obs[offset + (target - 1)] = 1
       }
     }
   }
-  offset += MAX_SEATS
+  offset += SEATS
 
   // Immoralist: known hamster seat
-  if (ctx.knownHamster !== null && ctx.knownHamster >= 1 && ctx.knownHamster <= MAX_SEATS) {
-    obs[offset] = ctx.knownHamster / MAX_SEATS
+  if (ctx.knownHamster !== null && ctx.knownHamster >= 1 && ctx.knownHamster <= SEATS) {
+    obs[offset] = ctx.knownHamster / SEATS
   }
   offset += 1
 
@@ -195,12 +224,12 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   // Revote candidates mask
   if (ctx.revoteCandidates) {
     for (const seat of ctx.revoteCandidates) {
-      if (seat >= 1 && seat <= MAX_SEATS) {
+      if (seat >= 1 && seat <= SEATS) {
         obs[offset + (seat - 1)] = 1
       }
     }
   }
-  offset += MAX_SEATS
+  offset += SEATS
 
   // ========== History window (last 3 days) ==========
   const currentDay = ctx.day
@@ -216,14 +245,14 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
         case 'vote': {
           // Record who voted for whom as one-hot-ish per seat
           const voterSlot = event.voter - 1
-          if (voterSlot >= 0 && voterSlot < MAX_SEATS) {
-            obs[dayBase + voterSlot * 5 + 0] = event.target / MAX_SEATS
+          if (voterSlot >= 0 && voterSlot < SEATS) {
+            obs[dayBase + voterSlot * 5 + 0] = event.target / SEATS
           }
           break
         }
         case 'execution': {
           const slot = event.target - 1
-          if (slot >= 0 && slot < MAX_SEATS) {
+          if (slot >= 0 && slot < SEATS) {
             obs[dayBase + slot * 5 + 1] = 1
           }
           break
@@ -231,7 +260,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
         case 'night_kill':
         case 'fox_kill': {
           const slot = event.target - 1
-          if (slot >= 0 && slot < MAX_SEATS) {
+          if (slot >= 0 && slot < SEATS) {
             obs[dayBase + slot * 5 + 2] = 1
           }
           break
@@ -242,14 +271,14 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
         case 'mason_claim':
         case 'nekomata_claim': {
           const slot = event.actor - 1
-          if (slot >= 0 && slot < MAX_SEATS) {
+          if (slot >= 0 && slot < SEATS) {
             obs[dayBase + slot * 5 + 3] = 1
           }
           break
         }
         case 'signal': {
           const slot = event.actor - 1
-          if (slot >= 0 && slot < MAX_SEATS) {
+          if (slot >= 0 && slot < SEATS) {
             obs[dayBase + slot * 5 + 4] = 1
           }
           break
@@ -261,7 +290,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
 
   // ========== Retar possibilities ==========
   if (ctx.retarPossibilities) {
-    for (let seat = 1; seat <= MAX_SEATS; seat++) {
+    for (let seat = 1; seat <= SEATS; seat++) {
       const roles = ctx.retarPossibilities.get(seat)
       if (!roles) continue
       for (const role of roles) {
@@ -276,7 +305,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
 
   // ========== What-If CO (人外向け) ==========
   if (ctx.retarWhatIfPossibilities) {
-    for (let seat = 1; seat <= MAX_SEATS; seat++) {
+    for (let seat = 1; seat <= SEATS; seat++) {
       const roles = ctx.retarWhatIfPossibilities.get(seat)
       if (!roles) continue
       for (const role of roles) {

@@ -1,6 +1,6 @@
 import type { SystemRole } from '../types/index.ts'
 import type { GameState, PlayerState, NightAction, DayClaim, GameEvent } from './types.ts'
-import type { Signal, SignalRecord } from './communication.ts'
+import type { SignalRecord, CommunicationAction } from './communication.ts'
 import type { Proposal, LeadershipResponse } from './leadership.ts'
 import type { Rng } from './random.ts'
 
@@ -44,7 +44,7 @@ export type Strategy = {
   decideDayClaim(ctx: DecisionContext): DayClaim
   decideForecast(ctx: DecisionContext): DayClaim
   decideVote(ctx: DecisionContext): number
-  decideCommunication(ctx: DecisionContext): Signal
+  decideCommunication(ctx: DecisionContext): CommunicationAction
   decideProposal(ctx: DecisionContext): Proposal | null
   decideLeadershipResponse(ctx: DecisionContext, proposal: Proposal): LeadershipResponse
 }

@@ -1,6 +1,6 @@
 import type { EnumSpecies } from '../types/index.ts'
 import type { GameState, PlayerState, NightAction, DayClaim } from './types.ts'
-import type { Signal } from './communication.ts'
+import type { Signal, CommunicationAction } from './communication.ts'
 import type { Proposal, LeadershipResponse } from './leadership.ts'
 import type { Strategy, DecisionContext } from './strategy.ts'
 import { alivePlayers, alivePlayersExcept, getMediumResult, isWerewolfAligned } from './roles.ts'
@@ -110,48 +110,99 @@ export class HeuristicStrategy implements Strategy {
   // コミュニケーション
   // ============================================================
 
-  decideCommunication(ctx: DecisionContext): Signal {
-    const { gameState: state, myPlayer: player, rng, signals } = ctx
+  decideCommunication(ctx: DecisionContext): CommunicationAction {
+    const { gameState: state, myPlayer: player, rng, signals, day } = ctx
+    const others = alivePlayersExcept(state, player.seat)
+    const noAction: CommunicationAction = { signal: { type: 'no_signal' }, proposals: [] }
 
-    // 2ラウンド目: 既存シグナルに反応
+    // === propose head: 処刑提案 ===
+    const proposals: number[] = []
+
+    // 黒出し先を処刑提案
+    const blackTargets = collectBlackTargets(state)
+    const aliveBlacks = others.filter(p => blackTargets.has(p.seat))
+    if (aliveBlacks.length > 0 && rng.next() < 0.6) {
+      for (const p of aliveBlacks) proposals.push(p.seat)
+    }
+
+    // 霊能ローラー: 霊能CO者が2人以上いたら全員提案
+    const mediumClaimers = others.filter(p => p.claimedRole === 'medium')
+    if (mediumClaimers.length >= 2 && rng.next() < 0.5) {
+      for (const p of mediumClaimers) {
+        if (!proposals.includes(p.seat)) proposals.push(p.seat)
+      }
+    }
+
+    // === comm head: シグナル ===
+
+    // PP判定: 狼陣営が生存者の過半数
+    if (player.role === 'werewolf') {
+      const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf').length
+      const aliveTotal = alivePlayers(state).length
+      const aliveFoxes = alivePlayers(state).filter(p => p.role === 'werehamster').length
+      if (aliveWolves >= aliveTotal - aliveWolves - aliveFoxes && rng.next() < 0.8) {
+        return { signal: { type: 'werewolf_co' }, proposals }
+      }
+    }
+
+    // LWCO: 最後の狼 & day > 3
+    if (player.role === 'werewolf' && day > 3) {
+      const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
+      if (aliveWolves.length === 1 && aliveWolves[0].seat === player.seat && rng.next() < 0.1) {
+        return { signal: { type: 'werewolf_co' }, proposals }
+      }
+    }
+
+    // demand_wolf_co: 村陣営 & day > 3
+    if (!isWerewolfAligned(player.role) && player.role !== 'werehamster' && player.role !== 'immoralist' && day > 3) {
+      if (rng.next() < 0.1) {
+        return { signal: { type: 'demand_wolf_co' }, proposals }
+      }
+    }
+
+    // 後半ラウンド: 既存シグナルに反応 (agree/disagree with target)
     if (signals.length > 0 && rng.next() < 0.3) {
       const targetSignal = rng.pick(signals)
-      if (rng.next() < 0.6) {
-        return { type: 'agree', signalId: targetSignal.id }
-      } else {
-        return { type: 'disagree', signalId: targetSignal.id }
-      }
+      const signal: Signal = rng.next() < 0.6
+        ? { type: 'agree', target: targetSignal.sender }
+        : { type: 'disagree', target: targetSignal.sender }
+      return { signal, proposals }
     }
 
-    // 1ラウンド目: 役割に応じたシグナル
+    // 狼陣営: ランダムsuspicionか沈黙
     if (isWerewolfAligned(player.role)) {
-      // 狼陣営: ランダムsuspicionか沈黙
       if (rng.next() < 0.3) {
-        const candidates = alivePlayersExcept(state, player.seat)
-          .filter(p => p.role !== 'werewolf')
+        const candidates = others.filter(p => p.role !== 'werewolf')
         if (candidates.length > 0) {
-          return { type: 'suspicion', target: rng.pick(candidates).seat }
+          return { signal: { type: 'suspicion', target: rng.pick(candidates).seat }, proposals }
         }
       }
-      return { type: 'no_signal' }
+      return { ...noAction, proposals }
     }
 
-    // 村陣営: 黒出し先にexecute_proposal、または占い結果に基づく
-    const blackTargets = collectBlackTargets(state)
-    const aliveBlacks = alivePlayersExcept(state, player.seat)
-      .filter(p => blackTargets.has(p.seat))
-    if (aliveBlacks.length > 0 && rng.next() < 0.6) {
-      return { type: 'execute_proposal', target: rng.pick(aliveBlacks).seat }
+    // accuse_wolf: 黒出し先を狼告発
+    if (aliveBlacks.length > 0 && rng.next() < 0.15) {
+      return { signal: { type: 'accuse_wolf', target: rng.pick(aliveBlacks).seat }, proposals }
+    }
+
+    // accuse_fox: 狼CO後のLWCO支援
+    const wolfCOExists = state.players.some(p => p.alive && p.claimedRole === 'werewolf')
+    if (wolfCOExists && rng.next() < 0.2 && others.length > 0) {
+      return { signal: { type: 'accuse_fox', target: rng.pick(others).seat }, proposals }
+    }
+
+    // vote_intent: 投票先を事前宣言
+    if (rng.next() < 0.15 && others.length > 0) {
+      return { signal: { type: 'vote_intent', target: rng.pick(others).seat }, proposals }
     }
 
     // 占いCO者を信用するシグナル
-    const seerClaimers = alivePlayersExcept(state, player.seat)
-      .filter(p => p.claimedRole === 'seer')
+    const seerClaimers = others.filter(p => p.claimedRole === 'seer')
     if (seerClaimers.length === 1 && rng.next() < 0.3) {
-      return { type: 'trust', target: seerClaimers[0].seat }
+      return { signal: { type: 'trust', target: seerClaimers[0].seat }, proposals }
     }
 
-    return { type: 'no_signal' }
+    return { ...noAction, proposals }
   }
 
   // ============================================================

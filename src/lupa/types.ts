@@ -1,6 +1,6 @@
 import type { SystemRole, EnumSpecies } from '../types/index.ts'
 import type { Strategy } from './strategy.ts'
-import type { Signal } from './communication.ts'
+import type { Signal, RolePrediction } from './communication.ts'
 
 export type LupaConfig = {
   roles: Map<SystemRole, number>
@@ -97,6 +97,9 @@ export type GameEvent =
   | { type: 'game_over', result: 'villager_won' | 'werewolf_won' | 'werehamster_won' | 'draw' }
   | { type: 'reveal', seat: number, role: SystemRole }
   | { type: 'signal', actor: number, signal: Signal }
+  | { type: 'wolf_claim', actor: number, claimedRole: SystemRole }
+  | { type: 'execute_proposals', actor: number, targets: number[] }
+  | { type: 'prediction', actor: number, predictions: RolePrediction }
   | { type: 'commander_appointed', seat: number }
   | { type: 'proposal', actor: number, proposal: import('./leadership.ts').Proposal }
   | { type: 'leadership_response', actor: number, response: import('./leadership.ts').LeadershipResponse }

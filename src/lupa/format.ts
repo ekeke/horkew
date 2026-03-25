@@ -185,8 +185,45 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
         lines.push(`${playerName(event.seat)}＝${ROLE_DISPLAY[event.role]}`)
         break
       }
-      // 新プロトコルイベント（howl出力では無視）
-      case 'signal':
+      case 'signal': {
+        const sig = event.signal
+        let sigText: string
+        switch (sig.type) {
+          case 'suspicion': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 疑い`; break
+          case 'trust': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 信頼`; break
+          case 'vote_intent': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 投票意思`; break
+          case 'accuse_wolf': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 狼告発`; break
+          case 'accuse_fox': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 狐告発`; break
+          case 'agree': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 同意`; break
+          case 'disagree': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 反対`; break
+          case 'demand_wolf_co': sigText = `${playerName(event.actor)} 狼CO要求`; break
+          case 'werewolf_co': sigText = `${playerName(event.actor)} 人狼CO`; break
+          case 'fanatic_co': sigText = `${playerName(event.actor)} 狂信者CO`; break
+          case 'werehamster_co': sigText = `${playerName(event.actor)} 妖狐CO`; break
+          case 'immoralist_co': sigText = `${playerName(event.actor)} 背徳者CO`; break
+          case 'submit_prediction': sigText = `${playerName(event.actor)} 配役予想提出`; break
+          default: sigText = ''; break  // no_signal は出力しない
+        }
+        if (sigText) lines.push(`# [シグナル] ${sigText}`)
+        break
+      }
+      case 'wolf_claim': {
+        lines.push(`${playerName(event.actor)} ${ROLE_DISPLAY[event.claimedRole]}CO`)
+        break
+      }
+      case 'execute_proposals': {
+        const targets = event.targets.map(t => playerName(t)).join(', ')
+        lines.push(`# [提案] ${playerName(event.actor)} → ${targets} 処刑提案`)
+        break
+      }
+      case 'prediction': {
+        const parts: string[] = []
+        for (const [seat, roles] of event.predictions) {
+          parts.push(`${playerName(seat)}=${roles.map(r => ROLE_DISPLAY[r]).join('/')}`)
+        }
+        lines.push(`# [予想] ${playerName(event.actor)}: ${parts.join(', ')}`)
+        break
+      }
       case 'commander_appointed':
       case 'proposal':
       case 'leadership_response':

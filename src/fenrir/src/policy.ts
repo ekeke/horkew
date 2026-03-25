@@ -5,7 +5,7 @@
 
 import type { Strategy, DecisionContext } from '../../lupa/strategy.ts'
 import type { NightAction, DayClaim } from '../../lupa/types.ts'
-import type { Signal } from '../../lupa/communication.ts'
+import type { CommunicationAction } from '../../lupa/communication.ts'
 import type { Proposal, LeadershipResponse } from '../../lupa/leadership.ts'
 import type { NeuralNetwork, ForwardResult } from './ml/nn.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
@@ -129,15 +129,23 @@ export class FenrirStrategy implements Strategy {
     return action + 1  // action is seat-1
   }
 
-  decideCommunication(ctx: DecisionContext): Signal {
+  decideCommunication(ctx: DecisionContext): CommunicationAction {
     const result = this.infer(ctx)
-    const logits = result.policies.get('comm')!
-    const mask = maskComm(ctx)
-    const { action, logProb } = this.selectAction(logits, mask)
 
-    this.record(ctx, 'comm', action, logProb, result.value, 0)
+    // comm head (softmax)
+    const commLogits = result.policies.get('comm')!
+    const commMask = maskComm(ctx)
+    const { action: commAction, logProb: commLogProb } = this.selectAction(commLogits, commMask)
+    this.record(ctx, 'comm', commAction, commLogProb, result.value, 0)
+    const signal = decodeComm(commAction)
 
-    return decodeComm(action)
+    // propose head (sigmoid) — TODO: NNからの推論に対応後実装
+    const proposals: number[] = []
+
+    // prediction head (sigmoid) — TODO: submit_prediction時のみ
+    const predictions = undefined
+
+    return { signal, proposals, predictions }
   }
 
   decideProposal(ctx: DecisionContext): Proposal | null {
