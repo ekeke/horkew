@@ -11,10 +11,11 @@ import type { NeuralNetwork, ForwardResult } from './ml/nn.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
 import { encodeObservation } from './observation.ts'
 import {
-  maskNightAction, maskClaim, maskVote, maskComm, maskLeader, maskTarget,
+  maskNightAction, maskClaim, maskVote, maskComm, maskPropose, maskPredict, maskLeader, maskTarget,
   sampleMasked,
-  decodeNightActionWithRole, decodeClaim, decodeComm, decodeLeader,
+  decodeNightActionWithRole, decodeClaim, decodeComm, decodePropose, decodePredict, decodeLeader,
 } from './action.ts'
+import { sigmoid } from './ml/nn.ts'
 
 export type FenrirStrategyConfig = {
   /** trueなら探索ノイズあり（学習時）、falseなら貪欲（評価時） */
@@ -71,6 +72,55 @@ export class FenrirStrategy implements Strategy {
       }
     }
     return { action: bestIdx, logProb: 0 }
+  }
+
+  /** Sigmoid head: 各次元を独立にサンプリング/閾値判定 */
+  private selectSigmoidAction(
+    logits: Float32Array, mask: Float32Array,
+  ): { actions: Float32Array, logProb: number } {
+    const masked = new Float32Array(logits.length)
+    for (let i = 0; i < logits.length; i++) {
+      masked[i] = logits[i] + mask[i]
+    }
+    const probs = sigmoid(masked)
+    const actions = new Float32Array(logits.length)
+    let logProb = 0
+
+    for (let i = 0; i < logits.length; i++) {
+      if (mask[i] === -Infinity) {
+        actions[i] = 0
+        continue
+      }
+      const p = probs[i]
+      if (this.config.explore) {
+        actions[i] = Math.random() < p ? 1 : 0
+      } else {
+        actions[i] = p >= 0.5 ? 1 : 0
+      }
+      // log prob: a*log(p) + (1-a)*log(1-p)
+      logProb += actions[i] === 1
+        ? Math.log(p + 1e-8)
+        : Math.log(1 - p + 1e-8)
+    }
+
+    return { actions, logProb }
+  }
+
+  private recordSigmoid(
+    ctx: DecisionContext, head: string, actions: Float32Array,
+    logProb: number, value: number, reward: number,
+  ): void {
+    this.trajectory.push({
+      seat: ctx.mySeat,
+      observation: encodeObservation(ctx),
+      actionHead: head,
+      actionIdx: -1,
+      logProb,
+      reward,
+      value,
+      done: false,
+      sigmoidActions: actions,
+    })
   }
 
   // ============================================================
@@ -139,11 +189,22 @@ export class FenrirStrategy implements Strategy {
     this.record(ctx, 'comm', commAction, commLogProb, result.value, 0)
     const signal = decodeComm(commAction)
 
-    // propose head (sigmoid) — TODO: NNからの推論に対応後実装
-    const proposals: number[] = []
+    // propose head (sigmoid)
+    const proposeLogits = result.policies.get('propose')!
+    const proposeMask = maskPropose(ctx)
+    const { actions: proposeActions, logProb: proposeLogProb } = this.selectSigmoidAction(proposeLogits, proposeMask)
+    this.recordSigmoid(ctx, 'propose', proposeActions, proposeLogProb, result.value, 0)
+    const proposals = decodePropose(proposeActions, 0.5)
 
-    // prediction head (sigmoid) — TODO: submit_prediction時のみ
-    const predictions = undefined
+    // prediction head (sigmoid, submit_prediction時のみ)
+    const predictMask = maskPredict(commAction)
+    let predictions = undefined
+    if (predictMask[0] !== -Infinity) {
+      const predictLogits = result.policies.get('predict')!
+      const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
+      this.recordSigmoid(ctx, 'predict', predictActions, predictLogProb, result.value, 0)
+      predictions = decodePredict(predictActions, 0.5)
+    }
 
     return { signal, proposals, predictions }
   }

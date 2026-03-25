@@ -37,6 +37,14 @@ export function softmax(logits: Float32Array): Float32Array {
   return out
 }
 
+export function sigmoid(x: Float32Array): Float32Array {
+  const out = new Float32Array(x.length)
+  for (let i = 0; i < x.length; i++) {
+    out[i] = 1 / (1 + Math.exp(-x[i]))
+  }
+  return out
+}
+
 export function tanh(x: number): number {
   return Math.tanh(x)
 }
@@ -127,7 +135,8 @@ export class DenseLayer {
 export type NetworkConfig = {
   inputSize: number
   hiddenSizes: number[]       // e.g. [512, 256]
-  heads: Record<string, number>  // head_name → output_size
+  heads: Record<string, number>  // head_name → output_size (softmax heads)
+  sigmoidHeads?: Record<string, number>  // head_name → output_size (sigmoid heads)
 }
 
 export type ForwardResult = {
@@ -138,7 +147,8 @@ export type ForwardResult = {
 export class NeuralNetwork {
   readonly config: NetworkConfig
   readonly trunk: DenseLayer[]
-  readonly heads: Map<string, DenseLayer>
+  readonly heads: Map<string, DenseLayer>          // softmax heads
+  readonly sigmoidHeads: Map<string, DenseLayer>    // sigmoid heads
   readonly valueHead: DenseLayer
 
   // ReLU入力キャッシュ（backward用）
@@ -148,6 +158,7 @@ export class NeuralNetwork {
     this.config = config
     this.trunk = []
     this.heads = new Map()
+    this.sigmoidHeads = new Map()
 
     // Trunk layers
     let prevSize = config.inputSize
@@ -156,9 +167,14 @@ export class NeuralNetwork {
       prevSize = hiddenSize
     }
 
-    // Policy heads
+    // Softmax policy heads
     for (const [name, outputSize] of Object.entries(config.heads)) {
       this.heads.set(name, new DenseLayer(prevSize, outputSize))
+    }
+
+    // Sigmoid policy heads
+    for (const [name, outputSize] of Object.entries(config.sigmoidHeads ?? {})) {
+      this.sigmoidHeads.set(name, new DenseLayer(prevSize, outputSize))
     }
 
     // Value head (single output, tanh activation)
@@ -176,9 +192,12 @@ export class NeuralNetwork {
       x = relu(preAct)
     }
 
-    // Policy heads (output raw logits)
+    // Policy heads (output raw logits — softmax + sigmoid)
     const policies = new Map<string, Float32Array>()
     for (const [name, head] of this.heads) {
+      policies.set(name, head.forward(x))
+    }
+    for (const [name, head] of this.sigmoidHeads) {
       policies.set(name, head.forward(x))
     }
 
@@ -193,6 +212,7 @@ export class NeuralNetwork {
   zeroGrad(): void {
     for (const layer of this.trunk) layer.zeroGrad()
     for (const head of this.heads.values()) head.zeroGrad()
+    for (const head of this.sigmoidHeads.values()) head.zeroGrad()
     this.valueHead.zeroGrad()
   }
 
@@ -204,9 +224,17 @@ export class NeuralNetwork {
   backward(policyGrads: Map<string, Float32Array>, valueGrad: number): void {
     const lastTrunkOutput = relu(this._trunkPreActivations[this._trunkPreActivations.length - 1])
 
-    // Policy heads backward
+    // Policy heads backward (softmax + sigmoid)
     let trunkGrad = new Float32Array(lastTrunkOutput.length)
     for (const [name, head] of this.heads) {
+      const grad = policyGrads.get(name)
+      if (!grad) continue
+      const headGrad = head.backward(grad)
+      for (let i = 0; i < trunkGrad.length; i++) {
+        trunkGrad[i] += headGrad[i]
+      }
+    }
+    for (const [name, head] of this.sigmoidHeads) {
       const grad = policyGrads.get(name)
       if (!grad) continue
       const headGrad = head.backward(grad)
@@ -243,6 +271,9 @@ export class NeuralNetwork {
     for (const head of this.heads.values()) {
       params.push(head.weights, head.biases)
     }
+    for (const head of this.sigmoidHeads.values()) {
+      params.push(head.weights, head.biases)
+    }
     params.push(this.valueHead.weights, this.valueHead.biases)
     return params
   }
@@ -256,6 +287,9 @@ export class NeuralNetwork {
     for (const head of this.heads.values()) {
       grads.push(head.weightGrads, head.biasGrads)
     }
+    for (const head of this.sigmoidHeads.values()) {
+      grads.push(head.weightGrads, head.biasGrads)
+    }
     grads.push(this.valueHead.weightGrads, this.valueHead.biasGrads)
     return grads
   }
@@ -265,6 +299,7 @@ export class NeuralNetwork {
     let total = 0
     for (const layer of this.trunk) total += layer.paramCount
     for (const head of this.heads.values()) total += head.paramCount
+    for (const head of this.sigmoidHeads.values()) total += head.paramCount
     total += this.valueHead.paramCount
     return total
   }
@@ -280,6 +315,10 @@ export class NeuralNetwork {
       weights.set(`head_${name}_w`, new Float32Array(head.weights))
       weights.set(`head_${name}_b`, new Float32Array(head.biases))
     }
+    for (const [name, head] of this.sigmoidHeads) {
+      weights.set(`head_${name}_w`, new Float32Array(head.weights))
+      weights.set(`head_${name}_b`, new Float32Array(head.biases))
+    }
     weights.set('value_w', new Float32Array(this.valueHead.weights))
     weights.set('value_b', new Float32Array(this.valueHead.biases))
     return weights
@@ -292,6 +331,10 @@ export class NeuralNetwork {
       this.trunk[i].biases.set(weights.get(`trunk_${i}_b`)!)
     }
     for (const [name, head] of this.heads) {
+      head.weights.set(weights.get(`head_${name}_w`)!)
+      head.biases.set(weights.get(`head_${name}_b`)!)
+    }
+    for (const [name, head] of this.sigmoidHeads) {
       head.weights.set(weights.get(`head_${name}_w`)!)
       head.biases.set(weights.get(`head_${name}_b`)!)
     }

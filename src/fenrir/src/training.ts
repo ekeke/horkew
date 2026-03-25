@@ -95,6 +95,10 @@ const NETWORK_CONFIG = {
     leader: HEAD_SIZES.leader,
     target: HEAD_SIZES.target,
   },
+  sigmoidHeads: {
+    propose: HEAD_SIZES.propose,
+    predict: HEAD_SIZES.predict,
+  },
 }
 
 /** 推論用（ゲーム内、ピュアJS — 単一forward が速い） */
@@ -201,6 +205,7 @@ function ppoUpdate(
       oldLogProbs: miniBatch.map(s => s.logProb),
       advantages: miniBatch.map(s => s.advantage),
       returns: miniBatch.map(s => s.returnValue),
+      sigmoidActions: miniBatch.map(s => s.sigmoidActions),
       clipEpsilon: config.clipEpsilon,
       valueLossCoeff: config.valueLossCoeff,
       entropyCoeff: config.entropyCoeff,

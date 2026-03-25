@@ -6,11 +6,13 @@ export type TrajectoryStep = {
   seat: number                    // プレイヤー seat
   observation: Float32Array       // 観測ベクトル
   actionHead: string              // どのヘッドのアクションか
-  actionIdx: number               // 選択されたアクション
+  actionIdx: number               // 選択されたアクション (softmax用, sigmoid時は-1)
   logProb: number                 // log π(a|s)
   reward: number                  // 即時報酬
   value: number                   // V(s) 推定値
   done: boolean                   // エピソード終了か
+  /** sigmoid head用: 各次元の0/1アクション */
+  sigmoidActions?: Float32Array
 }
 
 export type ProcessedStep = TrajectoryStep & {

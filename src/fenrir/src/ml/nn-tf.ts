@@ -13,7 +13,8 @@ export class TfNeuralNetwork {
   readonly config: NetworkConfig
 
   private trunkWeights: tf.Variable[]  // [w, b, w, b, ...]
-  private headWeights: Map<string, [tf.Variable, tf.Variable]>
+  private headWeights: Map<string, [tf.Variable, tf.Variable]>        // softmax heads
+  private sigmoidHeadWeights: Map<string, [tf.Variable, tf.Variable]> // sigmoid heads
   private valueWeights: [tf.Variable, tf.Variable]
   private allVariables: tf.Variable[]
 
@@ -23,6 +24,7 @@ export class TfNeuralNetwork {
     this.config = config
     this.trunkWeights = []
     this.headWeights = new Map()
+    this.sigmoidHeadWeights = new Map()
     this.allVariables = []
 
     // Trunk layers
@@ -41,7 +43,7 @@ export class TfNeuralNetwork {
       prevSize = hiddenSize
     }
 
-    // Policy heads
+    // Softmax policy heads
     for (const [name, outputSize] of Object.entries(config.heads)) {
       const w = tf.variable(
         tf.randomNormal([prevSize, outputSize], 0, Math.sqrt(2 / prevSize)),
@@ -49,6 +51,17 @@ export class TfNeuralNetwork {
       )
       const b = tf.variable(tf.zeros([outputSize]), true, `head_${name}_b`)
       this.headWeights.set(name, [w, b])
+      this.allVariables.push(w, b)
+    }
+
+    // Sigmoid policy heads
+    for (const [name, outputSize] of Object.entries(config.sigmoidHeads ?? {})) {
+      const w = tf.variable(
+        tf.randomNormal([prevSize, outputSize], 0, Math.sqrt(2 / prevSize)),
+        true, `head_${name}_w`,
+      )
+      const b = tf.variable(tf.zeros([outputSize]), true, `head_${name}_b`)
+      this.sigmoidHeadWeights.set(name, [w, b])
       this.allVariables.push(w, b)
     }
 
@@ -73,6 +86,10 @@ export class TfNeuralNetwork {
       const x = this.forwardTrunk(tf.tensor2d(input, [1, this.config.inputSize]))
 
       for (const [name, [w, b]] of this.headWeights) {
+        const logits = tf.add(tf.matMul(x, w), b)
+        policies.set(name, logits.dataSync() as Float32Array)
+      }
+      for (const [name, [w, b]] of this.sigmoidHeadWeights) {
         const logits = tf.add(tf.matMul(x, w), b)
         policies.set(name, logits.dataSync() as Float32Array)
       }
@@ -108,6 +125,7 @@ export class TfNeuralNetwork {
     oldLogProbs: number[]
     advantages: number[]
     returns: number[]
+    sigmoidActions?: (Float32Array | undefined)[]  // sigmoid heads用
     clipEpsilon: number
     valueLossCoeff: number
     entropyCoeff: number
@@ -116,6 +134,7 @@ export class TfNeuralNetwork {
     if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0 }
 
     const inputSize = this.config.inputSize
+    const sigmoidHeadNames = new Set(Object.keys(this.config.sigmoidHeads ?? {}))
 
     // バッチテンソル構築
     const obsData = new Float32Array(n * inputSize)
@@ -152,40 +171,82 @@ export class TfNeuralNetwork {
       let totalEntropy = tf.scalar(0)
 
       for (const [headName, indices] of headGroups) {
-        const [hw, hb] = this.headWeights.get(headName)!
-        const allLogits = tf.add(tf.matMul(trunk, hw), hb)  // [n, headSize]
+        if (sigmoidHeadNames.has(headName)) {
+          // === Sigmoid head: PPO with multi-binary BCE ===
+          const [hw, hb] = this.sigmoidHeadWeights.get(headName)!
+          const allLogits = tf.add(tf.matMul(trunk, hw), hb)  // [n, headSize]
+          const headLogits = tf.gather(allLogits, indices)  // [m, headSize]
+          const headProbs = tf.sigmoid(headLogits)  // [m, headSize]
 
-        // Gather rows for this head
-        const headLogits = tf.gather(allLogits, indices)  // [m, headSize]
-        const headProbs = tf.softmax(headLogits)
+          // Build target actions tensor
+          const headSize = allLogits.shape[1]!
+          const actionsData = new Float32Array(indices.length * headSize)
+          for (let j = 0; j < indices.length; j++) {
+            const sa = batch.sigmoidActions?.[indices[j]]
+            if (sa) actionsData.set(sa, j * headSize)
+          }
+          const actionsTensor = tf.tensor2d(actionsData, [indices.length, headSize])
 
-        // Gather action probs
-        const headActions = indices.map(i => batch.actionIndices[i])
-        const headAdvantages = indices.map(i => batch.advantages[i])
-        const headOldLogProbs = indices.map(i => batch.oldLogProbs[i])
+          // Per-element log prob: a*log(p) + (1-a)*log(1-p)
+          const logP = tf.log(tf.add(headProbs, tf.scalar(1e-8)))
+          const log1mP = tf.log(tf.add(tf.sub(tf.scalar(1), headProbs), tf.scalar(1e-8)))
+          const perElementLogProb = tf.add(
+            tf.mul(actionsTensor, logP),
+            tf.mul(tf.sub(tf.scalar(1), actionsTensor), log1mP),
+          )
+          const newLogProbs = tf.sum(perElementLogProb, 1)  // [m]
 
-        // log π(a|s) for selected actions
-        const actionMask = tf.oneHot(headActions, allLogits.shape[1]!)
-        const selectedProbs = tf.sum(tf.mul(headProbs, actionMask), 1)  // [m]
-        const newLogProbs = tf.log(tf.add(selectedProbs, tf.scalar(1e-8)))
+          // PPO ratio & clipped surrogate
+          const headOldLogProbs = indices.map(i => batch.oldLogProbs[i])
+          const headAdvantages = indices.map(i => batch.advantages[i])
+          const ratio = tf.exp(tf.sub(newLogProbs, tf.tensor1d(headOldLogProbs)))
+          const advTensor = tf.tensor1d(headAdvantages)
+          const surr1 = tf.mul(ratio, advTensor)
+          const surr2 = tf.mul(
+            tf.clipByValue(ratio, 1 - batch.clipEpsilon, 1 + batch.clipEpsilon),
+            advTensor,
+          )
+          const pLoss = tf.neg(tf.mean(tf.minimum(surr1, surr2)))
 
-        // PPO ratio & clipped surrogate
-        const ratio = tf.exp(tf.sub(newLogProbs, tf.tensor1d(headOldLogProbs)))
-        const advTensor = tf.tensor1d(headAdvantages)
-        const surr1 = tf.mul(ratio, advTensor)
-        const surr2 = tf.mul(
-          tf.clipByValue(ratio, 1 - batch.clipEpsilon, 1 + batch.clipEpsilon),
-          advTensor,
-        )
-        const pLoss = tf.neg(tf.mean(tf.minimum(surr1, surr2)))
+          // Entropy: -Σ [p*log(p) + (1-p)*log(1-p)] per element, averaged
+          const ent = tf.neg(tf.mean(tf.add(
+            tf.mul(headProbs, logP),
+            tf.mul(tf.sub(tf.scalar(1), headProbs), log1mP),
+          )))
 
-        // Entropy
-        const ent = tf.neg(tf.mean(
-          tf.sum(tf.mul(headProbs, tf.log(tf.add(headProbs, tf.scalar(1e-8)))), 1)
-        ))
+          totalPolicyLoss = tf.add(totalPolicyLoss, pLoss)
+          totalEntropy = tf.add(totalEntropy, ent)
+        } else {
+          // === Softmax head: standard PPO ===
+          const [hw, hb] = this.headWeights.get(headName)!
+          const allLogits = tf.add(tf.matMul(trunk, hw), hb)  // [n, headSize]
+          const headLogits = tf.gather(allLogits, indices)  // [m, headSize]
+          const headProbs = tf.softmax(headLogits)
 
-        totalPolicyLoss = tf.add(totalPolicyLoss, pLoss)
-        totalEntropy = tf.add(totalEntropy, ent)
+          const headActions = indices.map(i => batch.actionIndices[i])
+          const headAdvantages = indices.map(i => batch.advantages[i])
+          const headOldLogProbs = indices.map(i => batch.oldLogProbs[i])
+
+          const actionMask = tf.oneHot(headActions, allLogits.shape[1]!)
+          const selectedProbs = tf.sum(tf.mul(headProbs, actionMask), 1)
+          const newLogProbs = tf.log(tf.add(selectedProbs, tf.scalar(1e-8)))
+
+          const ratio = tf.exp(tf.sub(newLogProbs, tf.tensor1d(headOldLogProbs)))
+          const advTensor = tf.tensor1d(headAdvantages)
+          const surr1 = tf.mul(ratio, advTensor)
+          const surr2 = tf.mul(
+            tf.clipByValue(ratio, 1 - batch.clipEpsilon, 1 + batch.clipEpsilon),
+            advTensor,
+          )
+          const pLoss = tf.neg(tf.mean(tf.minimum(surr1, surr2)))
+
+          const ent = tf.neg(tf.mean(
+            tf.sum(tf.mul(headProbs, tf.log(tf.add(headProbs, tf.scalar(1e-8)))), 1)
+          ))
+
+          totalPolicyLoss = tf.add(totalPolicyLoss, pLoss)
+          totalEntropy = tf.add(totalEntropy, ent)
+        }
       }
 
       const entBonus = tf.mul(tf.scalar(-batch.entropyCoeff), totalEntropy)
@@ -216,6 +277,10 @@ export class TfNeuralNetwork {
       weights.set(`head_${name}_w`, w.dataSync() as Float32Array)
       weights.set(`head_${name}_b`, b.dataSync() as Float32Array)
     }
+    for (const [name, [w, b]] of this.sigmoidHeadWeights) {
+      weights.set(`head_${name}_w`, w.dataSync() as Float32Array)
+      weights.set(`head_${name}_b`, b.dataSync() as Float32Array)
+    }
     weights.set('value_w', this.valueWeights[0].dataSync() as Float32Array)
     weights.set('value_b', this.valueWeights[1].dataSync() as Float32Array)
     return weights
@@ -231,6 +296,12 @@ export class TfNeuralNetwork {
       this.trunkWeights[i + 1].assign(tf.tensor(b, this.trunkWeights[i + 1].shape))
     }
     for (const [name, [wVar, bVar]] of this.headWeights) {
+      const w = weights.get(`head_${name}_w`)!
+      const b = weights.get(`head_${name}_b`)!
+      wVar.assign(tf.tensor(w, wVar.shape))
+      bVar.assign(tf.tensor(b, bVar.shape))
+    }
+    for (const [name, [wVar, bVar]] of this.sigmoidHeadWeights) {
       const w = weights.get(`head_${name}_w`)!
       const b = weights.get(`head_${name}_b`)!
       wVar.assign(tf.tensor(w, wVar.shape))
