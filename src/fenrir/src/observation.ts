@@ -2,7 +2,8 @@
  * 観測ベクトルエンコーダ
  *
  * DecisionContextから固定長のFloat32Arrayを構築する。
- * 情報隔壁: gameState.players[].roleは参照しない（自分のroleのみ使用）。
+ * 情報隔壁: gameState.players[].roleは直接参照しない。
+ * 初期知識はDecisionContextの専用フィールド(wolfTeammates, knownWolves, knownHamster)経由で取得。
  * 公開情報(publicEvents, signals)と自分の秘密情報(myPlayer)のみからエンコード。
  */
 
@@ -25,7 +26,8 @@ const NUM_ROLES = ROLES.length
 const GLOBAL_SIZE = 2 + 1 + NUM_ROLES + 1 + 1  // day, phase, alive_ratio, role_onehot, commander, progress = 16
 const PER_SEAT_SIZE = 1 + (NUM_ROLES + 1) + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 // alive, claimed_role, is_me, black_count, white_count, vote_received, suspicion, trust, execute_proposal, is_commander = 21
 const SEAT_SECTION_SIZE = MAX_SEATS * PER_SEAT_SIZE  // 420
-const PRIVATE_SIZE = MAX_SEATS + MAX_SEATS + 1 + MAX_SEATS  // divine_results + wolf_teammates + mason_partner + guard_history = 61
+const PRIVATE_SIZE = MAX_SEATS + MAX_SEATS + 1 + MAX_SEATS + 1  // divine_results + wolf_teammates + mason_partner + guard_history + known_hamster = 62
+const REVOTE_SIZE = 1 + MAX_SEATS  // revote_round + revote_candidates_mask = 21
 const HISTORY_DAY_SIZE = MAX_SEATS * 5  // per day: voted_for, executed, killed, claimed, signaled = 100
 const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 300
 
@@ -34,7 +36,7 @@ const RETAR_POSSIBILITIES_SIZE = MAX_SEATS * NUM_ROLES  // 220
 // What-If CO: 占いCOシミュレーション後の可能性
 const RETAR_WHATIF_SIZE = MAX_SEATS * NUM_ROLES  // 220
 
-export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + RETAR_WHATIF_SIZE
+export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + RETAR_WHATIF_SIZE
 
 export function encodeObservation(ctx: DecisionContext): Float32Array {
   const obs = new Float32Array(OBSERVATION_SIZE)
@@ -146,27 +148,25 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   }
   offset += MAX_SEATS
 
-  // Wolf teammates mask
-  if (ctx.myRole === 'werewolf' || ctx.myRole === 'fanatic') {
-    // fanatic can see wolves; werewolf knows packmates
-    for (const player of ctx.gameState.players) {
-      if (player.role === 'werewolf' && player.seat !== ctx.mySeat) {
-        if (player.seat >= 1 && player.seat <= MAX_SEATS) {
-          obs[offset + (player.seat - 1)] = 1
-        }
+  // Wolf teammates mask (人狼: 仲間の狼, 狂信者: 狼の位置)
+  if (ctx.wolfTeammates) {
+    for (const seat of ctx.wolfTeammates) {
+      if (seat >= 1 && seat <= MAX_SEATS) {
+        obs[offset + (seat - 1)] = 1
+      }
+    }
+  } else if (ctx.knownWolves) {
+    for (const seat of ctx.knownWolves) {
+      if (seat >= 1 && seat <= MAX_SEATS) {
+        obs[offset + (seat - 1)] = 1
       }
     }
   }
   offset += MAX_SEATS
 
   // Mason partner
-  if (ctx.myRole === 'mason') {
-    const partner = ctx.gameState.players.find(p =>
-      p.seat !== ctx.mySeat && p.role === 'mason'
-    )
-    if (partner && partner.seat >= 1 && partner.seat <= MAX_SEATS) {
-      obs[offset] = partner.seat / MAX_SEATS
-    }
+  if (ctx.masonPartner !== null && ctx.masonPartner >= 1 && ctx.masonPartner <= MAX_SEATS) {
+    obs[offset] = ctx.masonPartner / MAX_SEATS
   }
   offset += 1
 
@@ -175,6 +175,28 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
     for (const [, target] of ctx.myPlayer.guardHistory) {
       if (target >= 1 && target <= MAX_SEATS) {
         obs[offset + (target - 1)] = 1
+      }
+    }
+  }
+  offset += MAX_SEATS
+
+  // Immoralist: known hamster seat
+  if (ctx.knownHamster !== null && ctx.knownHamster >= 1 && ctx.knownHamster <= MAX_SEATS) {
+    obs[offset] = ctx.knownHamster / MAX_SEATS
+  }
+  offset += 1
+
+  // ========== Revote information ==========
+  if (ctx.revoteRound !== null && ctx.revoteRound > 0) {
+    obs[offset] = Math.min(ctx.revoteRound / 3, 1)  // normalized revote round (0..1)
+  }
+  offset += 1
+
+  // Revote candidates mask
+  if (ctx.revoteCandidates) {
+    for (const seat of ctx.revoteCandidates) {
+      if (seat >= 1 && seat <= MAX_SEATS) {
+        obs[offset + (seat - 1)] = 1
       }
     }
   }

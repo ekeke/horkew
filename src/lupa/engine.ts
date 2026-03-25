@@ -32,7 +32,31 @@ function buildContext(
   lastExecutedSeat: number | null,
   retarPossibilities: Map<number, Set<SystemRole>> | null = null,
   retarWhatIfPossibilities: Map<number, Set<SystemRole>> | null = null,
+  revoteRound: number | null = null,
+  revoteCandidates: number[] | null = null,
 ): DecisionContext {
+  // 初期知識の注入
+  let wolfTeammates: number[] | null = null
+  let knownWolves: number[] | null = null
+  let knownHamster: number | null = null
+  let masonPartner: number | null = null
+
+  if (player.role === 'werewolf') {
+    wolfTeammates = state.players
+      .filter(p => p.role === 'werewolf' && p.seat !== player.seat)
+      .map(p => p.seat)
+  } else if (player.role === 'fanatic') {
+    knownWolves = state.players
+      .filter(p => p.role === 'werewolf')
+      .map(p => p.seat)
+  } else if (player.role === 'immoralist') {
+    const hamster = state.players.find(p => p.role === 'werehamster')
+    knownHamster = hamster?.seat ?? null
+  } else if (player.role === 'mason') {
+    const partner = state.players.find(p => p.role === 'mason' && p.seat !== player.seat)
+    masonPartner = partner?.seat ?? null
+  }
+
   return {
     mySeat: player.seat,
     myRole: player.role,
@@ -49,6 +73,12 @@ function buildContext(
     lastExecutedSeat,
     retarPossibilities,
     retarWhatIfPossibilities,
+    wolfTeammates,
+    knownWolves,
+    knownHamster,
+    masonPartner,
+    revoteRound,
+    revoteCandidates,
   }
 }
 
@@ -274,9 +304,17 @@ export function runGame(config: LupaConfig): GameResult {
       }
     }
 
-    // 投票フェーズ（最大3回再投票、それでも決まらなければ最小seatで決着）
-    let executedSeat: number
-    const MAX_REVOTES = 3
+    // グレラン/指定の決定
+    const isGrelan = rng.next() < 0.3
+    if (isGrelan) {
+      events.push({ type: 'grelan' })
+    }
+
+    // 投票フェーズ
+    const revoteStyle = config.revoteConfig?.style ?? 'random_tied'
+    const revoteTiebreaker = config.revoteConfig?.tiebreaker ?? 'lowest_seat'
+    const maxRevotes = config.revoteConfig?.maxRevotes ?? 3
+    let executedSeat: number | null = null
     let revoteCount = 0
     let revoteCandidates: number[] | null = null
 
@@ -285,11 +323,13 @@ export function runGame(config: LupaConfig): GameResult {
       const voters = alivePlayers(state)
       for (const voter of voters) {
         let target: number
-        if (revoteCandidates) {
+        if (revoteCandidates && revoteStyle === 'random_tied') {
+          // 現行方式: 候補者限定ランダム
           target = revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
         } else {
+          // 初回投票 or full_revote: Strategyに委任
           const strategy = getStrategy(config, voter.seat)
-          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, revoteCount, revoteCandidates)
           target = strategy.decideVote(ctx)
         }
         votes.set(voter.seat, target)
@@ -303,23 +343,44 @@ export function runGame(config: LupaConfig): GameResult {
       }
 
       revoteCount++
-      if (revoteCount > MAX_REVOTES) {
-        // 決着がつかない場合、最小seatで処刑
-        executedSeat = result.tied[0]
-        break
+      if (revoteCount > maxRevotes) {
+        if (revoteTiebreaker === 'draw') {
+          // 引き分け: 即座にゲーム終了
+          state.finished = true
+          state.result = 'draw'
+          events.push({ type: 'game_over', result: 'draw' })
+          break
+        } else {
+          // 現行方式: 最小seatで処刑
+          executedSeat = result.tied[0]
+          break
+        }
       }
 
       events.push({ type: 'revote', targets: result.tied })
       revoteCandidates = result.tied
     }
 
-    killPlayer(state, executedSeat)
-    events.push({ type: 'execution', target: executedSeat })
-    lastExecutedSeat = executedSeat
-    state.executionHistory.set(day, executedSeat)
+    // 引き分けの場合は後続処理をすべてスキップ
+    if (state.finished) break
+
+    // 指定の場合: 処刑対象が未COの村役職ならCOさせる
+    if (!isGrelan && config.allowPostVoteCO !== false) {
+      const target = state.players.find(p => p.seat === executedSeat!)!
+      const villageRoles: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+      if (villageRoles.includes(target.role) && target.claimedRole === null) {
+        const claim = forceTrueRoleCO(state, target, day, lastExecutedSeat)
+        applyClaim(state, target, day, claim, events)
+      }
+    }
+
+    killPlayer(state, executedSeat!)
+    events.push({ type: 'execution', target: executedSeat! })
+    lastExecutedSeat = executedSeat!
+    state.executionHistory.set(day, executedSeat!)
 
     // 霊能結果コメント
-    const executedPlayer = state.players.find(p => p.seat === executedSeat)!
+    const executedPlayer = state.players.find(p => p.seat === executedSeat!)!
     const medResult = getSeerResult(executedPlayer.role)
     events.push({ type: 'comment', text: `霊能: ${executedPlayer.name} = ${medResult === 'human' ? '○' : '●'}` })
 

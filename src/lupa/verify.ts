@@ -205,6 +205,7 @@ type GameConfig = {
   roles: Record<string, number>
   seeds: [number, number]
   hasFirstGhost?: boolean
+  revoteConfig?: import('./types.ts').RevoteConfig
 }
 
 const configs: GameConfig[] = [
@@ -229,7 +230,7 @@ const configs: GameConfig[] = [
   { name: 'full-15p', roles: { werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, possessed: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 1000] },
   { name: 'full-17p', roles: { werewolf: 3, villager: 4, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, possessed: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 500] },
   // 初日犠牲者あり
-  { name: '14d-neko', roles: { werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 1000], hasFirstGhost: true },
+  { name: '14d-neko', roles: { werewolf: 3, villager: 2, seer: 1, medium: 1, bodyguard: 1, mason: 2, nekomata: 1, fanatic: 1, werehamster: 1, immoralist: 1 }, seeds: [0, 1000], hasFirstGhost: true, revoteConfig: { maxRevotes: 2, style: 'full_revote', tiebreaker: 'draw' } },
 ]
 
 type Args = {
@@ -320,6 +321,7 @@ function main() {
   let totalGames = 0
   let totalCheckpoints = 0
   let totalSkipped = 0
+  const totalResults = { villager_won: 0, werewolf_won: 0, werehamster_won: 0, draw: 0 }
 
   // 時間計測
   const gameTimes: number[] = []
@@ -349,9 +351,11 @@ function main() {
     const lupaConfig: LupaConfig = {
       roles: new Map(Object.entries(gc.roles) as [SystemRole, number][]),
       hasFirstGhost: gc.hasFirstGhost,
+      revoteConfig: gc.revoteConfig,
     }
     let configCheckpoints = 0
     let configSkipped = 0
+    const configResults = { villager_won: 0, werewolf_won: 0, werehamster_won: 0, draw: 0 }
 
     const [seedStart, seedEnd] = singleSeed != null
       ? [singleSeed, singleSeed + 1]
@@ -362,6 +366,7 @@ function main() {
       lupaConfig.seed = seed
       const { events, state } = runGame(lupaConfig)
       totalGames++
+      if (state.result) configResults[state.result]++
 
       const checkpoints = findCheckpoints(events)
       let gameFailed = false
@@ -397,12 +402,20 @@ function main() {
     if (showProgress) process.stderr.write('\r\x1b[K')
     const skippedStr = configSkipped > 0 ? ` (${configSkipped} skipped)` : ''
     const numGames = seedEnd - seedStart
-    console.log(`  ${gc.name}: ${numGames} games, ${configCheckpoints} checkpoints${skippedStr}`)
+    const r = configResults
+    const resultStr = `村${r.villager_won} 狼${r.werewolf_won} 狐${r.werehamster_won}` + (r.draw > 0 ? ` 分${r.draw}` : '')
+    console.log(`  ${gc.name}: ${numGames} games [${resultStr}], ${configCheckpoints} checkpoints${skippedStr}`)
+    totalResults.villager_won += r.villager_won
+    totalResults.werewolf_won += r.werewolf_won
+    totalResults.werehamster_won += r.werehamster_won
+    totalResults.draw += r.draw
   }
 
   const totalMs = performance.now() - totalStart
 
-  console.log(`\n合計: ${totalGames} games, ${totalCheckpoints} checkpoints, ${totalSkipped} skipped`)
+  const tr = totalResults
+  const totalResultStr = `村${tr.villager_won} 狼${tr.werewolf_won} 狐${tr.werehamster_won}` + (tr.draw > 0 ? ` 分${tr.draw}` : '')
+  console.log(`\n合計: ${totalGames} games [${totalResultStr}], ${totalCheckpoints} checkpoints, ${totalSkipped} skipped`)
 
   // 時間統計
   const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0

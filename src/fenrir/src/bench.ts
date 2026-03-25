@@ -118,6 +118,8 @@ console.log('=== encodeObservation only (1000 calls) ===')
     publicEvents: [], signals: [], commander: null, proposals: [],
     rng: null as any, gameState: state, lastExecutedSeat: null,
     retarPossibilities: null, retarWhatIfPossibilities: null,
+    wolfTeammates: null, knownWolves: null, knownHamster: null, masonPartner: null,
+    revoteRound: null, revoteCandidates: null,
   }
   const t0 = performance.now()
   for (let i = 0; i < 1000; i++) {

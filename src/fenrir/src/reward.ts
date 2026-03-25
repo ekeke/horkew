@@ -21,6 +21,12 @@ export type RewardConfig = {
   commanderSuccess: number
   /** 中間報酬: 妖狐生存日数 */
   foxSurvived: number
+  /** 引き分け報酬 (村側) */
+  drawVillage: number
+  /** 引き分け報酬 (狼側) */
+  drawWolf: number
+  /** 引き分け報酬 (狐側) */
+  drawHamster: number
 }
 
 export const DEFAULT_REWARD_CONFIG: RewardConfig = {
@@ -32,6 +38,9 @@ export const DEFAULT_REWARD_CONFIG: RewardConfig = {
   bodyguardSave: 0.03,
   commanderSuccess: 0.05,
   foxSurvived: 0.01,
+  drawVillage: -0.5,
+  drawWolf: -0.5,
+  drawHamster: 0.3,
 }
 
 type Alignment = 'village' | 'wolf' | 'hamster'
@@ -64,6 +73,12 @@ export function terminalReward(
       return alignment === 'wolf' ? config.win : config.lose
     case 'werehamster_won':
       return alignment === 'hamster' ? config.win : config.lose
+    case 'draw':
+      switch (alignment) {
+        case 'village': return config.drawVillage
+        case 'wolf': return config.drawWolf
+        case 'hamster': return config.drawHamster
+      }
     default:
       return 0
   }

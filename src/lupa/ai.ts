@@ -29,6 +29,12 @@ function makeCompatCtx(
     lastExecutedSeat,
     retarPossibilities: null,
     retarWhatIfPossibilities: null,
+    wolfTeammates: null,
+    knownWolves: null,
+    knownHamster: null,
+    masonPartner: null,
+    revoteRound: null,
+    revoteCandidates: null,
   }
 }
 

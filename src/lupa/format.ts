@@ -34,6 +34,7 @@ const RESULT_DISPLAY = {
   villager_won: '村勝利',
   werewolf_won: '狼勝利',
   werehamster_won: '狐勝利',
+  draw: '引き分け',
 } as const
 
 export function formatHowl(events: GameEvent[], state: GameState, config: LupaConfig): string {
@@ -147,6 +148,11 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
       }
       case 'follow_kill': {
         lines.push(`${playerName(event.target)} 後追い`)
+        break
+      }
+      case 'grelan': {
+        lines.push('')
+        lines.push('グレラン')
         break
       }
       case 'vote': {

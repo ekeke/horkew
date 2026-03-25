@@ -12,6 +12,19 @@ export type LupaConfig = {
   strategies?: Map<number, Strategy>
   /** Retar論理推論を有効化（昼CO後に自動実行） */
   enableRetar?: boolean
+  /** 再投票設定 (未指定時はデフォルト: 候補者限定ランダム、3回、最小seat処刑) */
+  revoteConfig?: RevoteConfig
+  /** 投票確定後のCO許可 (デフォルト: true) */
+  allowPostVoteCO?: boolean
+}
+
+export type RevoteConfig = {
+  /** 最大再投票回数 (デフォルト: 3) */
+  maxRevotes: number
+  /** 再投票方式: 'random_tied' = 候補者限定ランダム(現行), 'full_revote' = 全員で完全やり直し */
+  style: 'random_tied' | 'full_revote'
+  /** 決着つかない場合: 'lowest_seat' = 最小seat処刑(現行), 'draw' = 引き分け終了 */
+  tiebreaker: 'lowest_seat' | 'draw'
 }
 
 export type PlayerState = {
@@ -36,7 +49,7 @@ export type GameState = {
   day: number
   phase: 'night' | 'day'
   finished: boolean
-  result: 'villager_won' | 'werewolf_won' | 'werehamster_won' | null
+  result: 'villager_won' | 'werewolf_won' | 'werehamster_won' | 'draw' | null
   /** 処刑履歴: day → seat */
   executionHistory: Map<number, number>
   /** 現在の指揮者 (seat) */
@@ -78,9 +91,10 @@ export type GameEvent =
   | { type: 'follow_kill', target: number }
   | { type: 'vote', voter: number, target: number }
   | { type: 'revote', targets: number[] }
+  | { type: 'grelan' }
   | { type: 'execution', target: number }
   | { type: 'comment', text: string }
-  | { type: 'game_over', result: 'villager_won' | 'werewolf_won' | 'werehamster_won' }
+  | { type: 'game_over', result: 'villager_won' | 'werewolf_won' | 'werehamster_won' | 'draw' }
   | { type: 'reveal', seat: number, role: SystemRole }
   | { type: 'signal', actor: number, signal: Signal }
   | { type: 'commander_appointed', seat: number }
