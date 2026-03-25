@@ -1,5 +1,5 @@
 import type { SystemRole, EnumSpecies } from '../types/index.ts'
-import type { Strategy } from './strategy.ts'
+import type { Strategy, TeamStrategy } from './strategy.ts'
 import type { Signal, RolePrediction } from './communication.ts'
 
 export type LupaConfig = {
@@ -10,6 +10,10 @@ export type LupaConfig = {
   hasFirstGhost?: boolean
   /** プレイヤーごとの戦略（未指定はHeuristicStrategy） */
   strategies?: Map<number, Strategy>
+  /** 狼チーム戦略 */
+  wolfTeamStrategy?: TeamStrategy
+  /** 共有者チーム戦略 */
+  masonTeamStrategy?: TeamStrategy
   /** Retar論理推論を有効化（昼CO後に自動実行） */
   enableRetar?: boolean
   /** 再投票設定 (未指定時はデフォルト: 候補者限定ランダム、3回、最小seat処刑) */

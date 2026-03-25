@@ -38,7 +38,7 @@ export type DecisionContext = {
   revoteCandidates: number[] | null
 }
 
-/** プラガブルな戦略インターフェース */
+/** プラガブルな戦略インターフェース (個人エージェント) */
 export type Strategy = {
   decideNightAction(ctx: DecisionContext): NightAction
   decideDayClaim(ctx: DecisionContext): DayClaim
@@ -47,4 +47,44 @@ export type Strategy = {
   decideCommunication(ctx: DecisionContext): CommunicationAction
   decideProposal(ctx: DecisionContext): Proposal | null
   decideLeadershipResponse(ctx: DecisionContext, proposal: Proposal): LeadershipResponse
+}
+
+// ============================================================
+// チームエージェント (狼チーム / 共有者チーム)
+// ============================================================
+
+/** チーム意思決定コンテキスト */
+export type TeamDecisionContext = DecisionContext & {
+  /** チームメンバーのseat一覧 */
+  teamSeats: number[]
+  /** チームメンバーの状態 */
+  teamPlayers: PlayerState[]
+  /** 昼行動時、今誰の番か */
+  currentActorSeat?: number
+}
+
+/** 狼チームの夜行動 */
+export type WolfNightAction = {
+  /** 襲撃先 */
+  target: number
+  /** 襲撃者 (猫又道連れリスク者) */
+  attacker: number
+}
+
+/** チーム戦略インターフェース */
+export type TeamStrategy = {
+  /** 狼チーム夜行動: 襲撃先 + 襲撃者を選択 */
+  decideNightAction(ctx: TeamDecisionContext): WolfNightAction | NightAction
+  /** 昼CO (currentActorSeat のプレイヤー分) */
+  decideDayClaim(ctx: TeamDecisionContext): DayClaim
+  /** 予告 (currentActorSeat のプレイヤー分) */
+  decideForecast(ctx: TeamDecisionContext): DayClaim
+  /** 投票 (currentActorSeat のプレイヤー分) */
+  decideVote(ctx: TeamDecisionContext): number
+  /** コミュニケーション (currentActorSeat のプレイヤー分) */
+  decideCommunication(ctx: TeamDecisionContext): CommunicationAction
+  /** 指揮者提案 */
+  decideProposal(ctx: TeamDecisionContext): Proposal | null
+  /** 指揮者への応答 */
+  decideLeadershipResponse(ctx: TeamDecisionContext, proposal: Proposal): LeadershipResponse
 }

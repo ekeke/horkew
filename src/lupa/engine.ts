@@ -1,6 +1,6 @@
 import type { LupaConfig, GameState, GameEvent, NightAction, DayClaim } from './types.ts'
 import type { SystemRole } from '../types/index.ts'
-import type { Strategy, DecisionContext } from './strategy.ts'
+import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from './strategy.ts'
 import type { SignalRecord, CommunicationAction } from './communication.ts'
 import type { Proposal } from './leadership.ts'
 import { Rng } from './random.ts'
@@ -23,6 +23,51 @@ const defaultStrategy = new HeuristicStrategy()
 
 function getStrategy(config: LupaConfig, seat: number): Strategy {
   return config.strategies?.get(seat) ?? defaultStrategy
+}
+
+/** チーム戦略を使うべきか判定し、TeamDecisionContext を構築 */
+function getTeamStrategy(
+  config: LupaConfig, state: GameState, player: typeof state.players[0],
+): TeamStrategy | null {
+  if (player.role === 'werewolf' && config.wolfTeamStrategy) {
+    return config.wolfTeamStrategy
+  }
+  if (player.role === 'mason' && config.masonTeamStrategy) {
+    return config.masonTeamStrategy
+  }
+  return null
+}
+
+function buildTeamContext(
+  baseCtx: DecisionContext, state: GameState, role: SystemRole,
+  currentActorSeat?: number,
+): TeamDecisionContext {
+  const teamPlayers = state.players.filter(p => p.role === role && p.alive)
+  return {
+    ...baseCtx,
+    teamSeats: teamPlayers.map(p => p.seat),
+    teamPlayers,
+    currentActorSeat,
+  }
+}
+
+/** 昼行動のチーム/個人ルーティングヘルパー */
+type DayDecisionFn<T> = (strategy: Strategy, ctx: DecisionContext) => T
+type TeamDayDecisionFn<T> = (strategy: TeamStrategy, ctx: TeamDecisionContext) => T
+
+function decideForPlayer<T>(
+  config: LupaConfig, state: GameState, player: typeof state.players[0],
+  baseCtx: DecisionContext,
+  individualFn: DayDecisionFn<T>,
+  teamFn: TeamDayDecisionFn<T>,
+): T {
+  const team = getTeamStrategy(config, state, player)
+  if (team) {
+    const teamCtx = buildTeamContext(baseCtx, state, player.role, player.seat)
+    return teamFn(team, teamCtx)
+  }
+  const strategy = getStrategy(config, player.seat)
+  return individualFn(strategy, baseCtx)
 }
 
 function buildContext(
@@ -165,7 +210,31 @@ export function runGame(config: LupaConfig): GameResult {
       const night = day - 1
 
       const actions: Array<{ player: typeof players[0], action: NightAction }> = []
+      let chosenAttacker: number | null = null  // 狼チームが選んだ襲撃者
+
+      // 狼チーム夜行動
+      if (config.wolfTeamStrategy) {
+        const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
+        if (aliveWolves.length > 0) {
+          const leader = aliveWolves[0]
+          const ctx = buildContext(state, leader, events, rng, signals, proposals, lastExecutedSeat)
+          const teamCtx = buildTeamContext(ctx, state, 'werewolf')
+          const wolfAction = config.wolfTeamStrategy.decideNightAction(teamCtx) as WolfNightAction
+          chosenAttacker = wolfAction.attacker
+          // 襲撃者が attack、他の狼は none
+          for (const wolf of aliveWolves) {
+            if (wolf.seat === wolfAction.attacker) {
+              actions.push({ player: wolf, action: { type: 'attack', target: wolfAction.target } })
+            } else {
+              actions.push({ player: wolf, action: { type: 'none' } })
+            }
+          }
+        }
+      }
+
+      // 個別プレイヤー夜行動（狼チーム以外）
       for (const player of alivePlayers(state)) {
+        if (config.wolfTeamStrategy && player.role === 'werewolf') continue  // 既に処理済み
         const strategy = getStrategy(config, player.seat)
         const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat)
         const action = strategy.decideNightAction(ctx)
@@ -177,7 +246,7 @@ export function runGame(config: LupaConfig): GameResult {
         player.forecastTarget = null
       }
 
-      resolveNight(state, actions, events, rng)
+      resolveNight(state, actions, events, rng, chosenAttacker)
 
       checkWinCondition(state)
       if (state.finished) {
@@ -208,10 +277,12 @@ export function runGame(config: LupaConfig): GameResult {
 
     // COフェーズ
     for (const player of alivePlayers(state)) {
-      const strategy = getStrategy(config, player.seat)
       const whatIf = whatIfByPlayer.get(player.seat) ?? null
       const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar, whatIf)
-      const claim = strategy.decideDayClaim(ctx)
+      const claim = decideForPlayer(config, state, player, ctx,
+        (s, c) => s.decideDayClaim(c),
+        (s, c) => s.decideDayClaim(c),
+      )
       applyClaim(state, player, day, claim, events)
     }
 
@@ -248,9 +319,11 @@ export function runGame(config: LupaConfig): GameResult {
     if (state.commander !== null) {
       const commander = state.players.find(p => p.seat === state.commander)!
       if (commander.alive) {
-        const strategy = getStrategy(config, commander.seat)
         const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
-        const proposal = strategy.decideProposal(ctx)
+        const proposal = decideForPlayer(config, state, commander, ctx,
+          (s, c) => s.decideProposal(c),
+          (s, c) => s.decideProposal(c),
+        )
         if (proposal) {
           dayProposals.push(proposal)
           events.push({ type: 'proposal', actor: commander.seat, proposal })
@@ -258,9 +331,11 @@ export function runGame(config: LupaConfig): GameResult {
           // 他プレイヤーの応答
           for (const player of alivePlayers(state)) {
             if (player.seat === state.commander) continue
-            const pStrategy = getStrategy(config, player.seat)
             const pCtx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
-            const response = pStrategy.decideLeadershipResponse(pCtx, proposal)
+            const response = decideForPlayer(config, state, player, pCtx,
+              (s, c) => s.decideLeadershipResponse(c, proposal),
+              (s, c) => s.decideLeadershipResponse(c, proposal),
+            )
             events.push({ type: 'leadership_response', actor: player.seat, response })
           }
         }
@@ -270,9 +345,11 @@ export function runGame(config: LupaConfig): GameResult {
     // シグナルラウンド (3ラウンド)
     for (let round = 0; round < 3; round++) {
       for (const player of alivePlayers(state)) {
-        const strategy = getStrategy(config, player.seat)
         const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
-        const commAction = strategy.decideCommunication(ctx)
+        const commAction = decideForPlayer(config, state, player, ctx,
+          (s, c) => s.decideCommunication(c),
+          (s, c) => s.decideCommunication(c),
+        )
         applyCommAction(state, player, day, commAction, events, daySignals, signals, signalIdCounter)
         signalIdCounter += 1
       }
@@ -280,9 +357,11 @@ export function runGame(config: LupaConfig): GameResult {
 
     // 予告フェーズ
     for (const player of alivePlayers(state)) {
-      const strategy = getStrategy(config, player.seat)
       const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
-      const forecast = strategy.decideForecast(ctx)
+      const forecast = decideForPlayer(config, state, player, ctx,
+        (s, c) => s.decideForecast(c),
+        (s, c) => s.decideForecast(c),
+      )
       if (forecast.type === 'forecast') {
         player.forecastTarget = forecast.target
         events.push({ type: 'forecast', actor: player.seat, target: forecast.target })
@@ -313,9 +392,11 @@ export function runGame(config: LupaConfig): GameResult {
           target = revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
         } else {
           // 初回投票 or full_revote: Strategyに委任
-          const strategy = getStrategy(config, voter.seat)
           const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, revoteCount, revoteCandidates)
-          target = strategy.decideVote(ctx)
+          target = decideForPlayer(config, state, voter, ctx,
+            (s, c) => s.decideVote(c),
+            (s, c) => s.decideVote(c),
+          )
         }
         votes.set(voter.seat, target)
         events.push({ type: 'vote', voter: voter.seat, target })
@@ -429,6 +510,7 @@ function resolveNight(
   actions: Array<{ player: typeof state.players[0], action: NightAction }>,
   events: GameEvent[],
   _rng: Rng,
+  chosenAttacker: number | null = null,
 ): void {
   const name = (seat: number) => state.players.find(p => p.seat === seat)!.name
   const speciesLabel = (r: 'human' | 'wolf' | null) => r === 'human' ? '○' : r === 'wolf' ? '●' : '?'
@@ -485,11 +567,10 @@ function resolveNight(
       // 猫又襲撃: 猫又は死亡、襲撃した人狼を道連れ
       killPlayer(state, action.target)
       events.push({ type: 'night_kill', target: action.target })
-      // 襲撃元の人狼 (最小seat狼) を道連れ
-      const attackingWolf = alivePlayers(state).find(p => p.role === 'werewolf')
-        ?? attacker // フォールバック
-      killPlayer(state, attackingWolf.seat)
-      events.push({ type: 'curse_kill', target: attackingWolf.seat })
+      // 襲撃者を道連れ (チーム選択 or 襲撃実行者)
+      const curseTarget = chosenAttacker ?? attacker.seat
+      killPlayer(state, curseTarget)
+      events.push({ type: 'curse_kill', target: curseTarget })
     } else {
       killPlayer(state, action.target)
       events.push({ type: 'night_kill', target: action.target })
