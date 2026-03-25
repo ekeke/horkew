@@ -3,15 +3,16 @@
  * NeuralNetworkの推論結果をLupaのアクションに変換する。
  */
 
-import type { Strategy, DecisionContext } from '../../lupa/strategy.ts'
+import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from '../../lupa/strategy.ts'
 import type { NightAction, DayClaim } from '../../lupa/types.ts'
 import type { CommunicationAction } from '../../lupa/communication.ts'
 import type { Proposal, LeadershipResponse } from '../../lupa/leadership.ts'
 import type { NeuralNetwork, ForwardResult } from './ml/nn.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
-import { encodeObservation } from './observation.ts'
+import { encodeObservation, encodeTeamObservation } from './observation.ts'
 import {
   maskNightAction, maskClaim, maskVote, maskComm, maskPropose, maskPredict, maskLeader, maskTarget,
+  maskAttackTarget, maskAttacker, decodeWolfNightAction,
   sampleMasked,
   decodeNightActionWithRole, decodeClaim, decodeComm, decodePropose, decodePredict, decodeLeader,
 } from './action.ts'
@@ -235,5 +236,264 @@ export class FenrirStrategy implements Strategy {
   /** トラジェクトリをリセット */
   resetTrajectory(): void {
     this.trajectory = []
+  }
+}
+
+// ============================================================
+// チームエージェント共通ベース
+// ============================================================
+
+abstract class TeamStrategyBase {
+  readonly network: NeuralNetwork
+  readonly config: FenrirStrategyConfig
+  trajectory: TrajectoryStep[] = []
+
+  constructor(network: NeuralNetwork, config?: Partial<FenrirStrategyConfig>) {
+    this.network = network
+    this.config = { explore: true, ...config }
+  }
+
+  protected infer(ctx: TeamDecisionContext): ForwardResult {
+    const obs = encodeTeamObservation(ctx)
+    return this.network.forward(obs)
+  }
+
+  protected record(
+    ctx: TeamDecisionContext, head: string, actionIdx: number,
+    logProb: number, value: number, reward: number,
+  ): void {
+    this.trajectory.push({
+      seat: ctx.currentActorSeat ?? ctx.teamSeats[0],
+      observation: encodeTeamObservation(ctx),
+      actionHead: head,
+      actionIdx,
+      logProb,
+      reward,
+      value,
+      done: false,
+    })
+  }
+
+  protected recordSigmoid(
+    ctx: TeamDecisionContext, head: string, actions: Float32Array,
+    logProb: number, value: number, reward: number,
+  ): void {
+    this.trajectory.push({
+      seat: ctx.currentActorSeat ?? ctx.teamSeats[0],
+      observation: encodeTeamObservation(ctx),
+      actionHead: head,
+      actionIdx: -1,
+      logProb,
+      reward,
+      value,
+      done: false,
+      sigmoidActions: actions,
+    })
+  }
+
+  protected selectAction(
+    logits: Float32Array, mask: Float32Array,
+  ): { action: number, logProb: number } {
+    if (this.config.explore) {
+      return sampleMasked(logits, mask)
+    }
+    let bestIdx = 0
+    let bestVal = -Infinity
+    for (let i = 0; i < logits.length; i++) {
+      const val = logits[i] + mask[i]
+      if (val > bestVal) {
+        bestVal = val
+        bestIdx = i
+      }
+    }
+    return { action: bestIdx, logProb: 0 }
+  }
+
+  protected selectSigmoidAction(
+    logits: Float32Array, mask: Float32Array,
+  ): { actions: Float32Array, logProb: number } {
+    const masked = new Float32Array(logits.length)
+    for (let i = 0; i < logits.length; i++) {
+      masked[i] = logits[i] + mask[i]
+    }
+    const probs = sigmoid(masked)
+    const actions = new Float32Array(logits.length)
+    let logProb = 0
+    for (let i = 0; i < logits.length; i++) {
+      if (mask[i] === -Infinity) { actions[i] = 0; continue }
+      const p = probs[i]
+      if (this.config.explore) {
+        actions[i] = Math.random() < p ? 1 : 0
+      } else {
+        actions[i] = p >= 0.5 ? 1 : 0
+      }
+      logProb += actions[i] === 1 ? Math.log(p + 1e-8) : Math.log(1 - p + 1e-8)
+    }
+    return { actions, logProb }
+  }
+
+  // Day action helpers shared by both team types
+  protected decideDayClaimImpl(ctx: TeamDecisionContext): DayClaim {
+    const result = this.infer(ctx)
+    const claimLogits = result.policies.get('claim')!
+    const claimMask = maskClaim(ctx)
+    const { action: claimIdx, logProb: claimLogProb } = this.selectAction(claimLogits, claimMask)
+
+    const targetLogits = result.policies.get('target')!
+    const targetMask = maskTarget(ctx)
+    const { action: targetIdx } = this.selectAction(targetLogits, targetMask)
+
+    this.record(ctx, 'claim', claimIdx, claimLogProb, result.value, 0)
+    return decodeClaim(claimIdx, targetIdx, ctx)
+  }
+
+  protected decideForecastImpl(ctx: TeamDecisionContext): DayClaim {
+    const result = this.infer(ctx)
+    const targetLogits = result.policies.get('target')!
+    const targetMask = maskTarget(ctx)
+    const { action: targetIdx } = this.selectAction(targetLogits, targetMask)
+
+    if (ctx.myPlayer.claimedRole === 'seer') {
+      return { type: 'forecast', target: targetIdx + 1 }
+    }
+    return { type: 'none' }
+  }
+
+  protected decideVoteImpl(ctx: TeamDecisionContext): number {
+    const result = this.infer(ctx)
+    const logits = result.policies.get('vote')!
+    const mask = maskVote(ctx)
+    const { action, logProb } = this.selectAction(logits, mask)
+    this.record(ctx, 'vote', action, logProb, result.value, 0)
+    return action + 1
+  }
+
+  protected decideCommunicationImpl(ctx: TeamDecisionContext): CommunicationAction {
+    const result = this.infer(ctx)
+
+    const commLogits = result.policies.get('comm')!
+    const commMask = maskComm(ctx)
+    const { action: commAction, logProb: commLogProb } = this.selectAction(commLogits, commMask)
+    this.record(ctx, 'comm', commAction, commLogProb, result.value, 0)
+    const signal = decodeComm(commAction)
+
+    const proposeLogits = result.policies.get('propose')!
+    const proposeMask = maskPropose(ctx)
+    const { actions: proposeActions, logProb: proposeLogProb } = this.selectSigmoidAction(proposeLogits, proposeMask)
+    this.recordSigmoid(ctx, 'propose', proposeActions, proposeLogProb, result.value, 0)
+    const proposals = decodePropose(proposeActions, 0.5)
+
+    const predictMask = maskPredict(commAction)
+    let predictions = undefined
+    if (predictMask[0] !== -Infinity) {
+      const predictLogits = result.policies.get('predict')!
+      const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
+      this.recordSigmoid(ctx, 'predict', predictActions, predictLogProb, result.value, 0)
+      predictions = decodePredict(predictActions, 0.5)
+    }
+
+    return { signal, proposals, predictions }
+  }
+
+  protected decideProposalImpl(ctx: TeamDecisionContext): Proposal | null {
+    if (ctx.commander !== ctx.mySeat) return null
+    const result = this.infer(ctx)
+    const logits = result.policies.get('vote')!
+    const mask = maskVote(ctx)
+    const { action } = this.selectAction(logits, mask)
+    return { type: 'execute_order', target: action + 1 }
+  }
+
+  protected decideLeadershipResponseImpl(ctx: TeamDecisionContext): LeadershipResponse {
+    const result = this.infer(ctx)
+    const logits = result.policies.get('leader')!
+    const mask = maskLeader(ctx)
+    const { action, logProb } = this.selectAction(logits, mask)
+    this.record(ctx, 'leader', action, logProb, result.value, 0)
+    return decodeLeader(action)
+  }
+
+  resetTrajectory(): void {
+    this.trajectory = []
+  }
+}
+
+// ============================================================
+// 狼チームMLエージェント
+// ============================================================
+
+export class WolfTeamStrategy extends TeamStrategyBase implements TeamStrategy {
+  decideNightAction(ctx: TeamDecisionContext): WolfNightAction {
+    const result = this.infer(ctx)
+
+    const attackLogits = result.policies.get('attack_target')!
+    const attackMask = maskAttackTarget(ctx)
+    const { action: attackIdx, logProb: attackLogProb } = this.selectAction(attackLogits, attackMask)
+    this.record(ctx, 'attack_target', attackIdx, attackLogProb, result.value, 0)
+
+    const attackerLogits = result.policies.get('attacker')!
+    const attackerMask = maskAttacker(ctx)
+    const { action: attackerIdx, logProb: attackerLogProb } = this.selectAction(attackerLogits, attackerMask)
+    this.record(ctx, 'attacker', attackerIdx, attackerLogProb, result.value, 0)
+
+    return decodeWolfNightAction(attackIdx, attackerIdx, ctx.teamSeats)
+  }
+
+  decideDayClaim(ctx: TeamDecisionContext): DayClaim {
+    return this.decideDayClaimImpl(ctx)
+  }
+
+  decideForecast(ctx: TeamDecisionContext): DayClaim {
+    return this.decideForecastImpl(ctx)
+  }
+
+  decideVote(ctx: TeamDecisionContext): number {
+    return this.decideVoteImpl(ctx)
+  }
+
+  decideCommunication(ctx: TeamDecisionContext): CommunicationAction {
+    return this.decideCommunicationImpl(ctx)
+  }
+
+  decideProposal(ctx: TeamDecisionContext): Proposal | null {
+    return this.decideProposalImpl(ctx)
+  }
+
+  decideLeadershipResponse(ctx: TeamDecisionContext, _proposal: Proposal): LeadershipResponse {
+    return this.decideLeadershipResponseImpl(ctx)
+  }
+}
+
+// ============================================================
+// 共有者チームMLエージェント
+// ============================================================
+
+export class MasonTeamStrategy extends TeamStrategyBase implements TeamStrategy {
+  decideNightAction(_ctx: TeamDecisionContext): NightAction {
+    return { type: 'none' }
+  }
+
+  decideDayClaim(ctx: TeamDecisionContext): DayClaim {
+    return this.decideDayClaimImpl(ctx)
+  }
+
+  decideForecast(ctx: TeamDecisionContext): DayClaim {
+    return this.decideForecastImpl(ctx)
+  }
+
+  decideVote(ctx: TeamDecisionContext): number {
+    return this.decideVoteImpl(ctx)
+  }
+
+  decideCommunication(ctx: TeamDecisionContext): CommunicationAction {
+    return this.decideCommunicationImpl(ctx)
+  }
+
+  decideProposal(ctx: TeamDecisionContext): Proposal | null {
+    return this.decideProposalImpl(ctx)
+  }
+
+  decideLeadershipResponse(ctx: TeamDecisionContext, _proposal: Proposal): LeadershipResponse {
+    return this.decideLeadershipResponseImpl(ctx)
   }
 }
