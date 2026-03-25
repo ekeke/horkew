@@ -8,7 +8,7 @@ import { howlCompletionExtension } from './howlCompletion.ts'
 
 export { EditorView } from '@codemirror/view'
 export { setStatements, type StatementInfo, type HighlightPayload, type PlayerNameInfo } from './howlLanguage.ts'
-export { setPlayerList, setSetup, type PlayerEntry } from './howlCompletion.ts'
+export { setPlayerList, setSetup, setCurrentDay, type PlayerEntry } from './howlCompletion.ts'
 
 export function createHowlEditor(parent: HTMLElement, opts: {
   doc: string

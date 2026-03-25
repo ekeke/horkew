@@ -206,9 +206,23 @@ const setupField = StateField.define<Map<string, number>>({
   },
 })
 
+// ---- 現在日数の管理 ----
+
+export const setCurrentDay = StateEffect.define<number>()
+
+const currentDayField = StateField.define<number>({
+  create() { return 1 },
+  update(day, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setCurrentDay)) return e.value
+    }
+    return day
+  },
+})
+
 // ---- 候補型と文脈型 ----
 
-type Category = 'player' | 'player_start' | 'role' | 'action' | 'arrow' | 'co_role' | 'denial_co_role' | 'standalone' | 'result' | 'gameresult'
+type Category = 'player' | 'player_start' | 'role' | 'action' | 'arrow' | 'co_role' | 'denial_co_role' | 'standalone' | 'result' | 'gameresult' | 'day'
 
 type HowlCandidateDef = {
   label: string
@@ -327,6 +341,7 @@ const allStaticCandidates = [
 
 // ---- ラベルセットを事前計算 (文脈推定用) ----
 
+const dayTokenRe = /^[1-9１-９][0-9０-９]*(?:日目?|[dDｄＤ](?:[aAａＡ][yYｙＹ])?)$/
 const arrowRe = new RegExp(`^(?:${V.rightArrow}|${V.leftArrow})$`)
 const rightArrowRe = new RegExp(`^${V.rightArrow}$`)
 const leftArrowRe = new RegExp(`(?:${V.leftArrow})`)
@@ -389,11 +404,19 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
     return null // 通常記法: プレイヤー名 アクション → 終了
   }
 
-  // 結果マーカー (○/●) → CO種別に応じた候補
-  if (resultLabels.has(lastToken)) {
+  // 日付トークン (1日目, 2d, etc.) → CO種別に応じた候補
+  if (dayTokenRe.test(lastToken)) {
     const coType = detectCoType(trimmed, players)
     if (coType === 'medium') return ['result']
-    return ['player']
+    if (coType === 'seer' || coType === 'bodyguard') return ['player']
+    return null
+  }
+
+  // 結果マーカー (○/●) → CO種別に応じた候補 (次のエントリは日付から始められる)
+  if (resultLabels.has(lastToken)) {
+    const coType = detectCoType(trimmed, players)
+    if (coType === 'medium') return ['day', 'result']
+    return ['day', 'player']
   }
 
   // 矢印 → プレイヤー名
@@ -402,8 +425,8 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
   // 役職名CO / 非役職名CO → CO種別に応じた候補
   if (coRoleLabels.has(lastToken)) {
     const coType = detectCoType(trimmed, players)
-    if (coType === 'medium') return ['result']
-    return ['player']
+    if (coType === 'medium') return ['day', 'result']
+    return ['day', 'player']
   }
 
   // プレイヤー名の判定
@@ -434,9 +457,10 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
     if (beforeLastToken !== '') {
       const coType = detectCoType(trimmed, players)
       if (coType !== 'other') {
-        if (coType === 'bodyguard' || coType === 'mason') return ['player']
-        if (coType === 'medium') return ['result']
-        return ['result'] // seer
+        if (coType === 'mason') return ['player']
+        if (coType === 'bodyguard') return ['day', 'player']
+        if (coType === 'medium') return ['day', 'result']
+        return ['result'] // seer: プレイヤー名の直後は結果 (日付はプレイヤーの前)
       }
     }
 
@@ -444,9 +468,9 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
     if (beforeLastToken === '') {
       const firstPlayer = players.find(p => p.name === lastToken || p.shortName === lastToken)
       const firstCoType = firstPlayer?.claimingRole ? claimingRoleToCoType[firstPlayer.claimingRole] : undefined
-      if (firstCoType === 'seer') return ['player', 'arrow', 'co_role', 'denial_co_role', 'action', 'result']
-      if (firstCoType === 'medium') return ['result', 'arrow', 'co_role', 'denial_co_role', 'action']
-      if (firstCoType === 'bodyguard') return ['player', 'arrow', 'co_role', 'denial_co_role', 'action']
+      if (firstCoType === 'seer') return ['day', 'player', 'arrow', 'co_role', 'denial_co_role', 'action', 'result']
+      if (firstCoType === 'medium') return ['day', 'result', 'arrow', 'co_role', 'denial_co_role', 'action']
+      if (firstCoType === 'bodyguard') return ['day', 'player', 'arrow', 'co_role', 'denial_co_role', 'action']
       if (firstCoType === 'mason') return ['player', 'arrow', 'co_role', 'denial_co_role', 'action']
     }
     return ['arrow', 'co_role', 'denial_co_role', 'action', 'result']
@@ -457,6 +481,24 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
 }
 
 // ---- 候補の構築 ----
+
+/** 日付候補を動的に生成 (1日目〜currentDay日目) */
+function buildDayCandidates(currentDay: number): HowlCandidate[] {
+  const candidates: HowlCandidate[] = []
+  for (let d = 1; d <= currentDay; d++) {
+    candidates.push({
+      label: `${d}日目`,
+      reading: `${d}`,
+      romaji: [`${d}`, `d${d}`, `${d}d`].join('\0'),
+      type: 'keyword',
+      category: 'day',
+      categoryLabel: '日付',
+      terminal: false,
+      info: `${d}日目の結果`,
+    })
+  }
+  return candidates
+}
 
 function buildPlayerCandidates(players: PlayerEntry[]): HowlCandidate[] {
   return players.map(p => {
@@ -531,13 +573,15 @@ const howlCompletionSource: CompletionSource = (context) => {
 
   const players = context.state.field(playerListField)
   const setup = context.state.field(setupField)
+  const currentDay = context.state.field(currentDayField)
   const playerCandidates = buildPlayerCandidates(players)
+  const dayCandidates = buildDayCandidates(currentDay)
 
   // 配役に応じて候補をフィルタ (setupが空の場合は全候補を表示)
   const staticFiltered = setup.size === 0
     ? allStaticCandidates
     : allStaticCandidates.filter(c => !c.requiredRole || (setup.get(c.requiredRole) ?? 0) > 0)
-  const allCandidates = [...playerCandidates, ...staticFiltered]
+  const allCandidates = [...playerCandidates, ...dayCandidates, ...staticFiltered]
 
   const word = context.matchBefore(/[^\s,;:、，；：]+/)
 
@@ -641,6 +685,7 @@ const howlCompletionSource: CompletionSource = (context) => {
 export const howlCompletionExtension: Extension = [
   playerListField,
   setupField,
+  currentDayField,
   autocompletion({
     override: [howlCompletionSource],
     activateOnTyping: true,
