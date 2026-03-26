@@ -626,6 +626,12 @@ function decideNekomataClam(ctx: DecisionContext): DayClaim {
     return { type: 'nekomata_co' }
   }
 
+  // 指揮者に処刑指定されたら CO して回避
+  const executeOrder = ctx.proposals.find(p => p.type === 'execute_order')
+  if (executeOrder && executeOrder.target === ctx.mySeat) {
+    return { type: 'nekomata_co' }
+  }
+
   // 単独黒（自分だけが黒出しされている）→ CO して処刑回避
   const blacks = collectBlackTargets(ctx.publicEvents)
   if (blacks.has(ctx.mySeat)) {

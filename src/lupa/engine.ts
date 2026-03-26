@@ -315,6 +315,21 @@ export function runGame(config: LupaConfig): GameResult {
           dayProposals.push(proposal)
           events.push({ type: 'proposal', actor: commander.seat, proposal })
 
+          // 指揮者指定後の追加COチャンス（処刑対象が猫又CO等で回避する機会）
+          if (proposal.type === 'execute_order') {
+            const target = state.players.find(p => p.seat === proposal.target)
+            if (target && target.alive && target.claimedRole === null) {
+              const targetCtx = buildContext(state, target, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+              const claim = decideForPlayer(config, state, target, targetCtx,
+                (s, c) => s.decideDayClaim(c),
+                (s, c) => s.decideDayClaim(c),
+              )
+              if (claim.type !== 'none') {
+                applyClaim(state, target, day, claim, events)
+              }
+            }
+          }
+
           // 他プレイヤーの応答
           for (const player of alivePlayers(state)) {
             if (player.seat === state.commander) continue
@@ -611,6 +626,15 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
         if (proposal) {
           dayProposals.push(proposal)
           events.push({ type: 'proposal', actor: commander.seat, proposal })
+          // 指揮者指定後の追加COチャンス
+          if (proposal.type === 'execute_order') {
+            const target = state.players.find(p => p.seat === proposal.target)
+            if (target && target.alive && target.claimedRole === null) {
+              const targetCtx = buildContext(state, target, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+              const claim = decideForPlayer(config, state, target, targetCtx, (s, c) => s.decideDayClaim(c), (s, c) => s.decideDayClaim(c))
+              if (claim.type !== 'none') applyClaim(state, target, day, claim, events)
+            }
+          }
           for (const player of alivePlayers(state)) {
             if (player.seat === state.commander) continue
             const pCtx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
