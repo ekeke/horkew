@@ -400,6 +400,11 @@ export function runGame(config: LupaConfig): GameResult {
             (s, c) => s.decideVote(c),
           )
         }
+        // 自投票禁止: 自分に投票した場合はランダムに変更
+        if (target === voter.seat) {
+          const others = voters.filter(v => v.seat !== voter.seat)
+          target = others.length > 0 ? others[Math.floor(rng.next() * others.length)].seat : voter.seat
+        }
         votes.set(voter.seat, target)
         events.push({ type: 'vote', voter: voter.seat, target })
       }
@@ -674,6 +679,11 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
         } else {
           const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates)
           target = decideForPlayer(config, state, voter, ctx, (s, c) => s.decideVote(c), (s, c) => s.decideVote(c))
+        }
+        // 自投票禁止: 自分に投票した場合はランダムに変更
+        if (target === voter.seat) {
+          const aliveOthers = alivePlayers(state).filter(p => p.seat !== voter.seat)
+          target = aliveOthers.length > 0 ? aliveOthers[Math.floor(rng.next() * aliveOthers.length)].seat : voter.seat
         }
         votes.set(voter.seat, target)
         events.push({ type: 'vote', voter: voter.seat, target })

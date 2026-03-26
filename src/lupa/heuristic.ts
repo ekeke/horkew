@@ -689,9 +689,10 @@ function decideVillageVote(ctx: DecisionContext): number {
   const scores = buildSuspicionScore(ctx.publicEvents, ctx.retarPossibilities, ctx.alivePlayers, ctx.mySeat)
   const candidates = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
 
-  // 再投票候補制限
+  // 再投票候補制限（自分を除外）
   if (ctx.revoteCandidates && ctx.revoteCandidates.length > 0) {
-    return pickHighestSuspicion(scores, ctx.revoteCandidates, ctx.rng)
+    const revoteCands = ctx.revoteCandidates.filter(s => s !== ctx.mySeat)
+    if (revoteCands.length > 0) return pickHighestSuspicion(scores, revoteCands, ctx.rng)
   }
 
   return pickHighestSuspicion(scores, candidates, ctx.rng)
