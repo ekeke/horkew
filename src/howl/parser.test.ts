@@ -768,3 +768,44 @@ Bob　Dave`
     assert.strictEqual(asserts.length, 1)
   })
 })
+
+describe('plain villager CO (素村CO)', () => {
+  function findAsserts(text: string) {
+    return parse(text).statements
+      .filter((s: any) => s.type === 'assert')
+      .map((s: any) => ({ actor: s.actor, assertions: s.assertions }))
+  }
+
+  test('素村CO denies all village power roles', () => {
+    const text = `++Alice,Bob,Charlie
+噛み Alice
+Bob　素村CO`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts.length, 1)
+    const a = asserts[0].assertions[0]
+    assert.strictEqual(a.negative, true)
+    assert.deepStrictEqual(a.roles.sort(), ['bodyguard', 'mason', 'medium', 'nekomata', 'seer'])
+  })
+
+  test('素村人CO also works', () => {
+    const text = `++Alice,Bob,Charlie
+噛み Alice
+Bob　素村人CO`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts.length, 1)
+    const a = asserts[0].assertions[0]
+    assert.strictEqual(a.negative, true)
+    assert.deepStrictEqual(a.roles.sort(), ['bodyguard', 'mason', 'medium', 'nekomata', 'seer'])
+  })
+
+  test('村人CO is nonVillage (not plain villager)', () => {
+    const text = `++Alice,Bob,Charlie
+噛み Alice
+Bob　村人CO`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts.length, 1)
+    const a = asserts[0].assertions[0]
+    assert.deepStrictEqual(a.roles, ['nonVillage'])
+    assert.strictEqual(a.negative, undefined)
+  })
+})

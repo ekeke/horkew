@@ -386,8 +386,14 @@ const guardHistoryTokenRegex = new RegExp(
   `^(?:(?<day>${V.dayNumber})${V.dayUnit})?(?:${V.optionalSpace})?(?<target>.+)$`
 )
 
+const allVillageRoles: Role[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+
 function extractRoles(claim: string): { roles: Role[], negative: boolean } {
   const negative = new RegExp(`^${V.denial}`).test(claim)
+  // 素村CO = deny all village power roles
+  if (new RegExp(V.plainVillager).test(claim)) {
+    return { roles: allVillageRoles, negative: true }
+  }
   const roleMap: [RegExp, Role][] = [
     [new RegExp(V.seer), 'seer'],
     [new RegExp(V.medium), 'medium'],

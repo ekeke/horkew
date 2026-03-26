@@ -45,8 +45,9 @@ export const werewolf    = `(?:人?狼)`
 export const possessed   = `(?:狂人?)`
 export const fanatic     = `(?:狂信者?|信)`
 export const werehamster = `(?:妖?狐)`
-export const immoralist  = `(?:背(?:徳者?)?)`
-export const anyRole     = `(?:${villager}|${seer}|${medium}|${bodyguard}|${mason}|${nekomata}|${werewolf}|${possessed}|${fanatic}|${werehamster}|${immoralist})`
+export const immoralist    = `(?:背(?:徳者?)?)`
+export const plainVillager = `(?:素村人?)`
+export const anyRole       = `(?:${plainVillager}|${villager}|${seer}|${medium}|${bodyguard}|${mason}|${nekomata}|${werewolf}|${possessed}|${fanatic}|${werehamster}|${immoralist})`
 
 // ********************************* Alignments
 
