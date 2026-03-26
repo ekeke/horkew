@@ -11,6 +11,7 @@
     "bench:hati": "node --experimental-strip-types src/hati/bench.ts",
     "lupa": "node --experimental-strip-types src/lupa/cli.ts",
     "verify:retar": "node --experimental-strip-types src/lupa/verify.ts",
+    "verify:hati": "node --experimental-strip-types src/hati/verify.ts",
     "train": "node --experimental-strip-types src/fenrir/src/cli.ts",
     "dev": "vite",
     "build:demo": "vite build",
