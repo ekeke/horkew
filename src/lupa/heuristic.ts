@@ -844,16 +844,17 @@ function decideWerewolfNight(ctx: DecisionContext): NightAction {
   return { type: 'attack', target: pickAttackTarget(candidates, ctx.rng) }
 }
 
+/** 襲撃先選択: COベースで優先度判定（狼は真の役職を知らない） */
 function pickAttackTarget(candidates: PlayerState[], rng: Rng): number {
-  // 優先: 占い > 霊能 > 共有 > 村人。猫又回避
+  // 優先: 占いCO > 霊能CO > 共有CO。猫又CO回避
   const priorities: SystemRole[] = ['seer', 'medium', 'mason']
   for (const role of priorities) {
-    const targets = candidates.filter(p => p.role === role)
+    const targets = candidates.filter(p => p.claimedRole === role)
     if (targets.length > 0) return rng.pick(targets).seat
   }
-  // 猫又以外
-  const nonNeko = candidates.filter(p => p.role !== 'nekomata')
-  if (nonNeko.length > 0) return rng.pick(nonNeko).seat
+  // 猫又CO以外
+  const nonNekoCO = candidates.filter(p => p.claimedRole !== 'nekomata')
+  if (nonNekoCO.length > 0) return rng.pick(nonNekoCO).seat
   return rng.pick(candidates).seat
 }
 
@@ -997,13 +998,11 @@ function generateStrategicFakeResult(
   // 非狼に黒出し — 真占いに黒が最優先
   const nonWolves = candidates.filter(p => !wolfSeats.has(p.seat))
   if (nonWolves.length > 0) {
-    const trueSeer = nonWolves.find(p => p.role === 'seer')
-    if (trueSeer && rng.next() < 0.6) {
-      if (trySetFakeResult(player, night, trueSeer.seat, 'wolf', ctx)) return
-    }
-    const hamster = nonWolves.find(p => p.role === 'werehamster')
-    if (hamster && rng.next() < 0.2) {
-      if (trySetFakeResult(player, night, hamster.seat, 'wolf', ctx)) return
+    // 対抗占いCO者（非狼）に黒出し優先
+    const claims = collectClaimsFromEvents(ctx.publicEvents)
+    const rivalSeers = nonWolves.filter(p => claims.get(p.seat) === 'seer')
+    if (rivalSeers.length > 0 && rng.next() < 0.6) {
+      if (trySetFakeResult(player, night, rng.pick(rivalSeers).seat, 'wolf', ctx)) return
     }
     // ランダム黒出し（詰まれないものを探す）
     const shuffled = [...nonWolves].sort(() => rng.next() - 0.5)
@@ -1041,45 +1040,60 @@ function reportFakeMediumResult(lastExecutedSeat: number | null, rng: Rng): DayC
  * 狼視点の飽和・狐判定
  * 飽和間近（あと1処刑で狼勝ちだが狐生存で狐勝ちになる）かを返す
  */
+/**
+ * 狼視点の飽和・狐判定
+ *
+ * 狼は狐の位置を知らない。Retarの可能性から狐候補を推測する。
+ * 狐候補 = Retarで werehamster が可能性に残っている非狼の生存者。
+ */
 function detectFoxThreat(ctx: DecisionContext): {
   nearSaturation: boolean
   foxCandidates: number[]
 } {
-  const state = ctx.gameState
   const alive = ctx.alivePlayers
   const wolfSeats = new Set([ctx.mySeat, ...(ctx.wolfTeammates ?? [])])
   const aliveWolfCount = alive.filter(s => wolfSeats.has(s)).length
 
-  // 狐候補: 狼視点で狐の位置を知っている（gameState参照OK）
-  const foxSeats = state.players
-    .filter(p => p.alive && p.role === 'werehamster')
-    .map(p => p.seat)
+  // 狐候補: Retarでwerehamster可能性が残っている非狼
+  const foxCandidates: number[] = []
+  if (ctx.retarPossibilities) {
+    for (const s of alive) {
+      if (wolfSeats.has(s)) continue
+      const roles = ctx.retarPossibilities.get(s)
+      if (roles && roles.has('werehamster')) foxCandidates.push(s)
+    }
+  }
 
-  // 飽和判定: 次の処刑で非狼が減ったとき狼数≧残りになるか
-  // 現在の非狼非狐数
-  const nonWolfNonFox = alive.length - aliveWolfCount - foxSeats.length
-  // あと1人村人を処刑すると飽和: aliveWolfCount >= (nonWolfNonFox - 1)
-  const nearSaturation = aliveWolfCount >= nonWolfNonFox - 1 && foxSeats.length > 0
+  // 飽和判定: 狐候補がいる & あと1処刑で飽和
+  // 狐が何人いるかは不明なので、候補がいるかどうかで判断
+  const hasFoxThreat = foxCandidates.length > 0
+  const nonWolfCount = alive.length - aliveWolfCount
+  const nearSaturation = aliveWolfCount >= nonWolfCount - 1 && hasFoxThreat
 
-  return { nearSaturation, foxCandidates: foxSeats }
+  return { nearSaturation, foxCandidates }
 }
 
 function decideWerewolfVote(ctx: DecisionContext): number {
-  const { gameState: state, rng, alivePlayers: alive, mySeat } = ctx
+  const { rng, alivePlayers: alive, mySeat } = ctx
   const wolfSeats = new Set([mySeat, ...(ctx.wolfTeammates ?? [])])
   const candidates = alive.filter(s => s !== mySeat && !wolfSeats.has(s))
   if (candidates.length === 0) return alive.find(s => s !== mySeat) ?? mySeat
 
-  // 狐脅威判定: 飽和間近で狐が生きていたら狐を最優先処刑
+  // 狐脅威判定: 飽和間近で狐候補(Retar推定)がいたら最優先処刑
   const { nearSaturation, foxCandidates } = detectFoxThreat(ctx)
   if (nearSaturation && foxCandidates.length > 0) {
     const aliveFox = foxCandidates.filter(s => candidates.includes(s))
     if (aliveFox.length > 0) return rng.pick(aliveFox.map(s => ({ seat: s }))).seat
   }
 
-  // PP判定（生存奇数 & 狐非生存 & 狂信者が特定済み）
+  // PP判定（生存奇数 & 狐非生存(Retar推定) & 狂信者が特定済み）
   const aliveWolfCount = alive.filter(s => wolfSeats.has(s)).length
-  const hamsterCount = alivePlayers(state).filter(p => p.alive && p.role === 'werehamster').length
+  // 狐生存判定: Retarでwerehamster可能性が残る非狼がいるか
+  const foxMaybeAlive = ctx.retarPossibilities && alive.some(s => {
+    if (wolfSeats.has(s)) return false
+    const roles = ctx.retarPossibilities!.get(s)
+    return roles && roles.has('werehamster')
+  })
   // 狂信者特定: fanatic_COシグナル or Retarで確定
   const fanaticCOed = ctx.publicEvents.some(e =>
     e.type === 'signal' && e.signal.type === 'fanatic_co' && alive.includes(e.actor)
@@ -1091,13 +1105,10 @@ function decideWerewolfVote(ctx: DecisionContext): number {
   })
   const fanaticIdentified = fanaticCOed || fanaticConfirmedByRetar
   const wolfSideCount = aliveWolfCount + (fanaticIdentified ? 1 : 0)
-  const nonWolfSide = alive.length - wolfSideCount - hamsterCount
-  if (alive.length % 2 === 1 && fanaticIdentified && wolfSideCount >= nonWolfSide && hamsterCount === 0) {
-    const villagers = candidates.filter(s => {
-      const p = state.players.find(pp => pp.seat === s)!
-      return !isWerewolfAligned(p.role) && p.role !== 'werehamster' && p.role !== 'immoralist'
-    })
-    if (villagers.length > 0) return rng.pick(villagers.map(s => ({ seat: s }))).seat
+  const nonWolfSide = alive.length - wolfSideCount
+  if (alive.length % 2 === 1 && fanaticIdentified && wolfSideCount >= nonWolfSide && !foxMaybeAlive) {
+    // PP: 非狼・非狂信を処刑
+    if (candidates.length > 0) return rng.pick(candidates.map(s => ({ seat: s }))).seat
   }
 
   // CO役職に応じた投票（自分の主張と一貫性を持たせる）
@@ -1121,7 +1132,7 @@ function decideWerewolfVote(ctx: DecisionContext): number {
 }
 
 function decideWerewolfComm(ctx: DecisionContext): CommunicationAction {
-  const { gameState: state, rng, alivePlayers: alive, mySeat } = ctx
+  const { rng, alivePlayers: alive, mySeat } = ctx
   const wolfSeats = new Set([mySeat, ...(ctx.wolfTeammates ?? [])])
   const others = alive.filter(s => s !== mySeat)
   const proposals: number[] = []
@@ -1136,9 +1147,13 @@ function decideWerewolfComm(ctx: DecisionContext): CommunicationAction {
     return { signal: { type: 'accuse_fox', target: rng.pick(foxCandidates.map(s => ({ seat: s }))).seat }, proposals }
   }
 
-  // PP判定 → werewolf_co（狐がいないとき）
+  // PP判定 → werewolf_co（狐非生存(Retar推定)のとき）
   const aliveWolfCount = alive.filter(s => wolfSeats.has(s)).length
-  const hamsterCount = alivePlayers(state).filter(p => p.alive && p.role === 'werehamster').length
+  const foxMaybeAlive = ctx.retarPossibilities && alive.some(s => {
+    if (wolfSeats.has(s)) return false
+    const roles = ctx.retarPossibilities!.get(s)
+    return roles && roles.has('werehamster')
+  })
   const fanaticCOed = ctx.publicEvents.some(e =>
     e.type === 'signal' && e.signal.type === 'fanatic_co' && alive.includes(e.actor)
   )
@@ -1149,8 +1164,8 @@ function decideWerewolfComm(ctx: DecisionContext): CommunicationAction {
   })
   const fanaticIdentified = fanaticCOed || fanaticConfirmedByRetar
   const wolfSideCount = aliveWolfCount + (fanaticIdentified ? 1 : 0)
-  const nonWolfSide = alive.length - wolfSideCount - hamsterCount
-  if (alive.length % 2 === 1 && fanaticIdentified && wolfSideCount >= nonWolfSide && hamsterCount === 0 && rng.next() < 0.9) {
+  const nonWolfSide = alive.length - wolfSideCount
+  if (alive.length % 2 === 1 && fanaticIdentified && wolfSideCount >= nonWolfSide && !foxMaybeAlive && rng.next() < 0.9) {
     return { signal: { type: 'werewolf_co' }, proposals }
   }
 
