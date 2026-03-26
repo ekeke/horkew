@@ -837,6 +837,20 @@ function decideWerewolfClaim(ctx: DecisionContext): DayClaim {
   }
   if (myPlayer.claimedRole !== null) return { type: 'none' }
 
+  // 相方狼が共有COしていたら、自分も共有COを返す（相互CO）
+  if (ctx.wolfTeammates) {
+    const claims = collectClaimsFromEvents(ctx.publicEvents)
+    for (const teammate of ctx.wolfTeammates) {
+      if (claims.get(teammate) === 'mason') {
+        // 相方狼が共有COで自分をパートナーに指定しているか確認
+        const masonEvent = ctx.publicEvents.find(
+          e => e.type === 'mason_claim' && e.actor === teammate && e.partner === ctx.mySeat
+        )
+        if (masonEvent) return { type: 'mason_co', partner: teammate }
+      }
+    }
+  }
+
   // 共有騙り (1%): 狼2匹でペアを組む
   if (rng.next() < 0.01 && ctx.wolfTeammates && ctx.wolfTeammates.length > 0) {
     const aliveSet = new Set(ctx.alivePlayers)
