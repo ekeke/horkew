@@ -63,6 +63,40 @@ export function analyzeFromEvents(
 }
 
 /**
+ * 偽結果を含むイベント列がRetarで矛盾しないか検証。
+ * 矛盾（解なし or 可能性が空の席あり）→ false、整合 → true。
+ */
+export function checkRetarConsistency(
+  events: GameEvent[],
+  state: GameState,
+  config: LupaConfig,
+  assumptions?: Map<number, SystemRole>,
+): boolean {
+  const howl = formatHowl(events, state, config)
+  const { meta, statements } = parse(howl)
+  const unknowns = statements.filter(s => s.type === 'unknown')
+  if (unknowns.length > 0) return true // パース失敗時は楽観的に通す
+
+  const { vs, setup } = buildVillageStatus(statements, meta)
+
+  const options = assumptions && assumptions.size > 0
+    ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: config.hasFirstGhost ?? false, assumptions }
+    : config.hasFirstGhost
+      ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
+      : DEFAULT_RETAR_OPTIONS
+
+  const retar = new VillageRetar(vs, setup, options)
+  const result = retar.analyzeSafe()
+
+  if (result.error || !result.result) return false
+
+  for (const [, roles] of result.result) {
+    if (roles.size === 0) return false
+  }
+  return true
+}
+
+/**
  * Hati詰み探索をイベント列から実行
  *
  * analyzeFromEventsと同じHowl→parse→buildVillageStatusパイプラインを使い、

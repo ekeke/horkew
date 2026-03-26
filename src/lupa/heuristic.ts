@@ -15,7 +15,7 @@ import type { Proposal, LeadershipResponse } from './leadership.ts'
 import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from './strategy.ts'
 import { alivePlayers, alivePlayersExcept, getMediumResult, isWerewolfAligned } from './roles.ts'
 import type { Rng } from './random.ts'
-import { searchTsumiFromEvents } from './retar-browser-bridge.ts'
+import { searchTsumiFromEvents, checkRetarConsistency } from './retar-browser-bridge.ts'
 import type { VillageAction } from '../hati/types.ts'
 
 // ============================================================
@@ -878,7 +878,7 @@ function decideWerewolfClaim(ctx: DecisionContext): DayClaim {
     return reportFakeSeerResult(state, myPlayer, day, ctx)
   }
   if (myPlayer.claimedRole === 'medium') {
-    return reportFakeMediumResult(lastExecutedSeat, rng)
+    return reportFakeMediumResult(lastExecutedSeat, rng, ctx)
   }
   if (myPlayer.claimedRole === 'mason') {
     return { type: 'none' }
@@ -914,6 +914,7 @@ function decideWerewolfClaim(ctx: DecisionContext): DayClaim {
     if (r < 0.55) {
       // 占い騙り (55%)
       for (let n = 0; n < day; n++) generateStrategicFakeResult(state, myPlayer, n, ctx)
+      revalidateFakeDivineHistory(myPlayer, ctx)
       const results = Array.from(myPlayer.fakeDivineHistory.entries())
         .sort((a, b) => a[0] - b[0])
         .map(([, v]) => ({ target: v.target, result: v.result }))
@@ -940,6 +941,7 @@ function decideWerewolfClaim(ctx: DecisionContext): DayClaim {
   // 非担当狼: 15%でCO（占い騙り）
   if (rng.next() < 0.15) {
     for (let n = 0; n < day; n++) generateStrategicFakeResult(state, myPlayer, n, ctx)
+    revalidateFakeDivineHistory(myPlayer, ctx)
     const results = Array.from(myPlayer.fakeDivineHistory.entries())
       .sort((a, b) => a[0] - b[0])
       .map(([, v]) => ({ target: v.target, result: v.result }))
@@ -956,26 +958,86 @@ function decideWerewolfClaim(ctx: DecisionContext): DayClaim {
 function trySetFakeResult(
   player: PlayerState, night: number, target: number, result: EnumSpecies, ctx: DecisionContext,
 ): boolean {
-  // 8人超ならチェックなしで受理
-  if (ctx.alivePlayers.length > 8) {
-    player.fakeDivineHistory.set(night, { target, result })
-    return true
-  }
-  // 仮セットしてHatiチェック
   player.fakeDivineHistory.set(night, { target, result })
-  const simEvents: GameEvent[] = [...ctx.publicEvents, {
-    type: 'seer_result' as const,
-    actor: ctx.mySeat,
-    target,
-    result,
-  }]
-  const tsumi = tryTsumiWithEvents(simEvents, ctx)
-  if (tsumi) {
-    // 詰まれる → ロールバック
+
+  // 安価な黒出し数チェック: 自分の黒出し先 + 自分が黒出ししていない死亡狼 > 狼数 → 矛盾
+  const state = ctx.gameState
+  const wolfTotal = state.players.filter(p => p.role === 'werewolf').length
+  const myBlackTargets = new Set<number>()
+  for (const [, d] of player.fakeDivineHistory) {
+    if (d.result === 'wolf') myBlackTargets.add(d.target)
+  }
+  const deadWolvesNotInBlacks = state.players.filter(
+    p => p.role === 'werewolf' && !p.alive && !myBlackTargets.has(p.seat)
+  ).length
+  if (myBlackTargets.size + deadWolvesNotInBlacks > wolfTotal) {
     player.fakeDivineHistory.delete(night)
     return false
   }
+
+  // publicEventsに既出の自分のseer_resultターゲットを収集
+  const publishedTargets = new Set<number>()
+  for (const e of ctx.publicEvents) {
+    if (e.type === 'seer_result' && e.actor === ctx.mySeat) publishedTargets.add(e.target)
+  }
+
+  // 未公開の過去偽結果 + 今回の結果をsimEventsに追加
+  const simEvents: GameEvent[] = [...ctx.publicEvents]
+  for (const [, d] of player.fakeDivineHistory) {
+    if (!publishedTargets.has(d.target)) {
+      simEvents.push({ type: 'seer_result' as const, actor: ctx.mySeat, target: d.target, result: d.result })
+    }
+  }
+
+  // Retar整合性チェック（assumptions: 自分が真占い + 黒出し先がwerewolf）
+  const assumptions = new Map<number, SystemRole>([[ ctx.mySeat, 'seer' ]])
+  for (const [, d] of player.fakeDivineHistory) {
+    if (d.result === 'wolf') assumptions.set(d.target, 'werewolf')
+  }
+  const roleCount = new Map<SystemRole, number>()
+  for (const p of state.players) {
+    roleCount.set(p.role, (roleCount.get(p.role) ?? 0) + 1)
+  }
+  const minimalConfig = { roles: roleCount, hasFirstGhost: state.players.some(p => !p.alive && p.seat > 0) }
+  if (!checkRetarConsistency(simEvents, state, minimalConfig as any, assumptions)) {
+    player.fakeDivineHistory.delete(night)
+    return false
+  }
+
+  // 8人以下なら追加でHati詰みチェック
+  if (ctx.alivePlayers.length <= 8) {
+    const tsumi = tryTsumiWithEvents(simEvents, ctx)
+    if (tsumi) {
+      player.fakeDivineHistory.delete(night)
+      return false
+    }
+  }
   return true
+}
+
+/**
+ * CO時に過去の偽結果を現在のpublicEventsで再検証。
+ * 当時は通ったが状況変化（共有CO等）で矛盾する結果を白に差し替える。
+ */
+function revalidateFakeDivineHistory(player: PlayerState, ctx: DecisionContext): void {
+  const entries = Array.from(player.fakeDivineHistory.entries())
+    .sort((a, b) => a[0] - b[0])
+  // 一度クリアして順番に再追加
+  player.fakeDivineHistory.clear()
+  for (const [night, d] of entries) {
+    if (!trySetFakeResult(player, night, d.target, d.result, ctx)) {
+      // 矛盾 → 白に差し替え
+      if (d.result === 'wolf') {
+        if (!trySetFakeResult(player, night, d.target, 'human', ctx)) {
+          // 白も矛盾 → チェックなしで白出し（フォールバック）
+          player.fakeDivineHistory.set(night, { target: d.target, result: 'human' })
+        }
+      } else {
+        // 白が矛盾 → チェックなしでそのまま（稀）
+        player.fakeDivineHistory.set(night, { target: d.target, result: d.result })
+      }
+    }
+  }
 }
 
 function generateStrategicFakeResult(
@@ -1033,10 +1095,33 @@ function reportFakeSeerResult(
   return { type: 'seer_result', target: latest.target, result: latest.result }
 }
 
-function reportFakeMediumResult(lastExecutedSeat: number | null, rng: Rng): DayClaim {
+function reportFakeMediumResult(lastExecutedSeat: number | null, rng: Rng, ctx: DecisionContext): DayClaim {
   if (lastExecutedSeat === null) return { type: 'none' }
-  const result: EnumSpecies = rng.next() < 0.5 ? 'human' : 'wolf'
-  return { type: 'medium_result', result }
+  const preferred: EnumSpecies = rng.next() < 0.5 ? 'human' : 'wolf'
+
+  // Retar整合性チェック
+  const state = ctx.gameState
+  const roleCount = new Map<SystemRole, number>()
+  for (const p of state.players) {
+    roleCount.set(p.role, (roleCount.get(p.role) ?? 0) + 1)
+  }
+  const minimalConfig = { roles: roleCount, hasFirstGhost: state.players.some(p => !p.alive && p.seat > 0) }
+  const simEvents: GameEvent[] = [...ctx.publicEvents, {
+    type: 'medium_result' as const,
+    actor: ctx.mySeat,
+    result: preferred,
+  }]
+  if (checkRetarConsistency(simEvents, state, minimalConfig as any)) {
+    return { type: 'medium_result', result: preferred }
+  }
+  // 矛盾 → 逆の結果を試す
+  const alt: EnumSpecies = preferred === 'wolf' ? 'human' : 'wolf'
+  simEvents[simEvents.length - 1] = { type: 'medium_result' as const, actor: ctx.mySeat, result: alt }
+  if (checkRetarConsistency(simEvents, state, minimalConfig as any)) {
+    return { type: 'medium_result', result: alt }
+  }
+  // 両方矛盾 → フォールバック
+  return { type: 'medium_result', result: preferred }
 }
 
 /**
@@ -1266,7 +1351,7 @@ function decideFanaticClaim(ctx: DecisionContext): DayClaim {
     return reportFanaticSeerResult(state, myPlayer, day, ctx)
   }
   if (myPlayer.claimedRole === 'medium') {
-    return reportFakeMediumResult(lastExecutedSeat, rng)
+    return reportFakeMediumResult(lastExecutedSeat, rng, ctx)
   }
   if (myPlayer.claimedRole !== null) return { type: 'none' }
 
@@ -1278,6 +1363,7 @@ function decideFanaticClaim(ctx: DecisionContext): DayClaim {
   if (r < 0.50) {
     // 占い騙り (50%)
     for (let n = 0; n < day; n++) generateFanaticFakeResult(state, myPlayer, n, ctx)
+    revalidateFakeDivineHistory(myPlayer, ctx)
     const results = Array.from(myPlayer.fakeDivineHistory.entries())
       .sort((a, b) => a[0] - b[0])
       .map(([, v]) => ({ target: v.target, result: v.result }))
@@ -1351,15 +1437,26 @@ function generateFanaticFakeResult(
     target = pickFanaticDefaultTarget(candidates, retarP, rng)
   }
 
-  // 結果を操作
+  // 結果を操作（Retar整合性チェック付き）
   if (wolves.has(target)) {
     // 狼 → 白出し
-    player.fakeDivineHistory.set(night, { target, result: 'human' })
+    if (trySetFakeResult(player, night, target, 'human', ctx)) return
   } else {
     // 非狼 → 50%で黒出し
-    const result: EnumSpecies = rng.next() < 0.5 ? 'wolf' : 'human'
-    player.fakeDivineHistory.set(night, { target, result })
+    const preferred: EnumSpecies = rng.next() < 0.5 ? 'wolf' : 'human'
+    if (trySetFakeResult(player, night, target, preferred, ctx)) return
+    // 矛盾 → 逆の結果を試す
+    const alt: EnumSpecies = preferred === 'wolf' ? 'human' : 'wolf'
+    if (trySetFakeResult(player, night, target, alt, ctx)) return
   }
+
+  // 全候補で試す（フォールバック）
+  const shuffled = [...candidates].filter(s => s !== target).sort(() => rng.next() - 0.5)
+  for (const t of shuffled) {
+    if (trySetFakeResult(player, night, t, 'human', ctx)) return
+  }
+  // 最終フォールバック（チェックなし）
+  player.fakeDivineHistory.set(night, { target, result: 'human' })
 }
 
 function pickFanaticDefaultTarget(
@@ -1467,7 +1564,7 @@ function decideHamsterClaim(ctx: DecisionContext): DayClaim {
     return reportHamsterSeerResult(state, myPlayer, day, ctx)
   }
   if (myPlayer.claimedRole === 'medium') {
-    return reportFakeMediumResult(lastExecutedSeat, rng)
+    return reportFakeMediumResult(lastExecutedSeat, rng, ctx)
   }
   if (myPlayer.claimedRole !== null) return { type: 'none' }
 
@@ -1480,6 +1577,7 @@ function decideHamsterClaim(ctx: DecisionContext): DayClaim {
   if (r < 0.40) {
     // 占い騙り (40%) — 呪殺されない（自分が狐なので）利点を活かす
     for (let n = 0; n < day; n++) generateHamsterFakeResult(state, myPlayer, n, ctx)
+    revalidateFakeDivineHistory(myPlayer, ctx)
     const results = Array.from(myPlayer.fakeDivineHistory.entries())
       .sort((a, b) => a[0] - b[0])
       .map(([, v]) => ({ target: v.target, result: v.result }))
@@ -1595,7 +1693,7 @@ function decideImmoralistClaim(ctx: DecisionContext): DayClaim {
     return reportImmoralistSeerResult(state, myPlayer, day, ctx)
   }
   if (myPlayer.claimedRole === 'medium') {
-    return reportFakeMediumResult(lastExecutedSeat, rng)
+    return reportFakeMediumResult(lastExecutedSeat, rng, ctx)
   }
   if (myPlayer.claimedRole !== null) return { type: 'none' }
 
@@ -1610,6 +1708,7 @@ function decideImmoralistClaim(ctx: DecisionContext): DayClaim {
     for (let n = 0; n < day; n++) {
       generateImmoralistFakeResult(state, myPlayer, n, ctx)
     }
+    revalidateFakeDivineHistory(myPlayer, ctx)
     const results = Array.from(myPlayer.fakeDivineHistory.entries())
       .sort((a, b) => a[0] - b[0])
       .map(([, v]) => ({ target: v.target, result: v.result }))
@@ -1652,30 +1751,28 @@ function generateImmoralistFakeResult(
   )
   const trueSeerLikelyDead = aliveSeerClaimers.length === 0
 
-  // 狐への結果
+  // 狐への結果（Retar整合性チェック付き）
   const hamsterCandidate = candidates.find(p => p.seat === hamsterSeat)
   if (hamsterCandidate) {
     if (trueSeerLikelyDead && rng.next() < 0.3) {
       // 真占い死亡 → 狐に黒出し（村が狼と誤認→他を先に吊る）
-      player.fakeDivineHistory.set(night, { target: hamsterCandidate.seat, result: 'wolf' })
-      return
+      if (trySetFakeResult(player, night, hamsterCandidate.seat, 'wolf', ctx)) return
     }
     // 基本: 狐に白出し（狐の疑惑を下げる）
-    player.fakeDivineHistory.set(night, { target: hamsterCandidate.seat, result: 'human' })
-    return
+    if (trySetFakeResult(player, night, hamsterCandidate.seat, 'human', ctx)) return
   }
 
   // 狐以外: ランダムに黒出し（自分の疑惑を上げ、破綻して先に吊られる）
   const nonHamster = candidates.filter(p => p.seat !== hamsterSeat)
   if (nonHamster.length > 0 && rng.next() < 0.5) {
-    player.fakeDivineHistory.set(night, { target: rng.pick(nonHamster).seat, result: 'wolf' })
-    return
+    const t = rng.pick(nonHamster)
+    if (trySetFakeResult(player, night, t.seat, 'wolf', ctx)) return
   }
 
   // 白出し
   if (nonHamster.length > 0) {
-    player.fakeDivineHistory.set(night, { target: rng.pick(nonHamster).seat, result: 'human' })
-    return
+    const t = rng.pick(nonHamster)
+    if (trySetFakeResult(player, night, t.seat, 'human', ctx)) return
   }
   player.fakeDivineHistory.set(night, { target: rng.pick(candidates).seat, result: 'human' })
 }
