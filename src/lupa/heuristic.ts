@@ -35,6 +35,15 @@ const W = {
   CO_BUSTED: 200,            // CO役職がRetarで否定 = 破綻
 }
 
+// CO役職の処刑優先度（高い=吊りやすい、低い=吊りにくい）
+const CO_EXECUTION_SCORE: Record<string, number> = {
+  mason: 10,       // 共有: 吊って良い（確定白なので本来吊らないが、偽共有は吊る）
+  medium: 5,       // 霊能
+  seer: 0,         // 占い
+  bodyguard: 0,    // 狩人
+  nekomata: -30,   // 猫又: なるべく後に（道連れリスク）
+}
+
 
 // ============================================================
 // ユーティリティ: 公開情報抽出
@@ -157,6 +166,12 @@ function buildSuspicionScore(
 
     // CO破綻（RetarでCO役職の可能性が消えている）
     if (bustedCOs.has(seat)) score += W.CO_BUSTED
+
+    // CO役職の処刑優先度（猫又COは後回し等）
+    const claimed = claims.get(seat)
+    if (claimed && claimed in CO_EXECUTION_SCORE) {
+      score += CO_EXECUTION_SCORE[claimed]
+    }
 
     // 複数占いCO
     if (seerClaimers.has(seat) && seerClaimers.size >= 2) score += W.MULTI_SEER_CLAIMER
@@ -760,32 +775,20 @@ function decideVillagerComm(ctx: DecisionContext): CommunicationAction {
     return { signal: { type: 'vote_intent', target }, proposals }
   }
 
-  // 処刑提案: 黒出し先
-  const blacks = collectBlackTargets(publicEvents)
-  const aliveBlacks = others.filter(s => blacks.has(s))
-  for (const s of aliveBlacks) proposals.push(s)
-
-  // ローラー提案
-  const aliveSet = new Set(alive)
-  if (isRollerSituation(publicEvents, 'seer', aliveSet)) {
-    const claims = collectClaimsFromEvents(publicEvents)
-    for (const [seat, role] of claims) {
-      if (role === 'seer' && aliveSet.has(seat) && !proposals.includes(seat)) proposals.push(seat)
-    }
-  }
-
-  // シグナル
+  // 処刑提案: 疑惑スコア最大の1人に絞る（票分散防止）
   const scores = buildSuspicionScore(publicEvents, ctx.retarPossibilities, alive, mySeat)
   const mostSuspicious = pickHighestSuspicion(scores, others, rng)
+  proposals.push(mostSuspicious)
 
   // demand_wolf_co (Day 3+)
   if (ctx.day > 3 && rng.next() < 0.1) {
     return { signal: { type: 'demand_wolf_co' }, proposals }
   }
 
-  // accuse_wolf (黒先がいれば)
-  if (aliveBlacks.length > 0 && rng.next() < 0.3) {
-    return { signal: { type: 'accuse_wolf', target: rng.pick(aliveBlacks.map(s => ({ seat: s }))).seat }, proposals }
+  // accuse_wolf (最疑惑が黒出し先なら)
+  const blacks = collectBlackTargets(publicEvents)
+  if (blacks.has(mostSuspicious) && rng.next() < 0.3) {
+    return { signal: { type: 'accuse_wolf', target: mostSuspicious }, proposals }
   }
 
   // suspicion (最疑惑)
