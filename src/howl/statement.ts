@@ -373,6 +373,19 @@ const assertRegex = new RegExp([
 
 const historyRegex = new RegExp(historyRegexText, 'g')
 
+// Bodyguard-specific: claim required, raw history captured as text (allows bare target names)
+const bodyguardAssertRegex = new RegExp([
+  `^${V.optionalSpace}(?<actor>${V.possibleName})${V.delimiter}${V.optionalSpace}`,
+  `(?<claim>(?:${V.denial})?(?:${V.bodyguard})${V.claim})`,
+  `(?:${V.optionalSpace}(?<rawHistory>.+?))?`,
+  `${V.optionalSpace}$`
+].join(''))
+
+const guardSuffixRegex = new RegExp(`${V.guard}$`)
+const guardHistoryTokenRegex = new RegExp(
+  `^(?:(?<day>${V.dayNumber})${V.dayUnit})?(?:${V.optionalSpace})?(?<target>.+)$`
+)
+
 function extractRoles(claim: string): { roles: Role[], negative: boolean } {
   const negative = new RegExp(`^${V.denial}`).test(claim)
   const roleMap: [RegExp, Role][] = [
@@ -391,31 +404,61 @@ function extractRoles(claim: string): { roles: Role[], negative: boolean } {
 
 export function parseAssertStatement(text: string, line: number): AssertStatement | null {
   const match = assertRegex.exec(text)
-  if (!match || !match.groups || !match.groups.actor) return null
-  const actor = match.groups.actor
-  const claim = match.groups?.claim ?? undefined
-  const assertions: Assertion[] = []
+  if (match && match.groups?.actor) {
+    const actor = match.groups.actor
+    const claim = match.groups?.claim ?? undefined
+    const assertions: Assertion[] = []
 
-  if (claim) {
-    const { roles, negative } = extractRoles(claim)
-    const assertion: Assertion = { player: actor, roles }
-    if (negative) assertion.negative = true
-    assertions.push(assertion)
+    if (claim) {
+      const { roles, negative } = extractRoles(claim)
+      const assertion: Assertion = { player: actor, roles }
+      if (negative) assertion.negative = true
+      assertions.push(assertion)
+    }
+
+    const history = match.groups?.history ?? undefined
+    if (history) {
+      for (const m of history.matchAll(historyRegex)) {
+        if (!m.groups) continue
+        const target = m.groups.target ?? undefined
+        const actionText = m.groups.action
+        const assertion: Assertion = { player: actor }
+        if (target) assertion.target = target
+        if (new RegExp(V.guard).test(actionText)) {
+          assertion.action = 'guard'
+        } else {
+          assertion.result = new RegExp(V.isWolf).test(actionText) ? 'isWolf' : 'isHuman'
+        }
+        assertions.push(assertion)
+      }
+    }
+
+    return { type: 'assert', line, actor, assertions }
   }
 
-  const history = match.groups?.history ?? undefined
-  if (history) {
-    for (const m of history.matchAll(historyRegex)) {
-      if (!m.groups) continue
-      const target = m.groups.target ?? undefined
-      const actionText = m.groups.action
-      const assertion: Assertion = { player: actor }
-      if (target) assertion.target = target
-      if (new RegExp(V.guard).test(actionText)) {
-        assertion.action = 'guard'
-      } else {
-        assertion.result = new RegExp(V.isWolf).test(actionText) ? 'isWolf' : 'isHuman'
-      }
+  // Fallback: bodyguard claim with bare target names (護衛 keyword optional)
+  const bgMatch = bodyguardAssertRegex.exec(text)
+  if (!bgMatch || !bgMatch.groups?.actor) return null
+
+  const actor = bgMatch.groups.actor
+  const claim = bgMatch.groups.claim
+  const assertions: Assertion[] = []
+
+  const { roles, negative } = extractRoles(claim)
+  const claimAssertion: Assertion = { player: actor, roles }
+  if (negative) claimAssertion.negative = true
+  assertions.push(claimAssertion)
+
+  const rawHistory = bgMatch.groups?.rawHistory
+  if (rawHistory) {
+    const tokens = rawHistory.split(new RegExp(`(?:${V.delimiter})+?`)).map(t => t.trim()).filter(t => t.length > 0)
+    for (const token of tokens) {
+      const tm = guardHistoryTokenRegex.exec(token)
+      if (!tm || !tm.groups?.target) continue
+      let target = tm.groups.target.trim()
+      target = target.replace(guardSuffixRegex, '')
+      if (!target) continue
+      const assertion: Assertion = { player: actor, target, action: 'guard' }
       assertions.push(assertion)
     }
   }

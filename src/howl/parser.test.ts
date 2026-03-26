@@ -664,3 +664,107 @@ describe('curse and follow statements in parser', () => {
     assert.strictEqual(attack.day, 2)
   })
 })
+
+describe('bodyguard guard keyword omission', () => {
+  function findAsserts(text: string) {
+    return parse(text).statements
+      .filter((s: any) => s.type === 'assert')
+      .map((s: any) => ({ actor: s.actor, assertions: s.assertions }))
+  }
+
+  test('bare target names with bodyguard claim', () => {
+    const text = `++Alice,Bob,Charlie,Dave,Eve
+噛み Alice
+Bob　狩りCO　Charlie　Dave　Eve`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts.length, 1)
+    const a = asserts[0]
+    assert.strictEqual(a.actor, 'Bob')
+    // First assertion is the claim
+    assert.deepStrictEqual(a.assertions[0].roles, ['bodyguard'])
+    // Three guard targets without 護衛 keyword
+    assert.strictEqual(a.assertions[1].target, 'Charlie')
+    assert.strictEqual(a.assertions[1].action, 'guard')
+    assert.strictEqual(a.assertions[2].target, 'Dave')
+    assert.strictEqual(a.assertions[2].action, 'guard')
+    assert.strictEqual(a.assertions[3].target, 'Eve')
+    assert.strictEqual(a.assertions[3].action, 'guard')
+  })
+
+  test('mixed: bare names and explicit guard keyword', () => {
+    const text = `++Alice,Bob,Charlie,Dave,Eve
+噛み Alice
+Bob　狩CO　Charlie護衛　Dave　Eve護衛`
+    const asserts = findAsserts(text)
+    const a = asserts[0]
+    assert.strictEqual(a.assertions[1].target, 'Charlie')
+    assert.strictEqual(a.assertions[1].action, 'guard')
+    assert.strictEqual(a.assertions[2].target, 'Dave')
+    assert.strictEqual(a.assertions[2].action, 'guard')
+    assert.strictEqual(a.assertions[3].target, 'Eve')
+    assert.strictEqual(a.assertions[3].action, 'guard')
+  })
+
+  test('bodyguard claim without history still works', () => {
+    const text = `++Alice,Bob,Charlie
+噛み Alice
+Bob　狩CO`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts.length, 1)
+    assert.strictEqual(asserts[0].assertions.length, 1)
+    assert.deepStrictEqual(asserts[0].assertions[0].roles, ['bodyguard'])
+  })
+
+  test('explicit guard keyword still works (existing behavior)', () => {
+    const text = `++Alice,Bob,Charlie,Dave
+噛み Alice
+Bob　狩りCO　Charlie護衛　Dave護衛`
+    const asserts = findAsserts(text)
+    const a = asserts[0]
+    assert.strictEqual(a.assertions.length, 3)
+    assert.strictEqual(a.assertions[1].target, 'Charlie')
+    assert.strictEqual(a.assertions[1].action, 'guard')
+    assert.strictEqual(a.assertions[2].target, 'Dave')
+    assert.strictEqual(a.assertions[2].action, 'guard')
+  })
+
+  test('standalone guard without claim uses bodyguard fallback', () => {
+    const text = `++Alice,Bob,Charlie
+噛み Alice
+Bob　狩CO
+Bob　Charlie`
+    const asserts = findAsserts(text)
+    // "Bob　狩CO" is bodyguard claim
+    assert.strictEqual(asserts[0].assertions[0].roles[0], 'bodyguard')
+    // "Bob　Charlie" — no claim, no action keyword → should NOT match as assert (no bodyguard claim)
+    // The second line parses via standard assertRegex or falls through
+  })
+
+  test('standalone bare guard after bodyguard CO (post-processing)', () => {
+    const text = `++Alice,Bob,Charlie,Dave,Eve
+噛み Alice
+Bob　狩りCO　Charlie
+噛み Dave
+Bob　Eve`
+    const asserts = findAsserts(text)
+    // "Bob　狩りCO　Charlie" → bodyguard claim + guard target Charlie
+    assert.strictEqual(asserts[0].assertions[0].roles[0], 'bodyguard')
+    assert.strictEqual(asserts[0].assertions[1].target, 'Charlie')
+    assert.strictEqual(asserts[0].assertions[1].action, 'guard')
+    // "Bob　Eve" → standalone bare guard (Bob is known bodyguard claimant)
+    assert.strictEqual(asserts[1].assertions[0].target, 'Eve')
+    assert.strictEqual(asserts[1].assertions[0].action, 'guard')
+  })
+
+  test('standalone bare target is not guard if actor has not claimed bodyguard', () => {
+    const text = `++Alice,Bob,Charlie,Dave
+噛み Alice
+Bob　占いCO　Charlie白
+Bob　Dave`
+    const asserts = findAsserts(text)
+    // Bob claimed seer, not bodyguard
+    assert.strictEqual(asserts[0].assertions[0].roles[0], 'seer')
+    // "Bob　Dave" should NOT be converted to guard
+    assert.strictEqual(asserts.length, 1)
+  })
+})

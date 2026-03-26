@@ -11,6 +11,7 @@ import {
   type CurseStatement,
   type FollowStatement,
   type AssertStatement,
+  type UnknownStatement,
   type SetupStatement,
 } from './statement.ts'
 import * as V from './vocabulary.ts'
@@ -246,6 +247,49 @@ function fillMediumTargets(statements: Statement[]): Statement[] {
   })
 }
 
+// "actor delimiter target" pattern for bare guard targets
+const bareGuardRegex = new RegExp(
+  `^${V.optionalSpace}(?<actor>${V.possibleName})${V.delimiter}${V.optionalSpace}(?<target>${V.possibleName})${V.optionalSpace}$`
+)
+
+function fillBodyguardGuards(statements: Statement[]): Statement[] {
+  const dict = new FlexibleDictionary()
+  const bodyguardClaimants = new Set<string>()
+
+  for (const s of statements) {
+    if (s.type === 'join') {
+      const js = s as JoinStatement
+      dict.add(js.name, [js.name, ...js.aliases])
+    } else if (s.type === 'joinMulti') {
+      for (const p of (s as JoinMultiStatement).players) {
+        dict.add(p, [p])
+      }
+    } else if (s.type === 'assert') {
+      const st = s as AssertStatement
+      if (st.assertions.some(a => a.roles?.includes('bodyguard'))) {
+        bodyguardClaimants.add(resolveName(dict, st.actor))
+      }
+    }
+  }
+
+  if (bodyguardClaimants.size === 0) return statements
+
+  return statements.map(s => {
+    if (s.type !== 'unknown') return s
+    const match = bareGuardRegex.exec((s as UnknownStatement).text)
+    if (!match || !match.groups) return s
+    const actorResolved = resolveName(dict, match.groups.actor)
+    if (!bodyguardClaimants.has(actorResolved)) return s
+    return {
+      type: 'assert',
+      line: s.line,
+      day: s.day,
+      actor: match.groups.actor,
+      assertions: [{ player: match.groups.actor, target: match.groups.target, action: 'guard' }],
+    } as AssertStatement
+  })
+}
+
 const survivorsRegex = new RegExp(`^${V.survivors}$`)
 
 function expandSurvivorAsserts(statements: Statement[]): Statement[] {
@@ -367,6 +411,7 @@ export function parse(text: string, options: ParseOptions = {}): { meta: any, st
   statements = expandSurvivorAsserts(statements)
   statements = assignDays(statements)
   statements = fillMediumTargets(statements)
+  statements = fillBodyguardGuards(statements)
 
   return { meta, statements }
 }
