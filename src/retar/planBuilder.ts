@@ -76,7 +76,11 @@ export function buildRoleTestPlan(
 
   for ( const role of rolesInTestPlanning ) {
     if ( 'nekomata' !== role && claims[role].length === 0 ) continue
-    if (claims[role].length === 0 && multipleVictims.length === 0) continue
+    // 処刑道連れによる猫又候補を検出
+    const hasExecutionCurse = role === 'nekomata' && Array.from(village.statuses.values()).some(
+      s => s.causeOfDeath === 'cursed_by_executed_nekomata'
+    )
+    if (claims[role].length === 0 && multipleVictims.length === 0 && !hasExecutionCurse) continue
     const testsOfRole: RoleTest[] = []
     const num = setup.get(role) || 0
     if ( !num ) continue
@@ -104,6 +108,28 @@ export function buildRoleTestPlan(
       }
       // Also consider alive non-claiming seats when no one has claimed nekomata:
       // multiple night deaths can be explained by seer-killed werehamster without nekomata curse
+      if ( claims[role].length === 0 ) {
+        for ( const [seat, status] of village.statuses.entries() ) {
+          if ( status.surviving && !status.claiming ) {
+            unrevealedSeats.push(seat)
+          }
+        }
+      }
+    }
+    // 処刑道連れ: 処刑された猫又候補を追加
+    if (role === 'nekomata' && hasExecutionCurse) {
+      for ( const [seat, status] of village.statuses.entries() ) {
+        if ( status.causeOfDeath === 'execution' && !status.claiming ) {
+          // この処刑で道連れが発生したか確認
+          for ( const [, otherStatus] of village.statuses.entries() ) {
+            if ( otherStatus.causeOfDeath === 'cursed_by_executed_nekomata' && otherStatus.diedDay === status.diedDay ) {
+              unrevealedSeats.push(seat)
+              break
+            }
+          }
+        }
+      }
+      // 道連れがあっても、生存者の猫又候補も考慮（道連れが偽の可能性）
       if ( claims[role].length === 0 ) {
         for ( const [seat, status] of village.statuses.entries() ) {
           if ( status.surviving && !status.claiming ) {

@@ -170,6 +170,14 @@ export class VillageRetar {
   private applyFixedPositions(village: VillageStatus) {
     const fixedPositions = new Map<Seat, SystemRole>()
 
+    // 処刑道連れが発生した日を事前収集（処刑者が猫又の可能性を残すため）
+    const curseDays = new Set<number>()
+    for ( const s of this.vs.statuses.values() ) {
+      if ( s.causeOfDeath === 'cursed_by_executed_nekomata' && s.diedDay !== undefined ) {
+        curseDays.add(s.diedDay)
+      }
+    }
+
     for ( const [seat, status] of this.vs.statuses.entries() ) {
       if ( status.claiming && status.claimingRole === 'villager' ) {
         this.initialPossibilities.markAsNoVillageRole(seat)
@@ -178,7 +186,15 @@ export class VillageRetar {
         this.initialPossibilities.markAsLiar(seat)
       }
       if ( !status.claiming && !status.surviving && status.causeOfDeath === 'execution' && !status.noCoOpportunity ) {
-        this.initialPossibilities.markAsNoVillageRole(seat)
+        if ( curseDays.has(status.diedDay!) ) {
+          // 道連れ発生 → 猫又の可能性を残し、他の村役職のみdeny
+          this.initialPossibilities.denyRole(seat, 'seer')
+          this.initialPossibilities.denyRole(seat, 'medium')
+          this.initialPossibilities.denyRole(seat, 'bodyguard')
+          this.initialPossibilities.denyRole(seat, 'mason')
+        } else {
+          this.initialPossibilities.markAsNoVillageRole(seat)
+        }
       }
       for ( const role of status.deniedRoles ) {
         this.initialPossibilities.denyRole(seat, role)
