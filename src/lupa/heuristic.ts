@@ -1342,17 +1342,131 @@ function decideFanaticComm(ctx: DecisionContext): CommunicationAction {
 // ============================================================
 
 function decideHamsterClaim(ctx: DecisionContext): DayClaim {
-  if (ctx.myPlayer.claimedRole !== null) {
-    if (ctx.myPlayer.claimedRole === 'medium') {
-      return reportFakeMediumResult(ctx.lastExecutedSeat, ctx.rng)
-    }
-    return { type: 'none' }
+  const { myPlayer, day, rng, gameState: state, lastExecutedSeat } = ctx
+
+  // 既にCO済み: 結果報告
+  if (myPlayer.claimedRole === 'seer') {
+    return reportHamsterSeerResult(state, myPlayer, day, ctx)
   }
-  // 90%潜伏
-  if (ctx.rng.next() < 0.9) return { type: 'none' }
-  // 10%霊能騙り
-  const pastResults = collectFakeMediumResults(ctx.gameState, ctx.day, ctx.rng)
-  return { type: 'medium_co', pastResults }
+  if (myPlayer.claimedRole === 'medium') {
+    return reportFakeMediumResult(lastExecutedSeat, rng)
+  }
+  if (myPlayer.claimedRole !== null) return { type: 'none' }
+
+  // CO率: 基本潜伏だが追い詰められたらCO
+  // Day 1: 85%潜伏、Day 2+: 70%潜伏
+  const stealthRate = day === 1 ? 0.85 : 0.70
+  if (rng.next() < stealthRate) return { type: 'none' }
+
+  const r = rng.next()
+  if (r < 0.40) {
+    // 占い騙り (40%) — 呪殺されない（自分が狐なので）利点を活かす
+    for (let n = 0; n < day; n++) generateHamsterFakeResult(state, myPlayer, n, ctx)
+    const results = Array.from(myPlayer.fakeDivineHistory.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, v]) => ({ target: v.target, result: v.result }))
+    return { type: 'seer_co', results }
+  } else if (r < 0.70) {
+    // 霊能騙り (30%)
+    const pastResults = collectFakeMediumResults(state, day, rng)
+    return { type: 'medium_co', pastResults }
+  } else if (r < 0.85) {
+    // 猫又騙り (15%) — 処刑抑止
+    return { type: 'nekomata_co' }
+  } else {
+    // 狩人騙り (15%)
+    const targets: number[] = []
+    const alive = alivePlayersExcept(state, myPlayer.seat)
+    for (let n = 0; n < day; n++) { if (alive.length > 0) targets.push(rng.pick(alive).seat) }
+    return { type: 'bodyguard_co', targets }
+  }
+}
+
+/**
+ * 妖狐の偽占い結果: 真占いのように振る舞いつつ、詰み回避
+ *
+ * - 占い先は真占いと同じロジック（グレー詰め/狐狙い/CO者検証）
+ * - 結果は黒30%/白70%（真っぽい比率）
+ * - Hatiで詰まれる結果は回避（グレーを狭めすぎない）
+ */
+function generateHamsterFakeResult(
+  _state: GameState, player: PlayerState, night: number, ctx: DecisionContext,
+): void {
+  if (player.fakeDivineHistory.has(night)) return
+  const divined = new Set(Array.from(player.fakeDivineHistory.values()).map(d => d.target))
+  const others = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
+  const candidates = others.filter(s => !divined.has(s))
+  if (candidates.length === 0) return
+
+  const rng = ctx.rng
+  const retarP = ctx.retarPossibilities
+
+  // 占い先を真占いと同じ方針で選択
+  let target: number
+  const strategies = ['gray', 'fox', 'verify'] as const
+  const strategy = rng.pick(strategies.map(s => ({ s }))).s
+
+  if (strategy === 'fox' && retarP) {
+    // 狐狙い — ただし自分が狐なので自分以外
+    const foxCands = candidates.filter(s => {
+      const roles = retarP.get(s)
+      return roles && roles.has('werehamster') && roles.size > 1
+    })
+    if (foxCands.length > 0) target = rng.pick(foxCands.map(s => ({ seat: s }))).seat
+    else target = pickHamsterDefaultTarget(candidates, retarP, rng)
+  } else if (strategy === 'verify') {
+    const claims = collectClaimsFromEvents(ctx.publicEvents)
+    const claimerCands = candidates.filter(s => {
+      const role = claims.get(s)
+      return role === 'seer' || role === 'medium'
+    })
+    if (claimerCands.length > 0) target = rng.pick(claimerCands.map(s => ({ seat: s }))).seat
+    else target = pickHamsterDefaultTarget(candidates, retarP, rng)
+  } else {
+    target = pickHamsterDefaultTarget(candidates, retarP, rng)
+  }
+
+  // 結果を決定（黒30%/白70%）、Hati詰みチェック付き
+  const preferredResult: EnumSpecies = rng.next() < 0.3 ? 'wolf' : 'human'
+  if (trySetFakeResult(player, night, target, preferredResult, ctx)) return
+
+  // 詰まれたら逆の結果を試す
+  const altResult: EnumSpecies = preferredResult === 'wolf' ? 'human' : 'wolf'
+  if (trySetFakeResult(player, night, target, altResult, ctx)) return
+
+  // 別のターゲットでも試す
+  const shuffled = [...candidates].filter(s => s !== target).sort(() => rng.next() - 0.5)
+  for (const t of shuffled) {
+    if (trySetFakeResult(player, night, t, 'human', ctx)) return
+  }
+
+  // フォールバック（チェックなし）
+  player.fakeDivineHistory.set(night, { target, result: 'human' })
+}
+
+function pickHamsterDefaultTarget(
+  candidates: number[],
+  retarP: Map<number, Set<SystemRole>> | null,
+  rng: Rng,
+): number {
+  if (retarP) {
+    const uncertain = candidates.filter(s => {
+      const roles = retarP.get(s)
+      return roles && roles.has('werewolf') && roles.size > 1
+    })
+    if (uncertain.length > 0) return rng.pick(uncertain.map(s => ({ seat: s }))).seat
+  }
+  return rng.pick(candidates.map(s => ({ seat: s }))).seat
+}
+
+function reportHamsterSeerResult(
+  state: GameState, player: PlayerState, day: number, ctx: DecisionContext,
+): DayClaim {
+  const night = day - 1
+  generateHamsterFakeResult(state, player, night, ctx)
+  const latest = player.fakeDivineHistory.get(night)
+  if (!latest) return { type: 'none' }
+  return { type: 'seer_result', target: latest.target, result: latest.result }
 }
 
 function decideImmoralistClaim(ctx: DecisionContext): DayClaim {
