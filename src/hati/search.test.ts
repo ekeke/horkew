@@ -12,12 +12,10 @@ function makeWorld(assignments: Record<number, SystemRole>): World {
   const roles: SystemRole[] = new Array(maxSeat + 1)
   const roleIds = new Uint8Array(maxSeat + 1)
   let wolfMask = 0
-  let hamsterSeat = -1
-  let immoralistSeat = -1
-  let seerSeat = -1
+  let hamsterMask = 0
+  let immoralistMask = 0
+  let seerMask = 0
   let bodyguardSeat = -1
-  let nekomataSeat = -1
-  let mediumSeat = -1
 
   for (const [seatStr, role] of Object.entries(assignments)) {
     const seat = Number(seatStr)
@@ -25,16 +23,14 @@ function makeWorld(assignments: Record<number, SystemRole>): World {
     roleIds[seat] = RoleBitIndex[role]
     switch (role) {
       case 'werewolf': wolfMask |= (1 << seat); break
-      case 'werehamster': hamsterSeat = seat; break
-      case 'immoralist': immoralistSeat = seat; break
-      case 'seer': seerSeat = seat; break
+      case 'werehamster': hamsterMask |= (1 << seat); break
+      case 'immoralist': immoralistMask |= (1 << seat); break
+      case 'seer': seerMask |= (1 << seat); break
       case 'bodyguard': bodyguardSeat = seat; break
-      case 'nekomata': nekomataSeat = seat; break
-      case 'medium': mediumSeat = seat; break
     }
   }
 
-  return { roles, roleIds, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
+  return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, bodyguardSeat }
 }
 
 describe('Hati searchTsumi', () => {
@@ -162,6 +158,97 @@ describe('Hati searchTsumi', () => {
       // 3を処刑 → 2人(1=狼, 2=狐) → 狼は狐数えない: 1>=0 → 狼勝ち（但し狐生存→狐勝ち）
       const worlds = [makeWorld({ 1: 'werewolf', 2: 'werehamster', 3: 'villager' })]
       const alive = new Set([1, 2, 3])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, false)
+    })
+  })
+
+  describe('multiple werehamsters', () => {
+    it('4人: 狼確定+狐2+村 → 狼処刑で狐勝ち（詰みなし）', () => {
+      const worlds = [makeWorld({ 1: 'werewolf', 2: 'werehamster', 3: 'werehamster', 4: 'villager' })]
+      const alive = new Set([1, 2, 3, 4])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, false)
+    })
+
+    it('3人: 狼確定+狐1生存(もう1匹死亡)+村 → 狐勝ち（詰みなし）', () => {
+      const worlds = [makeWorld({ 1: 'werewolf', 2: 'werehamster', 3: 'villager', 4: 'werehamster' })]
+      const alive = new Set([1, 2, 3]) // seat4(狐)は死亡
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, false)
+    })
+
+    it('3人: 狼確定+村2(狐2匹とも死亡済み) → 詰み', () => {
+      const worlds = [makeWorld({ 1: 'werewolf', 2: 'villager', 3: 'villager', 4: 'werehamster', 5: 'werehamster' })]
+      const alive = new Set([1, 2, 3])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, true)
+    })
+
+    it('6人: 狼確定+占い+狩人+狐1匹(候補2席)+村 → 呪殺で詰み', () => {
+      const worlds = [
+        makeWorld({ 1: 'werewolf', 2: 'seer', 3: 'bodyguard', 4: 'werehamster', 5: 'villager', 6: 'villager' }),
+        makeWorld({ 1: 'werewolf', 2: 'seer', 3: 'bodyguard', 4: 'villager', 5: 'werehamster', 6: 'villager' }),
+      ]
+      const alive = new Set([1, 2, 3, 4, 5, 6])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, true)
+    })
+
+    it('7人: 狼確定+占い+狩人+狐2匹(候補3席)+村 → 呪殺2回では足りず詰みなし', () => {
+      const worlds = [
+        makeWorld({ 1: 'werewolf', 2: 'seer', 3: 'bodyguard', 4: 'werehamster', 5: 'werehamster', 6: 'villager', 7: 'villager' }),
+        makeWorld({ 1: 'werewolf', 2: 'seer', 3: 'bodyguard', 4: 'werehamster', 5: 'villager', 6: 'werehamster', 7: 'villager' }),
+        makeWorld({ 1: 'werewolf', 2: 'seer', 3: 'bodyguard', 4: 'villager', 5: 'werehamster', 6: 'werehamster', 7: 'villager' }),
+      ]
+      const alive = new Set([1, 2, 3, 4, 5, 6, 7])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, false)
+    })
+
+    it('5人: 狼候補2席+狐1匹(候補2席)+村 → 狼不明+狐不明で詰みなし', () => {
+      const worlds = [
+        makeWorld({ 1: 'werewolf', 2: 'villager', 3: 'werehamster', 4: 'villager', 5: 'villager' }),
+        makeWorld({ 1: 'werewolf', 2: 'villager', 3: 'villager', 4: 'werehamster', 5: 'villager' }),
+        makeWorld({ 1: 'villager', 2: 'werewolf', 3: 'werehamster', 4: 'villager', 5: 'villager' }),
+        makeWorld({ 1: 'villager', 2: 'werewolf', 3: 'villager', 4: 'werehamster', 5: 'villager' }),
+      ]
+      const alive = new Set([1, 2, 3, 4, 5])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, false)
+    })
+  })
+
+  describe('multiple werehamsters with immoralists', () => {
+    it('5人: 狼確定+狐2+背徳2 → 狼処刑で狐勝ち（詰みなし）', () => {
+      const worlds = [makeWorld({ 1: 'werewolf', 2: 'werehamster', 3: 'werehamster', 4: 'immoralist', 5: 'immoralist' })]
+      const alive = new Set([1, 2, 3, 4, 5])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, false)
+    })
+
+    it('4人: 狼確定+狐1生存+背徳2(狐1匹死亡済み) → 背徳後追いなし、狐勝ち', () => {
+      // seat3(狐)死亡だがseat2(狐)生存 → 全狐死亡ではないので背徳は後追いしない
+      const worlds = [makeWorld({ 1: 'werewolf', 2: 'werehamster', 3: 'werehamster', 4: 'immoralist', 5: 'immoralist' })]
+      const alive = new Set([1, 2, 4, 5])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, false)
+    })
+
+    it('3人: 狼確定+村2(狐2+背徳2は全員死亡) → 詰み', () => {
+      const worlds = [makeWorld({ 1: 'werewolf', 2: 'villager', 3: 'villager', 4: 'werehamster', 5: 'werehamster', 6: 'immoralist', 7: 'immoralist' })]
+      const alive = new Set([1, 2, 3])
+      const result = searchTsumiDirect(worlds, alive)
+      assert.equal(result.isTsumi, true)
+    })
+
+    it('8人: 狼確定+占い+狩人+狐2+背徳2(候補不確定) → 詰みなし', () => {
+      const worlds = [
+        makeWorld({ 1: 'werewolf', 2: 'seer', 3: 'bodyguard', 4: 'werehamster', 5: 'immoralist', 6: 'werehamster', 7: 'immoralist', 8: 'villager' }),
+        makeWorld({ 1: 'werewolf', 2: 'seer', 3: 'bodyguard', 4: 'werehamster', 5: 'immoralist', 6: 'villager', 7: 'immoralist', 8: 'werehamster' }),
+        makeWorld({ 1: 'werewolf', 2: 'seer', 3: 'bodyguard', 4: 'villager', 5: 'immoralist', 6: 'werehamster', 7: 'immoralist', 8: 'werehamster' }),
+      ]
+      const alive = new Set([1, 2, 3, 4, 5, 6, 7, 8])
       const result = searchTsumiDirect(worlds, alive)
       assert.equal(result.isTsumi, false)
     })

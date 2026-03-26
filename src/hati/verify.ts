@@ -123,11 +123,11 @@ function verifyStrategy(
   }
 
   // 夜アクション
-  const { bodyguardTarget, seerTarget } = action
+  const { bodyguardTarget, seerTargets } = action
   const biteTargets = validBiteTargets(world, alive)
 
   if (biteTargets.length === 0) {
-    const key = obsKeyToString(0)
+    const key = obsKeyToString(0, seerTargets.length)
     const branch = branches[key] ?? branches['win']
     if (!branch) {
       return { valid: false, trace: [`夜: 狼全滅だが分岐 '${key}' が存在しない`] }
@@ -137,9 +137,9 @@ function verifyStrategy(
 
   for (const biteTarget of biteTargets) {
     const { nextAlive, obsKey: numKey } = simulateNight(
-      world, alive, biteTarget, bodyguardTarget, seerTarget,
+      world, alive, biteTarget, bodyguardTarget, seerTargets,
     )
-    const key = obsKeyToString(numKey)
+    const key = obsKeyToString(numKey, seerTargets.length)
     const branch = branches[key] ?? branches['win']
     if (!branch) {
       return { valid: false, trace: [`夜: 噛み ${biteTarget} の分岐 '${key}' が存在しない`] }
@@ -514,28 +514,24 @@ function buildTrueWorld(state: GameState): World {
   const roles: SystemRole[] = new Array(maxSeat + 1)
   const roleIds = new Uint8Array(maxSeat + 1)
   let wolfMask = 0
-  let hamsterSeat = -1
-  let immoralistSeat = -1
-  let seerSeat = -1
+  let hamsterMask = 0
+  let immoralistMask = 0
+  let seerMask = 0
   let bodyguardSeat = -1
-  let nekomataSeat = -1
-  let mediumSeat = -1
 
   for (const p of state.players) {
     roles[p.seat] = p.role
     roleIds[p.seat] = RoleBitIndex[p.role]
     switch (p.role) {
       case 'werewolf': wolfMask |= (1 << p.seat); break
-      case 'werehamster': hamsterSeat = p.seat; break
-      case 'immoralist': immoralistSeat = p.seat; break
-      case 'seer': seerSeat = p.seat; break
+      case 'werehamster': hamsterMask |= (1 << p.seat); break
+      case 'immoralist': immoralistMask |= (1 << p.seat); break
+      case 'seer': seerMask |= (1 << p.seat); break
       case 'bodyguard': bodyguardSeat = p.seat; break
-      case 'nekomata': nekomataSeat = p.seat; break
-      case 'medium': mediumSeat = p.seat; break
     }
   }
 
-  return { roles, roleIds, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
+  return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, bodyguardSeat }
 }
 
 // --- 実行 ---

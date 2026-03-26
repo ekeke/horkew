@@ -19,8 +19,8 @@ export function formatStrategy(node: StrategyNode, indent: number = 0): string {
     if (action.bodyguardTarget !== null) {
       lines.push(`${pad}  護衛: ${action.bodyguardTarget}番`)
     }
-    if (action.seerTarget !== null) {
-      lines.push(`${pad}  占い: ${action.seerTarget}番`)
+    if (action.seerTargets.length > 0) {
+      lines.push(`${pad}  占い: ${action.seerTargets.map(s => `${s}番`).join(', ')}`)
     }
   } else {
     // 夜: 護衛・占いのみ
@@ -28,8 +28,8 @@ export function formatStrategy(node: StrategyNode, indent: number = 0): string {
     if (action.bodyguardTarget !== null) {
       nightActions.push(`護衛→${action.bodyguardTarget}番`)
     }
-    if (action.seerTarget !== null) {
-      nightActions.push(`占い→${action.seerTarget}番`)
+    if (action.seerTargets.length > 0) {
+      nightActions.push(`占い→${action.seerTargets.map(s => `${s}番`).join(',')}`)
     }
     if (nightActions.length > 0) {
       lines.push(`${pad}夜行動: ${nightActions.join(', ')}`)

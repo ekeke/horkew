@@ -78,12 +78,10 @@ function createWorld(roles: SystemRole[], seats: Seat[]): World {
   const rolesArr: SystemRole[] = new Array(roles.length)
   const roleIds = new Uint8Array(roles.length)
   let wolfMask = 0
-  let hamsterSeat = -1
-  let immoralistSeat = -1
-  let seerSeat = -1
+  let hamsterMask = 0
+  let immoralistMask = 0
+  let seerMask = 0
   let bodyguardSeat = -1
-  let nekomataSeat = -1
-  let mediumSeat = -1
 
   for (const seat of seats) {
     const role = roles[seat]
@@ -91,14 +89,12 @@ function createWorld(roles: SystemRole[], seats: Seat[]): World {
     roleIds[seat] = RoleBitIndex[role]
     switch (role) {
       case 'werewolf': wolfMask |= (1 << seat); break
-      case 'werehamster': hamsterSeat = seat; break
-      case 'immoralist': immoralistSeat = seat; break
-      case 'seer': seerSeat = seat; break
+      case 'werehamster': hamsterMask |= (1 << seat); break
+      case 'immoralist': immoralistMask |= (1 << seat); break
+      case 'seer': seerMask |= (1 << seat); break
       case 'bodyguard': bodyguardSeat = seat; break
-      case 'nekomata': nekomataSeat = seat; break
-      case 'medium': mediumSeat = seat; break
     }
   }
 
-  return { roles: rolesArr, roleIds, wolfMask, hamsterSeat, immoralistSeat, seerSeat, bodyguardSeat, nekomataSeat, mediumSeat }
+  return { roles: rolesArr, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, bodyguardSeat }
 }

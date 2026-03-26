@@ -48,7 +48,7 @@ export type GameOutcome = 'village_win' | 'wolf_win' | 'hamster_win' | 'ongoing'
  */
 export function checkOutcome(world: World, alive: number): GameOutcome {
   const aliveWolves = popCount32(world.wolfMask & alive)
-  const hamsterAlive = world.hamsterSeat !== -1 && hasSeat(alive, world.hamsterSeat)
+  const hamsterAlive = (world.hamsterMask & alive) !== 0
   // 妖狐を除いた非狼カウント
   let nonWolfNonHamster = popCount32(alive) - aliveWolves
   if (hamsterAlive) nonWolfNonHamster--
@@ -98,21 +98,27 @@ export function simulateNight(
   alive: number,
   wolfBiteTarget: Seat,
   bodyguardTarget: Seat | null,
-  seerTarget: Seat | null,
+  seerTargets: Seat[],
 ): { nextAlive: number, obsKey: number } {
   let nextAlive = alive
   let deathMask = 0
   const targetRoleId = world.roleIds[wolfBiteTarget]
 
-  // 占い呪殺チェック
-  if (seerTarget !== null && hasSeat(alive, world.seerSeat)) {
-    if (world.roleIds[seerTarget] === WEREHAMSTER_ID && hasSeat(nextAlive, seerTarget)) {
-      nextAlive = removeSeat(nextAlive, seerTarget)
-      deathMask |= (1 << seerTarget)
-      // 背徳者後追い
-      if (world.immoralistSeat !== -1 && hasSeat(nextAlive, world.immoralistSeat)) {
-        nextAlive = removeSeat(nextAlive, world.immoralistSeat)
-        deathMask |= (1 << world.immoralistSeat)
+  // 占い呪殺チェック（各占い師が独立に実行）
+  let seerIdx = 0
+  let curseBits = world.seerMask & alive  // 生存占い師
+  while (curseBits !== 0) {
+    const bit = curseBits & (-curseBits)
+    curseBits ^= bit
+    const target = seerTargets[seerIdx++]
+    if (target !== undefined && world.roleIds[target] === WEREHAMSTER_ID && hasSeat(nextAlive, target)) {
+      nextAlive = removeSeat(nextAlive, target)
+      deathMask |= (1 << target)
+      // 全狐死亡 → 背徳者後追い
+      if ((world.hamsterMask & nextAlive) === 0) {
+        const dyingImmoralists = world.immoralistMask & nextAlive
+        nextAlive &= ~dyingImmoralists
+        deathMask |= dyingImmoralists
       }
     }
   }
@@ -143,15 +149,27 @@ export function simulateNight(
     }
   }
 
-  // 占い結果: 占い師がその夜を生き延びた場合のみ翌日報告できる
-  let seerResultCode = 0 // 0=none, 1=human, 2=wolf
-  if (seerTarget !== null && hasSeat(nextAlive, world.seerSeat)) {
-    const result = SEER_RESULT_TABLE[world.roleIds[seerTarget]]
-    seerResultCode = result === 'wolf' ? 2 : 1
+  // 占い結果: 各占い師が夜を生き延びた場合のみ報告
+  // obsKey: deathMask を上位に、各占い師の結果(2bit)を低ビットから詰める
+  let seerResultBits = 0
+  let resultIdx = 0
+  let resultBits = world.seerMask  // 全占い師（割り当て順序を保持）
+  while (resultBits !== 0) {
+    const bit = resultBits & (-resultBits)
+    const seerSeat = 31 - Math.clz32(bit)
+    resultBits ^= bit
+    const target = seerTargets[resultIdx]
+    let code = 0 // 0=報告なし(死亡), 1=human, 2=wolf
+    if (target !== undefined && hasSeat(nextAlive, seerSeat)) {
+      code = SEER_RESULT_TABLE[world.roleIds[target]] === 'wolf' ? 2 : 1
+    }
+    seerResultBits |= (code << (resultIdx * 2))
+    resultIdx++
   }
 
-  // 観測キー: deathMask (上位ビット) + seerResult (下位2ビット)
-  const obsKey = (deathMask << 2) | seerResultCode
+  // obsKey: deathMask を seerCount*2 ビット分シフトして結果を下位に配置
+  const seerCount = resultIdx
+  const obsKey = (deathMask << (seerCount * 2)) | seerResultBits
 
   return { nextAlive, obsKey }
 }
@@ -180,19 +198,19 @@ export function validBiteTargetsMask(world: World, alive: number): number {
  * 狐が死亡している場合、背徳者が後追い死亡する。
  */
 export function applyFollowDeaths(alive: number, world: World): number {
-  if (world.hamsterSeat !== -1 && !hasSeat(alive, world.hamsterSeat)) {
-    if (world.immoralistSeat !== -1 && hasSeat(alive, world.immoralistSeat)) {
-      return removeSeat(alive, world.immoralistSeat)
-    }
+  // 全狐死亡 → 全背徳者が後追い
+  if (world.hamsterMask !== 0 && (world.hamsterMask & alive) === 0) {
+    return alive & ~world.immoralistMask
   }
   return alive
 }
 
 // --- 観測キー変換（数値 → 文字列、出力用） ---
 
-export function obsKeyToString(obsKey: number): ObservationKey {
-  const seerCode = obsKey & 3
-  const deathMask = obsKey >>> 2
+export function obsKeyToString(obsKey: number, seerCount: number = 1): ObservationKey {
+  const seerBitWidth = seerCount * 2
+  const seerBits = obsKey & ((1 << seerBitWidth) - 1)
+  const deathMask = obsKey >>> seerBitWidth
 
   let deathPart: string
   if (deathMask === 0) {
@@ -202,8 +220,19 @@ export function obsKeyToString(obsKey: number): ObservationKey {
     deathPart = `d:${seats.join(',')}`
   }
 
-  if (seerCode === 0) return deathPart
-  return deathPart + (seerCode === 2 ? '|s:wolf' : '|s:human')
+  if (seerBits === 0) return deathPart
+
+  // 各占い師の結果を復元
+  const seerParts: string[] = []
+  for (let i = 0; i < seerCount; i++) {
+    const code = (seerBits >>> (i * 2)) & 3
+    if (code === 2) seerParts.push('wolf')
+    else if (code === 1) seerParts.push('human')
+    // code === 0: 報告なし（占い師死亡）→ 省略
+  }
+  if (seerParts.length === 0) return deathPart
+  if (seerParts.length === 1) return deathPart + `|s:${seerParts[0]}`
+  return deathPart + `|s:${seerParts.join(',')}`
 }
 
 export function executionObsKeyToString(

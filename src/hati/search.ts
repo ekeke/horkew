@@ -138,7 +138,7 @@ function isTsumi(
     // 自明な詰み: seat = precheck を処刑して即勝ち
     const result: StrategyNode = {
       type: 'action',
-      action: { execute: precheck, bodyguardTarget: null, seerTarget: null },
+      action: { execute: precheck, bodyguardTarget: null, seerTargets: [] },
       branches: { 'win': { type: 'win' } },
     }
     ss.memo.set(key, result)
@@ -249,7 +249,7 @@ function canonicalKey(worlds: World[], alive: number): string {
 function collapseBranches(
   branches: Record<ObservationKey, StrategyNode>,
   bodyguardTarget: Seat | null,
-  seerTarget: Seat | null,
+  seerTargets: Seat[],
 ): StrategyNode | null {
   const values = Object.values(branches)
   if (values.length === 0) return null
@@ -270,11 +270,11 @@ function collapseBranches(
 
   // 夜行動（占い/護衛）がある場合は collapse しない
   // （呪殺がゲーム状態に影響し、検証で再現が必要なため）
-  if (seerTarget !== null || bodyguardTarget !== null) return null
+  if (seerTargets.length > 0 || bodyguardTarget !== null) return null
 
   return {
     type: 'action',
-    action: { execute: commonTarget!, bodyguardTarget: null, seerTarget: null },
+    action: { execute: commonTarget!, bodyguardTarget: null, seerTargets: [] },
     branches: { 'win': { type: 'win' } },
   }
 }
@@ -343,10 +343,11 @@ export function precheckWorlds(worlds: World[], alive: number, disableHamsterPru
     else wolfIntersection &= wolvesAlive
     const wolfCount = popCount32(wolvesAlive)
     let nonWolfNonHamster = aliveCount - wolfCount
-    if (w.hamsterSeat !== -1 && hasSeat(alive, w.hamsterSeat)) {
-      nonWolfNonHamster--
+    const aliveHamsters = w.hamsterMask & alive
+    if (aliveHamsters !== 0) {
+      nonWolfNonHamster -= popCount32(aliveHamsters)
       hasAliveHamster = true
-      hamsterUnion |= (1 << w.hamsterSeat)
+      hamsterUnion |= aliveHamsters
     }
     // パリティチェック（per-world）
     if (wolfCount >= nonWolfNonHamster) return PRECHECK_PRUNED
@@ -444,7 +445,7 @@ function tryExecution(
 
   return {
     type: 'action',
-    action: { execute: target, bodyguardTarget: null, seerTarget: null },
+    action: { execute: target, bodyguardTarget: null, seerTargets: [] },
     branches,
   }
 }
@@ -538,6 +539,7 @@ function addToPartition(
 
 /**
  * 夜フェーズの探索。
+ * 複数占い師がいる場合、N人分の占い先の組み合わせを試す。
  */
 function searchNight(
   worlds: World[],
@@ -549,14 +551,56 @@ function searchNight(
   const bodyguardCandidates = getBodyguardCandidates(worlds, alive)
   const seerCandidates = getSeerCandidates(worlds, alive)
 
+  // 占い師の最大人数（ワールド間の最大値）
+  let maxSeerCount = 0
+  for (const w of worlds) {
+    const c = popCount32(w.seerMask & alive)
+    if (c > maxSeerCount) maxSeerCount = c
+  }
+
   for (const bgTarget of bodyguardCandidates) {
-    for (const seerTarget of seerCandidates) {
-      const result = tryNightAction(worlds, alive, day, bgTarget, seerTarget, depth, ss)
+    // 占い先の組み合わせを列挙（N人分）
+    const seerTargetCombos = enumerateSeerTargetCombos(seerCandidates, maxSeerCount)
+    for (const seerTargets of seerTargetCombos) {
+      const result = tryNightAction(worlds, alive, day, bgTarget, seerTargets, depth, ss)
       if (result !== null) return result
     }
   }
 
   return null
+}
+
+/**
+ * 占い先の組み合わせを列挙。
+ * seerTargets[i] は i 番目の占い師（seerMask低ビット順）の占い先。
+ * candidates の null は「占い指示なし」を表す → seerTargets では含めない（配列が短くなる）。
+ *
+ * N=0: [[]] (占い師なし)
+ * N=1: [[], [c1], [c2], ...] (null→[], seat→[seat])
+ * N=2: [[], [c1], ..., [c1,c1], [c1,c2], ...] (直積)
+ */
+function enumerateSeerTargetCombos(candidates: (Seat | null)[], count: number): Seat[][] {
+  if (count === 0) return [[]]
+  const result: Seat[][] = []
+  const current: Seat[] = new Array(count)
+
+  function recurse(idx: number): void {
+    if (idx === count) {
+      result.push(current.slice())
+      return
+    }
+    for (const c of candidates) {
+      if (c === null) {
+        // 指示なし: この占い師以降は全員占わない
+        result.push(current.slice(0, idx))
+        continue
+      }
+      current[idx] = c
+      recurse(idx + 1)
+    }
+  }
+  recurse(0)
+  return result
 }
 
 /**
@@ -589,7 +633,7 @@ function getBodyguardCandidates(worlds: World[], alive: number): (Seat | null)[]
  * #7: roleIds で等価クラスハッシュ + 情報ゲイン判定
  */
 function getSeerCandidates(worlds: World[], alive: number): (Seat | null)[] {
-  const hasAliveSeer = worlds.some(w => w.seerSeat !== -1 && hasSeat(alive, w.seerSeat))
+  const hasAliveSeer = worlds.some(w => (w.seerMask & alive) !== 0)
   if (!hasAliveSeer) return [null]
 
   const candidates: (Seat | null)[] = [null]
@@ -628,7 +672,7 @@ function tryNightAction(
   alive: number,
   day: number,
   bodyguardTarget: Seat | null,
-  seerTarget: Seat | null,
+  seerTargets: Seat[],
   depth: number,
   ss: SearchState,
 ): StrategyNode | null {
@@ -656,7 +700,7 @@ function tryNightAction(
       remainBite ^= biteBit
 
       const { nextAlive, obsKey: numKey } = simulateNight(
-        world, alive, biteTarget, bodyguardTarget, seerTarget,
+        world, alive, biteTarget, bodyguardTarget, seerTargets,
       )
       // 早期打ち切り: この噛み先で村が負ける → この夜行動は詰みでない
       const outcome = checkOutcome(world, nextAlive)
@@ -684,16 +728,16 @@ function tryNightAction(
 
     const result = isTsumi(group.worlds, nextState, depth + 1, ss)
     if (result === null) return null
-    branches[obsKeyToString(numKey)] = result
+    branches[obsKeyToString(numKey, seerTargets.length)] = result
   }
 
   // 全分岐が同じ trivial win に帰着する場合、夜分岐を圧縮
-  const collapsed = collapseBranches(branches, bodyguardTarget, seerTarget)
+  const collapsed = collapseBranches(branches, bodyguardTarget, seerTargets)
   if (collapsed) return collapsed
 
   return {
     type: 'action',
-    action: { execute: -1, bodyguardTarget, seerTarget },
+    action: { execute: -1, bodyguardTarget, seerTargets },
     branches,
   }
 }

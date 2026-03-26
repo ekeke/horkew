@@ -43,18 +43,14 @@ export type World = {
   roleIds: Uint8Array
   /** 人狼のseatビットマスク */
   wolfMask: number
-  /** 妖狐のseat（いなければ -1） */
-  hamsterSeat: number
-  /** 背徳者のseat（いなければ -1） */
-  immoralistSeat: number
-  /** 真占い師のseat（いなければ -1） */
-  seerSeat: number
+  /** 妖狐のseatビットマスク（0 = なし、複数対応） */
+  hamsterMask: number
+  /** 背徳者のseatビットマスク（0 = なし、複数対応） */
+  immoralistMask: number
+  /** 真占い師のseatビットマスク（0 = なし、複数対応） */
+  seerMask: number
   /** 真狩人のseat（いなければ -1） */
   bodyguardSeat: number
-  /** 真猫又のseat（いなければ -1） */
-  nekomataSeat: number
-  /** 真霊媒師のseat（いなければ -1） */
-  mediumSeat: number
 }
 
 /** 探索中のシミュレーション状態 */
@@ -68,7 +64,8 @@ export type SimState = {
 export type VillageAction = {
   execute: Seat
   bodyguardTarget: Seat | null
-  seerTarget: Seat | null
+  /** 占い先リスト（占い師N人分、seerMaskの低ビット順に割り当て） */
+  seerTargets: Seat[]
 }
 
 /** 観測のシリアライズキー（文字列: 出力用） */

@@ -30,12 +30,10 @@ export function canResolveFox(
   alive: number,
   maxTurns: number,
 ): boolean {
-  // 狐候補: いずれかのワールドで hamsterSeat が生存している席
+  // 狐候補: いずれかのワールドで hamster が生存している席
   let foxMask = 0
   for (const w of worlds) {
-    if (w.hamsterSeat !== -1 && hasSeat(alive, w.hamsterSeat)) {
-      foxMask |= (1 << w.hamsterSeat)
-    }
+    foxMask |= (w.hamsterMask & alive)
   }
   if (foxMask === 0) return true // 狐なし or 全ワールドで狐死亡
 
@@ -49,24 +47,27 @@ export function canResolveFox(
 
   // 狐関連の状態分析
   let wolfUnion = 0
-  let seerSeat = -1
-  let confirmedSeer = true
+  let seerMaskUnion = 0
+  let confirmedSeerMask = -1  // -1 = 未初期化
   let bodyguardAlive = false
   let anySeerAlive = false
   for (const w of worlds) {
     wolfUnion |= (w.wolfMask & alive)
-    if (w.seerSeat !== -1 && hasSeat(alive, w.seerSeat)) {
+    const aliveSeerMask = w.seerMask & alive
+    if (aliveSeerMask !== 0) {
       anySeerAlive = true
-      if (seerSeat === -1) seerSeat = w.seerSeat
-      else if (seerSeat !== w.seerSeat) confirmedSeer = false
+      seerMaskUnion |= aliveSeerMask
+      if (confirmedSeerMask === -1) confirmedSeerMask = aliveSeerMask
+      else if (confirmedSeerMask !== aliveSeerMask) confirmedSeerMask = 0
     } else {
-      confirmedSeer = false
+      confirmedSeerMask = 0
     }
     if (w.bodyguardSeat !== -1 && hasSeat(alive, w.bodyguardSeat)) {
       bodyguardAlive = true
     }
   }
-  if (!confirmedSeer) seerSeat = -1
+  if (confirmedSeerMask <= 0) confirmedSeerMask = 0
+  const confirmedSeerCount = popCount32(confirmedSeerMask)
 
   // 高速カバレッジチェック: 処刑+占い+消去で狐候補数を賄えるか
   {
@@ -76,18 +77,17 @@ export function canResolveFox(
     const aliveCount = popCount32(alive)
     const nawa = (aliveCount - 1 - 1) >> 1 // -1 for hamster (foxMask != 0)
     let executionCoverage = Math.min(safeFoxCount, Math.max(0, nawa - wolfCandidateCount))
-    // 狐候補かつ狼候補の席: 狐でない狼候補が1人以上いれば、1席は安全に処刑できる
-    // （霊能●なら狼確定で狐でない、霊能○なら狐かもしれないが他に狼が残る）
     const nonFoxWolfCount = popCount32(wolfUnion & ~foxMask & alive)
     if (nonFoxWolfCount >= 1) {
       const foxWolfOverlap = popCount32(foxMask & wolfUnion)
       executionCoverage += Math.min(1, foxWolfOverlap)
     }
-    // 予告対応: 未確定でもいずれかのワールドに占い師がいれば占いは機能する
-    // BG は確定占いの場合のみ護衛が効く（未確定では護衛先不明）
-    const divinationCoverage = anySeerAlive
-      ? (seerSeat !== -1 && bodyguardAlive ? 2 : 1)
-      : 0
+    // 占いcoverage: 確定占い師の人数 × (護衛あり ? 2 : 1) + 未確定でも占い師がいれば +1
+    // 確定占い師: BG生存なら2回保証、なければ1回保証（各占い師につき）
+    // 未確定占い師: 保証なし（どれが占い師かわからないので護衛も指定不能）
+    const divinationCoverage = confirmedSeerCount > 0
+      ? confirmedSeerCount * (bodyguardAlive ? 2 : 1)
+      : (anySeerAlive ? 1 : 0)
     const coverage = executionCoverage + divinationCoverage + 1
     if (foxCount > coverage) return false
   }
@@ -101,7 +101,7 @@ export function canResolveFox(
     const bit = mask & (-mask)
     const target = 31 - Math.clz32(bit)
     mask ^= bit
-    if (tryExecuteThenNight(worlds, alive, target, foxMask, seerSeat, bodyguardAlive, anySeerAlive, maxTurns)) {
+    if (tryExecuteThenNight(worlds, alive, target, foxMask, confirmedSeerMask, bodyguardAlive, anySeerAlive, maxTurns)) {
       return true
     }
   }
@@ -113,7 +113,7 @@ export function canResolveFox(
     const bit = mask & (-mask)
     const target = 31 - Math.clz32(bit)
     mask ^= bit
-    if (tryExecuteThenNight(worlds, alive, target, foxMask, seerSeat, bodyguardAlive, anySeerAlive, maxTurns)) {
+    if (tryExecuteThenNight(worlds, alive, target, foxMask, confirmedSeerMask, bodyguardAlive, anySeerAlive, maxTurns)) {
       return true
     }
   }
@@ -134,7 +134,7 @@ export function canResolveFox(
     h = h >>> 0
     if (seen.has(h)) continue
     seen.add(h)
-    if (tryExecuteThenNight(worlds, alive, target, foxMask, seerSeat, bodyguardAlive, anySeerAlive, maxTurns)) {
+    if (tryExecuteThenNight(worlds, alive, target, foxMask, confirmedSeerMask, bodyguardAlive, anySeerAlive, maxTurns)) {
       return true
     }
   }
@@ -150,7 +150,7 @@ function tryExecuteThenNight(
   alive: number,
   executeTarget: Seat,
   foxMask: number,
-  seerSeat: Seat,
+  confirmedSeerMask: number,
   bodyguardAlive: boolean,
   anySeerAlive: boolean,
   maxTurns: number,
@@ -181,14 +181,12 @@ function tryExecuteThenNight(
   for (const [, { worlds: branchWorlds, alive: branchAlive }] of byKey) {
     let branchFoxMask = 0
     for (const w of branchWorlds) {
-      if (w.hamsterSeat !== -1 && hasSeat(branchAlive, w.hamsterSeat)) {
-        branchFoxMask |= (1 << w.hamsterSeat)
-      }
+      branchFoxMask |= (w.hamsterMask & branchAlive)
     }
 
     if (branchFoxMask === 0) continue // この分岐では狐解決済み
 
-    if (!tryNightForFox(branchWorlds, branchAlive, branchFoxMask, seerSeat, bodyguardAlive, anySeerAlive, maxTurns)) {
+    if (!tryNightForFox(branchWorlds, branchAlive, branchFoxMask, confirmedSeerMask, bodyguardAlive, anySeerAlive, maxTurns)) {
       return false
     }
   }
@@ -205,14 +203,19 @@ function tryNightForFox(
   worlds: World[],
   alive: number,
   foxMask: number,
-  seerSeat: Seat,
+  confirmedSeerMask: number,
   bodyguardAlive: boolean,
   anySeerAlive: boolean,
   maxTurns: number,
 ): boolean {
-  // 護衛先: 確定占い師ならその席を護衛。未確定なら護衛なし。
-  const guardTarget = (seerSeat !== -1 && hasSeat(alive, seerSeat) && bodyguardAlive)
-    ? seerSeat : null
+  // 護衛先: 確定占い師が1人ならその席を護衛。複数or未確定なら護衛なし。
+  // （複数確定占い師の場合、どちらを護衛するかは本来OR探索だが、
+  //   foxResolverは簡易判定なので最初の1人を護衛）
+  let guardTarget: Seat | null = null
+  if (confirmedSeerMask !== 0 && bodyguardAlive) {
+    const firstSeer = 31 - Math.clz32(confirmedSeerMask & (-confirmedSeerMask))
+    if (hasSeat(alive, firstSeer)) guardTarget = firstSeer
+  }
 
   // OR: 各狐候補を占い先として指示（予告）
   // 占い師が未確定でも、各ワールドの真占い師が実行する
@@ -241,14 +244,16 @@ function tryNightForFox(
  * 狼は常に真占い師を狙う。護衛されていれば先にBGを噛む。
  */
 function worstCaseBite(w: World, alive: number, guardTarget: Seat | null): Seat {
-  const seer = w.seerSeat
-  if (seer !== -1 && hasSeat(alive, seer)) {
+  // 複数占い師: 最も低ビットの生存占い師を狙う
+  const aliveSeerMask = w.seerMask & alive
+  if (aliveSeerMask !== 0) {
+    const targetSeer = 31 - Math.clz32(aliveSeerMask & (-aliveSeerMask))
     // BGが占い師を護衛中 → BGを噛んで護衛を剥がす
-    if (guardTarget === seer && w.bodyguardSeat !== -1 && hasSeat(alive, w.bodyguardSeat)) {
+    if (guardTarget === targetSeer && w.bodyguardSeat !== -1 && hasSeat(alive, w.bodyguardSeat)) {
       return w.bodyguardSeat
     }
     // 占い師を直接噛む
-    return seer
+    return targetSeer
   }
   // 占い師なし → 非狼の生存者を噛む（alive を減らす）
   const nonWolf = alive & ~w.wolfMask
@@ -279,7 +284,11 @@ function simulateWorstCaseNight(
       continue
     }
 
-    const { nextAlive, obsKey } = simulateNight(w, alive, bite, guardTarget, divineTarget)
+    // foxResolverでは全占い師が同じ対象を占う（簡易判定）
+    const seerTargets = divineTarget !== null
+      ? new Array(popCount32(w.seerMask)).fill(divineTarget) as Seat[]
+      : []
+    const { nextAlive, obsKey } = simulateNight(w, alive, bite, guardTarget, seerTargets)
 
     // 即負けチェック
     const outcome = checkOutcome(w, nextAlive)
@@ -294,9 +303,7 @@ function simulateWorstCaseNight(
   for (const [, group] of byObs) {
     let branchFoxMask = 0
     for (const w of group.worlds) {
-      if (w.hamsterSeat !== -1 && hasSeat(group.alive, w.hamsterSeat)) {
-        branchFoxMask |= (1 << w.hamsterSeat)
-      }
+      branchFoxMask |= (w.hamsterMask & group.alive)
     }
 
     if (branchFoxMask === 0) continue // 狐解決済み
