@@ -20,7 +20,7 @@ export type LupaConfig = {
   retarFn?: (events: GameEvent[], state: GameState, config: LupaConfig) => Promise<Map<number, Set<SystemRole>>>
   /** 再投票設定 (未指定時はデフォルト: 候補者限定ランダム、3回、最小seat処刑) */
   revoteConfig?: RevoteConfig
-  /** 投票確定後のCO許可 (デフォルト: true) */
+  /** 投票確定後のCO許可 = 遺言 (デフォルト: false) */
   allowPostVoteCO?: boolean
 }
 

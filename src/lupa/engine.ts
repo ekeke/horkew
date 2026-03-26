@@ -418,7 +418,7 @@ export function runGame(config: LupaConfig): GameResult {
     if (state.finished) break
 
     // 指定の場合: 処刑対象が未COの村役職ならCOさせる
-    if (!isGrelan && config.allowPostVoteCO !== false) {
+    if (!isGrelan && config.allowPostVoteCO === true) {
       const target = state.players.find(p => p.seat === executedSeat!)!
       const villageRoles: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
       if (villageRoles.includes(target.role) && target.claimedRole === null) {
@@ -667,7 +667,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
     if (state.finished) break
 
     // 処刑後
-    if (!isGrelan && config.allowPostVoteCO !== false) {
+    if (!isGrelan && config.allowPostVoteCO === true) {
       const target = state.players.find(p => p.seat === executedSeat!)!
       const villageRoles: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
       if (villageRoles.includes(target.role) && target.claimedRole === null) {
