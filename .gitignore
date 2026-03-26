@@ -1,6 +1,7 @@
 node_modules/
 demo/dist/
 .claude/*.local.*
+.claude/worktrees/
 tasks/
 tmp/
 z-ai/*
