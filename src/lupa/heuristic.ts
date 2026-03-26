@@ -691,6 +691,45 @@ function decideVillageVote(ctx: DecisionContext): number {
   return pickHighestSuspicion(scores, candidates, ctx.rng)
 }
 
+/** 指揮者推薦先を決定。推薦すべきでなければnull */
+function pickCommanderNomination(ctx: DecisionContext): number | null {
+  const { publicEvents, alivePlayers: alive, retarPossibilities } = ctx
+  const claims = collectClaimsFromEvents(publicEvents)
+
+  // 既にnominate_commanderが出ていればスキップ
+  for (const e of publicEvents) {
+    if (e.type === 'signal' && e.signal.type === 'nominate_commander') return null
+  }
+
+  // 共有相互CO者がいれば推薦（seat低い方）
+  const masonClaimers = alive.filter(s => claims.get(s) === 'mason')
+  // 相互CO確認
+  for (const a of masonClaimers) {
+    for (const b of masonClaimers) {
+      if (a >= b) continue
+      const aPartner = publicEvents.find(e => e.type === 'mason_claim' && e.actor === a)
+      const bPartner = publicEvents.find(e => e.type === 'mason_claim' && e.actor === b)
+      if (aPartner && 'partner' in aPartner && aPartner.partner === b &&
+          bPartner && 'partner' in bPartner && bPartner.partner === a) {
+        return a // seat低い方を推薦
+      }
+    }
+  }
+
+  // 確定村（Retar確定 & 村役職）がいれば推薦
+  if (retarPossibilities) {
+    const villageRoles: Set<SystemRole> = new Set(['seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'villager'])
+    for (const s of alive) {
+      const roles = retarPossibilities.get(s)
+      if (roles && roles.size === 1 && villageRoles.has([...roles][0])) {
+        return s // 最初の確定村を推薦
+      }
+    }
+  }
+
+  return null
+}
+
 /** 共有が全滅していて自分が確定村陣営かを判定 */
 function shouldActAsLeader(ctx: DecisionContext): boolean {
   const { publicEvents, alivePlayers: alive, retarPossibilities, mySeat } = ctx
@@ -716,9 +755,16 @@ function decideVillagerComm(ctx: DecisionContext): CommunicationAction {
   const others = alive.filter(s => s !== mySeat)
   const proposals: number[] = []
 
-  // 共有全滅 & 自分が確定村 → 指揮者的に振る舞う
+  // 指揮者推薦（指揮者がまだいないとき）
+  if (ctx.commander === null) {
+    const nominateTarget = pickCommanderNomination(ctx)
+    if (nominateTarget !== null) {
+      return { signal: { type: 'nominate_commander', target: nominateTarget }, proposals }
+    }
+  }
+
+  // 自分が指揮者 → リーダー行動
   if (shouldActAsLeader(ctx)) {
-    // Hati詰み（6人以下）
     const action = tryTsumiAction(ctx)
     if (action && action.execute > 0 && alive.includes(action.execute)) {
       proposals.push(action.execute)
@@ -730,8 +776,6 @@ function decideVillagerComm(ctx: DecisionContext): CommunicationAction {
       }
       return { signal: { type: 'vote_intent', target: action.execute }, proposals }
     }
-
-    // 疑惑スコアで指示
     const scores = buildSuspicionScore(publicEvents, ctx.retarPossibilities, alive, mySeat)
     const target = pickHighestSuspicion(scores, others, rng)
     proposals.push(target)

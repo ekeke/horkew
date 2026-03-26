@@ -31,7 +31,7 @@ export const HEAD_SIZES = {
   night: SEATS + 1,            // seat 1..SEATS + none
   claim: 10,                   // seer_co, medium_co, bodyguard_co, mason_co, nekomata_co, seer_result, medium_result, forecast, villager_co(fake), none
   vote: SEATS,                 // seat 1..SEATS
-  comm: SEATS * 7 + 7,        // suspicion(14) + trust(14) + vote_intent(14) + accuse_wolf(14) + accuse_fox(14) + agree(14) + disagree(14) + demand_wolf_co + werewolf_co + fanatic_co + werehamster_co + immoralist_co + submit_prediction + no_signal
+  comm: SEATS * 8 + 7,        // suspicion(14) + trust(14) + vote_intent(14) + accuse_wolf(14) + accuse_fox(14) + agree(14) + disagree(14) + nominate_commander(14) + demand_wolf_co + werewolf_co + fanatic_co + werehamster_co + immoralist_co + submit_prediction + no_signal
   propose: SEATS,              // sigmoid: 処刑提案 (複数同時選択可)
   predict: SEATS * NUM_ROLES,  // sigmoid: 配役予想 (submit_prediction時のみ)
   leader: 3,                   // follow, defy, no_response
@@ -65,13 +65,14 @@ const COMM = {
   ACCUSE_FOX: SEATS * 4,                // SEATS*4..SEATS*5-1
   AGREE: SEATS * 5,                     // SEATS*5..SEATS*6-1
   DISAGREE: SEATS * 6,                  // SEATS*6..SEATS*7-1
-  DEMAND_WOLF_CO: SEATS * 7,            // SEATS*7
-  WEREWOLF_CO: SEATS * 7 + 1,           // SEATS*7+1
-  FANATIC_CO: SEATS * 7 + 2,            // SEATS*7+2
-  WEREHAMSTER_CO: SEATS * 7 + 3,        // SEATS*7+3
-  IMMORALIST_CO: SEATS * 7 + 4,         // SEATS*7+4
-  SUBMIT_PREDICTION: SEATS * 7 + 5,     // SEATS*7+5
-  NO_SIGNAL: SEATS * 7 + 6,             // SEATS*7+6
+  NOMINATE_COMMANDER: SEATS * 7,         // SEATS*7..SEATS*8-1
+  DEMAND_WOLF_CO: SEATS * 8,            // SEATS*8
+  WEREWOLF_CO: SEATS * 8 + 1,           // SEATS*8+1
+  FANATIC_CO: SEATS * 8 + 2,            // SEATS*8+2
+  WEREHAMSTER_CO: SEATS * 8 + 3,        // SEATS*8+3
+  IMMORALIST_CO: SEATS * 8 + 4,         // SEATS*8+4
+  SUBMIT_PREDICTION: SEATS * 8 + 5,     // SEATS*8+5
+  NO_SIGNAL: SEATS * 8 + 6,             // SEATS*8+6
 } as const
 
 // Roles ordered for prediction head (must match NUM_ROLES)
@@ -159,10 +160,11 @@ export function maskVote(ctx: DecisionContext): Float32Array {
 export function maskComm(ctx: DecisionContext): Float32Array {
   const mask = new Float32Array(HEAD_SIZES.comm).fill(-Infinity)
 
-  // target系シグナル (7種): 生存者+非自分に制限
+  // target系シグナル (8種): 生存者+非自分に制限
   const targetOffsets = [
     COMM.SUSPICION, COMM.TRUST, COMM.VOTE_INTENT,
     COMM.ACCUSE_WOLF, COMM.ACCUSE_FOX, COMM.AGREE, COMM.DISAGREE,
+    COMM.NOMINATE_COMMANDER,
   ]
   for (const offset of targetOffsets) {
     for (const seat of ctx.alivePlayers) {
@@ -312,18 +314,19 @@ export function decodeClaim(
 }
 
 export function decodeComm(actionIdx: number): Signal {
-  // target系シグナル (7種 × SEATS)
-  if (actionIdx < SEATS * 7) {
+  // target系シグナル (8種 × SEATS)
+  if (actionIdx < SEATS * 8) {
     const signalType = Math.floor(actionIdx / SEATS)
     const target = (actionIdx % SEATS) + 1
     const types: Signal['type'][] = [
       'suspicion', 'trust', 'vote_intent',
       'accuse_wolf', 'accuse_fox', 'agree', 'disagree',
+      'nominate_commander',
     ]
     return { type: types[signalType], target } as Signal
   }
   // 宣言系シグナル
-  const declIdx = actionIdx - SEATS * 7
+  const declIdx = actionIdx - SEATS * 8
   const declTypes: Signal['type'][] = [
     'demand_wolf_co', 'werewolf_co', 'fanatic_co',
     'werehamster_co', 'immoralist_co', 'submit_prediction', 'no_signal',

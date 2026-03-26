@@ -196,6 +196,7 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
           case 'accuse_fox': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 狐告発`; break
           case 'agree': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 同意`; break
           case 'disagree': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 反対`; break
+          case 'nominate_commander': sigText = `${playerName(event.actor)} → ${playerName(sig.target)} 指揮者推薦`; break
           case 'demand_wolf_co': sigText = `${playerName(event.actor)} 狼CO要求`; break
           case 'werewolf_co': sigText = `${playerName(event.actor)} 人狼CO`; break
           case 'fanatic_co': sigText = `${playerName(event.actor)} 狂信者CO`; break

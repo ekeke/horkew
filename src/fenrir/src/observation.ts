@@ -27,7 +27,7 @@ export const NUM_ROLES = ROLES.length
 
 // セクションサイズ
 const GLOBAL_SIZE = 2 + 1 + NUM_ROLES + 1 + 1 + 1  // day, phase, alive_ratio, role_onehot, commander, progress, demand_wolf_co_count = 17
-const PER_SEAT_SIZE = 1 + (NUM_ROLES + 1) + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 // alive, claimed_role, is_me, black_count, white_count, vote_received, suspicion, trust, execute_proposal, is_commander, accuse_wolf, accuse_fox, vote_intent = 24
+const PER_SEAT_SIZE = 1 + (NUM_ROLES + 1) + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 // alive, claimed_role, is_me, black_count, white_count, vote_received, suspicion, trust, execute_proposal, is_commander, accuse_wolf, accuse_fox, vote_intent, nominate_commander = 25
 const SEAT_SECTION_SIZE = SEATS * PER_SEAT_SIZE  // 336
 const PRIVATE_SIZE = SEATS + SEATS + 1 + SEATS + 1  // divine_results + wolf_teammates + mason_partner + guard_history + known_hamster = 43
 const REVOTE_SIZE = 1 + SEATS  // revote_round + revote_candidates_mask = 15
@@ -79,6 +79,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   const accuseWolfCounts = new Map<number, number>()
   const accuseFoxCounts = new Map<number, number>()
   const voteIntentCounts = new Map<number, number>()
+  const nominateCommanderCounts = new Map<number, number>()
 
   for (const event of ctx.publicEvents) {
     switch (event.type) {
@@ -121,6 +122,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
             case 'accuse_wolf': accuseWolfCounts.set(t, (accuseWolfCounts.get(t) ?? 0) + 1); break
             case 'accuse_fox': accuseFoxCounts.set(t, (accuseFoxCounts.get(t) ?? 0) + 1); break
             case 'vote_intent': voteIntentCounts.set(t, (voteIntentCounts.get(t) ?? 0) + 1); break
+            case 'nominate_commander': nominateCommanderCounts.set(t, (nominateCommanderCounts.get(t) ?? 0) + 1); break
           }
         }
         break
@@ -157,6 +159,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
     obs[o++] = Math.min((accuseWolfCounts.get(seat) ?? 0) / 5, 1)
     obs[o++] = Math.min((accuseFoxCounts.get(seat) ?? 0) / 5, 1)
     obs[o++] = Math.min((voteIntentCounts.get(seat) ?? 0) / 5, 1)
+    obs[o++] = Math.min((nominateCommanderCounts.get(seat) ?? 0) / 3, 1)
   }
   offset += SEAT_SECTION_SIZE
 

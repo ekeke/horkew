@@ -291,19 +291,31 @@ export function runGame(config: LupaConfig): GameResult {
     }
 
     // ==== シグナルフェーズ ====
-    // 指揮者判定
-    state.commander = detectCommander(state, retarPossibilities)
-    if (state.commander !== null) {
-      events.push({ type: 'commander_appointed', seat: state.commander })
-    }
-
     // 当日シグナルをリセット
     const daySignals: SignalRecord[] = []
     let signalIdCounter = signals.length
-
-    // 指揮者提案
     const dayProposals: Proposal[] = []
+    state.commander = null
+
+    // シグナルラウンド (3ラウンド) — nominate_commander で指揮者を選出
+    for (let round = 0; round < 3; round++) {
+      for (const player of alivePlayers(state)) {
+        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        const commAction = decideForPlayer(config, state, player, ctx,
+          (s, c) => s.decideCommunication(c),
+          (s, c) => s.decideCommunication(c),
+        )
+        applyCommAction(state, player, day, commAction, events, daySignals, signals, signalIdCounter)
+        signalIdCounter += 1
+      }
+    }
+
+    // シグナルラウンド後: 指揮者判定
+    state.commander = detectCommander(state, retarPossibilities, daySignals)
     if (state.commander !== null) {
+      events.push({ type: 'commander_appointed', seat: state.commander })
+
+      // 指揮者提案
       const commander = state.players.find(p => p.seat === state.commander)!
       if (commander.alive) {
         const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
@@ -315,7 +327,7 @@ export function runGame(config: LupaConfig): GameResult {
           dayProposals.push(proposal)
           events.push({ type: 'proposal', actor: commander.seat, proposal })
 
-          // 指揮者指定後の追加COチャンス（処刑対象が猫又CO等で回避する機会）
+          // 指揮者指定後の追加COチャンス
           if (proposal.type === 'execute_order') {
             const target = state.players.find(p => p.seat === proposal.target)
             if (target && target.alive && target.claimedRole === null) {
@@ -341,19 +353,6 @@ export function runGame(config: LupaConfig): GameResult {
             events.push({ type: 'leadership_response', actor: player.seat, response })
           }
         }
-      }
-    }
-
-    // シグナルラウンド (3ラウンド)
-    for (let round = 0; round < 3; round++) {
-      for (const player of alivePlayers(state)) {
-        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
-        const commAction = decideForPlayer(config, state, player, ctx,
-          (s, c) => s.decideCommunication(c),
-          (s, c) => s.decideCommunication(c),
-        )
-        applyCommAction(state, player, day, commAction, events, daySignals, signals, signalIdCounter)
-        signalIdCounter += 1
       }
     }
 
@@ -618,12 +617,21 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
     }
 
     // シグナルフェーズ
-    state.commander = detectCommander(state, retarPossibilities)
-    if (state.commander !== null) events.push({ type: 'commander_appointed', seat: state.commander })
     const daySignals: SignalRecord[] = []
     let signalIdCounter = signals.length
     const dayProposals: Proposal[] = []
+    state.commander = null
+    for (let round = 0; round < 3; round++) {
+      for (const player of alivePlayers(state)) {
+        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        applyCommAction(state, player, day, decideForPlayer(config, state, player, ctx, (s, c) => s.decideCommunication(c), (s, c) => s.decideCommunication(c)), events, daySignals, signals, signalIdCounter)
+        signalIdCounter += 1
+      }
+    }
+    // シグナルラウンド後: 指揮者判定
+    state.commander = detectCommander(state, retarPossibilities, daySignals)
     if (state.commander !== null) {
+      events.push({ type: 'commander_appointed', seat: state.commander })
       const commander = state.players.find(p => p.seat === state.commander)!
       if (commander.alive) {
         const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
@@ -631,7 +639,6 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
         if (proposal) {
           dayProposals.push(proposal)
           events.push({ type: 'proposal', actor: commander.seat, proposal })
-          // 指揮者指定後の追加COチャンス
           if (proposal.type === 'execute_order') {
             const target = state.players.find(p => p.seat === proposal.target)
             if (target && target.alive && target.claimedRole === null) {
@@ -646,13 +653,6 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
             events.push({ type: 'leadership_response', actor: player.seat, response: decideForPlayer(config, state, player, pCtx, (s, c) => s.decideLeadershipResponse(c, proposal), (s, c) => s.decideLeadershipResponse(c, proposal)) })
           }
         }
-      }
-    }
-    for (let round = 0; round < 3; round++) {
-      for (const player of alivePlayers(state)) {
-        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
-        applyCommAction(state, player, day, decideForPlayer(config, state, player, ctx, (s, c) => s.decideCommunication(c), (s, c) => s.decideCommunication(c)), events, daySignals, signals, signalIdCounter)
-        signalIdCounter += 1
       }
     }
     for (const player of alivePlayers(state)) {

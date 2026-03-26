@@ -1,5 +1,6 @@
 import type { GameState } from './types.ts'
 import type { SystemRole } from '../types/index.ts'
+import type { SignalRecord } from './communication.ts'
 import { alivePlayers } from './roles.ts'
 
 export type Proposal =
@@ -10,53 +11,100 @@ export type Proposal =
 export type LeadershipResponse = 'follow' | 'defy' | 'no_response'
 
 /**
- * 指揮者を判定する
+ * シグナルベースの指揮者判定
  *
- * 条件（優先度順）:
- * 1. 共有者ペア確認: AがBを共有相方と宣言 + BもAを宣言 → seat低い方
- * 2. 占い師確定: 占いCO者が1人のみ + 対抗なし + Retarで破綻していない
+ * nominate_commander シグナルから指揮者を決定する:
+ * 1. Retarで確定村陣営からの推薦/自薦 → 自動承認
+ * 2. それ以外はagree/disagreeの数で判定（過半数で承認）
+ * 3. 複数候補がいれば最も支持が多い候補を選出
  *
- * @param retarPossibilities Retar分析結果（破綻チェック用、省略可）
+ * @param daySignals 当日のシグナル記録
+ * @param retarPossibilities Retar分析結果（確定村判定用、省略可）
  */
 export function detectCommander(
   state: GameState,
   retarPossibilities?: Map<number, Set<SystemRole>> | null,
+  daySignals?: SignalRecord[],
 ): number | null {
   const alive = alivePlayers(state)
+  const aliveSeats = new Set(alive.map(p => p.seat))
 
-  // CO破綻判定: CO役職がRetarの可能性に含まれていない
+  if (!daySignals || daySignals.length === 0) return null
+
+  // CO破綻判定
   const isBusted = (seat: number, claimedRole: SystemRole): boolean => {
     if (!retarPossibilities) return false
     const roles = retarPossibilities.get(seat)
     return roles !== undefined && !roles.has(claimedRole)
   }
 
-  // 1. 共有者ペア確認（両方破綻していないこと）
-  const masonClaimers = alive.filter(p => p.claimedRole === 'mason' && !isBusted(p.seat, 'mason'))
-  for (const a of masonClaimers) {
-    for (const b of masonClaimers) {
-      if (a.seat >= b.seat) continue
-      const aPartner = findMasonPartner(state, a.seat)
-      const bPartner = findMasonPartner(state, b.seat)
-      if (aPartner === b.seat && bPartner === a.seat) {
-        return a.seat
+  // 確定村判定
+  const villageRoles: Set<SystemRole> = new Set(['seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'villager'])
+  const isConfirmedVillage = (seat: number): boolean => {
+    if (!retarPossibilities) return false
+    const roles = retarPossibilities.get(seat)
+    return roles !== undefined && roles.size === 1 && villageRoles.has([...roles][0])
+  }
+
+  // nominate_commander を集計
+  // 被推薦者 → { nominators: Set, agreeCount, disagreeCount }
+  const nominations = new Map<number, { nominators: Set<number>, agreeCount: number, disagreeCount: number }>()
+
+  for (const record of daySignals) {
+    if (record.signal.type === 'nominate_commander' && 'target' in record.signal) {
+      const target = record.signal.target
+      if (!aliveSeats.has(target)) continue
+      // 被推薦者がCO破綻していたら無視
+      const player = alive.find(p => p.seat === target)
+      if (player?.claimedRole && isBusted(target, player.claimedRole)) continue
+
+      if (!nominations.has(target)) {
+        nominations.set(target, { nominators: new Set(), agreeCount: 0, disagreeCount: 0 })
+      }
+      nominations.get(target)!.nominators.add(record.sender)
+    }
+  }
+
+  if (nominations.size === 0) return null
+
+  // 確定村からの推薦/自薦 → 自動承認
+  for (const [target, nom] of nominations) {
+    for (const nominator of nom.nominators) {
+      if (isConfirmedVillage(nominator)) {
+        return target
       }
     }
   }
 
-  // 2. 占い師確定: 破綻していない生存占いCO者が1人のみ
-  const seerClaimers = alive.filter(p => p.claimedRole === 'seer' && !isBusted(p.seat, 'seer'))
-  if (seerClaimers.length === 1) {
-    return seerClaimers[0].seat
+  // agree/disagree 集計（推薦者に対するagree = 被推薦者への支持）
+  for (const record of daySignals) {
+    if (record.signal.type === 'agree' && 'target' in record.signal) {
+      // agreeのtargetが推薦者であれば、その推薦者が推した被推薦者の支持を+1
+      for (const [, nom] of nominations) {
+        if (nom.nominators.has(record.signal.target)) {
+          nom.agreeCount++
+        }
+      }
+    } else if (record.signal.type === 'disagree' && 'target' in record.signal) {
+      for (const [, nom] of nominations) {
+        if (nom.nominators.has(record.signal.target)) {
+          nom.disagreeCount++
+        }
+      }
+    }
   }
 
-  return null
-}
+  // 最も支持が多い候補を選出
+  let bestCandidate: number | null = null
+  let bestSupport = 0
 
-/** GameEventからmason_claimのpartnerを取得 */
-function findMasonPartner(state: GameState, seat: number): number | null {
-  // PlayerStateには直接partnerが記録されていないため、
-  // engine側でGameEventから取得する必要がある。
-  // ここではGameStateに追加されるmasonPartnersマップを参照。
-  return state.masonPartners?.get(seat) ?? null
+  for (const [target, nom] of nominations) {
+    const support = nom.agreeCount + nom.nominators.size // 推薦者自身も支持とカウント
+    if (support > bestSupport) {
+      bestSupport = support
+      bestCandidate = target
+    }
+  }
+
+  return bestCandidate
 }

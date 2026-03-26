@@ -17,6 +17,7 @@ import type { SystemRole } from '../types/index.ts'
 //   accuse_fox(target)   — 対象を妖狐だと告発する
 //   agree(target)        — 対象の発言・行動に同意する
 //   disagree(target)     — 対象の発言・行動に反対する
+//   nominate_commander(target) — 対象を指揮者に推薦する（自薦含む）
 //
 // ■ 宣言系シグナル (対象なし、常に利用可能)
 //   demand_wolf_co       — 人狼にCOを要求する（村陣営の戦術）
@@ -44,6 +45,7 @@ export type Signal =
   | { type: 'accuse_fox', target: number }
   | { type: 'agree', target: number }
   | { type: 'disagree', target: number }
+  | { type: 'nominate_commander', target: number }
   | { type: 'demand_wolf_co' }
   | { type: 'werewolf_co' }
   | { type: 'fanatic_co' }
