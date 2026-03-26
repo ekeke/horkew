@@ -691,43 +691,24 @@ function decideVillageVote(ctx: DecisionContext): number {
   return pickHighestSuspicion(scores, candidates, ctx.rng)
 }
 
-/** 指揮者推薦先を決定。推薦すべきでなければnull */
-function pickCommanderNomination(ctx: DecisionContext): number | null {
-  const { publicEvents, alivePlayers: alive, retarPossibilities } = ctx
-  const claims = collectClaimsFromEvents(publicEvents)
+/**
+ * 指揮者推薦: Retar確定村陣営のみ自薦する。それ以外は推薦しない。
+ * 指揮者不在のときだけ発動。
+ */
+function shouldNominateSelf(ctx: DecisionContext): boolean {
+  if (ctx.commander !== null) return false
+  if (!ctx.retarPossibilities) return false
 
   // 既にnominate_commanderが出ていればスキップ
-  for (const e of publicEvents) {
-    if (e.type === 'signal' && e.signal.type === 'nominate_commander') return null
+  for (const e of ctx.publicEvents) {
+    if (e.type === 'signal' && e.signal.type === 'nominate_commander') return false
   }
 
-  // 共有相互CO者がいれば推薦（seat低い方）
-  const masonClaimers = alive.filter(s => claims.get(s) === 'mason')
-  // 相互CO確認
-  for (const a of masonClaimers) {
-    for (const b of masonClaimers) {
-      if (a >= b) continue
-      const aPartner = publicEvents.find(e => e.type === 'mason_claim' && e.actor === a)
-      const bPartner = publicEvents.find(e => e.type === 'mason_claim' && e.actor === b)
-      if (aPartner && 'partner' in aPartner && aPartner.partner === b &&
-          bPartner && 'partner' in bPartner && bPartner.partner === a) {
-        return a // seat低い方を推薦
-      }
-    }
-  }
-
-  // 確定村（Retar確定 & 村役職）がいれば推薦
-  if (retarPossibilities) {
-    const villageRoles: Set<SystemRole> = new Set(['seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'villager'])
-    for (const s of alive) {
-      const roles = retarPossibilities.get(s)
-      if (roles && roles.size === 1 && villageRoles.has([...roles][0])) {
-        return s // 最初の確定村を推薦
-      }
-    }
-  }
-
-  return null
+  // 自分がRetar確定村陣営か
+  const myRoles = ctx.retarPossibilities.get(ctx.mySeat)
+  if (!myRoles || myRoles.size !== 1) return false
+  const villageRoles: Set<SystemRole> = new Set(['seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'villager'])
+  return villageRoles.has([...myRoles][0])
 }
 
 /** 共有が全滅していて自分が確定村陣営かを判定 */
@@ -755,12 +736,9 @@ function decideVillagerComm(ctx: DecisionContext): CommunicationAction {
   const others = alive.filter(s => s !== mySeat)
   const proposals: number[] = []
 
-  // 指揮者推薦（指揮者がまだいないとき）
-  if (ctx.commander === null) {
-    const nominateTarget = pickCommanderNomination(ctx)
-    if (nominateTarget !== null) {
-      return { signal: { type: 'nominate_commander', target: nominateTarget }, proposals }
-    }
+  // 指揮者自薦（確定村陣営のみ、指揮者不在時）
+  if (shouldNominateSelf(ctx)) {
+    return { signal: { type: 'nominate_commander', target: ctx.mySeat }, proposals }
   }
 
   // 自分が指揮者 → リーダー行動
