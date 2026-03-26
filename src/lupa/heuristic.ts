@@ -16,13 +16,12 @@ import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, Wolf
 import { alivePlayers, alivePlayersExcept, getMediumResult, isWerewolfAligned } from './roles.ts'
 import type { Rng } from './random.ts'
 import { searchTsumiFromEvents } from './retar-browser-bridge.ts'
+import type { VillageAction } from '../hati/types.ts'
 
 // ============================================================
 // 定数
 // ============================================================
 
-const NEKOMATA_CO_RATE = 0.7
-const FORECAST_RATE = 0.4
 const FANATIC_SEER_RATE = 0.6
 const FANATIC_MEDIUM_RATE = 0.2
 
@@ -184,6 +183,44 @@ function pickHighestSuspicion(
 // Hati統合ヘルパー
 // ============================================================
 
+function tryTsumiAction(ctx: DecisionContext): VillageAction | null {
+  if (ctx.alivePlayers.length > 6) return null
+
+  const state = ctx.gameState
+  const roleCount = new Map<SystemRole, number>()
+  for (const p of state.players) {
+    roleCount.set(p.role, (roleCount.get(p.role) ?? 0) + 1)
+  }
+  const minimalConfig = { roles: roleCount, hasFirstGhost: state.players.some(p => !p.alive && p.seat > 0) }
+
+  try {
+    const result = searchTsumiFromEvents(ctx.publicEvents, state, minimalConfig as any, 4)
+    if (!result || !result.isTsumi || !result.strategy) return null
+    if (result.strategy.type === 'action') return result.strategy.action
+  } catch { /* fallback */ }
+  return null
+}
+
+function tryTsumiWithEvents(events: GameEvent[], ctx: DecisionContext): number | null {
+  const state = ctx.gameState
+  const roleCount = new Map<SystemRole, number>()
+  for (const p of state.players) {
+    roleCount.set(p.role, (roleCount.get(p.role) ?? 0) + 1)
+  }
+  const minimalConfig = { roles: roleCount, hasFirstGhost: state.players.some(p => !p.alive && p.seat > 0) }
+
+  try {
+    const result = searchTsumiFromEvents(events, state, minimalConfig as any, 4)
+    if (!result || !result.isTsumi || !result.strategy) return null
+    if (result.strategy.type === 'action' && result.strategy.action.execute > 0) {
+      return result.strategy.action.execute
+    }
+  } catch {
+    // Hati失敗時はフォールバック
+  }
+  return null
+}
+
 function tryTsumi(ctx: DecisionContext): number | null {
   if (ctx.alivePlayers.length > 6) return null
 
@@ -238,7 +275,9 @@ export class HeuristicStrategy implements Strategy {
 
   decideForecast(ctx: DecisionContext): DayClaim {
     if (ctx.myPlayer.claimedRole !== 'seer') return { type: 'none' }
-    if (ctx.rng.next() >= FORECAST_RATE) return { type: 'none' }
+    // 予告率: 20-60%の範囲でゲームごとにばらつく
+    const forecastRate = 0.2 + ctx.rng.next() * 0.4
+    if (ctx.rng.next() >= forecastRate) return { type: 'none' }
     const target = pickDivineTarget(ctx)
     return target ? { type: 'forecast', target } : { type: 'none' }
   }
@@ -308,22 +347,60 @@ function decideSeerNight(ctx: DecisionContext): NightAction {
   return target ? { type: 'divine', target } : { type: 'none' }
 }
 
+/** 占い先戦略 */
+type DivineStrategy = 'gray' | 'fox' | 'verify_claimer'
+
 function pickDivineTarget(ctx: DecisionContext): number | null {
-  const { myPlayer, rng, alivePlayers: alive, retarPossibilities } = ctx
+  const { myPlayer, rng, alivePlayers: alive, retarPossibilities, publicEvents, proposals } = ctx
   const others = alive.filter(s => s !== ctx.mySeat)
   if (others.length === 0) return null
-
-  // 予告先
-  if (myPlayer.forecastTarget != null && others.includes(myPlayer.forecastTarget)) {
-    return myPlayer.forecastTarget
-  }
 
   // 占い済みを除外
   const divined = new Set(Array.from(myPlayer.divineHistory.values()).map(d => d.target))
   const undivined = others.filter(s => !divined.has(s))
   const candidates = undivined.length > 0 ? undivined : others
 
-  // Retarで狼可能性が残っている & 役職確定していない席を優先
+  // 最優先: 予告先
+  if (myPlayer.forecastTarget != null && candidates.includes(myPlayer.forecastTarget)) {
+    return myPlayer.forecastTarget
+  }
+
+  // 最優先: 指揮者の占い指示
+  const investigateOrder = proposals.find(p => p.type === 'investigate_order')
+  if (investigateOrder && candidates.includes(investigateOrder.target)) {
+    return investigateOrder.target
+  }
+
+  // 次優先: 指揮者の処刑指示対象（未占いなら占って確認）
+  const executeOrder = proposals.find(p => p.type === 'execute_order')
+  if (executeOrder && candidates.includes(executeOrder.target)) {
+    return executeOrder.target
+  }
+
+  // 毎日ランダムで戦略を選択
+  const strategies: DivineStrategy[] = ['gray', 'fox', 'verify_claimer']
+  const strategy = rng.pick(strategies.map(s => ({ s }))).s
+
+  if (strategy === 'fox' && retarPossibilities) {
+    // 狐狙い: Retarで妖狐可能性が残る席を優先
+    const foxCandidates = candidates.filter(s => {
+      const roles = retarPossibilities.get(s)
+      return roles && roles.has('werehamster') && roles.size > 1
+    })
+    if (foxCandidates.length > 0) return rng.pick(foxCandidates.map(s => ({ seat: s }))).seat
+  }
+
+  if (strategy === 'verify_claimer') {
+    // CO者検証: 占い/霊能の対抗CO者を占う
+    const claims = collectClaimsFromEvents(publicEvents)
+    const claimerCandidates = candidates.filter(s => {
+      const role = claims.get(s)
+      return role === 'seer' || role === 'medium'
+    })
+    if (claimerCandidates.length > 0) return rng.pick(claimerCandidates.map(s => ({ seat: s }))).seat
+  }
+
+  // グレー詰め（デフォルト / フォールバック）: Retarで狼可能性が残る不確定席
   if (retarPossibilities) {
     const uncertain = candidates.filter(s => {
       const roles = retarPossibilities.get(s)
@@ -336,32 +413,52 @@ function pickDivineTarget(ctx: DecisionContext): number | null {
 }
 
 function decideBodyguardNight(ctx: DecisionContext): NightAction {
-  const { myPlayer, rng, publicEvents, alivePlayers: alive } = ctx
+  const { rng, publicEvents, alivePlayers: alive, retarPossibilities, proposals } = ctx
   const others = alive.filter(s => s !== ctx.mySeat)
   if (others.length === 0) return { type: 'none' }
 
-  // 連続護衛不可
-  const lastNight = Math.max(...Array.from(myPlayer.guardHistory.keys()), -1)
-  const lastTarget = myPlayer.guardHistory.get(lastNight)
-  const eligible = lastTarget !== undefined ? others.filter(s => s !== lastTarget) : others
-  const candidates = eligible.length > 0 ? eligible : others
+  // 最優先: 指揮者の護衛指示
+  const protectOrder = proposals.find(p => p.type === 'protect_order')
+  if (protectOrder && others.includes(protectOrder.target)) {
+    return { type: 'guard', target: protectOrder.target }
+  }
 
-  // 占いCO者を最優先護衛
   const claims = collectClaimsFromEvents(publicEvents)
   const aliveSet = new Set(alive)
-  const seerClaimers = candidates.filter(s => claims.get(s) === 'seer' && aliveSet.has(s))
-  if (seerClaimers.length === 1) return { type: 'guard', target: seerClaimers[0] }
-  if (seerClaimers.length > 1) return { type: 'guard', target: rng.pick(seerClaimers.map(s => ({ seat: s }))).seat }
 
-  // 霊能 > 共有指揮者
-  const mediumClaimers = candidates.filter(s => claims.get(s) === 'medium')
-  if (mediumClaimers.length === 1) return { type: 'guard', target: mediumClaimers[0] }
+  // 占いCO者が1人（確定）なら鉄板護衛（70%）
+  const seerClaimers = others.filter(s => claims.get(s) === 'seer' && aliveSet.has(s))
+  if (seerClaimers.length === 1 && rng.next() < 0.7) {
+    return { type: 'guard', target: seerClaimers[0] }
+  }
 
-  if (ctx.commander && candidates.includes(ctx.commander)) {
+  // 確定村陣営を優先（Retarで可能性が1つ & 村役職）
+  const villageRoles: Set<SystemRole> = new Set(['seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'villager'])
+  if (retarPossibilities) {
+    const confirmedVillage = others.filter(s => {
+      const roles = retarPossibilities.get(s)
+      return roles && roles.size === 1 && villageRoles.has([...roles][0])
+    })
+    if (confirmedVillage.length > 0) {
+      return { type: 'guard', target: rng.pick(confirmedVillage.map(s => ({ seat: s }))).seat }
+    }
+  }
+
+  // CO者（霊能、共有、占い）を優先
+  const coCandidates = others.filter(s => {
+    const role = claims.get(s)
+    return role === 'seer' || role === 'medium' || role === 'mason'
+  })
+  if (coCandidates.length > 0) {
+    return { type: 'guard', target: rng.pick(coCandidates.map(s => ({ seat: s }))).seat }
+  }
+
+  // 指揮者
+  if (ctx.commander && others.includes(ctx.commander)) {
     return { type: 'guard', target: ctx.commander }
   }
 
-  return { type: 'guard', target: rng.pick(candidates.map(s => ({ seat: s }))).seat }
+  return { type: 'guard', target: rng.pick(others.map(s => ({ seat: s }))).seat }
 }
 
 // ============================================================
@@ -369,13 +466,55 @@ function decideBodyguardNight(ctx: DecisionContext): NightAction {
 // ============================================================
 
 function decideSeerClaim(ctx: DecisionContext): DayClaim {
-  const { myPlayer, day } = ctx
+  const { myPlayer, day, rng, publicEvents, alivePlayers: alive } = ctx
   if (myPlayer.claimedRole === 'seer') {
     // 既にCO済み: 最新結果を報告
     const latest = myPlayer.divineHistory.get(day - 1)
     if (!latest) return { type: 'none' }
     return { type: 'seer_result', target: latest.target, result: latest.result }
   }
+
+  // 潜伏判定（Day 1のみ、14D猫では基本CO有利なので確率は低め）
+  if (day === 1) {
+    // 初日黒なら即CO（潜伏しない）
+    const night0Result = myPlayer.divineHistory.get(0)
+    if (night0Result && night0Result.result === 'wolf') {
+      const results = Array.from(myPlayer.divineHistory.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([, v]) => ({ target: v.target, result: v.result }))
+      return { type: 'seer_co', results }
+    }
+
+    const aliveSet = new Set(alive)
+    const claims = collectClaimsFromEvents(publicEvents)
+    const blacks = collectBlackTargets(publicEvents)
+
+    // 条件1: 対抗占いが誰かに黒出し済み & 他に一切のCOがない → 15%潜伏
+    const otherSeerClaimed = [...claims.entries()].some(
+      ([seat, role]) => role === 'seer' && seat !== ctx.mySeat && aliveSet.has(seat)
+    )
+    const otherNonSeerClaimed = [...claims.entries()].some(
+      ([seat, role]) => role !== 'seer' && seat !== ctx.mySeat
+    )
+    if (otherSeerClaimed && blacks.size > 0 && !otherNonSeerClaimed && rng.next() < 0.15) {
+      return { type: 'none' }
+    }
+
+    // 条件2: 初日占い先が初日犠牲者（非狐: 死んでいるので結果が無駄） → 20%潜伏
+    if (night0Result) {
+      const targetAlive = aliveSet.has(night0Result.target)
+      if (!targetAlive && rng.next() < 0.2) {
+        return { type: 'none' }
+      }
+
+      // 条件3: 初日占い先が共有CO者 → 20%潜伏
+      if (claims.get(night0Result.target) === 'mason' && rng.next() < 0.2) {
+        return { type: 'none' }
+      }
+    }
+  }
+
+  // Day 2+で未COなら溜めた結果ごとCO
   // 初回CO: 全結果つき
   const results = Array.from(myPlayer.divineHistory.entries())
     .sort((a, b) => a[0] - b[0])
@@ -384,7 +523,7 @@ function decideSeerClaim(ctx: DecisionContext): DayClaim {
 }
 
 function decideMediumClaim(ctx: DecisionContext): DayClaim {
-  const { myPlayer, day, lastExecutedSeat, gameState: state } = ctx
+  const { myPlayer, day, lastExecutedSeat, gameState: state, rng, publicEvents, alivePlayers: alive } = ctx
   if (myPlayer.claimedRole === 'medium') {
     if (lastExecutedSeat !== null) {
       const target = state.players.find(p => p.seat === lastExecutedSeat)!
@@ -392,6 +531,23 @@ function decideMediumClaim(ctx: DecisionContext): DayClaim {
     }
     return { type: 'none' }
   }
+
+  // 潜伏判定（Day 1のみ）
+  if (day === 1) {
+    const claims = collectClaimsFromEvents(publicEvents)
+    const blacks = collectBlackTargets(publicEvents)
+    const seerClaimed = [...claims.entries()].some(
+      ([seat, role]) => role === 'seer' && new Set(alive).has(seat)
+    )
+    const otherNonSeerClaimed = [...claims.entries()].some(
+      ([seat, role]) => role !== 'seer' && seat !== ctx.mySeat
+    )
+    // 占いが黒出し済み & 他に一切のCOがない → 30%潜伏
+    if (seerClaimed && blacks.size > 0 && !otherNonSeerClaimed && rng.next() < 0.3) {
+      return { type: 'none' }
+    }
+  }
+
   // 初回CO
   const pastResults = collectPastMediumResults(state, day)
   return { type: 'medium_co', pastResults }
@@ -408,27 +564,95 @@ function collectPastMediumResults(state: GameState, day: number): EnumSpecies[] 
   return results
 }
 
-function decideBodyguardClaim(_ctx: DecisionContext): DayClaim {
-  // 潜伏（処刑時はforceTrueRoleCOで処理）
+function decideBodyguardClaim(ctx: DecisionContext): DayClaim {
+  if (ctx.myPlayer.claimedRole) return { type: 'none' }
+
+  // Hati詰み: 自分がCOした後の盤面で詰みが生まれるか判定（8人以下）
+  if (ctx.alivePlayers.length <= 8) {
+    const targets = Array.from(ctx.myPlayer.guardHistory.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, seat]) => seat)
+
+    // 狩人COイベントを仮追加した盤面でHati判定
+    const simEvents: GameEvent[] = [...ctx.publicEvents, {
+      type: 'bodyguard_claim' as const,
+      actor: ctx.mySeat,
+      targets,
+    }]
+    const tsumiTarget = tryTsumiWithEvents(simEvents, ctx)
+    if (tsumiTarget) {
+      return { type: 'bodyguard_co', targets }
+    }
+  }
+
+  // 基本は潜伏（処刑時はforceTrueRoleCOで処理）
   return { type: 'none' }
 }
 
 function decideMasonClaim(ctx: DecisionContext): DayClaim {
-  const { myPlayer, gameState: state } = ctx
+  const { myPlayer, gameState: state, day, rng, publicEvents, alivePlayers: alive } = ctx
   if (myPlayer.claimedRole) return { type: 'none' }
   const partner = state.players.find(p => p.seat !== ctx.mySeat && p.role === 'mason')
   if (!partner) return { type: 'none' }
+
+  // 相方が初日犠牲者なら即CO（1人共有を証明する必要がある）
+  const aliveSet = new Set(alive)
+  if (!aliveSet.has(partner.seat)) {
+    return { type: 'mason_co', partner: partner.seat }
+  }
+
+  // 潜伏判定（Day 1のみ）: 霊媒と同じ条件
+  if (day === 1) {
+    const claims = collectClaimsFromEvents(publicEvents)
+    const blacks = collectBlackTargets(publicEvents)
+    const seerClaimed = [...claims.entries()].some(
+      ([seat, role]) => role === 'seer' && aliveSet.has(seat)
+    )
+    const otherNonSeerClaimed = [...claims.entries()].some(
+      ([seat, role]) => role !== 'seer' && seat !== ctx.mySeat
+    )
+    // 占いが黒出し済み & 他に一切のCOがない → 30%潜伏
+    if (seerClaimed && blacks.size > 0 && !otherNonSeerClaimed && rng.next() < 0.3) {
+      return { type: 'none' }
+    }
+  }
+
   return { type: 'mason_co', partner: partner.seat }
 }
 
 function decideNekomataClam(ctx: DecisionContext): DayClaim {
   if (ctx.myPlayer.claimedRole) return { type: 'none' }
-  // 対抗チェック: 既に猫又COがあれば強制CO
+
+  // 対抗チェック: 既に猫又COがあれば100%CO
   const aliveSet = new Set(ctx.alivePlayers)
   if (isRollerSituation(ctx.publicEvents, 'nekomata', aliveSet)) {
     return { type: 'nekomata_co' }
   }
-  if (ctx.rng.next() < NEKOMATA_CO_RATE) return { type: 'nekomata_co' }
+
+  // Day 1はCOしない
+  if (ctx.day === 1) return { type: 'none' }
+
+  // 複数死体が出たらCO（襲撃+呪殺等で盤面が動いたタイミング）
+  if (ctx.day > 1) {
+    let nightDeaths = 0
+    for (let i = ctx.publicEvents.length - 1; i >= 0; i--) {
+      const e = ctx.publicEvents[i]
+      if (e.type === 'night_kill' || e.type === 'fox_kill' || e.type === 'follow_kill') nightDeaths++
+      if (e.type === 'execution' || e.type === 'game_over') break
+    }
+    if (nightDeaths >= 2) return { type: 'nekomata_co' }
+  }
+
+  // Hati詰み: COした後の盤面で詰むならCO（8人以下）
+  if (ctx.alivePlayers.length <= 8) {
+    const simEvents: GameEvent[] = [...ctx.publicEvents, {
+      type: 'nekomata_claim' as const,
+      actor: ctx.mySeat,
+    }]
+    const tsumiTarget = tryTsumiWithEvents(simEvents, ctx)
+    if (tsumiTarget) return { type: 'nekomata_co' }
+  }
+
   return { type: 'none' }
 }
 
@@ -501,10 +725,17 @@ function decideBodyguardComm(ctx: DecisionContext): CommunicationAction {
 function decideCommanderProposal(ctx: DecisionContext): Proposal | null {
   const { publicEvents, rng, alivePlayers: alive, retarPossibilities } = ctx
 
-  // Hati詰み
-  const tsumiTarget = tryTsumi(ctx)
-  if (tsumiTarget && alive.includes(tsumiTarget)) {
-    return { type: 'execute_order', target: tsumiTarget }
+  // Hati詰み: 処刑指示（+ 占い/護衛指示をproposalsに追加）
+  const action = tryTsumiAction(ctx)
+  if (action && action.execute > 0 && alive.includes(action.execute)) {
+    // 占い/護衛指示もproposalsに積む（他プレイヤーが参照する）
+    if (action.seerTarget && alive.includes(action.seerTarget)) {
+      ctx.proposals.push({ type: 'investigate_order', target: action.seerTarget })
+    }
+    if (action.bodyguardTarget && alive.includes(action.bodyguardTarget)) {
+      ctx.proposals.push({ type: 'protect_order', target: action.bodyguardTarget })
+    }
+    return { type: 'execute_order', target: action.execute }
   }
 
   const scores = buildSuspicionScore(publicEvents, retarPossibilities, alive, ctx.mySeat)
@@ -555,20 +786,59 @@ function isDesignatedFakeSeer(ctx: DecisionContext): boolean {
 function decideWerewolfClaim(ctx: DecisionContext): DayClaim {
   const { myPlayer, day, gameState: state, rng, lastExecutedSeat } = ctx
 
-  // 既に占い騙り中: 結果報告
+  // 既にCO済み: 結果報告
   if (myPlayer.claimedRole === 'seer') {
     return reportFakeSeerResult(state, myPlayer, day, ctx)
   }
   if (myPlayer.claimedRole === 'medium') {
     return reportFakeMediumResult(lastExecutedSeat, rng)
   }
+  if (myPlayer.claimedRole === 'mason') {
+    return { type: 'none' }
+  }
+  if (myPlayer.claimedRole !== null) return { type: 'none' }
 
-  // 占い騙り担当か？
-  if (isDesignatedFakeSeer(ctx) && myPlayer.claimedRole === null) {
-    // 偽占い結果を生成してCO
-    for (let n = 0; n < day; n++) {
-      generateStrategicFakeResult(state, myPlayer, n, ctx)
+  // 共有騙り (1%): 狼2匹でペアを組む
+  if (rng.next() < 0.01 && ctx.wolfTeammates && ctx.wolfTeammates.length > 0) {
+    const aliveSet = new Set(ctx.alivePlayers)
+    const aliveTeammate = ctx.wolfTeammates.find(s => aliveSet.has(s))
+    if (aliveTeammate) {
+      return { type: 'mason_co', partner: aliveTeammate }
     }
+  }
+
+  // 担当狼: 騙り役職をランダム選択
+  if (isDesignatedFakeSeer(ctx)) {
+    const r = rng.next()
+    if (r < 0.55) {
+      // 占い騙り (55%)
+      for (let n = 0; n < day; n++) generateStrategicFakeResult(state, myPlayer, n, ctx)
+      const results = Array.from(myPlayer.fakeDivineHistory.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([, v]) => ({ target: v.target, result: v.result }))
+      return { type: 'seer_co', results }
+    } else if (r < 0.75) {
+      // 霊能騙り (20%)
+      const pastResults = collectFakeMediumResults(state, day, rng)
+      return { type: 'medium_co', pastResults }
+    } else if (r < 0.85) {
+      // 猫又騙り (10%)
+      return { type: 'nekomata_co' }
+    } else if (r < 0.90) {
+      // 狩人騙り (5%)
+      const targets: number[] = []
+      const alive = alivePlayersExcept(state, myPlayer.seat)
+      for (let n = 0; n < day; n++) { if (alive.length > 0) targets.push(rng.pick(alive).seat) }
+      return { type: 'bodyguard_co', targets }
+    } else {
+      // 潜伏 (10%)
+      return { type: 'none' }
+    }
+  }
+
+  // 非担当狼: 15%でCO（占い騙り）
+  if (rng.next() < 0.15) {
+    for (let n = 0; n < day; n++) generateStrategicFakeResult(state, myPlayer, n, ctx)
     const results = Array.from(myPlayer.fakeDivineHistory.entries())
       .sort((a, b) => a[0] - b[0])
       .map(([, v]) => ({ target: v.target, result: v.result }))
@@ -578,46 +848,75 @@ function decideWerewolfClaim(ctx: DecisionContext): DayClaim {
   return { type: 'none' }
 }
 
+/**
+ * 偽結果をセットし、Hatiで詰まれないか検証。
+ * 詰まれる場合はfalseを返して結果をロールバック。
+ */
+function trySetFakeResult(
+  player: PlayerState, night: number, target: number, result: EnumSpecies, ctx: DecisionContext,
+): boolean {
+  // 8人超ならチェックなしで受理
+  if (ctx.alivePlayers.length > 8) {
+    player.fakeDivineHistory.set(night, { target, result })
+    return true
+  }
+  // 仮セットしてHatiチェック
+  player.fakeDivineHistory.set(night, { target, result })
+  const simEvents: GameEvent[] = [...ctx.publicEvents, {
+    type: 'seer_result' as const,
+    actor: ctx.mySeat,
+    target,
+    result,
+  }]
+  const tsumi = tryTsumiWithEvents(simEvents, ctx)
+  if (tsumi) {
+    // 詰まれる → ロールバック
+    player.fakeDivineHistory.delete(night)
+    return false
+  }
+  return true
+}
+
 function generateStrategicFakeResult(
   state: GameState, player: PlayerState, night: number, ctx: DecisionContext,
 ): void {
   if (player.fakeDivineHistory.has(night)) return
   const divined = new Set(Array.from(player.fakeDivineHistory.values()).map(d => d.target))
   const wolfSeats = new Set([ctx.mySeat, ...(ctx.wolfTeammates ?? [])])
-  const fanaticSeats = new Set(state.players.filter(p => p.role === 'fanatic').map(p => p.seat))
   const candidates = alivePlayersExcept(state, player.seat).filter(p => !divined.has(p.seat))
   if (candidates.length === 0) return
 
   const rng = ctx.rng
 
-  // 仲間・狂信者に白出し (40%)
+  // 仲間狼に白出し (40%)
   if (rng.next() < 0.4) {
-    const allies = candidates.filter(p => wolfSeats.has(p.seat) || fanaticSeats.has(p.seat))
-    if (allies.length > 0) {
-      const target = rng.pick(allies)
-      player.fakeDivineHistory.set(night, { target: target.seat, result: 'human' })
-      return
+    const wolfAllies = candidates.filter(p => wolfSeats.has(p.seat))
+    if (wolfAllies.length > 0) {
+      const target = rng.pick(wolfAllies)
+      if (trySetFakeResult(player, night, target.seat, 'human', ctx)) return
     }
   }
 
-  // 村役職に黒出し — 真占いに黒が最優先
-  const villagers = candidates.filter(p => !wolfSeats.has(p.seat) && !fanaticSeats.has(p.seat))
-  if (villagers.length > 0) {
-    // 真占いに黒出し優先
-    const trueSeer = villagers.find(p => p.role === 'seer')
+  // 非狼に黒出し — 真占いに黒が最優先
+  const nonWolves = candidates.filter(p => !wolfSeats.has(p.seat))
+  if (nonWolves.length > 0) {
+    const trueSeer = nonWolves.find(p => p.role === 'seer')
     if (trueSeer && rng.next() < 0.6) {
-      player.fakeDivineHistory.set(night, { target: trueSeer.seat, result: 'wolf' })
-      return
+      if (trySetFakeResult(player, night, trueSeer.seat, 'wolf', ctx)) return
     }
-    // 妖狐に黒出し (20%)
-    const hamster = villagers.find(p => p.role === 'werehamster')
+    const hamster = nonWolves.find(p => p.role === 'werehamster')
     if (hamster && rng.next() < 0.2) {
-      player.fakeDivineHistory.set(night, { target: hamster.seat, result: 'wolf' })
-      return
+      if (trySetFakeResult(player, night, hamster.seat, 'wolf', ctx)) return
     }
-    const target = rng.pick(villagers)
-    player.fakeDivineHistory.set(night, { target: target.seat, result: 'wolf' })
-    return
+    // ランダム黒出し（詰まれないものを探す）
+    const shuffled = [...nonWolves].sort(() => rng.next() - 0.5)
+    for (const t of shuffled) {
+      if (trySetFakeResult(player, night, t.seat, 'wolf', ctx)) return
+    }
+    // 全部詰まれるなら白出し
+    for (const t of shuffled) {
+      if (trySetFakeResult(player, night, t.seat, 'human', ctx)) return
+    }
   }
 
   // フォールバック
@@ -641,19 +940,52 @@ function reportFakeMediumResult(lastExecutedSeat: number | null, rng: Rng): DayC
   return { type: 'medium_result', result }
 }
 
+/**
+ * 狼視点の飽和・狐判定
+ * 飽和間近（あと1処刑で狼勝ちだが狐生存で狐勝ちになる）かを返す
+ */
+function detectFoxThreat(ctx: DecisionContext): {
+  nearSaturation: boolean
+  foxCandidates: number[]
+} {
+  const state = ctx.gameState
+  const alive = ctx.alivePlayers
+  const wolfSeats = new Set([ctx.mySeat, ...(ctx.wolfTeammates ?? [])])
+  const aliveWolfCount = alive.filter(s => wolfSeats.has(s)).length
+
+  // 狐候補: 狼視点で狐の位置を知っている（gameState参照OK）
+  const foxSeats = state.players
+    .filter(p => p.alive && p.role === 'werehamster')
+    .map(p => p.seat)
+
+  // 飽和判定: 次の処刑で非狼が減ったとき狼数≧残りになるか
+  // 現在の非狼非狐数
+  const nonWolfNonFox = alive.length - aliveWolfCount - foxSeats.length
+  // あと1人村人を処刑すると飽和: aliveWolfCount >= (nonWolfNonFox - 1)
+  const nearSaturation = aliveWolfCount >= nonWolfNonFox - 1 && foxSeats.length > 0
+
+  return { nearSaturation, foxCandidates: foxSeats }
+}
+
 function decideWerewolfVote(ctx: DecisionContext): number {
   const { gameState: state, rng, alivePlayers: alive, mySeat } = ctx
   const wolfSeats = new Set([mySeat, ...(ctx.wolfTeammates ?? [])])
   const candidates = alive.filter(s => s !== mySeat && !wolfSeats.has(s))
   if (candidates.length === 0) return alive.find(s => s !== mySeat) ?? mySeat
 
-  // PP判定
+  // 狐脅威判定: 飽和間近で狐が生きていたら狐を最優先処刑
+  const { nearSaturation, foxCandidates } = detectFoxThreat(ctx)
+  if (nearSaturation && foxCandidates.length > 0) {
+    const aliveFox = foxCandidates.filter(s => candidates.includes(s))
+    if (aliveFox.length > 0) return rng.pick(aliveFox.map(s => ({ seat: s }))).seat
+  }
+
+  // PP判定（狐がいない場合）
   const aliveWolfCount = alive.filter(s => wolfSeats.has(s)).length
   const fanaticCount = alivePlayers(state).filter(p => p.alive && p.role === 'fanatic').length
   const hamsterCount = alivePlayers(state).filter(p => p.alive && p.role === 'werehamster').length
   const nonWolfNonFox = alive.length - aliveWolfCount - hamsterCount
-  if (aliveWolfCount + fanaticCount >= nonWolfNonFox) {
-    // PP: 村人を処刑
+  if (aliveWolfCount + fanaticCount >= nonWolfNonFox && hamsterCount === 0) {
     const villagers = candidates.filter(s => {
       const p = state.players.find(pp => pp.seat === s)!
       return !isWerewolfAligned(p.role) && p.role !== 'werehamster' && p.role !== 'immoralist'
@@ -661,9 +993,19 @@ function decideWerewolfVote(ctx: DecisionContext): number {
     if (villagers.length > 0) return rng.pick(villagers.map(s => ({ seat: s }))).seat
   }
 
+  // CO役職に応じた投票（自分の主張と一貫性を持たせる）
+  const claimedRole = ctx.myPlayer.claimedRole
+  if (claimedRole === 'seer') {
+    const blacks = collectBlackTargets(ctx.publicEvents)
+    const myBlacks = candidates.filter(s => blacks.has(s))
+    if (myBlacks.length > 0 && rng.next() < 0.8) {
+      return rng.pick(myBlacks.map(s => ({ seat: s }))).seat
+    }
+  }
+
   // 真占いCO者（非狼）を優先処刑
   const claims = collectClaimsFromEvents(ctx.publicEvents)
-  const trueSeerClaimers = candidates.filter(s => claims.get(s) === 'seer')
+  const trueSeerClaimers = candidates.filter(s => claims.get(s) === 'seer' && !wolfSeats.has(s))
   if (trueSeerClaimers.length > 0 && rng.next() < 0.7) {
     return rng.pick(trueSeerClaimers.map(s => ({ seat: s }))).seat
   }
@@ -677,22 +1019,93 @@ function decideWerewolfComm(ctx: DecisionContext): CommunicationAction {
   const others = alive.filter(s => s !== mySeat)
   const proposals: number[] = []
 
-  // PP判定 → werewolf_co
+  // 狐脅威: 飽和間近で狐生存 → 狼COして狐処刑を訴える
+  const { nearSaturation, foxCandidates } = detectFoxThreat(ctx)
+  if (nearSaturation && foxCandidates.length > 0) {
+    for (const s of foxCandidates) proposals.push(s)
+    if (rng.next() < 0.8) {
+      return { signal: { type: 'werewolf_co' }, proposals }
+    }
+    return { signal: { type: 'accuse_fox', target: rng.pick(foxCandidates.map(s => ({ seat: s }))).seat }, proposals }
+  }
+
+  // PP判定 → werewolf_co（狐がいないとき）
   const aliveWolfCount = alive.filter(s => wolfSeats.has(s)).length
   const fanaticCount = alivePlayers(state).filter(p => p.alive && p.role === 'fanatic').length
   const hamsterCount = alivePlayers(state).filter(p => p.alive && p.role === 'werehamster').length
   const nonWolfNonFox = alive.length - aliveWolfCount - hamsterCount
-  if (aliveWolfCount + fanaticCount >= nonWolfNonFox && rng.next() < 0.9) {
+  if (aliveWolfCount + fanaticCount >= nonWolfNonFox && hamsterCount === 0 && rng.next() < 0.9) {
     return { signal: { type: 'werewolf_co' }, proposals }
   }
 
-  // 占い騙り中なら占いっぽく振る舞う
-  if (ctx.myPlayer.claimedRole === 'seer') {
+  // CO役職に応じた振る舞い（Retarの可能性を使って矛盾しない行動を選ぶ）
+  const claimedRole = ctx.myPlayer.claimedRole
+  const retarP = ctx.retarPossibilities
+
+  if (claimedRole === 'seer') {
+    // 占い騙り: 自分の黒出し先を処刑提案 + accuse_wolf
     const blacks = collectBlackTargets(ctx.publicEvents)
     const aliveBlacks = others.filter(s => blacks.has(s))
     if (aliveBlacks.length > 0) {
       for (const s of aliveBlacks) proposals.push(s)
       return { signal: { type: 'accuse_wolf', target: rng.pick(aliveBlacks.map(s => ({ seat: s }))).seat }, proposals }
+    }
+    // 白出し先にtrust
+    const whites = collectWhiteTargets(ctx.publicEvents)
+    const aliveWhites = others.filter(s => whites.has(s) && !wolfSeats.has(s))
+    if (aliveWhites.length > 0 && rng.next() < 0.3) {
+      return { signal: { type: 'trust', target: rng.pick(aliveWhites.map(s => ({ seat: s }))).seat }, proposals }
+    }
+  } else if (claimedRole === 'medium') {
+    // 霊能騙り: Retarで狼可能性が高い非狼を疑う（村人っぽく振る舞う）
+    if (retarP) {
+      const suspicious = others.filter(s => {
+        const roles = retarP.get(s)
+        return roles && roles.has('werewolf') && !wolfSeats.has(s)
+      })
+      if (suspicious.length > 0 && rng.next() < 0.4) {
+        const t = rng.pick(suspicious.map(s => ({ seat: s }))).seat
+        proposals.push(t)
+        return { signal: { type: 'suspicion', target: t }, proposals }
+      }
+    }
+  } else if (claimedRole === 'nekomata') {
+    // 猫又騙り: おとなしく、非狼に軽い疑い程度
+    if (rng.next() < 0.2 && others.length > 0) {
+      const nonWolves = others.filter(s => !wolfSeats.has(s))
+      if (nonWolves.length > 0) {
+        return { signal: { type: 'suspicion', target: rng.pick(nonWolves.map(s => ({ seat: s }))).seat }, proposals }
+      }
+    }
+    return { signal: { type: 'no_signal' }, proposals }
+  } else if (claimedRole === 'bodyguard') {
+    // 狩人騙り: 確定村っぽい人にtrust、非狼にsuspicion
+    if (retarP) {
+      const confirmed = others.filter(s => {
+        const roles = retarP.get(s)
+        return roles && roles.size === 1 && !wolfSeats.has(s)
+      })
+      if (confirmed.length > 0 && rng.next() < 0.3) {
+        return { signal: { type: 'trust', target: rng.pick(confirmed.map(s => ({ seat: s }))).seat }, proposals }
+      }
+    }
+  } else if (claimedRole === 'mason') {
+    // 共有騙り: 相方狼にtrust、非狼にsuspicion
+    const partner = ctx.wolfTeammates?.find(s => alive.includes(s))
+    if (partner && rng.next() < 0.4) {
+      return { signal: { type: 'trust', target: partner }, proposals }
+    }
+  }
+
+  // 潜伏 or フォールバック: Retarで狼可能性が高い非狼に疑い
+  if (retarP && rng.next() < 0.3) {
+    const suspicious = others.filter(s => {
+      const roles = retarP.get(s)
+      return roles && roles.has('werewolf') && !wolfSeats.has(s)
+    })
+    if (suspicious.length > 0) {
+      const t = rng.pick(suspicious.map(s => ({ seat: s }))).seat
+      return { signal: { type: 'suspicion', target: t }, proposals }
     }
   }
 
@@ -828,16 +1241,106 @@ function decideHamsterClaim(ctx: DecisionContext): DayClaim {
 }
 
 function decideImmoralistClaim(ctx: DecisionContext): DayClaim {
-  if (ctx.myPlayer.claimedRole !== null) {
-    if (ctx.myPlayer.claimedRole === 'medium') {
-      return reportFakeMediumResult(ctx.lastExecutedSeat, ctx.rng)
-    }
-    return { type: 'none' }
+  const { myPlayer, day, rng, gameState: state, lastExecutedSeat } = ctx
+
+  // 既にCO済み: 結果報告
+  if (myPlayer.claimedRole === 'seer') {
+    return reportImmoralistSeerResult(state, myPlayer, day, ctx)
   }
-  if (ctx.rng.next() < 0.8) return { type: 'none' }
-  // 霊能騙り
-  const pastResults = collectFakeMediumResults(ctx.gameState, ctx.day, ctx.rng)
-  return { type: 'medium_co', pastResults }
+  if (myPlayer.claimedRole === 'medium') {
+    return reportFakeMediumResult(lastExecutedSeat, rng)
+  }
+  if (myPlayer.claimedRole !== null) return { type: 'none' }
+
+  // CO率: 初日80%、二日目以降99%
+  const coRate = day === 1 ? 0.8 : 0.99
+  if (rng.next() >= coRate) return { type: 'none' }
+
+  // 占いCOを基本とする（狐を守る偽結果を出せる）
+  const r = rng.next()
+  if (r < 0.7) {
+    // 占い騙り
+    for (let n = 0; n < day; n++) {
+      generateImmoralistFakeResult(state, myPlayer, n, ctx)
+    }
+    const results = Array.from(myPlayer.fakeDivineHistory.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, v]) => ({ target: v.target, result: v.result }))
+    return { type: 'seer_co', results }
+  } else if (r < 0.85) {
+    // 霊能騙り
+    const pastResults = collectFakeMediumResults(state, day, rng)
+    return { type: 'medium_co', pastResults }
+  } else if (r < 0.93) {
+    // 狩人騙り
+    const targets: number[] = []
+    const alive = alivePlayersExcept(state, myPlayer.seat)
+    for (let n = 0; n < day; n++) {
+      if (alive.length > 0) targets.push(rng.pick(alive).seat)
+    }
+    return { type: 'bodyguard_co', targets }
+  } else {
+    // 猫又騙り
+    return { type: 'nekomata_co' }
+  }
+}
+
+/** 背徳者の偽占い結果生成: 狐を守ることが目的 */
+function generateImmoralistFakeResult(
+  state: GameState, player: PlayerState, night: number, ctx: DecisionContext,
+): void {
+  if (player.fakeDivineHistory.has(night)) return
+  const divined = new Set(Array.from(player.fakeDivineHistory.values()).map(d => d.target))
+  const candidates = alivePlayersExcept(state, player.seat).filter(p => !divined.has(p.seat))
+  if (candidates.length === 0) return
+
+  const rng = ctx.rng
+  const hamsterSeat = ctx.knownHamster
+
+  // 真占いが死亡しているか確認
+  const claims = collectClaimsFromEvents(ctx.publicEvents)
+  const aliveSet = new Set(ctx.alivePlayers)
+  const aliveSeerClaimers = [...claims.entries()].filter(
+    ([seat, role]) => role === 'seer' && seat !== ctx.mySeat && aliveSet.has(seat)
+  )
+  const trueSeerLikelyDead = aliveSeerClaimers.length === 0
+
+  // 狐への結果
+  const hamsterCandidate = candidates.find(p => p.seat === hamsterSeat)
+  if (hamsterCandidate) {
+    if (trueSeerLikelyDead && rng.next() < 0.3) {
+      // 真占い死亡 → 狐に黒出し（村が狼と誤認→他を先に吊る）
+      player.fakeDivineHistory.set(night, { target: hamsterCandidate.seat, result: 'wolf' })
+      return
+    }
+    // 基本: 狐に白出し（狐の疑惑を下げる）
+    player.fakeDivineHistory.set(night, { target: hamsterCandidate.seat, result: 'human' })
+    return
+  }
+
+  // 狐以外: ランダムに黒出し（自分の疑惑を上げ、破綻して先に吊られる）
+  const nonHamster = candidates.filter(p => p.seat !== hamsterSeat)
+  if (nonHamster.length > 0 && rng.next() < 0.5) {
+    player.fakeDivineHistory.set(night, { target: rng.pick(nonHamster).seat, result: 'wolf' })
+    return
+  }
+
+  // 白出し
+  if (nonHamster.length > 0) {
+    player.fakeDivineHistory.set(night, { target: rng.pick(nonHamster).seat, result: 'human' })
+    return
+  }
+  player.fakeDivineHistory.set(night, { target: rng.pick(candidates).seat, result: 'human' })
+}
+
+function reportImmoralistSeerResult(
+  state: GameState, player: PlayerState, day: number, ctx: DecisionContext,
+): DayClaim {
+  const night = day - 1
+  generateImmoralistFakeResult(state, player, night, ctx)
+  const latest = player.fakeDivineHistory.get(night)
+  if (!latest) return { type: 'none' }
+  return { type: 'seer_result', target: latest.target, result: latest.result }
 }
 
 function decideImmoralistVote(ctx: DecisionContext): number {
