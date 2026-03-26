@@ -121,3 +121,16 @@ benchConfig({
   seeds: [0, 1],
   hasFirstGhost: true,
 })
+
+console.log('')
+
+// 14d-neko seed=4244: CO出そろい後のDay2で worlds=360, 探索が重いケース
+benchConfig({
+  name: '14d-neko-heavy (seed=4244)',
+  roles: new Map<SystemRole, number>([
+    ['werewolf', 3], ['villager', 2], ['seer', 1], ['medium', 1], ['bodyguard', 1],
+    ['mason', 2], ['nekomata', 1], ['fanatic', 1], ['werehamster', 1], ['immoralist', 1],
+  ]),
+  seeds: [4244, 4245],
+  hasFirstGhost: true,
+})
