@@ -4,8 +4,9 @@ import { VillageRetar } from '../retar/index.ts'
 import type { TsumiResult, SearchOptions, SimState } from './types.ts'
 import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
 import { collectWorlds } from './worlds.ts'
-import { searchTsumi as runSearch, shouldPruneHamster } from './search.ts'
-import { RoleBitIndex, RoleSignatureBits } from '../retar/possibilities.ts'
+import { searchTsumi as runSearch, threatExceedsNawa } from './search.ts'
+import { canResolveFox } from './foxResolver.ts'
+import { RoleSignatureBits } from '../retar/possibilities.ts'
 
 export type { TsumiResult, SearchOptions } from './types.ts'
 export type { StrategyNode, World, VillageAction } from './types.ts'
@@ -35,8 +36,7 @@ export function searchTsumi(
   retar.analyze()
   const t1 = performance.now()
 
-  // 2. 狼候補数による早期枝刈り（Retarから直接取得、ワールド列挙前）
-  // 縄数 = floor((alive - 1 - hamster) / 2): wolfCountに依存しない
+  // 2. 狼/狐候補数による早期枝刈り（Retarから直接取得、ワールド列挙前）
   let alive = 0
   for (const [seat, status] of vs.statuses) {
     if (status.surviving) alive |= (1 << seat)
@@ -45,23 +45,27 @@ export function searchTsumi(
 
   const wolfBit = RoleSignatureBits.werewolf
   const hamsterBit = RoleSignatureBits.werehamster
-  let wolfCandidates = 0
-  let hamsterCandidates = 0
-  let safeToExecuteHamster = 0
+  let foxOnly = 0
+  let foxAndWolf = 0
+  let wolfOnly = 0
+  let confirmedWolves = 0
   let hasAliveHamster = false
   for (let seat = 1; seat < retar.conclusions.possibilities.length; seat++) {
     if (!(alive & (1 << seat))) continue
     const p = retar.conclusions.possibilities[seat]
-    if (p & wolfBit) wolfCandidates++
-    if (p & hamsterBit) {
-      hamsterCandidates++
-      hasAliveHamster = true
-      // 狐候補かつ狼の可能性なし = 安全に吊れる
-      if (!(p & wolfBit)) safeToExecuteHamster++
+    const isFox = (p & hamsterBit) !== 0
+    const isWolf = (p & wolfBit) !== 0
+    if (isFox && isWolf) foxAndWolf++
+    else if (isFox) foxOnly++
+    else if (isWolf) {
+      wolfOnly++
+      if (p === wolfBit) confirmedWolves++
     }
+    if (isFox) hasAliveHamster = true
   }
   const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
-  if (wolfCandidates > nawa || (!searchOptions.disableHamsterPruning && hasAliveHamster && shouldPruneHamster(hamsterCandidates, wolfCandidates, safeToExecuteHamster, nawa))) {
+  if (foxAndWolf + wolfOnly > nawa
+    || threatExceedsNawa(foxOnly, foxAndWolf, wolfOnly, confirmedWolves, nawa)) {
     const t2 = performance.now()
     return {
       isTsumi: false,
@@ -85,6 +89,23 @@ export function searchTsumi(
         worldsTotal: 0, nodesVisited: 0, maxDepth: 0,
         elapsed: t2 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: 0,
       },
+    }
+  }
+
+  // 3.5. 狐排除探索: 狐が生存している場合、排除可能か判定
+  // maxTurns = aliveCount: wolf_win チェックが自然な終了条件になるため、
+  // 人工的な縄数制限は不要。alive は毎ターン最低1減るので探索は有界。
+  if (!searchOptions.disableHamsterPruning && hasAliveHamster) {
+    if (!canResolveFox(worlds, alive, aliveCount)) {
+      const t3 = performance.now()
+      return {
+        isTsumi: false,
+        strategy: null,
+        stats: {
+          worldsTotal: worlds.length, nodesVisited: 0, maxDepth: 0,
+          elapsed: t3 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: t3 - t2,
+        },
+      }
     }
   }
 

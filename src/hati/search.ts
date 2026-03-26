@@ -25,8 +25,8 @@ const endgameTable = new Map<string, boolean>()
 /** エンドゲームテーブルのヒット数 */
 let endgameHits = 0
 
-/** 統計リセット */
-export function resetEndgameStats(): void { endgameHits = 0 }
+/** 統計リセット（テーブルもクリア） */
+export function resetEndgameStats(): void { endgameHits = 0; endgameTable.clear() }
 export function getEndgameStats(): { size: number, hits: number } {
   return { size: endgameTable.size, hits: endgameHits }
 }
@@ -281,8 +281,11 @@ function collapseBranches(branches: Record<ObservationKey, StrategyNode>): Strat
  * 狐枝刈り判定（共通ロジック）。
  *
  * 狐候補を村が処理しきれるかを判定する。
- * - 吊りcoverage: 狐候補かつ全ワールド非狼の席のみ安全に吊れる（狼を先に吊ると負けるため）
- * - 占いcoverage: nawa-1 回の占いで狐候補を消去（最終日夜なし）
+ * - 吊りcoverage: 狐候補かつ全ワールド非狼の席のみ安全に吊れる
+ * - 占いcoverage: 占い師の確定・狩人生存で決まる保証占い回数
+ *   - 占い確定 + 狩人生存: 2回（狼は狩人→占い師の順で噛む。呪殺は噛み前に発動するので占った夜は有効）
+ *   - 占い確定 + 狩人なし: 1回（狼が占い師を噛むが、その夜の呪殺は有効）
+ *   - 占い非確定: 0回（誰が占い師か不明なので保証できない）
  * - 消去法: +1
  *
  * @returns true なら狐候補が多すぎて詰みは不可能（枝刈りすべき）
@@ -292,9 +295,11 @@ export function shouldPruneHamster(
   wolfCandidates: number,
   safeToExecute: number,
   nawa: number,
+  confirmedSeerAlive: boolean,
+  bodyguardAlive: boolean,
 ): boolean {
   const executionCoverage = Math.min(safeToExecute, Math.max(0, nawa - wolfCandidates))
-  const divinationCoverage = Math.max(0, nawa - 1)
+  const divinationCoverage = confirmedSeerAlive ? (bodyguardAlive ? 2 : 1) : 0
   const coverage = executionCoverage + divinationCoverage + 1
   return hamsterCandidates > coverage
 }
@@ -302,15 +307,32 @@ export function shouldPruneHamster(
 const PRECHECK_PRUNED = -1
 const PRECHECK_CONTINUE = -2
 
-function precheckWorlds(worlds: World[], alive: number, disableHamsterPruning?: boolean): number {
+/**
+ * 不確定の狼/狐候補が縄数を超えるか判定。
+ * - 狐のみ候補: 全席分の縄コスト（狼ではないので処刑は常に縄消費）
+ * - 狐かつ狼候補: 実際の狐は最大1匹なので、最大1席分の縄コスト（残りは狼=無料）
+ * - 狼のみ候補: 全席分だが、確定狼（全ワールド共通）は縄を消費しない
+ */
+export function threatExceedsNawa(
+  foxOnly: number, foxAndWolf: number, wolfOnly: number,
+  confirmedWolves: number, nawa: number,
+): boolean {
+  return foxOnly + Math.min(foxAndWolf, 1) + wolfOnly - confirmedWolves > nawa
+}
+
+export function precheckWorlds(worlds: World[], alive: number, disableHamsterPruning?: boolean): number {
   const aliveCount = popCount32(alive)
   let wolfUnion = 0
+  let wolfIntersection = 0
   let hamsterUnion = 0
   let hasAliveHamster = false
 
-  for (const w of worlds) {
+  for (let i = 0; i < worlds.length; i++) {
+    const w = worlds[i]
     const wolvesAlive = w.wolfMask & alive
     wolfUnion |= wolvesAlive
+    if (i === 0) wolfIntersection = wolvesAlive
+    else wolfIntersection &= wolvesAlive
     const wolfCount = popCount32(wolvesAlive)
     let nonWolfNonHamster = aliveCount - wolfCount
     if (w.hamsterSeat !== -1 && hasSeat(alive, w.hamsterSeat)) {
@@ -331,17 +353,14 @@ function precheckWorlds(worlds: World[], alive: number, disableHamsterPruning?: 
   // 狼命中は縄を消費しない（gap±0）、空振りは縄-1（gap-2→処刑1回分）
   // よってwolfCountに依存せず、alive人数のみで決まる
   const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
+  // 基本チェック: 狼候補数 > 縄数（foxAndWolfが多い局面に有効）
   if (popCount32(wolfUnion) > nawa) return PRECHECK_PRUNED
-
-  // 狐枝刈り: 狐候補を村が処理しきれるか判定
-  // 吊りで安全に処理できるのは「狐候補かつ全ワールド非狼」の席のみ
-  // （狼かもしれない席を吊ると、狼を先に全滅させて負けるリスクがある）
-  const wolfCandidates = popCount32(wolfUnion)
-  if (!disableHamsterPruning && hasAliveHamster) {
-    // wolfUnionに含まれない狐候補 = 安全に吊れる
-    const safeToExecute = popCount32(hamsterUnion & ~wolfUnion)
-    if (shouldPruneHamster(popCount32(hamsterUnion), wolfCandidates, safeToExecute, nawa)) return PRECHECK_PRUNED
-  }
+  // 精緻チェック: 狐のみ/狐狼兼/狼のみに分解し、確定狼と狐最大1匹を考慮
+  const confirmedWolves = popCount32(wolfIntersection)
+  const foxOnly = popCount32(hamsterUnion & ~wolfUnion)
+  const foxAndWolf = popCount32(hamsterUnion & wolfUnion)
+  const wolfOnly = popCount32(wolfUnion & ~hamsterUnion)
+  if (threatExceedsNawa(foxOnly, foxAndWolf, wolfOnly, confirmedWolves, nawa)) return PRECHECK_PRUNED
 
   return PRECHECK_CONTINUE
 }
