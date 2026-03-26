@@ -4,7 +4,7 @@ import { VillageRetar } from '../retar/index.ts'
 import type { TsumiResult, SearchOptions, SimState } from './types.ts'
 import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
 import { collectWorlds } from './worlds.ts'
-import { searchTsumi as runSearch } from './search.ts'
+import { searchTsumi as runSearch, shouldPruneHamster } from './search.ts'
 import { RoleBitIndex, RoleSignatureBits } from '../retar/possibilities.ts'
 
 export type { TsumiResult, SearchOptions } from './types.ts'
@@ -47,15 +47,21 @@ export function searchTsumi(
   const hamsterBit = RoleSignatureBits.werehamster
   let wolfCandidates = 0
   let hamsterCandidates = 0
+  let safeToExecuteHamster = 0
   let hasAliveHamster = false
   for (let seat = 1; seat < retar.conclusions.possibilities.length; seat++) {
     if (!(alive & (1 << seat))) continue
     const p = retar.conclusions.possibilities[seat]
     if (p & wolfBit) wolfCandidates++
-    if (p & hamsterBit) { hamsterCandidates++; hasAliveHamster = true }
+    if (p & hamsterBit) {
+      hamsterCandidates++
+      hasAliveHamster = true
+      // 狐候補かつ狼の可能性なし = 安全に吊れる
+      if (!(p & wolfBit)) safeToExecuteHamster++
+    }
   }
   const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
-  if (wolfCandidates > nawa || (!searchOptions.disableHamsterPruning && hasAliveHamster && hamsterCandidates > 2 * nawa - wolfCandidates)) {
+  if (wolfCandidates > nawa || (!searchOptions.disableHamsterPruning && hasAliveHamster && shouldPruneHamster(hamsterCandidates, wolfCandidates, safeToExecuteHamster, nawa))) {
     const t2 = performance.now()
     return {
       isTsumi: false,

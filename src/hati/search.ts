@@ -277,6 +277,28 @@ function collapseBranches(branches: Record<ObservationKey, StrategyNode>): Strat
  *
  * @returns >= 0: 自明詰みの処刑先seat, -1: 枝刈り(詰み不可能), -2: 探索続行
  */
+/**
+ * 狐枝刈り判定（共通ロジック）。
+ *
+ * 狐候補を村が処理しきれるかを判定する。
+ * - 吊りcoverage: 狐候補かつ全ワールド非狼の席のみ安全に吊れる（狼を先に吊ると負けるため）
+ * - 占いcoverage: nawa-1 回の占いで狐候補を消去（最終日夜なし）
+ * - 消去法: +1
+ *
+ * @returns true なら狐候補が多すぎて詰みは不可能（枝刈りすべき）
+ */
+export function shouldPruneHamster(
+  hamsterCandidates: number,
+  wolfCandidates: number,
+  safeToExecute: number,
+  nawa: number,
+): boolean {
+  const executionCoverage = Math.min(safeToExecute, Math.max(0, nawa - wolfCandidates))
+  const divinationCoverage = Math.max(0, nawa - 1)
+  const coverage = executionCoverage + divinationCoverage + 1
+  return hamsterCandidates > coverage
+}
+
 const PRECHECK_PRUNED = -1
 const PRECHECK_CONTINUE = -2
 
@@ -311,14 +333,15 @@ function precheckWorlds(worlds: World[], alive: number, disableHamsterPruning?: 
   const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
   if (popCount32(wolfUnion) > nawa) return PRECHECK_PRUNED
 
-  // 狐候補数 > 処刑+占い+消去法のカバー可能数 → 詰みなし
-  // nawaラウンド中、wolfCandidates回は狼処刑に使う可能性がある。
-  // 残り nawa-wolfCandidates ラウンドで狐を処刑（AND-OR分岐でカバー）。
-  // 占いは狼処刑ラウンドの夜にも使える → 占い回数 = nawa-1（最終日夜なし）。
-  // 最後の1候補は消去法で特定。
-  // カバー可能 = (nawa-wolfCandidates) + (nawa-1) + 1 = 2*nawa - wolfCandidates
+  // 狐枝刈り: 狐候補を村が処理しきれるか判定
+  // 吊りで安全に処理できるのは「狐候補かつ全ワールド非狼」の席のみ
+  // （狼かもしれない席を吊ると、狼を先に全滅させて負けるリスクがある）
   const wolfCandidates = popCount32(wolfUnion)
-  if (!disableHamsterPruning && hasAliveHamster && popCount32(hamsterUnion) > 2 * nawa - wolfCandidates) return PRECHECK_PRUNED
+  if (!disableHamsterPruning && hasAliveHamster) {
+    // wolfUnionに含まれない狐候補 = 安全に吊れる
+    const safeToExecute = popCount32(hamsterUnion & ~wolfUnion)
+    if (shouldPruneHamster(popCount32(hamsterUnion), wolfCandidates, safeToExecute, nawa)) return PRECHECK_PRUNED
+  }
 
   return PRECHECK_CONTINUE
 }
