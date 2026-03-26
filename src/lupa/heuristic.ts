@@ -626,7 +626,15 @@ function decideNekomataClam(ctx: DecisionContext): DayClaim {
     return { type: 'nekomata_co' }
   }
 
-  // Day 1はCOしない
+  // 単独黒（自分だけが黒出しされている）→ CO して処刑回避
+  const blacks = collectBlackTargets(ctx.publicEvents)
+  if (blacks.has(ctx.mySeat)) {
+    // 自分以外に黒出しされている生存者がいなければ「単独黒」
+    const otherBlacks = [...blacks].filter(s => s !== ctx.mySeat && aliveSet.has(s))
+    if (otherBlacks.length === 0) return { type: 'nekomata_co' }
+  }
+
+  // Day 1はCOしない（単独黒以外）
   if (ctx.day === 1) return { type: 'none' }
 
   // 複数死体が出たらCO（襲撃+呪殺等で盤面が動いたタイミング）
