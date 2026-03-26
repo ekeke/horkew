@@ -881,7 +881,7 @@ function decideWerewolfClaim(ctx: DecisionContext): DayClaim {
       // 狩人騙り (5%)
       const targets: number[] = []
       const alive = alivePlayersExcept(state, myPlayer.seat)
-      for (let n = 0; n < day; n++) { if (alive.length > 0) targets.push(rng.pick(alive).seat) }
+      for (let n = 0; n < day - 1; n++) { if (alive.length > 0) targets.push(rng.pick(alive).seat) }
       return { type: 'bodyguard_co', targets }
     } else {
       // 潜伏 (10%)
