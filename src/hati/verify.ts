@@ -22,7 +22,9 @@ import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi } from './index.ts'
 import { getEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
-import { RoleBitIndex } from '../retar/possibilities.ts'
+import { VillageRetar } from '../retar/index.ts'
+import { RoleBitIndex, RoleSignatureBits } from '../retar/possibilities.ts'
+import { formatStrategy } from './format.ts'
 import type { StrategyNode, World } from './types.ts'
 import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
 import {
@@ -166,6 +168,36 @@ function applyFollowDeaths(alive: number, world: World): number {
   return alive
 }
 
+// --- Retar可能性チェック ---
+
+/**
+ * 真の配役がRetarの可能性に含まれているか検証する。
+ * 含まれていない席があればそのリストを返す。
+ */
+function checkRetarInclusion(
+  state: GameState,
+  possibilities: Uint16Array,
+  alive: number,
+): { seat: number, trueRole: SystemRole, allowed: string[] }[] {
+  const excluded: { seat: number, trueRole: SystemRole, allowed: string[] }[] = []
+  for (const p of state.players) {
+    if (!hasSeat(alive, p.seat)) continue
+    const mask = possibilities[p.seat]
+    if (mask === 0) continue
+    const roleBit = RoleSignatureBits[p.role]
+    if (roleBit === undefined) continue
+    if (!(mask & roleBit)) {
+      // 真の役職がRetarの可能性に含まれていない
+      const allowed: string[] = []
+      for (const [role, bit] of Object.entries(RoleSignatureBits)) {
+        if (mask & (bit as number)) allowed.push(role)
+      }
+      excluded.push({ seat: p.seat, trueRole: p.role, allowed })
+    }
+  }
+  return excluded
+}
+
 // --- チェックポイント検出 ---
 
 function findExecutionCheckpoints(howl: string): { line: number, day: number }[] {
@@ -213,12 +245,14 @@ type Args = {
   outdir: string | null
   scenario: string | null
   seeds: [number, number] | null
+  checkHamsterPruning: boolean
 }
 
 function parseArgs(argv: string[]): Args {
   let outdir: string | null = null
   let scenario: string | null = null
   let seeds: [number, number] | null = null
+  let checkHamsterPruning = false
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -227,6 +261,8 @@ function parseArgs(argv: string[]): Args {
     else if (arg === '--seeds' && i + 1 < argv.length) {
       const m = argv[++i].match(/^(\d+)-(\d+)$/)
       if (m) seeds = [parseInt(m[1]), parseInt(m[2])]
+    } else if (arg === '--check-hamster-pruning') {
+      checkHamsterPruning = true
     } else if (arg === '--help' || arg === '-h') {
       const names = configs.map(c => c.name).join(', ')
       console.log(`Hati 詰み探索 検証スクリプト
@@ -234,17 +270,18 @@ function parseArgs(argv: string[]): Args {
 Usage: node --experimental-strip-types src/hati/verify.ts [options]
 
 Options:
-  --scenario <name>   指定シナリオのみ実行
-  --seeds <from>-<to> seed範囲を指定
-  --outdir <dir>      失敗howlファイルの出力先
-  --help, -h          このヘルプ
+  --scenario <name>            指定シナリオのみ実行
+  --seeds <from>-<to>          seed範囲を指定
+  --outdir <dir>               失敗howlファイルの出力先
+  --check-hamster-pruning      狐枝刈りの偽陰性チェック
+  --help, -h                   このヘルプ
 
 シナリオ: ${names}`)
       process.exit(0)
     }
   }
 
-  return { outdir, scenario, seeds }
+  return { outdir, scenario, seeds, checkHamsterPruning }
 }
 
 function runVerify(args: Args): void {
@@ -278,6 +315,8 @@ function runVerify(args: Args): void {
     let tsumiCount = 0
     let verifiedCount = 0
     let configFailures = 0
+    let retarExclusions = 0
+    let falseNegatives = 0
     let maxAlive = 0
     let maxAliveSeed = -1
     let maxAliveDay = -1
@@ -330,7 +369,39 @@ function runVerify(args: Args): void {
         hatiCount++
         allTimings.push({ ms: tsumiResult.stats.searchElapsed, seed, day: cp.day, config: cfg.name })
 
-        if (!tsumiResult.isTsumi || !tsumiResult.strategy) continue
+        if (!tsumiResult.isTsumi || !tsumiResult.strategy) {
+          // 偽陰性チェック: 枝刈りなしで再探索し、詰みが見つかるか確認
+          if (args.checkHamsterPruning && cfg.roles.werehamster) {
+            try {
+              const { meta, statements } = parse(truncated)
+              const { vs, setup } = buildVillageStatus(statements, meta)
+              const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+              const noPruneResult = searchTsumi(vs, setup, opts, { maxDepth: 5, disableHamsterPruning: true })
+              if (noPruneResult.isTsumi) {
+                falseNegatives++
+                const failure: Failure = {
+                  config: cfg.name,
+                  seed,
+                  day: cp.day,
+                  message: `偽陰性: 狐枝刈りで詰みを見逃し (worlds=${noPruneResult.stats.worldsTotal})`,
+                  trace: [`枝刈りあり: 詰みなし`, `枝刈りなし: 詰みあり (worlds=${noPruneResult.stats.worldsTotal}, ${noPruneResult.stats.searchElapsed.toFixed(1)}ms)`],
+                  howl: truncated,
+                }
+                failures.push(failure)
+                if (args.outdir) {
+                  const filename = `${cfg.name}_s${seed}_day${cp.day}_false_negative.howl`
+                  const content = truncated + '\n\n'
+                    + `# [偽陰性: 狐枝刈りで詰みを見逃し]\n`
+                    + `# 枝刈りなし: worlds=${noPruneResult.stats.worldsTotal}, ${noPruneResult.stats.searchElapsed.toFixed(1)}ms\n`
+                  writeFileSync(join(args.outdir, filename), content)
+                }
+              }
+            } catch {
+              // parse/build失敗は無視（上でも同様）
+            }
+          }
+          continue
+        }
         tsumiCount++
 
         const aliveCount = popCount32(alive)
@@ -347,22 +418,47 @@ function runVerify(args: Args): void {
         verifiedCount++
 
         if (!verification.valid) {
-          configFailures++
+          // Retar排除チェック: 真の配役がRetarの可能性に含まれているか
+          let retarExcluded: { seat: number, trueRole: SystemRole, allowed: string[] }[] = []
+          try {
+            const { meta, statements } = parse(truncated)
+            const { vs, setup } = buildVillageStatus(statements, meta)
+            const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+            const retar = new VillageRetar(vs, setup, opts)
+            retar.analyze()
+            retarExcluded = checkRetarInclusion(state, retar.conclusions.possibilities, alive)
+          } catch { /* ignore */ }
+
+          const isRetarBug = retarExcluded.length > 0
+          if (isRetarBug) retarExclusions++
+          else configFailures++
+
+          const label = isRetarBug ? 'Retar排除' : 'Hati検証失敗'
+          const retarLines = retarExcluded.map(e =>
+            `# Retar排除: seat${e.seat} 真=${e.trueRole} 許可=${e.allowed.join(',')}`
+          )
           const failure: Failure = {
             config: cfg.name,
             seed,
             day: cp.day,
-            message: verification.trace[verification.trace.length - 1],
-            trace: verification.trace,
+            message: isRetarBug
+              ? `Retar排除: ${retarExcluded.map(e => `seat${e.seat}(${e.trueRole})`).join(', ')}`
+              : verification.trace[verification.trace.length - 1],
+            trace: isRetarBug ? [...retarLines.map(l => l.slice(2)), ...verification.trace] : verification.trace,
             howl: truncated,
           }
           failures.push(failure)
 
           if (args.outdir) {
             const filename = `${cfg.name}_s${seed}_day${cp.day}.howl`
+            const trueRoles = state.players.map(p => `${p.seat}=${p.role}`).join(', ')
             const content = truncated + '\n\n'
-              + `# [Hati検証失敗]\n`
+              + `# [${label}]\n`
               + verification.trace.map(t => `# ${t}`).join('\n') + '\n'
+              + (retarLines.length > 0 ? retarLines.join('\n') + '\n' : '')
+              + `# 真の配役: ${trueRoles}\n`
+              + `# worlds=${tsumiResult.stats.worldsTotal}\n\n`
+              + formatStrategy(tsumiResult.strategy!) + '\n'
             writeFileSync(join(args.outdir, filename), content)
           }
         }
@@ -379,7 +475,10 @@ function runVerify(args: Args): void {
     if (tsumiCount > 0) {
       console.log(`    最長詰み: ${maxAlive}人生存 (seed=${maxAliveSeed} Day${maxAliveDay})`)
     }
-    console.log(`    戦略検証: ${configFailures === 0 ? '全通過' : `${configFailures}失敗`}`)
+    console.log(`    戦略検証: ${configFailures === 0 && retarExclusions === 0 ? '全通過' : `Hati=${configFailures}失敗, Retar排除=${retarExclusions}`}`)
+    if (args.checkHamsterPruning && cfg.roles.werehamster) {
+      console.log(`    狐枝刈り偽陰性: ${falseNegatives === 0 ? 'なし' : `${falseNegatives}件`}`)
+    }
   }
 
   console.log('')

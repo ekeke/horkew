@@ -110,6 +110,8 @@ export type SearchStats = {
 export type SearchOptions = {
   /** 最大探索深度（日数） */
   maxDepth: number
+  /** 狐関連の枝刈りを無効化（偽陰性検証用） */
+  disableHamsterPruning?: boolean
 }
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {

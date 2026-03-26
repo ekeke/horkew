@@ -133,7 +133,7 @@ function isTsumi(
   if (ss.memo.has(key)) return ss.memo.get(key)!
 
   // 統合事前チェック: 自明詰み / パリティ / 狼候補数
-  const precheck = precheckWorlds(worlds, state.alive)
+  const precheck = precheckWorlds(worlds, state.alive, ss.options.disableHamsterPruning)
   if (precheck >= 0) {
     // 自明な詰み: seat = precheck を処刑して即勝ち
     const result: StrategyNode = {
@@ -280,7 +280,7 @@ function collapseBranches(branches: Record<ObservationKey, StrategyNode>): Strat
 const PRECHECK_PRUNED = -1
 const PRECHECK_CONTINUE = -2
 
-function precheckWorlds(worlds: World[], alive: number): number {
+function precheckWorlds(worlds: World[], alive: number, disableHamsterPruning?: boolean): number {
   const aliveCount = popCount32(alive)
   let wolfUnion = 0
   let hamsterUnion = 0
@@ -318,7 +318,7 @@ function precheckWorlds(worlds: World[], alive: number): number {
   // 最後の1候補は消去法で特定。
   // カバー可能 = (nawa-wolfCandidates) + (nawa-1) + 1 = 2*nawa - wolfCandidates
   const wolfCandidates = popCount32(wolfUnion)
-  if (hasAliveHamster && popCount32(hamsterUnion) > 2 * nawa - wolfCandidates) return PRECHECK_PRUNED
+  if (!disableHamsterPruning && hasAliveHamster && popCount32(hamsterUnion) > 2 * nawa - wolfCandidates) return PRECHECK_PRUNED
 
   return PRECHECK_CONTINUE
 }

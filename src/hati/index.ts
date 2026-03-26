@@ -55,7 +55,7 @@ export function searchTsumi(
     if (p & hamsterBit) { hamsterCandidates++; hasAliveHamster = true }
   }
   const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
-  if (wolfCandidates > nawa || (hasAliveHamster && hamsterCandidates > 2 * nawa - wolfCandidates)) {
+  if (wolfCandidates > nawa || (!searchOptions.disableHamsterPruning && hasAliveHamster && hamsterCandidates > 2 * nawa - wolfCandidates)) {
     const t2 = performance.now()
     return {
       isTsumi: false,

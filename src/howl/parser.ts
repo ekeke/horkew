@@ -325,7 +325,10 @@ function assignDays(statements: Statement[]): Statement[] {
       }
       return { ...s, day }
     }
-    inNight = false
+    // follow/curse は夜イベントの一部なので inNight をリセットしない
+    if (s.type !== 'follow' && s.type !== 'curse') {
+      inNight = false
+    }
     return { ...s, day }
   })
 }
