@@ -32,7 +32,7 @@ const W = {
   MULTI_SEER_CLAIMER: 10,
   ACCUSE_WOLF_TARGET: 10,
   TRUST_FROM_CONFIRMED: -20,
-  SEER_BUSTED: 80,          // 占い結果が霊能と矛盾 = 破綻
+  CO_BUSTED: 200,            // CO役職がRetarで否定 = 破綻
 }
 
 // 指揮者追従率
@@ -132,12 +132,13 @@ function buildSuspicionScore(
     if (role === 'seer' && aliveSet.has(seat)) seerClaimers.add(seat)
   }
 
-  // 破綻検出: 占いCO者なのにRetarで占い師の可能性が消えている = 破綻
-  const bustedSeers = new Set<number>()
+  // 破綻検出: CO役職がRetarの可能性に含まれていない = 破綻
+  const bustedCOs = new Set<number>()
   if (retarPossibilities) {
-    for (const seat of seerClaimers) {
+    for (const [seat, claimedRole] of claims) {
+      if (!aliveSet.has(seat)) continue
       const roles = retarPossibilities.get(seat)
-      if (roles && !roles.has('seer')) bustedSeers.add(seat)
+      if (roles && !roles.has(claimedRole)) bustedCOs.add(seat)
     }
   }
 
@@ -159,8 +160,8 @@ function buildSuspicionScore(
       }
     }
 
-    // 占い破綻（Retarで占い師の可能性が消えている占いCO者）
-    if (bustedSeers.has(seat)) score += W.SEER_BUSTED
+    // CO破綻（RetarでCO役職の可能性が消えている）
+    if (bustedCOs.has(seat)) score += W.CO_BUSTED
 
     // 複数占いCO
     if (seerClaimers.has(seat) && seerClaimers.size >= 2) score += W.MULTI_SEER_CLAIMER
