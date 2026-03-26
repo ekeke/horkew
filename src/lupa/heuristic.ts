@@ -35,11 +35,6 @@ const W = {
   CO_BUSTED: 200,            // CO役職がRetarで否定 = 破綻
 }
 
-// 指揮者追従率
-const FOLLOW_RATES: Record<string, number> = {
-  werewolf: 0.2, fanatic: 0.25, werehamster: 0.6, immoralist: 0.7,
-}
-const DEFAULT_FOLLOW_RATE = 0.9
 
 // ============================================================
 // ユーティリティ: 公開情報抽出
@@ -294,29 +289,15 @@ export class HeuristicStrategy implements Strategy {
   }
 
   decideVote(ctx: DecisionContext): number {
-    const { rng, proposals } = ctx
+    const { proposals } = ctx
 
-    // 指揮者の処刑指示（破綻指揮者の指示には従わない）
+    // 指揮者の処刑指示（100%追従、背徳者は妖狐指定を拒否）
     const executeOrder = proposals.find(p => p.type === 'execute_order')
-    if (executeOrder && ctx.commander !== null) {
-      // 指揮者がRetarで破綻していないか確認
-      let commanderBusted = false
-      if (ctx.retarPossibilities) {
-        const claims = collectClaimsFromEvents(ctx.publicEvents)
-        const cmdClaim = claims.get(ctx.commander)
-        if (cmdClaim) {
-          const cmdRoles = ctx.retarPossibilities.get(ctx.commander)
-          if (cmdRoles && !cmdRoles.has(cmdClaim)) commanderBusted = true
-        }
-      }
-
-      if (!commanderBusted) {
-        const followRate = FOLLOW_RATES[ctx.myRole] ?? DEFAULT_FOLLOW_RATE
-        if (ctx.myRole === 'immoralist' && executeOrder.target === ctx.knownHamster) {
-          // 背徳者: 妖狐処刑指示には絶対に従わない
-        } else if (rng.next() < followRate) {
-          if (ctx.alivePlayers.includes(executeOrder.target)) return executeOrder.target
-        }
+    if (executeOrder) {
+      if (ctx.myRole === 'immoralist' && executeOrder.target === ctx.knownHamster) {
+        // 背徳者: 妖狐処刑指示には従わない
+      } else if (ctx.alivePlayers.includes(executeOrder.target)) {
+        return executeOrder.target
       }
     }
 
@@ -353,12 +334,11 @@ export class HeuristicStrategy implements Strategy {
   }
 
   decideLeadershipResponse(ctx: DecisionContext, _proposal: Proposal): LeadershipResponse {
-    const followRate = FOLLOW_RATES[ctx.myRole] ?? DEFAULT_FOLLOW_RATE
     if (ctx.myRole === 'immoralist') {
       const exec = ctx.proposals.find(p => p.type === 'execute_order')
       if (exec && exec.target === ctx.knownHamster) return 'defy'
     }
-    return ctx.rng.next() < followRate ? 'follow' : 'defy'
+    return 'follow'
   }
 }
 

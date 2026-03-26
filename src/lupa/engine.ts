@@ -292,7 +292,7 @@ export function runGame(config: LupaConfig): GameResult {
 
     // ==== シグナルフェーズ ====
     // 指揮者判定
-    state.commander = detectCommander(state)
+    state.commander = detectCommander(state, retarPossibilities)
     if (state.commander !== null) {
       events.push({ type: 'commander_appointed', seat: state.commander })
     }
@@ -618,7 +618,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
     }
 
     // シグナルフェーズ
-    state.commander = detectCommander(state)
+    state.commander = detectCommander(state, retarPossibilities)
     if (state.commander !== null) events.push({ type: 'commander_appointed', seat: state.commander })
     const daySignals: SignalRecord[] = []
     let signalIdCounter = signals.length
