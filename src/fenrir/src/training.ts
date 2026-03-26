@@ -692,9 +692,11 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     const avgPL = (totalPolicyLoss / config.ppoEpochs)
     const totalSteps = allIndividualTrajectories.length + allWolfTeamTrajectories.length + allMasonTeamTrajectories.length
     const phaseLabel = phase === 1 ? 'heuristic' : phase === 2 ? 'self-play' : 'pool'
+    const gamePct = (gameMs / iterMs * 100).toFixed(0)
+    const ppoPct = (ppoMs / iterMs * 100).toFixed(0)
     process.stderr.write(
       `\r\x1b[K  ${bar} ${pctStr}% ${iter}/${config.totalIterations} | ` +
-      `${iterMs.toFixed(0)}ms [game:${gameMs.toFixed(0)} gae:${gaeMs.toFixed(0)} ppo:${ppoMs.toFixed(0)}] ETA ${etaStr} | ` +
+      `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ETA ${etaStr} | ` +
       `loss=${avgPL.toFixed(4)} steps=${totalSteps} | ` +
       `phase ${phase} (${phaseLabel})`
     )
