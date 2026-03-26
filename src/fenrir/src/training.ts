@@ -6,6 +6,7 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
+import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame, runGameAsync } from '../../lupa/engine.ts'
 import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-node-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
@@ -190,6 +191,7 @@ type GameTrajectories = {
 
 type GameAgents = {
   strategies: Map<number, FenrirStrategy>
+  defaultStrategy?: Strategy
   wolfTeamStrategy?: WolfTeamStrategy
   masonTeamStrategy?: MasonTeamStrategy
 }
@@ -205,6 +207,7 @@ function generateGame(
     roles,
     seed,
     strategies: new Map(agents.strategies),
+    defaultStrategy: agents.defaultStrategy,
     enableRetar: config.enableRetar,
     hasFirstGhost: config.hasFirstGhost,
     revoteConfig: config.revoteConfig,
@@ -213,7 +216,7 @@ function generateGame(
   }
 
   // Reset trajectories
-  for (const s of agents.strategies.values()) s.resetTrajectory()
+  for (const s of agents.strategies.values()) s.resetTrajectory?.()
   agents.wolfTeamStrategy?.resetTrajectory()
   agents.masonTeamStrategy?.resetTrajectory()
 
@@ -291,6 +294,7 @@ async function generateGameAsync(
     roles,
     seed,
     strategies: new Map(agents.strategies),
+    defaultStrategy: agents.defaultStrategy,
     enableRetar: config.enableRetar,
     hasFirstGhost: config.hasFirstGhost,
     revoteConfig: config.revoteConfig,
@@ -299,7 +303,7 @@ async function generateGameAsync(
     retarFn: analyzeFromEventsParallel,
   }
 
-  for (const s of agents.strategies.values()) s.resetTrajectory()
+  for (const s of agents.strategies.values()) s.resetTrajectory?.()
   agents.wolfTeamStrategy?.resetTrajectory()
   agents.masonTeamStrategy?.resetTrajectory()
 
@@ -601,7 +605,8 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       }
 
       const seed = iter * config.gamesPerBatch + g
-      const agents = { strategies, wolfTeamStrategy, masonTeamStrategy }
+      const defaultStrategy = useHeuristic ? new HeuristicStrategy() : undefined
+      const agents = { strategies, defaultStrategy, wolfTeamStrategy, masonTeamStrategy }
 
       if (useAsync) {
         gamePromises.push(

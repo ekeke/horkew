@@ -18,6 +18,8 @@ Options:
   --checkpoint-dir <dir>    チェックポイント保存先 (default: ${d.checkpointDir})
   --checkpoint-interval <n> 保存間隔 (default: ${d.checkpointInterval})
   --eval-interval <n>       評価間隔 (default: ${d.evalInterval})
+  --phase1-end <n>          Phase1終了イテレーション (default: ${d.phase1End})
+  --phase2-end <n>          Phase2終了イテレーション (default: ${d.phase2End})
   --no-retar                Retar論理推論を無効化
   --resume [dir]            チェックポイントから再開 (default: --checkpoint-dir)
   --help, -h                このヘルプを表示
@@ -90,6 +92,12 @@ function parseArgs(): ParsedArgs {
         break
       case '--checkpoint-interval':
         config.checkpointInterval = parseInt(args[++i])
+        break
+      case '--phase1-end':
+        config.phase1End = parseInt(args[++i])
+        break
+      case '--phase2-end':
+        config.phase2End = parseInt(args[++i])
         break
       case '--resume': {
         // --resume の次が別のフラグか末尾なら true（checkpoint-dir を使う）

@@ -8,8 +8,10 @@ export type LupaConfig = {
   verify?: boolean
   useRandomNames?: boolean
   hasFirstGhost?: boolean
-  /** プレイヤーごとの戦略（未指定はHeuristicStrategy） */
+  /** プレイヤーごとの戦略（未指定はdefaultStrategy、それも未指定ならRandomStrategy） */
   strategies?: Map<number, Strategy>
+  /** strategiesに未登録のseatに使う戦略 */
+  defaultStrategy?: Strategy
   /** 狼チーム戦略 */
   wolfTeamStrategy?: TeamStrategy
   /** 共有者チーム戦略 */

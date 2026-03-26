@@ -233,6 +233,10 @@ export class FenrirStrategy implements Strategy {
     return decodeLeader(action)
   }
 
+  decideDefensiveClaim(_ctx: DecisionContext): DayClaim {
+    return { type: 'none' }
+  }
+
   /** トラジェクトリをリセット */
   resetTrajectory(): void {
     this.trajectory = []
@@ -462,6 +466,10 @@ export class WolfTeamStrategy extends TeamStrategyBase implements TeamStrategy {
   decideLeadershipResponse(ctx: TeamDecisionContext, _proposal: Proposal): LeadershipResponse {
     return this.decideLeadershipResponseImpl(ctx)
   }
+
+  decideDefensiveClaim(_ctx: TeamDecisionContext): DayClaim {
+    return { type: 'none' }
+  }
 }
 
 // ============================================================
@@ -495,5 +503,9 @@ export class MasonTeamStrategy extends TeamStrategyBase implements TeamStrategy 
 
   decideLeadershipResponse(ctx: TeamDecisionContext, _proposal: Proposal): LeadershipResponse {
     return this.decideLeadershipResponseImpl(ctx)
+  }
+
+  decideDefensiveClaim(_ctx: TeamDecisionContext): DayClaim {
+    return { type: 'none' }
   }
 }

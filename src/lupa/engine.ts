@@ -23,7 +23,7 @@ export type GameResult = {
 const defaultStrategy = new RandomStrategy()
 
 function getStrategy(config: LupaConfig, seat: number): Strategy {
-  return config.strategies?.get(seat) ?? defaultStrategy
+  return config.strategies?.get(seat) ?? config.defaultStrategy ?? defaultStrategy
 }
 
 /** チーム戦略を使うべきか判定し、TeamDecisionContext を構築 */
