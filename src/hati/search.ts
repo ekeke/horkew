@@ -8,7 +8,7 @@ import {
   checkOutcome, allWorldsVillageWin, anyWorldVillageLoss,
   applyExecution, simulateNight, validBiteTargetsMask,
   obsKeyToString, executionObsKeyToString,
-  getMediumResult,
+  getMediumResult, applyFollowDeaths,
 } from './simulate.ts'
 import { RoleBitIndex } from '../retar/possibilities.ts'
 
@@ -246,7 +246,11 @@ function canonicalKey(worlds: World[], alive: number): string {
 /**
  * 全分岐が同じ trivial win に帰着する場合、夜分岐を圧縮。
  */
-function collapseBranches(branches: Record<ObservationKey, StrategyNode>): StrategyNode | null {
+function collapseBranches(
+  branches: Record<ObservationKey, StrategyNode>,
+  bodyguardTarget: Seat | null,
+  seerTarget: Seat | null,
+): StrategyNode | null {
   const values = Object.values(branches)
   if (values.length === 0) return null
   if (values.every(v => v.type === 'win')) return { type: 'win' }
@@ -263,6 +267,10 @@ function collapseBranches(branches: Record<ObservationKey, StrategyNode>): Strat
       return null
     }
   }
+
+  // 夜行動（占い/護衛）がある場合は collapse しない
+  // （呪殺がゲーム状態に影響し、検証で再現が必要なため）
+  if (seerTarget !== null || bodyguardTarget !== null) return null
 
   return {
     type: 'action',
@@ -490,7 +498,30 @@ function partitionWorldsByExecution(
     }
   }
 
-  return result
+  // 後追い死亡の適用: 狐処刑時に背徳者が死ぬ（観測可能）
+  // 同じ霊能分岐内でも後追い有無で alive が異なるため、グループを分割する
+  const finalResult = new Map<ObservationKey, { worlds: World[], alive: number }>()
+  for (const [obsKey, group] of result) {
+    const byAlive = new Map<number, World[]>()
+    for (const w of group.worlds) {
+      const a = applyFollowDeaths(group.alive, w)
+      const existing = byAlive.get(a)
+      if (existing) existing.push(w)
+      else byAlive.set(a, [w])
+    }
+    if (byAlive.size === 1) {
+      const [alive, worlds] = [...byAlive.entries()][0]
+      finalResult.set(obsKey, { worlds, alive })
+    } else {
+      for (const [alive, worlds] of byAlive) {
+        const followDead = group.alive & ~alive
+        const suffix = followDead !== 0 ? `+f:${31 - Math.clz32(followDead & (-followDead))}` : ''
+        finalResult.set((obsKey + suffix) as ObservationKey, { worlds, alive })
+      }
+    }
+  }
+
+  return finalResult
 }
 
 function addToPartition(
@@ -657,7 +688,7 @@ function tryNightAction(
   }
 
   // 全分岐が同じ trivial win に帰着する場合、夜分岐を圧縮
-  const collapsed = collapseBranches(branches)
+  const collapsed = collapseBranches(branches, bodyguardTarget, seerTarget)
   if (collapsed) return collapsed
 
   return {

@@ -29,7 +29,7 @@ import type { StrategyNode, World } from './types.ts'
 import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
 import {
   checkOutcome, simulateNight, validBiteTargets, getMediumResult,
-  executionObsKeyToString, obsKeyToString,
+  executionObsKeyToString, obsKeyToString, applyFollowDeaths,
 } from './simulate.ts'
 
 const ANALYZE_OPTIONS: AnalyzeOptions = {
@@ -107,10 +107,13 @@ function verifyStrategy(
         : { valid: false, trace: failTrace }
     }
 
+    const beforeFollow = afterExec
     afterExec = applyFollowDeaths(afterExec, world)
+    const followDead = beforeFollow & ~afterExec
+    const followSuffix = followDead !== 0 ? `+f:${31 - Math.clz32(followDead & (-followDead))}` : ''
 
-    const obsKey = executionObsKeyToString(mediumResult, null)
-    const branch = branches[obsKey] ?? branches['win']
+    const obsKey = executionObsKeyToString(mediumResult, null) + followSuffix
+    const branch = branches[obsKey] ?? branches[executionObsKeyToString(mediumResult, null)] ?? branches['win']
     if (!branch) {
       return { valid: false, trace: [`処刑 ${target} の分岐 '${obsKey}' が存在しない`] }
     }
@@ -157,15 +160,6 @@ function verifyStrategy(
   }
 
   return { valid: true, trace: ['全噛み先で勝利確認'] }
-}
-
-function applyFollowDeaths(alive: number, world: World): number {
-  if (world.hamsterSeat !== -1 && !hasSeat(alive, world.hamsterSeat)) {
-    if (world.immoralistSeat !== -1 && hasSeat(alive, world.immoralistSeat)) {
-      return removeSeat(alive, world.immoralistSeat)
-    }
-  }
-  return alive
 }
 
 // --- Retar可能性チェック ---

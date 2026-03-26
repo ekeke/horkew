@@ -175,6 +175,19 @@ export function validBiteTargetsMask(world: World, alive: number): number {
   return alive & ~world.wolfMask
 }
 
+/**
+ * 処刑後の後追い死亡を適用する。
+ * 狐が死亡している場合、背徳者が後追い死亡する。
+ */
+export function applyFollowDeaths(alive: number, world: World): number {
+  if (world.hamsterSeat !== -1 && !hasSeat(alive, world.hamsterSeat)) {
+    if (world.immoralistSeat !== -1 && hasSeat(alive, world.immoralistSeat)) {
+      return removeSeat(alive, world.immoralistSeat)
+    }
+  }
+  return alive
+}
+
 // --- 観測キー変換（数値 → 文字列、出力用） ---
 
 export function obsKeyToString(obsKey: number): ObservationKey {
