@@ -45,6 +45,8 @@ export type Strategy = {
   decideCommunication(ctx: DecisionContext): CommunicationAction
   decideProposal(ctx: DecisionContext): Proposal | null
   decideLeadershipResponse(ctx: DecisionContext, proposal: Proposal): LeadershipResponse
+  /** 提案後・投票前の防御CO（処刑提案されている場合に反応） */
+  decideDefensiveClaim(ctx: DecisionContext): DayClaim
 }
 
 // ============================================================
@@ -85,4 +87,6 @@ export type TeamStrategy = {
   decideProposal(ctx: TeamDecisionContext): Proposal | null
   /** 指揮者への応答 */
   decideLeadershipResponse(ctx: TeamDecisionContext, proposal: Proposal): LeadershipResponse
+  /** 提案後・投票前の防御CO */
+  decideDefensiveClaim(ctx: TeamDecisionContext): DayClaim
 }

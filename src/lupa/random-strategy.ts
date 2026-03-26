@@ -241,6 +241,10 @@ export class RandomStrategy implements Strategy {
     if (rng.next() < followRate) return 'follow'
     return 'defy'
   }
+
+  decideDefensiveClaim(_ctx: DecisionContext): DayClaim {
+    return { type: 'none' }
+  }
 }
 
 // ============================================================
@@ -676,6 +680,10 @@ export class WolfTeamRandom implements TeamStrategy {
     return this.individual.decideLeadershipResponse(actorCtx, proposal)
   }
 
+  decideDefensiveClaim(ctx: TeamDecisionContext): DayClaim {
+    return this.individual.decideDefensiveClaim(this.buildActorCtx(ctx))
+  }
+
   private buildActorCtx(ctx: TeamDecisionContext): DecisionContext {
     const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
     const player = ctx.gameState.players.find(p => p.seat === seat)!
@@ -728,6 +736,10 @@ export class MasonTeamRandom implements TeamStrategy {
   decideLeadershipResponse(ctx: TeamDecisionContext, proposal: Proposal): LeadershipResponse {
     const actorCtx = this.buildActorCtx(ctx)
     return this.individual.decideLeadershipResponse(actorCtx, proposal)
+  }
+
+  decideDefensiveClaim(ctx: TeamDecisionContext): DayClaim {
+    return this.individual.decideDefensiveClaim(this.buildActorCtx(ctx))
   }
 
   private buildActorCtx(ctx: TeamDecisionContext): DecisionContext {

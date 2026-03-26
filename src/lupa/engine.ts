@@ -259,7 +259,7 @@ export function runGame(config: LupaConfig): GameResult {
 
     // ==== CO前Retar分析 ====
     let preCoRetar: Map<number, Set<SystemRole>> | null = null
-    if (config.enableRetar) {
+    if (config.enableRetar !== false) {
       preCoRetar = retarAnalyze(events, state, config)
     }
 
@@ -286,7 +286,7 @@ export function runGame(config: LupaConfig): GameResult {
 
     // ==== CO後Retar分析（シグナル/投票用） ====
     let retarPossibilities: Map<number, Set<SystemRole>> | null = null
-    if (config.enableRetar) {
+    if (config.enableRetar !== false) {
       retarPossibilities = retarAnalyze(events, state, config)
     }
 
@@ -297,9 +297,10 @@ export function runGame(config: LupaConfig): GameResult {
     const dayProposals: Proposal[] = []
     state.commander = null
 
-    // シグナルラウンド (3ラウンド) — nominate_commander で指揮者を選出
+    // シグナルラウンド (3ラウンド) — nominate_commander で指揮者を選出、CO時Retar再実行
     for (let round = 0; round < 3; round++) {
       for (const player of alivePlayers(state)) {
+        const prevClaimed = player.claimedRole
         const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
         const commAction = decideForPlayer(config, state, player, ctx,
           (s, c) => s.decideCommunication(c),
@@ -307,6 +308,9 @@ export function runGame(config: LupaConfig): GameResult {
         )
         applyCommAction(state, player, day, commAction, events, daySignals, signals, signalIdCounter)
         signalIdCounter += 1
+        if (player.claimedRole !== prevClaimed && config.enableRetar !== false) {
+          retarPossibilities = retarAnalyze(events, state, config)
+        }
       }
     }
 
@@ -366,6 +370,40 @@ export function runGame(config: LupaConfig): GameResult {
       if (forecast.type === 'forecast') {
         player.forecastTarget = forecast.target
         events.push({ type: 'forecast', actor: player.seat, target: forecast.target })
+      }
+    }
+
+    // 防御COフェーズ — CO発生時はRetar再実行
+    let defensiveCOHappened = false
+    for (const player of alivePlayers(state)) {
+      if (player.claimedRole !== null) continue
+      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+      const claim = decideForPlayer(config, state, player, ctx,
+        (s, c) => s.decideDefensiveClaim(c),
+        (s, c) => s.decideDefensiveClaim(c),
+      )
+      if (claim.type !== 'none') {
+        applyClaim(state, player, day, claim, events)
+        defensiveCOHappened = true
+        if (config.enableRetar !== false) {
+          retarPossibilities = retarAnalyze(events, state, config)
+        }
+      }
+    }
+
+    // 防御CO後: 指揮者に再提案の機会を与える
+    if (defensiveCOHappened && state.commander !== null) {
+      const commander = state.players.find(p => p.seat === state.commander)!
+      if (commander.alive) {
+        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        const proposal = decideForPlayer(config, state, commander, ctx,
+          (s, c) => s.decideProposal(c),
+          (s, c) => s.decideProposal(c),
+        )
+        if (proposal) {
+          dayProposals.push(proposal)
+          events.push({ type: 'proposal', actor: commander.seat, proposal })
+        }
       }
     }
 
@@ -594,7 +632,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
 
     // CO前Retar (async)
     let preCoRetar: Map<number, Set<SystemRole>> | null = null
-    if (config.enableRetar) {
+    if (config.enableRetar !== false) {
       preCoRetar = await retarFn(events, state, config)
     }
 
@@ -612,7 +650,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
 
     // CO後Retar (async)
     let retarPossibilities: Map<number, Set<SystemRole>> | null = null
-    if (config.enableRetar) {
+    if (config.enableRetar !== false) {
       retarPossibilities = await retarFn(events, state, config)
     }
 

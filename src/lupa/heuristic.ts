@@ -24,16 +24,24 @@ import type { VillageAction } from '../hati/types.ts'
 
 // 疑惑スコア重み
 const W = {
-  BLACK_RESULT: 40,
+  BLACK_RESULT: 25,
+  BLACK_RESULT_ROLLER: 12,    // ローラー中（占い複数CO）の黒出し
   WHITE_RESULT: -15,
   RETAR_WOLF_POSSIBLE: 5,
-  RETAR_WOLF_IMPOSSIBLE: -50,
-  RETAR_CONFIRMED: -100,
+  RETAR_WOLF_IMPOSSIBLE: -200, // 論理的確実: 絶対に上書きされない
+  RETAR_CONFIRMED: -200,       // 論理的確実: 役職確定
   MULTI_SEER_CLAIMER: 10,
-  ACCUSE_WOLF_TARGET: 10,
+  ACCUSE_WOLF_TARGET: 8,
   TRUST_FROM_CONFIRMED: -20,
-  CO_BUSTED: 200,            // CO役職がRetarで否定 = 破綻
+  VILLAGE_ROLE_CO: -30,
+  CO_BUSTED: 200,             // CO役職がRetarで否定 = 破綻
 }
+
+// 指揮者追従率
+const FOLLOW_RATES: Record<string, number> = {
+  werewolf: 0.2, fanatic: 0.25, werehamster: 0.6, immoralist: 0.7,
+}
+const DEFAULT_FOLLOW_RATE = 1.0
 
 // CO役職の処刑優先度（高い=吊りやすい、低い=吊りにくい）
 const CO_EXECUTION_SCORE: Record<string, number> = {
@@ -102,6 +110,100 @@ function isRollerSituation(events: GameEvent[], role: SystemRole, aliveSeats: Se
 }
 
 // ============================================================
+// 防御CO判定
+// ============================================================
+
+function isDefensiveCONeeded(ctx: DecisionContext): boolean {
+  // 1. 指揮者の処刑指示が自分を対象
+  for (const e of ctx.publicEvents) {
+    if (e.type === 'proposal' && e.proposal.type === 'execute_order' && e.proposal.target === ctx.mySeat) return true
+  }
+
+  // 2. 処刑提案で自分が対象にされた割合が高い
+  let myProposals = 0
+  let totalProposals = 0
+  for (const e of ctx.publicEvents) {
+    if (e.type === 'execute_proposals') {
+      totalProposals++
+      if (e.targets.includes(ctx.mySeat)) myProposals++
+    }
+  }
+  if (totalProposals > 0 && myProposals * 3 >= totalProposals) return true
+
+  // 3. シグナルで狼告発を多数受けている (accuse_wolfが3件以上)
+  let accuseCount = 0
+  for (const e of ctx.publicEvents) {
+    if (e.type === 'signal' && 'target' in e.signal && e.signal.target === ctx.mySeat) {
+      if (e.signal.type === 'accuse_wolf') accuseCount++
+    }
+  }
+  if (accuseCount >= 3) return true
+
+  return false
+}
+
+// ============================================================
+// 縄数計算・決め打ち判定
+// ============================================================
+
+type RopeInfo = { rope: number, remainingWolves: number, margin: number }
+
+function calcRopeInfo(ctx: DecisionContext): RopeInfo {
+  const aliveCount = ctx.alivePlayers.length
+  const totalWolves = ctx.gameState.players.filter(p => p.role === 'werewolf').length
+  let confirmedDeadWolves = 0
+  for (const e of ctx.publicEvents) {
+    if (e.type === 'medium_result' && e.result === 'wolf') confirmedDeadWolves++
+  }
+  const remainingWolves = Math.max(totalWolves - confirmedDeadWolves, 0)
+  const rope = Math.floor((aliveCount - 1) / 2)
+  return { rope, remainingWolves, margin: rope - remainingWolves }
+}
+
+function findConfirmedWolves(retar: Map<number, Set<SystemRole>> | null, alivePlayers: number[]): number[] {
+  if (!retar) return []
+  const result: number[] = []
+  for (const seat of alivePlayers) {
+    const roles = retar.get(seat)
+    if (roles && roles.size === 1 && roles.has('werewolf')) result.push(seat)
+  }
+  return result
+}
+
+function filterSafeCandidates(candidates: number[], retar: Map<number, Set<SystemRole>> | null): number[] {
+  if (!retar) return candidates
+  const filtered = candidates.filter(s => {
+    const roles = retar.get(s)
+    return !roles || roles.has('werewolf')
+  })
+  return filtered.length > 0 ? filtered : candidates
+}
+
+// ============================================================
+// 段階的CO判定（狩人・猫又）
+// ============================================================
+
+/** 自分が占い結果の対象になったことがあるか */
+function hasBeenDivined(ctx: DecisionContext): boolean {
+  for (const e of ctx.publicEvents) {
+    if (e.type === 'seer_claim') {
+      for (const r of e.results) { if (r.target === ctx.mySeat) return true }
+    } else if (e.type === 'seer_result') {
+      if (e.target === ctx.mySeat) return true
+    }
+  }
+  return false
+}
+
+/** 日数と占い状況に応じたCO確率 */
+function gradualCORate(ctx: DecisionContext): number {
+  if (ctx.day <= 1) return 0
+  let rate = Math.min(0.1 * (ctx.day - 1), 0.5)
+  if (!hasBeenDivined(ctx)) rate *= 1.5
+  return rate
+}
+
+// ============================================================
 // 疑惑スコア（村側投票判断の核）
 // ============================================================
 
@@ -150,8 +252,8 @@ function buildSuspicionScore(
     if (seat === mySeat) continue
     let score = 0
 
-    // 黒出し/白出し
-    if (blacks.has(seat)) score += W.BLACK_RESULT
+    // 黒出し/白出し（ローラー中は信頼度半減）
+    if (blacks.has(seat)) score += seerClaimers.size >= 2 ? W.BLACK_RESULT_ROLLER : W.BLACK_RESULT
     if (whites.has(seat)) score += W.WHITE_RESULT
 
     // Retar分析
@@ -175,6 +277,12 @@ function buildSuspicionScore(
 
     // 複数占いCO
     if (seerClaimers.has(seat) && seerClaimers.size >= 2) score += W.MULTI_SEER_CLAIMER
+
+    // 村役職CO（対抗なし）は疑惑を下げる
+    if (claimed && (claimed === 'bodyguard' || claimed === 'nekomata' || claimed === 'medium' || claimed === 'mason')) {
+      const claimerCount = countRoleClaimers(events, claimed, aliveSet)
+      if (claimerCount === 1) score += W.VILLAGE_ROLE_CO
+    }
 
     // シグナル
     if (accuseWolfTargets.has(seat)) score += W.ACCUSE_WOLF_TARGET * (accuseWolfTargets.get(seat) ?? 0)
@@ -306,8 +414,8 @@ export class HeuristicStrategy implements Strategy {
   decideVote(ctx: DecisionContext): number {
     const { proposals } = ctx
 
-    // 指揮者の処刑指示（100%追従、背徳者は妖狐指定を拒否）
-    const executeOrder = proposals.find(p => p.type === 'execute_order')
+    // 指揮者の処刑指示（再提案があれば最新を採用）
+    const executeOrder = proposals.findLast(p => p.type === 'execute_order')
     if (executeOrder) {
       if (ctx.myRole === 'immoralist' && executeOrder.target === ctx.knownHamster) {
         // 背徳者: 妖狐処刑指示には従わない
@@ -354,6 +462,38 @@ export class HeuristicStrategy implements Strategy {
       if (exec && exec.target === ctx.knownHamster) return 'defy'
     }
     return 'follow'
+  }
+
+  decideDefensiveClaim(ctx: DecisionContext): DayClaim {
+    if (ctx.myPlayer.claimedRole !== null) return { type: 'none' }
+
+    switch (ctx.myRole) {
+      case 'bodyguard': {
+        // GJ後は高確率CO
+        const hasGJ = ctx.publicEvents.some(e => e.type === 'peace')
+        if (hasGJ && ctx.rng.next() < 0.7) {
+          return forceTrueRoleCO(ctx.gameState, ctx.myPlayer, ctx.day, ctx.lastExecutedSeat)
+        }
+        // 脅威がある場合は即CO
+        if (isDefensiveCONeeded(ctx)) {
+          return forceTrueRoleCO(ctx.gameState, ctx.myPlayer, ctx.day, ctx.lastExecutedSeat)
+        }
+        // 段階的CO（シグナルを見てから判断）
+        if (ctx.rng.next() < gradualCORate(ctx)) {
+          return forceTrueRoleCO(ctx.gameState, ctx.myPlayer, ctx.day, ctx.lastExecutedSeat)
+        }
+        return { type: 'none' }
+      }
+      case 'nekomata': {
+        // 脅威がある場合は即CO
+        if (isDefensiveCONeeded(ctx)) return { type: 'nekomata_co' }
+        // 段階的CO（シグナルを見てから判断）
+        if (ctx.rng.next() < gradualCORate(ctx)) return { type: 'nekomata_co' }
+        return { type: 'none' }
+      }
+      default:
+        return { type: 'none' }
+    }
   }
 }
 
@@ -695,13 +835,51 @@ function decideNekomataClam(ctx: DecisionContext): DayClaim {
 
 function decideVillageVote(ctx: DecisionContext): number {
   const scores = buildSuspicionScore(ctx.publicEvents, ctx.retarPossibilities, ctx.alivePlayers, ctx.mySeat)
-  const candidates = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
+  let candidates = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
 
   // 再投票候補制限（自分を除外）
   if (ctx.revoteCandidates && ctx.revoteCandidates.length > 0) {
     const revoteCands = ctx.revoteCandidates.filter(s => s !== ctx.mySeat)
     if (revoteCands.length > 0) return pickHighestSuspicion(scores, revoteCands, ctx.rng)
   }
+
+  // Retar確定狼がいる → 最優先処刑
+  const confirmedWolves = findConfirmedWolves(ctx.retarPossibilities, candidates)
+  if (confirmedWolves.length > 0) {
+    return pickHighestSuspicion(scores, confirmedWolves, ctx.rng)
+  }
+
+  // 確定村を候補から除外（全モード共通）
+  candidates = filterSafeCandidates(candidates, ctx.retarPossibilities)
+
+  // 縄数に基づく判断
+  const { margin } = calcRopeInfo(ctx)
+  const claims = collectClaimsFromEvents(ctx.publicEvents)
+  const aliveSet = new Set(ctx.alivePlayers)
+
+  if (margin <= 0) {
+    // 決め打ちモード: 狼可能性がある候補のみ
+    if (ctx.retarPossibilities) {
+      const wolfPossible = candidates.filter(s => {
+        const roles = ctx.retarPossibilities!.get(s)
+        return roles && roles.has('werewolf')
+      })
+      if (wolfPossible.length > 0) return pickHighestSuspicion(scores, wolfPossible, ctx.rng)
+    }
+  }
+
+  // CO済み怪しい候補を優先（ローラー対象、黒出し先）→ グレー無駄吊り防止
+  const suspects: number[] = []
+  if (isRollerSituation(ctx.publicEvents, 'seer', aliveSet)) {
+    for (const [seat, role] of claims) {
+      if (role === 'seer' && candidates.includes(seat)) suspects.push(seat)
+    }
+  }
+  const blacks = collectBlackTargets(ctx.publicEvents)
+  for (const seat of candidates) {
+    if (blacks.has(seat) && !suspects.includes(seat)) suspects.push(seat)
+  }
+  if (suspects.length > 0) return pickHighestSuspicion(scores, suspects, ctx.rng)
 
   return pickHighestSuspicion(scores, candidates, ctx.rng)
 }
@@ -1869,6 +2047,10 @@ export class WolfTeamHeuristic implements TeamStrategy {
     return this.individual.decideLeadershipResponse(this.buildActorCtx(ctx), proposal)
   }
 
+  decideDefensiveClaim(ctx: TeamDecisionContext): DayClaim {
+    return this.individual.decideDefensiveClaim(this.buildActorCtx(ctx))
+  }
+
   private buildActorCtx(ctx: TeamDecisionContext): DecisionContext {
     const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
     const player = ctx.gameState.players.find(p => p.seat === seat)!
@@ -1909,6 +2091,10 @@ export class MasonTeamHeuristic implements TeamStrategy {
 
   decideLeadershipResponse(ctx: TeamDecisionContext, proposal: Proposal): LeadershipResponse {
     return this.individual.decideLeadershipResponse(this.buildActorCtx(ctx), proposal)
+  }
+
+  decideDefensiveClaim(ctx: TeamDecisionContext): DayClaim {
+    return this.individual.decideDefensiveClaim(this.buildActorCtx(ctx))
   }
 
   private buildActorCtx(ctx: TeamDecisionContext): DecisionContext {

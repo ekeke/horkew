@@ -14,7 +14,7 @@ export type LupaConfig = {
   wolfTeamStrategy?: TeamStrategy
   /** 共有者チーム戦略 */
   masonTeamStrategy?: TeamStrategy
-  /** Retar論理推論を有効化（昼CO後に自動実行） */
+  /** Retar論理推論（デフォルトON、falseで無効化） */
   enableRetar?: boolean
   /** カスタムRetar実行関数（並列版等を注入する場合） */
   retarFn?: (events: GameEvent[], state: GameState, config: LupaConfig) => Promise<Map<number, Set<SystemRole>>>
