@@ -51,7 +51,7 @@ function benchConfig(cfg: Config) {
   let totalMs = 0
   let maxMs = 0
   let count = 0
-  const perDay: Map<number, { totalMs: number, count: number, maxMs: number, maxNodes: number }> = new Map()
+  const perDay: Map<number, { totalMs: number, count: number, maxMs: number, maxNodes: number, times: number[] }> = new Map()
 
   for (let seed = cfg.seeds[0]; seed < cfg.seeds[1]; seed++) {
     let events: GameEvent[], state: GameState
@@ -81,9 +81,10 @@ function benchConfig(cfg: Config) {
         if (r.stats.searchElapsed > maxMs) maxMs = r.stats.searchElapsed
         count++
 
-        const d = perDay.get(cp.day) ?? { totalMs: 0, count: 0, maxMs: 0, maxNodes: 0 }
+        const d = perDay.get(cp.day) ?? { totalMs: 0, count: 0, maxMs: 0, maxNodes: 0, times: [] }
         d.totalMs += r.stats.searchElapsed
         d.count++
+        d.times.push(r.stats.searchElapsed)
         if (r.stats.searchElapsed > d.maxMs) d.maxMs = r.stats.searchElapsed
         if (r.stats.nodesVisited > d.maxNodes) d.maxNodes = r.stats.nodesVisited
         perDay.set(cp.day, d)
@@ -94,13 +95,23 @@ function benchConfig(cfg: Config) {
   const eg = getEndgameStats()
   console.log(`${cfg.name} (seeds ${cfg.seeds[0]}-${cfg.seeds[1]}):`)
   console.log(`  ${count} checkpoints, avg ${count > 0 ? (totalMs / count).toFixed(2) : 'N/A'}ms, max ${maxMs.toFixed(1)}ms`)
+
   for (const [day, d] of [...perDay.entries()].sort((a, b) => a[0] - b[0])) {
     console.log(`    Day${day}: avg ${(d.totalMs / d.count).toFixed(2)}ms, max ${d.maxMs.toFixed(1)}ms, maxNodes ${d.maxNodes}`)
+    if (d.times.length > 0) {
+      d.times.sort((a, b) => a - b)
+      const p50 = d.times[Math.floor(d.times.length * 0.5)]
+      const p90 = d.times[Math.floor(d.times.length * 0.9)]
+      const p95 = d.times[Math.floor(d.times.length * 0.95)]
+      const p99 = d.times[Math.floor(d.times.length * 0.99)]
+      console.log(`           p50=${p50.toFixed(2)}ms p90=${p90.toFixed(2)}ms p95=${p95.toFixed(2)}ms p99=${p99.toFixed(2)}ms`)
+    }
   }
   console.log(`  endgame: ${eg.size} entries, ${eg.hits} hits`)
 }
 
 console.log('=== Hati Benchmark ===\n')
+const t0 = performance.now()
 
 benchConfig({
   name: 'small-8p',
@@ -124,13 +135,14 @@ benchConfig({
 
 console.log('')
 
-// 14d-neko seed=4244: CO出そろい後のDay2で worlds=360, 探索が重いケース
 benchConfig({
-  name: '14d-neko-heavy (seed=4244)',
+  name: '14d-neko-10k',
   roles: new Map<SystemRole, number>([
     ['werewolf', 3], ['villager', 2], ['seer', 1], ['medium', 1], ['bodyguard', 1],
     ['mason', 2], ['nekomata', 1], ['fanatic', 1], ['werehamster', 1], ['immoralist', 1],
   ]),
-  seeds: [4244, 4245],
+  seeds: [10000, 20000],
   hasFirstGhost: true,
 })
+
+console.log(`\nTotal wall: ${(performance.now() - t0).toFixed(0)}ms`)
