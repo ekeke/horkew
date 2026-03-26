@@ -570,6 +570,9 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     const allWolfTeamTrajectories: ProcessedStep[] = []
     const allMasonTeamTrajectories: ProcessedStep[] = []
 
+    // === タイミング計測 ===
+    const tGameStart = performance.now()
+
     // ゲーム生成: Retar有効時はPromise.allで並行実行（worker_threadsのRetar並列化を活用）
     const useAsync = config.enableRetar
     const gamePromises: Array<Promise<{ game: GameTrajectories, strategies: Map<number, FenrirStrategy>, wolfTeamStrategy?: WolfTeamStrategy, masonTeamStrategy?: MasonTeamStrategy }>> = []
@@ -611,6 +614,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     }
 
     const gameResults = await Promise.all(gamePromises)
+    const tGameEnd = performance.now()
 
     for (const { game, strategies, wolfTeamStrategy, masonTeamStrategy } of gameResults) {
       const currentNetSteps = new Map<number, TrajectoryStep[]>()
@@ -631,7 +635,10 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       }
     }
 
+    const tGaeEnd = performance.now()
+
     // === PPO更新: 3ネットワーク独立 ===
+    const tPpoStart = performance.now()
 
     // 個人エージェント
     normalizeAdvantages(allIndividualTrajectories)
@@ -663,6 +670,13 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       masonTeamNet.loadWeights(masonTeamTf.cloneWeights())
     }
 
+    const tPpoEnd = performance.now()
+
+    // タイミング
+    const gameMs = tGameEnd - tGameStart
+    const gaeMs = tGaeEnd - tGameEnd
+    const ppoMs = tPpoEnd - tPpoStart
+
     // Progress bar
     const iterMs = performance.now() - iterStart
     const elapsed = performance.now() - trainingStart
@@ -680,8 +694,8 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     const phaseLabel = phase === 1 ? 'heuristic' : phase === 2 ? 'self-play' : 'pool'
     process.stderr.write(
       `\r\x1b[K  ${bar} ${pctStr}% ${iter}/${config.totalIterations} | ` +
-      `${iterMs.toFixed(0)}ms/iter ETA ${etaStr} | ` +
-      `loss=${avgPL.toFixed(4)} steps=${totalSteps} (w:${allWolfTeamTrajectories.length} m:${allMasonTeamTrajectories.length}) | ` +
+      `${iterMs.toFixed(0)}ms [game:${gameMs.toFixed(0)} gae:${gaeMs.toFixed(0)} ppo:${ppoMs.toFixed(0)}] ETA ${etaStr} | ` +
+      `loss=${avgPL.toFixed(4)} steps=${totalSteps} | ` +
       `phase ${phase} (${phaseLabel})`
     )
 
