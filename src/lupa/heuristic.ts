@@ -669,10 +669,52 @@ function decideVillageVote(ctx: DecisionContext): number {
   return pickHighestSuspicion(scores, candidates, ctx.rng)
 }
 
+/** 共有が全滅していて自分が確定村陣営かを判定 */
+function shouldActAsLeader(ctx: DecisionContext): boolean {
+  const { publicEvents, alivePlayers: alive, retarPossibilities, mySeat } = ctx
+  // 指揮者が既にいればそちらに任せる
+  if (ctx.commander !== null) return false
+
+  // 自分がRetarで確定村陣営か
+  if (!retarPossibilities) return false
+  const myRoles = retarPossibilities.get(mySeat)
+  if (!myRoles || myRoles.size !== 1) return false
+  const villageRoles: Set<SystemRole> = new Set(['seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'villager'])
+  if (!villageRoles.has([...myRoles][0])) return false
+
+  // 共有COしている生存者がいないか
+  const claims = collectClaimsFromEvents(publicEvents)
+  const aliveSet = new Set(alive)
+  const aliveMasons = [...claims.entries()].filter(([seat, role]) => role === 'mason' && aliveSet.has(seat))
+  return aliveMasons.length === 0
+}
+
 function decideVillagerComm(ctx: DecisionContext): CommunicationAction {
   const { rng, publicEvents, alivePlayers: alive, mySeat } = ctx
   const others = alive.filter(s => s !== mySeat)
   const proposals: number[] = []
+
+  // 共有全滅 & 自分が確定村 → 指揮者的に振る舞う
+  if (shouldActAsLeader(ctx)) {
+    // Hati詰み（6人以下）
+    const action = tryTsumiAction(ctx)
+    if (action && action.execute > 0 && alive.includes(action.execute)) {
+      proposals.push(action.execute)
+      if (action.seerTarget && alive.includes(action.seerTarget)) {
+        ctx.proposals.push({ type: 'investigate_order', target: action.seerTarget })
+      }
+      if (action.bodyguardTarget && alive.includes(action.bodyguardTarget)) {
+        ctx.proposals.push({ type: 'protect_order', target: action.bodyguardTarget })
+      }
+      return { signal: { type: 'vote_intent', target: action.execute }, proposals }
+    }
+
+    // 疑惑スコアで指示
+    const scores = buildSuspicionScore(publicEvents, ctx.retarPossibilities, alive, mySeat)
+    const target = pickHighestSuspicion(scores, others, rng)
+    proposals.push(target)
+    return { signal: { type: 'vote_intent', target }, proposals }
+  }
 
   // 処刑提案: 黒出し先
   const blacks = collectBlackTargets(publicEvents)
