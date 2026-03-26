@@ -22,9 +22,6 @@ import type { VillageAction } from '../hati/types.ts'
 // 定数
 // ============================================================
 
-const FANATIC_SEER_RATE = 0.6
-const FANATIC_MEDIUM_RATE = 0.2
-
 // 疑惑スコア重み
 const W = {
   BLACK_RESULT: 40,
@@ -980,12 +977,22 @@ function decideWerewolfVote(ctx: DecisionContext): number {
     if (aliveFox.length > 0) return rng.pick(aliveFox.map(s => ({ seat: s }))).seat
   }
 
-  // PP判定（狐がいない場合）
+  // PP判定（生存奇数 & 狐非生存 & 狂信者が特定済み）
   const aliveWolfCount = alive.filter(s => wolfSeats.has(s)).length
-  const fanaticCount = alivePlayers(state).filter(p => p.alive && p.role === 'fanatic').length
   const hamsterCount = alivePlayers(state).filter(p => p.alive && p.role === 'werehamster').length
-  const nonWolfNonFox = alive.length - aliveWolfCount - hamsterCount
-  if (aliveWolfCount + fanaticCount >= nonWolfNonFox && hamsterCount === 0) {
+  // 狂信者特定: fanatic_COシグナル or Retarで確定
+  const fanaticCOed = ctx.publicEvents.some(e =>
+    e.type === 'signal' && e.signal.type === 'fanatic_co' && alive.includes(e.actor)
+  )
+  const fanaticConfirmedByRetar = ctx.retarPossibilities && alive.some(s => {
+    if (wolfSeats.has(s) || s === mySeat) return false
+    const roles = ctx.retarPossibilities!.get(s)
+    return roles && roles.size === 1 && roles.has('fanatic')
+  })
+  const fanaticIdentified = fanaticCOed || fanaticConfirmedByRetar
+  const wolfSideCount = aliveWolfCount + (fanaticIdentified ? 1 : 0)
+  const nonWolfSide = alive.length - wolfSideCount - hamsterCount
+  if (alive.length % 2 === 1 && fanaticIdentified && wolfSideCount >= nonWolfSide && hamsterCount === 0) {
     const villagers = candidates.filter(s => {
       const p = state.players.find(pp => pp.seat === s)!
       return !isWerewolfAligned(p.role) && p.role !== 'werehamster' && p.role !== 'immoralist'
@@ -1031,10 +1038,19 @@ function decideWerewolfComm(ctx: DecisionContext): CommunicationAction {
 
   // PP判定 → werewolf_co（狐がいないとき）
   const aliveWolfCount = alive.filter(s => wolfSeats.has(s)).length
-  const fanaticCount = alivePlayers(state).filter(p => p.alive && p.role === 'fanatic').length
   const hamsterCount = alivePlayers(state).filter(p => p.alive && p.role === 'werehamster').length
-  const nonWolfNonFox = alive.length - aliveWolfCount - hamsterCount
-  if (aliveWolfCount + fanaticCount >= nonWolfNonFox && hamsterCount === 0 && rng.next() < 0.9) {
+  const fanaticCOed = ctx.publicEvents.some(e =>
+    e.type === 'signal' && e.signal.type === 'fanatic_co' && alive.includes(e.actor)
+  )
+  const fanaticConfirmedByRetar = ctx.retarPossibilities && alive.some(s => {
+    if (wolfSeats.has(s) || s === mySeat) return false
+    const roles = ctx.retarPossibilities!.get(s)
+    return roles && roles.size === 1 && roles.has('fanatic')
+  })
+  const fanaticIdentified = fanaticCOed || fanaticConfirmedByRetar
+  const wolfSideCount = aliveWolfCount + (fanaticIdentified ? 1 : 0)
+  const nonWolfSide = alive.length - wolfSideCount - hamsterCount
+  if (alive.length % 2 === 1 && fanaticIdentified && wolfSideCount >= nonWolfSide && hamsterCount === 0 && rng.next() < 0.9) {
     return { signal: { type: 'werewolf_co' }, proposals }
   }
 
@@ -1127,60 +1143,121 @@ function decideWerewolfComm(ctx: DecisionContext): CommunicationAction {
 function decideFanaticClaim(ctx: DecisionContext): DayClaim {
   const { myPlayer, day, gameState: state, rng, lastExecutedSeat } = ctx
 
+  // 既にCO済み: 結果報告
   if (myPlayer.claimedRole === 'seer') {
     return reportFanaticSeerResult(state, myPlayer, day, ctx)
   }
   if (myPlayer.claimedRole === 'medium') {
     return reportFakeMediumResult(lastExecutedSeat, rng)
   }
-
   if (myPlayer.claimedRole !== null) return { type: 'none' }
 
+  // CO率: 初日90%、二日目以降99%
+  const coRate = day === 1 ? 0.9 : 0.99
+  if (rng.next() >= coRate) return { type: 'none' }
+
   const r = rng.next()
-  if (r < FANATIC_SEER_RATE) {
-    // 占い騙り
-    for (let n = 0; n < day; n++) {
-      generateFanaticFakeResult(state, myPlayer, n, ctx)
-    }
+  if (r < 0.50) {
+    // 占い騙り (50%)
+    for (let n = 0; n < day; n++) generateFanaticFakeResult(state, myPlayer, n, ctx)
     const results = Array.from(myPlayer.fakeDivineHistory.entries())
       .sort((a, b) => a[0] - b[0])
       .map(([, v]) => ({ target: v.target, result: v.result }))
     return { type: 'seer_co', results }
-  } else if (r < FANATIC_SEER_RATE + FANATIC_MEDIUM_RATE) {
-    // 霊能騙り
+  } else if (r < 0.70) {
+    // 霊能騙り (20%)
     const pastResults = collectFakeMediumResults(state, day, rng)
     return { type: 'medium_co', pastResults }
+  } else if (r < 0.80) {
+    // 猫又騙り (10%)
+    return { type: 'nekomata_co' }
+  } else if (r < 0.88) {
+    // 狩人騙り (8%)
+    const targets: number[] = []
+    const alive = alivePlayersExcept(state, myPlayer.seat)
+    for (let n = 0; n < day; n++) { if (alive.length > 0) targets.push(rng.pick(alive).seat) }
+    return { type: 'bodyguard_co', targets }
+  } else if (r < 0.93) {
+    // 共有騙り (5%) — 適当な非狼をパートナーに
+    const alive = alivePlayersExcept(state, myPlayer.seat)
+    if (alive.length > 0) return { type: 'mason_co', partner: rng.pick(alive).seat }
   }
+  // 潜伏 (7%)
   return { type: 'none' }
 }
 
+/**
+ * 狂信者の偽占い結果生成
+ *
+ * 真占いと同じロジックで占い先を選び、結果だけ操作する:
+ * - 占い先が狼 → 白出し（守る）
+ * - 占い先が非狼 → 一定確率で黒出し（偽黒で混乱させる）
+ */
 function generateFanaticFakeResult(
-  state: GameState, player: PlayerState, night: number, ctx: DecisionContext,
+  _state: GameState, player: PlayerState, night: number, ctx: DecisionContext,
 ): void {
   if (player.fakeDivineHistory.has(night)) return
   const divined = new Set(Array.from(player.fakeDivineHistory.values()).map(d => d.target))
   const wolves = new Set(ctx.knownWolves ?? [])
-  const candidates = alivePlayersExcept(state, player.seat).filter(p => !divined.has(p.seat))
+  const alive = ctx.alivePlayers
+  const others = alive.filter(s => s !== ctx.mySeat)
+  const candidates = others.filter(s => !divined.has(s))
   if (candidates.length === 0) return
 
   const rng = ctx.rng
+  const retarP = ctx.retarPossibilities
 
-  // 狼に白出し
-  if (rng.next() < 0.4) {
-    const wolfCandidates = candidates.filter(p => wolves.has(p.seat))
-    if (wolfCandidates.length > 0) {
-      player.fakeDivineHistory.set(night, { target: rng.pick(wolfCandidates).seat, result: 'human' })
-      return
-    }
+  // 占い先を真占いと同じ方針で選択
+  let target: number
+
+  // 戦略ランダム選択（pickDivineTargetと同様）
+  const strategies = ['gray', 'fox', 'verify'] as const
+  const strategy = rng.pick(strategies.map(s => ({ s }))).s
+
+  if (strategy === 'fox' && retarP) {
+    const foxCands = candidates.filter(s => {
+      const roles = retarP.get(s)
+      return roles && roles.has('werehamster') && roles.size > 1
+    })
+    if (foxCands.length > 0) { target = rng.pick(foxCands.map(s => ({ seat: s }))).seat }
+    else { target = pickFanaticDefaultTarget(candidates, retarP, rng) }
+  } else if (strategy === 'verify') {
+    const claims = collectClaimsFromEvents(ctx.publicEvents)
+    const claimerCands = candidates.filter(s => {
+      const role = claims.get(s)
+      return role === 'seer' || role === 'medium'
+    })
+    if (claimerCands.length > 0) { target = rng.pick(claimerCands.map(s => ({ seat: s }))).seat }
+    else { target = pickFanaticDefaultTarget(candidates, retarP, rng) }
+  } else {
+    target = pickFanaticDefaultTarget(candidates, retarP, rng)
   }
 
-  // 非狼に黒出し
-  const nonWolves = candidates.filter(p => !wolves.has(p.seat))
-  if (nonWolves.length > 0) {
-    player.fakeDivineHistory.set(night, { target: rng.pick(nonWolves).seat, result: 'wolf' })
-    return
+  // 結果を操作
+  if (wolves.has(target)) {
+    // 狼 → 白出し
+    player.fakeDivineHistory.set(night, { target, result: 'human' })
+  } else {
+    // 非狼 → 50%で黒出し
+    const result: EnumSpecies = rng.next() < 0.5 ? 'wolf' : 'human'
+    player.fakeDivineHistory.set(night, { target, result })
   }
-  player.fakeDivineHistory.set(night, { target: rng.pick(candidates).seat, result: 'human' })
+}
+
+function pickFanaticDefaultTarget(
+  candidates: number[],
+  retarP: Map<number, Set<SystemRole>> | null,
+  rng: Rng,
+): number {
+  // グレー詰め: Retarで狼可能性が残る不確定席
+  if (retarP) {
+    const uncertain = candidates.filter(s => {
+      const roles = retarP.get(s)
+      return roles && roles.has('werewolf') && roles.size > 1
+    })
+    if (uncertain.length > 0) return rng.pick(uncertain.map(s => ({ seat: s }))).seat
+  }
+  return rng.pick(candidates.map(s => ({ seat: s }))).seat
 }
 
 function reportFanaticSeerResult(
@@ -1202,11 +1279,42 @@ function collectFakeMediumResults(state: GameState, day: number, rng: Rng): Enum
   return results
 }
 
+/** 狂信者視点のPP判定: 生存奇数 & 狼+自分≧非狼 & 狐非生存 */
+function detectFanaticPP(ctx: DecisionContext): boolean {
+  const wolves = new Set(ctx.knownWolves ?? [])
+  const alive = ctx.alivePlayers
+  if (alive.length % 2 === 0) return false // 偶数ならPP不成立
+
+  const aliveWolfCount = alive.filter(s => wolves.has(s)).length
+  const wolfSideCount = aliveWolfCount + 1 // +自分(狂信者)
+  const nonWolfSide = alive.length - wolfSideCount
+
+  if (wolfSideCount < nonWolfSide) return false
+
+  // 狐が生存していないか確認（Retarで狐可能性がある生存者がいなければ狐非生存と判断）
+  const retarP = ctx.retarPossibilities
+  if (retarP) {
+    const foxPossible = alive.some(s => {
+      if (s === ctx.mySeat || wolves.has(s)) return false
+      const roles = retarP.get(s)
+      return roles && roles.has('werehamster')
+    })
+    if (foxPossible) return false // 狐がいるかもしれない → PP危険
+  }
+
+  return true
+}
+
 function decideFanaticVote(ctx: DecisionContext): number {
   const { rng, alivePlayers: alive, mySeat } = ctx
   const wolves = new Set(ctx.knownWolves ?? [])
   const candidates = alive.filter(s => s !== mySeat && !wolves.has(s))
   if (candidates.length === 0) return alive.find(s => s !== mySeat) ?? mySeat
+
+  // PP: 狐非生存で狼陣営過半数 → 村人を処刑
+  if (detectFanaticPP(ctx)) {
+    return rng.pick(candidates.map(s => ({ seat: s }))).seat
+  }
 
   // 真占いCO者を優先
   const claims = collectClaimsFromEvents(ctx.publicEvents)
@@ -1218,7 +1326,14 @@ function decideFanaticVote(ctx: DecisionContext): number {
 }
 
 function decideFanaticComm(ctx: DecisionContext): CommunicationAction {
-  // 狼と似た動き
+  const { rng } = ctx
+
+  // PP宣言: 狐非生存で狼陣営過半数 → fanatic_co
+  if (detectFanaticPP(ctx) && rng.next() < 0.9) {
+    return { signal: { type: 'fanatic_co' }, proposals: [] }
+  }
+
+  // それ以外は狼と似た動き
   return decideWerewolfComm(ctx)
 }
 
