@@ -1,7 +1,10 @@
 use wasm_bindgen::prelude::*;
 
+pub mod types;
+pub mod possibilities;
+
 #[wasm_bindgen]
-pub fn analyze(village_json: &str, setup_json: &str, options_json: &str) -> String {
+pub fn analyze(_village_json: &str, _setup_json: &str, _options_json: &str) -> String {
     // TODO: implement
     String::from("{}")
 }
