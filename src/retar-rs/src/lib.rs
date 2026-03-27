@@ -2,6 +2,8 @@ use wasm_bindgen::prelude::*;
 
 pub mod types;
 pub mod possibilities;
+pub mod combinatorics;
+pub mod solver;
 
 #[wasm_bindgen]
 pub fn analyze(_village_json: &str, _setup_json: &str, _options_json: &str) -> String {
