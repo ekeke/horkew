@@ -73,15 +73,15 @@ export function canResolveFox(
   {
     const foxCount = popCount32(foxMask)
     const safeFoxCount = popCount32(foxMask & ~wolfUnion)
-    const wolfCandidateCount = popCount32(wolfUnion)
+    const foxAndWolfCount = popCount32(foxMask & wolfUnion)
+    const wolfOnlyCount = popCount32(wolfUnion & ~foxMask & alive)
     const aliveCount = popCount32(alive)
     const nawa = (aliveCount - 1 - 1) >> 1 // -1 for hamster (foxMask != 0)
-    let executionCoverage = Math.min(safeFoxCount, Math.max(0, nawa - wolfCandidateCount))
-    const nonFoxWolfCount = popCount32(wolfUnion & ~foxMask & alive)
-    if (nonFoxWolfCount >= 1) {
-      const foxWolfOverlap = popCount32(foxMask & wolfUnion)
-      executionCoverage += Math.min(1, foxWolfOverlap)
-    }
+    // 必要処刑数: 狐のみ + 狐狼兼(0 or 1) + 狼のみ が縄数に収まるか
+    const requiredExecs = safeFoxCount + Math.min(foxAndWolfCount, 1) + wolfOnlyCount
+    if (requiredExecs > nawa) return false
+    // 処刑で排除可能な狐候補数: 縄数から狼のみ候補を引いた残り
+    const executionCoverage = Math.min(safeFoxCount + Math.min(foxAndWolfCount, 1), Math.max(0, nawa - wolfOnlyCount))
     // 占いcoverage: 確定占い師の人数 × (護衛あり ? 2 : 1) + 未確定でも占い師がいれば +1
     // 確定占い師: BG生存なら2回保証、なければ1回保証（各占い師につき）
     // 未確定占い師: 保証なし（どれが占い師かわからないので護衛も指定不能）
