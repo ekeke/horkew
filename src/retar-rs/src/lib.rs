@@ -4,6 +4,9 @@ pub mod types;
 pub mod possibilities;
 pub mod combinatorics;
 pub mod solver;
+pub mod role_testers;
+pub mod plan_builder;
+pub mod finalizer;
 
 #[wasm_bindgen]
 pub fn analyze(_village_json: &str, _setup_json: &str, _options_json: &str) -> String {
