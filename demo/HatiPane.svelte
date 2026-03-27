@@ -2,7 +2,12 @@
   import type { VillageStatus, SystemRole } from '../src/types/index.ts'
   import type { TsumiResult, StrategyNode } from '../src/hati/index.ts'
   import { searchTsumi } from '../src/hati/index.ts'
+  import type { RunRetar } from '../src/hati/index.ts'
   import type { AnalyzeOptions } from '../src/retar/index.ts'
+  import { init, analyze } from '../src/retar-rs/pkg-web/retar.js'
+  // @ts-ignore — Vite ?url import
+  import wasmUrl from '../src/retar-rs/pkg/retar_bg.wasm?url'
+  import { serializeVillageStatus, serializeOptions, parseWasmResult, resultToPossibilities } from '../src/retar/wasm-helpers.ts'
 
   let {
     vs,
@@ -13,6 +18,16 @@
     setup: Map<SystemRole, number>
     players: Map<number, string>
   } = $props()
+
+  let wasmReady = $state(false)
+  init(wasmUrl).then(() => { wasmReady = true }).catch(() => {})
+
+  const wasmRunRetar: RunRetar = (vs, setup, options) => {
+    const vsJson = JSON.stringify(serializeVillageStatus(vs))
+    const setupJson = JSON.stringify(Object.fromEntries(setup))
+    const optJson = JSON.stringify(serializeOptions(options))
+    return resultToPossibilities(parseWasmResult(analyze(vsJson, setupJson, optJson)))
+  }
 
   let result: TsumiResult | null = $state(null)
   let running = $state(false)
@@ -46,7 +61,7 @@
           batches: 1,
           batch: 0,
         }
-        result = searchTsumi(vs!, setup, options)
+        result = searchTsumi(vs!, setup, options, undefined, wasmReady ? wasmRunRetar : undefined)
       } catch (e) {
         error = e instanceof Error ? e.message : String(e)
       } finally {

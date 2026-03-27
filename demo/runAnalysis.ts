@@ -42,6 +42,7 @@ export function runParallelAnalysis(payload: AnalysisPayload): Promise<AnalysisR
     let completed = 0
     let failed = false
     let errorMessage = ''
+    let usedWasm = false
 
     for (let i = 0; i < numWorkers; i++) {
       localWorkers.push(createWorker())
@@ -69,6 +70,7 @@ export function runParallelAnalysis(payload: AnalysisPayload): Promise<AnalysisR
         }
         results.push(data.seats)
         elapsedTimes.push(data.elapsed)
+        if (data.wasm) usedWasm = true
         completed++
         if (completed === numWorkers) {
           terminateAll()
@@ -79,6 +81,7 @@ export function runParallelAnalysis(payload: AnalysisPayload): Promise<AnalysisR
               workers: numWorkers,
               minElapsed: Math.round(Math.min(...elapsedTimes)),
               maxElapsed: Math.round(Math.max(...elapsedTimes)),
+              wasm: usedWasm,
             },
           })
         }

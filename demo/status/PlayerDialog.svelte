@@ -4,6 +4,7 @@
   import type { SeatResult } from '../analysis.worker.ts'
   import { extractVoteStatus, computeVerdicts } from './extract.ts'
   import { runParallelAnalysis } from '../runAnalysis.ts'
+  import { serializeVillageStatus } from '../../src/retar/wasm-helpers.ts'
   import SpeciesIcon from './SpeciesIcon.svelte'
 
   let { seat, name, status, vs, setup, players, onclose }: {
@@ -31,23 +32,6 @@
 
   let retarState: RetarState = $state({ type: 'loading' })
 
-  function serializeVs(v: VillageStatus) {
-    const statuses = [...v.statuses].map(([s, st]) => [s, {
-      ...st,
-      actions: [...st.actions],
-      assertions: [...st.assertions],
-    }])
-    return {
-      ...v,
-      statuses,
-      executions: [...v.executions],
-      kills: [...v.kills],
-      roles: [...v.roles],
-      claims: [...v.claims],
-      voteHistory: [...v.voteHistory],
-    }
-  }
-
   function runRetarCheck() {
     retarState = { type: 'loading' }
 
@@ -56,8 +40,8 @@
       : []
 
     runParallelAnalysis({
-      vs: serializeVs(vs) as any,
-      setup: [...setup],
+      vsJson: JSON.stringify(serializeVillageStatus(vs)),
+      setupJson: JSON.stringify(Object.fromEntries(setup)),
       players: [...players],
       assumptions,
     }).then((data) => {

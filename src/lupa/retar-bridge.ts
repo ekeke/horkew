@@ -6,14 +6,14 @@
  * パイプライン: GameEvents → formatHowl → parse → buildVillageStatus → Retar
  */
 
-import type { SystemRole, Seat } from '../types/index.ts'
+import type { SystemRole } from '../types/index.ts'
 import type { LupaConfig, GameState, GameEvent } from './types.ts'
 import { formatHowl } from './format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
-import { Possibilities, RoleSignatureBits } from '../retar/possibilities.ts'
+import { serializeVillageStatus, serializeOptions, parseWasmResult, resultToPossibilities } from '../retar/wasm-helpers.ts'
 import { searchTsumi } from '../hati/index.ts'
 import type { RunRetar } from '../hati/index.ts'
 import type { TsumiResult } from '../hati/index.ts'
@@ -33,76 +33,6 @@ try {
 }
 
 export const useWasm = wasmAnalyze !== null
-
-// ============================================================
-// VillageStatus / Options の JSON 直列化 (WASM 用)
-// ============================================================
-
-function serializeVillageStatus(vs: any): any {
-  const obj: any = { ...vs }
-  obj.statuses = Object.fromEntries(
-    [...vs.statuses.entries()].map(([k, v]: [any, any]) => [
-      String(k),
-      {
-        ...v,
-        actions: Object.fromEntries(v.actions),
-        assertions: Object.fromEntries(
-          [...v.assertions.entries()].map(([day, a]: [any, any]) => [String(day), a])
-        ),
-        forecasts: Object.fromEntries(
-          [...v.forecasts.entries()].map(([day, s]: [any, any]) => [String(day), s])
-        ),
-        previousAssertions: v.previousAssertions
-          ? Object.fromEntries(
-              [...v.previousAssertions.entries()].map(([day, a]: [any, any]) => [String(day), a])
-            )
-          : undefined,
-        previousClaims: v.previousClaims?.map((pc: any) => ({
-          ...pc,
-          assertions: Object.fromEntries(
-            [...pc.assertions.entries()].map(([day, a]: [any, any]) => [String(day), a])
-          ),
-          actions: Object.fromEntries(pc.actions),
-          forecasts: Object.fromEntries(
-            [...pc.forecasts.entries()].map(([day, s]: [any, any]) => [String(day), s])
-          ),
-        })),
-      },
-    ])
-  )
-  obj.executions = Object.fromEntries(
-    [...vs.executions.entries()].map(([k, v]: [any, any]) => [String(k), v])
-  )
-  obj.kills = Object.fromEntries(
-    [...vs.kills.entries()].map(([k, v]: [any, any]) => [String(k), v])
-  )
-  obj.voteHistory = Object.fromEntries(
-    [...vs.voteHistory.entries()].map(([k, v]: [any, any]) => [String(k), v])
-  )
-  obj.revoteTargets = [...vs.revoteTargets]
-  obj.multiVoteDays = [...vs.multiVoteDays]
-  delete obj.roles
-  delete obj.claims
-  return obj
-}
-
-function serializeOptions(options: AnalyzeOptions): any {
-  return {
-    ...options,
-    assumptions: Object.fromEntries(options.assumptions),
-    hocusPocus: Object.fromEntries(options.hocusPocus),
-  }
-}
-
-function parseWasmResult(resultJson: string): Map<Seat, Set<SystemRole>> {
-  const parsed = JSON.parse(resultJson)
-  if (parsed.error) return new Map()
-  const result = new Map<Seat, Set<SystemRole>>()
-  for (const [seatStr, roles] of Object.entries(parsed)) {
-    result.set(Number(seatStr), new Set(roles as SystemRole[]))
-  }
-  return result
-}
 
 // ============================================================
 // Options
@@ -150,20 +80,6 @@ function runRetar(
 // ============================================================
 // RunRetar (Possibilities を返す版 — hati DI 用)
 // ============================================================
-
-function resultToPossibilities(result: Map<number, Set<SystemRole>>): Possibilities {
-  let maxSeat = 0
-  for (const seat of result.keys()) {
-    if (seat > maxSeat) maxSeat = seat
-  }
-  const p = new Possibilities(maxSeat)
-  for (const [seat, roles] of result) {
-    let mask = 0
-    for (const role of roles) mask |= RoleSignatureBits[role]
-    p.possibilities[seat] = mask
-  }
-  return p
-}
 
 const lupaRunRetar: RunRetar = (vs, setup, options) => {
   if (wasmAnalyze) {

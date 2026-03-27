@@ -6,7 +6,7 @@ export type SeatResult = {
 }
 
 export type WorkerResponse =
-  | { type: 'result'; seats: SeatResult[]; elapsed: number }
+  | { type: 'result'; seats: SeatResult[]; elapsed: number; wasm?: boolean }
   | { type: 'aborted' }
   | { type: 'error'; message: string }
 
@@ -14,6 +14,7 @@ export type AnalysisStats = {
   workers: number
   minElapsed: number
   maxElapsed: number
+  wasm: boolean
 }
 
 export type AnalysisResult =
@@ -85,6 +86,7 @@ export class AnalysisScheduler {
     let completed = 0
     let failed = false
     let errorMessage = ''
+    let usedWasm = false
 
     const onAllDone = () => {
       if (this.pending) {
@@ -104,6 +106,7 @@ export class AnalysisScheduler {
           workers: numWorkers,
           minElapsed: Math.round(Math.min(...elapsedTimes)),
           maxElapsed: Math.round(Math.max(...elapsedTimes)),
+          wasm: usedWasm,
         },
       })
     }
@@ -133,6 +136,7 @@ export class AnalysisScheduler {
         }
         results.push(data.seats)
         elapsedTimes.push(data.elapsed)
+        if (data.wasm) usedWasm = true
         completed++
         if (completed === numWorkers) onAllDone()
       }

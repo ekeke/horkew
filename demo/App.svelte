@@ -7,6 +7,7 @@
   import type { SeatResult } from './analysis.worker.ts'
   import type { SystemRole, VillageStatus, CauseOfDeath } from '../src/types/index.ts'
   import { requestAnalysis, type AnalysisStats } from './runAnalysis.ts'
+  import { serializeVillageStatus } from '../src/retar/wasm-helpers.ts'
   import StatusPane from './status/StatusPane.svelte'
   import PlayerName from './status/PlayerName.svelte'
   import { findReason, findConfirmationReason } from '../src/gmork/index.ts'
@@ -835,16 +836,16 @@
       const roleOrder = [...systemRoles.keys()] as SystemRole[]
       analysisColumns = roleOrder.filter(r => setup.has(r as SystemRole))
 
+      const vsJson = JSON.stringify(serializeVillageStatus(vs))
+      const setupJson = JSON.stringify(Object.fromEntries(setup))
       const workerPayload = {
-        vs,
-        setup: [...setup],
+        vsJson,
+        setupJson,
         players: [...playersMap],
         assumptions: [...assumptions],
         wolfPairDenyals: denyWolfGroups.map(g => [g[0], g[1]] as [number, number]),
       }
-      analyzerJson = JSON.stringify(workerPayload, (_key, value) =>
-        value instanceof Map ? Object.fromEntries(value) : value
-      , 2)
+      analyzerJson = JSON.stringify({ vs: JSON.parse(vsJson), setup: JSON.parse(setupJson) }, null, 2)
 
       // キャッシュチェック: 同じ行で同じテキスト+assumptionsならRetar再計算をスキップ
       const { key: cacheKey, hash: cacheHash } = computeAnalysisHash(input, cursorLine, assumptions)
@@ -1010,9 +1011,9 @@
                 </tbody>
               </table>
               {#if analysisCached}
-                <div class="analysis-duration">total {analysisTotalElapsed}ms (cached) — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms){/if}</div>
+                <div class="analysis-duration">total {analysisTotalElapsed}ms (cached) — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms, {analysisStatsInfo.wasm ? 'WASM' : 'JS'}){/if}</div>
               {:else if analysisDuration > 0}
-                <div class="analysis-duration">total {analysisTotalElapsed}ms — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms){/if}</div>
+                <div class="analysis-duration">total {analysisTotalElapsed}ms — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms, {analysisStatsInfo.wasm ? 'WASM' : 'JS'}){/if}</div>
               {/if}
             </div>
             <div class="analysis-sidebar">
