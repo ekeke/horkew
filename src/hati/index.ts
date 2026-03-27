@@ -46,10 +46,12 @@ export function searchTsumi(
   const wolfBit = RoleSignatureBits.werewolf
   const hamsterBit = RoleSignatureBits.werehamster
   const nekomataBit = RoleSignatureBits.nekomata
+  const whiteNVBits = RoleSignatureBits.fanatic | RoleSignatureBits.possessed
   let foxOnly = 0
   let foxAndWolf = 0
   let wolfOnly = 0
   let confirmedWolves = 0
+  let whiteNVCandidates = 0
   let hasAliveHamster = false
   let hasNonWolfNekomata = false
   for (let seat = 1; seat < retar.conclusions.possibilities.length; seat++) {
@@ -62,10 +64,17 @@ export function searchTsumi(
     else if (isWolf) {
       wolfOnly++
       if (p === wolfBit) confirmedWolves++
+    } else if (p & whiteNVBits) {
+      // 狼でも狐でもないが白人外(狂信/狂人)の可能性がある席
+      whiteNVCandidates++
     }
     if (isFox) hasAliveHamster = true
     if ((p & nekomataBit) && p !== wolfBit) hasNonWolfNekomata = true
   }
+  // 白人外の脅威数: 候補数と setup 上の白人外人数の小さい方
+  const setupWhiteNV = (setup.get('fanatic' as SystemRole) ?? 0)
+    + (setup.get('possessed' as SystemRole) ?? 0)
+  const whiteNVThreat = Math.min(whiteNVCandidates, setupWhiteNV)
   const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
   // 猫又パリティ枝刈り: 非狼の猫又が生存し、(alive - hamster) が奇数の場合、
   // 狼が猫又を噛むと alive が2減り、奇→奇のシフトで nawa が通常より1多く減る。
@@ -76,6 +85,7 @@ export function searchTsumi(
   // 確定狼の処刑は「コスト0」にならず、狐解決と合わせた全体の縄数計算が必要。
   const threat = foxOnly + Math.min(foxAndWolf, 1) + wolfOnly
     - (hasAliveHamster ? 0 : confirmedWolves)
+    + whiteNVThreat
   if (foxAndWolf + wolfOnly > nawa
     || threat > nawa
     || (nekoParityShift && threat === nawa)) {
