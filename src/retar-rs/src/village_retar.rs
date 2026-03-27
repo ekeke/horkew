@@ -248,17 +248,14 @@ impl VillageRetar {
     }
 
     pub fn analyze(&mut self) -> AnalyzeResult {
-        let start = std::time::Instant::now();
-
         if self.vs.result == Some(VillageResult::WerehamsterWon) && !self.last_deaths.is_empty() {
-            return self.analyze_hamster_win(start);
+            return self.analyze_hamster_win();
         }
 
         self.run_analysis();
-        let elapsed = start.elapsed().as_secs_f64() * 1000.0;
 
         AnalyzeResult {
-            elapsed_ms: elapsed,
+            elapsed_ms: 0.0, // timing done by caller
             batch: self.options.batch,
             id: self.options.id,
             aborted: false,
@@ -267,7 +264,7 @@ impl VillageRetar {
         }
     }
 
-    fn analyze_hamster_win(&mut self, start: std::time::Instant) -> AnalyzeResult {
+    fn analyze_hamster_win(&mut self) -> AnalyzeResult {
         let original_possibilities = self.initial_possibilities.clone_instance();
 
         // Path 1: wolves eliminated (village-like)
@@ -316,9 +313,8 @@ impl VillageRetar {
         self.initial_possibilities = original_possibilities;
         self.hamster_win_path = None;
 
-        let elapsed = start.elapsed().as_secs_f64() * 1000.0;
         AnalyzeResult {
-            elapsed_ms: elapsed,
+            elapsed_ms: 0.0,
             batch: self.options.batch,
             id: self.options.id,
             aborted: false,

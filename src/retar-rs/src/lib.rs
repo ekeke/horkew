@@ -19,6 +19,8 @@ use village_retar::VillageRetar;
 /// Output: JSON object {"1": ["seer", "villager"], "2": ["werewolf"], ...}
 #[wasm_bindgen]
 pub fn analyze(village_json: &str, setup_json: &str, options_json: &str) -> String {
+    console_error_panic_hook::set_once();
+
     let vs: VillageStatus = match serde_json::from_str(village_json) {
         Ok(v) => v,
         Err(e) => return format!("{{\"error\": \"village parse error: {}\"}}", e),
@@ -32,8 +34,23 @@ pub fn analyze(village_json: &str, setup_json: &str, options_json: &str) -> Stri
         Err(e) => return format!("{{\"error\": \"options parse error: {}\"}}", e),
     };
 
-    let mut retar = VillageRetar::new(vs, setup_raw, options);
-    let result = retar.analyze();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut retar = VillageRetar::new(vs, setup_raw, options);
+        retar.analyze()
+    }));
+    let result = match result {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "unknown panic".to_string()
+            };
+            return format!("{{\"error\": \"panic: {}\"}}", msg);
+        }
+    };
 
     // Serialize result: Map<Seat, Set<SystemRole>> → {"1": ["seer"], ...}
     let output: HashMap<String, Vec<SystemRole>> = result
