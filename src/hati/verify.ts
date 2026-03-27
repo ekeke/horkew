@@ -270,6 +270,7 @@ type Args = {
   checkFalseNegative: boolean
   maxAliveForFN: number
   tsumiDb: string | null
+  noStrategy: boolean
 }
 
 function parseArgs(argv: string[]): Args {
@@ -280,6 +281,7 @@ function parseArgs(argv: string[]): Args {
   let checkFalseNegative = false
   let maxAliveForFN = 10
   let tsumiDb: string | null = null
+  let noStrategy = false
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -296,6 +298,8 @@ function parseArgs(argv: string[]): Args {
       maxAliveForFN = parseInt(argv[++i])
     } else if (arg === '--tsumi-db' && i + 1 < argv.length) {
       tsumiDb = argv[++i]
+    } else if (arg === '--no-strategy') {
+      noStrategy = true
     } else if (arg === '--help' || arg === '-h') {
       const names = configs.map(c => c.name).join(', ')
       console.log(`Hati 詰み探索 検証スクリプト
@@ -310,6 +314,7 @@ Options:
   --check-false-negative       偽陰性チェック（前日CP再探索）
   --max-alive <N>              偽陰性チェック時の生存者上限（デフォルト: 10）
   --tsumi-db <file>            詰みDBをJSONLで出力
+  --no-strategy                戦略木構築をスキップ（高速、検証なし）
   --help, -h                   このヘルプ
 
 シナリオ: ${names}`)
@@ -317,7 +322,7 @@ Options:
     }
   }
 
-  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb }
+  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb, noStrategy }
 }
 
 function runVerify(args: Args): void {
@@ -415,7 +420,8 @@ function runVerify(args: Args): void {
           const { meta, statements } = parse(truncated)
           const { vs, setup } = buildVillageStatus(statements, meta)
           const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
-          tsumiResult = searchTsumi(vs, setup, opts)
+          const searchOpts = args.noStrategy ? { maxDepth: 5, buildStrategy: false as const } : undefined
+          tsumiResult = searchTsumi(vs, setup, opts, searchOpts)
           alive = 0
           for (const [seat, status] of vs.statuses) {
             if (status.surviving) alive |= (1 << seat)
@@ -448,7 +454,7 @@ function runVerify(args: Args): void {
         const currentAliveCount = popCount32(alive)
 
         // 偽陰性チェック: 前日CPで詰みなし → 今日詰み → 前日を深い探索で再検証
-        if (args.checkFalseNegative && tsumiResult.isTsumi && tsumiResult.strategy
+        if (args.checkFalseNegative && tsumiResult.isTsumi
           && prevCp !== null && !prevCp.wasTsumi) {
           fnCandidates++
           if (prevCp.aliveCount > args.maxAliveForFN) {
@@ -492,7 +498,7 @@ function runVerify(args: Args): void {
           }
         }
 
-        if (!tsumiResult.isTsumi || !tsumiResult.strategy) {
+        if (!tsumiResult.isTsumi) {
           // 偽陰性チェック: 枝刈りなしで再探索し、詰みが見つかるか確認
           if (args.checkHamsterPruning && (cfg.roles.werehamster || cfg.roles.nekomata)) {
             try {
@@ -543,6 +549,12 @@ function runVerify(args: Args): void {
           maxAlive = aliveCount
           maxAliveSeed = seed
           maxAliveDay = cp.day
+        }
+
+        // --no-strategy: 戦略木がないので検証スキップ
+        if (!tsumiResult.strategy) {
+          prevCp = { truncated, day: cp.day, aliveCount: currentAliveCount, wasTsumi: true }
+          continue
         }
 
         const trueWorld = buildTrueWorld(state)
