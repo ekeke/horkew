@@ -267,6 +267,8 @@ type Args = {
   scenario: string | null
   seeds: [number, number] | null
   checkHamsterPruning: boolean
+  checkFalseNegative: boolean
+  maxAliveForFN: number
 }
 
 function parseArgs(argv: string[]): Args {
@@ -274,6 +276,8 @@ function parseArgs(argv: string[]): Args {
   let scenario: string | null = null
   let seeds: [number, number] | null = null
   let checkHamsterPruning = false
+  let checkFalseNegative = false
+  let maxAliveForFN = 10
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -284,6 +288,10 @@ function parseArgs(argv: string[]): Args {
       if (m) seeds = [parseInt(m[1]), parseInt(m[2])]
     } else if (arg === '--check-hamster-pruning') {
       checkHamsterPruning = true
+    } else if (arg === '--check-false-negative') {
+      checkFalseNegative = true
+    } else if (arg === '--max-alive' && i + 1 < argv.length) {
+      maxAliveForFN = parseInt(argv[++i])
     } else if (arg === '--help' || arg === '-h') {
       const names = configs.map(c => c.name).join(', ')
       console.log(`Hati 詰み探索 検証スクリプト
@@ -295,6 +303,8 @@ Options:
   --seeds <from>-<to>          seed範囲を指定
   --outdir <dir>               失敗howlファイルの出力先
   --check-hamster-pruning      狐枝刈りの偽陰性チェック
+  --check-false-negative       偽陰性チェック（前日CP再探索）
+  --max-alive <N>              偽陰性チェック時の生存者上限（デフォルト: 10）
   --help, -h                   このヘルプ
 
 シナリオ: ${names}`)
@@ -302,7 +312,7 @@ Options:
     }
   }
 
-  return { outdir, scenario, seeds, checkHamsterPruning }
+  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN }
 }
 
 function runVerify(args: Args): void {
@@ -331,6 +341,9 @@ function runVerify(args: Args): void {
   let totalPrunedThreat = 0
   let totalPrunedWorlds = 0
   let totalPrunedFox = 0
+  let totalFnCandidates = 0
+  let totalFnSkipped = 0
+  let totalFnFound = 0
   const allTimings: { ms: number, seed: number, day: number, config: string }[] = []
 
   for (const cfg of selectedConfigs) {
@@ -351,6 +364,9 @@ function runVerify(args: Args): void {
     let maxAlive = 0
     let maxAliveSeed = -1
     let maxAliveDay = -1
+    let fnCandidates = 0
+    let fnSkipped = 0
+    let fnFound = 0
 
     for (let seed = seedFrom; seed < seedTo; seed++) {
       let events: GameEvent[]
@@ -377,6 +393,8 @@ function runVerify(args: Args): void {
       const howl = formatHowl(events, state, lupaConfigForFormat)
       const checkpoints = findExecutionCheckpoints(howl)
 
+      let prevCp: { truncated: string, day: number, aliveCount: number, wasTsumi: boolean } | null = null
+
       for (const cp of checkpoints) {
         checkpointCount++
         const truncated = howl.split('\n').slice(0, cp.line - 1).join('\n')
@@ -393,6 +411,7 @@ function runVerify(args: Args): void {
             if (status.surviving) alive |= (1 << seat)
           }
         } catch {
+          prevCp = null
           continue
         }
 
@@ -413,6 +432,53 @@ function runVerify(args: Args): void {
           else {
             const ac = popCount32(alive)
             console.log(`    [探索突入・詰みなし] seed=${seed} Day${cp.day} alive=${ac} worlds=${tsumiResult.stats.worldsTotal} nodes=${tsumiResult.stats.nodesVisited} maxDepth=${tsumiResult.stats.maxDepth} search=${tsumiResult.stats.searchElapsed.toFixed(1)}ms`)
+          }
+        }
+
+        const currentAliveCount = popCount32(alive)
+
+        // 偽陰性チェック: 前日CPで詰みなし → 今日詰み → 前日を深い探索で再検証
+        if (args.checkFalseNegative && tsumiResult.isTsumi && tsumiResult.strategy
+          && prevCp !== null && !prevCp.wasTsumi) {
+          fnCandidates++
+          if (prevCp.aliveCount > args.maxAliveForFN) {
+            fnSkipped++
+          } else {
+            try {
+              const { meta, statements } = parse(prevCp.truncated)
+              const { vs, setup } = buildVillageStatus(statements, meta)
+              const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+              const deepResult = searchTsumi(vs, setup, opts, { maxDepth: prevCp.aliveCount })
+              if (deepResult.isTsumi) {
+                fnFound++
+                console.log(`    [偽陰性発見] seed=${seed} Day${prevCp.day} alive=${prevCp.aliveCount} worlds=${deepResult.stats.worldsTotal} nodes=${deepResult.stats.nodesVisited} search=${deepResult.stats.searchElapsed.toFixed(1)}ms`)
+                const failure: Failure = {
+                  config: cfg.name,
+                  seed,
+                  day: prevCp.day,
+                  message: `偽陰性: Day${prevCp.day}(${prevCp.aliveCount}人)で詰みあり、通常探索(maxDepth=5)では見逃し`,
+                  trace: [
+                    `通常探索(maxDepth=5): 詰みなし`,
+                    `深い探索(maxDepth=${prevCp.aliveCount}): 詰みあり (worlds=${deepResult.stats.worldsTotal}, nodes=${deepResult.stats.nodesVisited}, ${deepResult.stats.searchElapsed.toFixed(1)}ms)`,
+                    `翌日Day${cp.day}(${currentAliveCount}人)では通常探索で詰み発見済み`,
+                  ],
+                  howl: prevCp.truncated,
+                }
+                failures.push(failure)
+                if (args.outdir) {
+                  const filename = `${cfg.name}_s${seed}_day${prevCp.day}_fn.howl`
+                  const content = prevCp.truncated + '\n\n'
+                    + `# [偽陰性: 通常探索で詰み見逃し]\n`
+                    + `# 通常探索(maxDepth=5): 詰みなし\n`
+                    + `# 深い探索(maxDepth=${prevCp.aliveCount}): 詰みあり\n`
+                    + `# worlds=${deepResult.stats.worldsTotal}, nodes=${deepResult.stats.nodesVisited}, ${deepResult.stats.searchElapsed.toFixed(1)}ms\n`
+                    + `# 翌日Day${cp.day}(${currentAliveCount}人)では通常探索で詰み発見\n`
+                  writeFileSync(join(args.outdir, filename), content)
+                }
+              }
+            } catch {
+              // parse/build失敗は無視
+            }
           }
         }
 
@@ -447,11 +513,12 @@ function runVerify(args: Args): void {
               // parse/build失敗は無視（上でも同様）
             }
           }
+          prevCp = { truncated, day: cp.day, aliveCount: currentAliveCount, wasTsumi: false }
           continue
         }
         tsumiCount++
 
-        const aliveCount = popCount32(alive)
+        const aliveCount = currentAliveCount
         if (aliveCount > maxAlive) {
           maxAlive = aliveCount
           maxAliveSeed = seed
@@ -509,6 +576,7 @@ function runVerify(args: Args): void {
             writeFileSync(join(args.outdir, filename), content)
           }
         }
+        prevCp = { truncated, day: cp.day, aliveCount: currentAliveCount, wasTsumi: true }
       }
     }
 
@@ -521,6 +589,9 @@ function runVerify(args: Args): void {
     totalPrunedThreat += prunedByThreat
     totalPrunedWorlds += prunedByWorlds
     totalPrunedFox += prunedByFox
+    totalFnCandidates += fnCandidates
+    totalFnSkipped += fnSkipped
+    totalFnFound += fnFound
 
     console.log(`  ${cfg.name}: ${gameCount} games, ${checkpointCount} checkpoints`)
     console.log(`    詰み発見: ${tsumiCount} (${checkpointCount > 0 ? (tsumiCount / checkpointCount * 100).toFixed(1) : 0}%)`)
@@ -532,6 +603,9 @@ function runVerify(args: Args): void {
     console.log(`    戦略検証: ${configFailures === 0 && retarExclusions === 0 ? '全通過' : `Hati=${configFailures}失敗, Retar排除=${retarExclusions}`}`)
     if (args.checkHamsterPruning && (cfg.roles.werehamster || cfg.roles.nekomata)) {
       console.log(`    枝刈り偽陰性: ${falseNegatives === 0 ? 'なし' : `${falseNegatives}件`}`)
+    }
+    if (args.checkFalseNegative) {
+      console.log(`    偽陰性チェック: 候補=${fnCandidates}, スキップ=${fnSkipped}, 発見=${fnFound}`)
     }
   }
 
@@ -561,6 +635,9 @@ function runVerify(args: Args): void {
 
   const eg = getEndgameStats()
   console.log(`エンドゲームテーブル: ${eg.size}エントリ, ${eg.hits}ヒット`)
+  if (args.checkFalseNegative) {
+    console.log(`偽陰性チェック合計: 候補=${totalFnCandidates}, スキップ=${totalFnSkipped}, 発見=${totalFnFound}`)
+  }
 
   if (failures.length === 0) {
     console.log('検証結果: 全通過')
