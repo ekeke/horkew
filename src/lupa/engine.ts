@@ -149,6 +149,12 @@ export function runGame(config: LupaConfig): GameResult {
   }
 
   const players = assignRoles(config.roles, names, shuffledIndices)
+
+  if (config.onRolesAssigned) {
+    const seatRoles = new Map(players.map(p => [p.seat, p.role]))
+    config.onRolesAssigned(seatRoles)
+  }
+
   const state: GameState = {
     players,
     day: 0,
@@ -551,6 +557,12 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
     names = generateRoleNames(assignedRoles)
   }
   const players = assignRoles(config.roles, names, shuffledIndices)
+
+  if (config.onRolesAssigned) {
+    const seatRoles = new Map(players.map(p => [p.seat, p.role]))
+    config.onRolesAssigned(seatRoles)
+  }
+
   const state: GameState = { players, day: 0, phase: 'night', finished: false, result: null, executionHistory: new Map(), commander: null, masonPartners: new Map() }
   const events: GameEvent[] = []
   const signals: SignalRecord[] = []

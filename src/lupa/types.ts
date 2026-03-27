@@ -12,6 +12,8 @@ export type LupaConfig = {
   strategies?: Map<number, Strategy>
   /** strategiesに未登録のseatに使う戦略 */
   defaultStrategy?: Strategy
+  /** 役職割り当て後のコールバック（seat→roleマップを受け取り、strategiesを動的に設定できる） */
+  onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   /** 狼チーム戦略 */
   wolfTeamStrategy?: TeamStrategy
   /** 共有者チーム戦略 */

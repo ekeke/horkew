@@ -18,6 +18,7 @@ import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../
 import { terminalReward, intermediateReward, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
+import { packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize, generateGamesParallel, deserializeStep, type SharedWeights } from './parallel.ts'
 
 // ============================================================
 // Training Config
@@ -63,6 +64,10 @@ export type TrainingConfig = {
   hasFirstGhost: boolean
   /** 再投票設定 */
   revoteConfig?: RevoteConfig
+  /** ゲーム生成の並列ワーカー数（0で直列、未指定でauto） */
+  numWorkers?: number
+  /** Phase 1でMLにする役職（未指定時は偶数seat） */
+  mlRoles?: SystemRole[]
 }
 
 export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
@@ -192,6 +197,7 @@ type GameTrajectories = {
 type GameAgents = {
   strategies: Map<number, FenrirStrategy>
   defaultStrategy?: Strategy
+  onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   wolfTeamStrategy?: WolfTeamStrategy
   masonTeamStrategy?: MasonTeamStrategy
 }
@@ -203,11 +209,19 @@ function generateGame(
 ): GameTrajectories {
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
 
+  const strategiesMap = new Map<number, Strategy>(agents.strategies)
   const lupaConfig: LupaConfig = {
     roles,
     seed,
-    strategies: new Map(agents.strategies),
+    strategies: strategiesMap,
     defaultStrategy: agents.defaultStrategy,
+    onRolesAssigned: agents.onRolesAssigned ? (seatRoles) => {
+      agents.onRolesAssigned!(seatRoles)
+      // フックが agents.strategies に追加した分を lupaConfig.strategies にも反映
+      for (const [seat, s] of agents.strategies) {
+        if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
+      }
+    } : undefined,
     enableRetar: config.enableRetar,
     hasFirstGhost: config.hasFirstGhost,
     revoteConfig: config.revoteConfig,
@@ -290,11 +304,18 @@ async function generateGameAsync(
 ): Promise<GameTrajectories> {
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
 
+  const strategiesMap = new Map<number, Strategy>(agents.strategies)
   const lupaConfig: LupaConfig = {
     roles,
     seed,
-    strategies: new Map(agents.strategies),
+    strategies: strategiesMap,
     defaultStrategy: agents.defaultStrategy,
+    onRolesAssigned: agents.onRolesAssigned ? (seatRoles) => {
+      agents.onRolesAssigned!(seatRoles)
+      for (const [seat, s] of agents.strategies) {
+        if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
+      }
+    } : undefined,
     enableRetar: config.enableRetar,
     hasFirstGhost: config.hasFirstGhost,
     revoteConfig: config.revoteConfig,
@@ -415,21 +436,38 @@ export function evaluate(
   let totalLength = 0
   const resultCounts: Record<string, number> = {}
 
+  const mlRolesSet = config.mlRoles ? new Set(config.mlRoles) : null
+
   for (let i = 0; i < numGames; i++) {
-    // ML plays half the seats, heuristic plays the other half
     const strategies = new Map<number, any>()
-    for (let seat = 1; seat <= totalPlayers; seat++) {
-      if (seat % 2 === 0) {
-        strategies.set(seat, new FenrirStrategy(network, { explore: false }))
-      } else {
-        strategies.set(seat, heuristic)
+
+    // mlRoles未指定: 従来の偶数seat方式
+    if (!mlRolesSet) {
+      for (let seat = 1; seat <= totalPlayers; seat++) {
+        if (seat % 2 === 0) {
+          strategies.set(seat, new FenrirStrategy(network, { explore: false }))
+        } else {
+          strategies.set(seat, heuristic)
+        }
       }
     }
+
+    const onRolesAssigned = mlRolesSet ? (seatRoles: Map<number, SystemRole>) => {
+      for (const [seat, role] of seatRoles) {
+        if (mlRolesSet.has(role)) {
+          strategies.set(seat, new FenrirStrategy(network, { explore: false }))
+        } else {
+          strategies.set(seat, heuristic)
+        }
+      }
+    } : undefined
 
     const lupaConfig: LupaConfig = {
       roles,
       seed: 10000 + i,
       strategies,
+      defaultStrategy: heuristic,
+      onRolesAssigned,
       enableRetar: config.enableRetar,
       hasFirstGhost: config.hasFirstGhost,
       revoteConfig: config.revoteConfig,
@@ -540,6 +578,11 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     log('Retar worker pool initialized')
   }
 
+  // === ゲーム生成ワーカープール ===
+  if (config.numWorkers !== undefined) {
+    initGameWorkerPool(config.numWorkers === -1 ? undefined : config.numWorkers)
+  }
+
   // === Resume ===
   let startIter = 1
   if (resumeDir) {
@@ -577,68 +620,125 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     // === タイミング計測 ===
     const tGameStart = performance.now()
 
-    // ゲーム生成: Retar有効時はPromise.allで並行実行（worker_threadsのRetar並列化を活用）
-    const useAsync = config.enableRetar
-    const gamePromises: Array<Promise<{ game: GameTrajectories, strategies: Map<number, FenrirStrategy>, wolfTeamStrategy?: WolfTeamStrategy, masonTeamStrategy?: MasonTeamStrategy }>> = []
+    const seeds = Array.from({ length: config.gamesPerBatch }, (_, g) => iter * config.gamesPerBatch + g)
 
-    for (let g = 0; g < config.gamesPerBatch; g++) {
-      const strategies = new Map<number, FenrirStrategy>()
+    if (gameWorkerPoolSize() > 0) {
+      // === 並列パス: worker_threads でゲーム生成 ===
+      const sharedWeights = packWeights(network)
+      const sharedWolfWeights = !useHeuristic ? packWeights(wolfTeamNet) : undefined
+      const sharedMasonWeights = !useHeuristic ? packWeights(masonTeamNet) : undefined
+      const poolSharedWeights = (usePool && pool.length > 0)
+        ? pool.map(w => { const net = createNetwork(); net.loadWeights(w); return packWeights(net) })
+        : undefined
 
-      for (let seat = 1; seat <= totalPlayers; seat++) {
-        if (useHeuristic && seat % 2 !== 0) continue
-
-        if (usePool && pool.length > 0 && seat % 3 === 0) {
-          const pastWeights = pool[Math.floor(Math.random() * pool.length)]
-          const pastNet = createNetwork()
-          pastNet.loadWeights(pastWeights)
-          strategies.set(seat, new FenrirStrategy(pastNet, { explore: true }))
-        } else {
-          strategies.set(seat, new FenrirStrategy(network, { explore: true }))
-        }
-      }
-
-      let wolfTeamStrategy: WolfTeamStrategy | undefined
-      let masonTeamStrategy: MasonTeamStrategy | undefined
-      if (!useHeuristic) {
-        wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
-        masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
-      }
-
-      const seed = iter * config.gamesPerBatch + g
-      const defaultStrategy = useHeuristic ? new HeuristicStrategy() : undefined
-      const agents = { strategies, defaultStrategy, wolfTeamStrategy, masonTeamStrategy }
-
-      if (useAsync) {
-        gamePromises.push(
-          generateGameAsync(config, agents, seed).then(game => ({ game, strategies, wolfTeamStrategy, masonTeamStrategy }))
-        )
-      } else {
-        const game = generateGame(config, agents, seed)
-        gamePromises.push(Promise.resolve({ game, strategies, wolfTeamStrategy, masonTeamStrategy }))
-      }
-    }
-
-    const gameResults = await Promise.all(gamePromises)
-    const tGameEnd = performance.now()
-
-    for (const { game, strategies, wolfTeamStrategy, masonTeamStrategy } of gameResults) {
-      const currentNetSteps = new Map<number, TrajectoryStep[]>()
-      for (const [seat, steps] of game.steps) {
-        const strategy = strategies.get(seat)
-        if (strategy && strategy.network === network) {
-          currentNetSteps.set(seat, steps)
-        }
-      }
-      allIndividualTrajectories.push(
-        ...processTrajectories(currentNetSteps, config.gamma, config.lambda)
+      const serializedResults = await generateGamesParallel(
+        {
+          weights: sharedWeights,
+          wolfTeamWeights: sharedWolfWeights,
+          masonTeamWeights: sharedMasonWeights,
+          poolWeights: poolSharedWeights,
+          trainingConfig: config,
+          phase,
+          mlRoles: config.mlRoles,
+        },
+        seeds,
       )
-      if (wolfTeamStrategy && game.wolfTeamSteps.length > 0) {
-        allWolfTeamTrajectories.push(...computeGAE(game.wolfTeamSteps, config.gamma, config.lambda, 0))
+
+      for (const game of serializedResults) {
+        // Deserialize individual steps
+        const stepsMap = new Map<number, TrajectoryStep[]>()
+        for (const { seat, steps } of game.individualSteps) {
+          stepsMap.set(seat, steps.map(deserializeStep))
+        }
+        allIndividualTrajectories.push(
+          ...processTrajectories(stepsMap, config.gamma, config.lambda)
+        )
+
+        // Wolf team
+        if (game.wolfTeamSteps.length > 0) {
+          const wolfSteps = game.wolfTeamSteps.map(deserializeStep)
+          allWolfTeamTrajectories.push(...computeGAE(wolfSteps, config.gamma, config.lambda, 0))
+        }
+
+        // Mason team
+        if (game.masonTeamSteps.length > 0) {
+          const masonSteps = game.masonTeamSteps.map(deserializeStep)
+          allMasonTeamTrajectories.push(...computeGAE(masonSteps, config.gamma, config.lambda, 0))
+        }
       }
-      if (masonTeamStrategy && game.masonTeamSteps.length > 0) {
-        allMasonTeamTrajectories.push(...computeGAE(game.masonTeamSteps, config.gamma, config.lambda, 0))
+    } else {
+      // === 直列フォールバック ===
+      const useAsync = config.enableRetar
+      const gamePromises: Array<Promise<{ game: GameTrajectories, strategies: Map<number, FenrirStrategy>, wolfTeamStrategy?: WolfTeamStrategy, masonTeamStrategy?: MasonTeamStrategy }>> = []
+
+      for (const seed of seeds) {
+        const strategies = new Map<number, FenrirStrategy>()
+        const mlRolesSet = config.mlRoles ? new Set(config.mlRoles) : null
+
+        if (!useHeuristic || !mlRolesSet) {
+          for (let seat = 1; seat <= totalPlayers; seat++) {
+            if (useHeuristic && seat % 2 !== 0) continue
+
+            if (usePool && pool.length > 0 && seat % 3 === 0) {
+              const pastWeights = pool[Math.floor(Math.random() * pool.length)]
+              const pastNet = createNetwork()
+              pastNet.loadWeights(pastWeights)
+              strategies.set(seat, new FenrirStrategy(pastNet, { explore: true }))
+            } else {
+              strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+            }
+          }
+        }
+
+        let wolfTeamStrategy: WolfTeamStrategy | undefined
+        let masonTeamStrategy: MasonTeamStrategy | undefined
+        if (!useHeuristic) {
+          wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
+          masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
+        }
+
+        const defaultStrategy = useHeuristic ? new HeuristicStrategy() : undefined
+        const onRolesAssigned = (useHeuristic && mlRolesSet) ? (seatRoles: Map<number, SystemRole>) => {
+          for (const [seat, role] of seatRoles) {
+            if (mlRolesSet.has(role)) {
+              strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+            }
+          }
+        } : undefined
+        const agents = { strategies, defaultStrategy, onRolesAssigned, wolfTeamStrategy, masonTeamStrategy }
+
+        if (useAsync) {
+          gamePromises.push(
+            generateGameAsync(config, agents, seed).then(game => ({ game, strategies, wolfTeamStrategy, masonTeamStrategy }))
+          )
+        } else {
+          const game = generateGame(config, agents, seed)
+          gamePromises.push(Promise.resolve({ game, strategies, wolfTeamStrategy, masonTeamStrategy }))
+        }
+      }
+
+      const gameResults = await Promise.all(gamePromises)
+
+      for (const { game, strategies, wolfTeamStrategy, masonTeamStrategy } of gameResults) {
+        const currentNetSteps = new Map<number, TrajectoryStep[]>()
+        for (const [seat, steps] of game.steps) {
+          const strategy = strategies.get(seat)
+          if (strategy && strategy.network === network) {
+            currentNetSteps.set(seat, steps)
+          }
+        }
+        allIndividualTrajectories.push(
+          ...processTrajectories(currentNetSteps, config.gamma, config.lambda)
+        )
+        if (wolfTeamStrategy && game.wolfTeamSteps.length > 0) {
+          allWolfTeamTrajectories.push(...computeGAE(game.wolfTeamSteps, config.gamma, config.lambda, 0))
+        }
+        if (masonTeamStrategy && game.masonTeamSteps.length > 0) {
+          allMasonTeamTrajectories.push(...computeGAE(game.masonTeamSteps, config.gamma, config.lambda, 0))
+        }
       }
     }
+    const tGameEnd = performance.now()
 
     const tGaeEnd = performance.now()
 
@@ -742,5 +842,6 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
   wolfTeamTf.dispose()
   masonTeamTf.dispose()
   if (config.enableRetar) terminateRetarWorkerPool()
+  terminateGameWorkerPool()
   log(`Training complete! (${timeStr})`)
 }

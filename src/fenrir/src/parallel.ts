@@ -23,6 +23,10 @@
  * 実際の worker_threads 起動は将来の実装。
  */
 
+import { Worker } from 'node:worker_threads'
+import { availableParallelism } from 'node:os'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import type { NeuralNetwork, NetworkConfig } from './ml/nn.ts'
 import type { TrainingConfig } from './training.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
@@ -119,23 +123,34 @@ export type WorkerRequest = {
   wolfTeamWeights?: SharedWeights
   /** 共有者チームの重み (Phase 2+) */
   masonTeamWeights?: SharedWeights
+  /** プール用過去チェックポイントの重み */
+  poolWeights?: SharedWeights[]
   /** ゲーム設定 (JSON-safe) */
   trainingConfig: TrainingConfig
   /** このバッチの seed 範囲 */
   seeds: number[]
   /** Phase: 1=heuristic, 2=self-play, 3=pool */
   phase: number
+  /** Phase 1でMLにする役職 */
+  mlRoles?: string[]
 }
 
-/** Worker → メインスレッド */
-export type WorkerResult = {
-  type: 'result'
+/** 1ゲーム分の結果 */
+export type SerializedGameResult = {
   /** 個人エージェントのトラジェクトリ: seat → steps */
   individualSteps: Array<{ seat: number, steps: SerializedStep[] }>
   /** 狼チームのトラジェクトリ */
   wolfTeamSteps: SerializedStep[]
   /** 共有者チームのトラジェクトリ */
   masonTeamSteps: SerializedStep[]
+  /** ゲーム結果 */
+  result: string
+}
+
+/** Worker → メインスレッド */
+export type WorkerResult = {
+  type: 'result'
+  games: SerializedGameResult[]
 }
 
 /** TrajectoryStep のシリアライズ形式（worker_threads メッセージ用） */
@@ -179,4 +194,90 @@ export function deserializeStep(s: SerializedStep): TrajectoryStep {
     done: s.done,
     sigmoidActions: s.sigmoidActions ? new Float32Array(s.sigmoidActions) : undefined,
   }
+}
+
+// ============================================================
+// ワーカープール管理
+// ============================================================
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+const WORKER_PATH = join(__dirname, 'game-worker.ts')
+
+let workerPool: Worker[] = []
+
+export function initGameWorkerPool(numWorkers?: number): void {
+  const n = numWorkers ?? Math.max(1, (availableParallelism?.() ?? 4) - 1)
+  for (let i = 0; i < n; i++) {
+    const w = new Worker(WORKER_PATH, {
+      execArgv: ['--experimental-strip-types'],
+    })
+    workerPool.push(w)
+  }
+  console.error(`Game worker pool initialized: ${n} workers`)
+}
+
+export function terminateGameWorkerPool(): void {
+  for (const w of workerPool) w.terminate()
+  workerPool = []
+}
+
+export function gameWorkerPoolSize(): number {
+  return workerPool.length
+}
+
+/**
+ * ゲーム生成をワーカープールに分散
+ * seeds を均等分割し、各ワーカーに配布。全結果を collect して返す。
+ */
+export function generateGamesParallel(
+  request: Omit<WorkerRequest, 'type' | 'seeds'>,
+  seeds: number[],
+): Promise<SerializedGameResult[]> {
+  const n = workerPool.length
+  if (n === 0) throw new Error('Game worker pool not initialized')
+
+  // seeds を均等分割
+  const chunks: number[][] = Array.from({ length: n }, () => [])
+  for (let i = 0; i < seeds.length; i++) {
+    chunks[i % n].push(seeds[i])
+  }
+
+  return new Promise((resolve, reject) => {
+    const allResults: SerializedGameResult[][] = new Array(n)
+    let completed = 0
+    let rejected = false
+
+    for (let i = 0; i < n; i++) {
+      if (chunks[i].length === 0) {
+        allResults[i] = []
+        completed++
+        if (completed === n) resolve(allResults.flat())
+        continue
+      }
+
+      const worker = workerPool[i]
+
+      const onMessage = (result: WorkerResult) => {
+        worker.off('message', onMessage)
+        worker.off('error', onError)
+        allResults[i] = result.games
+        completed++
+        if (completed === n) resolve(allResults.flat())
+      }
+
+      const onError = (err: Error) => {
+        worker.off('message', onMessage)
+        worker.off('error', onError)
+        if (!rejected) {
+          rejected = true
+          reject(err)
+        }
+      }
+
+      worker.on('message', onMessage)
+      worker.on('error', onError)
+      worker.postMessage({ type: 'generate', ...request, seeds: chunks[i] } satisfies WorkerRequest)
+    }
+  })
 }

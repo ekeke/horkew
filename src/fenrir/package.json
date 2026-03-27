@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "train": "node --experimental-strip-types src/cli.ts",
-    "eval": "node --experimental-strip-types src/evaluate.ts",
-    "play": "node --experimental-strip-types src/play.ts",
+    "train": "node --experimental-strip-types --no-deprecation src/cli.ts",
+    "eval": "node --experimental-strip-types --no-deprecation src/evaluate.ts",
+    "play": "node --experimental-strip-types --no-deprecation src/play.ts",
     "test": "node --experimental-strip-types --test src/**/*.test.ts",
     "postinstall": "node -e \"const fs=require('fs'),s='node_modules/@tensorflow/tfjs-node-gpu/deps/lib/tensorflow.dll',d='node_modules/@tensorflow/tfjs-node-gpu/lib/napi-v8/tensorflow.dll';fs.existsSync(s)&&!fs.existsSync(d)&&fs.copyFileSync(s,d)\""
   },

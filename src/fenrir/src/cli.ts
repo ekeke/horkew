@@ -20,13 +20,21 @@ Options:
   --eval-interval <n>       評価間隔 (default: ${d.evalInterval})
   --phase1-end <n>          Phase1終了イテレーション (default: ${d.phase1End})
   --phase2-end <n>          Phase2終了イテレーション (default: ${d.phase2End})
+  --ml-roles <roles>        Phase1でMLにする役職 (カンマ区切り, 例: villager,seer)
+  --workers <n|auto>        ゲーム生成の並列ワーカー数 (auto=CPU-1, default: 直列)
   --no-retar                Retar論理推論を無効化
   --resume [dir]            チェックポイントから再開 (default: --checkpoint-dir)
   --help, -h                このヘルプを表示
 
 Examples:
-  # クイックテスト (2分程度)
+  # クイックテスト (直列)
   npm run train -- --iterations 100 --batch 8 --eval-interval 50
+
+  # 村人だけML、並列、Retarなし
+  npm run train -- --ml-roles villager --workers auto --no-retar
+
+  # ワーカー3つで並列学習
+  npm run train -- --workers 3
 
   # フル学習
   npm run train
@@ -99,6 +107,14 @@ function parseArgs(): ParsedArgs {
       case '--phase2-end':
         config.phase2End = parseInt(args[++i])
         break
+      case '--ml-roles':
+        config.mlRoles = args[++i].split(',') as any
+        break
+      case '--workers': {
+        const val = args[++i]
+        config.numWorkers = val === 'auto' ? -1 : parseInt(val)
+        break
+      }
       case '--resume': {
         // --resume の次が別のフラグか末尾なら true（checkpoint-dir を使う）
         const next = args[i + 1]

@@ -6,11 +6,14 @@ import { formatHowl } from './format.ts'
 import { parse } from '../howl/index.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi } from '../hati/index.ts'
+import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
+import { findScenario, scenarioToRoles, scenarios } from './scenarios.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 
 type CliOptions = {
   config: LupaConfig
   tsumi: boolean
+  stats: boolean
   games: number
 }
 
@@ -20,13 +23,36 @@ function parseArgs(args: string[]): CliOptions {
   let verify = false
   let useRandomNames = false
   let tsumi = false
+  let stats = false
+  let heuristic = false
+  let hasFirstGhost = false
   let games = 1
+  let revoteConfig: import('./types.ts').RevoteConfig | undefined
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (arg === '--test') { verify = true; continue }
     if (arg === '--use-random-names') { useRandomNames = true; continue }
     if (arg === '--tsumi') { tsumi = true; continue }
+    if (arg === '--stats') { stats = true; continue }
+    if (arg === '--heuristic') { heuristic = true; continue }
+    if (arg === '--first-ghost') { hasFirstGhost = true; continue }
+    if (arg === '--revote-draw') { revoteConfig = { maxRevotes: 2, style: 'full_revote', tiebreaker: 'draw' }; continue }
+    if (arg === '--scenario' && i + 1 < args.length) {
+      const name = args[++i]
+      const scenario = findScenario(name)
+      if (!scenario) {
+        console.error(`不明なシナリオ: ${name}`)
+        console.error(`利用可能: ${scenarios.map(s => s.name).join(', ')}`)
+        process.exit(1)
+      }
+      for (const [role, count] of Object.entries(scenario.roles)) {
+        roles.set(role as SystemRole, count)
+      }
+      if (scenario.hasFirstGhost) hasFirstGhost = true
+      if (scenario.revoteConfig) revoteConfig = scenario.revoteConfig
+      continue
+    }
     if (arg.startsWith('--seed=')) { seed = parseInt(arg.slice(7), 10); continue }
     if (arg === '--seed' && i + 1 < args.length) { seed = parseInt(args[++i], 10); continue }
     if (arg.startsWith('--games=')) { games = parseInt(arg.slice(8), 10); continue }
@@ -45,12 +71,25 @@ function parseArgs(args: string[]): CliOptions {
   }
 
   if (roles.size === 0) {
-    console.error('使用法: node --experimental-strip-types src/lupa/cli.ts <role:count>... [--seed N] [--tsumi] [--games N]')
+    console.error('使用法: node --experimental-strip-types src/lupa/cli.ts <role:count>... [options]')
     console.error('例: node --experimental-strip-types src/lupa/cli.ts werewolf:1 villager:4 seer:1 mason:2 --tsumi --games 100')
+    console.error('    node --experimental-strip-types src/lupa/cli.ts werewolf:3 villager:2 seer:1 medium:1 bodyguard:1 mason:2 nekomata:1 fanatic:1 werehamster:1 immoralist:1 --heuristic --stats --games 1000 --first-ghost --revote-draw')
     process.exit(1)
   }
 
-  return { config: { roles, seed, verify, useRandomNames }, tsumi, games }
+  const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
+  const config: LupaConfig = { roles, seed, verify, useRandomNames, hasFirstGhost, revoteConfig }
+
+  if (heuristic) {
+    const h = new HeuristicStrategy()
+    const strategies = new Map<number, import('./strategy.ts').Strategy>()
+    for (let s = 1; s <= totalPlayers; s++) strategies.set(s, h)
+    config.strategies = strategies
+    config.wolfTeamStrategy = new WolfTeamHeuristic()
+    config.masonTeamStrategy = new MasonTeamHeuristic()
+  }
+
+  return { config, tsumi, stats, games }
 }
 
 const ANALYZE_OPTIONS: AnalyzeOptions = {
@@ -120,9 +159,31 @@ function runTsumiCheck(howl: string, execLine: number, _day: number): {
   }
 }
 
-const { config, tsumi, games } = parseArgs(process.argv.slice(2))
+const { config, tsumi, stats, games } = parseArgs(process.argv.slice(2))
 
-if (!tsumi) {
+if (stats) {
+  // 勝率統計モード
+  const baseSeed = config.seed ?? Date.now()
+  const counts: Record<string, number> = {}
+  let totalLen = 0
+
+  for (let g = 0; g < games; g++) {
+    const seed = baseSeed + g
+    try {
+      const { state } = runGame({ ...config, seed })
+      const result = state.result ?? 'unknown'
+      counts[result] = (counts[result] ?? 0) + 1
+      totalLen += state.day
+    } catch (e) {
+      console.error(`seed=${seed} エラー: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+
+  for (const [k, v] of Object.entries(counts)) {
+    console.log(`${k}: ${v} (${(v / games * 100).toFixed(1)}%)`)
+  }
+  console.log(`avgLen: ${(totalLen / games).toFixed(1)}`)
+} else if (!tsumi) {
   // 通常モード: howl出力のみ
   const { events, state } = runGame(config)
   console.log(formatHowl(events, state, config))
