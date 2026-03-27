@@ -699,19 +699,46 @@ function tryNightAction(
       const biteTarget = 31 - Math.clz32(biteBit)
       remainBite ^= biteBit
 
-      const { nextAlive, obsKey: numKey } = simulateNight(
+      const { nextAlive: baseAlive, obsKey: baseKey } = simulateNight(
         world, alive, biteTarget, bodyguardTarget, seerTargets,
       )
-      // 早期打ち切り: この噛み先で村が負ける → この夜行動は詰みでない
-      const outcome = checkOutcome(world, nextAlive)
-      if (outcome === 'wolf_win' || outcome === 'hamster_win') return null
 
-      const group = possibleByObs.get(numKey)
-      if (group) {
-        // #5: 配列 + indexOf で重複回避（Setの代わり）
-        if (!group.worlds.includes(world)) group.worlds.push(world)
+      // 猫又噛みチェック: 道連れ狼を全生存狼に対して分岐（AND節点）
+      const isNekoBite = world.roleIds[biteTarget] === NEKOMATA_ROLE_ID
+        && hasSeat(alive, biteTarget)
+        && (bodyguardTarget !== biteTarget || !hasSeat(alive, world.bodyguardSeat))
+      const curseWolfMask = isNekoBite ? (world.wolfMask & baseAlive) : 0
+
+      if (curseWolfMask === 0) {
+        // 通常噛み or 猫又以外 or 護衛成功 or 狼全滅
+        const outcome = checkOutcome(world, baseAlive)
+        if (outcome === 'wolf_win' || outcome === 'hamster_win') return null
+        const group = possibleByObs.get(baseKey)
+        if (group) {
+          if (!group.worlds.includes(world)) group.worlds.push(world)
+        } else {
+          possibleByObs.set(baseKey, { worlds: [world], alive: baseAlive })
+        }
       } else {
-        possibleByObs.set(numKey, { worlds: [world], alive: nextAlive })
+        // 猫又噛み: 各生存狼が道連れ対象（狼が選択するAND分岐）
+        // obsKey に道連れ狼の死亡を反映: deathMask は seerCount*2 ビットシフトされている
+        const seerShift = popCount32(world.seerMask) * 2
+        let wolfBits = curseWolfMask
+        while (wolfBits !== 0) {
+          const wolfBit = wolfBits & (-wolfBits)
+          wolfBits ^= wolfBit
+          const curseWolf = 31 - Math.clz32(wolfBit)
+          const nextAlive = removeSeat(baseAlive, curseWolf)
+          const numKey = baseKey | ((1 << curseWolf) << seerShift)
+          const outcome = checkOutcome(world, nextAlive)
+          if (outcome === 'wolf_win' || outcome === 'hamster_win') return null
+          const group = possibleByObs.get(numKey)
+          if (group) {
+            if (!group.worlds.includes(world)) group.worlds.push(world)
+          } else {
+            possibleByObs.set(numKey, { worlds: [world], alive: nextAlive })
+          }
+        }
       }
     }
   }

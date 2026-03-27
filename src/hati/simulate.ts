@@ -129,17 +129,10 @@ export function simulateNight(
   } else if (bodyguardTarget === wolfBiteTarget && hasSeat(alive, world.bodyguardSeat)) {
     // 護衛成功
   } else if (targetRoleId === NEKOMATA_ID) {
-    // 猫又噛み: 猫又死亡 + 噛んだ狼1匹死亡
+    // 猫又噛み: 猫又死亡（道連れ狼は呼び出し側で全狼に分岐）
     if (hasSeat(nextAlive, wolfBiteTarget)) {
       nextAlive = removeSeat(nextAlive, wolfBiteTarget)
       deathMask |= (1 << wolfBiteTarget)
-    }
-    // 狼の1匹が道連れ
-    const aliveWolves = world.wolfMask & nextAlive
-    if (aliveWolves !== 0) {
-      const lowestWolf = 31 - Math.clz32(aliveWolves & (-aliveWolves))
-      nextAlive = removeSeat(nextAlive, lowestWolf)
-      deathMask |= (1 << lowestWolf)
     }
   } else {
     // 通常の噛み殺し

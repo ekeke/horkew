@@ -136,26 +136,53 @@ function verifyStrategy(
   }
 
   for (const biteTarget of biteTargets) {
-    const { nextAlive, obsKey: numKey } = simulateNight(
+    const { nextAlive: baseAlive, obsKey: baseKey } = simulateNight(
       world, alive, biteTarget, bodyguardTarget, seerTargets,
     )
-    const key = obsKeyToString(numKey, seerTargets.length)
-    const branch = branches[key] ?? branches['win']
-    if (!branch) {
-      return { valid: false, trace: [`夜: 噛み ${biteTarget} の分岐 '${key}' が存在しない`] }
-    }
 
-    if (branch.type === 'win') {
-      const outcome = checkOutcome(world, nextAlive)
-      if (outcome !== 'village_win') {
-        return { valid: false, trace: [`夜: 噛み ${biteTarget} → win だが勝利条件未達: ${outcome}`] }
+    // 猫又噛み: 道連れ狼の全分岐を検証
+    const isNekoBite = world.roles[biteTarget] === 'nekomata'
+      && hasSeat(alive, biteTarget)
+      && (bodyguardTarget !== biteTarget || !hasSeat(alive, world.bodyguardSeat))
+    const curseWolfMask = isNekoBite ? (world.wolfMask & baseAlive) : 0
+
+    const variants: { nextAlive: number, numKey: number, label: string }[] = []
+    if (curseWolfMask === 0) {
+      variants.push({ nextAlive: baseAlive, numKey: baseKey, label: `噛み ${biteTarget}` })
+    } else {
+      const seerShift = popCount32(world.seerMask) * 2
+      let wolfBits = curseWolfMask
+      while (wolfBits !== 0) {
+        const wolfBit = wolfBits & (-wolfBits)
+        wolfBits ^= wolfBit
+        const curseWolf = 31 - Math.clz32(wolfBit)
+        variants.push({
+          nextAlive: removeSeat(baseAlive, curseWolf),
+          numKey: baseKey | ((1 << curseWolf) << seerShift),
+          label: `噛み ${biteTarget} (猫又) 道連れ狼 ${curseWolf}`,
+        })
       }
-      continue
     }
 
-    const sub = verifyStrategy(branch, world, nextAlive)
-    if (!sub.valid) {
-      return { valid: false, trace: [`夜: 噛み ${biteTarget}`, ...sub.trace] }
+    for (const { nextAlive, numKey, label } of variants) {
+      const key = obsKeyToString(numKey, seerTargets.length)
+      const branch = branches[key] ?? branches['win']
+      if (!branch) {
+        return { valid: false, trace: [`夜: ${label} の分岐 '${key}' が存在しない`] }
+      }
+
+      if (branch.type === 'win') {
+        const outcome = checkOutcome(world, nextAlive)
+        if (outcome !== 'village_win') {
+          return { valid: false, trace: [`夜: ${label} → win だが勝利条件未達: ${outcome}`] }
+        }
+        continue
+      }
+
+      const sub = verifyStrategy(branch, world, nextAlive)
+      if (!sub.valid) {
+        return { valid: false, trace: [`夜: ${label}`, ...sub.trace] }
+      }
     }
   }
 
@@ -383,11 +410,15 @@ function runVerify(args: Args): void {
         } else {
           searchEntered++
           if (tsumiResult.isTsumi) searchTsumiFound++
+          else {
+            const ac = popCount32(alive)
+            console.log(`    [探索突入・詰みなし] seed=${seed} Day${cp.day} alive=${ac} worlds=${tsumiResult.stats.worldsTotal} nodes=${tsumiResult.stats.nodesVisited} maxDepth=${tsumiResult.stats.maxDepth} search=${tsumiResult.stats.searchElapsed.toFixed(1)}ms`)
+          }
         }
 
         if (!tsumiResult.isTsumi || !tsumiResult.strategy) {
           // 偽陰性チェック: 枝刈りなしで再探索し、詰みが見つかるか確認
-          if (args.checkHamsterPruning && cfg.roles.werehamster) {
+          if (args.checkHamsterPruning && (cfg.roles.werehamster || cfg.roles.nekomata)) {
             try {
               const { meta, statements } = parse(truncated)
               const { vs, setup } = buildVillageStatus(statements, meta)
@@ -499,8 +530,8 @@ function runVerify(args: Args): void {
     console.log(`    枝刈り: 脅威数=${prunedByThreat}, ワールド0=${prunedByWorlds}, 狐=${prunedByFox}`)
     console.log(`    探索突入: ${searchEntered}/${checkpointCount} → 詰み=${searchTsumiFound}, なし=${searchEntered - searchTsumiFound} (詰み率${searchEntered > 0 ? (searchTsumiFound / searchEntered * 100).toFixed(1) : '-'}%)`)
     console.log(`    戦略検証: ${configFailures === 0 && retarExclusions === 0 ? '全通過' : `Hati=${configFailures}失敗, Retar排除=${retarExclusions}`}`)
-    if (args.checkHamsterPruning && cfg.roles.werehamster) {
-      console.log(`    狐枝刈り偽陰性: ${falseNegatives === 0 ? 'なし' : `${falseNegatives}件`}`)
+    if (args.checkHamsterPruning && (cfg.roles.werehamster || cfg.roles.nekomata)) {
+      console.log(`    枝刈り偽陰性: ${falseNegatives === 0 ? 'なし' : `${falseNegatives}件`}`)
     }
   }
 
