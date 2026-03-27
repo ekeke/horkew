@@ -299,6 +299,11 @@ function runVerify(args: Args): void {
   const failures: Failure[] = []
   let totalHatiMs = 0
   let hatiCount = 0
+  let totalSearchEntered = 0
+  let totalSearchTsumi = 0
+  let totalPrunedThreat = 0
+  let totalPrunedWorlds = 0
+  let totalPrunedFox = 0
   const allTimings: { ms: number, seed: number, day: number, config: string }[] = []
 
   for (const cfg of selectedConfigs) {
@@ -311,6 +316,11 @@ function runVerify(args: Args): void {
     let configFailures = 0
     let retarExclusions = 0
     let falseNegatives = 0
+    let searchEntered = 0
+    let searchTsumiFound = 0
+    let prunedByThreat = 0
+    let prunedByWorlds = 0
+    let prunedByFox = 0
     let maxAlive = 0
     let maxAliveSeed = -1
     let maxAliveDay = -1
@@ -362,6 +372,18 @@ function runVerify(args: Args): void {
         totalHatiMs += tsumiResult.stats.searchElapsed
         hatiCount++
         allTimings.push({ ms: tsumiResult.stats.searchElapsed, seed, day: cp.day, config: cfg.name })
+
+        // 探索段階の分類
+        if (tsumiResult.stats.worldsTotal === 0 && tsumiResult.stats.enumerateElapsed === 0) {
+          prunedByThreat++
+        } else if (tsumiResult.stats.worldsTotal === 0) {
+          prunedByWorlds++
+        } else if (tsumiResult.stats.nodesVisited === 0) {
+          prunedByFox++
+        } else {
+          searchEntered++
+          if (tsumiResult.isTsumi) searchTsumiFound++
+        }
 
         if (!tsumiResult.isTsumi || !tsumiResult.strategy) {
           // 偽陰性チェック: 枝刈りなしで再探索し、詰みが見つかるか確認
@@ -463,12 +485,19 @@ function runVerify(args: Args): void {
     totalCheckpoints += checkpointCount
     totalTsumi += tsumiCount
     totalVerified += verifiedCount
+    totalSearchEntered += searchEntered
+    totalSearchTsumi += searchTsumiFound
+    totalPrunedThreat += prunedByThreat
+    totalPrunedWorlds += prunedByWorlds
+    totalPrunedFox += prunedByFox
 
     console.log(`  ${cfg.name}: ${gameCount} games, ${checkpointCount} checkpoints`)
     console.log(`    詰み発見: ${tsumiCount} (${checkpointCount > 0 ? (tsumiCount / checkpointCount * 100).toFixed(1) : 0}%)`)
     if (tsumiCount > 0) {
       console.log(`    最長詰み: ${maxAlive}人生存 (seed=${maxAliveSeed} Day${maxAliveDay})`)
     }
+    console.log(`    枝刈り: 脅威数=${prunedByThreat}, ワールド0=${prunedByWorlds}, 狐=${prunedByFox}`)
+    console.log(`    探索突入: ${searchEntered}/${checkpointCount} → 詰み=${searchTsumiFound}, なし=${searchEntered - searchTsumiFound} (詰み率${searchEntered > 0 ? (searchTsumiFound / searchEntered * 100).toFixed(1) : '-'}%)`)
     console.log(`    戦略検証: ${configFailures === 0 && retarExclusions === 0 ? '全通過' : `Hati=${configFailures}失敗, Retar排除=${retarExclusions}`}`)
     if (args.checkHamsterPruning && cfg.roles.werehamster) {
       console.log(`    狐枝刈り偽陰性: ${falseNegatives === 0 ? 'なし' : `${falseNegatives}件`}`)
@@ -478,6 +507,9 @@ function runVerify(args: Args): void {
   console.log('')
   console.log(`合計: ${totalGames} games, ${totalCheckpoints} checkpoints`)
   console.log(`詰み発見: ${totalTsumi}, 検証済み: ${totalVerified}`)
+  console.log(`枝刈り合計: 脅威数=${totalPrunedThreat}, ワールド0=${totalPrunedWorlds}, 狐=${totalPrunedFox}`)
+  const searchNoTsumi = totalSearchEntered - totalSearchTsumi
+  console.log(`探索突入合計: ${totalSearchEntered}/${totalCheckpoints} → 詰み=${totalSearchTsumi}, なし=${searchNoTsumi} (詰み率${totalSearchEntered > 0 ? (totalSearchTsumi / totalSearchEntered * 100).toFixed(1) : '-'}%)`)
   if (allTimings.length > 0) {
     allTimings.sort((a, b) => a.ms - b.ms)
     const pct = (p: number) => {
