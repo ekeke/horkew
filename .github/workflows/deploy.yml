@@ -25,7 +25,14 @@ jobs:
           node-version: 22
           cache: npm
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: jetli/wasm-pack-action@v0.4.0
+
       - run: npm ci
+      - run: cd src/retar-rs && wasm-pack build --target nodejs --out-dir pkg
       - run: npm run build:demo
 
       - uses: actions/upload-pages-artifact@v4
