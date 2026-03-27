@@ -45,11 +45,13 @@ export function searchTsumi(
 
   const wolfBit = RoleSignatureBits.werewolf
   const hamsterBit = RoleSignatureBits.werehamster
+  const nekomataBit = RoleSignatureBits.nekomata
   let foxOnly = 0
   let foxAndWolf = 0
   let wolfOnly = 0
   let confirmedWolves = 0
   let hasAliveHamster = false
+  let hasNonWolfNekomata = false
   for (let seat = 1; seat < retar.conclusions.possibilities.length; seat++) {
     if (!(alive & (1 << seat))) continue
     const p = retar.conclusions.possibilities[seat]
@@ -62,10 +64,18 @@ export function searchTsumi(
       if (p === wolfBit) confirmedWolves++
     }
     if (isFox) hasAliveHamster = true
+    if ((p & nekomataBit) && p !== wolfBit) hasNonWolfNekomata = true
   }
   const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
+  // 猫又パリティ枝刈り: 非狼の猫又が生存し、(alive - hamster) が奇数の場合、
+  // 狼が猫又を噛むと alive が2減り、奇→奇のシフトで nawa が通常より1多く減る。
+  // このとき threat == nawa でも実効的に threat > nawa となるため枝刈り可能。
+  const nekoParityShift = hasNonWolfNekomata
+    && ((aliveCount - (hasAliveHamster ? 1 : 0)) & 1) === 1
+  const threat = foxOnly + Math.min(foxAndWolf, 1) + wolfOnly - confirmedWolves
   if (foxAndWolf + wolfOnly > nawa
-    || threatExceedsNawa(foxOnly, foxAndWolf, wolfOnly, confirmedWolves, nawa)) {
+    || threat > nawa
+    || (nekoParityShift && threat === nawa)) {
     const t2 = performance.now()
     return {
       isTsumi: false,
@@ -92,7 +102,29 @@ export function searchTsumi(
     }
   }
 
-  // 3.5. 狐排除探索: 狐が生存している場合、排除可能か判定
+  // 3.5a. 狐生存時パリティ枝刈り: 村勝ちには狼全滅前に狐を殺す必要がある。
+  // 処刑だけで狼+狐を処理するには最低 aliveWolves+1 回の処刑が必要。
+  // 全ワールドで aliveWolves+1 > nawa なら詰みは不可能。
+  if (hasAliveHamster) {
+    let allInsufficient = true
+    for (const w of worlds) {
+      const aliveWolves = popCount32(w.wolfMask & alive)
+      if (aliveWolves + 1 <= nawa) { allInsufficient = false; break }
+    }
+    if (allInsufficient) {
+      const t3 = performance.now()
+      return {
+        isTsumi: false,
+        strategy: null,
+        stats: {
+          worldsTotal: worlds.length, nodesVisited: 0, maxDepth: 0,
+          elapsed: t3 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: t3 - t2,
+        },
+      }
+    }
+  }
+
+  // 3.5b. 狐排除探索: 狐が生存している場合、排除可能か判定
   // maxTurns = aliveCount: wolf_win チェックが自然な終了条件になるため、
   // 人工的な縄数制限は不要。alive は毎ターン最低1減るので探索は有界。
   if (!searchOptions.disableHamsterPruning && hasAliveHamster) {
