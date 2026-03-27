@@ -7,3 +7,5 @@ tmp/
 z-ai/*
 z-ai/
 src/fenrir/checkpoints/
+src/retar-rs/target/
+src/retar-rs/pkg/
