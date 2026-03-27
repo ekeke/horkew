@@ -19,6 +19,9 @@ const VILLAGER_ROLE_IDS: Set<number> = new Set([
 ])
 const NEKOMATA_ROLE_ID = RoleBitIndex.nekomata
 
+/** 戦略木省略時のセンチネル（詰みありを示す軽量値） */
+const WIN: StrategyNode = { type: 'win' }
+
 /** 6人以下のエンドゲームテーブル（正規形キー → 詰み可否） */
 const endgameTable = new Map<string, boolean>()
 
@@ -37,6 +40,7 @@ type SearchState = {
   nodesVisited: number
   maxDepthReached: number
   options: SearchOptions
+  build: boolean
   memo: Map<string, StrategyNode | null>
 }
 
@@ -52,6 +56,7 @@ export function searchTsumi(
     nodesVisited: 0,
     maxDepthReached: 0,
     options,
+    build: options.buildStrategy !== false,
     memo: new Map(),
   }
 
@@ -109,8 +114,8 @@ function isTsumi(
   worlds = deduplicateWorlds(worlds, state.alive)
 
   // 終端チェック
-  if (worlds.length === 0) return { type: 'win' }
-  if (allWorldsVillageWin(worlds, state.alive)) return { type: 'win' }
+  if (worlds.length === 0) return WIN
+  if (allWorldsVillageWin(worlds, state.alive)) return WIN
   if (anyWorldVillageLoss(worlds, state.alive)) return null
   if (depth >= ss.options.maxDepth) return null
 
@@ -122,9 +127,10 @@ function isTsumi(
     const cached = endgameTable.get(canonKey)
     if (cached !== undefined) {
       endgameHits++
-      // テーブルは詰み可否のみ保持。詰みなら再計算して戦略木を返す（高速）
+      // テーブルは詰み可否のみ保持。
       if (!cached) return null
-      // 詰みの場合はフォールスルーして戦略木を構築
+      // 詰みの場合: 戦略木不要なら即返却、必要ならフォールスルーして構築
+      if (!ss.build) return WIN
     }
   }
 
@@ -136,10 +142,11 @@ function isTsumi(
   const precheck = precheckWorlds(worlds, state.alive, ss.options.disableHamsterPruning)
   if (precheck >= 0) {
     // 自明な詰み: seat = precheck を処刑して即勝ち
+    if (!ss.build) { ss.memo.set(key, WIN); return WIN }
     const result: StrategyNode = {
       type: 'action',
       action: { execute: precheck, bodyguardTarget: null, seerTargets: [] },
-      branches: { 'win': { type: 'win' } },
+      branches: { 'win': WIN },
     }
     ss.memo.set(key, result)
     return result
@@ -425,13 +432,24 @@ function tryExecution(
   const sortedExecObs = [...obsGroups.entries()]
     .sort((a, b) => b[1].worlds.length - a[1].worlds.length)
 
+  if (!ss.build) {
+    for (const [, group] of sortedExecObs) {
+      const { worlds: groupWorlds, alive: groupAlive } = group
+      if (allWorldsVillageWin(groupWorlds, groupAlive)) continue
+      if (anyWorldVillageLoss(groupWorlds, groupAlive)) return null
+      const nightResult = searchNight(groupWorlds, groupAlive, state.day, depth, ss)
+      if (nightResult === null) return null
+    }
+    return WIN
+  }
+
   const branches = {} as Record<ObservationKey, StrategyNode>
 
   for (const [obsKey, group] of sortedExecObs) {
     const { worlds: groupWorlds, alive: groupAlive } = group
 
     if (allWorldsVillageWin(groupWorlds, groupAlive)) {
-      branches[obsKey] = { type: 'win' }
+      branches[obsKey] = WIN
       continue
     }
     if (anyWorldVillageLoss(groupWorlds, groupAlive)) {
@@ -747,6 +765,15 @@ function tryNightAction(
   // ムーブオーダリング: ワールド数が多い（難しい）分岐を先に試す → 失敗時の早期打ち切り
   const sortedObs = [...possibleByObs.entries()]
     .sort((a, b) => b[1].worlds.length - a[1].worlds.length)
+
+  if (!ss.build) {
+    for (const [, group] of sortedObs) {
+      const nextState: SimState = { alive: group.alive, day: day + 1 }
+      const result = isTsumi(group.worlds, nextState, depth + 1, ss)
+      if (result === null) return null
+    }
+    return WIN
+  }
 
   const branches = {} as Record<ObservationKey, StrategyNode>
 

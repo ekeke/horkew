@@ -109,6 +109,8 @@ export type SearchOptions = {
   maxDepth: number
   /** 狐関連の枝刈りを無効化（偽陰性検証用） */
   disableHamsterPruning?: boolean
+  /** 戦略木を構築する（デフォルト: true）。falseなら詰み判定のみ高速実行 */
+  buildStrategy?: boolean
 }
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {

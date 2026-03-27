@@ -193,7 +193,7 @@ export function searchTsumi(
 
   return {
     isTsumi: result !== null,
-    strategy: result,
+    strategy: searchOptions.buildStrategy === false ? null : result,
     stats: {
       worldsTotal: worlds.length, nodesVisited, maxDepth: maxDepthReached,
       elapsed: t3 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: t3 - t2,
