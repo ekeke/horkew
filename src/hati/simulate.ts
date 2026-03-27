@@ -171,19 +171,32 @@ export function simulateNight(
  * 特定ワールドにおける狼の有効な噛み先を列挙。
  */
 export function validBiteTargets(world: World, alive: number): Seat[] {
-  // 生存中の狼がいなければ空
   if ((world.wolfMask & alive) === 0) return []
-
-  const nonWolfAlive = alive & ~world.wolfMask
-  return seatsFromMask(nonWolfAlive)
+  return seatsFromMask(validBiteTargetsMask(world, alive))
 }
 
 /**
  * #6: 噛み先をビットマスクで返す（配列alloc不要）
+ * LW（最後の狼）は猫又を噛まない: 噛むと道連れで狼全滅し自チームも負けるため。
+ * 狼が2匹以上いる場合は猫又を噛む選択肢を残す（1匹犠牲にしても残りが戦える）。
  */
 export function validBiteTargetsMask(world: World, alive: number): number {
-  if ((world.wolfMask & alive) === 0) return 0
-  return alive & ~world.wolfMask
+  const aliveWolves = world.wolfMask & alive
+  if (aliveWolves === 0) return 0
+  let targets = alive & ~world.wolfMask
+  // LW（狼が1匹のみ）の場合、猫又を噛み先から除外
+  if (popCount32(aliveWolves) === 1) {
+    let scan = targets
+    while (scan !== 0) {
+      const bit = scan & (-scan)
+      scan ^= bit
+      if (world.roleIds[31 - Math.clz32(bit)] === NEKOMATA_ID) {
+        targets ^= bit
+        break
+      }
+    }
+  }
+  return targets
 }
 
 /**
