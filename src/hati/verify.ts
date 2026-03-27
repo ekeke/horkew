@@ -11,7 +11,7 @@
  *   node --experimental-strip-types src/hati/verify.ts --scenario small-8p --seeds 0-50
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SystemRole } from '../types/index.ts'
 import type { GameEvent, GameState } from '../lupa/types.ts'
@@ -269,6 +269,7 @@ type Args = {
   checkHamsterPruning: boolean
   checkFalseNegative: boolean
   maxAliveForFN: number
+  tsumiDb: string | null
 }
 
 function parseArgs(argv: string[]): Args {
@@ -278,6 +279,7 @@ function parseArgs(argv: string[]): Args {
   let checkHamsterPruning = false
   let checkFalseNegative = false
   let maxAliveForFN = 10
+  let tsumiDb: string | null = null
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -292,6 +294,8 @@ function parseArgs(argv: string[]): Args {
       checkFalseNegative = true
     } else if (arg === '--max-alive' && i + 1 < argv.length) {
       maxAliveForFN = parseInt(argv[++i])
+    } else if (arg === '--tsumi-db' && i + 1 < argv.length) {
+      tsumiDb = argv[++i]
     } else if (arg === '--help' || arg === '-h') {
       const names = configs.map(c => c.name).join(', ')
       console.log(`Hati 詰み探索 検証スクリプト
@@ -305,6 +309,7 @@ Options:
   --check-hamster-pruning      狐枝刈りの偽陰性チェック
   --check-false-negative       偽陰性チェック（前日CP再探索）
   --max-alive <N>              偽陰性チェック時の生存者上限（デフォルト: 10）
+  --tsumi-db <file>            詰みDBをJSONLで出力
   --help, -h                   このヘルプ
 
 シナリオ: ${names}`)
@@ -312,7 +317,7 @@ Options:
     }
   }
 
-  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN }
+  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb }
 }
 
 function runVerify(args: Args): void {
@@ -325,6 +330,11 @@ function runVerify(args: Args): void {
     process.exit(1)
   }
 
+  if (args.tsumiDb) {
+    const dir = args.tsumiDb.replace(/[/\\][^/\\]*$/, '')
+    if (dir && dir !== args.tsumiDb) mkdirSync(dir, { recursive: true })
+    writeFileSync(args.tsumiDb, '')
+  }
   if (args.outdir) {
     mkdirSync(args.outdir, { recursive: true })
   }
@@ -517,6 +527,16 @@ function runVerify(args: Args): void {
           continue
         }
         tsumiCount++
+
+        if (args.tsumiDb) {
+          appendFileSync(args.tsumiDb, JSON.stringify({
+            scenario: cfg.name, seed, day: cp.day,
+            alive: currentAliveCount,
+            worlds: tsumiResult.stats.worldsTotal,
+            nodes: tsumiResult.stats.nodesVisited,
+            searchMs: +tsumiResult.stats.searchElapsed.toFixed(1),
+          }) + '\n')
+        }
 
         const aliveCount = currentAliveCount
         if (aliveCount > maxAlive) {
