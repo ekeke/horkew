@@ -427,13 +427,14 @@ export function evaluate(
   numGames: number = 50,
   wolfTeamNet?: NeuralNetwork,
   masonTeamNet?: NeuralNetwork,
-): { winRates: Record<string, number>, avgGameLength: number } {
+): { winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number } {
   const heuristic = new HeuristicStrategy()
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
   const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
 
   let totalGames = 0
   let totalLength = 0
+  let totalElapsed = 0
   const resultCounts: Record<string, number> = {}
 
   const mlRolesSet = config.mlRoles ? new Set(config.mlRoles) : null
@@ -478,7 +479,9 @@ export function evaluate(
         ? new MasonTeamStrategy(masonTeamNet, { explore: false })
         : new MasonTeamHeuristic(),
     }
+    const t0 = performance.now()
     const { state } = runGame(lupaConfig)
+    totalElapsed += performance.now() - t0
 
     const result = state.result ?? 'unknown'
     resultCounts[result] = (resultCounts[result] ?? 0) + 1
@@ -491,6 +494,7 @@ export function evaluate(
       Object.entries(resultCounts).map(([k, v]) => [k, v / totalGames])
     ),
     avgGameLength: totalLength / totalGames,
+    avgElapsedMs: totalElapsed / totalGames,
   }
 }
 
@@ -812,7 +816,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       const evalResult = evaluate(network, config, 30, wolfTeamNet, masonTeamNet)
       log(
         `[${iter}] Eval: ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
-        `avgLen=${evalResult.avgGameLength.toFixed(1)}`
+        `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/game`
       )
     }
 
