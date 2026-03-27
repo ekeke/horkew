@@ -104,6 +104,7 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
           if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
         }
       } : undefined,
+      enableRetar: config.enableRetar,
       hasFirstGhost: config.hasFirstGhost,
       revoteConfig: config.revoteConfig,
       wolfTeamStrategy,

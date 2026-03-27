@@ -12,7 +12,7 @@ import {
 import { RandomStrategy } from './random-strategy.ts'
 import { forceTrueRoleCO, resolveVotes } from './heuristic.ts'
 import { detectCommander } from './leadership.ts'
-import { analyzeFromEvents as retarAnalyze } from './retar-browser-bridge.ts'
+import { analyzeFromEvents as retarAnalyze, analyzePerPlayer as retarAnalyzePerPlayer } from './retar-browser-bridge.ts'
 
 export type GameResult = {
   events: GameEvent[]
@@ -71,6 +71,9 @@ function decideForPlayer<T>(
   return individualFn(strategy, baseCtx)
 }
 
+/** プレイヤー別 Retar 結果 (seat → per-seat possibilities) */
+type PerPlayerRetar = Map<number, Map<number, Set<SystemRole>>>
+
 function buildContext(
   state: GameState, player: typeof state.players[0],
   events: GameEvent[], rng: Rng,
@@ -79,6 +82,7 @@ function buildContext(
   retarPossibilities: Map<number, Set<SystemRole>> | null = null,
   revoteRound: number | null = null,
   revoteCandidates: number[] | null = null,
+  perPlayerRetar: PerPlayerRetar | null = null,
 ): DecisionContext {
   // 初期知識の注入
   let wolfTeammates: number[] | null = null
@@ -102,6 +106,9 @@ function buildContext(
     masonPartner = partner?.seat ?? null
   }
 
+  // プレイヤー別 Retar があればそちらを優先
+  const playerRetar = perPlayerRetar?.get(player.seat) ?? retarPossibilities
+
   return {
     mySeat: player.seat,
     myRole: player.role,
@@ -116,7 +123,7 @@ function buildContext(
     rng,
     gameState: state,
     lastExecutedSeat,
-    retarPossibilities,
+    retarPossibilities: playerRetar,
     wolfTeammates,
     knownWolves,
     knownHamster,
@@ -265,13 +272,15 @@ export function runGame(config: LupaConfig): GameResult {
 
     // ==== CO前Retar分析 ====
     let preCoRetar: Map<number, Set<SystemRole>> | null = null
+    let preCoPerPlayer: PerPlayerRetar | null = null
     if (config.enableRetar !== false) {
       preCoRetar = retarAnalyze(events, state, config)
+      preCoPerPlayer = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
     }
 
     // COフェーズ
     for (const player of alivePlayers(state)) {
-      const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar)
+      const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar, null, null, preCoPerPlayer)
       const claim = decideForPlayer(config, state, player, ctx,
         (s, c) => s.decideDayClaim(c),
         (s, c) => s.decideDayClaim(c),
@@ -292,8 +301,10 @@ export function runGame(config: LupaConfig): GameResult {
 
     // ==== CO後Retar分析（シグナル/投票用） ====
     let retarPossibilities: Map<number, Set<SystemRole>> | null = null
+    let perPlayerRetar: PerPlayerRetar | null = null
     if (config.enableRetar !== false) {
       retarPossibilities = retarAnalyze(events, state, config)
+      perPlayerRetar = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
     }
 
     // ==== シグナルフェーズ ====
@@ -307,7 +318,7 @@ export function runGame(config: LupaConfig): GameResult {
     for (let round = 0; round < 3; round++) {
       for (const player of alivePlayers(state)) {
         const prevClaimed = player.claimedRole
-        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
         const commAction = decideForPlayer(config, state, player, ctx,
           (s, c) => s.decideCommunication(c),
           (s, c) => s.decideCommunication(c),
@@ -316,6 +327,7 @@ export function runGame(config: LupaConfig): GameResult {
         signalIdCounter += 1
         if (player.claimedRole !== prevClaimed && config.enableRetar !== false) {
           retarPossibilities = retarAnalyze(events, state, config)
+          perPlayerRetar = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
         }
       }
     }
@@ -328,7 +340,7 @@ export function runGame(config: LupaConfig): GameResult {
       // 指揮者提案
       const commander = state.players.find(p => p.seat === state.commander)!
       if (commander.alive) {
-        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
         const proposal = decideForPlayer(config, state, commander, ctx,
           (s, c) => s.decideProposal(c),
           (s, c) => s.decideProposal(c),
@@ -341,7 +353,7 @@ export function runGame(config: LupaConfig): GameResult {
           if (proposal.type === 'execute_order') {
             const target = state.players.find(p => p.seat === proposal.target)
             if (target && target.alive && target.claimedRole === null) {
-              const targetCtx = buildContext(state, target, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+              const targetCtx = buildContext(state, target, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
               const claim = decideForPlayer(config, state, target, targetCtx,
                 (s, c) => s.decideDayClaim(c),
                 (s, c) => s.decideDayClaim(c),
@@ -355,7 +367,7 @@ export function runGame(config: LupaConfig): GameResult {
           // 他プレイヤーの応答
           for (const player of alivePlayers(state)) {
             if (player.seat === state.commander) continue
-            const pCtx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+            const pCtx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
             const response = decideForPlayer(config, state, player, pCtx,
               (s, c) => s.decideLeadershipResponse(c, proposal),
               (s, c) => s.decideLeadershipResponse(c, proposal),
@@ -368,7 +380,7 @@ export function runGame(config: LupaConfig): GameResult {
 
     // 予告フェーズ
     for (const player of alivePlayers(state)) {
-      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
       const forecast = decideForPlayer(config, state, player, ctx,
         (s, c) => s.decideForecast(c),
         (s, c) => s.decideForecast(c),
@@ -383,7 +395,7 @@ export function runGame(config: LupaConfig): GameResult {
     let defensiveCOHappened = false
     for (const player of alivePlayers(state)) {
       if (player.claimedRole !== null) continue
-      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
       const claim = decideForPlayer(config, state, player, ctx,
         (s, c) => s.decideDefensiveClaim(c),
         (s, c) => s.decideDefensiveClaim(c),
@@ -393,6 +405,7 @@ export function runGame(config: LupaConfig): GameResult {
         defensiveCOHappened = true
         if (config.enableRetar !== false) {
           retarPossibilities = retarAnalyze(events, state, config)
+          perPlayerRetar = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
         }
       }
     }
@@ -401,7 +414,7 @@ export function runGame(config: LupaConfig): GameResult {
     if (defensiveCOHappened && state.commander !== null) {
       const commander = state.players.find(p => p.seat === state.commander)!
       if (commander.alive) {
-        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
         const proposal = decideForPlayer(config, state, commander, ctx,
           (s, c) => s.decideProposal(c),
           (s, c) => s.decideProposal(c),
@@ -437,7 +450,7 @@ export function runGame(config: LupaConfig): GameResult {
           target = revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
         } else {
           // 初回投票 or full_revote: Strategyに委任
-          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates)
+          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates, perPlayerRetar)
           target = decideForPlayer(config, state, voter, ctx,
             (s, c) => s.decideVote(c),
             (s, c) => s.decideVote(c),
@@ -644,13 +657,15 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
 
     // CO前Retar (async)
     let preCoRetar: Map<number, Set<SystemRole>> | null = null
+    let preCoPerPlayer: PerPlayerRetar | null = null
     if (config.enableRetar !== false) {
       preCoRetar = await retarFn(events, state, config)
+      preCoPerPlayer = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
     }
 
     // COフェーズ
     for (const player of alivePlayers(state)) {
-      const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar)
+      const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar, null, null, preCoPerPlayer)
       const claim = decideForPlayer(config, state, player, ctx, (s, c) => s.decideDayClaim(c), (s, c) => s.decideDayClaim(c))
       applyClaim(state, player, day, claim, events)
     }
@@ -662,8 +677,10 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
 
     // CO後Retar (async)
     let retarPossibilities: Map<number, Set<SystemRole>> | null = null
+    let perPlayerRetar: PerPlayerRetar | null = null
     if (config.enableRetar !== false) {
       retarPossibilities = await retarFn(events, state, config)
+      perPlayerRetar = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
     }
 
     // シグナルフェーズ
@@ -673,7 +690,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
     state.commander = null
     for (let round = 0; round < 3; round++) {
       for (const player of alivePlayers(state)) {
-        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
         applyCommAction(state, player, day, decideForPlayer(config, state, player, ctx, (s, c) => s.decideCommunication(c), (s, c) => s.decideCommunication(c)), events, daySignals, signals, signalIdCounter)
         signalIdCounter += 1
       }
@@ -684,7 +701,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
       events.push({ type: 'commander_appointed', seat: state.commander })
       const commander = state.players.find(p => p.seat === state.commander)!
       if (commander.alive) {
-        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
         const proposal = decideForPlayer(config, state, commander, ctx, (s, c) => s.decideProposal(c), (s, c) => s.decideProposal(c))
         if (proposal) {
           dayProposals.push(proposal)
@@ -692,21 +709,21 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
           if (proposal.type === 'execute_order') {
             const target = state.players.find(p => p.seat === proposal.target)
             if (target && target.alive && target.claimedRole === null) {
-              const targetCtx = buildContext(state, target, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+              const targetCtx = buildContext(state, target, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
               const claim = decideForPlayer(config, state, target, targetCtx, (s, c) => s.decideDayClaim(c), (s, c) => s.decideDayClaim(c))
               if (claim.type !== 'none') applyClaim(state, target, day, claim, events)
             }
           }
           for (const player of alivePlayers(state)) {
             if (player.seat === state.commander) continue
-            const pCtx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+            const pCtx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
             events.push({ type: 'leadership_response', actor: player.seat, response: decideForPlayer(config, state, player, pCtx, (s, c) => s.decideLeadershipResponse(c, proposal), (s, c) => s.decideLeadershipResponse(c, proposal)) })
           }
         }
       }
     }
     for (const player of alivePlayers(state)) {
-      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities)
+      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar)
       const forecast = decideForPlayer(config, state, player, ctx, (s, c) => s.decideForecast(c), (s, c) => s.decideForecast(c))
       if (forecast.type === 'forecast') { player.forecastTarget = forecast.target; events.push({ type: 'forecast', actor: player.seat, target: forecast.target }) }
     }
@@ -727,7 +744,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
         if (revoteCandidates && revoteStyle === 'random_tied') {
           target = revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
         } else {
-          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates)
+          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates, perPlayerRetar)
           target = decideForPlayer(config, state, voter, ctx, (s, c) => s.decideVote(c), (s, c) => s.decideVote(c))
         }
         // 自投票禁止: 自分に投票した場合はランダムに変更
