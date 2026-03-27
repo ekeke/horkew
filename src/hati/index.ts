@@ -6,7 +6,7 @@ import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
 import { collectWorlds } from './worlds.ts'
 import { searchTsumi as runSearch, threatExceedsNawa } from './search.ts'
 import { canResolveFox } from './foxResolver.ts'
-import { RoleSignatureBits } from '../retar/possibilities.ts'
+import { RoleSignatureBits, RoleBitIndex } from '../retar/possibilities.ts'
 
 export type { TsumiResult, SearchOptions } from './types.ts'
 export type { StrategyNode, World, VillageAction } from './types.ts'
@@ -72,7 +72,10 @@ export function searchTsumi(
   // このとき threat == nawa でも実効的に threat > nawa となるため枝刈り可能。
   const nekoParityShift = hasNonWolfNekomata
     && ((aliveCount - (hasAliveHamster ? 1 : 0)) & 1) === 1
-  const threat = foxOnly + Math.min(foxAndWolf, 1) + wolfOnly - confirmedWolves
+  // 狐生存時は確定狼を引かない: 狼を先に処刑すると狐勝ちになるため、
+  // 確定狼の処刑は「コスト0」にならず、狐解決と合わせた全体の縄数計算が必要。
+  const threat = foxOnly + Math.min(foxAndWolf, 1) + wolfOnly
+    - (hasAliveHamster ? 0 : confirmedWolves)
   if (foxAndWolf + wolfOnly > nawa
     || threat > nawa
     || (nekoParityShift && threat === nawa)) {
@@ -102,14 +105,28 @@ export function searchTsumi(
     }
   }
 
-  // 3.5a. 狐生存時パリティ枝刈り: 村勝ちには狼全滅前に狐を殺す必要がある。
-  // 処刑だけで狼+狐を処理するには最低 aliveWolves+1 回の処刑が必要。
-  // 全ワールドで aliveWolves+1 > nawa なら詰みは不可能。
-  if (hasAliveHamster) {
+  // 3.5a. 狐+白人外パリティ枝刈り: 処刑で狼+狐+白人外を全処理するのに必要な
+  // 最低回数が nawa を超えるなら詰みは不可能。白人外（狂信・狂人）の処刑は
+  // 狼を減らさず縄だけ消費する。狐生存時は狐解決にも1回必要。
+  {
+    const fanaticId = RoleBitIndex.fanatic
+    const possessedId = RoleBitIndex.possessed
     let allInsufficient = true
     for (const w of worlds) {
       const aliveWolves = popCount32(w.wolfMask & alive)
-      if (aliveWolves + 1 <= nawa) { allInsufficient = false; break }
+      const hasHamsterAlive = (w.hamsterMask & alive) !== 0
+      // 白人外の生存数: 全生存席をスキャンし狂信・狂人を数える
+      let whiteNonVillagers = 0
+      let m = alive
+      while (m !== 0) {
+        const bit = m & (-m); m ^= bit
+        const seat = 31 - Math.clz32(bit)
+        const rid = w.roleIds[seat]
+        if (rid === fanaticId || rid === possessedId) whiteNonVillagers++
+      }
+      // 必要処刑数: 狼全員 + 狐(生存時) + 白人外
+      const requiredExecs = aliveWolves + (hasHamsterAlive ? 1 : 0) + whiteNonVillagers
+      if (requiredExecs <= nawa) { allInsufficient = false; break }
     }
     if (allInsufficient) {
       const t3 = performance.now()
