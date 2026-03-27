@@ -82,6 +82,7 @@ Hati（詰み探索）とRetar（役職推理）は機械学習パイプライ�
 - Retar tests: Vitest patterns (expect/describe/it)
 - Named regex capture groups used extensively in parsing
 - Discriminated unions keyed on `type` field for statement and event types
+- `tasks/` ディレクトリは `.gitignore` に含まれる（ローカル作業用、コミット対象外）
 
 ## Gmork (Role Reasoning Engine)
 
