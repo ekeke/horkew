@@ -13,7 +13,9 @@ import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
+import { Possibilities, RoleSignatureBits } from '../retar/possibilities.ts'
 import { searchTsumi } from '../hati/index.ts'
+import type { RunRetar } from '../hati/index.ts'
 import type { TsumiResult } from '../hati/index.ts'
 
 // ============================================================
@@ -143,6 +145,36 @@ function runRetar(
   const result = retar.analyzeSafe()
   if (result.error || !result.result) return new Map()
   return result.result
+}
+
+// ============================================================
+// RunRetar (Possibilities を返す版 — hati DI 用)
+// ============================================================
+
+function resultToPossibilities(result: Map<number, Set<SystemRole>>): Possibilities {
+  let maxSeat = 0
+  for (const seat of result.keys()) {
+    if (seat > maxSeat) maxSeat = seat
+  }
+  const p = new Possibilities(maxSeat)
+  for (const [seat, roles] of result) {
+    let mask = 0
+    for (const role of roles) mask |= RoleSignatureBits[role]
+    p.possibilities[seat] = mask
+  }
+  return p
+}
+
+const lupaRunRetar: RunRetar = (vs, setup, options) => {
+  if (wasmAnalyze) {
+    const vsJson = JSON.stringify(serializeVillageStatus(vs))
+    const setupJson = JSON.stringify(Object.fromEntries(setup))
+    const optJson = JSON.stringify(serializeOptions(options))
+    return resultToPossibilities(parseWasmResult(wasmAnalyze(vsJson, setupJson, optJson)))
+  }
+  const retar = new VillageRetar(vs, setup, options)
+  retar.analyze()
+  return retar.conclusions
 }
 
 // ============================================================
@@ -317,7 +349,7 @@ export function searchTsumiFromEvents(
     : DEFAULT_RETAR_OPTIONS
 
   try {
-    return searchTsumi(vs, setup, options, { maxDepth })
+    return searchTsumi(vs, setup, options, { maxDepth }, lupaRunRetar)
   } catch {
     return null
   }

@@ -1,6 +1,7 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { VillageRetar } from '../retar/index.ts'
+import type { Possibilities } from '../retar/possibilities.ts'
 import type { TsumiResult, SearchOptions, SimState } from './types.ts'
 import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
 import { collectWorlds } from './worlds.ts'
@@ -10,6 +11,22 @@ import { RoleSignatureBits, RoleBitIndex } from '../retar/possibilities.ts'
 
 export type { TsumiResult, SearchOptions } from './types.ts'
 export type { StrategyNode, World, VillageAction } from './types.ts'
+
+/**
+ * Retar解析を実行し Possibilities を返す関数の型。
+ * DI により WASM 版・JS 版を切り替え可能。
+ */
+export type RunRetar = (
+  vs: VillageStatus,
+  setup: Map<SystemRole, number>,
+  options: AnalyzeOptions,
+) => Possibilities
+
+function defaultRunRetar(vs: VillageStatus, setup: Map<SystemRole, number>, options: AnalyzeOptions): Possibilities {
+  const retar = new VillageRetar(vs, setup, options)
+  retar.analyze()
+  return retar.conclusions
+}
 
 /**
  * 詰み進行探索のメインエントリポイント。
@@ -28,12 +45,12 @@ export function searchTsumi(
   setup: Map<SystemRole, number>,
   analyzeOptions: AnalyzeOptions,
   searchOptions: SearchOptions = DEFAULT_SEARCH_OPTIONS,
+  runRetar: RunRetar = defaultRunRetar,
 ): TsumiResult {
   const t0 = performance.now()
 
   // 1. Retar解析で可能性を取得
-  const retar = new VillageRetar(vs, setup, analyzeOptions)
-  retar.analyze()
+  const conclusions = runRetar(vs, setup, analyzeOptions)
   const t1 = performance.now()
 
   // 2. 狼/狐候補数による早期枝刈り（Retarから直接取得、ワールド列挙前）
@@ -54,9 +71,9 @@ export function searchTsumi(
   let whiteNVCandidates = 0
   let hasAliveHamster = false
   let hasNonWolfNekomata = false
-  for (let seat = 1; seat < retar.conclusions.possibilities.length; seat++) {
+  for (let seat = 1; seat < conclusions.possibilities.length; seat++) {
     if (!(alive & (1 << seat))) continue
-    const p = retar.conclusions.possibilities[seat]
+    const p = conclusions.possibilities[seat]
     const isFox = (p & hamsterBit) !== 0
     const isWolf = (p & wolfBit) !== 0
     if (isFox && isWolf) foxAndWolf++
@@ -101,7 +118,7 @@ export function searchTsumi(
   }
 
   // 3. Retarの内部Possibilitiesからワールド列挙
-  const worlds = collectWorlds(retar.conclusions, setup)
+  const worlds = collectWorlds(conclusions, setup)
   const t2 = performance.now()
 
   if (worlds === null || worlds.length === 0) {
