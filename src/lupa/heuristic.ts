@@ -15,7 +15,7 @@ import type { Proposal, LeadershipResponse } from './leadership.ts'
 import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from './strategy.ts'
 import { alivePlayers, alivePlayersExcept, getMediumResult, isWerewolfAligned } from './roles.ts'
 import type { Rng } from './random.ts'
-import { searchTsumiFromEvents, checkRetarConsistency } from './retar-browser-bridge.ts'
+import { searchTsumiFromEvents, checkRetarConsistency } from './retar-bridge.ts'
 import type { VillageAction } from '../hati/types.ts'
 
 // ============================================================

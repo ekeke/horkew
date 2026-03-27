@@ -2,7 +2,7 @@
  * Retar統合ブリッジ (Node.js専用 — worker_threads 並列版)
  *
  * Howlテキスト生成はメインスレッドで行い、Retar実行をN分割して並列実行する。
- * ブラウザ互換のシングルスレッド版は retar-browser-bridge.ts を参照。
+ * ブラウザ互換のシングルスレッド版は retar-bridge.ts を参照。
  */
 
 import type { SystemRole } from '../types/index.ts'
@@ -13,7 +13,7 @@ import { availableParallelism } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { RetarWorkerRequest, RetarWorkerResponse } from './retar-worker.ts'
-import { analyzeFromEvents } from './retar-browser-bridge.ts'
+import { analyzeFromEvents } from './retar-bridge.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
