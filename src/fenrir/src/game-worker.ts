@@ -13,7 +13,12 @@ import { runGame } from '../../lupa/engine.ts'
 import { NeuralNetwork } from './ml/nn.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
-import { terminalReward, intermediateReward, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { terminalReward, intermediateReward, tsumiReward, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { formatHowl } from '../../lupa/format.ts'
+import { parse } from '../../howl/parser.ts'
+import { buildVillageStatus } from '../../howl/bridge.ts'
+import { searchTsumi } from '../../hati/index.ts'
+import { DEFAULT_RETAR_OPTIONS } from '../../lupa/retar-bridge.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
 import {
   unpackWeights,
@@ -189,6 +194,53 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
     for (const event of events) {
       const rewards = intermediateReward(event, state, config.rewardConfig)
       for (const [seat, reward] of rewards) {
+        const entry = individualSteps.find(e => e.seat === seat)
+        if (entry && entry.steps.length > 0) {
+          entry.steps[entry.steps.length - 1].reward += reward
+        }
+        const player = state.players.find(p => p.seat === seat)
+        if (player?.role === 'werewolf' && wSteps.length > 0) {
+          wSteps[wSteps.length - 1].reward += reward
+        }
+        if (player?.role === 'mason' && mSteps.length > 0) {
+          mSteps[mSteps.length - 1].reward += reward
+        }
+      }
+    }
+
+    // Hati 詰み報酬: ゲーム終了後に遡って判定
+    const howl = formatHowl(events, state, lupaConfig)
+    const howlLines = howl.split('\n')
+    const execLines: number[] = []
+    for (let li = 0; li < howlLines.length; li++) {
+      if (howlLines[li].match(/処刑$/)) execLines.push(li + 1)
+    }
+
+    const hatiOptions = config.hasFirstGhost
+      ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
+      : DEFAULT_RETAR_OPTIONS
+
+    let firstTsumiDay = -1
+    for (let i = 0; i < execLines.length; i++) {
+      const truncated = howlLines.slice(0, execLines[i] - 1).join('\n')
+      try {
+        const { meta, statements } = parse(truncated)
+        const { vs, setup } = buildVillageStatus(statements, meta)
+        const result = searchTsumi(vs, setup, hatiOptions, { buildStrategy: false })
+        if (result.isTsumi) {
+          firstTsumiDay = i + 1
+          break
+        }
+      } catch {
+        // parse error → skip
+      }
+    }
+
+    if (firstTsumiDay > 0) {
+      const totalDays = execLines.length
+      const tsumiDays = totalDays - firstTsumiDay + 1
+      const tRewards = tsumiReward(state, tsumiDays, config.rewardConfig)
+      for (const [seat, reward] of tRewards) {
         const entry = individualSteps.find(e => e.seat === seat)
         if (entry && entry.steps.length > 0) {
           entry.steps[entry.steps.length - 1].reward += reward

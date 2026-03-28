@@ -25,6 +25,10 @@ export type RewardConfig = {
   lwSurvival: number
   /** 中間報酬: 妖狐生存 (狐陣営、1日あたり) */
   foxSurvival: number
+  /** 中間報酬: Hati 詰み (村陣営、詰み後の1日あたり) */
+  tsumiVillagePerDay: number
+  /** 中間報酬: Hati 被詰み (狼陣営、詰み後の1日あたり) */
+  tsumiWolfPerDay: number
 }
 
 export const DEFAULT_REWARD_CONFIG: RewardConfig = {
@@ -35,6 +39,8 @@ export const DEFAULT_REWARD_CONFIG: RewardConfig = {
   drawHamster: 0.3,
   lwSurvival: 0.05,
   foxSurvival: 0.07,
+  tsumiVillagePerDay: 0.1,
+  tsumiWolfPerDay: -0.2,
 }
 
 type Alignment = 'village' | 'wolf' | 'hamster'
@@ -117,5 +123,29 @@ export function intermediateReward(
     }
   }
 
+  return rewards
+}
+
+/**
+ * 詰み報酬: ゲーム終了後に遡って付与
+ * 詰み開始日からゲーム終了日までの日数 × 1日あたりの報酬
+ * 村陣営に +tsumiVillagePerDay/日、狼陣営に +tsumiWolfPerDay/日 (負値)
+ * returns: Map<seat, reward>
+ */
+export function tsumiReward(
+  state: GameState,
+  tsumiDays: number,
+  config: RewardConfig = DEFAULT_REWARD_CONFIG,
+): Map<number, number> {
+  const rewards = new Map<number, number>()
+  if (tsumiDays <= 0) return rewards
+  for (const p of state.players) {
+    const alignment = getAlignment(p.role)
+    if (alignment === 'village') {
+      rewards.set(p.seat, config.tsumiVillagePerDay * tsumiDays)
+    } else if (alignment === 'wolf') {
+      rewards.set(p.seat, config.tsumiWolfPerDay * tsumiDays)
+    }
+  }
   return rewards
 }
