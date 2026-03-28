@@ -11,7 +11,7 @@
  *   node --experimental-strip-types src/hati/verify.ts --scenario small-8p --seeds 0-50
  */
 
-import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SystemRole } from '../types/index.ts'
 import type { GameEvent, GameState } from '../lupa/types.ts'
@@ -271,6 +271,7 @@ type Args = {
   maxAliveForFN: number
   tsumiDb: string | null
   noStrategy: boolean
+  fnFromDb: string | null
 }
 
 function parseArgs(argv: string[]): Args {
@@ -282,6 +283,7 @@ function parseArgs(argv: string[]): Args {
   let maxAliveForFN = 10
   let tsumiDb: string | null = null
   let noStrategy = false
+  let fnFromDb: string | null = null
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -300,6 +302,8 @@ function parseArgs(argv: string[]): Args {
       tsumiDb = argv[++i]
     } else if (arg === '--no-strategy') {
       noStrategy = true
+    } else if (arg === '--fn-from-db' && i + 1 < argv.length) {
+      fnFromDb = argv[++i]
     } else if (arg === '--help' || arg === '-h') {
       const names = configs.map(c => c.name).join(', ')
       console.log(`Hati 詰み探索 検証スクリプト
@@ -315,6 +319,7 @@ Options:
   --max-alive <N>              偽陰性チェック時の生存者上限（デフォルト: 10）
   --tsumi-db <file>            詰みDBをJSONLで出力
   --no-strategy                戦略木構築をスキップ（高速、検証なし）
+  --fn-from-db <file>          詰みDBから偽陰性チェック（前日CP再探索）
   --help, -h                   このヘルプ
 
 シナリオ: ${names}`)
@@ -322,7 +327,7 @@ Options:
     }
   }
 
-  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb, noStrategy }
+  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb, noStrategy, fnFromDb }
 }
 
 function runVerify(args: Args): void {
@@ -706,6 +711,136 @@ function buildTrueWorld(state: GameState): World {
   return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, bodyguardSeat }
 }
 
+// --- 偽陰性チェック（DBベース） ---
+
+type TsumiDbEntry = {
+  scenario: string
+  seed: number
+  day: number
+  alive: number
+}
+
+function runFalseNegativeFromDb(args: Args): void {
+  const dbFile = args.fnFromDb!
+  const lines = readFileSync(dbFile, 'utf-8').split('\n').filter(l => l.trim())
+  const entries: TsumiDbEntry[] = lines.map(l => JSON.parse(l))
+
+  // (scenario, seed) ごとに最小dayを取得 → day-1 が偽陰性チェック対象
+  const earliestByKey = new Map<string, TsumiDbEntry>()
+  for (const e of entries) {
+    const key = `${e.scenario}:${e.seed}`
+    const prev = earliestByKey.get(key)
+    if (!prev || e.day < prev.day) earliestByKey.set(key, e)
+  }
+
+  // day=1 の詰みは前日がないのでスキップ。max-alive でフィルタ
+  const candidates: TsumiDbEntry[] = []
+  let skippedDay1 = 0
+  let skippedAlive = 0
+  for (const e of earliestByKey.values()) {
+    if (e.day <= 1) { skippedDay1++; continue }
+    // day-1 の alive は day の alive + 1 (処刑で1人減る、前日は1人多い) + 夜の死者
+    // 正確な値は不明なので e.alive + 2 で概算（処刑+噛みで2人減）
+    const estimatedPrevAlive = e.alive + 2
+    if (estimatedPrevAlive > args.maxAliveForFN) { skippedAlive++; continue }
+    candidates.push(e)
+  }
+
+  console.log(`偽陰性チェック (DBベース)`)
+  console.log(`  DB読込: ${entries.length}エントリ → ${earliestByKey.size} seeds`)
+  console.log(`  候補: ${candidates.length} (Day1スキップ=${skippedDay1}, alive超過スキップ=${skippedAlive})`)
+  console.log()
+
+  const configMap = new Map(configs.map(c => [c.name, c]))
+  let found = 0
+  let checked = 0
+
+  // シナリオごとにグループ化して処理
+  const byScenario = new Map<string, TsumiDbEntry[]>()
+  for (const e of candidates) {
+    if (!byScenario.has(e.scenario)) byScenario.set(e.scenario, [])
+    byScenario.get(e.scenario)!.push(e)
+  }
+
+  for (const [scenarioName, scenarioEntries] of byScenario) {
+    const cfg = configMap.get(scenarioName)
+    if (!cfg) { console.error(`  不明なシナリオ: ${scenarioName}`); continue }
+
+    const roles = new Map(Object.entries(cfg.roles) as [SystemRole, number][])
+    let scenarioFound = 0
+
+    for (const entry of scenarioEntries) {
+      // ゲームを再生
+      let howl: string
+      try {
+        const lupaConfig = {
+          roles, seed: entry.seed,
+          hasFirstGhost: cfg.hasFirstGhost,
+          revoteConfig: cfg.revoteConfig ?? { maxRevotes: 2, style: 'full_revote' as const, tiebreaker: 'draw' as const },
+        }
+        const result = runGame(lupaConfig)
+        const lupaConfigForFormat = {
+          roles, seed: entry.seed,
+          hasFirstGhost: cfg.hasFirstGhost,
+          revoteConfig: cfg.revoteConfig,
+        }
+        howl = formatHowl(result.events, result.state, lupaConfigForFormat)
+      } catch { continue }
+
+      const checkpoints = findExecutionCheckpoints(howl)
+      // entry.day の1つ前のCPを見つける
+      const prevCpIdx = checkpoints.findIndex(cp => cp.day === entry.day) - 1
+      if (prevCpIdx < 0) continue
+      const prevCp = checkpoints[prevCpIdx]
+
+      const truncated = howl.split('\n').slice(0, prevCp.line - 1).join('\n')
+
+      try {
+        const { meta, statements } = parse(truncated)
+        const { vs, setup } = buildVillageStatus(statements, meta)
+        const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+
+        let alive = 0
+        for (const [seat, status] of vs.statuses) {
+          if (status.surviving) alive |= (1 << seat)
+        }
+        const aliveCount = popCount32(alive)
+
+        if (aliveCount > args.maxAliveForFN) { skippedAlive++; continue }
+
+        checked++
+        const deepResult = searchTsumi(vs, setup, opts, { maxDepth: aliveCount, buildStrategy: false })
+
+        if (deepResult.isTsumi) {
+          found++
+          scenarioFound++
+          console.log(`  [偽陰性] ${scenarioName} seed=${entry.seed} Day${prevCp.day} alive=${aliveCount} worlds=${deepResult.stats.worldsTotal} nodes=${deepResult.stats.nodesVisited} search=${deepResult.stats.searchElapsed.toFixed(1)}ms`)
+          console.log(`    → Day${entry.day}(${entry.alive}人)で通常探索は詰み発見済み`)
+
+          if (args.outdir) {
+            const filename = `${scenarioName}_s${entry.seed}_day${prevCp.day}_fn.howl`
+            const content = truncated + '\n\n'
+              + `# [偽陰性: 通常探索で詰み見逃し]\n`
+              + `# Day${prevCp.day}(${aliveCount}人): 深い探索(maxDepth=${aliveCount})で詰みあり\n`
+              + `# worlds=${deepResult.stats.worldsTotal}, nodes=${deepResult.stats.nodesVisited}, ${deepResult.stats.searchElapsed.toFixed(1)}ms\n`
+              + `# Day${entry.day}(${entry.alive}人): 通常探索で詰み発見\n`
+            writeFileSync(join(args.outdir, filename), content)
+          }
+        }
+      } catch { continue }
+    }
+
+    console.log(`  ${scenarioName}: ${scenarioEntries.length}候補 → チェック済み, 偽陰性=${scenarioFound}`)
+  }
+
+  console.log()
+  console.log(`結果: ${checked}件チェック, 偽陰性=${found}件`)
+}
+
 // --- 実行 ---
 const args = parseArgs(process.argv.slice(2))
-runVerify(args)
+if (args.fnFromDb) {
+  runFalseNegativeFromDb(args)
+} else {
+  runVerify(args)
+}
