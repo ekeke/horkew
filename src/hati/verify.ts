@@ -422,6 +422,7 @@ function runVerify(args: Args): void {
 
         let tsumiResult
         let alive: number
+        const cpStart = performance.now()
         try {
           const { meta, statements } = parse(truncated)
           const { vs, setup } = buildVillageStatus(statements, meta)
@@ -541,12 +542,14 @@ function runVerify(args: Args): void {
         tsumiCount++
 
         if (args.tsumiDb) {
+          const cpElapsed = performance.now() - cpStart
           appendFileSync(args.tsumiDb, JSON.stringify({
             scenario: cfg.name, seed, day: cp.day,
             alive: currentAliveCount,
             worlds: tsumiResult.stats.worldsTotal,
             nodes: tsumiResult.stats.nodesVisited,
             searchMs: +tsumiResult.stats.searchElapsed.toFixed(1),
+            elapsedMs: +cpElapsed.toFixed(1),
           }) + '\n')
         }
 
@@ -763,14 +766,25 @@ function runFalseNegativeFromDb(args: Args): void {
     byScenario.get(e.scenario)!.push(e)
   }
 
+  const totalCandidates = candidates.length
+  let globalIdx = 0
+  const globalStart = performance.now()
+
   for (const [scenarioName, scenarioEntries] of byScenario) {
     const cfg = configMap.get(scenarioName)
     if (!cfg) { console.error(`  不明なシナリオ: ${scenarioName}`); continue }
 
     const roles = new Map(Object.entries(cfg.roles) as [SystemRole, number][])
     let scenarioFound = 0
+    let scenarioIdx = 0
 
     for (const entry of scenarioEntries) {
+      scenarioIdx++
+      globalIdx++
+      if (scenarioIdx % 100 === 0 || scenarioIdx === scenarioEntries.length) {
+        const elapsed = ((performance.now() - globalStart) / 1000).toFixed(0)
+        process.stdout.write(`\r  [${scenarioName}] ${scenarioIdx}/${scenarioEntries.length}  (全体 ${globalIdx}/${totalCandidates}  ${elapsed}s  FN=${found})`)
+      }
       // ゲームを再生
       let howl: string
       try {
@@ -831,6 +845,7 @@ function runFalseNegativeFromDb(args: Args): void {
       } catch { continue }
     }
 
+    process.stdout.write('\n')
     console.log(`  ${scenarioName}: ${scenarioEntries.length}候補 → チェック済み, 偽陰性=${scenarioFound}`)
   }
 
