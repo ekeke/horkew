@@ -58,23 +58,28 @@ export const DEFAULT_RETAR_OPTIONS: AnalyzeOptions = {
 // Core: analyze (WASM or JS)
 // ============================================================
 
+export type RetarResult = {
+  possibilities: Map<number, Set<SystemRole>>
+  maxSurvivingNV: number
+}
+
 function runRetar(
   vs: any,
   setup: Map<SystemRole, number>,
   options: AnalyzeOptions,
-): Map<number, Set<SystemRole>> {
+): RetarResult {
   if (wasmAnalyze) {
     const vsJson = JSON.stringify(serializeVillageStatus(vs))
     const setupJson = JSON.stringify(Object.fromEntries(setup))
     const optJson = JSON.stringify(serializeOptions(options))
-    return parseWasmResult(wasmAnalyze(vsJson, setupJson, optJson)).possibilities
+    return parseWasmResult(wasmAnalyze(vsJson, setupJson, optJson))
   }
 
   // JS fallback
   const retar = new VillageRetar(vs, setup, options)
   const result = retar.analyzeSafe()
-  if (result.error || !result.result) return new Map()
-  return result.result
+  if (result.error || !result.result) return { possibilities: new Map(), maxSurvivingNV: 0 }
+  return { possibilities: result.result, maxSurvivingNV: retar.conclusions.maxSurvivingNV }
 }
 
 // ============================================================
@@ -105,11 +110,11 @@ export function analyzeFromEvents(
   state: GameState,
   config: LupaConfig,
   assumptions?: Map<number, SystemRole>,
-): Map<number, Set<SystemRole>> {
+): RetarResult {
   const howl = formatHowl(events, state, config)
   const { meta, statements } = parse(howl)
   const unknowns = statements.filter(s => s.type === 'unknown')
-  if (unknowns.length > 0) return new Map()
+  if (unknowns.length > 0) return { possibilities: new Map(), maxSurvivingNV: 0 }
 
   const { vs, setup } = buildVillageStatus(statements, meta)
 
@@ -190,8 +195,8 @@ export function analyzePerPlayer(
   state: GameState,
   config: LupaConfig,
   players: GameState['players'],
-): Map<number, Map<number, Set<SystemRole>>> {
-  const result = new Map<number, Map<number, Set<SystemRole>>>()
+): Map<number, RetarResult> {
+  const result = new Map<number, RetarResult>()
 
   const howl = formatHowl(events, state, config)
   const { meta, statements } = parse(howl)
@@ -236,10 +241,10 @@ export function checkRetarConsistency(
       ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
       : DEFAULT_RETAR_OPTIONS
 
-  const retarResult = runRetar(vs, setup, options)
-  if (retarResult.size === 0) return false
+  const { possibilities } = runRetar(vs, setup, options)
+  if (possibilities.size === 0) return false
 
-  for (const [, roles] of retarResult) {
+  for (const [, roles] of possibilities) {
     if (roles.size === 0) return false
   }
   return true

@@ -26,7 +26,7 @@ const ROLE_INDEX = new Map(ROLES.map((r, i) => [r, i]))
 export const NUM_ROLES = ROLES.length
 
 // セクションサイズ
-const GLOBAL_SIZE = 2 + 1 + NUM_ROLES + 1 + 1 + 1  // day, phase, alive_ratio, role_onehot, commander, progress, demand_wolf_co_count = 17
+const GLOBAL_SIZE = 2 + 1 + NUM_ROLES + 1 + 1 + 1 + 1  // day, phase, alive_ratio, role_onehot, commander, progress, demand_wolf_co_count, rope_margin = 18
 const PER_SEAT_SIZE = 1 + (NUM_ROLES + 1) + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 // alive, claimed_role, is_me, black_count, white_count, vote_received, suspicion, trust, execute_proposal, is_commander, accuse_wolf, accuse_fox, vote_intent, nominate_commander = 25
 const SEAT_SECTION_SIZE = SEATS * PER_SEAT_SIZE  // 336
 const PRIVATE_SIZE = SEATS + SEATS + 1 + SEATS + 1  // divine_results + wolf_teammates + mason_partner + guard_history + known_hamster = 43
@@ -64,6 +64,17 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
     }
   }
   obs[offset++] = Math.min(demandWolfCoCount / 5, 1)
+
+  // rope_margin: 縄余裕 = 残り処刑回数 - maxSurvivingNV
+  // 正 = 村有利、0 = ギリギリ、負 = 村不利
+  if (ctx.maxSurvivingNV !== null) {
+    const aliveCount = ctx.alivePlayers.length
+    const remainingExecutions = Math.floor((aliveCount - 1) / 2)
+    const ropeMargin = remainingExecutions - ctx.maxSurvivingNV
+    obs[offset++] = ropeMargin / SEATS  // normalized
+  } else {
+    obs[offset++] = 0
+  }
 
   // ========== Per-seat features ==========
   const aliveSet = new Set(ctx.alivePlayers)
