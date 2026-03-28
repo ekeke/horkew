@@ -11,7 +11,7 @@
 
 - **計算だけで詰みの可否を決定する。**
 - 入力: Retarの `Possibilities`（各席の役職可能性ビットマスク）
-- 出力: `TsumiJudgment`（tsumiCoeff, nawa, threat, impossible）
+- 出力: `TsumiJudgment`（nawa, threat, impossible）
 - ワールド列挙もAND-OR探索も行わない
 - `isThreatExceeded` が判定ロジックを担当
 

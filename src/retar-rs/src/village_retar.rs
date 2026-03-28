@@ -18,6 +18,7 @@ pub struct AnalyzeResult {
     pub aborted: bool,
     pub error: Option<String>,
     pub result: HashMap<Seat, HashSet<SystemRole>>,
+    pub max_surviving_nv: i32,
 }
 
 /// Check if a subtree rooted at `start` with `size` paths contains any path for `batch`
@@ -247,12 +248,21 @@ impl VillageRetar {
         }
     }
 
+    fn compute_alive_mask(&self) -> u32 {
+        let mut alive: u32 = 0;
+        for &seat in &self.cached_survivors {
+            alive |= 1u32 << seat;
+        }
+        alive
+    }
+
     pub fn analyze(&mut self) -> AnalyzeResult {
         if self.vs.result == Some(VillageResult::WerehamsterWon) && !self.last_deaths.is_empty() {
             return self.analyze_hamster_win();
         }
 
         self.run_analysis();
+        self.conclusions.compute_max_surviving_nv(self.compute_alive_mask());
 
         AnalyzeResult {
             elapsed_ms: 0.0, // timing done by caller
@@ -261,6 +271,7 @@ impl VillageRetar {
             aborted: false,
             error: None,
             result: self.conclusions.to_structured(),
+            max_surviving_nv: self.conclusions.max_surviving_nv,
         }
     }
 
@@ -313,6 +324,8 @@ impl VillageRetar {
         self.initial_possibilities = original_possibilities;
         self.hamster_win_path = None;
 
+        self.conclusions.compute_max_surviving_nv(self.compute_alive_mask());
+
         AnalyzeResult {
             elapsed_ms: 0.0,
             batch: self.options.batch,
@@ -320,6 +333,7 @@ impl VillageRetar {
             aborted: false,
             error: None,
             result: self.conclusions.to_structured(),
+            max_surviving_nv: self.conclusions.max_surviving_nv,
         }
     }
 

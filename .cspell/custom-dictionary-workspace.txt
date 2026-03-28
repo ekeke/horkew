@@ -1,13 +1,16 @@
 # Custom Dictionary Words
+Coeff
 combinatorially
 decos
 frontmatter
 immoralists
 lupa
+nawa
 neko
 nekomata
 Pocus
 Retar
 revote
 satisfiability
+tsumi
 werehamster

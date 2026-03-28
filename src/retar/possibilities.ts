@@ -184,6 +184,8 @@ export class Possibilities {
   possibilities: Uint16Array
   setup: Uint8Array
   setupOriginal!: Uint8Array
+  /** 最大生存人外数（事前計算済み。computeMaxSurvivingNV() で設定） */
+  maxSurvivingNV: number = 0
   constructor(
     setup: Map<SystemRole, number> | Uint16Array | number,
     setupArr?: Uint8Array,
@@ -349,4 +351,79 @@ export class Possibilities {
   isActualRole(seat: number, role: SystemRole): boolean {
     return this.possibilities[seat] === RoleSignatureBits[role]
   }
+
+  /**
+   * 最大生存人外数を計算し maxSurvivingNV に格納する。
+   * 二部マッチングにより死亡者を村役職スロットに最大割り当てし、
+   * 配役上の人外総数から最小死亡人外数を差し引く。
+   *
+   * alive: 生存者ビットマスク (bit N = seat N が生存)
+   */
+  computeMaxSurvivingNV(alive: number): void {
+    const villageMask = ~Liar & AllRoles
+
+    // 配役上の人外総数
+    let totalNV = 0
+    for (let i = 0; i < ROLE_COUNT; i++) {
+      if ((1 << i) & Liar) totalNV += this.setupOriginal[i]
+    }
+
+    // 死者席を収集
+    const deadSeats: number[] = []
+    for (let seat = 1; seat < this.possibilities.length; seat++) {
+      if (!(alive & (1 << seat))) deadSeats.push(seat)
+    }
+    if (deadSeats.length === 0) {
+      this.maxSurvivingNV = totalNV
+      return
+    }
+
+    // 村役職スロットを容量展開（各エントリ = その役職の RoleSignatureBits 値）
+    const villageSlots: number[] = []
+    for (let i = 0; i < ROLE_COUNT; i++) {
+      if (!((1 << i) & villageMask)) continue
+      const bit = 1 << i
+      for (let j = 0; j < this.setupOriginal[i]; j++) villageSlots.push(bit)
+    }
+    if (villageSlots.length === 0) {
+      this.maxSurvivingNV = totalNV
+      return
+    }
+
+    // Kuhn's augmenting path matching
+    const matchDead = new Int8Array(deadSeats.length).fill(-1)
+    const visited = new Uint8Array(deadSeats.length)
+
+    let maxDeadVillage = 0
+    for (let si = 0; si < villageSlots.length; si++) {
+      visited.fill(0)
+      if (tryAugmentVillageSlot(si, villageSlots, deadSeats, this.possibilities, matchDead, visited)) {
+        maxDeadVillage++
+      }
+    }
+
+    this.maxSurvivingNV = Math.max(0, totalNV - (deadSeats.length - maxDeadVillage))
+  }
+}
+
+/** 二部マッチングの増加パス探索（Kuhn's algorithm） */
+function tryAugmentVillageSlot(
+  slotIdx: number,
+  villageSlots: number[],
+  deadSeats: number[],
+  possibilities: Uint16Array,
+  matchDead: Int8Array,
+  visited: Uint8Array,
+): boolean {
+  const slotBit = villageSlots[slotIdx]
+  for (let di = 0; di < deadSeats.length; di++) {
+    if (visited[di]) continue
+    if (!(possibilities[deadSeats[di]] & slotBit)) continue
+    visited[di] = 1
+    if (matchDead[di] === -1 || tryAugmentVillageSlot(matchDead[di], villageSlots, deadSeats, possibilities, matchDead, visited)) {
+      matchDead[di] = slotIdx
+      return true
+    }
+  }
+  return false
 }

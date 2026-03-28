@@ -4,7 +4,7 @@
   import { searchTsumi } from '../src/hati/index.ts'
   import type { RunRetar } from '../src/hati/index.ts'
   import type { AnalyzeOptions } from '../src/retar/index.ts'
-  import { init, analyze } from '../src/retar-rs/pkg-web/retar.js'
+  import wasmInit, { analyze } from '../src/retar-rs/pkg-web/retar.js'
   // @ts-ignore — Vite ?url import
   import wasmUrl from '../src/retar-rs/pkg/retar_bg.wasm?url'
   import { serializeVillageStatus, serializeOptions, parseWasmResult, resultToPossibilities } from '../src/retar/wasm-helpers.ts'
@@ -20,7 +20,7 @@
   } = $props()
 
   let wasmReady = $state(false)
-  init(wasmUrl).then(() => { wasmReady = true }).catch(() => {})
+  wasmInit(wasmUrl).then(() => { wasmReady = true }).catch(() => {})
 
   const wasmRunRetar: RunRetar = (vs, setup, options) => {
     const vsJson = JSON.stringify(serializeVillageStatus(vs))
@@ -125,12 +125,7 @@
   {#if result}
     <div class="hati-verdict-bar" class:tsumi={result.isTsumi}>
       <span class="hati-verdict-label">{result.isTsumi ? '詰み' : '詰みなし'}</span>
-      <span class="hati-coeff-group">
-        <span class="hati-coeff" class:positive={result.tsumiCoeff > 0} class:zero={result.tsumiCoeff === 0} class:negative={result.tsumiCoeff < 0}>
-          係数 {result.tsumiCoeff.toFixed(1)}
-        </span>
-        <span class="hati-nawa-threat">縄{result.nawa % 1 ? result.nawa.toFixed(1) : result.nawa} / 脅威{result.threat}</span>
-      </span>
+      <span class="hati-nawa-threat">縄{result.nawa % 1 ? result.nawa.toFixed(1) : result.nawa} / 人外{result.threat}</span>
     </div>
 
     {#if result.strategy}
@@ -255,35 +250,6 @@
     background: var(--ctp-surface0);
     color: var(--ctp-subtext0);
     border-left: 3px solid var(--ctp-surface2);
-  }
-
-  .hati-coeff-group {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.8rem;
-    font-weight: normal;
-  }
-
-  .hati-coeff {
-    padding: 0.1rem 0.4rem;
-    border-radius: 3px;
-    font-weight: bold;
-  }
-
-  .hati-coeff.positive {
-    color: var(--ctp-green);
-    background: color-mix(in srgb, var(--ctp-green) 10%, transparent);
-  }
-
-  .hati-coeff.zero {
-    color: var(--ctp-yellow);
-    background: color-mix(in srgb, var(--ctp-yellow) 10%, transparent);
-  }
-
-  .hati-coeff.negative {
-    color: var(--ctp-red);
-    background: color-mix(in srgb, var(--ctp-red) 10%, transparent);
   }
 
   .hati-nawa-threat {

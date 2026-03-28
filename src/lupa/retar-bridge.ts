@@ -67,7 +67,7 @@ function runRetar(
     const vsJson = JSON.stringify(serializeVillageStatus(vs))
     const setupJson = JSON.stringify(Object.fromEntries(setup))
     const optJson = JSON.stringify(serializeOptions(options))
-    return parseWasmResult(wasmAnalyze(vsJson, setupJson, optJson))
+    return parseWasmResult(wasmAnalyze(vsJson, setupJson, optJson)).possibilities
   }
 
   // JS fallback

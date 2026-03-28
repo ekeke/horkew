@@ -83,18 +83,16 @@ export type StrategyNode =
 
 /** 詰み判定の中間結果（探索前の計算ベース判定） */
 export type TsumiJudgment = {
-  /** 詰み係数: nawa - threat */
-  tsumiCoeff: number
   /** 縄数: (alive - 1) / 2（人間式、小数あり） */
   nawa: number
-  /** 脅威数（処理すべき非村人数） */
+  /** 最大生存人外数: 配役上の人外数 − 死亡確定人外数 */
   threat: number
   /** 整数縄数: floor((alive - 1 - hamster) / 2)（実際に処刑できる回数） */
   nawaInt: number
   /** 生存者ビットマスク */
   alive: number
   /** 狐が生存している可能性があるか */
-  hasAliveHamster: boolean
+  possibleSurvivingHamster: boolean
   /** 計算で詰み不可能と判定された場合 true */
   impossible: boolean
 }
@@ -103,11 +101,9 @@ export type TsumiJudgment = {
 export type TsumiResult = {
   isTsumi: boolean
   strategy: StrategyNode | null
-  /** 詰み係数: nawa - threat (正=余裕あり, 0=ギリギリ, 負=詰み不可能) */
-  tsumiCoeff: number
-  /** 縄数: (alive - 1) / 2（人間式、小数あり。パリティ余裕を表現） */
+  /** 縄数: (alive - 1) / 2（人間式、小数あり） */
   nawa: number
-  /** 脅威数（処理すべき非村人数） */
+  /** 最大生存人外数: 配役上の人外数 − 死亡確定人外数 */
   threat: number
   stats: SearchStats
 }

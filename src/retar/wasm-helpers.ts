@@ -63,26 +63,35 @@ export function serializeOptions(options: AnalyzeOptions): any {
   }
 }
 
-export function parseWasmResult(resultJson: string): Map<Seat, Set<SystemRole>> {
-  const parsed = JSON.parse(resultJson)
-  if (parsed.error) return new Map()
-  const result = new Map<Seat, Set<SystemRole>>()
-  for (const [seatStr, roles] of Object.entries(parsed)) {
-    result.set(Number(seatStr), new Set(roles as SystemRole[]))
-  }
-  return result
+export type WasmResult = {
+  possibilities: Map<Seat, Set<SystemRole>>
+  maxSurvivingNV: number
 }
 
-export function resultToPossibilities(result: Map<number, Set<SystemRole>>): Possibilities {
+export function parseWasmResult(resultJson: string): WasmResult {
+  const parsed = JSON.parse(resultJson)
+  if (parsed.error) return { possibilities: new Map(), maxSurvivingNV: 0 }
+  // 新フォーマット: { possibilities: {...}, maxSurvivingNV: N }
+  const possObj = parsed.possibilities ?? parsed
+  const maxSurvivingNV: number = parsed.maxSurvivingNV ?? 0
+  const possibilities = new Map<Seat, Set<SystemRole>>()
+  for (const [seatStr, roles] of Object.entries(possObj)) {
+    possibilities.set(Number(seatStr), new Set(roles as SystemRole[]))
+  }
+  return { possibilities, maxSurvivingNV }
+}
+
+export function resultToPossibilities(result: WasmResult): Possibilities {
   let maxSeat = 0
-  for (const seat of result.keys()) {
+  for (const seat of result.possibilities.keys()) {
     if (seat > maxSeat) maxSeat = seat
   }
   const p = new Possibilities(maxSeat)
-  for (const [seat, roles] of result) {
+  for (const [seat, roles] of result.possibilities) {
     let mask = 0
     for (const role of roles) mask |= RoleSignatureBits[role]
     p.possibilities[seat] = mask
   }
+  p.maxSurvivingNV = result.maxSurvivingNV
   return p
 }

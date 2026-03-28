@@ -351,6 +351,12 @@ export class VillageRetar {
     return result
   }
 
+  private computeAliveMask(): number {
+    let alive = 0
+    for (const seat of this.cachedSurvivors) alive |= (1 << seat)
+    return alive
+  }
+
   analyze(): AnalyzeResult {
     if (this.vs.result === 'werehamster_won' && this.lastDeaths.length > 0) {
       return this.analyzeHamsterWin()
@@ -359,6 +365,7 @@ export class VillageRetar {
     this.runAnalysis()
     const elapsed = performance.now() - t0
     const aborted = this.isAborted()
+    if (!aborted) this.conclusions.computeMaxSurvivingNV(this.computeAliveMask())
     return {
       elapsed,
       batch: this.options.batch,
@@ -414,6 +421,7 @@ export class VillageRetar {
 
     const elapsed = performance.now() - t0
     const aborted = this.isAborted()
+    if (!aborted) this.conclusions.computeMaxSurvivingNV(this.computeAliveMask())
     return {
       elapsed,
       batch: this.options.batch,

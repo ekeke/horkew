@@ -107,6 +107,8 @@ pub struct Possibilities {
     pub possibilities: Vec<u16>,
     pub setup: [u8; ROLE_COUNT],
     pub setup_original: [u8; ROLE_COUNT],
+    /// 最大生存人外数（compute_max_surviving_nv() で設定）
+    pub max_surviving_nv: i32,
 }
 
 impl Possibilities {
@@ -129,6 +131,7 @@ impl Possibilities {
             possibilities,
             setup: setup_arr,
             setup_original,
+            max_surviving_nv: 0,
         }
     }
 
@@ -147,6 +150,7 @@ impl Possibilities {
             possibilities: vec![0u16; seat_count + 1],
             setup: [0u8; ROLE_COUNT],
             setup_original: [0u8; ROLE_COUNT],
+            max_surviving_nv: 0,
         }
     }
 
@@ -159,6 +163,7 @@ impl Possibilities {
             possibilities: self.possibilities.clone(),
             setup: self.setup,
             setup_original: self.setup_original,
+            max_surviving_nv: self.max_surviving_nv,
         }
     }
 
@@ -293,6 +298,106 @@ impl Possibilities {
         }
         result
     }
+
+    /// 最大生存人外数を計算し max_surviving_nv に格納する。
+    /// 二部マッチングにより死亡者を村役職スロットに最大割り当てし、
+    /// 配役上の人外総数から最小死亡人外数を差し引く。
+    pub fn compute_max_surviving_nv(&mut self, alive: u32) {
+        let village_mask = !LIAR & ALL_ROLES;
+
+        // 配役上の人外総数
+        let mut total_nv: i32 = 0;
+        for i in 0..ROLE_COUNT {
+            if ((1u16 << i) & LIAR) != 0 {
+                total_nv += self.setup_original[i] as i32;
+            }
+        }
+
+        // 死者席を収集
+        let mut dead_seats: Vec<usize> = Vec::new();
+        for seat in 1..self.possibilities.len() {
+            if (alive & (1u32 << seat)) == 0 {
+                dead_seats.push(seat);
+            }
+        }
+        if dead_seats.is_empty() {
+            self.max_surviving_nv = total_nv;
+            return;
+        }
+
+        // 村役職スロットを容量展開
+        let mut village_slots: Vec<u16> = Vec::new();
+        for i in 0..ROLE_COUNT {
+            if ((1u16 << i) & village_mask) == 0 {
+                continue;
+            }
+            let bit = 1u16 << i;
+            for _ in 0..self.setup_original[i] {
+                village_slots.push(bit);
+            }
+        }
+        if village_slots.is_empty() {
+            self.max_surviving_nv = total_nv;
+            return;
+        }
+
+        // Kuhn's augmenting path matching
+        let dead_count = dead_seats.len();
+        let mut match_dead: Vec<i32> = vec![-1; dead_count];
+        let mut visited: Vec<bool> = vec![false; dead_count];
+
+        let mut max_dead_village: i32 = 0;
+        for si in 0..village_slots.len() {
+            visited.fill(false);
+            if try_augment_village_slot(
+                si,
+                &village_slots,
+                &dead_seats,
+                &self.possibilities,
+                &mut match_dead,
+                &mut visited,
+            ) {
+                max_dead_village += 1;
+            }
+        }
+
+        self.max_surviving_nv = (total_nv - (dead_count as i32 - max_dead_village)).max(0);
+    }
+}
+
+/// 二部マッチングの増加パス探索（Kuhn's algorithm）
+fn try_augment_village_slot(
+    slot_idx: usize,
+    village_slots: &[u16],
+    dead_seats: &[usize],
+    possibilities: &[u16],
+    match_dead: &mut [i32],
+    visited: &mut [bool],
+) -> bool {
+    let slot_bit = village_slots[slot_idx];
+    for di in 0..dead_seats.len() {
+        if visited[di] {
+            continue;
+        }
+        if (possibilities[dead_seats[di]] & slot_bit) == 0 {
+            continue;
+        }
+        visited[di] = true;
+        if match_dead[di] == -1
+            || try_augment_village_slot(
+                match_dead[di] as usize,
+                village_slots,
+                dead_seats,
+                possibilities,
+                match_dead,
+                visited,
+            )
+        {
+            match_dead[di] = slot_idx as i32;
+            return true;
+        }
+    }
+    false
 }
 
 /// Generator-like combination with replacement within limits.
