@@ -12,6 +12,8 @@
  */
 
 import { mkdirSync, writeFileSync, appendFileSync, readFileSync } from 'node:fs'
+const _sleepBuf = new Int32Array(new SharedArrayBuffer(4))
+function sleepMs(ms: number) { if (ms > 0) Atomics.wait(_sleepBuf, 0, 0, ms) }
 import { join } from 'node:path'
 import type { SystemRole } from '../types/index.ts'
 import type { GameEvent, GameState } from '../lupa/types.ts'
@@ -272,6 +274,8 @@ type Args = {
   tsumiDb: string | null
   noStrategy: boolean
   fnFromDb: string | null
+  deepCheck: boolean
+  cpuLimit: number
 }
 
 function parseArgs(argv: string[]): Args {
@@ -284,6 +288,8 @@ function parseArgs(argv: string[]): Args {
   let tsumiDb: string | null = null
   let noStrategy = false
   let fnFromDb: string | null = null
+  let deepCheck = false
+  let cpuLimit = 1.0
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -304,6 +310,10 @@ function parseArgs(argv: string[]): Args {
       noStrategy = true
     } else if (arg === '--fn-from-db' && i + 1 < argv.length) {
       fnFromDb = argv[++i]
+    } else if (arg === '--deep-check') {
+      deepCheck = true
+    } else if (arg === '--cpu-limit' && i + 1 < argv.length) {
+      cpuLimit = parseFloat(argv[++i])
     } else if (arg === '--help' || arg === '-h') {
       const names = configs.map(c => c.name).join(', ')
       console.log(`Hati 詰み探索 検証スクリプト
@@ -320,6 +330,8 @@ Options:
   --tsumi-db <file>            詰みDBをJSONLで出力
   --no-strategy                戦略木構築をスキップ（高速、検証なし）
   --fn-from-db <file>          詰みDBから偽陰性チェック（前日CP再探索）
+  --deep-check                 詰みなしCPをmaxDepth=aliveで再探索（--max-aliveで生存者上限）
+  --cpu-limit <0-1>            CPUスロットリング（デフォルト: 1.0 = 制限なし、0.8 = 80%）
   --help, -h                   このヘルプ
 
 シナリオ: ${names}`)
@@ -327,7 +339,7 @@ Options:
     }
   }
 
-  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb, noStrategy, fnFromDb }
+  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb, noStrategy, fnFromDb, deepCheck, cpuLimit }
 }
 
 function runVerify(args: Args): void {
@@ -387,8 +399,18 @@ function runVerify(args: Args): void {
     let fnCandidates = 0
     let fnSkipped = 0
     let fnFound = 0
+    let deepCheckCount = 0
+    let deepCheckFound = 0
 
+    const scenarioStart = performance.now()
+    const throttle = args.cpuLimit < 1.0
+    const sleepRatio = throttle ? (1.0 - args.cpuLimit) / args.cpuLimit : 0
     for (let seed = seedFrom; seed < seedTo; seed++) {
+      if (args.deepCheck && (seed - seedFrom) % 500 === 0 && seed > seedFrom) {
+        const elapsed = ((performance.now() - scenarioStart) / 1000).toFixed(0)
+        process.stdout.write(`\r  [${cfg.name}] seed=${seed}/${seedTo}  (${elapsed}s  deep=${deepCheckCount}  FN=${deepCheckFound})`)
+      }
+      const seedStart = throttle ? performance.now() : 0
       resetEndgameStats()
       let events: GameEvent[]
       let state: GameState
@@ -536,6 +558,28 @@ function runVerify(args: Args): void {
               // parse/build失敗は無視（上でも同様）
             }
           }
+          if (args.deepCheck && currentAliveCount <= args.maxAliveForFN) {
+            try {
+              const { meta: m2, statements: s2 } = parse(truncated)
+              const { vs: vs2, setup: setup2 } = buildVillageStatus(s2, m2)
+              const opts2 = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+              const deepResult = searchTsumi(vs2, setup2, opts2, { maxDepth: currentAliveCount, buildStrategy: false })
+              if (deepResult.isTsumi) {
+                deepCheckFound++
+                console.log(`    [深探索で詰み発見] seed=${seed} Day${cp.day} alive=${currentAliveCount} worlds=${deepResult.stats.worldsTotal} nodes=${deepResult.stats.nodesVisited} search=${deepResult.stats.searchElapsed.toFixed(1)}ms`)
+                if (args.outdir) {
+                  const filename = `${cfg.name}_s${seed}_day${cp.day}_deep.howl`
+                  const content = truncated + '\n\n'
+                    + `# [深探索偽陰性: 通常探索で詰み見逃し]\n`
+                    + `# 通常探索(maxDepth=5): 詰みなし\n`
+                    + `# 深い探索(maxDepth=${currentAliveCount}): 詰みあり\n`
+                    + `# worlds=${deepResult.stats.worldsTotal}, nodes=${deepResult.stats.nodesVisited}, ${deepResult.stats.searchElapsed.toFixed(1)}ms\n`
+                  writeFileSync(join(args.outdir, filename), content)
+                }
+              }
+              deepCheckCount++
+            } catch { /* ignore */ }
+          }
           prevCp = { truncated, day: cp.day, aliveCount: currentAliveCount, wasTsumi: false }
           continue
         }
@@ -619,6 +663,10 @@ function runVerify(args: Args): void {
         }
         prevCp = { truncated, day: cp.day, aliveCount: currentAliveCount, wasTsumi: true }
       }
+      if (throttle) {
+        const workMs = performance.now() - seedStart
+        sleepMs(Math.round(workMs * sleepRatio))
+      }
     }
 
     totalGames += gameCount
@@ -647,6 +695,10 @@ function runVerify(args: Args): void {
     }
     if (args.checkFalseNegative) {
       console.log(`    偽陰性チェック: 候補=${fnCandidates}, スキップ=${fnSkipped}, 発見=${fnFound}`)
+    }
+    if (args.deepCheck) {
+      process.stdout.write('\n')
+      console.log(`    深探索チェック: ${deepCheckCount}件(alive<=${args.maxAliveForFN}), 偽陰性=${deepCheckFound}`)
     }
   }
 
@@ -778,6 +830,9 @@ function runFalseNegativeFromDb(args: Args): void {
     let scenarioFound = 0
     let scenarioIdx = 0
 
+    const fnThrottle = args.cpuLimit < 1.0
+    const fnSleepRatio = fnThrottle ? (1.0 - args.cpuLimit) / args.cpuLimit : 0
+
     for (const entry of scenarioEntries) {
       scenarioIdx++
       globalIdx++
@@ -785,6 +840,7 @@ function runFalseNegativeFromDb(args: Args): void {
         const elapsed = ((performance.now() - globalStart) / 1000).toFixed(0)
         process.stdout.write(`\r  [${scenarioName}] ${scenarioIdx}/${scenarioEntries.length}  (全体 ${globalIdx}/${totalCandidates}  ${elapsed}s  FN=${found})`)
       }
+      const entryStart = fnThrottle ? performance.now() : 0
       // ゲームを再生
       let howl: string
       try {
@@ -843,6 +899,10 @@ function runFalseNegativeFromDb(args: Args): void {
           }
         }
       } catch { continue }
+      if (fnThrottle) {
+        const workMs = performance.now() - entryStart
+        sleepMs(Math.round(workMs * fnSleepRatio))
+      }
     }
 
     process.stdout.write('\n')
