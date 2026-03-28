@@ -7,7 +7,7 @@ import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
 import { collectWorlds } from './worlds.ts'
 import { searchTsumi as runSearch } from './search.ts'
 import { simulateFoxElimination } from './foxResolver.ts'
-import { RoleSignatureBits, RoleBitIndex } from '../retar/possibilities.ts'
+import { RoleBitIndex } from '../retar/possibilities.ts'
 
 export type { TsumiResult, TsumiJudgment, SearchOptions } from './types.ts'
 export type { StrategyNode, World, VillageAction } from './types.ts'
@@ -34,54 +34,68 @@ function defaultRunRetar(vs: VillageStatus, setup: Map<SystemRole, number>, opti
 
 /**
  * 脅威ベースの詰み不可能判定。
- * 生存者の役職可能性スキャン結果から nawa/threat/tsumiCoeff を算出し、
- * 詰み不可能かどうかを判定する。
+ * Retarの可能性から各生存者の役職分類を読み取り、
+ * nawa/threat/tsumiCoeff を算出して詰み不可能かを判定する。
  *
  * 不可能条件:
  * - 狼+狐狼兼候補数が縄数を超える
  * - 脅威数が縄数を超える
  * - 猫又パリティシフトにより脅威数 == 縄数でも実質超過
  */
-function isThreatExceeded(scan: {
-  /** 生存者のうち、狐の可能性はあるが狼の可能性はない席の数 */
-  foxOnly: number
-  /** 生存者のうち、狐・狼どちらの可能性もある席の数 */
-  foxAndWolf: number
-  /** 生存者のうち、狼の可能性はあるが狐の可能性はない席の数 */
-  wolfOnly: number
-  /** 生存者のうち、狼であることが確定している席の数 */
-  confirmedWolves: number
-  /** 生存者のうち、白人外（狂信者・狂人）の可能性がある席の数 */
-  whiteNVCandidates: number
-  /** 狐が生存している可能性があるか */
-  hasAliveHamster: boolean
-  /** 非狼猫又が生存 & 生存者パリティが奇数（噛み死で縄が余分に1減る） */
-  nekoParityShift: boolean
-  /** 生存者数 */
-  aliveCount: number
-  /** 配役上の白人外の数 */
-  setupWhiteNV: number
-}): { impossible: boolean, tsumiCoeff: number, nawa: number, threat: number, nawaInt: number } {
-  const {
-    foxOnly, foxAndWolf, wolfOnly, confirmedWolves,
-    whiteNVCandidates, hasAliveHamster, nekoParityShift,
-    aliveCount, setupWhiteNV,
-  } = scan
+function isThreatExceeded(
+  conclusions: Possibilities,
+  alive: number,
+  aliveCount: number,
+  setup: Map<SystemRole, number>,
+): { impossible: boolean, tsumiCoeff: number, nawa: number, threat: number, nawaInt: number, hasAliveHamster: boolean } {
+  // 生存者の役職可能性を分類
+  let foxCandidates = 0       // 狐候補（狼の可能性なし）
+  let foxWolfCandidates = 0   // 狐・狼の両方の候補
+  let wolfCandidates = 0      // 狼候補（狐の可能性なし）
+  let wolfConfirmedCount = 0  // 狼確定
+  let whiteNVCandidates = 0   // 白人外（狂信者・狂人）候補
+  let hasAliveHamster = false
+  let hasNonWolfNekomata = false
 
+  for (let seat = 1; seat < conclusions.possibilities.length; seat++) {
+    if (!(alive & (1 << seat))) continue
+    const foxCandidate = conclusions.hasRole(seat, 'werehamster' as SystemRole)
+    const wolfCandidate = conclusions.hasRole(seat, 'werewolf' as SystemRole)
+    const wolfConfirmed = conclusions.isActualRole(seat, 'werewolf' as SystemRole)
+    if (foxCandidate && wolfCandidate) foxWolfCandidates++
+    else if (foxCandidate) foxCandidates++
+    else if (wolfCandidate) {
+      wolfCandidates++
+      if (wolfConfirmed) wolfConfirmedCount++
+    } else if (conclusions.hasRole(seat, 'fanatic' as SystemRole) || conclusions.hasRole(seat, 'possessed' as SystemRole)) {
+      whiteNVCandidates++
+    }
+    if (foxCandidate) hasAliveHamster = true
+    if (conclusions.hasRole(seat, 'nekomata' as SystemRole) && !wolfConfirmed) {
+      hasNonWolfNekomata = true
+    }
+  }
+
+  // nawa/threat 算出
+  const setupWhiteNV = (setup.get('fanatic' as SystemRole) ?? 0)
+    + (setup.get('possessed' as SystemRole) ?? 0)
   const whiteNVThreat = Math.min(whiteNVCandidates, setupWhiteNV)
   const nawaInt = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
   const nawa = (aliveCount - 1) / 2
+  // 猫又パリティ: 非狼猫又生存 & (alive - hamster) が奇数 → 噛みで alive が2減り nawa が余分に1減る
+  const nekoParityShift = hasNonWolfNekomata
+    && ((aliveCount - (hasAliveHamster ? 1 : 0)) & 1) === 1
   // 狐生存時は確定狼を引かない（狼先処刑 → 狐勝ちのリスク）
-  const threat = foxOnly + Math.min(foxAndWolf, 1) + wolfOnly
-    - (hasAliveHamster ? 0 : confirmedWolves)
+  const threat = foxCandidates + Math.min(foxWolfCandidates, 1) + wolfCandidates
+    - (hasAliveHamster ? 0 : wolfConfirmedCount)
     + whiteNVThreat
   const tsumiCoeff = nawa - threat
 
-  const impossible = foxAndWolf + wolfOnly > nawaInt
+  const impossible = foxWolfCandidates + wolfCandidates > nawaInt
     || threat > nawaInt
     || (nekoParityShift && threat === nawaInt)
 
-  return { impossible, tsumiCoeff, nawa, threat, nawaInt }
+  return { impossible, tsumiCoeff, nawa, threat, nawaInt, hasAliveHamster }
 }
 
 // ---------------------------------------------------------------------------
@@ -103,45 +117,8 @@ export function judgeTsumi(
   }
   const aliveCount = popCount32(alive)
 
-  const wolfBit = RoleSignatureBits.werewolf
-  const hamsterBit = RoleSignatureBits.werehamster
-  const nekomataBit = RoleSignatureBits.nekomata
-  const whiteNVBits = RoleSignatureBits.fanatic | RoleSignatureBits.possessed
-  let foxOnly = 0
-  let foxAndWolf = 0
-  let wolfOnly = 0
-  let confirmedWolves = 0
-  let whiteNVCandidates = 0
-  let hasAliveHamster = false
-  let hasNonWolfNekomata = false
-  for (let seat = 1; seat < conclusions.possibilities.length; seat++) {
-    if (!(alive & (1 << seat))) continue
-    const p = conclusions.possibilities[seat]
-    const isFox = (p & hamsterBit) !== 0
-    const isWolf = (p & wolfBit) !== 0
-    if (isFox && isWolf) foxAndWolf++
-    else if (isFox) foxOnly++
-    else if (isWolf) {
-      wolfOnly++
-      if (p === wolfBit) confirmedWolves++
-    } else if (p & whiteNVBits) {
-      whiteNVCandidates++
-    }
-    if (isFox) hasAliveHamster = true
-    if ((p & nekomataBit) && p !== wolfBit) hasNonWolfNekomata = true
-  }
-
-  const setupWhiteNV = (setup.get('fanatic' as SystemRole) ?? 0)
-    + (setup.get('possessed' as SystemRole) ?? 0)
-  // 猫又パリティ: 非狼猫又生存 & (alive - hamster) が奇数 → 噛みで alive が2減り nawa が余分に1減る
-  const nekoParityShift = hasNonWolfNekomata
-    && ((aliveCount - (hasAliveHamster ? 1 : 0)) & 1) === 1
-
-  const { impossible, tsumiCoeff, nawa, threat, nawaInt } = isThreatExceeded({
-    foxOnly, foxAndWolf, wolfOnly, confirmedWolves,
-    whiteNVCandidates, hasAliveHamster, nekoParityShift,
-    aliveCount, setupWhiteNV,
-  })
+  const { impossible, tsumiCoeff, nawa, threat, nawaInt, hasAliveHamster } =
+    isThreatExceeded(conclusions, alive, aliveCount, setup)
 
   return { tsumiCoeff, nawa, threat, nawaInt, alive, hasAliveHamster, impossible }
 }
