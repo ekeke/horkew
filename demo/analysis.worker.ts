@@ -39,6 +39,7 @@ self.onmessage = (e: MessageEvent<any>) => {
 }
 
 function handleAnalysis(msg: any) {
+  const t0 = performance.now()
   try {
     const { vsJson, setupJson } = msg as RetarRequest
 
@@ -59,9 +60,7 @@ function handleAnalysis(msg: any) {
     })
 
     if (wasmReady) {
-      const t0 = performance.now()
       const resultJson = analyze(vsJson, setupJson, optJson)
-      const elapsed = performance.now() - t0
 
       const parsed = JSON.parse(resultJson)
       if (parsed.error) {
@@ -73,7 +72,7 @@ function handleAnalysis(msg: any) {
       for (const [seatStr, roles] of Object.entries(parsed)) {
         seats.push({ seat: Number(seatStr), roles: roles as SystemRole[] })
       }
-      self.postMessage({ type: 'result', seats, elapsed, wasm: true } satisfies RetarResponse)
+      self.postMessage({ type: 'result', seats, elapsed: performance.now() - t0, wasm: true } satisfies RetarResponse)
       return
     }
 
@@ -128,7 +127,7 @@ function handleAnalysis(msg: any) {
       }
     }
 
-    self.postMessage({ type: 'result', seats, elapsed: result.elapsed ?? 0, wasm: false } satisfies RetarResponse)
+    self.postMessage({ type: 'result', seats, elapsed: performance.now() - t0, wasm: false } satisfies RetarResponse)
   } catch (e: any) {
     self.postMessage({ type: 'error', message: e.message } satisfies RetarResponse)
   }

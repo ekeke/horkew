@@ -35,6 +35,7 @@ export function requestAnalysis(payload: AnalysisPayload, callback: SchedulerCal
 
 export function runParallelAnalysis(payload: AnalysisPayload): Promise<AnalysisResult> {
   return new Promise((resolve) => {
+    const dispatchStart = performance.now()
     const localWorkers: any[] = []
     const numWorkers = poolSize
     const results: SeatResult[][] = []
@@ -81,6 +82,7 @@ export function runParallelAnalysis(payload: AnalysisPayload): Promise<AnalysisR
               workers: numWorkers,
               minElapsed: Math.round(Math.min(...elapsedTimes)),
               maxElapsed: Math.round(Math.max(...elapsedTimes)),
+              wallClock: Math.round(performance.now() - dispatchStart),
               wasm: usedWasm,
             },
           })

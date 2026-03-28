@@ -14,6 +14,7 @@ export type AnalysisStats = {
   workers: number
   minElapsed: number
   maxElapsed: number
+  wallClock: number
   wasm: boolean
 }
 
@@ -79,6 +80,7 @@ export class AnalysisScheduler {
     const { signal } = this.options
     if (signal) Atomics.store(signal, 0, 0)
 
+    const dispatchStart = performance.now()
     const workers = this.ensurePool()
     const numWorkers = workers.length
     const results: SeatResult[][] = []
@@ -106,6 +108,7 @@ export class AnalysisScheduler {
           workers: numWorkers,
           minElapsed: Math.round(Math.min(...elapsedTimes)),
           maxElapsed: Math.round(Math.max(...elapsedTimes)),
+          wallClock: Math.round(performance.now() - dispatchStart),
           wasm: usedWasm,
         },
       })

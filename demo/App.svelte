@@ -1011,9 +1011,9 @@
                 </tbody>
               </table>
               {#if analysisCached}
-                <div class="analysis-duration">total {analysisTotalElapsed}ms (cached) — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms, {analysisStatsInfo.wasm ? 'WASM' : 'JS'}){/if}</div>
+                <div class="analysis-duration">total {analysisTotalElapsed}ms (cached) — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, wall {analysisStatsInfo.wallClock}ms, worker {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms, {analysisStatsInfo.wasm ? 'WASM' : 'JS'}){/if}</div>
               {:else if analysisDuration > 0}
-                <div class="analysis-duration">total {analysisTotalElapsed}ms — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms, {analysisStatsInfo.wasm ? 'WASM' : 'JS'}){/if}</div>
+                <div class="analysis-duration">total {analysisTotalElapsed}ms — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, wall {analysisStatsInfo.wallClock}ms, worker {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms, {analysisStatsInfo.wasm ? 'WASM' : 'JS'}){/if}</div>
               {/if}
             </div>
             <div class="analysis-sidebar">
