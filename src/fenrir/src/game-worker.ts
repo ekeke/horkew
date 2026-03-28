@@ -37,8 +37,19 @@ function buildNetwork(shared: SharedWeights): NeuralNetwork {
   return net
 }
 
+/** role → モデルグループ名の逆引きマップ (コンパイル時定数相当) */
+const ROLE_TO_GROUP: Record<string, string> = {
+  mason: 'mason',
+  villager: 'village', seer: 'village', medium: 'village', bodyguard: 'village', nekomata: 'village',
+  werewolf: 'werewolf',
+  fanatic: 'fanatic',
+  werehamster: 'hamster',
+  immoralist: 'immoralist',
+}
+
 function runBatch(req: WorkerRequest): SerializedGameResult[] {
   const config = req.trainingConfig
+  const multiModel = req.modelGroupWeights != null
   const network = buildNetwork(req.weights)
   const wolfTeamNet = req.wolfTeamWeights ? buildNetwork(req.wolfTeamWeights) : undefined
   const masonTeamNet = req.masonTeamWeights ? buildNetwork(req.masonTeamWeights) : undefined
@@ -47,6 +58,14 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
   const usePool = req.phase === 3
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
   const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
+
+  // マルチモデル: グループ名 → NeuralNetwork
+  const groupNets = new Map<string, NeuralNetwork>()
+  if (multiModel) {
+    for (const [name, sw] of Object.entries(req.modelGroupWeights!)) {
+      groupNets.set(name, buildNetwork(sw))
+    }
+  }
 
   // Pool用の過去ネットワーク
   const poolNets: NeuralNetwork[] = []
@@ -60,8 +79,12 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
 
   for (const seed of req.seeds) {
     const strategies = new Map<number, FenrirStrategy>()
+    // seat → role マッピング (role フィールド出力用)
+    let seatRoleMap: Map<number, SystemRole> | undefined
 
-    if (!useHeuristic || !mlRolesSet) {
+    if (multiModel) {
+      // マルチモデルモード: onRolesAssigned で割り当てるので事前には何もしない
+    } else if (!useHeuristic || !mlRolesSet) {
       for (let seat = 1; seat <= totalPlayers; seat++) {
         if (useHeuristic && seat % 2 !== 0) continue
 
@@ -76,20 +99,38 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
 
     let wolfTeamStrategy: WolfTeamStrategy | undefined
     let masonTeamStrategy: MasonTeamStrategy | undefined
-    if (!useHeuristic) {
+    if (!useHeuristic || multiModel) {
       if (wolfTeamNet) wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
       if (masonTeamNet) masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
     }
 
-    const defaultStrategy = useHeuristic ? new HeuristicStrategy() : undefined
+    const defaultStrategy = (useHeuristic || multiModel) ? new HeuristicStrategy() : undefined
 
-    const onRolesAssigned = (useHeuristic && mlRolesSet) ? (seatRoles: Map<number, SystemRole>) => {
-      for (const [seat, role] of seatRoles) {
-        if (mlRolesSet.has(role)) {
-          strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+    let onRolesAssigned: ((seatRoles: Map<number, SystemRole>) => void) | undefined
+
+    if (multiModel) {
+      // マルチモデル: role に応じたグループの network を割り当て
+      onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
+        seatRoleMap = seatRoles
+        for (const [seat, role] of seatRoles) {
+          const groupName = ROLE_TO_GROUP[role]
+          const net = groupName ? groupNets.get(groupName) : undefined
+          if (net) {
+            strategies.set(seat, new FenrirStrategy(net, { explore: true }))
+          }
+          // groupName が無い (possessed等) → defaultStrategy にフォールバック
         }
       }
-    } : undefined
+    } else if (useHeuristic && mlRolesSet) {
+      onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
+        seatRoleMap = seatRoles
+        for (const [seat, role] of seatRoles) {
+          if (mlRolesSet.has(role)) {
+            strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+          }
+        }
+      }
+    }
 
     // Build LupaConfig
     const strategiesMap = new Map<number, Strategy>(strategies)
@@ -128,7 +169,8 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
         const player = state.players.find(p => p.seat === seat)!
         steps[steps.length - 1].reward += terminalReward(player.role, state.result ?? '', config.rewardConfig)
       }
-      individualSteps.push({ seat, steps: steps.map(serializeStep) })
+      const role = seatRoleMap?.get(seat) ?? state.players.find(p => p.seat === seat)?.role ?? 'unknown'
+      individualSteps.push({ seat, role, steps: steps.map(serializeStep) })
     }
 
     const wSteps = wolfTeamStrategy?.trajectory ?? []

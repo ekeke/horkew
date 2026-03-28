@@ -117,7 +117,7 @@ export function unpackWeights(network: NeuralNetwork, shared: SharedWeights): vo
 /** メインスレッド → Worker */
 export type WorkerRequest = {
   type: 'generate'
-  /** 個人エージェントの重み */
+  /** 個人エージェントの重み（単一モデルモード） */
   weights: SharedWeights
   /** 狼チームの重み (Phase 2+) */
   wolfTeamWeights?: SharedWeights
@@ -125,6 +125,10 @@ export type WorkerRequest = {
   masonTeamWeights?: SharedWeights
   /** プール用過去チェックポイントの重み */
   poolWeights?: SharedWeights[]
+  /** モデルグループ別の重み (Phase 2 マルチモデルモード、heuristicOnly グループは含まない) */
+  modelGroupWeights?: Record<string, SharedWeights>
+  /** heuristic フォールバックするグループ名リスト */
+  heuristicGroups?: string[]
   /** ゲーム設定 (JSON-safe) */
   trainingConfig: TrainingConfig
   /** このバッチの seed 範囲 */
@@ -138,7 +142,7 @@ export type WorkerRequest = {
 /** 1ゲーム分の結果 */
 export type SerializedGameResult = {
   /** 個人エージェントのトラジェクトリ: seat → steps */
-  individualSteps: Array<{ seat: number, steps: SerializedStep[] }>
+  individualSteps: Array<{ seat: number, role: string, steps: SerializedStep[] }>
   /** 狼チームのトラジェクトリ */
   wolfTeamSteps: SerializedStep[]
   /** 共有者チームのトラジェクトリ */

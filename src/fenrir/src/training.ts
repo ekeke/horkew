@@ -21,6 +21,38 @@ import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import { packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize, generateGamesParallel, deserializeStep, type SharedWeights } from './parallel.ts'
 
 // ============================================================
+// Model Groups (Phase 2 マルチモデル)
+// ============================================================
+
+export type ModelGroupName = 'mason' | 'village' | 'werewolf' | 'fanatic' | 'hamster' | 'immoralist'
+
+export const MODEL_GROUP_DEFS: Record<ModelGroupName, { roles: SystemRole[], teamType?: 'wolf_team' | 'mason_team' }> = {
+  mason:      { roles: ['mason'], teamType: 'mason_team' },
+  village:    { roles: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata'] },
+  werewolf:   { roles: ['werewolf'], teamType: 'wolf_team' },
+  fanatic:    { roles: ['fanatic'] },
+  hamster:    { roles: ['werehamster'] },
+  immoralist: { roles: ['immoralist'] },
+}
+
+export const MODEL_GROUP_NAMES: ModelGroupName[] = ['mason', 'village', 'werewolf', 'fanatic', 'hamster', 'immoralist']
+
+/** role → ModelGroupName の逆引き */
+const ROLE_TO_GROUP_NAME = new Map<SystemRole, ModelGroupName>()
+for (const [name, def] of Object.entries(MODEL_GROUP_DEFS) as [ModelGroupName, { roles: SystemRole[] }][]) {
+  for (const role of def.roles) ROLE_TO_GROUP_NAME.set(role, name)
+}
+
+type ModelGroup = {
+  name: ModelGroupName
+  roles: SystemRole[]
+  network: NeuralNetwork
+  tfNetwork: TfNeuralNetwork
+  /** チェックポイント未発見 → heuristic フォールバック、PPO更新スキップ */
+  heuristicOnly: boolean
+}
+
+// ============================================================
 // Training Config
 // ============================================================
 
@@ -68,6 +100,12 @@ export type TrainingConfig = {
   numWorkers?: number
   /** Phase 1でMLにする役職（未指定時は偶数seat） */
   mlRoles?: SystemRole[]
+  /** Phase 2マルチモデル: 6モデルのチェックポイントDir (mason,village,werewolf,fanatic,hamster,immoralist順) */
+  phase2ModelDirs?: string[]
+  /** 目標勝率 (0-1)。eval でこの勝率を超えたら早期終了 */
+  targetWinRate?: number
+  /** チェックする陣営 ('villageWin' | 'wolfWin' | 'hamsterWin') */
+  targetFaction?: string
 }
 
 export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
@@ -557,24 +595,117 @@ function findLatestCheckpoint(dir: string): {
   return { iteration: maxIter, individual, wolfTeam, masonTeam }
 }
 
+/**
+ * マルチモデルのチェックポイントディレクトリから最新のイテレーション番号を検出。
+ * mason_N.json 形式のファイルを探す。
+ */
+function findLatestCheckpointMulti(dir: string): {
+  iteration: number
+  groups: Record<string, string>
+  wolfTeam: string
+  masonTeam: string
+} | null {
+  if (!existsSync(dir)) return null
+  const files = readdirSync(dir)
+
+  // final を探す
+  const hasFinals = MODEL_GROUP_NAMES.every(n => files.includes(`${n}_final.json`))
+    && files.includes('wolf_team_final.json') && files.includes('mason_team_final.json')
+  if (hasFinals) {
+    const raw = JSON.parse(readFileSync(`${dir}/${MODEL_GROUP_NAMES[0]}_final.json`, 'utf-8'))
+    const groups: Record<string, string> = {}
+    for (const n of MODEL_GROUP_NAMES) groups[n] = `${dir}/${n}_final.json`
+    return {
+      iteration: raw.metadata?.iteration ?? 0,
+      groups,
+      wolfTeam: `${dir}/wolf_team_final.json`,
+      masonTeam: `${dir}/mason_team_final.json`,
+    }
+  }
+
+  // {groupName}_{iter}.json から最大iterを探す
+  let maxIter = 0
+  for (const f of files) {
+    const m = f.match(/^mason_(\d+)\.json$/)
+    if (m) {
+      const iter = parseInt(m[1])
+      if (iter > maxIter) maxIter = iter
+    }
+  }
+  if (maxIter === 0) return null
+
+  const groups: Record<string, string> = {}
+  for (const n of MODEL_GROUP_NAMES) {
+    const path = `${dir}/${n}_${maxIter}.json`
+    if (!existsSync(path)) return null
+    groups[n] = path
+  }
+  const wolfTeam = `${dir}/wolf_team_${maxIter}.json`
+  const masonTeam = `${dir}/mason_team_${maxIter}.json`
+  if (!existsSync(wolfTeam) || !existsSync(masonTeam)) return null
+
+  return { iteration: maxIter, groups, wolfTeam, masonTeam }
+}
+
 export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDir?: string): Promise<void> {
   log('Fenrir Training Started')
   log(`Observation size: individual=${OBSERVATION_SIZE}, team=${TEAM_OBSERVATION_SIZE}`)
 
-  // === 個人エージェント ===
-  const network = createNetwork()
-  const tfNetwork = createTfNetwork(config.learningRate)
-  log(`Individual network: ${network.totalParams} params`)
+  const multiModel = config.phase2ModelDirs != null
+
+  // === マルチモデル用 ===
+  const modelGroups = new Map<ModelGroupName, ModelGroup>()
+
+  // === 個人エージェント (単一モデルモード用) ===
+  const network = multiModel ? undefined! as NeuralNetwork : createNetwork()
+  const tfNetwork = multiModel ? undefined! as TfNeuralNetwork : createTfNetwork(config.learningRate)
 
   // === 狼チームエージェント ===
   const wolfTeamNet = createWolfTeamNetwork()
   const wolfTeamTf = createWolfTeamTfNetwork(config.learningRate)
-  log(`Wolf team network: ${wolfTeamNet.totalParams} params`)
 
   // === 共有者チームエージェント ===
   const masonTeamNet = createMasonTeamNetwork()
   const masonTeamTf = createMasonTeamTfNetwork(config.learningRate)
-  log(`Mason team network: ${masonTeamNet.totalParams} params`)
+
+  if (multiModel) {
+    // Phase 2 マルチモデル: 6グループ初期化 + チェックポイント読込
+    const dirs = config.phase2ModelDirs!
+    if (dirs.length !== MODEL_GROUP_NAMES.length) {
+      throw new Error(`--phase2-models requires exactly ${MODEL_GROUP_NAMES.length} directories, got ${dirs.length}`)
+    }
+    for (let i = 0; i < MODEL_GROUP_NAMES.length; i++) {
+      const name = MODEL_GROUP_NAMES[i]
+      const def = MODEL_GROUP_DEFS[name]
+      // チェックポイント読込
+      const ckpt = findLatestCheckpoint(dirs[i])
+      if (ckpt) {
+        const net = createNetwork()
+        const tf = createTfNetwork(config.learningRate)
+        loadCheckpoint(net, ckpt.individual)
+        log(`  ${name}: loaded from ${ckpt.individual} (iter ${ckpt.iteration})`)
+        // チームネットワークも読込
+        if (def.teamType === 'wolf_team') {
+          loadCheckpoint(wolfTeamNet, ckpt.wolfTeam)
+          log(`  wolf_team: loaded from ${ckpt.wolfTeam}`)
+        } else if (def.teamType === 'mason_team') {
+          loadCheckpoint(masonTeamNet, ckpt.masonTeam)
+          log(`  mason_team: loaded from ${ckpt.masonTeam}`)
+        }
+        modelGroups.set(name, { name, roles: def.roles, network: net, tfNetwork: tf, heuristicOnly: false })
+      } else {
+        log(`  ${name}: no checkpoint in ${dirs[i]} → heuristic fallback`)
+        // network/tfNetwork は不要だが型を満たすためダミー。heuristicOnly=true で参照されない。
+        modelGroups.set(name, { name, roles: def.roles, network: undefined!, tfNetwork: undefined!, heuristicOnly: true })
+      }
+    }
+    const mlCount = [...modelGroups.values()].filter(g => !g.heuristicOnly).length
+    log(`Multi-model mode: ${mlCount}/${modelGroups.size} groups with ML, rest heuristic`)
+  } else {
+    log(`Individual network: ${network.totalParams} params`)
+    log(`Wolf team network: ${wolfTeamNet.totalParams} params`)
+    log(`Mason team network: ${masonTeamNet.totalParams} params`)
+  }
 
   // === Retarワーカープール ===
   if (config.enableRetar) {
@@ -589,7 +720,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
 
   // === Resume ===
   let startIter = 1
-  if (resumeDir) {
+  if (resumeDir && !multiModel) {
     const ckpt = findLatestCheckpoint(resumeDir)
     if (ckpt) {
       loadCheckpoint(network, ckpt.individual)
@@ -599,6 +730,19 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       log(`Resumed from iteration ${ckpt.iteration} (${resumeDir})`)
     } else {
       log(`Warning: no checkpoint found in ${resumeDir}, starting from scratch`)
+    }
+  } else if (resumeDir && multiModel) {
+    const ckpt = findLatestCheckpointMulti(resumeDir)
+    if (ckpt) {
+      for (const [name, group] of modelGroups) {
+        if (ckpt.groups[name]) loadCheckpoint(group.network, ckpt.groups[name])
+      }
+      loadCheckpoint(wolfTeamNet, ckpt.wolfTeam)
+      loadCheckpoint(masonTeamNet, ckpt.masonTeam)
+      startIter = ckpt.iteration + 1
+      log(`Resumed multi-model from iteration ${ckpt.iteration} (${resumeDir})`)
+    } else {
+      log(`Warning: no multi-model checkpoint found in ${resumeDir}`)
     }
   }
 
@@ -621,6 +765,11 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     const allWolfTeamTrajectories: ProcessedStep[] = []
     const allMasonTeamTrajectories: ProcessedStep[] = []
 
+    // マルチモデル: グループ別トラジェクトリバッファ
+    const groupTrajectories = new Map<ModelGroupName, ProcessedStep[]>(
+      multiModel ? MODEL_GROUP_NAMES.map(n => [n, []] as [ModelGroupName, ProcessedStep[]]) : []
+    )
+
     // === タイミング計測 ===
     const tGameStart = performance.now()
 
@@ -628,12 +777,28 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
 
     if (gameWorkerPoolSize() > 0) {
       // === 並列パス: worker_threads でゲーム生成 ===
-      const sharedWeights = packWeights(network)
-      const sharedWolfWeights = !useHeuristic ? packWeights(wolfTeamNet) : undefined
-      const sharedMasonWeights = !useHeuristic ? packWeights(masonTeamNet) : undefined
+      const firstMlGroup = multiModel ? [...modelGroups.values()].find(g => !g.heuristicOnly) : undefined
+      const sharedWeights = multiModel ? packWeights(firstMlGroup!.network) : packWeights(network)
+      const sharedWolfWeights = (!useHeuristic || multiModel) ? packWeights(wolfTeamNet) : undefined
+      const sharedMasonWeights = (!useHeuristic || multiModel) ? packWeights(masonTeamNet) : undefined
       const poolSharedWeights = (usePool && pool.length > 0)
         ? pool.map(w => { const net = createNetwork(); net.loadWeights(w); return packWeights(net) })
         : undefined
+
+      // マルチモデル: グループ別の重みをパック (heuristicOnly は除外)
+      let modelGroupWeights: Record<string, SharedWeights> | undefined
+      let heuristicGroups: string[] | undefined
+      if (multiModel) {
+        modelGroupWeights = {}
+        heuristicGroups = []
+        for (const [name, group] of modelGroups) {
+          if (group.heuristicOnly) {
+            heuristicGroups.push(name)
+          } else {
+            modelGroupWeights[name] = packWeights(group.network)
+          }
+        }
+      }
 
       const serializedResults = await generateGamesParallel(
         {
@@ -641,6 +806,8 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
           wolfTeamWeights: sharedWolfWeights,
           masonTeamWeights: sharedMasonWeights,
           poolWeights: poolSharedWeights,
+          modelGroupWeights,
+          heuristicGroups,
           trainingConfig: config,
           phase,
           mlRoles: config.mlRoles,
@@ -649,14 +816,27 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       )
 
       for (const game of serializedResults) {
-        // Deserialize individual steps
-        const stepsMap = new Map<number, TrajectoryStep[]>()
-        for (const { seat, steps } of game.individualSteps) {
-          stepsMap.set(seat, steps.map(deserializeStep))
+        if (multiModel) {
+          // マルチモデル: role でグループ分けしてトラジェクトリをルーティング
+          for (const { seat, role, steps } of game.individualSteps) {
+            const groupName = ROLE_TO_GROUP_NAME.get(role as SystemRole)
+            if (groupName && !modelGroups.get(groupName)!.heuristicOnly) {
+              const deserialized = steps.map(deserializeStep)
+              const stepsMap = new Map([[seat, deserialized]])
+              const grouped = groupTrajectories.get(groupName)!
+              grouped.push(...processTrajectories(stepsMap, config.gamma, config.lambda))
+            }
+          }
+        } else {
+          // 単一モデル: 既存パス
+          const stepsMap = new Map<number, TrajectoryStep[]>()
+          for (const { seat, steps } of game.individualSteps) {
+            stepsMap.set(seat, steps.map(deserializeStep))
+          }
+          allIndividualTrajectories.push(
+            ...processTrajectories(stepsMap, config.gamma, config.lambda)
+          )
         }
-        allIndividualTrajectories.push(
-          ...processTrajectories(stepsMap, config.gamma, config.lambda)
-        )
 
         // Wolf team
         if (game.wolfTeamSteps.length > 0) {
@@ -679,36 +859,53 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
         const strategies = new Map<number, FenrirStrategy>()
         const mlRolesSet = config.mlRoles ? new Set(config.mlRoles) : null
 
-        if (!useHeuristic || !mlRolesSet) {
-          for (let seat = 1; seat <= totalPlayers; seat++) {
-            if (useHeuristic && seat % 2 !== 0) continue
+        let onRolesAssigned: ((seatRoles: Map<number, SystemRole>) => void) | undefined
+        let defaultStrategy: Strategy | undefined
 
-            if (usePool && pool.length > 0 && seat % 3 === 0) {
-              const pastWeights = pool[Math.floor(Math.random() * pool.length)]
-              const pastNet = createNetwork()
-              pastNet.loadWeights(pastWeights)
-              strategies.set(seat, new FenrirStrategy(pastNet, { explore: true }))
-            } else {
-              strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+        if (multiModel) {
+          // マルチモデル: onRolesAssigned で role に応じたグループ network を割り当て
+          defaultStrategy = new HeuristicStrategy()
+          onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
+            for (const [seat, role] of seatRoles) {
+              const groupName = ROLE_TO_GROUP_NAME.get(role)
+              const group = groupName ? modelGroups.get(groupName) : undefined
+              if (group && !group.heuristicOnly) {
+                strategies.set(seat, new FenrirStrategy(group.network, { explore: true }))
+              }
             }
           }
+        } else {
+          if (!useHeuristic || !mlRolesSet) {
+            for (let seat = 1; seat <= totalPlayers; seat++) {
+              if (useHeuristic && seat % 2 !== 0) continue
+
+              if (usePool && pool.length > 0 && seat % 3 === 0) {
+                const pastWeights = pool[Math.floor(Math.random() * pool.length)]
+                const pastNet = createNetwork()
+                pastNet.loadWeights(pastWeights)
+                strategies.set(seat, new FenrirStrategy(pastNet, { explore: true }))
+              } else {
+                strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+              }
+            }
+          }
+          defaultStrategy = useHeuristic ? new HeuristicStrategy() : undefined
+          onRolesAssigned = (useHeuristic && mlRolesSet) ? (seatRoles: Map<number, SystemRole>) => {
+            for (const [seat, role] of seatRoles) {
+              if (mlRolesSet.has(role)) {
+                strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+              }
+            }
+          } : undefined
         }
 
         let wolfTeamStrategy: WolfTeamStrategy | undefined
         let masonTeamStrategy: MasonTeamStrategy | undefined
-        if (!useHeuristic) {
+        if (!useHeuristic || multiModel) {
           wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
           masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
         }
 
-        const defaultStrategy = useHeuristic ? new HeuristicStrategy() : undefined
-        const onRolesAssigned = (useHeuristic && mlRolesSet) ? (seatRoles: Map<number, SystemRole>) => {
-          for (const [seat, role] of seatRoles) {
-            if (mlRolesSet.has(role)) {
-              strategies.set(seat, new FenrirStrategy(network, { explore: true }))
-            }
-          }
-        } : undefined
         const agents = { strategies, defaultStrategy, onRolesAssigned, wolfTeamStrategy, masonTeamStrategy }
 
         if (useAsync) {
@@ -724,16 +921,33 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       const gameResults = await Promise.all(gamePromises)
 
       for (const { game, strategies, wolfTeamStrategy, masonTeamStrategy } of gameResults) {
-        const currentNetSteps = new Map<number, TrajectoryStep[]>()
-        for (const [seat, steps] of game.steps) {
-          const strategy = strategies.get(seat)
-          if (strategy && strategy.network === network) {
-            currentNetSteps.set(seat, steps)
+        if (multiModel) {
+          // マルチモデル: strategy.network の参照一致でグループを特定
+          for (const [seat, steps] of game.steps) {
+            const strategy = strategies.get(seat)
+            if (!strategy) continue
+            for (const [name, group] of modelGroups) {
+              if (strategy.network === group.network) {
+                const stepsMap = new Map([[seat, steps]])
+                groupTrajectories.get(name)!.push(
+                  ...processTrajectories(stepsMap, config.gamma, config.lambda)
+                )
+                break
+              }
+            }
           }
+        } else {
+          const currentNetSteps = new Map<number, TrajectoryStep[]>()
+          for (const [seat, steps] of game.steps) {
+            const strategy = strategies.get(seat)
+            if (strategy && strategy.network === network) {
+              currentNetSteps.set(seat, steps)
+            }
+          }
+          allIndividualTrajectories.push(
+            ...processTrajectories(currentNetSteps, config.gamma, config.lambda)
+          )
         }
-        allIndividualTrajectories.push(
-          ...processTrajectories(currentNetSteps, config.gamma, config.lambda)
-        )
         if (wolfTeamStrategy && game.wolfTeamSteps.length > 0) {
           allWolfTeamTrajectories.push(...computeGAE(game.wolfTeamSteps, config.gamma, config.lambda, 0))
         }
@@ -746,18 +960,36 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
 
     const tGaeEnd = performance.now()
 
-    // === PPO更新: 3ネットワーク独立 ===
+    // === PPO更新 ===
     const tPpoStart = performance.now()
-
-    // 個人エージェント
-    normalizeAdvantages(allIndividualTrajectories)
-    tfNetwork.loadWeights(network.cloneWeights())
     let totalPolicyLoss = 0
-    for (let epoch = 0; epoch < config.ppoEpochs; epoch++) {
-      const { policyLoss } = ppoUpdate(tfNetwork, allIndividualTrajectories, config)
-      totalPolicyLoss += policyLoss
+
+    if (multiModel) {
+      // マルチモデル: グループ別に PPO update
+      for (const [name, group] of modelGroups) {
+        const steps = groupTrajectories.get(name)!
+        if (steps.length === 0) continue
+        normalizeAdvantages(steps)
+        group.tfNetwork.loadWeights(group.network.cloneWeights())
+        for (let epoch = 0; epoch < config.ppoEpochs; epoch++) {
+          const { policyLoss } = ppoUpdate(group.tfNetwork, steps, config)
+          totalPolicyLoss += policyLoss
+        }
+        group.network.loadWeights(group.tfNetwork.cloneWeights())
+      }
+      // 平均化: グループ数で割る
+      const activeGroups = [...groupTrajectories.values()].filter(s => s.length > 0).length
+      if (activeGroups > 0) totalPolicyLoss /= activeGroups
+    } else {
+      // 単一モデル: 既存パス
+      normalizeAdvantages(allIndividualTrajectories)
+      tfNetwork.loadWeights(network.cloneWeights())
+      for (let epoch = 0; epoch < config.ppoEpochs; epoch++) {
+        const { policyLoss } = ppoUpdate(tfNetwork, allIndividualTrajectories, config)
+        totalPolicyLoss += policyLoss
+      }
+      network.loadWeights(tfNetwork.cloneWeights())
     }
-    network.loadWeights(tfNetwork.cloneWeights())
 
     // 狼チーム
     if (allWolfTeamTrajectories.length > 0) {
@@ -798,8 +1030,11 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     const etaStr = etaSec < 60 ? `${etaSec.toFixed(0)}s`
       : etaSec < 3600 ? `${(etaSec / 60).toFixed(1)}m`
       : `${(etaSec / 3600).toFixed(1)}h`
-    const avgPL = (totalPolicyLoss / config.ppoEpochs)
-    const totalSteps = allIndividualTrajectories.length + allWolfTeamTrajectories.length + allMasonTeamTrajectories.length
+    const avgPL = multiModel ? totalPolicyLoss / config.ppoEpochs : totalPolicyLoss / config.ppoEpochs
+    const individualStepCount = multiModel
+      ? [...groupTrajectories.values()].reduce((sum, s) => sum + s.length, 0)
+      : allIndividualTrajectories.length
+    const totalSteps = individualStepCount + allWolfTeamTrajectories.length + allMasonTeamTrajectories.length
     const phaseLabel = phase === 1 ? 'heuristic' : phase === 2 ? 'self-play' : 'pool'
     const gamePct = (gameMs / iterMs * 100).toFixed(0)
     const ppoPct = (ppoMs / iterMs * 100).toFixed(0)
@@ -811,23 +1046,48 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     )
 
     // Evaluation
+    let targetReached = false
     if (iter % config.evalInterval === 0) {
       process.stderr.write('\r\x1b[K')
-      const evalResult = evaluate(network, config, 30, wolfTeamNet, masonTeamNet)
-      log(
-        `[${iter}] Eval: ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
-        `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/game`
-      )
+      if (multiModel) {
+        // TODO: マルチモデル用の evaluate (全グループのモデルを使った対heuristic評価)
+        log(`[${iter}] Eval: skipped (multi-model eval not yet implemented)`)
+      } else {
+        const evalResult = evaluate(network, config, 30, wolfTeamNet, masonTeamNet)
+        log(
+          `[${iter}] Eval: ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
+          `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/game`
+        )
+
+        // 早期終了判定
+        if (config.targetWinRate != null && config.targetFaction) {
+          const factionRate = evalResult.winRates[config.targetFaction] ?? 0
+          if (factionRate >= config.targetWinRate) {
+            log(`Target reached: ${config.targetFaction}=${(factionRate * 100).toFixed(0)}% >= ${(config.targetWinRate * 100).toFixed(0)}%`)
+            targetReached = true
+          }
+        }
+      }
     }
+
+    if (targetReached) break
 
     // Checkpoint
     if (iter % config.checkpointInterval === 0) {
       process.stderr.write('\r\x1b[K')
-      saveCheckpoint(network, `${config.checkpointDir}/checkpoint_${iter}.json`, { iteration: iter, winRate: 0 })
+      if (multiModel) {
+        for (const [name, group] of modelGroups) {
+          if (!group.heuristicOnly) {
+            saveCheckpoint(group.network, `${config.checkpointDir}/${name}_${iter}.json`, { iteration: iter, winRate: 0 })
+          }
+        }
+      } else {
+        saveCheckpoint(network, `${config.checkpointDir}/checkpoint_${iter}.json`, { iteration: iter, winRate: 0 })
+        pool.push(network.cloneWeights())
+        if (pool.length > 5) pool.shift()
+      }
       saveCheckpoint(wolfTeamNet, `${config.checkpointDir}/wolf_team_${iter}.json`, { iteration: iter, winRate: 0 })
       saveCheckpoint(masonTeamNet, `${config.checkpointDir}/mason_team_${iter}.json`, { iteration: iter, winRate: 0 })
-      pool.push(network.cloneWeights())
-      if (pool.length > 5) pool.shift()
       log(`[${iter}] Checkpoints saved`)
     }
   }
@@ -835,14 +1095,28 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
   process.stderr.write('\r\x1b[K')
 
   // Final save
-  saveCheckpoint(network, `${config.checkpointDir}/final.json`, { iteration: config.totalIterations, winRate: 0 })
+  if (multiModel) {
+    for (const [name, group] of modelGroups) {
+      if (!group.heuristicOnly) {
+        saveCheckpoint(group.network, `${config.checkpointDir}/${name}_final.json`, { iteration: config.totalIterations, winRate: 0 })
+      }
+    }
+  } else {
+    saveCheckpoint(network, `${config.checkpointDir}/final.json`, { iteration: config.totalIterations, winRate: 0 })
+  }
   saveCheckpoint(wolfTeamNet, `${config.checkpointDir}/wolf_team_final.json`, { iteration: config.totalIterations, winRate: 0 })
   saveCheckpoint(masonTeamNet, `${config.checkpointDir}/mason_team_final.json`, { iteration: config.totalIterations, winRate: 0 })
   const totalSec = (performance.now() - trainingStart) / 1000
   const timeStr = totalSec < 60 ? `${totalSec.toFixed(1)}s`
     : totalSec < 3600 ? `${(totalSec / 60).toFixed(1)}m`
     : `${(totalSec / 3600).toFixed(1)}h`
-  tfNetwork.dispose()
+  if (multiModel) {
+    for (const group of modelGroups.values()) {
+      if (!group.heuristicOnly) group.tfNetwork.dispose()
+    }
+  } else {
+    tfNetwork.dispose()
+  }
   wolfTeamTf.dispose()
   masonTeamTf.dispose()
   if (config.enableRetar) terminateRetarWorkerPool()

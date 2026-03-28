@@ -18,6 +18,7 @@
     "verify:retar": "node --experimental-strip-types src/lupa/verify.ts",
     "verify:hati": "node --experimental-strip-types src/hati/verify.ts",
     "train": "node --experimental-strip-types src/fenrir/src/cli.ts",
+    "train:orchestrate": "node --experimental-strip-types src/fenrir/src/orchestrate.ts",
     "dev": "vite",
     "build:demo": "vite build",
     "preview": "vite preview"
