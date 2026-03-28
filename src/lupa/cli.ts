@@ -7,6 +7,7 @@ import { parse } from '../howl/index.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi } from '../hati/index.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
+import { RandomStrategy } from './random-strategy.ts'
 import { findScenario, scenarioToRoles, scenarios } from './scenarios.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 
@@ -28,6 +29,7 @@ function parseArgs(args: string[]): CliOptions {
   let hasFirstGhost = false
   let games = 1
   let revoteConfig: import('./types.ts').RevoteConfig | undefined
+  const randomRoles: SystemRole[] = []
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -36,6 +38,19 @@ function parseArgs(args: string[]): CliOptions {
     if (arg === '--tsumi') { tsumi = true; continue }
     if (arg === '--stats') { stats = true; continue }
     if (arg === '--heuristic') { heuristic = true; continue }
+    if (arg === '--random-roles' && i + 1 < args.length) {
+      const roleNames = args[++i].split(',')
+      for (const rn of roleNames) {
+        const role = rn.trim() as SystemRole
+        if (!systemRoles.has(role)) {
+          console.error(`不明な役職: ${role}`)
+          console.error(`利用可能: ${Array.from(systemRoles.keys()).join(', ')}`)
+          process.exit(1)
+        }
+        randomRoles.push(role)
+      }
+      continue
+    }
     if (arg === '--first-ghost') { hasFirstGhost = true; continue }
     if (arg === '--revote-draw') { revoteConfig = { maxRevotes: 2, style: 'full_revote', tiebreaker: 'draw' }; continue }
     if (arg === '--scenario' && i + 1 < args.length) {
@@ -87,6 +102,18 @@ function parseArgs(args: string[]): CliOptions {
     config.strategies = strategies
     config.wolfTeamStrategy = new WolfTeamHeuristic()
     config.masonTeamStrategy = new MasonTeamHeuristic()
+
+    if (randomRoles.length > 0) {
+      const randomRoleSet = new Set(randomRoles)
+      const r = new RandomStrategy()
+      config.onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
+        for (const [seat, role] of seatRoles) {
+          if (randomRoleSet.has(role)) {
+            strategies.set(seat, r)
+          }
+        }
+      }
+    }
   }
 
   return { config, tsumi, stats, games }
