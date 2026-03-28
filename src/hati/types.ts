@@ -81,18 +81,44 @@ export type StrategyNode =
     branches: Record<ObservationKey, StrategyNode>
   }
 
-/** 詰み判定の中間結果（探索前の計算ベース判定） */
-export type TsumiJudgment = {
-  /** 縄数: (alive - 1) / 2（人間式、小数あり） */
-  nawa: number
-  /** 最大生存人外数: 配役上の人外数 − 死亡確定人外数 */
-  threat: number
-  /** 整数縄数: floor((alive - 1 - hamster) / 2)（実際に処刑できる回数） */
-  nawaInt: number
-  /** 生存者ビットマスク */
-  alive: number
+/** 生存者の役職候補分類と脅威指標（学習特徴量としても利用） */
+export type ThreatProfile = {
+  /** 狐候補数（狼の可能性なし） */
+  foxCandidates: number
+  /** 狐・狼の両方の候補数 */
+  foxWolfCandidates: number
+  /** 狼候補数（狐の可能性なし） */
+  wolfCandidates: number
+  /** 狼確定数 */
+  wolfConfirmedCount: number
+  /** 白人外（狂信者・狂人）候補数 */
+  whiteNVCandidates: number
+  /** 白人外の脅威数: min(whiteNVCandidates, setupの白人外数) */
+  whiteNVThreat: number
   /** 狐が生存している可能性があるか */
   possibleSurvivingHamster: boolean
+  /** 猫又が生存している可能性があるか */
+  possibleSurvivingNekomata: boolean
+  /** 縄数: (alive - 1) / 2（人間式、小数あり） */
+  nawa: number
+  /** 実効縄数: (alive - 1 - hamster補正) / 2 */
+  effectiveNawa: number
+  /** 整数縄数: floor(effectiveNawa)（実際に処刑できる回数） */
+  nawaInt: number
+  /** 最大生存人外数: 配役上の人外数 − 死亡確定人外数 */
+  threat: number
+  /** 必要処刑数（狐狼兼候補を楽観視した見積もり） */
+  requiredExecs: number
+  /** 猫又パリティシフト: 縄に.5余裕がなく猫又候補が生存 */
+  nekoParityShift: boolean
+}
+
+/** 詰み判定の中間結果（探索前の計算ベース判定） */
+export type TsumiJudgment = {
+  /** 生存者ビットマスク */
+  alive: number
+  /** 脅威プロファイル */
+  profile: ThreatProfile
   /** 計算で詰み不可能と判定された場合 true */
   impossible: boolean
 }
@@ -101,10 +127,8 @@ export type TsumiJudgment = {
 export type TsumiResult = {
   isTsumi: boolean
   strategy: StrategyNode | null
-  /** 縄数: (alive - 1) / 2（人間式、小数あり） */
-  nawa: number
-  /** 最大生存人外数: 配役上の人外数 − 死亡確定人外数 */
-  threat: number
+  /** 詰み判定の中間結果（ThreatProfile含む） */
+  judgment: TsumiJudgment
   stats: SearchStats
 }
 

@@ -125,7 +125,7 @@
   {#if result}
     <div class="hati-verdict-bar" class:tsumi={result.isTsumi}>
       <span class="hati-verdict-label">{result.isTsumi ? '詰み' : '詰みなし'}</span>
-      <span class="hati-nawa-threat">縄{result.nawa % 1 ? result.nawa.toFixed(1) : result.nawa} / 人外{result.threat}</span>
+      <span class="hati-nawa-threat">縄{result.judgment.profile.nawa % 1 ? result.judgment.profile.nawa.toFixed(1) : result.judgment.profile.nawa} / 人外{result.judgment.profile.threat}</span>
     </div>
 
     {#if result.strategy}

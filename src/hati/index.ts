@@ -2,14 +2,14 @@ import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { Possibilities } from '../retar/possibilities.ts'
-import type { TsumiResult, TsumiJudgment, SearchOptions, SimState, World } from './types.ts'
+import type { TsumiResult, TsumiJudgment, ThreatProfile, SearchOptions, SimState, World } from './types.ts'
 import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
 import { collectWorlds } from './worlds.ts'
 import { searchTsumi as runSearch } from './search.ts'
 import { simulateFoxElimination } from './foxResolver.ts'
 import { RoleBitIndex } from '../retar/possibilities.ts'
 
-export type { TsumiResult, TsumiJudgment, SearchOptions } from './types.ts'
+export type { TsumiResult, TsumiJudgment, ThreatProfile, SearchOptions } from './types.ts'
 export type { StrategyNode, World, VillageAction } from './types.ts'
 
 /**
@@ -29,31 +29,25 @@ function defaultRunRetar(vs: VillageStatus, setup: Map<SystemRole, number>, opti
 }
 
 // ---------------------------------------------------------------------------
-// 判定条件
+// 脅威プロファイル構築
 // ---------------------------------------------------------------------------
 
 /**
- * 脅威ベースの詰み不可能判定。
- * Retarの可能性から各生存者の役職分類を読み取り、
- * nawa/threat を算出して詰み不可能かを判定する。
- *
- * 不可能条件:
- * - 狼+狐狼兼候補数が縄数を超える
- * - 脅威数が縄数を超える
- * - 猫又パリティシフトにより脅威数 == 縄数でも実質超過
+ * 生存者の役職候補を分類し、縄数・脅威指標を算出する。
+ * 判定ロジックは含まない。学習特徴量としても利用可能。
  */
-function isThreatExceeded(
+function buildThreatProfile(
   conclusions: Possibilities,
   alive: number,
   aliveCount: number,
   setup: Map<SystemRole, number>,
-): { impossible: boolean, nawa: number, threat: number, nawaInt: number, possibleSurvivingHamster: boolean } {
+): ThreatProfile {
   // 生存者の役職可能性を分類
-  let foxCandidates = 0       // 狐候補（狼の可能性なし）
-  let foxWolfCandidates = 0   // 狐・狼の両方の候補
-  let wolfCandidates = 0      // 狼候補（狐の可能性なし）
-  let wolfConfirmedCount = 0  // 狼確定
-  let whiteNVCandidates = 0   // 白人外（狂信者・狂人）候補
+  let foxCandidates = 0
+  let foxWolfCandidates = 0
+  let wolfCandidates = 0
+  let wolfConfirmedCount = 0
+  let whiteNVCandidates = 0
   let possibleSurvivingHamster = false
   let possibleSurvivingNekomata = false
 
@@ -74,30 +68,47 @@ function isThreatExceeded(
     if (conclusions.hasRole(seat, 'nekomata' as SystemRole)) possibleSurvivingNekomata = true
   }
 
-  const threat = conclusions.maxSurvivingNV
-
-  // 不可能判定用の内部値
   const setupWhiteNV = (setup.get('fanatic' as SystemRole) ?? 0)
     + (setup.get('possessed' as SystemRole) ?? 0)
   const whiteNVThreat = Math.min(whiteNVCandidates, setupWhiteNV)
   const nawa = (aliveCount - 1) / 2
   const effectiveNawa = (aliveCount - 1 - (possibleSurvivingHamster ? 1 : 0)) / 2
   const nawaInt = effectiveNawa | 0
-  // 猫又パリティシフト:
-  // effectiveNawa に .5 の余裕がないとき、狼が猫又を噛むと道連れで
-  // 生存者が2人減り、縄が想定より1本減る。
-  // この場合 requiredExecs == nawaInt でも実質不足になる。
-  const nekoParityShift = possibleSurvivingNekomata && effectiveNawa % 1 === 0
+  const threat = conclusions.maxSurvivingNV
   // 狐生存時は確定狼を引かない（狼先処刑 → 狐勝ちのリスク）
   const requiredExecs = foxCandidates + Math.min(foxWolfCandidates, 1) + wolfCandidates
     - (possibleSurvivingHamster ? 0 : wolfConfirmedCount)
     + whiteNVThreat
+  // 猫又パリティシフト:
+  // effectiveNawa に .5 の余裕がないとき、狼が猫又を噛むと道連れで
+  // 生存者が2人減り、縄が想定より1本減る。
+  const nekoParityShift = possibleSurvivingNekomata && effectiveNawa % 1 === 0
 
-  const impossible = foxWolfCandidates + wolfCandidates > nawaInt
-    || requiredExecs > nawaInt
-    || (nekoParityShift && requiredExecs === nawaInt)
+  return {
+    foxCandidates, foxWolfCandidates, wolfCandidates, wolfConfirmedCount,
+    whiteNVCandidates, whiteNVThreat,
+    possibleSurvivingHamster, possibleSurvivingNekomata,
+    nawa, effectiveNawa, nawaInt, threat,
+    requiredExecs, nekoParityShift,
+  }
+}
 
-  return { impossible, nawa, threat, nawaInt, possibleSurvivingHamster }
+// ---------------------------------------------------------------------------
+// 判定条件
+// ---------------------------------------------------------------------------
+
+/**
+ * ThreatProfileから詰み不可能かを判定する。
+ *
+ * 不可能条件:
+ * - 狼+狐狼兼候補数が縄数を超える
+ * - 必要処刑数が縄数を超える
+ * - 猫又パリティシフトにより必要処刑数 == 縄数でも実質超過
+ */
+function isThreatExceeded(p: ThreatProfile): boolean {
+  return p.foxWolfCandidates + p.wolfCandidates > p.nawaInt
+    || p.requiredExecs > p.nawaInt
+    || (p.nekoParityShift && p.requiredExecs === p.nawaInt)
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +116,7 @@ function isThreatExceeded(
 // ---------------------------------------------------------------------------
 
 /**
- * 詰み判定: Retarの可能性からnawa/threat/coeffを計算し、詰み不可能かを判定する。
+ * 詰み判定: Retarの可能性からThreatProfileを構築し、詰み不可能かを判定する。
  * ワールド列挙・AND-OR探索は行わない。
  */
 export function judgeTsumi(
@@ -118,11 +129,9 @@ export function judgeTsumi(
     if (status.surviving) alive |= (1 << seat)
   }
   const aliveCount = popCount32(alive)
+  const profile = buildThreatProfile(conclusions, alive, aliveCount, setup)
 
-  const { impossible, nawa, threat, nawaInt, possibleSurvivingHamster } =
-    isThreatExceeded(conclusions, alive, aliveCount, setup)
-
-  return { nawa, threat, nawaInt, alive, possibleSurvivingHamster, impossible }
+  return { alive, profile, impossible: isThreatExceeded(profile) }
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +185,7 @@ export function searchTsumiStrategy(
   day: number,
   searchOptions: SearchOptions = DEFAULT_SEARCH_OPTIONS,
 ): StrategySearchResult {
-  const { alive, nawaInt, possibleSurvivingHamster } = judgment
+  const { alive, profile: { nawaInt, possibleSurvivingHamster } } = judgment
 
   // ワールド列挙
   const t0 = performance.now()
@@ -248,16 +257,13 @@ export function searchTsumi(
 
   // 2. 判定フェーズ
   const judgment = judgeTsumi(conclusions, vs, setup)
-  const { nawa, threat } = judgment
-
   const isTsumi = !judgment.impossible
   const t2 = performance.now()
 
   // 戦略構築が不要、または詰み不可能なら探索をスキップ
   if (!isTsumi || searchOptions.buildStrategy === false) {
     return {
-      isTsumi, strategy: null,
-      nawa, threat,
+      isTsumi, strategy: null, judgment,
       stats: {
         worldsTotal: 0, nodesVisited: 0, maxDepth: 0,
         elapsed: t2 - t0, retarElapsed: t1 - t0, enumerateElapsed: 0, searchElapsed: 0,
@@ -271,8 +277,7 @@ export function searchTsumi(
 
   return {
     isTsumi: true,
-    strategy: sr.strategy,
-    nawa, threat,
+    strategy: sr.strategy, judgment,
     stats: {
       worldsTotal: sr.worldsTotal, nodesVisited: sr.nodesVisited, maxDepth: sr.maxDepth,
       elapsed, retarElapsed: t1 - t0,
@@ -296,10 +301,18 @@ export function searchTsumiDirect(
   const { result, nodesVisited, maxDepthReached } = runSearch(worlds, initialState, searchOptions)
   const searchElapsed = performance.now() - t0
 
+  const dummyProfile: ThreatProfile = {
+    foxCandidates: 0, foxWolfCandidates: 0, wolfCandidates: 0, wolfConfirmedCount: 0,
+    whiteNVCandidates: 0, whiteNVThreat: 0,
+    possibleSurvivingHamster: false, possibleSurvivingNekomata: false,
+    nawa: 0, effectiveNawa: 0, nawaInt: 0, threat: 0,
+    requiredExecs: 0, nekoParityShift: false,
+  }
+
   return {
     isTsumi: result !== null,
     strategy: result,
-    nawa: 0, threat: 0,
+    judgment: { alive: aliveMask, profile: dummyProfile, impossible: result === null },
     stats: {
       worldsTotal: worlds.length, nodesVisited, maxDepth: maxDepthReached,
       elapsed: searchElapsed, retarElapsed: 0, enumerateElapsed: 0, searchElapsed,
