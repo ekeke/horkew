@@ -20,7 +20,7 @@ import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi } from './index.ts'
-import { getEndgameStats } from './search.ts'
+import { getEndgameStats, resetEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { VillageRetar } from '../retar/index.ts'
 import { RoleBitIndex, RoleSignatureBits } from '../retar/possibilities.ts'
@@ -389,6 +389,7 @@ function runVerify(args: Args): void {
     let fnFound = 0
 
     for (let seed = seedFrom; seed < seedTo; seed++) {
+      resetEndgameStats()
       let events: GameEvent[]
       let state: GameState
       try {

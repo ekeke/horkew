@@ -85,6 +85,12 @@ export type StrategyNode =
 export type TsumiResult = {
   isTsumi: boolean
   strategy: StrategyNode | null
+  /** 詰み係数: 1 - threat/nawa (1=余裕あり, 0=ギリギリ, 負=詰み不可能) */
+  tsumiCoeff: number
+  /** 縄数 */
+  nawa: number
+  /** 脅威数（処理すべき非村人数） */
+  threat: number
   stats: SearchStats
 }
 

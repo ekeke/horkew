@@ -103,6 +103,8 @@ export function searchTsumi(
   const threat = foxOnly + Math.min(foxAndWolf, 1) + wolfOnly
     - (hasAliveHamster ? 0 : confirmedWolves)
     + whiteNVThreat
+  const tsumiCoeff = nawa > 0 ? 1 - threat / nawa : (threat > 0 ? -1 : 0)
+
   if (foxAndWolf + wolfOnly > nawa
     || threat > nawa
     || (nekoParityShift && threat === nawa)) {
@@ -110,6 +112,7 @@ export function searchTsumi(
     return {
       isTsumi: false,
       strategy: null,
+      tsumiCoeff, nawa, threat,
       stats: {
         worldsTotal: 0, nodesVisited: 0, maxDepth: 0,
         elapsed: t2 - t0, retarElapsed: t1 - t0, enumerateElapsed: 0, searchElapsed: 0,
@@ -125,6 +128,7 @@ export function searchTsumi(
     return {
       isTsumi: false,
       strategy: null,
+      tsumiCoeff, nawa, threat,
       stats: {
         worldsTotal: 0, nodesVisited: 0, maxDepth: 0,
         elapsed: t2 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: 0,
@@ -160,6 +164,7 @@ export function searchTsumi(
       return {
         isTsumi: false,
         strategy: null,
+        tsumiCoeff, nawa, threat,
         stats: {
           worldsTotal: worlds.length, nodesVisited: 0, maxDepth: 0,
           elapsed: t3 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: t3 - t2,
@@ -177,6 +182,7 @@ export function searchTsumi(
       return {
         isTsumi: false,
         strategy: null,
+        tsumiCoeff, nawa, threat,
         stats: {
           worldsTotal: worlds.length, nodesVisited: 0, maxDepth: 0,
           elapsed: t3 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: t3 - t2,
@@ -194,6 +200,7 @@ export function searchTsumi(
   return {
     isTsumi: result !== null,
     strategy: searchOptions.buildStrategy === false ? null : result,
+    tsumiCoeff, nawa, threat,
     stats: {
       worldsTotal: worlds.length, nodesVisited, maxDepth: maxDepthReached,
       elapsed: t3 - t0, retarElapsed: t1 - t0, enumerateElapsed: t2 - t1, searchElapsed: t3 - t2,
@@ -219,6 +226,7 @@ export function searchTsumiDirect(
   return {
     isTsumi: result !== null,
     strategy: result,
+    tsumiCoeff: 0, nawa: 0, threat: 0,
     stats: {
       worldsTotal: worlds.length, nodesVisited, maxDepth: maxDepthReached,
       elapsed: searchElapsed, retarElapsed: 0, enumerateElapsed: 0, searchElapsed,
