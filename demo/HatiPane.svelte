@@ -32,6 +32,7 @@
   let result: TsumiResult | null = $state(null)
   let running = $state(false)
   let error = $state('')
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null
 
   function playerName(seat: number): string {
     return players.get(seat) ?? `${seat}`
@@ -39,12 +40,17 @@
 
   function runSearch() {
     if (!vs || setup.size === 0) return
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer)
+      pendingTimer = null
+    }
     running = true
     error = ''
     result = null
 
     // setTimeout to let UI update before blocking
-    setTimeout(() => {
+    pendingTimer = setTimeout(() => {
+      pendingTimer = null
       try {
         const options: AnalyzeOptions = {
           seerClaimingDueDate: 2,
@@ -69,6 +75,16 @@
       }
     }, 10)
   }
+
+  // Auto-run when vs or setup changes
+  $effect(() => {
+    // Read reactive deps
+    const _vs = vs
+    const _setup = setup
+    const _setupSize = setup.size
+    // Trigger search
+    runSearch()
+  })
 
   function formatObsKey(key: string): string {
     return key
@@ -108,7 +124,13 @@
 
   {#if result}
     <div class="hati-verdict-bar" class:tsumi={result.isTsumi}>
-      {result.isTsumi ? '詰み' : '詰みなし'}
+      <span class="hati-verdict-label">{result.isTsumi ? '詰み' : '詰みなし'}</span>
+      <span class="hati-coeff-group">
+        <span class="hati-coeff" class:positive={result.tsumiCoeff > 0} class:zero={result.tsumiCoeff === 0} class:negative={result.tsumiCoeff < 0}>
+          係数 {result.tsumiCoeff.toFixed(1)}
+        </span>
+        <span class="hati-nawa-threat">縄{result.nawa % 1 ? result.nawa.toFixed(1) : result.nawa} / 脅威{result.threat}</span>
+      </span>
     </div>
 
     {#if result.strategy}
@@ -217,6 +239,12 @@
     flex-shrink: 0;
   }
 
+  .hati-verdict-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+  }
+
   .hati-verdict-bar.tsumi {
     background: color-mix(in srgb, var(--ctp-green) 15%, transparent);
     color: var(--ctp-green);
@@ -227,6 +255,40 @@
     background: var(--ctp-surface0);
     color: var(--ctp-subtext0);
     border-left: 3px solid var(--ctp-surface2);
+  }
+
+  .hati-coeff-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: normal;
+  }
+
+  .hati-coeff {
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-weight: bold;
+  }
+
+  .hati-coeff.positive {
+    color: var(--ctp-green);
+    background: color-mix(in srgb, var(--ctp-green) 10%, transparent);
+  }
+
+  .hati-coeff.zero {
+    color: var(--ctp-yellow);
+    background: color-mix(in srgb, var(--ctp-yellow) 10%, transparent);
+  }
+
+  .hati-coeff.negative {
+    color: var(--ctp-red);
+    background: color-mix(in srgb, var(--ctp-red) 10%, transparent);
+  }
+
+  .hati-nawa-threat {
+    color: var(--ctp-subtext0);
+    font-size: 0.75rem;
   }
 
   .hati-tree {

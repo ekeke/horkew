@@ -322,19 +322,6 @@ export function shouldPruneHamster(
 const PRECHECK_PRUNED = -1
 const PRECHECK_CONTINUE = -2
 
-/**
- * 不確定の狼/狐候補が縄数を超えるか判定。
- * - 狐のみ候補: 全席分の縄コスト（狼ではないので処刑は常に縄消費）
- * - 狐かつ狼候補: 実際の狐は最大1匹なので、最大1席分の縄コスト（残りは狼=無料）
- * - 狼のみ候補: 全席分だが、確定狼（全ワールド共通）は縄を消費しない
- */
-export function threatExceedsNawa(
-  foxOnly: number, foxAndWolf: number, wolfOnly: number,
-  confirmedWolves: number, nawa: number,
-): boolean {
-  return foxOnly + Math.min(foxAndWolf, 1) + wolfOnly - confirmedWolves > nawa
-}
-
 export function precheckWorlds(worlds: World[], alive: number, disableHamsterPruning?: boolean): number {
   const aliveCount = popCount32(alive)
   let wolfUnion = 0
@@ -365,18 +352,19 @@ export function precheckWorlds(worlds: World[], alive: number, disableHamsterPru
     return 31 - Math.clz32(wolfUnion)
   }
 
-  // 縄数 = floor((alive - 1 - hamster) / 2)
+  // 枝刈り用縄数 = floor((alive - 1 - hamster) / 2)
   // 狼命中は縄を消費しない（gap±0）、空振りは縄-1（gap-2→処刑1回分）
   // よってwolfCountに依存せず、alive人数のみで決まる
-  const nawa = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
+  const nawaInt = (aliveCount - 1 - (hasAliveHamster ? 1 : 0)) >> 1
   // 基本チェック: 狼候補数 > 縄数（foxAndWolfが多い局面に有効）
-  if (popCount32(wolfUnion) > nawa) return PRECHECK_PRUNED
+  if (popCount32(wolfUnion) > nawaInt) return PRECHECK_PRUNED
   // 精緻チェック: 狐のみ/狐狼兼/狼のみに分解し、確定狼と狐最大1匹を考慮
   const confirmedWolves = popCount32(wolfIntersection)
   const foxOnly = popCount32(hamsterUnion & ~wolfUnion)
   const foxAndWolf = popCount32(hamsterUnion & wolfUnion)
   const wolfOnly = popCount32(wolfUnion & ~hamsterUnion)
-  if (threatExceedsNawa(foxOnly, foxAndWolf, wolfOnly, confirmedWolves, nawa)) return PRECHECK_PRUNED
+  const threat = foxOnly + Math.min(foxAndWolf, 1) + wolfOnly - confirmedWolves
+  if (threat > nawaInt) return PRECHECK_PRUNED
 
   return PRECHECK_CONTINUE
 }
