@@ -6,6 +6,7 @@ tasks/
 tmp/
 z-ai/*
 z-ai/
+checkpoints/
 src/fenrir/checkpoints/
 src/retar-rs/target/
 src/retar-rs/pkg/
