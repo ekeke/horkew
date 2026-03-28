@@ -25,7 +25,7 @@ import {
  * @param maxTurns - 最大ターン数（1ターン = 処刑 + 夜）
  * @returns true なら狐排除可能（本探索に進む）、false なら不可能（枝刈り）
  */
-export function canResolveFox(
+export function simulateFoxElimination(
   worlds: World[],
   alive: number,
   maxTurns: number,
@@ -308,7 +308,7 @@ function simulateWorstCaseNight(
 
     if (branchFoxMask === 0) continue // 狐解決済み
 
-    if (!canResolveFox(group.worlds, group.alive, maxTurns - 1)) {
+    if (!simulateFoxElimination(group.worlds, group.alive, maxTurns - 1)) {
       return false
     }
   }
