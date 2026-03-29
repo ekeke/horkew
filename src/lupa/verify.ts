@@ -354,9 +354,9 @@ function verifyCompatCheckpoint(
   const wasmRaw = parseWasmResult(wasmAnalyze!(vsJson, setupJson, optJson))
   const retarMs = performance.now() - t0
 
-  // deepEqual で完全一致を検証
+  // deepEqual で完全一致を検証（elapsedは実行時間のため除外）
   try {
-    deepStrictEqual(wasmRaw, jsResult)
+    deepStrictEqual({ ...wasmRaw, elapsed: undefined }, { ...jsResult, elapsed: undefined })
     return { failure: null, skipped: false, retarMs }
   } catch (e: any) {
     const message = e.message ?? String(e)

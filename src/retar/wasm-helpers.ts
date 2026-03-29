@@ -4,7 +4,7 @@
  */
 
 import type { SystemRole, Seat } from '../types/index.ts'
-import type { AnalyzeOptions } from './index.ts'
+import type { AnalyzeOptions, AnalyzeResult } from './index.ts'
 import { Possibilities, RoleSignatureBits } from './possibilities.ts'
 
 export function serializeVillageStatus(vs: any): any {
@@ -71,31 +71,31 @@ export function serializeOptions(options: AnalyzeOptions): any {
   return result
 }
 
-export type WasmResult = {
-  possibilities: Map<Seat, Set<SystemRole>>
-  maxSurvivingNV: number
-}
-
-export function parseWasmResult(resultJson: string): WasmResult {
+export function parseWasmResult(resultJson: string): AnalyzeResult {
   const parsed = JSON.parse(resultJson)
-  if (parsed.error) return { possibilities: new Map(), maxSurvivingNV: 0 }
-  // 新フォーマット: { possibilities: {...}, maxSurvivingNV: N }
-  const possObj = parsed.possibilities ?? parsed
-  const maxSurvivingNV: number = parsed.maxSurvivingNV ?? 0
-  const possibilities = new Map<Seat, Set<SystemRole>>()
+  if (parsed.error) return { result: new Map(), maxSurvivingNV: 0 }
+  const possObj = parsed.result ?? parsed.possibilities ?? parsed
+  const result = new Map<Seat, Set<SystemRole>>()
   for (const [seatStr, roles] of Object.entries(possObj)) {
-    possibilities.set(Number(seatStr), new Set(roles as SystemRole[]))
+    result.set(Number(seatStr), new Set(roles as SystemRole[]))
   }
-  return { possibilities, maxSurvivingNV }
+  return {
+    result,
+    maxSurvivingNV: parsed.maxSurvivingNV ?? 0,
+    elapsed: parsed.elapsed,
+    batch: parsed.batch,
+    id: parsed.id,
+    aborted: parsed.aborted,
+  }
 }
 
-export function resultToPossibilities(result: WasmResult): Possibilities {
+export function resultToPossibilities(result: AnalyzeResult): Possibilities {
   let maxSeat = 0
-  for (const seat of result.possibilities.keys()) {
+  for (const seat of result.result.keys()) {
     if (seat > maxSeat) maxSeat = seat
   }
   const p = new Possibilities(maxSeat)
-  for (const [seat, roles] of result.possibilities) {
+  for (const [seat, roles] of result.result) {
     let mask = 0
     for (const role of roles) mask |= RoleSignatureBits[role]
     p.possibilities[seat] = mask

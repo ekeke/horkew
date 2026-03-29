@@ -52,8 +52,8 @@ pub fn analyze(village_json: &str, setup_json: &str, options_json: &str) -> Stri
         }
     };
 
-    // Serialize result: {"possibilities": {"1": ["seer"], ...}, "maxSurvivingNV": N}
-    let possibilities: HashMap<String, Vec<SystemRole>> = result
+    // Serialize result matching JS AnalyzeResult shape
+    let result_map: HashMap<String, Vec<SystemRole>> = result
         .result
         .into_iter()
         .map(|(seat, roles)| {
@@ -64,8 +64,12 @@ pub fn analyze(village_json: &str, setup_json: &str, options_json: &str) -> Stri
         .collect();
 
     let output = serde_json::json!({
-        "possibilities": possibilities,
+        "result": result_map,
         "maxSurvivingNV": result.max_surviving_nv,
+        "elapsed": result.elapsed_ms,
+        "batch": result.batch,
+        "id": result.id,
+        "aborted": result.aborted,
     });
 
     serde_json::to_string(&output).unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
