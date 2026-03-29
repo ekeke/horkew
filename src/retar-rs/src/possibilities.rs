@@ -102,7 +102,7 @@ pub fn add_role_to_possibility(possibility: u16, role: SystemRole) -> u16 {
     possibility | role.bit()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Possibilities {
     pub possibilities: Vec<u16>,
     pub setup: [u8; ROLE_COUNT],

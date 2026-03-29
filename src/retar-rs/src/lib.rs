@@ -81,3 +81,4 @@ pub fn analyze_direct(
     let result = retar.analyze();
     result.result
 }
+

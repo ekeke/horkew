@@ -175,7 +175,7 @@ pub struct SeatStatus {
     pub assertions: HashMap<Day, Assertion>,
     #[serde(deserialize_with = "deserialize_day_seat_map")]
     pub forecasts: HashMap<Day, Seat>,
-    #[serde(rename = "noCoOpportunity")]
+    #[serde(rename = "noCoOpportunity", default)]
     pub no_co_opportunity: Option<bool>,
     #[serde(rename = "previousAssertions", default, deserialize_with = "deserialize_optional_day_assertion_vec_map")]
     pub previous_assertions: Option<HashMap<Day, Vec<Assertion>>>,
@@ -244,6 +244,10 @@ pub struct AnalyzeOptions {
     pub batches: u32,
     #[serde(default)]
     pub batch: u32,
+
+    /// 事前計算済みinitialPossibilitiesを基に再計算する場合に指定
+    #[serde(default)]
+    pub prior: Option<crate::possibilities::Possibilities>,
 }
 
 fn default_batches() -> u32 {

@@ -56,11 +56,20 @@ export function serializeVillageStatus(vs: any): any {
 }
 
 export function serializeOptions(options: AnalyzeOptions): any {
-  return {
+  const result: any = {
     ...options,
     assumptions: Object.fromEntries(options.assumptions),
     hocusPocus: Object.fromEntries(options.hocusPocus),
   }
+  if (options.prior) {
+    result.prior = {
+      possibilities: Array.from(options.prior.possibilities),
+      setup: Array.from(options.prior.setup),
+      setup_original: Array.from(options.prior.setupOriginal),
+      max_surviving_nv: options.prior.maxSurvivingNV,
+    }
+  }
+  return result
 }
 
 export type WasmResult = {

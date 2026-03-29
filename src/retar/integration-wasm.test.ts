@@ -178,8 +178,9 @@ function analyzeViaWasm(
   if (parsed.error) {
     return { result: new Map(), error: parsed.error }
   }
+  const possObj = parsed.possibilities ?? parsed
   const result = new Map<Seat, Set<SystemRole>>()
-  for (const [seatStr, roles] of Object.entries(parsed)) {
+  for (const [seatStr, roles] of Object.entries(possObj)) {
     result.set(Number(seatStr), new Set(roles as SystemRole[]))
   }
   return { result }
