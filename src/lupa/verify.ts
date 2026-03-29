@@ -19,6 +19,7 @@
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs'
+import { deepStrictEqual } from 'node:assert'
 import { join } from 'node:path'
 import type { SystemRole } from '../types/index.ts'
 import type { LupaConfig, GameEvent, GameState } from './types.ts'
@@ -27,7 +28,17 @@ import { formatHowl } from './format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
-import type { AnalyzeOptions } from '../retar/index.ts'
+import type { AnalyzeOptions, AnalyzedPossibilities } from '../retar/index.ts'
+import { serializeVillageStatus, serializeOptions, parseWasmResult } from '../retar/wasm-helpers.ts'
+
+// WASM ロード（--compat 時のみ使用）
+let wasmAnalyze: ((village: string, setup: string, options: string) => string) | null = null
+try {
+  const wasm = await import('../retar-rs/pkg/retar.js')
+  wasmAnalyze = wasm.analyze
+} catch {
+  // WASM not available
+}
 
 const lupaOptions: AnalyzeOptions = {
   seerClaimingDueDate: 99,
@@ -301,6 +312,66 @@ function verifyPriorCheckpoint(
   }
 }
 
+/**
+ * Compat検証: JS版とWASM版の出力が完全一致するか
+ */
+function verifyCompatCheckpoint(
+  events: GameEvent[],
+  state: GameState,
+  config: LupaConfig,
+  checkpoint: Checkpoint,
+  configName: string,
+  seed: number,
+): VerifyResult {
+  if (!wasmAnalyze) {
+    return { failure: null, skipped: true, retarMs: 0 }
+  }
+
+  const partialEvents = events.slice(0, checkpoint.index)
+  const partialHowl = formatHowl(partialEvents, state, config)
+
+  const { meta, statements } = parse(partialHowl)
+  const unknowns = statements.filter(s => s.type === 'unknown')
+  if (unknowns.length > 0) {
+    return { failure: null, skipped: true, retarMs: 0 }
+  }
+
+  const { vs, setup } = buildVillageStatus(statements, meta)
+
+  const options = config.hasFirstGhost
+    ? { ...lupaOptions, hasFirstGhost: true }
+    : lupaOptions
+
+  // JS版
+  const retar = new VillageRetar(vs, setup, options)
+  const jsResult = retar.analyze()
+
+  // WASM版
+  const vsJson = JSON.stringify(serializeVillageStatus(vs))
+  const setupJson = JSON.stringify(Object.fromEntries(setup))
+  const optJson = JSON.stringify(serializeOptions(options))
+  const t0 = performance.now()
+  const wasmRaw = parseWasmResult(wasmAnalyze!(vsJson, setupJson, optJson))
+  const retarMs = performance.now() - t0
+
+  // deepEqual で完全一致を検証
+  try {
+    deepStrictEqual(wasmRaw, jsResult)
+    return { failure: null, skipped: false, retarMs }
+  } catch (e: any) {
+    const message = e.message ?? String(e)
+    const annotatedHowl = partialHowl.trimEnd() + '\n\n'
+      + `# [compat] ${message}\n`
+    return {
+      failure: {
+        config: configName, seed, checkpoint, howl: annotatedHowl,
+        players: [{ name: '(compat)', message }],
+      },
+      skipped: false, retarMs,
+    }
+  }
+}
+
 type GameConfig = {
   name: string
   roles: Record<string, number>
@@ -341,6 +412,7 @@ type Args = {
   seeds: [number, number] | null
   quiet: boolean
   prior: boolean
+  compat: boolean
 }
 
 function showHelp(): never {
@@ -355,6 +427,7 @@ Options:
   --seeds <from>-<to> seed範囲を指定 (例: 100-200)
   --outdir <dir>      失敗howlファイルの出力先ディレクトリ
   --prior             priorモード検証: 各座席の真の役職でprior再計算し他席と矛盾しないか
+  --compat            JS版とWASM版の出力が完全一致するか検証
   --quiet, -q         プログレスバーを非表示
   --help, -h          このヘルプを表示
 
@@ -372,7 +445,7 @@ Examples:
 function parseArgs(): Args {
   const args = process.argv.slice(2)
   if (args.includes('--help') || args.includes('-h')) showHelp()
-  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false, prior: false }
+  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false, prior: false, compat: false }
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -392,6 +465,9 @@ function parseArgs(): Args {
       }
       case '--prior':
         result.prior = true
+        break
+      case '--compat':
+        result.compat = true
         break
       case '--quiet':
       case '-q':
@@ -421,7 +497,11 @@ function renderProgress(
 }
 
 function main() {
-  const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet, prior } = parseArgs()
+  const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet, prior, compat } = parseArgs()
+  if (compat && !wasmAnalyze) {
+    console.error('--compat: WASM版が利用できません。npm run build:wasm:node でビルドしてください。')
+    process.exit(1)
+  }
   const showProgress = !!outdir && !quiet
   const allFailures: FailedCheckpoint[] = []
   let totalGames = 0
@@ -480,7 +560,9 @@ function main() {
         totalCheckpoints++
         configCheckpoints++
         if (gameFailed) continue
-        const { failure, skipped, retarMs } = prior
+        const { failure, skipped, retarMs } = compat
+          ? verifyCompatCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
+          : prior
           ? verifyPriorCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
           : verifyCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
         if (failure) {
