@@ -9,7 +9,7 @@
                   └────────────┬────────────────────┘
                                │ 重み同期
                   ┌────────────▼────────────────────┐
-                  │      Pure JS NeuralNetwork       │
+                  │   AnyNetwork (MLP or Transformer) │
                   │  (ゲーム内推論、worker_threads)    │
                   └────────────┬────────────────────┘
                                │
@@ -18,6 +18,9 @@
         Individual       WolfTeam         MasonTeam
          Network          Network           Network
 ```
+
+`NetworkConfig.transformer` の有無でMLPとTransformerを自動切替。
+`AnyNetwork` インターフェースにより、学習・推論パイプライン全体で透過的に動作する。
 
 ## ネットワーク構成
 
@@ -66,28 +69,152 @@
 
 Wolf Team と同構造だが attack_target / attacker ヘッドなし。
 
-## 観測ベクトル (OBSERVATION_SIZE = 790)
+## 観測ベクトル (OBSERVATION_SIZE = 984)
 
 ```
-セクション              サイズ   内容
+セクション                サイズ   内容
 ─────────────────────────────────────────────────────────
-Global                    17   day, phase, alive_ratio, my_role(11), commander, progress, demand_wolf_co_count
-Per-Seat (×14)           350   alive, claimed_role(12), is_me, black/white_count,
-                               vote_received, suspicion, trust, execute_proposal,
-                               is_commander, accuse_wolf/fox, vote_intent, nominate_commander
-Private                   43   divine_results(14), wolf_teammates(14), mason_partner(1),
-                               guard_history(14), known_hamster(1)
-Revote                    15   revote_round(1), revote_candidates(14)
-History (3日分)          210   per day: voted_for, executed, killed, claimed, signaled (×14×5)
-Retar Possibilities      154   per-seat × 11 roles (0/1)
+Global                      19   day, phase, alive_ratio, my_role(11), commander,
+                                 progress, demand_wolf_co, rope_margin, alive_parity
+Per-Seat (×14)             350   alive, claimed_role(12), is_me, black/white_count,
+                                 vote_received, suspicion, trust, execute_proposal,
+                                 is_commander, accuse_wolf/fox, vote_intent, nominate_commander
+Private                     44   divine_results(14), wolf_teammates(14), mason_partner(1),
+                                 guard_history(14), known_hamster(1)
+Revote                      15   revote_round(1), revote_candidates(14)
+History (3日分)            210   per day: voted_for, executed, killed, claimed, signaled (×14×5)
+Retar Possibilities        154   per-seat × 11 roles (0/1)
+Execution Plan (primary)    31   plan_included(14), plan_position(14), plan_global(3)
+Plan Tokens                161   plan_token_count(1) + 最大8プラン × 20次元
 ─────────────────────────────────────────────────────────
-合計                     790
+合計                       984
 ```
 
-チーム追加 (TEAM_OBSERVATION_SIZE = 833):
+各プラントークン (20次元): target_mask[14] + type_onehot[5] + priority[1]
+プラン種別: roller / decision / designated / grayran / endgame
+
+チーム追加 (TEAM_OBSERVATION_SIZE = 984 + 43 = 1027):
 - team_size: 1
 - per-seat: is_my_team + is_current_actor (×14 = 28)
 - team_private: fake_divine_results (14)
+
+## Transformer Encoder アーキテクチャ (新)
+
+MLP trunk の代替として、Transformer Encoder を使用する。
+`NetworkConfig.transformer` フィールドが存在する場合に有効化。
+
+### トークン構成
+
+```
+入力: OBSERVATION_SIZE = 984 (フラットFloat32Array)
+        │
+        ▼
+    tokenize()  ─── フラットベクトルをトークン列に分解
+        │
+        ├─ CLS   (1トークン, 25次元)  ── global + private(非per-seat) + plan_global
+        ├─ Seat   (14トークン, 57次元) ── per-seat + history + retar + plan + private
+        └─ Plan   (0-8トークン, 20次元) ── 各処刑プラン (可変長)
+```
+
+チーム版: CLS=26次元, Seat=60次元 (+is_my_team, is_current_actor, fake_divine)
+
+### エンコーダ
+
+```
+                    ┌───────────────────────────────────┐
+[CLS, S1..S14, P0..PN] ─→ Input Projection (per-type)   │
+                    │     CLS:  Dense(25 → 128)          │
+                    │     Seat: Dense(57 → 128)  ×14     │
+                    │     Plan: Dense(20 → 128)  ×N      │
+                    └────────────┬──────────────────────┘
+                                 │
+                    ┌────────────▼──────────────────────┐
+                    │  TransformerEncoder (3 layers)      │
+                    │                                    │
+                    │  Per layer (Pre-LN):               │
+                    │    x = x + MHA(LN(x))              │
+                    │    x = x + FFN(LN(x))              │
+                    │                                    │
+                    │  d_model=128, heads=4, d_ff=256    │
+                    └────────────┬──────────────────────┘
+                                 │ Final LayerNorm
+                    ┌────────────▼──────────────────────┐
+                    │  Head Readout                      │
+                    │                                    │
+                    │  CLS出力 → global heads:           │
+                    │    comm(119), claim(10), leader(3)  │
+                    │    value(1, tanh)                   │
+                    │                                    │
+                    │  Seat出力 → per-seat heads:        │
+                    │    vote(14), target(14)  ── 1logit/seat │
+                    │    propose(14)           ── sigmoid │
+                    │    predict(154=14×11)    ── sigmoid │
+                    │    night(15) ── 14 seat + 1 CLS    │
+                    └────────────────────────────────────┘
+```
+
+### パラメータ・性能
+
+| 項目 | MLP | Transformer |
+|------|-----|-------------|
+| パラメータ数 | ~560K | ~430K |
+| 推論 (pure JS) | ~1-2ms | ~15ms |
+| 学習 | TfNeuralNetwork | TfTransformerNetwork |
+| 推論 | NeuralNetwork | TransformerNetwork |
+
+### 使い方
+
+```bash
+# MLP (従来通り)
+node --experimental-strip-types src/fenrir/src/cli.ts train
+
+# Transformer
+# training.ts の createTransformerTfNetwork() / createTransformerNetwork() を使用
+# NetworkConfig に transformer フィールドを設定すると自動でTransformerモードになる
+```
+
+```typescript
+// コード例: Transformer ネットワーク構築
+import { createTransformerNetwork, createTransformerTfNetwork } from './training.ts'
+
+// 推論用 (pure JS, game-worker内)
+const net = createTransformerNetwork()
+const result = net.forward(observation)  // ForwardResult (MLPと同一)
+
+// 学習用 (tf.js GPU)
+const tfNet = createTransformerTfNetwork(lr)
+tfNet.trainBatch({ observations, actionHeads, ... })  // PPO
+tfNet.trainSupervisedVote({ observations, labels, masks })  // 教師あり
+```
+
+### 処刑プラン (ExecutionPlan)
+
+```typescript
+type PlanType = 'roller' | 'decision' | 'designated' | 'grayran' | 'endgame'
+
+type ExecutionPlan = {
+  targets: number[]   // 処刑対象 or endgameの候補集合
+  type: PlanType
+}
+
+// DecisionContext
+executionPlans: ExecutionPlan[]  // 空配列 = プランなし、複数可
+```
+
+- 各プランはTransformerの独立したトークンとして入力
+- Attentionが席トークンとプラントークンの関係を自然に学習
+- endgame: targets に候補を入れ、type='endgame' で「この中から1人」を表現
+
+### ファイル構成 (Transformer関連)
+
+```
+src/fenrir/src/ml/
+├── transformer.ts           Transformer基本ブロック (LayerNorm, MHA, FFN)
+├── transformer-network.ts   TransformerNetwork (pure JS推論)
+├── nn-tf-transformer.ts     TfTransformerNetwork (tf.js GPU学習)
+├── nn.ts                    NetworkConfig, AnyNetwork interface
+└── transformer.test.ts      テスト (16ケース)
+```
 
 ## アクション空間・報酬設計
 
@@ -132,10 +259,11 @@ Phase 3 (phase2End ~):        Pool-based self-play
 DecisionContext
   │
   ▼
-encodeObservation()     ← 790次元 Float32Array
+encodeObservation()     ← 984次元 Float32Array
   │
-  ▼
-NeuralNetwork.forward() ← Pure JS (2.58ms/call)
+  ├─ MLP:        NeuralNetwork.forward()         ← ~1-2ms/call
+  └─ Transformer: TransformerNetwork.forward()    ← ~15ms/call
+       (内部で tokenize() → Encoder → Head Readout)
   │
   ▼
 ForwardResult { policies: Map<head, Float32Array>, value: number }
@@ -147,25 +275,34 @@ maskXxx(ctx) + selectAction(logits, mask)  ← 不正行動除外 + サンプリ
 decodeXxx(actionIdx)    ← NightAction / DayClaim / number(vote) / etc.
 ```
 
+MLP/Transformer問わず同一のForwardResultを返すため、パイプラインの後段は一切変更不要。
+
 ## ファイル構成
 
 ```
 src/fenrir/
 ├── src/
 │   ├── cli.ts              CLI エントリポイント
-│   ├── training.ts         PPO 学習ループ
-│   ├── policy.ts           FenrirStrategy / WolfTeam / MasonTeam
-│   ├── observation.ts      観測エンコーダ (790 / 833次元)
+│   ├── training.ts         PPO 学習ループ + ネットワークConfig/Factory
+│   ├── policy.ts           FenrirStrategy / WolfTeam / MasonTeam (AnyNetwork対応)
+│   ├── observation.ts      観測エンコーダ (984次元) + tokenize()
 │   ├── action.ts           アクションマスク・デコード
 │   ├── reward.ts           報酬関数
 │   ├── evaluate.ts         評価スクリプト
 │   ├── play.ts             ゲーム再生 (Howl出力)
 │   ├── bench.ts            ベンチマーク
-│   ├── parallel.ts         SharedWeights + ワーカープール管理
-│   ├── game-worker.ts      ゲーム生成ワーカースレッド
+│   ├── parallel.ts         SharedWeights + ワーカープール管理 (AnyNetwork対応)
+│   ├── game-worker.ts      ゲーム生成ワーカースレッド (自動アーキテクチャ判別)
 │   └── ml/
-│       ├── nn.ts           Pure JS NeuralNetwork (推論用)
-│       ├── nn-tf.ts        TF.js GPU NeuralNetwork (学習用)
+│       ├── nn.ts           NeuralNetwork (MLP推論), AnyNetwork interface, NetworkConfig
+│       ├── nn-tf.ts        TfNeuralNetwork (MLP, tf.js GPU学習)
+│       ├── transformer.ts          Transformer基本ブロック (LayerNorm, MHA, FFN)
+│       ├── transformer-network.ts  TransformerNetwork (pure JS推論)
+│       ├── nn-tf-transformer.ts    TfTransformerNetwork (tf.js GPU学習)
+│       ├── transformer.test.ts     Transformerテスト (16ケース)
+│       ├── execution-plan.ts       処刑プラン分類 + フォーマット
+│       ├── execution-plan-data.ts  事前学習用合成データ生成
+│       ├── pretrain-plan.ts        処刑プラン事前学習スクリプト
 │       ├── trajectory.ts   GAE + トラジェクトリ処理
 │       ├── checkpoint.ts   チェックポイント保存/読込
 │       └── optimizer.ts    Adam optimizer
