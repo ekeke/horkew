@@ -36,7 +36,150 @@ const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 210
 
 // Retar可能性: per-seat × roles (0/1)
 const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
-export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE
+
+// 処刑プラン: per-seat(included, position) + global(length, is_grayran, active)
+const PLAN_PER_SEAT_SIZE = 2
+const PLAN_GLOBAL_SIZE = 3
+const PLAN_SIZE = SEATS * PLAN_PER_SEAT_SIZE + PLAN_GLOBAL_SIZE  // 31
+
+export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + PLAN_SIZE
+
+// ============================================================
+// Transformer用トークン化
+// ============================================================
+
+// セクション開始オフセット
+const GLOBAL_START = 0
+const PER_SEAT_START = GLOBAL_SIZE
+const PRIVATE_START = PER_SEAT_START + SEAT_SECTION_SIZE
+const DIVINE_START = PRIVATE_START
+const WOLF_TEAM_START = DIVINE_START + SEATS
+const MASON_PARTNER_START = WOLF_TEAM_START + SEATS
+const GUARD_HISTORY_START = MASON_PARTNER_START + 1
+const KNOWN_HAMSTER_START = GUARD_HISTORY_START + SEATS
+const REVOTE_START = PRIVATE_START + PRIVATE_SIZE
+const REVOTE_ROUND_START = REVOTE_START
+const REVOTE_CANDIDATES_START = REVOTE_START + 1
+const HISTORY_START = REVOTE_START + REVOTE_SIZE
+const RETAR_START = HISTORY_START + HISTORY_SIZE
+const PLAN_START = RETAR_START + RETAR_POSSIBILITIES_SIZE
+const PLAN_INCLUDED_START = PLAN_START
+const PLAN_POSITION_START = PLAN_START + SEATS
+const PLAN_GLOBAL_START = PLAN_START + SEATS * PLAN_PER_SEAT_SIZE
+
+// チーム拡張オフセット (OBSERVATION_SIZE基準)
+const TEAM_SIZE_START = OBSERVATION_SIZE
+const TEAM_IS_MY_TEAM_START = TEAM_SIZE_START + 1
+const TEAM_IS_CURRENT_ACTOR_START = TEAM_IS_MY_TEAM_START + SEATS
+const TEAM_FAKE_DIVINE_START = TEAM_IS_CURRENT_ACTOR_START + SEATS
+
+// トークン特徴量次元
+/** CLSトークンの特徴量次元 (individual) */
+export const CLS_FEATURES = 25
+/** CLSトークンの特徴量次元 (team) */
+export const TEAM_CLS_FEATURES = 26
+/** 席トークンの特徴量次元 (individual) */
+export const SEAT_TOKEN_FEATURES = 57
+/** 席トークンの特徴量次元 (team) */
+export const TEAM_SEAT_TOKEN_FEATURES = 60
+/** プラントークンの特徴量次元 (Phase D用) */
+export const PLAN_TOKEN_FEATURES = 20
+/** プラントークンの最大数 */
+export const MAX_PLAN_TOKENS = 8
+
+/** トークン化されたobservation */
+export type TokenizedObservation = {
+  /** CLSトークン [clsFeatures] */
+  cls: Float32Array
+  /** 席トークン [SEATS * seatFeatures] — flat, stride = seatFeatures */
+  seats: Float32Array
+  /** プラントークン [planCount * PLAN_TOKEN_FEATURES] — flat */
+  plans: Float32Array
+  /** プラントークン数 (0 = プランなし) */
+  planCount: number
+  /** 席特徴量次元 */
+  seatFeatures: number
+  /** CLS特徴量次元 */
+  clsFeatures: number
+}
+
+/**
+ * フラットobservationをTransformer用トークンに分割
+ * @param obs フラットobservation (OBSERVATION_SIZE or TEAM_OBSERVATION_SIZE)
+ * @param isTeam チーム観測かどうか
+ */
+export function tokenize(obs: Float32Array, isTeam: boolean = false): TokenizedObservation {
+  const sf = isTeam ? TEAM_SEAT_TOKEN_FEATURES : SEAT_TOKEN_FEATURES
+  const cf = isTeam ? TEAM_CLS_FEATURES : CLS_FEATURES
+
+  const cls = new Float32Array(cf)
+  const seats = new Float32Array(SEATS * sf)
+
+  // ========== CLS token ==========
+  let co = 0
+  // global features (19)
+  for (let i = 0; i < GLOBAL_SIZE; i++) cls[co++] = obs[GLOBAL_START + i]
+  // mason_partner (1)
+  cls[co++] = obs[MASON_PARTNER_START]
+  // known_hamster (1)
+  cls[co++] = obs[KNOWN_HAMSTER_START]
+  // revote_round (1)
+  cls[co++] = obs[REVOTE_ROUND_START]
+  // plan_global (3)
+  cls[co++] = obs[PLAN_GLOBAL_START]
+  cls[co++] = obs[PLAN_GLOBAL_START + 1]
+  cls[co++] = obs[PLAN_GLOBAL_START + 2]
+  // team extension
+  if (isTeam) {
+    cls[co++] = obs[TEAM_SIZE_START]
+  }
+
+  // ========== Seat tokens ==========
+  for (let s = 0; s < SEATS; s++) {
+    let so = s * sf
+
+    // per_seat features (25)
+    const psOff = PER_SEAT_START + s * PER_SEAT_SIZE
+    for (let i = 0; i < PER_SEAT_SIZE; i++) seats[so++] = obs[psOff + i]
+
+    // private per-seat (4)
+    seats[so++] = obs[DIVINE_START + s]
+    seats[so++] = obs[WOLF_TEAM_START + s]
+    seats[so++] = obs[GUARD_HISTORY_START + s]
+    seats[so++] = obs[REVOTE_CANDIDATES_START + s]
+
+    // history (3 windows × 5 features = 15)
+    for (let w = 0; w < HISTORY_WINDOW; w++) {
+      const hOff = HISTORY_START + w * HISTORY_DAY_SIZE + s * 5
+      for (let i = 0; i < 5; i++) seats[so++] = obs[hOff + i]
+    }
+
+    // retar possibilities (11)
+    const rOff = RETAR_START + s * NUM_ROLES
+    for (let i = 0; i < NUM_ROLES; i++) seats[so++] = obs[rOff + i]
+
+    // plan per-seat (2)
+    seats[so++] = obs[PLAN_INCLUDED_START + s]
+    seats[so++] = obs[PLAN_POSITION_START + s]
+
+    // team extension per-seat (3)
+    if (isTeam) {
+      seats[so++] = obs[TEAM_IS_MY_TEAM_START + s]
+      seats[so++] = obs[TEAM_IS_CURRENT_ACTOR_START + s]
+      seats[so++] = obs[TEAM_FAKE_DIVINE_START + s]
+    }
+  }
+
+  // ========== Plan tokens (Phase D: 現時点では空) ==========
+  return {
+    cls,
+    seats,
+    plans: new Float32Array(0),
+    planCount: 0,
+    seatFeatures: sf,
+    clsFeatures: cf,
+  }
+}
 
 export function encodeObservation(ctx: DecisionContext): Float32Array {
   const obs = new Float32Array(OBSERVATION_SIZE)
@@ -316,7 +459,30 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
       }
     }
   }
-  // offset += RETAR_POSSIBILITIES_SIZE
+  offset += RETAR_POSSIBILITIES_SIZE
+
+  // ========== Execution Plan ==========
+  if (ctx.executionPlan) {
+    const plan = ctx.executionPlan
+    // per-seat: plan_included (14次元)
+    for (let seat = 1; seat <= SEATS; seat++) {
+      obs[offset + seat - 1] = plan.targets.includes(seat) ? 1 : 0
+    }
+    offset += SEATS
+    // per-seat: plan_position (14次元, normalized by plan length)
+    const len = plan.targets.length
+    for (let seat = 1; seat <= SEATS; seat++) {
+      const idx = plan.targets.indexOf(seat)
+      obs[offset + seat - 1] = idx >= 0 && len > 0 ? (idx + 1) / len : 0
+    }
+    offset += SEATS
+    // global: plan_length, plan_is_grayran, plan_active
+    obs[offset++] = len / SEATS
+    obs[offset++] = plan.isGrayran ? 1 : 0
+    obs[offset++] = 1  // plan_active
+  } else {
+    offset += PLAN_SIZE  // all zeros
+  }
 
   return obs
 }

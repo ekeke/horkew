@@ -137,6 +137,24 @@ export type NetworkConfig = {
   hiddenSizes: number[]       // e.g. [512, 256]
   heads: Record<string, number>  // head_name → output_size (softmax heads)
   sigmoidHeads?: Record<string, number>  // head_name → output_size (sigmoid heads)
+  /** Transformer設定 (存在すればMLPの代わりにTransformerをtrunkとして使用) */
+  transformer?: TransformerNetworkConfig
+}
+
+/** Transformerアーキテクチャ設定 */
+export type TransformerNetworkConfig = {
+  dModel: number            // e.g. 128
+  numLayers: number         // e.g. 3
+  numHeads: number          // e.g. 4
+  dFf: number               // e.g. 256
+  seatFeatures: number      // 生の1席あたり特徴量次元
+  clsFeatures: number       // CLSトークンの生特徴量次元
+  planFeatures: number      // プラントークンの生特徴量次元
+  maxPlanTokens: number     // プラントークンの最大数
+  /** per-seatヘッドの名前リスト (seat token出力から読み出す) */
+  perSeatHeads: string[]    // e.g. ['vote', 'target', 'propose']
+  /** per-seat sigmoid headの名前リスト (seat token出力から読み出す) */
+  perSeatSigmoidHeads?: string[]  // e.g. ['predict']
 }
 
 export type ForwardResult = {

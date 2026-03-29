@@ -1,6 +1,6 @@
 import type { LupaConfig, GameState, GameEvent, NightAction, DayClaim } from './types.ts'
 import type { SystemRole } from '../types/index.ts'
-import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction, AsyncStrategy, AsyncTeamStrategy } from './strategy.ts'
+import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction, AsyncStrategy, AsyncTeamStrategy, ExecutionPlan } from './strategy.ts'
 import type { SignalRecord, CommunicationAction } from './communication.ts'
 import type { Proposal } from './leadership.ts'
 import { Rng } from './random.ts'
@@ -84,6 +84,7 @@ function buildContext(
   revoteCandidates: number[] | null = null,
   perPlayerRetar: PerPlayerRetar | null = null,
   maxSurvivingNV: number | null = null,
+  executionPlan: ExecutionPlan | null = null,
 ): DecisionContext {
   // 初期知識の注入
   let wolfTeammates: number[] | null = null
@@ -134,6 +135,7 @@ function buildContext(
     masonPartner,
     revoteRound,
     revoteCandidates,
+    executionPlan,
   }
 }
 

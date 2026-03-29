@@ -10,8 +10,13 @@ import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame, runGameAsync } from '../../lupa/engine.ts'
 import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-node-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
+import type { NetworkConfig } from './ml/nn.ts'
 import { TfNeuralNetwork } from './ml/nn-tf.ts'
-import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE } from './observation.ts'
+import { TransformerNetwork } from './ml/transformer-network.ts'
+import { TfTransformerNetwork } from './ml/nn-tf-transformer.ts'
+import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
+  CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES,
+  PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS } from './observation.ts'
 import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
@@ -192,6 +197,95 @@ const MASON_TEAM_NETWORK_CONFIG = {
   },
 }
 
+// ============================================================
+// Transformer Network Configuration
+// ============================================================
+
+const TRANSFORMER_COMMON = {
+  dModel: 128,
+  numLayers: 3,
+  numHeads: 4,
+  dFf: 256,
+  planFeatures: PLAN_TOKEN_FEATURES,
+  maxPlanTokens: MAX_PLAN_TOKENS,
+}
+
+const TRANSFORMER_NETWORK_CONFIG: NetworkConfig = {
+  inputSize: OBSERVATION_SIZE,
+  hiddenSizes: [],
+  heads: {
+    night: HEAD_SIZES.night,
+    claim: HEAD_SIZES.claim,
+    vote: HEAD_SIZES.vote,
+    comm: HEAD_SIZES.comm,
+    leader: HEAD_SIZES.leader,
+    target: HEAD_SIZES.target,
+  },
+  sigmoidHeads: {
+    propose: HEAD_SIZES.propose,
+    predict: HEAD_SIZES.predict,
+  },
+  transformer: {
+    ...TRANSFORMER_COMMON,
+    seatFeatures: SEAT_TOKEN_FEATURES,
+    clsFeatures: CLS_FEATURES,
+    perSeatHeads: ['vote', 'target'],
+    perSeatSigmoidHeads: ['propose', 'predict'],
+  },
+}
+
+const WOLF_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
+  inputSize: TEAM_OBSERVATION_SIZE,
+  hiddenSizes: [],
+  heads: {
+    attack_target: TEAM_HEAD_SIZES.attack_target,
+    attacker: TEAM_HEAD_SIZES.attacker,
+    claim: HEAD_SIZES.claim,
+    vote: HEAD_SIZES.vote,
+    comm: HEAD_SIZES.comm,
+    leader: HEAD_SIZES.leader,
+    target: HEAD_SIZES.target,
+  },
+  sigmoidHeads: {
+    propose: HEAD_SIZES.propose,
+    predict: HEAD_SIZES.predict,
+  },
+  transformer: {
+    ...TRANSFORMER_COMMON,
+    seatFeatures: TEAM_SEAT_TOKEN_FEATURES,
+    clsFeatures: TEAM_CLS_FEATURES,
+    perSeatHeads: ['vote', 'target', 'attack_target'],
+    perSeatSigmoidHeads: ['propose', 'predict'],
+  },
+}
+
+const MASON_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
+  inputSize: TEAM_OBSERVATION_SIZE,
+  hiddenSizes: [],
+  heads: {
+    claim: HEAD_SIZES.claim,
+    vote: HEAD_SIZES.vote,
+    comm: HEAD_SIZES.comm,
+    leader: HEAD_SIZES.leader,
+    target: HEAD_SIZES.target,
+  },
+  sigmoidHeads: {
+    propose: HEAD_SIZES.propose,
+    predict: HEAD_SIZES.predict,
+  },
+  transformer: {
+    ...TRANSFORMER_COMMON,
+    seatFeatures: TEAM_SEAT_TOKEN_FEATURES,
+    clsFeatures: TEAM_CLS_FEATURES,
+    perSeatHeads: ['vote', 'target'],
+    perSeatSigmoidHeads: ['propose', 'predict'],
+  },
+}
+
+// ============================================================
+// Factory Functions
+// ============================================================
+
 /** 推論用（ゲーム内、ピュアJS — 単一forward が速い） */
 export function createNetwork(): NeuralNetwork {
   return new NeuralNetwork(NETWORK_CONFIG)
@@ -216,6 +310,34 @@ export function createWolfTeamTfNetwork(lr: number = 3e-4): TfNeuralNetwork {
 
 export function createMasonTeamTfNetwork(lr: number = 3e-4): TfNeuralNetwork {
   return new TfNeuralNetwork(MASON_TEAM_NETWORK_CONFIG, lr)
+}
+
+// ---- Transformer variants ----
+
+/** Transformer推論用（ピュアJS） */
+export function createTransformerNetwork(): TransformerNetwork {
+  return new TransformerNetwork(TRANSFORMER_NETWORK_CONFIG)
+}
+
+export function createWolfTeamTransformerNetwork(): TransformerNetwork {
+  return new TransformerNetwork(WOLF_TEAM_TRANSFORMER_CONFIG, true)
+}
+
+export function createMasonTeamTransformerNetwork(): TransformerNetwork {
+  return new TransformerNetwork(MASON_TEAM_TRANSFORMER_CONFIG, true)
+}
+
+/** Transformer学習用（tf.js GPU） */
+export function createTransformerTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+  return new TfTransformerNetwork(TRANSFORMER_NETWORK_CONFIG, lr)
+}
+
+export function createWolfTeamTransformerTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+  return new TfTransformerNetwork(WOLF_TEAM_TRANSFORMER_CONFIG, lr, true)
+}
+
+export function createMasonTeamTransformerTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+  return new TfTransformerNetwork(MASON_TEAM_TRANSFORMER_CONFIG, lr, true)
 }
 
 // ============================================================

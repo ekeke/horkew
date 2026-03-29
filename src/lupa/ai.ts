@@ -28,12 +28,14 @@ function makeCompatCtx(
     gameState: state,
     lastExecutedSeat,
     retarPossibilities: null,
+    maxSurvivingNV: null,
     wolfTeammates: null,
     knownWolves: null,
     knownHamster: null,
     masonPartner: null,
     revoteRound: null,
     revoteCandidates: null,
+    executionPlan: null,
   }
 }
 

@@ -36,6 +36,16 @@ export type DecisionContext = {
   revoteRound: number | null
   /** 再投票時の候補者seat一覧 (初回投票 or 投票フェーズ以外はnull) */
   revoteCandidates: number[] | null
+  /** 処刑プラン (null = プランなし) */
+  executionPlan: ExecutionPlan | null
+}
+
+/** 処刑プラン（NNのobservationに注入） */
+export type ExecutionPlan = {
+  /** 処刑対象の席番号列 (1-indexed, 順序が処刑順) */
+  targets: number[]
+  /** グレランか（targetsが空の場合にtrue） */
+  isGrayran: boolean
 }
 
 /** プラガブルな戦略インターフェース (個人エージェント) */

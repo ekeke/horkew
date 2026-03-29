@@ -318,6 +318,76 @@ export class TfNeuralNetwork {
     })
   }
 
+  /**
+   * 教師あり学習バッチ（vote head用 cross-entropy）
+   *
+   * soft label対応: labelが分布（合計~1）の場合はKLダイバージェンスに近い損失になる。
+   * trunk + vote head の重みのみが更新される。
+   */
+  trainSupervisedVote(batch: {
+    observations: Float32Array[]
+    /** soft label: [SEATS] per sample, 合計~1 */
+    labels: Float32Array[]
+    /** vote mask: [SEATS] per sample, -Inf=invalid, 0=valid */
+    masks: Float32Array[]
+  }): { loss: number, accuracy: number } {
+    const n = batch.observations.length
+    if (n === 0) return { loss: 0, accuracy: 0 }
+
+    const inputSize = this.config.inputSize
+    const obsData = new Float32Array(n * inputSize)
+    for (let i = 0; i < n; i++) {
+      obsData.set(batch.observations[i], i * inputSize)
+    }
+
+    const voteHeadSize = this.config.heads.vote
+    const labelData = new Float32Array(n * voteHeadSize)
+    const maskData = new Float32Array(n * voteHeadSize)
+    for (let i = 0; i < n; i++) {
+      labelData.set(batch.labels[i], i * voteHeadSize)
+      maskData.set(batch.masks[i], i * voteHeadSize)
+    }
+
+    const result = { loss: 0, accuracy: 0 }
+
+    // trunk + vote head のみ学習対象
+    const [hw, hb] = this.headWeights.get('vote')!
+    const trainableVars = [...this.trunkWeights, hw, hb]
+
+    const lossFunc = () => {
+      const obsTensor = tf.tensor2d(obsData, [n, inputSize])
+      const trunk = this.forwardTrunk(obsTensor)
+      const logits = tf.add(tf.matMul(trunk, hw), hb)  // [n, voteHeadSize]
+
+      // マスク適用
+      const maskTensor = tf.tensor2d(maskData, [n, voteHeadSize])
+      const maskedLogits = tf.add(logits, maskTensor)
+
+      const probs = tf.softmax(maskedLogits)
+      const labelTensor = tf.tensor2d(labelData, [n, voteHeadSize])
+
+      // cross-entropy: -Σ label[i] * log(probs[i])
+      const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
+      const loss = tf.neg(tf.mean(tf.sum(tf.mul(labelTensor, logProbs), 1)))
+
+      // accuracy: argmax(probs) === argmax(label)
+      const predIndices = tf.argMax(probs, 1).dataSync()
+      const labelIndices = tf.argMax(labelTensor, 1).dataSync()
+      let correct = 0
+      for (let i = 0; i < n; i++) {
+        if (predIndices[i] === labelIndices[i]) correct++
+      }
+      result.accuracy = correct / n
+      result.loss = loss.dataSync()[0]
+
+      return loss as tf.Scalar
+    }
+
+    this.optimizer.minimize(lossFunc, false, trainableVars)
+
+    return result
+  }
+
   /** 総パラメータ数 */
   get totalParams(): number {
     let total = 0

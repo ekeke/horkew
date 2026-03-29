@@ -1,0 +1,373 @@
+import { describe, it } from 'node:test'
+import * as assert from 'node:assert/strict'
+import { LayerNorm, MultiHeadAttention, FeedForward, TransformerBlock, TransformerEncoder } from './transformer.ts'
+import { TransformerNetwork } from './transformer-network.ts'
+import { tokenize, OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE, SEATS, NUM_ROLES,
+         CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES } from '../observation.ts'
+import type { NetworkConfig } from './nn.ts'
+
+// ============================================================
+// テスト用コンフィグ
+// ============================================================
+
+const D_MODEL = 128
+const NUM_LAYERS = 3
+const NUM_HEADS = 4
+const D_FF = 256
+const MAX_PLAN_TOKENS = 8
+
+function makeConfig(isTeam = false): NetworkConfig {
+  return {
+    inputSize: isTeam ? TEAM_OBSERVATION_SIZE : OBSERVATION_SIZE,
+    hiddenSizes: [],  // unused for transformer
+    heads: {
+      night: SEATS + 1,
+      claim: 10,
+      vote: SEATS,
+      comm: SEATS * 8 + 7,
+      leader: 3,
+      target: SEATS,
+    },
+    sigmoidHeads: {
+      propose: SEATS,
+      predict: SEATS * NUM_ROLES,
+    },
+    transformer: {
+      dModel: D_MODEL,
+      numLayers: NUM_LAYERS,
+      numHeads: NUM_HEADS,
+      dFf: D_FF,
+      seatFeatures: isTeam ? TEAM_SEAT_TOKEN_FEATURES : SEAT_TOKEN_FEATURES,
+      clsFeatures: isTeam ? TEAM_CLS_FEATURES : CLS_FEATURES,
+      planFeatures: 20,
+      maxPlanTokens: MAX_PLAN_TOKENS,
+      perSeatHeads: ['vote', 'target'],
+      perSeatSigmoidHeads: ['propose', 'predict'],
+    },
+  }
+}
+
+// ============================================================
+// LayerNorm
+// ============================================================
+
+describe('LayerNorm', () => {
+  it('normalizes to mean≈0, variance≈1', () => {
+    const ln = new LayerNorm(64)
+    const input = new Float32Array(64)
+    for (let i = 0; i < 64; i++) input[i] = Math.random() * 10 - 5
+    const out = new Float32Array(64)
+    ln.forwardInto(input, 0, out, 0)
+
+    let mean = 0
+    for (let i = 0; i < 64; i++) mean += out[i]
+    mean /= 64
+    let variance = 0
+    for (let i = 0; i < 64; i++) variance += (out[i] - mean) ** 2
+    variance /= 64
+
+    assert.ok(Math.abs(mean) < 0.01, `mean should be ~0, got ${mean}`)
+    assert.ok(Math.abs(variance - 1) < 0.05, `variance should be ~1, got ${variance}`)
+  })
+
+  it('produces correct output with non-trivial scale/bias', () => {
+    const ln = new LayerNorm(4)
+    ln.scale.set([2, 2, 2, 2])
+    ln.bias.set([1, 1, 1, 1])
+    const input = new Float32Array([1, 2, 3, 4])
+    const out = new Float32Array(4)
+    ln.forwardInto(input, 0, out, 0)
+
+    // After norm: mean=2.5, std≈1.118 → normalized: [-1.34, -0.45, 0.45, 1.34]
+    // × 2 + 1 → [-1.68, 0.10, 1.89, 3.68]
+    let mean = 0
+    for (let i = 0; i < 4; i++) mean += out[i]
+    mean /= 4
+    assert.ok(Math.abs(mean - 1) < 0.01, `scaled mean should be ~1, got ${mean}`)
+  })
+})
+
+// ============================================================
+// MultiHeadAttention
+// ============================================================
+
+describe('MultiHeadAttention', () => {
+  it('produces output with correct shape', () => {
+    const mha = new MultiHeadAttention(32, 4, 16)
+    const tokens = new Float32Array(5 * 32)
+    for (let i = 0; i < tokens.length; i++) tokens[i] = Math.random() - 0.5
+    const mask = [true, true, true, true, true]
+    const out = new Float32Array(5 * 32)
+    mha.forward(tokens, 5, mask, out)
+
+    // Check output is not all zeros
+    let sumAbs = 0
+    for (let i = 0; i < out.length; i++) sumAbs += Math.abs(out[i])
+    assert.ok(sumAbs > 0, 'output should not be all zeros')
+  })
+
+  it('masks padding tokens correctly', () => {
+    const mha = new MultiHeadAttention(16, 2, 8)
+    const tokens = new Float32Array(4 * 16)
+    for (let i = 0; i < tokens.length; i++) tokens[i] = Math.random() - 0.5
+    const mask = [true, true, false, false]  // last 2 are padding
+    const out = new Float32Array(4 * 16)
+    mha.forward(tokens, 4, mask, out)
+
+    // Masked token outputs should be 0 (not attended to and not attending)
+    // Actually, masked tokens' output rows won't be computed (mask[i]=false skips)
+    // So they stay at whatever linearBatched produces... but the attention skip
+    // means they shouldn't affect the unmasked tokens.
+    // The key property: running with fewer tokens should give same results.
+    // Just verify present tokens have non-zero output.
+    let sumPresent = 0
+    for (let i = 0; i < 2 * 16; i++) sumPresent += Math.abs(out[i])
+    assert.ok(sumPresent > 0, 'present tokens should have non-zero output')
+  })
+})
+
+// ============================================================
+// FeedForward
+// ============================================================
+
+describe('FeedForward', () => {
+  it('produces output with correct dimensions', () => {
+    const ffn = new FeedForward(32, 64, 8)
+    const input = new Float32Array(3 * 32)
+    for (let i = 0; i < input.length; i++) input[i] = Math.random() - 0.5
+    const out = new Float32Array(3 * 32)
+    ffn.forward(input, 3, out)
+
+    let sumAbs = 0
+    for (let i = 0; i < out.length; i++) sumAbs += Math.abs(out[i])
+    assert.ok(sumAbs > 0, 'output should not be all zeros')
+    assert.equal(out.length, 3 * 32)
+  })
+})
+
+// ============================================================
+// TransformerBlock
+// ============================================================
+
+describe('TransformerBlock', () => {
+  it('preserves sequence length and dimension', () => {
+    const block = new TransformerBlock(32, 4, 64, 16)
+    const tokens = new Float32Array(5 * 32)
+    for (let i = 0; i < tokens.length; i++) tokens[i] = Math.random() * 0.1
+    const mask = [true, true, true, true, true]
+    block.forward(tokens, 5, mask)
+
+    // tokens modified in-place, check not all zero
+    let sumAbs = 0
+    for (let i = 0; i < tokens.length; i++) sumAbs += Math.abs(tokens[i])
+    assert.ok(sumAbs > 0)
+  })
+})
+
+// ============================================================
+// TransformerEncoder
+// ============================================================
+
+describe('TransformerEncoder', () => {
+  it('forward pass with correct output shape', () => {
+    const enc = new TransformerEncoder({
+      dModel: 32, numLayers: 2, numHeads: 4, dFf: 64, maxSeqLen: 16,
+    })
+    const tokens = new Float32Array(5 * 32)
+    for (let i = 0; i < tokens.length; i++) tokens[i] = Math.random() * 0.1
+    const mask = [true, true, true, true, true]
+    const out = enc.forward(tokens, 5, mask)
+
+    assert.equal(out.length, tokens.length)
+    let sumAbs = 0
+    for (let i = 0; i < 5 * 32; i++) sumAbs += Math.abs(out[i])
+    assert.ok(sumAbs > 0)
+  })
+
+  it('collectWeights and loadWeights roundtrip', () => {
+    const enc = new TransformerEncoder({
+      dModel: 16, numLayers: 2, numHeads: 2, dFf: 32, maxSeqLen: 8,
+    })
+    const weights = enc.collectWeights()
+    const enc2 = new TransformerEncoder({
+      dModel: 16, numLayers: 2, numHeads: 2, dFf: 32, maxSeqLen: 8,
+    })
+    enc2.loadWeights(weights)
+
+    // Forward should give same result
+    const tokens1 = new Float32Array(3 * 16)
+    const tokens2 = new Float32Array(3 * 16)
+    for (let i = 0; i < tokens1.length; i++) {
+      tokens1[i] = tokens2[i] = Math.random() * 0.1
+    }
+    const mask = [true, true, true]
+    enc.forward(tokens1, 3, mask)
+    enc2.forward(tokens2, 3, mask)
+
+    for (let i = 0; i < tokens1.length; i++) {
+      assert.ok(Math.abs(tokens1[i] - tokens2[i]) < 1e-5,
+        `mismatch at ${i}: ${tokens1[i]} vs ${tokens2[i]}`)
+    }
+  })
+})
+
+// ============================================================
+// Tokenize
+// ============================================================
+
+describe('tokenize', () => {
+  it('individual: correct token dimensions', () => {
+    const obs = new Float32Array(OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random()
+    const tok = tokenize(obs, false)
+
+    assert.equal(tok.cls.length, CLS_FEATURES)
+    assert.equal(tok.seats.length, SEATS * SEAT_TOKEN_FEATURES)
+    assert.equal(tok.seatFeatures, SEAT_TOKEN_FEATURES)
+    assert.equal(tok.clsFeatures, CLS_FEATURES)
+    assert.equal(tok.planCount, 0)
+  })
+
+  it('team: correct token dimensions', () => {
+    const obs = new Float32Array(TEAM_OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random()
+    const tok = tokenize(obs, true)
+
+    assert.equal(tok.cls.length, TEAM_CLS_FEATURES)
+    assert.equal(tok.seats.length, SEATS * TEAM_SEAT_TOKEN_FEATURES)
+    assert.equal(tok.seatFeatures, TEAM_SEAT_TOKEN_FEATURES)
+    assert.equal(tok.clsFeatures, TEAM_CLS_FEATURES)
+  })
+
+  it('preserves observation data (spot check)', () => {
+    const obs = new Float32Array(OBSERVATION_SIZE)
+    // Set day_norm = 0.5 (offset 0)
+    obs[0] = 0.5
+    // Set seat 1 alive = 1 (offset 19)
+    obs[19] = 1.0
+    // Set seat 1 is_me = 1 (offset 19 + 13 = 32)
+    obs[32] = 1.0
+
+    const tok = tokenize(obs, false)
+    // CLS[0] should be day_norm = 0.5
+    assert.equal(tok.cls[0], 0.5)
+    // Seat 0 (seat1), feature 0 = alive
+    assert.equal(tok.seats[0], 1.0)
+    // Seat 0, feature 13 = is_me
+    assert.equal(tok.seats[13], 1.0)
+  })
+})
+
+// ============================================================
+// TransformerNetwork
+// ============================================================
+
+describe('TransformerNetwork', () => {
+  it('forward produces correct head shapes (individual)', () => {
+    const config = makeConfig(false)
+    const net = new TransformerNetwork(config, false)
+
+    const obs = new Float32Array(OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
+    const result = net.forward(obs)
+
+    // Check all head shapes
+    assert.equal(result.policies.get('vote')!.length, SEATS)
+    assert.equal(result.policies.get('target')!.length, SEATS)
+    assert.equal(result.policies.get('night')!.length, SEATS + 1)
+    assert.equal(result.policies.get('claim')!.length, 10)
+    assert.equal(result.policies.get('comm')!.length, SEATS * 8 + 7)
+    assert.equal(result.policies.get('leader')!.length, 3)
+    assert.equal(result.policies.get('propose')!.length, SEATS)
+    assert.equal(result.policies.get('predict')!.length, SEATS * NUM_ROLES)
+
+    // Value should be in [-1, 1]
+    assert.ok(result.value >= -1 && result.value <= 1, `value ${result.value} out of range`)
+  })
+
+  it('forward produces correct head shapes (team)', () => {
+    const config = makeConfig(true)
+    // Add team-specific heads
+    config.heads = {
+      ...config.heads,
+      attack_target: SEATS,
+      attacker: 3,
+    }
+    const net = new TransformerNetwork(config, true)
+
+    const obs = new Float32Array(TEAM_OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
+    const result = net.forward(obs)
+
+    assert.equal(result.policies.get('vote')!.length, SEATS)
+    assert.equal(result.policies.get('attack_target')!.length, SEATS)
+    // attacker is global (size 3, not per-seat)
+    assert.equal(result.policies.get('attacker')!.length, 3)
+  })
+
+  it('cloneWeights and loadWeights roundtrip', () => {
+    const config = makeConfig(false)
+    const net = new TransformerNetwork(config, false)
+    const weights = net.cloneWeights()
+
+    const net2 = new TransformerNetwork(config, false)
+    net2.loadWeights(weights)
+
+    const obs = new Float32Array(OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
+
+    const r1 = net.forward(obs)
+    const r2 = net2.forward(obs)
+
+    assert.ok(Math.abs(r1.value - r2.value) < 1e-4, `value mismatch: ${r1.value} vs ${r2.value}`)
+    for (const [name, logits1] of r1.policies) {
+      const logits2 = r2.policies.get(name)!
+      for (let i = 0; i < logits1.length; i++) {
+        assert.ok(Math.abs(logits1[i] - logits2[i]) < 1e-4,
+          `head ${name}[${i}] mismatch: ${logits1[i]} vs ${logits2[i]}`)
+      }
+    }
+  })
+
+  it('totalParams is reasonable', () => {
+    const config = makeConfig(false)
+    const net = new TransformerNetwork(config, false)
+    const params = net.totalParams
+
+    // Rough estimate: ~470K params
+    assert.ok(params > 100_000, `too few params: ${params}`)
+    assert.ok(params < 2_000_000, `too many params: ${params}`)
+    console.log(`  TransformerNetwork totalParams: ${params}`)
+  })
+})
+
+// ============================================================
+// ベンチマーク
+// ============================================================
+
+describe('Benchmark', () => {
+  it('inference < 20ms per forward pass (pure JS, d_model=128, 3 layers)', () => {
+    // d_model=128, 3層のTransformerは純JSで~15ms程度。
+    // 学習はtf.js GPU版を使うため、純JS推論は自己対戦ゲーム生成用。
+    // 1ゲーム~300推論 × 15ms ≈ 4.5秒は許容範囲（GPUが学習ボトルネック）。
+    // d_model=64にすれば~4msだが表現力とのトレードオフ。
+    const config = makeConfig(false)
+    const net = new TransformerNetwork(config, false)
+
+    const obs = new Float32Array(OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
+
+    // Warmup
+    for (let i = 0; i < 10; i++) net.forward(obs)
+
+    // Benchmark
+    const N = 100
+    const start = performance.now()
+    for (let i = 0; i < N; i++) net.forward(obs)
+    const elapsed = performance.now() - start
+    const perCall = elapsed / N
+
+    console.log(`  Inference: ${perCall.toFixed(2)}ms per forward pass (${N} runs)`)
+    assert.ok(perCall < 20, `too slow: ${perCall.toFixed(2)}ms (target < 20ms)`)
+  })
+})

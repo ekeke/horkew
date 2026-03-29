@@ -1,0 +1,237 @@
+/**
+ * 処刑プラン事前学習用の教師データ自動生成
+ *
+ * CO状況→処刑プラン→正解投票先のラベルを合成的に生成する。
+ * パターン: ローラー(30%), 決め打ち(20%), 吊り先指定(20%), グレラン(30%)
+ */
+
+import type { DecisionContext, ExecutionPlan } from '../../../lupa/strategy.ts'
+import type { SystemRole } from '../../../types/index.ts'
+import type { GameEvent } from '../../../lupa/types.ts'
+import { Rng } from '../../../lupa/random.ts'
+import { encodeObservation, SEATS } from '../observation.ts'
+import { maskVote } from '../action.ts'
+
+export type PlanTrainingSample = {
+  observation: Float32Array
+  /** one-hot or soft label (uniform over valid targets for grayran) */
+  voteLabel: Float32Array  // [SEATS]
+  voteMask: Float32Array   // [SEATS] from maskVote
+}
+
+const VILLAGE_ROLES: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+const CO_ROLES: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+
+/**
+ * 合成 CO 状況を生成
+ * @returns CO map (seat → role) と対応するpublicEvents
+ */
+function generateCOSituation(
+  aliveSeats: number[],
+  rng: Rng,
+): { claims: Map<number, SystemRole>, events: GameEvent[] } {
+  const claims = new Map<number, SystemRole>()
+  const events: GameEvent[] = []
+
+  // CO役職をランダムに選ぶ
+  const role = CO_ROLES[Math.floor(rng.next() * CO_ROLES.length)]
+
+  // CO者数: 2-3人（ローラー・決め打ちの素材）
+  const numClaimants = rng.next() < 0.6 ? 2 : 3
+  const shuffled = shuffleArray(aliveSeats, rng)
+  const claimants = shuffled.slice(0, Math.min(numClaimants, shuffled.length))
+
+  for (const seat of claimants) {
+    claims.set(seat, role)
+    switch (role) {
+      case 'seer':
+        events.push({ type: 'seer_claim', actor: seat, results: [] })
+        break
+      case 'medium':
+        events.push({ type: 'medium_claim', actor: seat })
+        break
+      case 'bodyguard':
+        events.push({ type: 'bodyguard_claim', actor: seat, targets: [] })
+        break
+      case 'mason':
+        events.push({ type: 'mason_claim', actor: seat, partner: 0 })
+        break
+      case 'nekomata':
+        events.push({ type: 'nekomata_claim', actor: seat })
+        break
+    }
+  }
+
+  return { claims, events }
+}
+
+type PatternType = 'roller' | 'decision' | 'designated' | 'grayran'
+
+/** パターンに応じてプランと正解ラベルを生成 */
+function generatePlanAndLabel(
+  pattern: PatternType,
+  claims: Map<number, SystemRole>,
+  aliveSeats: number[],
+  mySeat: number,
+  rng: Rng,
+): { plan: ExecutionPlan, label: Float32Array } | null {
+  const label = new Float32Array(SEATS)
+  const claimants = [...claims.keys()]
+  const grays = aliveSeats.filter(s => s !== mySeat && !claims.has(s))
+
+  switch (pattern) {
+    case 'roller': {
+      if (claimants.length < 2) return null
+      const targets = claimants.filter(s => s !== mySeat)
+      if (targets.length < 2) return null
+      const plan: ExecutionPlan = { targets, isGrayran: false }
+      // 正解: targets[0] (先頭)
+      label[targets[0] - 1] = 1
+      return { plan, label }
+    }
+    case 'decision': {
+      if (claimants.length < 2) return null
+      // 1人だけ選ぶ
+      const candidates = claimants.filter(s => s !== mySeat)
+      if (candidates.length === 0) return null
+      const target = candidates[Math.floor(rng.next() * candidates.length)]
+      const plan: ExecutionPlan = { targets: [target], isGrayran: false }
+      label[target - 1] = 1
+      return { plan, label }
+    }
+    case 'designated': {
+      // CO者以外のランダムな席を指定
+      const candidates = aliveSeats.filter(s => s !== mySeat)
+      if (candidates.length === 0) return null
+      const target = candidates[Math.floor(rng.next() * candidates.length)]
+      const plan: ExecutionPlan = { targets: [target], isGrayran: false }
+      label[target - 1] = 1
+      return { plan, label }
+    }
+    case 'grayran': {
+      if (grays.length === 0) return null
+      const plan: ExecutionPlan = { targets: [], isGrayran: true }
+      // soft label: CO者以外の生存者に均等確率
+      const prob = 1 / grays.length
+      for (const s of grays) {
+        label[s - 1] = prob
+      }
+      return { plan, label }
+    }
+  }
+}
+
+/** 最小限の合成DecisionContextを構築 */
+function buildSyntheticContext(params: {
+  day: number
+  mySeat: number
+  myRole: SystemRole
+  aliveSeats: number[]
+  events: GameEvent[]
+  plan: ExecutionPlan
+  rng: Rng
+}): DecisionContext {
+  return {
+    mySeat: params.mySeat,
+    myRole: params.myRole,
+    myPlayer: {
+      seat: params.mySeat, role: params.myRole, alive: true,
+      divineHistory: new Map(), guardHistory: new Map(),
+      claimed: null, fakeDivineHistory: null,
+    } as any,
+    day: params.day,
+    phase: 'day',
+    alivePlayers: params.aliveSeats,
+    publicEvents: params.events,
+    signals: [],
+    commander: null,
+    proposals: [],
+    rng: params.rng,
+    gameState: { day: params.day, phase: 'day', players: [], commander: null } as any,
+    lastExecutedSeat: null,
+    retarPossibilities: null,
+    maxSurvivingNV: null,
+    wolfTeammates: null,
+    knownWolves: null,
+    knownHamster: null,
+    masonPartner: null,
+    revoteRound: null,
+    revoteCandidates: null,
+    executionPlan: params.plan,
+  }
+}
+
+function shuffleArray<T>(arr: T[], rng: Rng): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng.next() * (i + 1))
+    const tmp = a[i]; a[i] = a[j]; a[j] = tmp
+  }
+  return a
+}
+
+const PATTERNS: PatternType[] = ['roller', 'decision', 'designated', 'grayran']
+const PATTERN_WEIGHTS = [0.3, 0.2, 0.2, 0.3]
+
+function pickPattern(rng: Rng): PatternType {
+  const r = rng.next()
+  let cum = 0
+  for (let i = 0; i < PATTERNS.length; i++) {
+    cum += PATTERN_WEIGHTS[i]
+    if (r < cum) return PATTERNS[i]
+  }
+  return PATTERNS[PATTERNS.length - 1]
+}
+
+/**
+ * 教師データを一括生成する
+ * @param count 生成するサンプル数
+ * @param seed 乱数シード（再現性のため）
+ */
+export function generatePlanTrainingBatch(count: number, seed: number = 42): PlanTrainingSample[] {
+  const rng = new Rng(seed)
+  const samples: PlanTrainingSample[] = []
+
+  while (samples.length < count) {
+    // ランダムなゲーム状況
+    const day = 2 + Math.floor(rng.next() * 4)  // day 2-5
+    const aliveCount = 7 + Math.floor(rng.next() * 7)  // 7-13人生存
+    const allSeats = Array.from({ length: SEATS }, (_, i) => i + 1)
+    const aliveSeats = shuffleArray(allSeats, rng).slice(0, aliveCount)
+    const mySeat = aliveSeats[Math.floor(rng.next() * aliveSeats.length)]
+    const myRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
+
+    // CO状況を生成
+    const { claims, events } = generateCOSituation(aliveSeats, rng)
+
+    // パターン選択
+    const pattern = pickPattern(rng)
+
+    // プランとラベルを生成
+    const result = generatePlanAndLabel(pattern, claims, aliveSeats, mySeat, rng)
+    if (!result) continue  // 条件に合わなければリトライ
+
+    const { plan, label } = result
+
+    // DecisionContext構築 → observation
+    const ctx = buildSyntheticContext({
+      day, mySeat, myRole, aliveSeats, events, plan, rng,
+    })
+    const observation = encodeObservation(ctx)
+    const voteMask = maskVote(ctx)
+
+    // ラベルの検証: マスクで無効な席のラベルが0であることを確認
+    let valid = true
+    for (let i = 0; i < SEATS; i++) {
+      if (label[i] > 0 && voteMask[i] === -Infinity) {
+        valid = false
+        break
+      }
+    }
+    if (!valid) continue
+
+    samples.push({ observation, voteLabel: label, voteMask })
+  }
+
+  return samples
+}
