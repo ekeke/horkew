@@ -47,6 +47,16 @@ export type AnalyzeOptions = {
 
   // cooperative abort via SharedArrayBuffer
   signal?: Int32Array
+
+  // 事前計算済みinitialPossibilitiesを基に再計算する場合に指定
+  prior?: Possibilities
+}
+
+export type VillageMetadata = {
+  nightKillsByDay: Map<Day, Seat[]>
+  lastDeaths: Seat[]
+  lastHamsterMustDieAt?: number
+  lastHamsterMustDiedBy?: CauseOfDeath
 }
 
 const HumanRoles: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'possessed', 'fanatic', 'immoralist', 'werehamster']
@@ -105,27 +115,20 @@ export class VillageRetar {
     this.options = options
     this.conclusions = Possibilities.empty(setup)
 
-    this.applyHocusPocus()
-
     this.setOfRoles = new Set<SystemRole>(setup.keys())
     this.setOfHuman = new Set(HumanRoles).intersection(this.setOfRoles)
     this.setOfLiar = new Set(LiarRoles).intersection(this.setOfRoles)
 
-    this.initialPossibilities = new Possibilities(setup)
-    this.applyFixedPositions(village)
-
+    // Village由来メタデータ（possibilities非依存）
+    this.extractHamsterDeathInfo(village)
     const multipleVictims = this.buildNightKillMap(village)
-
-    // 単独の夜死体は狼襲撃によるものなので、被害者は人狼ではない
-    for ( const [, killed] of this.nightKillsByDay ) {
-      if ( killed.length === 1 ) {
-        this.initialPossibilities.denyRole(killed[0], 'werewolf')
-      }
-    }
-
     this.lastDeaths = this.findLastDeaths()
-    this.applyGameEndConstraints()
 
+    // 初期化分岐
+    if (options.prior) this.initFromPrior(options.prior)
+    else this.initFromScratch(village)
+
+    // 共通後処理
     const plan = buildRoleTestPlan(village, setup, multipleVictims, this.initialPossibilities)
     this.roleTests = plan.roleTests
     this.totalLiarRoles = plan.totalLiarRoles
@@ -154,6 +157,46 @@ export class VillageRetar {
     this.cachedSurvivingMap = new Map(this.cachedSurvivors.map(seat => [seat, true]))
   }
 
+  // ゼロから初期化（従来のフルパス）
+  private initFromScratch(village: VillageStatus) {
+    this.applyHocusPocus()
+    this.initialPossibilities = new Possibilities(this.setup)
+    this.applyFixedPositions(village)
+
+    // 単独の夜死体は狼襲撃によるものなので、被害者は人狼ではない
+    for ( const [, killed] of this.nightKillsByDay ) {
+      if ( killed.length === 1 ) {
+        this.initialPossibilities.denyRole(killed[0], 'werewolf')
+      }
+    }
+
+    this.applyGameEndConstraints()
+  }
+
+  // 事前計算済みpossibilitiesを基に、追加assumptionで再計算
+  private initFromPrior(prior: Possibilities) {
+    this.initialPossibilities = prior.clone()
+
+    for ( const [seat, role] of this.options.assumptions.entries() ) {
+      if ( !this.initialPossibilities.hasRole(seat, role) ) {
+        throw new Error(`Prior-based re-analysis: seat ${seat} cannot be ${role} (not in prior possibilities)`)
+      }
+      if ( !this.initialPossibilities.fixRole(seat, role) ) {
+        throw new Error(`Prior-based re-analysis: fixRole(${seat}, ${role}) caused contradiction`)
+      }
+    }
+
+    // 狼ペア否定の早期適用: 新assumptionで狼確定した場合
+    for ( const [seatA, seatB] of this.options.wolfPairDenyals ) {
+      if ( this.options.assumptions.get(seatA) === 'werewolf' ) {
+        this.initialPossibilities.denyRole(seatB, 'werewolf')
+      }
+      if ( this.options.assumptions.get(seatB) === 'werewolf' ) {
+        this.initialPossibilities.denyRole(seatA, 'werewolf')
+      }
+    }
+  }
+
   // 村騙りなどのハルプンテ指定 — 一切のCOを無視
   private applyHocusPocus() {
     if ( !this.options.hocusPocus ) return
@@ -163,6 +206,22 @@ export class VillageRetar {
       state.claiming = false
       state.claimingRole = ''
       state.actions = new Map()
+    }
+  }
+
+  // 後追い死亡によるハムスター死亡情報の抽出（possibilities非依存）
+  private extractHamsterDeathInfo(village: VillageStatus) {
+    for ( const [, status] of village.statuses.entries() ) {
+      if ( !status.surviving ) {
+        if ( status.causeOfDeath === 'follow_executed_hamster' ) {
+          this.lastHamsterMustDieAt = status.diedDay
+          this.lastHamsterMustDiedBy = 'execution'
+        }
+        else if ( status.causeOfDeath === 'follow_killed_hamster' ) {
+          this.lastHamsterMustDieAt = status.diedDay
+          this.lastHamsterMustDiedBy = 'night_kill'
+        }
+      }
     }
   }
 
@@ -233,13 +292,9 @@ export class VillageRetar {
         }
         else if ( status.causeOfDeath === 'follow_executed_hamster') {
           fixedPositions.set(seat, 'immoralist')
-          this.lastHamsterMustDieAt = status.diedDay
-          this.lastHamsterMustDiedBy = 'execution'
         }
         else if ( status.causeOfDeath === 'follow_killed_hamster' ) {
           fixedPositions.set(seat, 'immoralist')
-          this.lastHamsterMustDieAt = status.diedDay
-          this.lastHamsterMustDiedBy = 'night_kill'
         }
       }
     }
@@ -338,6 +393,15 @@ export class VillageRetar {
 
   getStatus(seat: Seat) {
     return this.vs.statuses.get(seat)
+  }
+
+  extractMetadata(): VillageMetadata {
+    return {
+      nightKillsByDay: this.nightKillsByDay,
+      lastDeaths: this.lastDeaths,
+      lastHamsterMustDieAt: this.lastHamsterMustDieAt,
+      lastHamsterMustDiedBy: this.lastHamsterMustDiedBy,
+    }
   }
 
   testRole(scenario: RoleTest) {
