@@ -5,7 +5,7 @@
 
 import type { SystemRole, Seat } from '../types/index.ts'
 import type { AnalyzeOptions, AnalyzeResult } from './index.ts'
-import { Possibilities, RoleSignatureBits } from './possibilities.ts'
+import { Possibilities, RoleSignatureBits, RoleBitIndex, ROLE_COUNT } from './possibilities.ts'
 
 export function serializeVillageStatus(vs: any): any {
   const obj: any = { ...vs }
@@ -55,18 +55,37 @@ export function serializeVillageStatus(vs: any): any {
   return obj
 }
 
-export function serializeOptions(options: AnalyzeOptions): any {
+export function serializeOptions(options: AnalyzeOptions, setup?: Map<SystemRole, number>): any {
   const result: any = {
     ...options,
     assumptions: Object.fromEntries(options.assumptions),
     hocusPocus: Object.fromEntries(options.hocusPocus),
   }
   if (options.prior) {
-    const priorObj: Record<string, string[]> = {}
-    for (const [seat, roles] of options.prior) {
-      priorObj[String(seat)] = [...roles]
+    // Rust Possibilities 構造体互換フォーマットに変換
+    // { possibilities: u16[], setup: u8[11], setup_original: u8[11], max_surviving_nv: i32 }
+    let maxSeat = 0
+    for (const seat of options.prior.keys()) {
+      if (seat > maxSeat) maxSeat = seat
     }
-    result.prior = priorObj
+    const possibilities = new Array<number>(maxSeat + 1).fill(0)
+    for (const [seat, roles] of options.prior) {
+      let mask = 0
+      for (const role of roles) mask |= RoleSignatureBits[role]
+      possibilities[seat] = mask
+    }
+    const setupArr = new Array<number>(ROLE_COUNT).fill(0)
+    if (setup) {
+      for (const [role, count] of setup) {
+        setupArr[RoleBitIndex[role]] = count
+      }
+    }
+    result.prior = {
+      possibilities,
+      setup: setupArr,
+      setup_original: setupArr,
+      max_surviving_nv: 0,
+    }
   }
   return result
 }

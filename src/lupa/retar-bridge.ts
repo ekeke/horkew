@@ -71,7 +71,7 @@ function runRetar(
   if (wasmAnalyze) {
     const vsJson = JSON.stringify(serializeVillageStatus(vs))
     const setupJson = JSON.stringify(Object.fromEntries(setup))
-    const optJson = JSON.stringify(serializeOptions(options))
+    const optJson = JSON.stringify(serializeOptions(options, setup))
     const wasmResult = parseWasmResult(wasmAnalyze(vsJson, setupJson, optJson))
     return { possibilities: wasmResult.result, maxSurvivingNV: wasmResult.maxSurvivingNV }
   }
@@ -91,7 +91,7 @@ const lupaRunRetar: RunRetar = (vs, setup, options) => {
   if (wasmAnalyze) {
     const vsJson = JSON.stringify(serializeVillageStatus(vs))
     const setupJson = JSON.stringify(Object.fromEntries(setup))
-    const optJson = JSON.stringify(serializeOptions(options))
+    const optJson = JSON.stringify(serializeOptions(options, setup))
     return resultToPossibilities(parseWasmResult(wasmAnalyze(vsJson, setupJson, optJson)))
   }
   const retar = new VillageRetar(vs, setup, options)
@@ -135,14 +135,25 @@ export function analyzeFromEvents(
 export function buildAssumptions(
   state: GameState,
   player: GameState['players'][0],
+  prior?: Map<number, Set<SystemRole>>,
 ): Map<number, SystemRole> {
-  const assumptions = new Map<number, SystemRole>([[player.seat, player.role]])
+  const assumptions = new Map<number, SystemRole>()
+
+  const trySet = (seat: number, role: SystemRole) => {
+    if (prior) {
+      const possible = prior.get(seat)
+      if (!possible || !possible.has(role)) return
+    }
+    assumptions.set(seat, role)
+  }
+
+  trySet(player.seat, player.role)
 
   switch (player.role) {
     case 'werewolf':
       for (const p of state.players) {
         if (p.role === 'werewolf' && p.seat !== player.seat) {
-          assumptions.set(p.seat, 'werewolf')
+          trySet(p.seat, 'werewolf')
         }
       }
       break
@@ -150,27 +161,27 @@ export function buildAssumptions(
     case 'fanatic':
       for (const p of state.players) {
         if (p.role === 'werewolf') {
-          assumptions.set(p.seat, 'werewolf')
+          trySet(p.seat, 'werewolf')
         }
       }
       break
 
     case 'immoralist': {
       const hamster = state.players.find(p => p.role === 'werehamster')
-      if (hamster) assumptions.set(hamster.seat, 'werehamster')
+      if (hamster) trySet(hamster.seat, 'werehamster')
       break
     }
 
     case 'mason': {
       const partner = state.players.find(p => p.role === 'mason' && p.seat !== player.seat)
-      if (partner) assumptions.set(partner.seat, 'mason')
+      if (partner) trySet(partner.seat, 'mason')
       break
     }
 
     case 'seer':
       for (const [, result] of player.divineHistory) {
         if (result.result === 'wolf') {
-          assumptions.set(result.target, 'werewolf')
+          trySet(result.target, 'werewolf')
         }
       }
       break
@@ -179,7 +190,7 @@ export function buildAssumptions(
       for (const [day, executedSeat] of state.executionHistory) {
         const executed = state.players.find(p => p.seat === executedSeat)
         if (executed && executed.role === 'werewolf') {
-          assumptions.set(executedSeat, 'werewolf')
+          trySet(executedSeat, 'werewolf')
         }
       }
       break
@@ -211,10 +222,18 @@ export function analyzePerPlayer(
     ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
     : DEFAULT_RETAR_OPTIONS
 
+  // 共通 Retar を1回走らせ、結果を prior として再利用
+  const common = runRetar(vs, setup, baseOptions)
+  const prior = common.possibilities
+
   for (const player of players) {
-    const assumptions = buildAssumptions(state, player)
-    const options = { ...baseOptions, assumptions }
-    result.set(player.seat, runRetar(vs, setup, options))
+    const assumptions = buildAssumptions(state, player, prior)
+    if (assumptions.size === 0) {
+      result.set(player.seat, common)
+    } else {
+      const options = { ...baseOptions, assumptions, prior }
+      result.set(player.seat, runRetar(vs, setup, options))
+    }
   }
 
   return result

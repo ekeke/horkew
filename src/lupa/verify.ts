@@ -30,6 +30,7 @@ import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions, AnalyzedPossibilities } from '../retar/index.ts'
 import { serializeVillageStatus, serializeOptions, parseWasmResult } from '../retar/wasm-helpers.ts'
+import { buildAssumptions } from './retar-bridge.ts'
 
 // WASM ロード（--compat 時のみ使用）
 let wasmAnalyze: ((village: string, setup: string, options: string) => string) | null = null
@@ -372,6 +373,119 @@ function verifyCompatCheckpoint(
   }
 }
 
+/**
+ * Prior等価性検証: buildAssumptions を使い prior+assumptions と assumptions のみの結果が完全一致するか
+ */
+function verifyPriorEquivCheckpoint(
+  events: GameEvent[],
+  state: GameState,
+  config: LupaConfig,
+  checkpoint: Checkpoint,
+  configName: string,
+  seed: number,
+): VerifyResult {
+  const partialEvents = events.slice(0, checkpoint.index)
+  const partialHowl = formatHowl(partialEvents, state, config)
+
+  const { meta, statements } = parse(partialHowl)
+  const unknowns = statements.filter(s => s.type === 'unknown')
+  if (unknowns.length > 0) {
+    return { failure: null, skipped: true, retarMs: 0 }
+  }
+
+  const { vs, setup } = buildVillageStatus(statements, meta)
+
+  // Retarの前提条件チェック
+  for (const player of state.players) {
+    if (!VILLAGE_ROLES.includes(player.role)) continue
+    const seatStatus = vs.statuses.get(player.seat)
+    if (!seatStatus) continue
+    if (!seatStatus.surviving && seatStatus.causeOfDeath === 'execution' && !seatStatus.claiming) {
+      return { failure: null, skipped: true, retarMs: 0 }
+    }
+  }
+
+  const options = config.hasFirstGhost
+    ? { ...lupaOptions, hasFirstGhost: true }
+    : lupaOptions
+
+  // ベースRetarを実行してpriorを取得
+  const baseRetar = new VillageRetar(vs, setup, options)
+  const baseResult = baseRetar.analyze()
+  if (baseResult.error) {
+    return { failure: null, skipped: true, retarMs: 0 }
+  }
+  const prior = baseResult.result
+
+  const t0 = performance.now()
+  const failedPlayers: { name: string, message: string }[] = []
+
+  for (const player of state.players) {
+    // prior ありの assumptions（buildAssumptions が prior を参照してフィルタする）
+    const assumptionsWithPrior = buildAssumptions(state, player, prior)
+    if (assumptionsWithPrior.size === 0) continue
+
+    // prior なしの assumptions（直接実行用）
+    const assumptionsWithout = buildAssumptions(state, player)
+
+    // A: prior + assumptions
+    const retarA = new VillageRetar(vs, setup, { ...options, assumptions: assumptionsWithPrior, prior })
+    const resultA = retarA.analyzeSafe()
+
+    // B: assumptions のみ（prior なし）
+    const retarB = new VillageRetar(vs, setup, { ...options, assumptions: assumptionsWithout })
+    const resultB = retarB.analyzeSafe()
+
+    // エラー状態の比較
+    if (resultA.error && resultB.error) continue
+    if (resultA.error || resultB.error) {
+      failedPlayers.push({
+        name: player.name,
+        message: `エラー不一致: prior=${resultA.error ?? 'ok'}, direct=${resultB.error ?? 'ok'}`,
+      })
+      continue
+    }
+
+    // 各座席の可能性を比較
+    for (const [seat, rolesB] of resultB.result) {
+      const rolesA = resultA.result.get(seat)
+      if (!rolesA) {
+        failedPlayers.push({
+          name: player.name,
+          message: `${player.name}視点: seat${seat}がprior結果に欠落`,
+        })
+        break
+      }
+      const sortedA = [...rolesA].sort()
+      const sortedB = [...rolesB].sort()
+      if (sortedA.length !== sortedB.length || sortedA.some((r, i) => r !== sortedB[i])) {
+        failedPlayers.push({
+          name: player.name,
+          message: `${player.name}(${player.role})視点 seat${seat}: prior=[${sortedA}] direct=[${sortedB}]`,
+        })
+        break
+      }
+    }
+  }
+
+  const retarMs = performance.now() - t0
+
+  if (failedPlayers.length === 0) {
+    return { failure: null, skipped: false, retarMs }
+  }
+
+  const annotatedHowl = partialHowl.trimEnd() + '\n\n'
+    + failedPlayers.map(p => `# [prior-equiv] ${p.name}: ${p.message}`).join('\n') + '\n'
+
+  return {
+    failure: {
+      config: configName, seed, checkpoint, howl: annotatedHowl,
+      players: failedPlayers,
+    },
+    skipped: false, retarMs,
+  }
+}
+
 type GameConfig = {
   name: string
   roles: Record<string, number>
@@ -412,6 +526,7 @@ type Args = {
   seeds: [number, number] | null
   quiet: boolean
   prior: boolean
+  priorEquiv: boolean
   compat: boolean
 }
 
@@ -427,6 +542,7 @@ Options:
   --seeds <from>-<to> seed範囲を指定 (例: 100-200)
   --outdir <dir>      失敗howlファイルの出力先ディレクトリ
   --prior             priorモード検証: 各座席の真の役職でprior再計算し他席と矛盾しないか
+  --prior-equiv       prior等価性検証: buildAssumptionsでprior有無の結果が完全一致するか
   --compat            JS版とWASM版の出力が完全一致するか検証
   --quiet, -q         プログレスバーを非表示
   --help, -h          このヘルプを表示
@@ -445,7 +561,7 @@ Examples:
 function parseArgs(): Args {
   const args = process.argv.slice(2)
   if (args.includes('--help') || args.includes('-h')) showHelp()
-  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false, prior: false, compat: false }
+  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false, prior: false, priorEquiv: false, compat: false }
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -465,6 +581,9 @@ function parseArgs(): Args {
       }
       case '--prior':
         result.prior = true
+        break
+      case '--prior-equiv':
+        result.priorEquiv = true
         break
       case '--compat':
         result.compat = true
@@ -497,7 +616,7 @@ function renderProgress(
 }
 
 function main() {
-  const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet, prior, compat } = parseArgs()
+  const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet, prior, priorEquiv, compat } = parseArgs()
   if (compat && !wasmAnalyze) {
     console.error('--compat: WASM版が利用できません。npm run build:wasm:node でビルドしてください。')
     process.exit(1)
@@ -562,6 +681,8 @@ function main() {
         if (gameFailed) continue
         const { failure, skipped, retarMs } = compat
           ? verifyCompatCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
+          : priorEquiv
+          ? verifyPriorEquivCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
           : prior
           ? verifyPriorCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
           : verifyCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
