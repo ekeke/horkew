@@ -7,8 +7,14 @@
  * 公開情報(publicEvents, signals)と自分の秘密情報(myPlayer)のみからエンコード。
  */
 
-import type { DecisionContext, TeamDecisionContext } from '../../lupa/strategy.ts'
+import type { DecisionContext, TeamDecisionContext, PlanType } from '../../lupa/strategy.ts'
 import type { SystemRole } from '../../types/index.ts'
+
+// プラン種別インデックス
+const PLAN_TYPES: PlanType[] = ['roller', 'decision', 'designated', 'grayran', 'endgame']
+const PLAN_TYPE_INDEX: Record<string, number> = {}
+for (let i = 0; i < PLAN_TYPES.length; i++) PLAN_TYPE_INDEX[PLAN_TYPES[i]] = i
+const PLAN_TYPE_COUNT = PLAN_TYPES.length
 
 /** 14D猫専用: 席数固定 */
 export const SEATS = 14
@@ -42,7 +48,17 @@ const PLAN_PER_SEAT_SIZE = 2
 const PLAN_GLOBAL_SIZE = 3
 const PLAN_SIZE = SEATS * PLAN_PER_SEAT_SIZE + PLAN_GLOBAL_SIZE  // 31
 
-export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + PLAN_SIZE
+/** プラントークンの特徴量次元 */
+export const PLAN_TOKEN_FEATURES = 20
+/** プラントークンの最大数 */
+export const MAX_PLAN_TOKENS = 8
+
+// プラントークン: plan_token_count(1) + MAX_PLAN_TOKENS × PLAN_TOKEN_FEATURES
+const PLAN_TOKENS_COUNT_SIZE = 1
+const PLAN_TOKENS_DATA_SIZE = MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES  // 160
+const PLAN_TOKENS_SIZE = PLAN_TOKENS_COUNT_SIZE + PLAN_TOKENS_DATA_SIZE  // 161
+
+export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + PLAN_SIZE + PLAN_TOKENS_SIZE
 
 // ============================================================
 // Transformer用トークン化
@@ -67,6 +83,11 @@ const PLAN_INCLUDED_START = PLAN_START
 const PLAN_POSITION_START = PLAN_START + SEATS
 const PLAN_GLOBAL_START = PLAN_START + SEATS * PLAN_PER_SEAT_SIZE
 
+// プラントークンセクション
+const PLAN_TOKENS_START = PLAN_START + PLAN_SIZE
+const PLAN_TOKEN_COUNT_START = PLAN_TOKENS_START
+const PLAN_TOKEN_DATA_START = PLAN_TOKENS_START + 1
+
 // チーム拡張オフセット (OBSERVATION_SIZE基準)
 const TEAM_SIZE_START = OBSERVATION_SIZE
 const TEAM_IS_MY_TEAM_START = TEAM_SIZE_START + 1
@@ -82,11 +103,6 @@ export const TEAM_CLS_FEATURES = 26
 export const SEAT_TOKEN_FEATURES = 57
 /** 席トークンの特徴量次元 (team) */
 export const TEAM_SEAT_TOKEN_FEATURES = 60
-/** プラントークンの特徴量次元 (Phase D用) */
-export const PLAN_TOKEN_FEATURES = 20
-/** プラントークンの最大数 */
-export const MAX_PLAN_TOKENS = 8
-
 /** トークン化されたobservation */
 export type TokenizedObservation = {
   /** CLSトークン [clsFeatures] */
@@ -170,12 +186,27 @@ export function tokenize(obs: Float32Array, isTeam: boolean = false): TokenizedO
     }
   }
 
-  // ========== Plan tokens (Phase D: 現時点では空) ==========
+  // ========== Plan tokens ==========
+  const planCount = Math.min(Math.round(obs[PLAN_TOKEN_COUNT_START]), MAX_PLAN_TOKENS)
+  let plans: Float32Array
+  if (planCount > 0) {
+    plans = new Float32Array(planCount * PLAN_TOKEN_FEATURES)
+    for (let p = 0; p < planCount; p++) {
+      const srcOff = PLAN_TOKEN_DATA_START + p * PLAN_TOKEN_FEATURES
+      const dstOff = p * PLAN_TOKEN_FEATURES
+      for (let i = 0; i < PLAN_TOKEN_FEATURES; i++) {
+        plans[dstOff + i] = obs[srcOff + i]
+      }
+    }
+  } else {
+    plans = new Float32Array(0)
+  }
+
   return {
     cls,
     seats,
-    plans: new Float32Array(0),
-    planCount: 0,
+    plans,
+    planCount,
     seatFeatures: sf,
     clsFeatures: cf,
   }
@@ -461,28 +492,49 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   }
   offset += RETAR_POSSIBILITIES_SIZE
 
-  // ========== Execution Plan ==========
-  if (ctx.executionPlan) {
-    const plan = ctx.executionPlan
+  // ========== Execution Plan (primary plan — backward compat) ==========
+  const primaryPlan = ctx.executionPlans.length > 0 ? ctx.executionPlans[0] : null
+  if (primaryPlan) {
     // per-seat: plan_included (14次元)
     for (let seat = 1; seat <= SEATS; seat++) {
-      obs[offset + seat - 1] = plan.targets.includes(seat) ? 1 : 0
+      obs[offset + seat - 1] = primaryPlan.targets.includes(seat) ? 1 : 0
     }
     offset += SEATS
     // per-seat: plan_position (14次元, normalized by plan length)
-    const len = plan.targets.length
+    const len = primaryPlan.targets.length
     for (let seat = 1; seat <= SEATS; seat++) {
-      const idx = plan.targets.indexOf(seat)
+      const idx = primaryPlan.targets.indexOf(seat)
       obs[offset + seat - 1] = idx >= 0 && len > 0 ? (idx + 1) / len : 0
     }
     offset += SEATS
     // global: plan_length, plan_is_grayran, plan_active
     obs[offset++] = len / SEATS
-    obs[offset++] = plan.isGrayran ? 1 : 0
+    obs[offset++] = primaryPlan.type === 'grayran' ? 1 : 0
     obs[offset++] = 1  // plan_active
   } else {
     offset += PLAN_SIZE  // all zeros
   }
+
+  // ========== Plan Tokens (Transformer用、全プラン) ==========
+  const planCount = Math.min(ctx.executionPlans.length, MAX_PLAN_TOKENS)
+  obs[offset++] = planCount  // plan_token_count
+
+  for (let p = 0; p < planCount; p++) {
+    const plan = ctx.executionPlans[p]
+    const base = offset + p * PLAN_TOKEN_FEATURES
+    // target_mask[14]
+    for (let seat = 1; seat <= SEATS; seat++) {
+      obs[base + seat - 1] = plan.targets.includes(seat) ? 1 : 0
+    }
+    // type_onehot[5]: roller/decision/designated/grayran/endgame
+    const typeIdx = PLAN_TYPE_INDEX[plan.type]
+    if (typeIdx !== undefined) {
+      obs[base + SEATS + typeIdx] = 1
+    }
+    // priority[1]
+    obs[base + SEATS + PLAN_TYPE_COUNT] = planCount > 1 ? p / (planCount - 1) : 0
+  }
+  offset += PLAN_TOKENS_DATA_SIZE  // always advance by max size
 
   return obs
 }

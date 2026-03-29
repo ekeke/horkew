@@ -84,7 +84,7 @@ function generatePlanAndLabel(
       if (claimants.length < 2) return null
       const targets = claimants.filter(s => s !== mySeat)
       if (targets.length < 2) return null
-      const plan: ExecutionPlan = { targets, isGrayran: false }
+      const plan: ExecutionPlan = { targets, type: 'roller' }
       // 正解: targets[0] (先頭)
       label[targets[0] - 1] = 1
       return { plan, label }
@@ -95,7 +95,7 @@ function generatePlanAndLabel(
       const candidates = claimants.filter(s => s !== mySeat)
       if (candidates.length === 0) return null
       const target = candidates[Math.floor(rng.next() * candidates.length)]
-      const plan: ExecutionPlan = { targets: [target], isGrayran: false }
+      const plan: ExecutionPlan = { targets: [target], type: 'decision' }
       label[target - 1] = 1
       return { plan, label }
     }
@@ -104,13 +104,13 @@ function generatePlanAndLabel(
       const candidates = aliveSeats.filter(s => s !== mySeat)
       if (candidates.length === 0) return null
       const target = candidates[Math.floor(rng.next() * candidates.length)]
-      const plan: ExecutionPlan = { targets: [target], isGrayran: false }
+      const plan: ExecutionPlan = { targets: [target], type: 'designated' }
       label[target - 1] = 1
       return { plan, label }
     }
     case 'grayran': {
       if (grays.length === 0) return null
-      const plan: ExecutionPlan = { targets: [], isGrayran: true }
+      const plan: ExecutionPlan = { targets: [], type: 'grayran' }
       // soft label: CO者以外の生存者に均等確率
       const prob = 1 / grays.length
       for (const s of grays) {
@@ -157,7 +157,7 @@ function buildSyntheticContext(params: {
     masonPartner: null,
     revoteRound: null,
     revoteCandidates: null,
-    executionPlan: params.plan,
+    executionPlans: [params.plan],
   }
 }
 

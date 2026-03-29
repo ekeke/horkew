@@ -36,16 +36,19 @@ export type DecisionContext = {
   revoteRound: number | null
   /** 再投票時の候補者seat一覧 (初回投票 or 投票フェーズ以外はnull) */
   revoteCandidates: number[] | null
-  /** 処刑プラン (null = プランなし) */
-  executionPlan: ExecutionPlan | null
+  /** 処刑プラン (空配列 = プランなし) */
+  executionPlans: ExecutionPlan[]
 }
+
+/** 処刑プランの種別 */
+export type PlanType = 'roller' | 'decision' | 'designated' | 'grayran' | 'endgame'
 
 /** 処刑プラン（NNのobservationに注入） */
 export type ExecutionPlan = {
-  /** 処刑対象の席番号列 (1-indexed, 順序が処刑順) */
+  /** 処刑対象の席番号列 (1-indexed, 順序が処刑順)。endgameの場合は候補集合 */
   targets: number[]
-  /** グレランか（targetsが空の場合にtrue） */
-  isGrayran: boolean
+  /** プラン種別 */
+  type: PlanType
 }
 
 /** プラガブルな戦略インターフェース (個人エージェント) */

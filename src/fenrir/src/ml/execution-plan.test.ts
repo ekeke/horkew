@@ -6,20 +6,29 @@ import type { SystemRole } from '../../../types/index.ts'
 
 describe('classifyPlan', () => {
   it('grayran', () => {
-    const plan: ExecutionPlan = { targets: [], isGrayran: true }
+    const plan: ExecutionPlan = { targets: [], type: 'grayran' }
     const label = classifyPlan(plan, new Map())
     assert.equal(label.type, 'grayran')
   })
 
   it('empty targets without grayran → none', () => {
-    const plan: ExecutionPlan = { targets: [], isGrayran: false }
+    const plan: ExecutionPlan = { targets: [], type: 'designated' }
     const label = classifyPlan(plan, new Map())
     assert.equal(label.type, 'none')
   })
 
+  it('endgame: candidates', () => {
+    const plan: ExecutionPlan = { targets: [5, 9], type: 'endgame' }
+    const label = classifyPlan(plan, new Map())
+    assert.equal(label.type, 'endgame')
+    if (label.type === 'endgame') {
+      assert.deepEqual(label.candidates, [5, 9])
+    }
+  })
+
   it('roller: 2 medium claimants both in targets', () => {
     const claims = new Map<number, SystemRole>([[3, 'medium'], [7, 'medium']])
-    const plan: ExecutionPlan = { targets: [3, 7], isGrayran: false }
+    const plan: ExecutionPlan = { targets: [3, 7], type: 'roller' }
     const label = classifyPlan(plan, claims)
     assert.equal(label.type, 'roller')
     assert.equal(label.type === 'roller' && label.role, 'medium')
@@ -28,7 +37,7 @@ describe('classifyPlan', () => {
 
   it('decision: 3 medium claimants, 2 in targets', () => {
     const claims = new Map<number, SystemRole>([[3, 'medium'], [7, 'medium'], [12, 'medium']])
-    const plan: ExecutionPlan = { targets: [3, 7], isGrayran: false }
+    const plan: ExecutionPlan = { targets: [3, 7], type: 'roller' }
     const label = classifyPlan(plan, claims)
     assert.equal(label.type, 'decision')
     if (label.type === 'decision') {
@@ -40,7 +49,7 @@ describe('classifyPlan', () => {
 
   it('decision: 2 medium claimants, 1 in targets', () => {
     const claims = new Map<number, SystemRole>([[3, 'medium'], [7, 'medium']])
-    const plan: ExecutionPlan = { targets: [3], isGrayran: false }
+    const plan: ExecutionPlan = { targets: [3], type: 'decision' }
     const label = classifyPlan(plan, claims)
     assert.equal(label.type, 'decision')
     if (label.type === 'decision') {
@@ -51,7 +60,7 @@ describe('classifyPlan', () => {
   })
 
   it('designated: single target, no CO match', () => {
-    const plan: ExecutionPlan = { targets: [5], isGrayran: false }
+    const plan: ExecutionPlan = { targets: [5], type: 'designated' }
     const label = classifyPlan(plan, new Map())
     assert.equal(label.type, 'designated')
     assert.equal(label.type === 'designated' && label.seat, 5)
@@ -59,7 +68,7 @@ describe('classifyPlan', () => {
 
   it('mixed: multiple targets with different COs', () => {
     const claims = new Map<number, SystemRole>([[3, 'seer'], [7, 'medium']])
-    const plan: ExecutionPlan = { targets: [3, 7], isGrayran: false }
+    const plan: ExecutionPlan = { targets: [3, 7], type: 'designated' }
     const label = classifyPlan(plan, claims)
     assert.equal(label.type, 'mixed')
   })
@@ -86,6 +95,13 @@ describe('formatPlanLabel', () => {
 
   it('grayran', () => {
     assert.equal(formatPlanLabel({ type: 'grayran' }), 'グレラン')
+  })
+
+  it('endgame', () => {
+    assert.equal(
+      formatPlanLabel({ type: 'endgame', candidates: [5, 9] }),
+      '最終日決選（5or9）',
+    )
   })
 
   it('mixed', () => {

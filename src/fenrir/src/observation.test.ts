@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { OBSERVATION_SIZE, SEATS, NUM_ROLES, encodeObservation } from './observation.ts'
+import { OBSERVATION_SIZE, SEATS, NUM_ROLES, encodeObservation, tokenize,
+  PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS } from './observation.ts'
 import type { DecisionContext, ExecutionPlan } from '../../lupa/strategy.ts'
 import { Rng } from '../../lupa/random.ts'
 
@@ -13,6 +14,12 @@ const REVOTE_SIZE = 1 + SEATS  // 15
 const HISTORY_SIZE = 3 * SEATS * 5  // 210
 const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
 const PLAN_SIZE = SEATS * 2 + 3  // 31
+const PLAN_TOKENS_SIZE = 1 + MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES  // 161
+const PLAN_GLOBAL_SIZE = 3
+
+// PLANセクションの開始オフセット
+const PLAN_SECTION_START = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE
+  + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE
 
 /** テスト用の最小DecisionContext */
 function makeCtx(overrides: Partial<DecisionContext> = {}): DecisionContext {
@@ -41,7 +48,7 @@ function makeCtx(overrides: Partial<DecisionContext> = {}): DecisionContext {
     masonPartner: null,
     revoteRound: null,
     revoteCandidates: null,
-    executionPlan: null,
+    executionPlans: [],
     ...overrides,
   }
 }
@@ -49,9 +56,9 @@ function makeCtx(overrides: Partial<DecisionContext> = {}): DecisionContext {
 describe('OBSERVATION_SIZE', () => {
   it('equals expected total', () => {
     const expected = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE
-      + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + PLAN_SIZE
+      + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + PLAN_SIZE + PLAN_TOKENS_SIZE
     assert.equal(OBSERVATION_SIZE, expected)
-    assert.equal(OBSERVATION_SIZE, 823)
+    assert.equal(OBSERVATION_SIZE, 984)
   })
 })
 
@@ -61,69 +68,139 @@ describe('encodeObservation', () => {
     assert.equal(obs.length, OBSERVATION_SIZE)
   })
 
-  it('plan section is all zeros when executionPlan is null', () => {
-    const obs = encodeObservation(makeCtx({ executionPlan: null }))
-    const planStart = OBSERVATION_SIZE - PLAN_SIZE
-    for (let i = planStart; i < OBSERVATION_SIZE; i++) {
+  it('plan section is all zeros when no plans', () => {
+    const obs = encodeObservation(makeCtx({ executionPlans: [] }))
+    for (let i = PLAN_SECTION_START; i < PLAN_SECTION_START + PLAN_SIZE; i++) {
       assert.equal(obs[i], 0, `obs[${i}] should be 0 when no plan`)
     }
   })
 
   it('encodes plan_included correctly', () => {
-    const plan: ExecutionPlan = { targets: [3, 7], isGrayran: false }
-    const obs = encodeObservation(makeCtx({ executionPlan: plan }))
-    const planStart = OBSERVATION_SIZE - PLAN_SIZE
+    const plan: ExecutionPlan = { targets: [3, 7], type: 'roller' }
+    const obs = encodeObservation(makeCtx({ executionPlans: [plan] }))
 
-    // plan_included: 14次元 (seats 1..14)
     for (let seat = 1; seat <= SEATS; seat++) {
       const expected = (seat === 3 || seat === 7) ? 1 : 0
-      assert.equal(obs[planStart + seat - 1], expected, `plan_included[seat${seat}]`)
+      assert.equal(obs[PLAN_SECTION_START + seat - 1], expected, `plan_included[seat${seat}]`)
     }
   })
 
   it('encodes plan_position correctly', () => {
-    const plan: ExecutionPlan = { targets: [3, 7], isGrayran: false }
-    const obs = encodeObservation(makeCtx({ executionPlan: plan }))
-    const posStart = OBSERVATION_SIZE - PLAN_SIZE + SEATS  // after plan_included
+    const plan: ExecutionPlan = { targets: [3, 7], type: 'roller' }
+    const obs = encodeObservation(makeCtx({ executionPlans: [plan] }))
+    const posStart = PLAN_SECTION_START + SEATS
 
-    // seat3 = targets[0] → position = 1/2 = 0.5
     assert.equal(obs[posStart + 3 - 1], 0.5, 'seat3 position')
-    // seat7 = targets[1] → position = 2/2 = 1.0
     assert.equal(obs[posStart + 7 - 1], 1.0, 'seat7 position')
-    // seat1 not in plan → 0
     assert.equal(obs[posStart + 1 - 1], 0, 'seat1 position')
   })
 
   it('encodes plan global features correctly', () => {
-    const plan: ExecutionPlan = { targets: [3, 7], isGrayran: false }
-    const obs = encodeObservation(makeCtx({ executionPlan: plan }))
-    const globalStart = OBSERVATION_SIZE - PLAN_GLOBAL_SIZE
+    const plan: ExecutionPlan = { targets: [3, 7], type: 'roller' }
+    const obs = encodeObservation(makeCtx({ executionPlans: [plan] }))
+    const globalStart = PLAN_SECTION_START + SEATS * 2
 
-    // plan_length = 2/14
     assert.ok(Math.abs(obs[globalStart] - 2 / 14) < 1e-6, 'plan_length')
-    // plan_is_grayran = 0
     assert.equal(obs[globalStart + 1], 0, 'plan_is_grayran')
-    // plan_active = 1
     assert.equal(obs[globalStart + 2], 1, 'plan_active')
   })
 
   it('encodes grayran plan correctly', () => {
-    const plan: ExecutionPlan = { targets: [], isGrayran: true }
-    const obs = encodeObservation(makeCtx({ executionPlan: plan }))
-    const planStart = OBSERVATION_SIZE - PLAN_SIZE
-    const globalStart = OBSERVATION_SIZE - PLAN_GLOBAL_SIZE
+    const plan: ExecutionPlan = { targets: [], type: 'grayran' }
+    const obs = encodeObservation(makeCtx({ executionPlans: [plan] }))
+    const globalStart = PLAN_SECTION_START + SEATS * 2
 
-    // all plan_included should be 0
     for (let i = 0; i < SEATS; i++) {
-      assert.equal(obs[planStart + i], 0, `plan_included[${i}]`)
+      assert.equal(obs[PLAN_SECTION_START + i], 0, `plan_included[${i}]`)
     }
-    // plan_length = 0
     assert.equal(obs[globalStart], 0, 'plan_length')
-    // plan_is_grayran = 1
     assert.equal(obs[globalStart + 1], 1, 'plan_is_grayran')
-    // plan_active = 1
     assert.equal(obs[globalStart + 2], 1, 'plan_active')
+  })
+
+  // ========== Plan Token tests ==========
+
+  it('plan_token_count is 0 when no plans', () => {
+    const obs = encodeObservation(makeCtx({ executionPlans: [] }))
+    const tokenCountOffset = PLAN_SECTION_START + PLAN_SIZE
+    assert.equal(obs[tokenCountOffset], 0)
+  })
+
+  it('encodes single plan token correctly', () => {
+    const plan: ExecutionPlan = { targets: [3, 7], type: 'roller' }
+    const obs = encodeObservation(makeCtx({ executionPlans: [plan] }))
+    const tokenCountOffset = PLAN_SECTION_START + PLAN_SIZE
+    const tokenDataOffset = tokenCountOffset + 1
+
+    assert.equal(obs[tokenCountOffset], 1, 'plan_token_count')
+
+    // target_mask[14]: seat 3 and 7 should be 1
+    assert.equal(obs[tokenDataOffset + 3 - 1], 1, 'target_mask[3]')
+    assert.equal(obs[tokenDataOffset + 7 - 1], 1, 'target_mask[7]')
+    assert.equal(obs[tokenDataOffset + 1 - 1], 0, 'target_mask[1]')
+
+    // type_onehot[5]: roller = index 0
+    assert.equal(obs[tokenDataOffset + SEATS + 0], 1, 'type_onehot[roller]')
+    assert.equal(obs[tokenDataOffset + SEATS + 1], 0, 'type_onehot[decision]')
+
+    // priority[1]: single plan = 0
+    assert.equal(obs[tokenDataOffset + SEATS + 5], 0, 'priority')
+  })
+
+  it('encodes multiple plan tokens correctly', () => {
+    const plans: ExecutionPlan[] = [
+      { targets: [3, 7], type: 'roller' },
+      { targets: [5, 9], type: 'endgame' },
+    ]
+    const obs = encodeObservation(makeCtx({ executionPlans: plans }))
+    const tokenCountOffset = PLAN_SECTION_START + PLAN_SIZE
+    const tokenDataOffset = tokenCountOffset + 1
+
+    assert.equal(obs[tokenCountOffset], 2, 'plan_token_count')
+
+    // Token 0: roller
+    assert.equal(obs[tokenDataOffset + 3 - 1], 1, 'plan0 target_mask[3]')
+    assert.equal(obs[tokenDataOffset + SEATS + 0], 1, 'plan0 type=roller')
+
+    // Token 1: endgame (offset by PLAN_TOKEN_FEATURES)
+    const t1 = tokenDataOffset + PLAN_TOKEN_FEATURES
+    assert.equal(obs[t1 + 5 - 1], 1, 'plan1 target_mask[5]')
+    assert.equal(obs[t1 + 9 - 1], 1, 'plan1 target_mask[9]')
+    assert.equal(obs[t1 + SEATS + 4], 1, 'plan1 type=endgame (index 4)')
+
+    // Priority: plan0=0, plan1=1
+    assert.equal(obs[tokenDataOffset + SEATS + 5], 0, 'plan0 priority=0')
+    assert.equal(obs[t1 + SEATS + 5], 1, 'plan1 priority=1')
   })
 })
 
-const PLAN_GLOBAL_SIZE = 3
+describe('tokenize with plan tokens', () => {
+  it('extracts plan tokens from encoded observation', () => {
+    const plans: ExecutionPlan[] = [
+      { targets: [3, 7], type: 'roller' },
+      { targets: [5], type: 'designated' },
+    ]
+    const obs = encodeObservation(makeCtx({ executionPlans: plans }))
+    const tok = tokenize(obs, false)
+
+    assert.equal(tok.planCount, 2, 'planCount')
+    assert.equal(tok.plans.length, 2 * PLAN_TOKEN_FEATURES, 'plans array length')
+
+    // Plan 0: target_mask[3]=1, target_mask[7]=1, type=roller (index 0)
+    assert.equal(tok.plans[3 - 1], 1, 'plan0 target[3]')
+    assert.equal(tok.plans[7 - 1], 1, 'plan0 target[7]')
+    assert.equal(tok.plans[SEATS + 0], 1, 'plan0 type=roller')
+
+    // Plan 1: target_mask[5]=1, type=designated (index 2)
+    const p1 = PLAN_TOKEN_FEATURES
+    assert.equal(tok.plans[p1 + 5 - 1], 1, 'plan1 target[5]')
+    assert.equal(tok.plans[p1 + SEATS + 2], 1, 'plan1 type=designated')
+  })
+
+  it('returns planCount=0 when no plans', () => {
+    const obs = encodeObservation(makeCtx({ executionPlans: [] }))
+    const tok = tokenize(obs, false)
+    assert.equal(tok.planCount, 0)
+    assert.equal(tok.plans.length, 0)
+  })
+})

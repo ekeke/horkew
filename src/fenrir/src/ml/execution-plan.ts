@@ -21,20 +21,23 @@ export type PlanLabel =
   | { type: 'decision', role: SystemRole, targets: number[], trusted: number[] }
   | { type: 'designated', seat: number }
   | { type: 'grayran' }
+  | { type: 'endgame', candidates: number[] }
   | { type: 'mixed', seats: number[] }
   | { type: 'none' }
 
 /**
  * 処刑プランを分類する
  *
+ * - type === 'grayran' → grayran
+ * - type === 'endgame' → endgame
  * - 全targets が同一役職CO → roller
  * - 全targets が同一役職COで、そのCO者数 > targets数 → decision
- * - isGrayran → grayran
  * - targets.length === 1 → designated (ただしroller/decisionに該当しない場合)
  * - それ以外 → mixed
  */
 export function classifyPlan(plan: ExecutionPlan, claims: ClaimedRoles): PlanLabel {
-  if (plan.isGrayran) return { type: 'grayran' }
+  if (plan.type === 'grayran') return { type: 'grayran' }
+  if (plan.type === 'endgame') return { type: 'endgame', candidates: plan.targets }
   if (plan.targets.length === 0) return { type: 'none' }
 
   // targets全員のCO役職を取得
@@ -84,6 +87,10 @@ export function formatPlanLabel(label: PlanLabel): string {
       return `${label.seat}吊り指定`
     case 'grayran':
       return 'グレラン'
+    case 'endgame': {
+      const candidates = label.candidates.join('or')
+      return `最終日決選（${candidates}）`
+    }
     case 'mixed': {
       const seats = label.seats.join('→')
       return `${seats}処刑提案`

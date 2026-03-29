@@ -35,7 +35,7 @@ function makeCompatCtx(
     masonPartner: null,
     revoteRound: null,
     revoteCandidates: null,
-    executionPlan: null,
+    executionPlans: [],
   }
 }
 

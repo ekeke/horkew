@@ -84,7 +84,7 @@ function buildContext(
   revoteCandidates: number[] | null = null,
   perPlayerRetar: PerPlayerRetar | null = null,
   maxSurvivingNV: number | null = null,
-  executionPlan: ExecutionPlan | null = null,
+  executionPlans: ExecutionPlan[] = [],
 ): DecisionContext {
   // 初期知識の注入
   let wolfTeammates: number[] | null = null
@@ -135,7 +135,7 @@ function buildContext(
     masonPartner,
     revoteRound,
     revoteCandidates,
-    executionPlan,
+    executionPlans,
   }
 }
 
