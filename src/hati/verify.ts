@@ -25,7 +25,7 @@ import { searchTsumi } from './index.ts'
 import { getEndgameStats, resetEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { VillageRetar } from '../retar/index.ts'
-import { RoleBitIndex, RoleSignatureBits } from '../retar/possibilities.ts'
+import { RoleBitIndex, RoleSignatureBits, possibilityFromSet } from '../retar/possibilities.ts'
 import { formatStrategy } from './format.ts'
 import type { StrategyNode, World } from './types.ts'
 import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
@@ -624,8 +624,12 @@ function runVerify(args: Args): void {
             const { vs, setup } = buildVillageStatus(statements, meta)
             const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
             const retar = new VillageRetar(vs, setup, opts)
-            retar.analyze()
-            retarExcluded = checkRetarInclusion(state, retar.conclusions.possibilities, alive)
+            const retarResult = retar.analyze()
+            const poss = new Uint16Array(setup.values().reduce((a, b) => a + b, 0) + 1)
+            for (const [seat, roles] of retarResult.result) {
+              poss[seat] = possibilityFromSet(roles)
+            }
+            retarExcluded = checkRetarInclusion(state, poss, alive)
           } catch { /* ignore */ }
 
           const isRetarBug = retarExcluded.length > 0

@@ -62,12 +62,11 @@ export function serializeOptions(options: AnalyzeOptions): any {
     hocusPocus: Object.fromEntries(options.hocusPocus),
   }
   if (options.prior) {
-    result.prior = {
-      possibilities: Array.from(options.prior.possibilities),
-      setup: Array.from(options.prior.setup),
-      setup_original: Array.from(options.prior.setupOriginal),
-      max_surviving_nv: options.prior.maxSurvivingNV,
+    const priorObj: Record<string, string[]> = {}
+    for (const [seat, roles] of options.prior) {
+      priorObj[String(seat)] = [...roles]
     }
+    result.prior = priorObj
   }
   return result
 }

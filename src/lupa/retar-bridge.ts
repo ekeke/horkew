@@ -79,7 +79,7 @@ function runRetar(
   const retar = new VillageRetar(vs, setup, options)
   const result = retar.analyzeSafe()
   if (result.error || !result.result) return { possibilities: new Map(), maxSurvivingNV: 0 }
-  return { possibilities: result.result, maxSurvivingNV: retar.conclusions.maxSurvivingNV }
+  return { possibilities: result.result, maxSurvivingNV: result.maxSurvivingNV }
 }
 
 // ============================================================
@@ -94,8 +94,9 @@ const lupaRunRetar: RunRetar = (vs, setup, options) => {
     return resultToPossibilities(parseWasmResult(wasmAnalyze(vsJson, setupJson, optJson)))
   }
   const retar = new VillageRetar(vs, setup, options)
-  retar.analyze()
-  return retar.conclusions
+  const result = retar.analyzeSafe()
+  if (result.error || !result.result) return resultToPossibilities({ possibilities: new Map(), maxSurvivingNV: 0 })
+  return resultToPossibilities({ possibilities: result.result, maxSurvivingNV: result.maxSurvivingNV })
 }
 
 // ============================================================

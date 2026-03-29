@@ -1,5 +1,5 @@
 import type { CauseOfDeath, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
-import { Possibilities } from './possibilities.ts'
+import { Possibilities, possibilityFromSet } from './possibilities.ts'
 import { generateCombinations } from './combinatorics.ts'
 import { roleTesterMap, saveContext, restoreContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
@@ -18,7 +18,8 @@ export type AnalyzeResult = {
   aborted?: boolean,
   error?: Error,
   info?: any,
-  result: AnalyzedPossibilities
+  result: AnalyzedPossibilities,
+  maxSurvivingNV: number,
 }
 
 /*
@@ -48,8 +49,8 @@ export type AnalyzeOptions = {
   // cooperative abort via SharedArrayBuffer
   signal?: Int32Array
 
-  // 事前計算済みinitialPossibilitiesを基に再計算する場合に指定
-  prior?: Possibilities
+  // 事前計算済みanalyze結果を基に再計算する場合に指定
+  prior?: AnalyzedPossibilities
 }
 
 export type VillageMetadata = {
@@ -173,9 +174,12 @@ export class VillageRetar {
     this.applyGameEndConstraints()
   }
 
-  // 事前計算済みpossibilitiesを基に、追加assumptionで再計算
-  private initFromPrior(prior: Possibilities) {
-    this.initialPossibilities = prior.clone()
+  // 事前計算済みanalyze結果を基に、追加assumptionで再計算
+  private initFromPrior(prior: AnalyzedPossibilities) {
+    this.initialPossibilities = new Possibilities(this.setup)
+    for ( const [seat, roles] of prior.entries() ) {
+      this.initialPossibilities.possibilities[seat] = possibilityFromSet(roles)
+    }
 
     for ( const [seat, role] of this.options.assumptions.entries() ) {
       if ( !this.initialPossibilities.hasRole(seat, role) ) {
@@ -436,6 +440,7 @@ export class VillageRetar {
       id: this.options.id,
       aborted,
       result: aborted ? new Map() : this.conclusions.toStructured(),
+      maxSurvivingNV: this.conclusions.maxSurvivingNV,
     }
   }
 
@@ -462,7 +467,7 @@ export class VillageRetar {
     if (this.isAborted()) {
       this.initialPossibilities = originalPossibilities
       this.hamsterWinPath = undefined
-      return { aborted: true, result: new Map() }
+      return { aborted: true, result: new Map(), maxSurvivingNV: 0 }
     }
 
     // パス2: 飽和（狼勝利相当）→ 最終死者は非狼・非狐
@@ -492,6 +497,7 @@ export class VillageRetar {
       id: this.options.id,
       aborted,
       result: aborted ? new Map() : this.conclusions.toStructured(),
+      maxSurvivingNV: this.conclusions.maxSurvivingNV,
     }
   }
 
@@ -629,7 +635,7 @@ export class VillageRetar {
       return this.analyze()
     }
     catch (e) {
-      return { error: e instanceof Error ? e : new Error(String(e)), result: new Map() }
+      return { error: e instanceof Error ? e : new Error(String(e)), result: new Map(), maxSurvivingNV: 0 }
     }
   }
 }

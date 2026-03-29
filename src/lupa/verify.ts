@@ -244,9 +244,10 @@ function verifyPriorCheckpoint(
     ? { ...lupaOptions, hasFirstGhost: true }
     : lupaOptions
 
-  // ベースRetarを構築してpriorを取得
+  // ベースRetarを実行してprior（analyze結果）を取得
   const baseRetar = new VillageRetar(vs, setup, options)
-  const prior = baseRetar.initialPossibilities
+  const baseResult = baseRetar.analyze()
+  const prior = baseResult.result
 
   const t0 = performance.now()
   const failedPlayers: { name: string, message: string }[] = []
@@ -256,7 +257,8 @@ function verifyPriorCheckpoint(
     const assumptions = new Map<number, SystemRole>([[player.seat, player.role]])
 
     // priorに含まれない役職 → この座席はスキップ（ベースRetarの前提条件で既に除外済み）
-    if (!prior.hasRole(player.seat, player.role)) continue
+    const priorRoles = prior.get(player.seat)
+    if (!priorRoles || !priorRoles.has(player.role)) continue
 
     const priorRetar = new VillageRetar(vs, setup, { ...options, assumptions, prior })
     const result = priorRetar.analyzeSafe()
