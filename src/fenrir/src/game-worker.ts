@@ -104,7 +104,15 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
 
     let wolfTeamStrategy: WolfTeamStrategy | undefined
     let masonTeamStrategy: MasonTeamStrategy | undefined
-    if (!useHeuristic || multiModel) {
+    if (req.useTeamStrategy) {
+      // orchestrator: 指定チームだけML
+      if (req.useTeamStrategy === 'wolf_team' && wolfTeamNet) {
+        wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
+      }
+      if (req.useTeamStrategy === 'mason_team' && masonTeamNet) {
+        masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
+      }
+    } else if (!useHeuristic || multiModel) {
       if (wolfTeamNet) wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
       if (masonTeamNet) masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
     }

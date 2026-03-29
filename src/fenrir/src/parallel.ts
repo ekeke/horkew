@@ -137,6 +137,8 @@ export type WorkerRequest = {
   phase: number
   /** Phase 1でMLにする役職 */
   mlRoles?: string[]
+  /** チーム戦略の選択制御 (orchestrator用: 指定チームだけML、残りはheuristic) */
+  useTeamStrategy?: 'wolf_team' | 'mason_team'
 }
 
 /** 1ゲーム分の結果 */

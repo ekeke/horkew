@@ -30,6 +30,10 @@ import {
 } from './training.ts'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+import {
+  packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
+  generateGamesParallel, deserializeStep,
+} from './parallel.ts'
 
 // ============================================================
 // Model Group Definitions
@@ -82,11 +86,11 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   batch: 64,
   checkpointBase: './checkpoints',
   noRetar: false,
-  evalInterval: 500,
-  checkpointInterval: 1000,
+  evalInterval: 100,
+  checkpointInterval: 10,
   phase1Only: false,
   phase2Only: false,
-  resume: false,
+  resume: true,
   learningRate: 3e-4,
   workers: 0,
 }
@@ -311,8 +315,30 @@ function log(msg: string): void {
 // Main
 // ============================================================
 
+function validateConfig(config: OrchestratorConfig): void {
+  const errors: string[] = []
+  if (config.evalInterval > config.chunkSize) {
+    errors.push(`evalInterval (${config.evalInterval}) > chunkSize (${config.chunkSize}): eval がチャンク内で1回も走らない`)
+  }
+  if (config.checkpointInterval > config.chunkSize) {
+    errors.push(`checkpointInterval (${config.checkpointInterval}) > chunkSize (${config.chunkSize}): チャンク内でcheckpointが保存されない`)
+  }
+  if (config.chunkSize > config.iterations) {
+    errors.push(`chunkSize (${config.chunkSize}) > iterations (${config.iterations}): 1チャンクが上限を超えている`)
+  }
+  if (config.evalInterval > 0 && config.chunkSize % config.evalInterval !== 0) {
+    errors.push(`chunkSize (${config.chunkSize}) が evalInterval (${config.evalInterval}) で割り切れない: チャンク末尾で eval が走らない可能性`)
+  }
+  if (errors.length > 0) {
+    console.error('設定エラー:')
+    for (const e of errors) console.error(`  - ${e}`)
+    process.exit(1)
+  }
+}
+
 async function main(): Promise<void> {
   const config = parseArgs()
+  validateConfig(config)
 
   log(`${BOLD}Fenrir Training Orchestrator (round-robin)${RESET}`)
   log(`Iterations: ${config.iterations}/model, Chunk: ${config.chunkSize}, Batch: ${config.batch}`)
@@ -342,36 +368,48 @@ async function main(): Promise<void> {
   log(`Individual NN: ${networks.values().next().value!.totalParams} params × 6 (CPU)`)
   log(`TfNN: 1 shared (GPU)`)
 
+  // === ゲーム生成ワーカープール ===
+  if (config.workers > 0) {
+    initGameWorkerPool(config.workers)
+  }
+
   // === Resume ===
   const iterCounts = new Map<ModelName, number>()
+  let anyResumed = false
   for (const name of MODEL_NAMES) {
     let startIter = 0
-    if (config.resume) {
-      const dir = `${config.checkpointBase}/ckpt-${name}`
-      const ckpt = findCheckpoint(dir)
-      if (ckpt) {
-        loadCheckpoint(networks.get(name)!, ckpt.path)
-        startIter = ckpt.iteration
-        log(`  ${name}: resumed from iter ${startIter}`)
-      }
+    const dir = `${config.checkpointBase}/ckpt-${name}`
+    const ckpt = findCheckpoint(dir)
+    if (ckpt) {
+      loadCheckpoint(networks.get(name)!, ckpt.path)
+      startIter = ckpt.iteration
+      anyResumed = true
     }
     iterCounts.set(name, startIter)
   }
   // チームNNも resume
-  if (config.resume) {
-    const wolfDir = `${config.checkpointBase}/ckpt-werewolf`
-    const wolfCkpt = findCheckpoint(wolfDir)
-    if (wolfCkpt) {
-      // wolf_team checkpoint は別名
-      const teamPath = wolfCkpt.path.replace('checkpoint_', 'wolf_team_').replace('final.json', 'wolf_team_final.json')
-      if (existsSync(teamPath)) loadCheckpoint(wolfTeamNet, teamPath)
+  const wolfDir = `${config.checkpointBase}/ckpt-werewolf`
+  const wolfCkpt = findCheckpoint(wolfDir)
+  if (wolfCkpt) {
+    const teamPath = wolfCkpt.path.replace('checkpoint_', 'wolf_team_').replace('final.json', 'wolf_team_final.json')
+    if (existsSync(teamPath)) loadCheckpoint(wolfTeamNet, teamPath)
+  }
+  const masonDir = `${config.checkpointBase}/ckpt-mason`
+  const masonCkpt = findCheckpoint(masonDir)
+  if (masonCkpt) {
+    const teamPath = masonCkpt.path.replace('checkpoint_', 'mason_team_').replace('final.json', 'mason_team_final.json')
+    if (existsSync(teamPath)) loadCheckpoint(masonTeamNet, teamPath)
+  }
+
+  // Resume 状況の表示
+  if (anyResumed) {
+    log('Resume:')
+    for (const name of MODEL_NAMES) {
+      const iter = iterCounts.get(name)!
+      log(`  ${COLORS[name]}${name.padEnd(12)}${RESET} iter ${iter}`)
     }
-    const masonDir = `${config.checkpointBase}/ckpt-mason`
-    const masonCkpt = findCheckpoint(masonDir)
-    if (masonCkpt) {
-      const teamPath = masonCkpt.path.replace('checkpoint_', 'mason_team_').replace('final.json', 'mason_team_final.json')
-      if (existsSync(teamPath)) loadCheckpoint(masonTeamNet, teamPath)
-    }
+  } else {
+    log('Starting from scratch (no checkpoints found)')
   }
 
   // === Baseline eval ===
@@ -413,30 +451,68 @@ async function main(): Promise<void> {
         const prefix = `${COLORS[name]}[${name.padEnd(10)}]${RESET}`
 
         // チャンク学習
+        let iterElapsed = 0
+        let iterCount = 0
+
         for (let iter = currentIter + 1; iter <= targetIter; iter++) {
+          const iterStart = performance.now()
           const seeds = Array.from({ length: config.batch }, (_, g) => iter * config.batch + g)
 
           // ゲーム生成
+          const tGameStart = performance.now()
           const allIndividual: ProcessedStep[] = []
           const allWolfTeam: ProcessedStep[] = []
           const allMasonTeam: ProcessedStep[] = []
 
-          for (const seed of seeds) {
-            const game = generateGame(trainingConfig, network, wolfTeamNet, masonTeamNet, mlRolesSet, seed, group.teamType)
-            // 自モデルの trajectory のみ収集
-            const currentSteps = new Map<number, TrajectoryStep[]>()
-            for (const [seat, steps] of game.individualSteps) {
-              currentSteps.set(seat, steps)
-            }
-            allIndividual.push(...processTrajectories(currentSteps, trainingConfig.gamma, trainingConfig.lambda))
+          if (gameWorkerPoolSize() > 0) {
+            // === 並列パス ===
+            const sharedWeights = packWeights(network)
+            const sharedWolfWeights = group.teamType === 'wolf_team' ? packWeights(wolfTeamNet) : undefined
+            const sharedMasonWeights = group.teamType === 'mason_team' ? packWeights(masonTeamNet) : undefined
 
-            if (game.wolfTeamSteps.length > 0 && group.teamType === 'wolf_team') {
-              allWolfTeam.push(...computeGAE(game.wolfTeamSteps, trainingConfig.gamma, trainingConfig.lambda, 0))
+            const serializedResults = await generateGamesParallel({
+              weights: sharedWeights,
+              wolfTeamWeights: sharedWolfWeights,
+              masonTeamWeights: sharedMasonWeights,
+              useTeamStrategy: group.teamType,
+              trainingConfig,
+              phase: 1,
+              mlRoles: group.roles,
+            }, seeds)
+
+            for (const game of serializedResults) {
+              const stepsMap = new Map<number, TrajectoryStep[]>()
+              for (const { seat, steps } of game.individualSteps) {
+                stepsMap.set(seat, steps.map(deserializeStep))
+              }
+              allIndividual.push(...processTrajectories(stepsMap, trainingConfig.gamma, trainingConfig.lambda))
+
+              if (game.wolfTeamSteps.length > 0 && group.teamType === 'wolf_team') {
+                allWolfTeam.push(...computeGAE(game.wolfTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
+              }
+              if (game.masonTeamSteps.length > 0 && group.teamType === 'mason_team') {
+                allMasonTeam.push(...computeGAE(game.masonTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
+              }
             }
-            if (game.masonTeamSteps.length > 0 && group.teamType === 'mason_team') {
-              allMasonTeam.push(...computeGAE(game.masonTeamSteps, trainingConfig.gamma, trainingConfig.lambda, 0))
+          } else {
+            // === 直列フォールバック ===
+            for (const seed of seeds) {
+              const game = generateGame(trainingConfig, network, wolfTeamNet, masonTeamNet, mlRolesSet, seed, group.teamType)
+              const currentSteps = new Map<number, TrajectoryStep[]>()
+              for (const [seat, steps] of game.individualSteps) {
+                currentSteps.set(seat, steps)
+              }
+              allIndividual.push(...processTrajectories(currentSteps, trainingConfig.gamma, trainingConfig.lambda))
+
+              if (game.wolfTeamSteps.length > 0 && group.teamType === 'wolf_team') {
+                allWolfTeam.push(...computeGAE(game.wolfTeamSteps, trainingConfig.gamma, trainingConfig.lambda, 0))
+              }
+              if (game.masonTeamSteps.length > 0 && group.teamType === 'mason_team') {
+                allMasonTeam.push(...computeGAE(game.masonTeamSteps, trainingConfig.gamma, trainingConfig.lambda, 0))
+              }
             }
           }
+          const tGameEnd = performance.now()
 
           // PPO update (shared TfNN に重みをスワップ)
           if (allIndividual.length > 0) {
@@ -466,11 +542,18 @@ async function main(): Promise<void> {
             masonTeamNet.loadWeights(masonTeamTf.cloneWeights())
           }
 
+          const iterMs = performance.now() - iterStart
+          iterElapsed += iterMs
+          iterCount++
+
           iterCounts.set(name, iter)
 
           // Progress
           const pct = (iter / config.iterations * 100).toFixed(1)
-          process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) steps=${allIndividual.length}`)
+          const gameMs = ((tGameEnd - tGameStart) / config.batch).toFixed(0)
+          const avgIterMs = (iterElapsed / iterCount / 1000).toFixed(1)
+          const remaining = ((targetIter - iter) * iterElapsed / iterCount / 1000).toFixed(0)
+          process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ${gameMs}ms/game ${avgIterMs}s/iter ETA ${remaining}s`)
 
           // Eval
           if (iter % config.evalInterval === 0) {
@@ -535,6 +618,7 @@ async function main(): Promise<void> {
   tfNetwork.dispose()
   wolfTeamTf.dispose()
   masonTeamTf.dispose()
+  terminateGameWorkerPool()
 
   // === Phase 2 (子プロセスで起動) ===
   if (!config.phase1Only) {
