@@ -200,6 +200,105 @@ function verifyCheckpoint(
   }
 }
 
+/**
+ * Prior検証: 各座席の真の役職をassumptionにしてprior再計算 → 他席の真の役職が矛盾しないか
+ */
+function verifyPriorCheckpoint(
+  events: GameEvent[],
+  state: GameState,
+  config: LupaConfig,
+  checkpoint: Checkpoint,
+  configName: string,
+  seed: number,
+): VerifyResult {
+  const partialEvents = events.slice(0, checkpoint.index)
+  const partialHowl = formatHowl(partialEvents, state, config)
+
+  const { meta, statements } = parse(partialHowl)
+  const unknowns = statements.filter(s => s.type === 'unknown')
+  if (unknowns.length > 0) {
+    const annotatedHowl = partialHowl.trimEnd() + '\n\n'
+      + `# パース失敗: ${unknowns.map((s: any) => s.raw).join(', ')}\n`
+    return {
+      failure: {
+        config: configName, seed, checkpoint, howl: annotatedHowl,
+        players: [{ name: '(parse)', message: `unknown statements: ${unknowns.map((s: any) => s.raw).join(', ')}` }],
+      },
+      skipped: false, retarMs: 0,
+    }
+  }
+
+  const { vs, setup } = buildVillageStatus(statements, meta)
+
+  // Retarの前提条件チェック
+  for (const player of state.players) {
+    if (!VILLAGE_ROLES.includes(player.role)) continue
+    const seatStatus = vs.statuses.get(player.seat)
+    if (!seatStatus) continue
+    if (!seatStatus.surviving && seatStatus.causeOfDeath === 'execution' && !seatStatus.claiming) {
+      return { failure: null, skipped: true, retarMs: 0 }
+    }
+  }
+
+  const options = config.hasFirstGhost
+    ? { ...lupaOptions, hasFirstGhost: true }
+    : lupaOptions
+
+  // ベースRetarを構築してpriorを取得
+  const baseRetar = new VillageRetar(vs, setup, options)
+  const prior = baseRetar.initialPossibilities
+
+  const t0 = performance.now()
+  const failedPlayers: { name: string, message: string }[] = []
+
+  // 各座席について: 真の役職をassumptionにしてprior再計算
+  for (const player of state.players) {
+    const assumptions = new Map<number, SystemRole>([[player.seat, player.role]])
+
+    // priorに含まれない役職 → この座席はスキップ（ベースRetarの前提条件で既に除外済み）
+    if (!prior.hasRole(player.seat, player.role)) continue
+
+    const priorRetar = new VillageRetar(vs, setup, { ...options, assumptions, prior })
+    const result = priorRetar.analyzeSafe()
+
+    if (result.error) {
+      failedPlayers.push({ name: player.name, message: `analyze()エラー: ${result.error}` })
+      continue
+    }
+
+    // 他の全座席について真の役職が可能性に含まれるか
+    for (const other of state.players) {
+      if (other.seat === player.seat) continue
+      const possibilities = result.result.get(other.seat)
+      if (!possibilities || !possibilities.has(other.role)) {
+        const possStr = possibilities ? `[${[...possibilities].join(', ')}]` : '空'
+        failedPlayers.push({
+          name: player.name,
+          message: `${player.name}=${player.role}仮定時、${other.name}の真の役職${other.role}が可能性${possStr}に含まれない`,
+        })
+        break
+      }
+    }
+  }
+
+  const retarMs = performance.now() - t0
+
+  if (failedPlayers.length === 0) {
+    return { failure: null, skipped: false, retarMs }
+  }
+
+  const annotatedHowl = partialHowl.trimEnd() + '\n\n'
+    + failedPlayers.map(p => `# [prior] ${p.name}: ${p.message}`).join('\n') + '\n'
+
+  return {
+    failure: {
+      config: configName, seed, checkpoint, howl: annotatedHowl,
+      players: failedPlayers,
+    },
+    skipped: false, retarMs,
+  }
+}
+
 type GameConfig = {
   name: string
   roles: Record<string, number>
@@ -239,6 +338,7 @@ type Args = {
   seed: number | null
   seeds: [number, number] | null
   quiet: boolean
+  prior: boolean
 }
 
 function showHelp(): never {
@@ -252,6 +352,7 @@ Options:
   --seed <n>          単一seedで実行
   --seeds <from>-<to> seed範囲を指定 (例: 100-200)
   --outdir <dir>      失敗howlファイルの出力先ディレクトリ
+  --prior             priorモード検証: 各座席の真の役職でprior再計算し他席と矛盾しないか
   --quiet, -q         プログレスバーを非表示
   --help, -h          このヘルプを表示
 
@@ -269,7 +370,7 @@ Examples:
 function parseArgs(): Args {
   const args = process.argv.slice(2)
   if (args.includes('--help') || args.includes('-h')) showHelp()
-  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false }
+  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false, prior: false }
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -287,6 +388,9 @@ function parseArgs(): Args {
         if (m) result.seeds = [parseInt(m[1], 10), parseInt(m[2], 10)]
         break
       }
+      case '--prior':
+        result.prior = true
+        break
       case '--quiet':
       case '-q':
         result.quiet = true
@@ -315,7 +419,7 @@ function renderProgress(
 }
 
 function main() {
-  const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet } = parseArgs()
+  const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet, prior } = parseArgs()
   const showProgress = !!outdir && !quiet
   const allFailures: FailedCheckpoint[] = []
   let totalGames = 0
@@ -374,7 +478,9 @@ function main() {
         totalCheckpoints++
         configCheckpoints++
         if (gameFailed) continue
-        const { failure, skipped, retarMs } = verifyCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
+        const { failure, skipped, retarMs } = prior
+          ? verifyPriorCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
+          : verifyCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
         if (failure) {
           allFailures.push(failure)
           gameFailed = true
