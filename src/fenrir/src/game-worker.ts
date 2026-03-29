@@ -10,7 +10,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame } from '../../lupa/engine.ts'
-import { NeuralNetwork } from './ml/nn.ts'
+import type { AnyNetwork } from './ml/nn.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import { terminalReward, intermediateReward, tsumiReward, DEFAULT_REWARD_CONFIG } from './reward.ts'
@@ -21,7 +21,7 @@ import { searchTsumi } from '../../hati/index.ts'
 import { DEFAULT_RETAR_OPTIONS } from '../../lupa/retar-bridge.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
 import {
-  unpackWeights,
+  buildNetworkFromShared,
   serializeStep,
   type WorkerRequest,
   type WorkerResult,
@@ -36,10 +36,8 @@ parentPort.on('message', (req: WorkerRequest) => {
   parentPort!.postMessage({ type: 'result', games: results } satisfies WorkerResult)
 })
 
-function buildNetwork(shared: SharedWeights): NeuralNetwork {
-  const net = new NeuralNetwork(shared.config)
-  unpackWeights(net, shared)
-  return net
+function buildNetwork(shared: SharedWeights, isTeam: boolean = false): AnyNetwork {
+  return buildNetworkFromShared(shared, isTeam)
 }
 
 /** role → モデルグループ名の逆引きマップ (コンパイル時定数相当) */
@@ -56,16 +54,16 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
   const config = req.trainingConfig
   const multiModel = req.modelGroupWeights != null
   const network = buildNetwork(req.weights)
-  const wolfTeamNet = req.wolfTeamWeights ? buildNetwork(req.wolfTeamWeights) : undefined
-  const masonTeamNet = req.masonTeamWeights ? buildNetwork(req.masonTeamWeights) : undefined
+  const wolfTeamNet = req.wolfTeamWeights ? buildNetwork(req.wolfTeamWeights, true) : undefined
+  const masonTeamNet = req.masonTeamWeights ? buildNetwork(req.masonTeamWeights, true) : undefined
   const mlRolesSet = req.mlRoles ? new Set(req.mlRoles) : null
   const useHeuristic = req.phase === 1
   const usePool = req.phase === 3
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
   const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
 
-  // マルチモデル: グループ名 → NeuralNetwork
-  const groupNets = new Map<string, NeuralNetwork>()
+  // マルチモデル: グループ名 → AnyNetwork
+  const groupNets = new Map<string, AnyNetwork>()
   if (multiModel) {
     for (const [name, sw] of Object.entries(req.modelGroupWeights!)) {
       groupNets.set(name, buildNetwork(sw))
@@ -73,7 +71,7 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
   }
 
   // Pool用の過去ネットワーク
-  const poolNets: NeuralNetwork[] = []
+  const poolNets: AnyNetwork[] = []
   if (req.poolWeights) {
     for (const pw of req.poolWeights) {
       poolNets.push(buildNetwork(pw))

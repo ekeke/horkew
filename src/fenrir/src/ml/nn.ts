@@ -162,6 +162,16 @@ export type ForwardResult = {
   value: number                         // scalar value estimate
 }
 
+/** NeuralNetwork / TransformerNetwork 共通インターフェース */
+export interface AnyNetwork {
+  readonly config: NetworkConfig
+  forward(input: Float32Array): ForwardResult
+  getParams(): Float32Array[]
+  cloneWeights(): Map<string, Float32Array>
+  loadWeights(weights: Map<string, Float32Array>): void
+  get totalParams(): number
+}
+
 export class NeuralNetwork {
   readonly config: NetworkConfig
   readonly trunk: DenseLayer[]

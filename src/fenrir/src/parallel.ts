@@ -27,7 +27,9 @@ import { Worker } from 'node:worker_threads'
 import { availableParallelism } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import type { NeuralNetwork, NetworkConfig } from './ml/nn.ts'
+import type { NetworkConfig, AnyNetwork } from './ml/nn.ts'
+import { NeuralNetwork } from './ml/nn.ts'
+import { TransformerNetwork } from './ml/transformer-network.ts'
 import type { TrainingConfig } from './training.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
 
@@ -44,62 +46,31 @@ export type SharedWeights = {
   layout: Array<{ name: string, offset: number, length: number }>
 }
 
-/** NeuralNetwork の重みを SharedArrayBuffer にパック */
-export function packWeights(network: NeuralNetwork): SharedWeights {
-  const params = network.getParams()
-  const totalLength = params.reduce((sum, p) => sum + p.length, 0)
+/**
+ * ネットワークの重みを SharedArrayBuffer にパック
+ * NeuralNetwork / TransformerNetwork 両対応（cloneWeights()経由）
+ */
+export function packWeights(network: AnyNetwork): SharedWeights {
+  const namedWeights = network.cloneWeights()
+  let totalLength = 0
+  for (const w of namedWeights.values()) totalLength += w.length
+
   const buffer = new SharedArrayBuffer(totalLength * 4)  // Float32 = 4 bytes
   const view = new Float32Array(buffer)
-
   const layout: SharedWeights['layout'] = []
   let offset = 0
 
-  // Trunk
-  for (let i = 0; i < network.trunk.length; i++) {
-    layout.push({ name: `trunk_${i}_w`, offset, length: network.trunk[i].weights.length })
-    view.set(network.trunk[i].weights, offset)
-    offset += network.trunk[i].weights.length
-
-    layout.push({ name: `trunk_${i}_b`, offset, length: network.trunk[i].biases.length })
-    view.set(network.trunk[i].biases, offset)
-    offset += network.trunk[i].biases.length
+  for (const [name, w] of namedWeights) {
+    layout.push({ name, offset, length: w.length })
+    view.set(w, offset)
+    offset += w.length
   }
-
-  // Heads
-  for (const [name, head] of network.heads) {
-    layout.push({ name: `head_${name}_w`, offset, length: head.weights.length })
-    view.set(head.weights, offset)
-    offset += head.weights.length
-
-    layout.push({ name: `head_${name}_b`, offset, length: head.biases.length })
-    view.set(head.biases, offset)
-    offset += head.biases.length
-  }
-
-  // Sigmoid heads
-  for (const [name, head] of network.sigmoidHeads) {
-    layout.push({ name: `head_${name}_w`, offset, length: head.weights.length })
-    view.set(head.weights, offset)
-    offset += head.weights.length
-
-    layout.push({ name: `head_${name}_b`, offset, length: head.biases.length })
-    view.set(head.biases, offset)
-    offset += head.biases.length
-  }
-
-  // Value head
-  layout.push({ name: 'value_w', offset, length: network.valueHead.weights.length })
-  view.set(network.valueHead.weights, offset)
-  offset += network.valueHead.weights.length
-
-  layout.push({ name: 'value_b', offset, length: network.valueHead.biases.length })
-  view.set(network.valueHead.biases, offset)
 
   return { config: network.config, buffer, layout }
 }
 
-/** SharedArrayBuffer から NeuralNetwork に重みを展開 */
-export function unpackWeights(network: NeuralNetwork, shared: SharedWeights): void {
+/** SharedArrayBuffer からネットワークに重みを展開 */
+export function unpackWeights(network: AnyNetwork, shared: SharedWeights): void {
   const view = new Float32Array(shared.buffer)
   const weights = new Map<string, Float32Array>()
 
@@ -108,6 +79,18 @@ export function unpackWeights(network: NeuralNetwork, shared: SharedWeights): vo
   }
 
   network.loadWeights(weights)
+}
+
+/** SharedWeightsからネットワークを構築（config.transformerで自動判別） */
+export function buildNetworkFromShared(shared: SharedWeights, isTeam: boolean = false): AnyNetwork {
+  let net: AnyNetwork
+  if (shared.config.transformer) {
+    net = new TransformerNetwork(shared.config, isTeam)
+  } else {
+    net = new NeuralNetwork(shared.config)
+  }
+  unpackWeights(net, shared)
+  return net
 }
 
 // ============================================================

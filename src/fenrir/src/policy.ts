@@ -7,7 +7,7 @@ import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, Wolf
 import type { NightAction, DayClaim } from '../../lupa/types.ts'
 import type { CommunicationAction } from '../../lupa/communication.ts'
 import type { Proposal, LeadershipResponse } from '../../lupa/leadership.ts'
-import type { NeuralNetwork, ForwardResult } from './ml/nn.ts'
+import type { AnyNetwork, ForwardResult } from './ml/nn.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
 import { encodeObservation, encodeTeamObservation } from './observation.ts'
 import {
@@ -24,13 +24,13 @@ export type FenrirStrategyConfig = {
 }
 
 export class FenrirStrategy implements Strategy {
-  readonly network: NeuralNetwork
+  readonly network: AnyNetwork
   readonly config: FenrirStrategyConfig
 
   /** 学習時にトラジェクトリを収集するバッファ */
   trajectory: TrajectoryStep[] = []
 
-  constructor(network: NeuralNetwork, config?: Partial<FenrirStrategyConfig>) {
+  constructor(network: AnyNetwork, config?: Partial<FenrirStrategyConfig>) {
     this.network = network
     this.config = { explore: true, ...config }
   }
@@ -248,11 +248,11 @@ export class FenrirStrategy implements Strategy {
 // ============================================================
 
 abstract class TeamStrategyBase {
-  readonly network: NeuralNetwork
+  readonly network: AnyNetwork
   readonly config: FenrirStrategyConfig
   trajectory: TrajectoryStep[] = []
 
-  constructor(network: NeuralNetwork, config?: Partial<FenrirStrategyConfig>) {
+  constructor(network: AnyNetwork, config?: Partial<FenrirStrategyConfig>) {
     this.network = network
     this.config = { explore: true, ...config }
   }
