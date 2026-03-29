@@ -1,4 +1,4 @@
-import { init, analyze } from '../src/retar-rs/pkg-web/retar.js'
+import wasmInit, { analyze } from '../src/retar-rs/pkg-web/retar.js'
 // @ts-ignore — Vite ?url import
 import wasmUrl from '../src/retar-rs/pkg/retar_bg.wasm?url'
 import { VillageRetar } from '../src/retar/index.ts'
@@ -26,7 +26,7 @@ export type RetarResponse =
 
 let signal: Int32Array | undefined
 let wasmReady = false
-const wasmInit = init(wasmUrl).then(() => { wasmReady = true }).catch(() => {})
+const wasmReady$ = wasmInit(wasmUrl).then(() => { wasmReady = true }).catch(() => {})
 
 self.onmessage = (e: MessageEvent<any>) => {
   const msg = e.data
@@ -35,7 +35,7 @@ self.onmessage = (e: MessageEvent<any>) => {
     return
   }
 
-  wasmInit.then(() => handleAnalysis(msg))
+  wasmReady$.then(() => handleAnalysis(msg))
 }
 
 function handleAnalysis(msg: any) {
@@ -67,9 +67,13 @@ function handleAnalysis(msg: any) {
         self.postMessage({ type: 'error', message: parsed.error } satisfies RetarResponse)
         return
       }
+      if (parsed.aborted) {
+        self.postMessage({ type: 'aborted' } satisfies RetarResponse)
+        return
+      }
 
       const seats: SeatResult[] = []
-      for (const [seatStr, roles] of Object.entries(parsed)) {
+      for (const [seatStr, roles] of Object.entries(parsed.result)) {
         seats.push({ seat: Number(seatStr), roles: roles as SystemRole[] })
       }
       self.postMessage({ type: 'result', seats, elapsed: performance.now() - t0, wasm: true } satisfies RetarResponse)
