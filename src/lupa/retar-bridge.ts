@@ -226,6 +226,9 @@ export function analyzePerPlayer(
   const common = runRetar(vs, setup, baseOptions)
   const prior = common.possibilities
 
+  // 共通 Retar が破綻していたら per-player もスキップ
+  if (common.possibilities.size === 0) return result
+
   for (const player of players) {
     const assumptions = buildAssumptions(state, player, prior)
     if (assumptions.size === 0) {
