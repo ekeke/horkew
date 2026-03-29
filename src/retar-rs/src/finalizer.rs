@@ -265,7 +265,7 @@ pub fn finalize(
                 conclusions.union(&context.possibilities);
             }
             if hamster_win_path != Some(HamsterWinPath::Village)
-                && check(max_surviving_wolves + 1, u32::MAX, 1, u32::MAX)
+                && check(max_surviving_wolves.saturating_add(1), u32::MAX, 1, u32::MAX)
             {
                 debug_stash.finalizer_passes += 1;
                 conclusions.union(&context.possibilities);
