@@ -60,12 +60,12 @@ export function buildRoleTestPlan(
   const roleTests: RoleTest[][] = []
 
   // 狐の処理は面倒なので、最初に全員分のプランを作成しておく
+  // 注意: initialPossibilities で狐候補をフィルタしない。
+  // prior パスでは確定席が狐候補から除外されるが、solver の交差検証
+  // (finalizer の死体数チェック等) に確定席の狐仮説が必要なケースがある。
   if (setup.has('werehamster') && setup.get('werehamster')! > 0 ) {
     const hamsterTests: RoleTest[] = []
-    let allSeats = Array.from(village.statuses.keys())
-    if (initialPossibilities) {
-      allSeats = allSeats.filter(seat => initialPossibilities.hasRole(seat, 'werehamster'))
-    }
+    const allSeats = Array.from(village.statuses.keys())
     const num = setup.get('werehamster')!
     const iter = selectCombinationsFromArray(allSeats, num, num)
     for ( const [selected, rest] of iter ) {

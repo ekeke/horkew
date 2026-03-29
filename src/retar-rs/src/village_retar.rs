@@ -622,6 +622,9 @@ fn init_from_prior(
 ) -> Possibilities {
     let mut initial_possibilities = prior.clone();
 
+    // prior ビットマスクに合わせて setup カウントを同期し、確定席の伝播を実行
+    initial_possibilities.refix();
+
     for (&seat, &role) in &options.assumptions {
         if !initial_possibilities.has_role(seat, role) {
             panic!(

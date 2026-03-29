@@ -181,6 +181,9 @@ export class VillageRetar {
       this.initialPossibilities.possibilities[seat] = possibilityFromSet(roles)
     }
 
+    // prior ビットマスクに合わせて setup カウントを同期し、確定席の伝播を実行
+    this.initialPossibilities.refix()
+
     for ( const [seat, role] of this.options.assumptions.entries() ) {
       if ( !this.initialPossibilities.hasRole(seat, role) ) {
         throw new Error(`Prior-based re-analysis: seat ${seat} cannot be ${role} (not in prior possibilities)`)

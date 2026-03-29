@@ -91,12 +91,12 @@ pub fn build_role_test_plan(
     let mut role_tests: Vec<Vec<RoleTest>> = Vec::new();
 
     // Werehamster hypotheses
+    // 注意: initialPossibilities で狐候補をフィルタしない。
+    // prior パスでは確定席が狐候補から除外されるが、solver の交差検証に必要。
     if let Some(&hamster_count) = setup.get(&SystemRole::Werehamster) {
         if hamster_count > 0 {
             let mut all_seats: Vec<Seat> = village.statuses.keys().cloned().collect();
-            if let Some(poss) = initial_possibilities {
-                all_seats.retain(|&seat| poss.has_role(seat, SystemRole::Werehamster));
-            }
+            all_seats.sort();
             let mut hamster_tests = Vec::new();
             select_combinations_from_array(
                 &all_seats,
