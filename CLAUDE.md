@@ -4,12 +4,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Horkew is a Werewolf/Mafia game analysis toolkit consisting of two components being consolidated into a single TypeScript library:
+Horkew is a werewolf（人狼）game analysis and AI toolkit. Game state parsing, logical deduction, checkmate search, explainable reasoning, game simulation, and reinforcement learning — all in one TypeScript monorepo (with an optional Rust/WASM solver).
 
-- **Howl** (Horkew OutLine Log) — A parser for `.howl` shorthand notation (YAML frontmatter + compact game notation) that outputs structured game event data. Supports both Japanese and ASCII syntax.
-- **Retar** — A logical deduction engine that takes game state and computes which roles each player could possibly hold, using constraint satisfaction and bitwise hypothesis testing.
+### Modules (`src/`)
 
-The `howl/` and `common/` directories are **reference implementations** extracted from an external project. A new unified TypeScript project will be created at the repo root to consolidate them.
+| Module | 概要 |
+|--------|------|
+| **types** | 共有型定義。`SystemRole`, `VillageStatus`, `SeatStatus` など全モジュールの基盤 |
+| **howl** | `.howl` 記法パーサー。YAML frontmatter + コンパクトなゲーム記法 → 構造化イベントデータ。日本語/ASCII 両対応 |
+| **retar** | 役職推理エンジン（TypeScript）。リファレンス実装・開発のフロントライン |
+| **retar-rs** | Retar の Rust/WASM 実装。本番用。Docker ビルド → Node.js/ブラウザ両対応 |
+| **hati** | 詰み探索エンジン。AND-OR ゲーム木探索で村の必勝戦略を発見 |
+| **gmork** | 役職否定/確定の理由説明。Retar の結果を人間が読める日本語テキストに変換 |
+| **lupa** | ゲームシミュレーション。プラガブルな戦略インターフェースで完全な人狼ゲームを実行 |
+| **fenrir** | 強化学習（PPO）による AI プレイヤー。Lupa 上でゲームを回し、役職別ニューラルネットを訓練 |
+
+### Data Flow
+```
+HOWL (parse .howl logs)     LUPA (simulate games)     FENRIR (train AI via PPO)
+  ↓                            ↓                          ↓
+VillageStatus ────────→ RETAR (solve possibilities) ← game decisions
+                           ↓
+                       Possibilities ────→ HATI (checkmate search)
+                           ↓
+                       GMORK (explain denials in Japanese)
+```
+
+### Retar 開発フロー (TS → Rust)
+
+Rust版（retar-rs）が実運用ターゲット、TypeScript版（retar）がリファレンス実装兼開発のフロントライン。変更は以下の流れで行う:
+
+1. **TS版を変更** — `src/retar/` のコードを修正・拡張
+2. **TSテストをパス** — `npm test` でリグレッションなしを確認
+3. **Rustへ一行単位で移植** — TS版の差分を `src/retar-rs/` に対応するRustコードとして忠実に転写
+4. **Rustテストをパス** — `npm run test:rust` で正しさを検証
+
+TS版とRust版はファイル構成・関数名を一致させる。TS版で設計・検証を済ませてからRustに移すことで、型システムの違いによるバグを最小化し、差分比較を容易にする。
+
+### Legacy Directories
+
+`howl/` と `common/` は外部プロジェクトから抽出した**リファレンス実装**。現在は `src/` 配下の統合版が正。
 
 ## Commands
 
