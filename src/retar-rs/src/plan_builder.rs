@@ -1,4 +1,4 @@
-use crate::types::{VillageStatus, SystemRole, Seat};
+use crate::types::{CauseOfDeath, VillageStatus, SystemRole, Seat};
 use crate::possibilities::Possibilities;
 use crate::combinatorics::select_combinations_from_array;
 use std::collections::{HashMap, HashSet};
@@ -119,7 +119,9 @@ pub fn build_role_test_plan(
         if role != SystemRole::Nekomata && role_claims.is_empty() {
             continue;
         }
-        if role_claims.is_empty() && multiple_victims.is_empty() {
+        let has_execution_curse = role == SystemRole::Nekomata
+            && village.statuses.values().any(|s| s.cause_of_death == CauseOfDeath::CursedByExecutedNekomata);
+        if role_claims.is_empty() && multiple_victims.is_empty() && !has_execution_curse {
             continue;
         }
         let num = setup.get(&role).copied().unwrap_or(0);
@@ -148,6 +150,28 @@ pub fn build_role_test_plan(
                 let status = village.statuses.get(&seat).unwrap();
                 if status.died_day.unwrap_or(i32::MAX) < min_day {
                     unrevealed_seats.push(seat);
+                }
+            }
+            if role_claims.is_empty() {
+                for (&seat, status) in &village.statuses {
+                    if status.surviving && !status.claiming {
+                        unrevealed_seats.push(seat);
+                    }
+                }
+            }
+        }
+
+        // 処刑道連れ: 処刑された猫又候補を追加
+        if role == SystemRole::Nekomata && has_execution_curse {
+            for (&seat, status) in &village.statuses {
+                if status.cause_of_death == CauseOfDeath::Execution && !status.claiming {
+                    let has_curse_on_same_day = village.statuses.values().any(|s| {
+                        s.cause_of_death == CauseOfDeath::CursedByExecutedNekomata
+                            && s.died_day == status.died_day
+                    });
+                    if has_curse_on_same_day {
+                        unrevealed_seats.push(seat);
+                    }
                 }
             }
             if role_claims.is_empty() {
