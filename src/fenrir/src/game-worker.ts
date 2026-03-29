@@ -170,7 +170,9 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
     wolfTeamStrategy?.resetTrajectory()
     masonTeamStrategy?.resetTrajectory()
 
+    const tGameStart = performance.now()
     const { state, events } = runGame(lupaConfig)
+    const tGameEnd = performance.now()
 
     // Collect trajectories
     const individualSteps: SerializedGameResult['individualSteps'] = []
@@ -217,6 +219,7 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
     }
 
     // Hati 詰み報酬: ゲーム終了後に遡って判定
+    const tTsumiStart = performance.now()
     const howl = formatHowl(events, state, lupaConfig)
     const howlLines = howl.split('\n')
     const execLines: number[] = []
@@ -263,11 +266,18 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
       }
     }
 
+    const tTsumiEnd = performance.now()
+
     results.push({
       individualSteps,
       wolfTeamSteps: wSteps.map(serializeStep),
       masonTeamSteps: mSteps.map(serializeStep),
       result: state.result ?? 'unknown',
+      timing: {
+        totalMs: tTsumiEnd - tGameStart,
+        gameMs: tGameEnd - tGameStart,
+        tsumiMs: tTsumiEnd - tTsumiStart,
+      },
     })
   }
 

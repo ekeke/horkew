@@ -464,6 +464,8 @@ async function main(): Promise<void> {
           const allWolfTeam: ProcessedStep[] = []
           const allMasonTeam: ProcessedStep[] = []
 
+          let lastBatchTimings: import('./parallel.ts').GameTiming[] = []
+
           if (gameWorkerPoolSize() > 0) {
             // === 並列パス ===
             const sharedWeights = packWeights(network)
@@ -494,6 +496,7 @@ async function main(): Promise<void> {
                 allMasonTeam.push(...computeGAE(game.masonTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
               }
             }
+            lastBatchTimings = serializedResults.filter(g => g.timing).map(g => g.timing!)
           } else {
             // === 直列フォールバック ===
             for (const seed of seeds) {
@@ -550,10 +553,17 @@ async function main(): Promise<void> {
 
           // Progress
           const pct = (iter / config.iterations * 100).toFixed(1)
-          const gameMs = ((tGameEnd - tGameStart) / config.batch).toFixed(0)
+          const wallGameMs = ((tGameEnd - tGameStart) / config.batch).toFixed(0)
           const avgIterMs = (iterElapsed / iterCount / 1000).toFixed(1)
           const remaining = ((targetIter - iter) * iterElapsed / iterCount / 1000).toFixed(0)
-          process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ${gameMs}ms/game ${avgIterMs}s/iter ETA ${remaining}s`)
+          // worker timing breakdown (if available from parallel path)
+          let timingStr = `${wallGameMs}ms/game`
+          if (lastBatchTimings.length > 0) {
+            const avgGame = lastBatchTimings.reduce((a, t) => a + t.gameMs, 0) / lastBatchTimings.length
+            const avgTsumi = lastBatchTimings.reduce((a, t) => a + t.tsumiMs, 0) / lastBatchTimings.length
+            timingStr = `${avgGame.toFixed(0)}+${avgTsumi.toFixed(0)}ms/game (wall ${wallGameMs}ms)`
+          }
+          process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ${timingStr} ${avgIterMs}s/iter ETA ${remaining}s`)
 
           // Eval
           if (iter % config.evalInterval === 0) {
@@ -563,7 +573,7 @@ async function main(): Promise<void> {
             const factionRate = evalResult.winRates[group.faction] ?? 0
             log(
               `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
-              `avgLen=${evalResult.avgGameLength.toFixed(1)}`
+              `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
             )
 
             if (factionRate >= targetRate) {

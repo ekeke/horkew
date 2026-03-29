@@ -141,6 +141,13 @@ export type WorkerRequest = {
   useTeamStrategy?: 'wolf_team' | 'mason_team'
 }
 
+/** 1ゲーム分のタイミング情報 */
+export type GameTiming = {
+  totalMs: number
+  gameMs: number
+  tsumiMs: number
+}
+
 /** 1ゲーム分の結果 */
 export type SerializedGameResult = {
   /** 個人エージェントのトラジェクトリ: seat → steps */
@@ -151,6 +158,8 @@ export type SerializedGameResult = {
   masonTeamSteps: SerializedStep[]
   /** ゲーム結果 */
   result: string
+  /** タイミング計測 */
+  timing?: GameTiming
 }
 
 /** Worker → メインスレッド */
