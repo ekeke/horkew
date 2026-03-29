@@ -28,7 +28,7 @@ import {
   DEFAULT_TRAINING_CONFIG,
   type TrainingConfig,
 } from './training.ts'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
@@ -592,6 +592,18 @@ async function main(): Promise<void> {
             }
             if (group.teamType === 'mason_team') {
               saveCheckpoint(masonTeamNet, `${dir}/mason_team_${iter}.json`, { iteration: iter, winRate: 0 })
+            }
+
+            // マイルストーン (eval タイミング) 以外の古いチェックポイントを削除
+            if (existsSync(dir)) {
+              for (const f of readdirSync(dir)) {
+                const m = f.match(/^(?:checkpoint|wolf_team|mason_team)_(\d+)\.json$/)
+                if (!m) continue
+                const ckptIter = parseInt(m[1])
+                if (ckptIter >= iter) continue  // 今回保存分は残す
+                if (ckptIter % config.evalInterval === 0) continue  // マイルストーンは残す
+                try { unlinkSync(`${dir}/${f}`) } catch {}
+              }
             }
           }
         }
