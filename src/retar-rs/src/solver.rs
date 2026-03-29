@@ -366,12 +366,12 @@ pub fn solve_possibilities(
         conclusion: Possibilities::empty(setup),
         items,
         wolves_range: (
-            fixed_died_wolves + min_surviving_wolves,
-            fixed_died_wolves + max_surviving_wolves,
+            fixed_died_wolves.saturating_add(min_surviving_wolves),
+            fixed_died_wolves.saturating_add(max_surviving_wolves),
         ),
         hamsters_range: (
-            fixed_died_hamsters + min_surviving_hamsters,
-            fixed_died_hamsters + max_surviving_hamsters,
+            fixed_died_hamsters.saturating_add(min_surviving_hamsters),
+            fixed_died_hamsters.saturating_add(max_surviving_hamsters),
         ),
     };
 

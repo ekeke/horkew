@@ -106,4 +106,29 @@ mod tests {
         let seat3 = result.result.get(&3).expect("seat 3 should exist");
         assert!(!seat3.is_empty(), "seat 3 should have role possibilities, got: {:?}", seat3);
     }
+
+    #[test]
+    fn test_standard_10p_s0() {
+        let vs_json = include_str!("../std10p_s0_vs.json");
+        let setup_json = include_str!("../std10p_s0_setup.json");
+        let options_json = include_str!("../std10p_s0_options.json");
+
+        let vs: VillageStatus = serde_json::from_str(vs_json).unwrap();
+        let setup: HashMap<SystemRole, u32> = serde_json::from_str(setup_json).unwrap();
+        let options: AnalyzeOptions = serde_json::from_str(options_json).unwrap();
+
+        let mut retar = VillageRetar::new(vs, setup, options);
+        let result = retar.analyze();
+
+        eprintln!("debug_stash: {:?}", retar.debug_stash);
+        for (seat, roles) in &result.result {
+            eprintln!("seat {}: {:?}", seat, roles);
+        }
+
+        // JS: seerTests=3, seerTestPasses=2, finalizerRuns=2, preFinalizePasses=2
+        // No seat should be empty
+        for (&seat, roles) in &result.result {
+            assert!(!roles.is_empty(), "seat {} should not be empty", seat);
+        }
+    }
 }
