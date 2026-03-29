@@ -86,3 +86,24 @@ pub fn analyze_direct(
     result.result
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_13597_execution_curse() {
+        let vs_json = include_str!("../13597_vs.json");
+        let setup_json = include_str!("../13597_setup.json");
+        let options_json = include_str!("../13597_options.json");
+
+        let vs: VillageStatus = serde_json::from_str(vs_json).unwrap();
+        let setup: HashMap<SystemRole, u32> = serde_json::from_str(setup_json).unwrap();
+        let options: AnalyzeOptions = serde_json::from_str(options_json).unwrap();
+
+        let mut retar = VillageRetar::new(vs, setup, options);
+        let result = retar.analyze();
+
+        let seat3 = result.result.get(&3).expect("seat 3 should exist");
+        assert!(!seat3.is_empty(), "seat 3 should have role possibilities, got: {:?}", seat3);
+    }
+}
