@@ -1,5 +1,5 @@
 import type { SystemRole, EnumSpecies } from '../types/index.ts'
-import type { Strategy, TeamStrategy } from './strategy.ts'
+import type { Strategy, TeamStrategy, AsyncStrategy, AsyncTeamStrategy } from './strategy.ts'
 import type { Signal, RolePrediction } from './communication.ts'
 
 export type LupaConfig = {
@@ -26,6 +26,14 @@ export type LupaConfig = {
   revoteConfig?: RevoteConfig
   /** 投票確定後のCO許可 = 遺言 (デフォルト: false) */
   allowPostVoteCO?: boolean
+  /** 非同期戦略 (runGameAsync専用、対話型CLI等) */
+  asyncStrategies?: Map<number, AsyncStrategy>
+  /** asyncStrategiesに未登録のseatに使う非同期戦略 */
+  defaultAsyncStrategy?: AsyncStrategy
+  /** 非同期狼チーム戦略 */
+  asyncWolfTeamStrategy?: AsyncTeamStrategy
+  /** 非同期共有者チーム戦略 */
+  asyncMasonTeamStrategy?: AsyncTeamStrategy
 }
 
 export type RevoteConfig = {

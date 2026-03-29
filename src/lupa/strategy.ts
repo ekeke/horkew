@@ -92,3 +92,33 @@ export type TeamStrategy = {
   /** 提案後・投票前の防御CO */
   decideDefensiveClaim(ctx: TeamDecisionContext): DayClaim
 }
+
+// ============================================================
+// 非同期戦略 (対話型CLI等、人間の入力を待つ場合)
+// ============================================================
+
+type MaybePromise<T> = T | Promise<T>
+
+/** 非同期対応の戦略インターフェース — Strategy の上位互換 */
+export type AsyncStrategy = {
+  decideNightAction(ctx: DecisionContext): MaybePromise<NightAction>
+  decideDayClaim(ctx: DecisionContext): MaybePromise<DayClaim>
+  decideForecast(ctx: DecisionContext): MaybePromise<DayClaim>
+  decideVote(ctx: DecisionContext): MaybePromise<number>
+  decideCommunication(ctx: DecisionContext): MaybePromise<CommunicationAction>
+  decideProposal(ctx: DecisionContext): MaybePromise<Proposal | null>
+  decideLeadershipResponse(ctx: DecisionContext, proposal: Proposal): MaybePromise<LeadershipResponse>
+  decideDefensiveClaim(ctx: DecisionContext): MaybePromise<DayClaim>
+}
+
+/** 非同期対応のチーム戦略インターフェース */
+export type AsyncTeamStrategy = {
+  decideNightAction(ctx: TeamDecisionContext): MaybePromise<WolfNightAction | NightAction>
+  decideDayClaim(ctx: TeamDecisionContext): MaybePromise<DayClaim>
+  decideForecast(ctx: TeamDecisionContext): MaybePromise<DayClaim>
+  decideVote(ctx: TeamDecisionContext): MaybePromise<number>
+  decideCommunication(ctx: TeamDecisionContext): MaybePromise<CommunicationAction>
+  decideProposal(ctx: TeamDecisionContext): MaybePromise<Proposal | null>
+  decideLeadershipResponse(ctx: TeamDecisionContext, proposal: Proposal): MaybePromise<LeadershipResponse>
+  decideDefensiveClaim(ctx: TeamDecisionContext): MaybePromise<DayClaim>
+}
