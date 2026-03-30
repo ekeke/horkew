@@ -164,17 +164,35 @@ MLP trunk の代替として、Transformer Encoder を使用する。
 
 ### 使い方
 
+`--transformer` フラグでMLP/Transformerを切り替える。未指定時はMLP。
+
 ```bash
 # MLP (従来通り)
-node --experimental-strip-types src/fenrir/src/cli.ts train
+npm run train
 
 # Transformer
-# training.ts の createTransformerTfNetwork() / createTransformerNetwork() を使用
-# NetworkConfig に transformer フィールドを設定すると自動でTransformerモードになる
+npm run train -- --transformer
+
+# Transformer + 並列ワーカー + Retar無効化
+npm run train -- --transformer --workers auto --no-retar
+
+# Transformerスモークテスト (短時間)
+npm run train -- --transformer --iterations 10 --batch 4 --eval-interval 5 --no-retar
+
+# チェックポイントから再開
+npm run train -- --transformer --resume
+
+# オーケストレーター (6モデル Phase 1 → Phase 2)
+npm run train:orchestrate -- --transformer --workers 3
 ```
 
+`--transformer` は以下のコマンドすべてで利用可能:
+- `npm run train` (cli.ts) — 単一モデル学習
+- `npm run train:orchestrate` (orchestrate.ts) — 6モデル ラウンドロビン学習
+  - Phase 2 の子プロセスにも自動で引き継がれる
+
 ```typescript
-// コード例: Transformer ネットワーク構築
+// コード例: Transformer ネットワーク構築 (プログラムから)
 import { createTransformerNetwork, createTransformerTfNetwork } from './training.ts'
 
 // 推論用 (pure JS, game-worker内)

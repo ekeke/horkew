@@ -44,6 +44,9 @@ Examples:
   # フル学習
   npm run train
 
+  # Transformer で学習
+  npm run train -- --transformer --workers auto
+
   # 前回の続きから再開
   npm run train -- --resume
 
