@@ -9,11 +9,13 @@ import { parentPort } from 'node:worker_threads'
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame } from '../../lupa/engine.ts'
+import { runGame as runGameLegacy } from '../../lupa/engine.ts'
+import { runGame as runGameNext } from '../../lupa/engine-next.ts'
+import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
-import { terminalReward, intermediateReward, tsumiReward, predictAccuracyReward, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { terminalReward, intermediateReward, tsumiReward, predictAccuracyReward, buildKnownSeats, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { parse } from '../../howl/parser.ts'
 import { buildVillageStatus } from '../../howl/bridge.ts'
@@ -32,8 +34,8 @@ import {
 
 if (!parentPort) throw new Error('game-worker must be run as a worker thread')
 
-parentPort.on('message', (req: WorkerRequest) => {
-  const results = runBatch(req)
+parentPort.on('message', async (req: WorkerRequest) => {
+  const results = await runBatch(req)
   parentPort!.postMessage({ type: 'result', games: results } satisfies WorkerResult)
 })
 
@@ -48,7 +50,7 @@ const ROLE_TO_GROUP: Record<string, string> = {
   werehamster: 'third', immoralist: 'third',
 }
 
-function runBatch(req: WorkerRequest): SerializedGameResult[] {
+async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
   const config = req.trainingConfig
   const multiModel = req.modelGroupWeights != null
   const network = buildNetwork(req.weights)
@@ -168,7 +170,38 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
     masonTeamStrategy?.resetTrajectory()
 
     const tGameStart = performance.now()
-    const { state, events, retarMs: gameRetarMs } = runGame(lupaConfig)
+    let state: import('../../lupa/types.ts').GameState
+    let events: import('../../lupa/types.ts').GameEvent[]
+    let gameRetarMs = 0
+
+    if (config.strategyOnly) {
+      // 新エンジン + minimal-adapter: 議論フェーズ全スキップで高速化
+      const handlers = minimalAdapter({
+        strategies: strategiesMap,
+        defaultStrategy,
+        wolfTeamStrategy,
+        masonTeamStrategy,
+        onRolesAssigned: onRolesAssigned ? (seatRoles) => {
+          onRolesAssigned(seatRoles)
+          for (const [seat, s] of strategies) {
+            if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
+          }
+        } : undefined,
+        seed,
+      })
+      const result = await runGameNext(
+        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+        handlers,
+      )
+      state = result.state
+      events = result.events
+    } else {
+      // 旧エンジン: 全フェーズ実行
+      const result = runGameLegacy(lupaConfig)
+      state = result.state
+      events = result.events
+      gameRetarMs = result.retarMs ?? 0
+    }
     const tGameEnd = performance.now()
 
     // Collect trajectories
@@ -219,12 +252,14 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
     const trueRoles = encodeTrueRoles(state.players)
     const trueRolesArray = Array.from(trueRoles)
     for (const entry of individualSteps) {
+      const player = state.players.find(p => p.seat === entry.seat)
+      const knownSeats = player ? buildKnownSeats(entry.seat, player.role, state) : undefined
       for (const step of entry.steps) {
         step.trueRoles = trueRolesArray
         // predict stepに推理精度報酬を付与
         if (step.actionHead === 'predict' && step.sigmoidActions) {
           step.reward += predictAccuracyReward(
-            new Float32Array(step.sigmoidActions), trueRoles, entry.role, config.rewardConfig,
+            new Float32Array(step.sigmoidActions), trueRoles, entry.role, config.rewardConfig, knownSeats,
           )
         }
       }
