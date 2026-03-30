@@ -14,7 +14,6 @@ import { buildPlayerView } from '../player-view.ts'
 import { alivePlayers } from '../roles.ts'
 import { Rng } from '../random.ts'
 import {
-  analyzeFromEvents as retarAnalyze,
   analyzePerPlayer as retarAnalyzePerPlayer,
   type RetarResult,
 } from '../retar-bridge.ts'
@@ -55,10 +54,10 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
     const state = pctx.state as GameState
     const events = [...pctx.events] as GameEvent[]
     const lupaConfig = { roles: config.roles, rules: config.rules } as any
-    const r = retarAnalyze(events, state, lupaConfig)
-    retarPossibilities = r.possibilities
-    maxSurvivingNV = r.maxSurvivingNV
+    // analyzePerPlayer 内部でグローバルRetarも走るので単独呼び出し不要
     const ppResult = retarAnalyzePerPlayer(events, state, lupaConfig, alivePlayers(state))
+    retarPossibilities = ppResult.global.possibilities
+    maxSurvivingNV = ppResult.global.maxSurvivingNV
     perPlayerRetar = ppResult.perPlayer
     globalRetarPossibilities = ppResult.global.possibilities
     retarAccMs += performance.now() - t0
@@ -89,7 +88,6 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       retarPossibilities: playerRetar,
       maxSurvivingNV: playerMaxNV,
       globalRetarPossibilities,
-      fakeRetarPossibilities: globalRetarPossibilities,
       wolfTeammates: view.wolfTeammates,
       knownWolves: view.knownWolves,
       knownHamster: view.knownHamster,
