@@ -9,6 +9,7 @@
  */
 
 import type { GameState, GameEvent } from '../../lupa/types.ts'
+import type { SystemRole } from '../../types/index.ts'
 
 export type RewardConfig = {
   /** 勝利報酬 */
@@ -29,6 +30,16 @@ export type RewardConfig = {
   tsumiVillagePerDay: number
   /** 中間報酬: Hati 被詰み (狼陣営、詰み後の1日あたり) */
   tsumiWolfPerDay: number
+  /** 中間報酬: 最終日前日に狐候補を処刑 (村陣営) */
+  endgamePreFinalFoxTarget: number
+  /** 中間報酬: 最終日前日にLW候補を処刑 (村陣営、負値) */
+  endgamePreFinalLWTarget: number
+  /** 中間報酬: 最終日に狐候補を処刑 (村陣営、負値) */
+  endgameFinalFoxTarget: number
+  /** 中間報酬: 最終日に狼候補(狐なし)を処刑 (村陣営) */
+  endgameFinalWolfTarget: number
+  /** 中間報酬: 最終日に確定狼を処刑 (村陣営) */
+  endgameFinalConfirmedWolf: number
 }
 
 export const DEFAULT_REWARD_CONFIG: RewardConfig = {
@@ -41,6 +52,11 @@ export const DEFAULT_REWARD_CONFIG: RewardConfig = {
   foxSurvival: 0.07,
   tsumiVillagePerDay: 0.1,
   tsumiWolfPerDay: -0.2,
+  endgamePreFinalFoxTarget: 0.08,
+  endgamePreFinalLWTarget: -0.06,
+  endgameFinalFoxTarget: -0.12,
+  endgameFinalWolfTarget: 0.08,
+  endgameFinalConfirmedWolf: 0.15,
 }
 
 type Alignment = 'village' | 'wolf' | 'hamster'
@@ -148,4 +164,34 @@ export function tsumiReward(
     }
   }
   return rewards
+}
+
+/**
+ * エンドゲーム投票報酬: 投票先の Retar 可能性集合に基づく中間報酬
+ *
+ * - 最終日前日 (4 < alive <= 6): 狐候補処刑 → +, LW候補処刑 → -
+ * - 最終日 (alive <= 4): 狐候補処刑 → --, 狼候補(狐なし)処刑 → +, 確定狼 → ++
+ */
+export function endgameVoteReward(
+  aliveCount: number,
+  targetPossibilities: Set<SystemRole> | undefined,
+  config: RewardConfig = DEFAULT_REWARD_CONFIG,
+): number {
+  if (!targetPossibilities || aliveCount > 6) return 0
+
+  const hasWolf = targetPossibilities.has('werewolf')
+  const hasFox = targetPossibilities.has('werehamster')
+
+  if (aliveCount <= 4) {
+    // 最終日
+    if (targetPossibilities.size === 1 && hasWolf) return config.endgameFinalConfirmedWolf
+    if (hasFox) return config.endgameFinalFoxTarget
+    if (hasWolf) return config.endgameFinalWolfTarget
+    return 0
+  }
+
+  // 最終日前日 (4 < alive <= 6)
+  if (hasFox) return config.endgamePreFinalFoxTarget
+  if (hasWolf) return config.endgamePreFinalLWTarget
+  return 0
 }

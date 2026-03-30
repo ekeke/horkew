@@ -16,6 +16,7 @@ import {
   sampleMasked,
   decodeNightActionWithRole, decodeClaim, decodeComm, decodePropose, decodePredict, decodeLeader,
 } from './action.ts'
+import { endgameVoteReward } from './reward.ts'
 import { sigmoid } from './ml/nn.ts'
 
 export type FenrirStrategyConfig = {
@@ -175,7 +176,17 @@ export class FenrirStrategy implements Strategy {
     const mask = maskVote(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
 
-    this.record(ctx, 'vote', action, logProb, result.value, 0)
+    // Endgame vote reward: Retar可能性に基づく投票先評価
+    let reward = 0
+    if (ctx.retarPossibilities) {
+      const targetSeat = action + 1
+      reward = endgameVoteReward(
+        ctx.alivePlayers.length,
+        ctx.retarPossibilities.get(targetSeat),
+      )
+    }
+
+    this.record(ctx, 'vote', action, logProb, result.value, reward)
 
     return action + 1  // action is seat-1
   }
