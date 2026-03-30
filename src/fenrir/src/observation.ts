@@ -54,11 +54,20 @@ const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 210
 
 // Retar可能性: per-seat × roles (0/1)
 const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
+// グローバルRetar: 公開情報のみで計算した可能性 (Step 6)
+const GLOBAL_RETAR_SIZE = SEATS * NUM_ROLES  // 154
+// 騙り前提Retar: 自分が偽物だと仮定した場合の可能性 (Step 6)
+const FAKE_RETAR_SIZE = SEATS * NUM_ROLES  // 154
 
 // 処刑プラン: per-seat(included, position) + global(length, is_grayran, active)
 const PLAN_PER_SEAT_SIZE = 2
 const PLAN_GLOBAL_SIZE = 3
 const PLAN_SIZE = SEATS * PLAN_PER_SEAT_SIZE + PLAN_GLOBAL_SIZE  // 31
+// プラン賛否: per-seat (Step 6)
+const PLAN_APPROVED_SIZE = SEATS  // 14
+// 新シグナル: per-seat × 4 (confirm_human, confirm_wolf, vote_for, vote_against) (Step 6)
+const NEW_SIGNALS_PER_SEAT = 4
+const NEW_SIGNALS_SIZE = SEATS * NEW_SIGNALS_PER_SEAT  // 56
 
 /** プラントークンの特徴量次元 */
 export const PLAN_TOKEN_FEATURES = 20
@@ -70,7 +79,7 @@ const PLAN_TOKENS_COUNT_SIZE = 1
 const PLAN_TOKENS_DATA_SIZE = MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES  // 160
 const PLAN_TOKENS_SIZE = PLAN_TOKENS_COUNT_SIZE + PLAN_TOKENS_DATA_SIZE  // 161
 
-export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + PLAN_SIZE + PLAN_TOKENS_SIZE
+export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + GLOBAL_RETAR_SIZE + FAKE_RETAR_SIZE + PLAN_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE + PLAN_TOKENS_SIZE
 
 // ============================================================
 // Transformer用トークン化
@@ -90,13 +99,17 @@ const REVOTE_ROUND_START = REVOTE_START
 const REVOTE_CANDIDATES_START = REVOTE_START + 1
 const HISTORY_START = REVOTE_START + REVOTE_SIZE
 const RETAR_START = HISTORY_START + HISTORY_SIZE
-const PLAN_START = RETAR_START + RETAR_POSSIBILITIES_SIZE
+const GLOBAL_RETAR_START = RETAR_START + RETAR_POSSIBILITIES_SIZE
+const FAKE_RETAR_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
+const PLAN_START = FAKE_RETAR_START + FAKE_RETAR_SIZE
 const PLAN_INCLUDED_START = PLAN_START
 const PLAN_POSITION_START = PLAN_START + SEATS
 const PLAN_GLOBAL_START = PLAN_START + SEATS * PLAN_PER_SEAT_SIZE
+const PLAN_APPROVED_START = PLAN_START + PLAN_SIZE
+const NEW_SIGNALS_START = PLAN_APPROVED_START + PLAN_APPROVED_SIZE
 
 // プラントークンセクション
-const PLAN_TOKENS_START = PLAN_START + PLAN_SIZE
+const PLAN_TOKENS_START = NEW_SIGNALS_START + NEW_SIGNALS_SIZE
 const PLAN_TOKEN_COUNT_START = PLAN_TOKENS_START
 const PLAN_TOKEN_DATA_START = PLAN_TOKENS_START + 1
 
@@ -112,9 +125,9 @@ export const CLS_FEATURES = 25
 /** CLSトークンの特徴量次元 (team) */
 export const TEAM_CLS_FEATURES = 26
 /** 席トークンの特徴量次元 (individual) */
-export const SEAT_TOKEN_FEATURES = 57
+export const SEAT_TOKEN_FEATURES = 84  // 57 + globalRetar(11) + fakeRetar(11) + plan_approved(1) + new_signals(4)
 /** 席トークンの特徴量次元 (team) */
-export const TEAM_SEAT_TOKEN_FEATURES = 60
+export const TEAM_SEAT_TOKEN_FEATURES = 87  // 84 + team(3)
 
 /** CO可能役職 (Role token対象) */
 export const CO_ROLES: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
@@ -192,13 +205,28 @@ export function tokenize(obs: Float32Array, isTeam: boolean = false): TokenizedO
       for (let i = 0; i < 5; i++) seats[so++] = obs[hOff + i]
     }
 
-    // retar possibilities (11)
+    // retar possibilities (11) — 自分視点
     const rOff = RETAR_START + s * NUM_ROLES
     for (let i = 0; i < NUM_ROLES; i++) seats[so++] = obs[rOff + i]
+
+    // global retar possibilities (11) — 公開情報のみ
+    const grOff = GLOBAL_RETAR_START + s * NUM_ROLES
+    for (let i = 0; i < NUM_ROLES; i++) seats[so++] = obs[grOff + i]
+
+    // fake retar possibilities (11) — 騙り前提
+    const frOff = FAKE_RETAR_START + s * NUM_ROLES
+    for (let i = 0; i < NUM_ROLES; i++) seats[so++] = obs[frOff + i]
 
     // plan per-seat (2)
     seats[so++] = obs[PLAN_INCLUDED_START + s]
     seats[so++] = obs[PLAN_POSITION_START + s]
+
+    // plan_approved (1)
+    seats[so++] = obs[PLAN_APPROVED_START + s]
+
+    // new signals (4): confirm_human, confirm_wolf, vote_for, vote_against
+    const nsOff = NEW_SIGNALS_START + s * NEW_SIGNALS_PER_SEAT
+    for (let i = 0; i < NEW_SIGNALS_PER_SEAT; i++) seats[so++] = obs[nsOff + i]
 
     // team extension per-seat (3)
     if (isTeam) {
@@ -519,7 +547,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   }
   offset += HISTORY_SIZE
 
-  // ========== Retar possibilities ==========
+  // ========== Retar possibilities (自分視点) ==========
   if (ctx.retarPossibilities) {
     for (let seat = 1; seat <= SEATS; seat++) {
       const roles = ctx.retarPossibilities.get(seat)
@@ -533,6 +561,36 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
     }
   }
   offset += RETAR_POSSIBILITIES_SIZE
+
+  // ========== Global Retar (公開情報のみ) ==========
+  if (ctx.globalRetarPossibilities) {
+    for (let seat = 1; seat <= SEATS; seat++) {
+      const roles = ctx.globalRetarPossibilities.get(seat)
+      if (!roles) continue
+      for (const role of roles) {
+        const rIdx = ROLE_INDEX.get(role)
+        if (rIdx !== undefined) {
+          obs[offset + (seat - 1) * NUM_ROLES + rIdx] = 1
+        }
+      }
+    }
+  }
+  offset += GLOBAL_RETAR_SIZE
+
+  // ========== Fake Retar (騙り前提) ==========
+  if (ctx.fakeRetarPossibilities) {
+    for (let seat = 1; seat <= SEATS; seat++) {
+      const roles = ctx.fakeRetarPossibilities.get(seat)
+      if (!roles) continue
+      for (const role of roles) {
+        const rIdx = ROLE_INDEX.get(role)
+        if (rIdx !== undefined) {
+          obs[offset + (seat - 1) * NUM_ROLES + rIdx] = 1
+        }
+      }
+    }
+  }
+  offset += FAKE_RETAR_SIZE
 
   // ========== Execution Plan (primary plan — backward compat) ==========
   const primaryPlan = ctx.executionPlans.length > 0 ? ctx.executionPlans[0] : null
@@ -556,6 +614,54 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   } else {
     offset += PLAN_SIZE  // all zeros
   }
+
+  // ========== Plan Approved (per-seat) ==========
+  // agree/disagreeシグナルから導出: 処刑提案者への賛否
+  {
+    const agreeCounts = new Map<number, number>()
+    const disagreeCounts = new Map<number, number>()
+    for (const event of ctx.publicEvents) {
+      if (event.type === 'signal' && 'target' in event.signal) {
+        if (event.signal.type === 'agree') {
+          agreeCounts.set(event.signal.target, (agreeCounts.get(event.signal.target) ?? 0) + 1)
+        } else if (event.signal.type === 'disagree') {
+          disagreeCounts.set(event.signal.target, (disagreeCounts.get(event.signal.target) ?? 0) + 1)
+        }
+      }
+    }
+    for (let seat = 1; seat <= SEATS; seat++) {
+      const net = (agreeCounts.get(seat) ?? 0) - (disagreeCounts.get(seat) ?? 0)
+      obs[offset + seat - 1] = Math.max(-1, Math.min(1, net / 5))  // clamp to [-1, 1]
+    }
+  }
+  offset += PLAN_APPROVED_SIZE
+
+  // ========== New Signals (per-seat × 4) ==========
+  {
+    const confirmHumanCounts = new Map<number, number>()
+    const confirmWolfCounts = new Map<number, number>()
+    const voteForCounts = new Map<number, number>()
+    const voteAgainstCounts = new Map<number, number>()
+    for (const event of ctx.publicEvents) {
+      if (event.type === 'signal' && 'target' in event.signal) {
+        const t = event.signal.target
+        switch (event.signal.type) {
+          case 'confirm_human': confirmHumanCounts.set(t, (confirmHumanCounts.get(t) ?? 0) + 1); break
+          case 'confirm_wolf': confirmWolfCounts.set(t, (confirmWolfCounts.get(t) ?? 0) + 1); break
+          case 'vote_for': voteForCounts.set(t, (voteForCounts.get(t) ?? 0) + 1); break
+          case 'vote_against': voteAgainstCounts.set(t, (voteAgainstCounts.get(t) ?? 0) + 1); break
+        }
+      }
+    }
+    for (let seat = 1; seat <= SEATS; seat++) {
+      const base = offset + (seat - 1) * NEW_SIGNALS_PER_SEAT
+      obs[base + 0] = Math.min((confirmHumanCounts.get(seat) ?? 0) / 5, 1)
+      obs[base + 1] = Math.min((confirmWolfCounts.get(seat) ?? 0) / 5, 1)
+      obs[base + 2] = Math.min((voteForCounts.get(seat) ?? 0) / 5, 1)
+      obs[base + 3] = Math.min((voteAgainstCounts.get(seat) ?? 0) / 5, 1)
+    }
+  }
+  offset += NEW_SIGNALS_SIZE
 
   // ========== Plan Tokens (Transformer用、全プラン) ==========
   const planCount = Math.min(ctx.executionPlans.length, MAX_PLAN_TOKENS)

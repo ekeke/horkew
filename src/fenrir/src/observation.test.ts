@@ -14,13 +14,17 @@ const PRIVATE_SIZE = SEATS + SEATS + 1 + SEATS + 1  // 44
 const REVOTE_SIZE = 1 + SEATS  // 15
 const HISTORY_SIZE = 3 * SEATS * 5  // 210
 const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
+const GLOBAL_RETAR_SIZE = SEATS * NUM_ROLES  // 154
+const FAKE_RETAR_SIZE = SEATS * NUM_ROLES  // 154
 const PLAN_SIZE = SEATS * 2 + 3  // 31
+const PLAN_APPROVED_SIZE = SEATS  // 14
+const NEW_SIGNALS_SIZE = SEATS * 4  // 56
 const PLAN_TOKENS_SIZE = 1 + MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES  // 161
 const PLAN_GLOBAL_SIZE = 3
 
 // PLANセクションの開始オフセット
 const PLAN_SECTION_START = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE
-  + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE
+  + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + GLOBAL_RETAR_SIZE + FAKE_RETAR_SIZE
 
 /** テスト用の最小DecisionContext */
 function makeCtx(overrides: Partial<DecisionContext> = {}): DecisionContext {
@@ -43,6 +47,8 @@ function makeCtx(overrides: Partial<DecisionContext> = {}): DecisionContext {
     lastExecutedSeat: null,
     retarPossibilities: null,
     maxSurvivingNV: null,
+    globalRetarPossibilities: null,
+    fakeRetarPossibilities: null,
     wolfTeammates: null,
     knownWolves: null,
     knownHamster: null,
@@ -58,9 +64,11 @@ function makeCtx(overrides: Partial<DecisionContext> = {}): DecisionContext {
 describe('OBSERVATION_SIZE', () => {
   it('equals expected total', () => {
     const expected = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE
-      + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + PLAN_SIZE + PLAN_TOKENS_SIZE
+      + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE
+      + GLOBAL_RETAR_SIZE + FAKE_RETAR_SIZE
+      + PLAN_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE + PLAN_TOKENS_SIZE
     assert.equal(OBSERVATION_SIZE, expected)
-    assert.equal(OBSERVATION_SIZE, 984)
+    assert.equal(OBSERVATION_SIZE, 1362)
   })
 })
 
@@ -124,14 +132,14 @@ describe('encodeObservation', () => {
 
   it('plan_token_count is 0 when no plans', () => {
     const obs = encodeObservation(makeCtx({ executionPlans: [] }))
-    const tokenCountOffset = PLAN_SECTION_START + PLAN_SIZE
+    const tokenCountOffset = PLAN_SECTION_START + PLAN_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE
     assert.equal(obs[tokenCountOffset], 0)
   })
 
   it('encodes single plan token correctly', () => {
     const plan: ExecutionPlan = { targets: [3, 7], type: 'roller' }
     const obs = encodeObservation(makeCtx({ executionPlans: [plan] }))
-    const tokenCountOffset = PLAN_SECTION_START + PLAN_SIZE
+    const tokenCountOffset = PLAN_SECTION_START + PLAN_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE
     const tokenDataOffset = tokenCountOffset + 1
 
     assert.equal(obs[tokenCountOffset], 1, 'plan_token_count')
@@ -155,7 +163,7 @@ describe('encodeObservation', () => {
       { targets: [5, 9], type: 'endgame' },
     ]
     const obs = encodeObservation(makeCtx({ executionPlans: plans }))
-    const tokenCountOffset = PLAN_SECTION_START + PLAN_SIZE
+    const tokenCountOffset = PLAN_SECTION_START + PLAN_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE
     const tokenDataOffset = tokenCountOffset + 1
 
     assert.equal(obs[tokenCountOffset], 2, 'plan_token_count')

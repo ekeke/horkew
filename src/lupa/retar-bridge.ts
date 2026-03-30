@@ -212,45 +212,55 @@ export function buildAssumptions(
   return assumptions
 }
 
+/** analyzePerPlayer の戻り値: グローバル結果 + プレイヤー別結果 */
+export type PerPlayerRetarResult = {
+  /** 仮定なし（公開情報のみ）のRetar結果 */
+  global: RetarResult
+  /** プレイヤー別Retar結果 (seat → RetarResult) */
+  perPlayer: Map<number, RetarResult>
+}
+
 /**
  * プレイヤー別 Retar 分析
  * 各プレイヤーの初期知識を assumption として Retar を実行し、プレイヤー別の結果を返す
+ * グローバル（仮定なし）の結果も同時に返す
  */
 export function analyzePerPlayer(
   events: GameEvent[],
   state: GameState,
   config: LupaConfig,
   players: GameState['players'],
-): Map<number, RetarResult> {
-  const result = new Map<number, RetarResult>()
+): PerPlayerRetarResult {
+  const emptyGlobal: RetarResult = { possibilities: new Map(), maxSurvivingNV: 0 }
+  const perPlayer = new Map<number, RetarResult>()
 
   const howl = formatHowl(events, state, config)
   const { meta, statements } = parse(howl)
   const unknowns = statements.filter(s => s.type === 'unknown')
-  if (unknowns.length > 0) return result
+  if (unknowns.length > 0) return { global: emptyGlobal, perPlayer }
 
   const { vs, setup } = buildVillageStatus(statements, meta)
 
   const baseOptions = buildRetarOptions(config)
 
   // 共通 Retar を1回走らせ、結果を prior として再利用
-  const common = runRetar(vs, setup, baseOptions)
-  const prior = common.possibilities
+  const global = runRetar(vs, setup, baseOptions)
+  const prior = global.possibilities
 
   // 共通 Retar が破綻していたら per-player もスキップ
-  if (common.possibilities.size === 0) return result
+  if (global.possibilities.size === 0) return { global, perPlayer }
 
   for (const player of players) {
     const assumptions = buildAssumptions(state, player, prior)
     if (assumptions.size === 0) {
-      result.set(player.seat, common)
+      perPlayer.set(player.seat, global)
     } else {
       const options = { ...baseOptions, assumptions, prior }
-      result.set(player.seat, runRetar(vs, setup, options))
+      perPlayer.set(player.seat, runRetar(vs, setup, options))
     }
   }
 
-  return result
+  return { global, perPlayer }
 }
 
 /**

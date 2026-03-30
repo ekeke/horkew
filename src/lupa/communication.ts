@@ -51,6 +51,10 @@ export type Signal =
   | { type: 'fanatic_co' }
   | { type: 'werehamster_co' }
   | { type: 'immoralist_co' }
+  | { type: 'confirm_human', target: number }
+  | { type: 'confirm_wolf', target: number }
+  | { type: 'vote_for', target: number }
+  | { type: 'vote_against', target: number }
   | { type: 'submit_prediction' }
   | { type: 'no_signal' }
 

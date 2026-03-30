@@ -41,10 +41,19 @@ const HISTORY_DAY_SIZE = SEATS * 5
 const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE
 const RETAR_START = HISTORY_START + HISTORY_SIZE
 const RETAR_SIZE = SEATS * NUM_ROLES
-const PLAN_START = RETAR_START + RETAR_SIZE
+const GLOBAL_RETAR_START = RETAR_START + RETAR_SIZE
+const GLOBAL_RETAR_SIZE = SEATS * NUM_ROLES
+const FAKE_RETAR_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
+const FAKE_RETAR_SIZE = SEATS * NUM_ROLES
+const PLAN_START = FAKE_RETAR_START + FAKE_RETAR_SIZE
 const PLAN_INCLUDED_START = PLAN_START
 const PLAN_POSITION_START = PLAN_START + SEATS
 const PLAN_GLOBAL_START = PLAN_START + SEATS * 2
+const PLAN_SIZE = SEATS * 2 + 3  // 31
+const PLAN_APPROVED_START = PLAN_START + PLAN_SIZE
+const PLAN_APPROVED_SIZE = SEATS
+const NEW_SIGNALS_PER_SEAT = 4
+const NEW_SIGNALS_START = PLAN_APPROVED_START + PLAN_APPROVED_SIZE
 
 // Team offsets
 const TEAM_SIZE_START = OBSERVATION_SIZE
@@ -87,12 +96,23 @@ function buildSeatIndices(isTeam: boolean): number[] {
       const hOff = HISTORY_START + w * HISTORY_DAY_SIZE + s * 5
       for (let i = 0; i < 5; i++) indices.push(hOff + i)
     }
-    // retar (11)
+    // retar — 自分視点 (11)
     const rOff = RETAR_START + s * NUM_ROLES
     for (let i = 0; i < NUM_ROLES; i++) indices.push(rOff + i)
+    // global retar — 公開情報のみ (11)
+    const grOff = GLOBAL_RETAR_START + s * NUM_ROLES
+    for (let i = 0; i < NUM_ROLES; i++) indices.push(grOff + i)
+    // fake retar — 騙り前提 (11)
+    const frOff = FAKE_RETAR_START + s * NUM_ROLES
+    for (let i = 0; i < NUM_ROLES; i++) indices.push(frOff + i)
     // plan (2)
     indices.push(PLAN_INCLUDED_START + s)
     indices.push(PLAN_POSITION_START + s)
+    // plan_approved (1)
+    indices.push(PLAN_APPROVED_START + s)
+    // new signals (4): confirm_human, confirm_wolf, vote_for, vote_against
+    const nsOff = NEW_SIGNALS_START + s * NEW_SIGNALS_PER_SEAT
+    for (let i = 0; i < NEW_SIGNALS_PER_SEAT; i++) indices.push(nsOff + i)
     // team per-seat (3)
     if (isTeam) {
       indices.push(TEAM_IS_MY_TEAM_START + s)

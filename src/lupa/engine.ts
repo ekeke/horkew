@@ -133,6 +133,8 @@ function buildContext(
     lastExecutedSeat,
     retarPossibilities: playerRetar,
     maxSurvivingNV: playerMaxNV,
+    globalRetarPossibilities: null,
+    fakeRetarPossibilities: null,
     wolfTeammates,
     knownWolves,
     knownHamster,
@@ -207,9 +209,12 @@ export function runGame(config: LupaConfig): GameResult {
   const hasFirstVictim = config.hasFirstGhost ?? rules['first-victim'] !== 'none'
 
   // rules をキャプチャした buildContext ラッパー
+  let globalRetarPossibilities: Map<number, Set<SystemRole>> | null = null
   const makeCtx: typeof buildContext = (...args) => {
     const c = buildContext(...args)
     c.rules = rules
+    c.globalRetarPossibilities = globalRetarPossibilities
+    c.fakeRetarPossibilities = globalRetarPossibilities // 暫定: グローバルRetarで代用
     return c
   }
 
@@ -314,7 +319,9 @@ export function runGame(config: LupaConfig): GameResult {
       const r = retarAnalyze(events, state, config)
       preCoRetar = r.possibilities
       preCoMaxNV = r.maxSurvivingNV
-      preCoPerPlayer = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+      const preCoRetarResult = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+      preCoPerPlayer = preCoRetarResult.perPlayer
+      globalRetarPossibilities = preCoRetarResult.global.possibilities
     }
 
     // COフェーズ
@@ -346,7 +353,9 @@ export function runGame(config: LupaConfig): GameResult {
       const r = retarAnalyze(events, state, config)
       retarPossibilities = r.possibilities
       maxSurvivingNV = r.maxSurvivingNV
-      perPlayerRetar = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+      const retarResult = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+      perPlayerRetar = retarResult.perPlayer
+      globalRetarPossibilities = retarResult.global.possibilities
     }
 
     // ==== シグナルフェーズ ====
@@ -371,7 +380,9 @@ export function runGame(config: LupaConfig): GameResult {
           const r = retarAnalyze(events, state, config)
           retarPossibilities = r.possibilities
           maxSurvivingNV = r.maxSurvivingNV
-          perPlayerRetar = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+          const claimRetarResult = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+          perPlayerRetar = claimRetarResult.perPlayer
+          globalRetarPossibilities = claimRetarResult.global.possibilities
         }
       }
     }
@@ -451,7 +462,9 @@ export function runGame(config: LupaConfig): GameResult {
           const r = retarAnalyze(events, state, config)
           retarPossibilities = r.possibilities
           maxSurvivingNV = r.maxSurvivingNV
-          perPlayerRetar = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+          const defRetarResult = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+          perPlayerRetar = defRetarResult.perPlayer
+          globalRetarPossibilities = defRetarResult.global.possibilities
         }
       }
     }
@@ -689,9 +702,12 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
   const hasFirstVictim = config.hasFirstGhost ?? rules['first-victim'] !== 'none'
 
   // rules をキャプチャした buildContext ラッパー
+  let globalRetarPossibilities: Map<number, Set<SystemRole>> | null = null
   const makeCtx: typeof buildContext = (...args) => {
     const c = buildContext(...args)
     c.rules = rules
+    c.globalRetarPossibilities = globalRetarPossibilities
+    c.fakeRetarPossibilities = globalRetarPossibilities // 暫定: グローバルRetarで代用
     return c
   }
 
@@ -778,7 +794,9 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
       const r = retarAnalyze(events, state, config)
       preCoRetar = r.possibilities
       preCoMaxNV = r.maxSurvivingNV
-      preCoPerPlayer = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+      const preCoRetarResult = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+      preCoPerPlayer = preCoRetarResult.perPlayer
+      globalRetarPossibilities = preCoRetarResult.global.possibilities
     }
 
     // COフェーズ
@@ -801,7 +819,9 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
       const r = retarAnalyze(events, state, config)
       retarPossibilities = r.possibilities
       maxSurvivingNV = r.maxSurvivingNV
-      perPlayerRetar = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+      const retarResult = retarAnalyzePerPlayer(events, state, config, alivePlayers(state))
+      perPlayerRetar = retarResult.perPlayer
+      globalRetarPossibilities = retarResult.global.possibilities
     }
 
     // シグナルフェーズ
