@@ -173,6 +173,9 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         masonTeamStrategy,
         onRolesAssigned: onRolesAssignedWrapped,
         seed,
+        enableRetar: config.enableRetar,
+        roles,
+        rules: config.rules,
       })
       const result = await runGame(
         { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
@@ -180,6 +183,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       )
       state = result.state
       events = result.events
+      gameRetarMs = result.timing?.retarMs ?? 0
     } else {
       // strategy-adapter: 全フェーズ実行
       const handlers = strategyAdapter({

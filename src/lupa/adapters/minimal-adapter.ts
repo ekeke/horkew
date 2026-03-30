@@ -3,16 +3,21 @@
  *
  * onNight + onDayClaims + onVote のみ実装。
  * onPreVote なし → シグナル/指揮者/予告/防御CO全スキップ。
- * Retar計算もなし。最速のゲーム実行。
+ * Retar計算はオプション（enableRetar時のみ）。
  */
 
-import type { SystemRole } from '../../types/index.ts'
-import type { GameState, NightAction, DayClaim, PlayerState } from '../types.ts'
+import type { SystemRole, ResolvedRules } from '../../types/index.ts'
+import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../types.ts'
 import type { DecisionContext, TeamDecisionContext, Strategy, TeamStrategy, WolfNightAction } from '../strategy.ts'
-import type { GameHandlers, PhaseContext, PlayerView } from '../handlers.ts'
+import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../handlers.ts'
 import { buildPlayerView } from '../player-view.ts'
 import { alivePlayers } from '../roles.ts'
 import { Rng } from '../random.ts'
+import {
+  analyzeFromEvents as retarAnalyze,
+  analyzePerPlayer as retarAnalyzePerPlayer,
+  type RetarResult,
+} from '../retar-bridge.ts'
 
 export type MinimalAdapterConfig = {
   strategies: Map<number, Strategy>
@@ -22,19 +27,51 @@ export type MinimalAdapterConfig = {
   /** 役職割当後にstrategy差し替え用コールバック */
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   seed?: number
+  /** Retar有効化（デフォルト: false） */
+  enableRetar?: boolean
+  /** enableRetar時に必要 */
+  roles?: Map<SystemRole, number>
+  /** enableRetar時に必要 */
+  rules?: Partial<ResolvedRules>
 }
 
 export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
   const rng = new Rng(config.seed)
 
+  // Retar state
+  let retarPossibilities: Map<number, Set<SystemRole>> | null = null
+  let maxSurvivingNV: number | null = null
+  let globalRetarPossibilities: Map<number, Set<SystemRole>> | null = null
+  let perPlayerRetar: Map<number, RetarResult> | null = null
+  let retarAccMs = 0
+
   function getStrategy(seat: number): Strategy {
     return config.strategies.get(seat) ?? config.defaultStrategy!
+  }
+
+  function runRetar(pctx: PhaseContext): void {
+    if (!config.enableRetar) return
+    const t0 = performance.now()
+    const state = pctx.state as GameState
+    const events = [...pctx.events] as GameEvent[]
+    const lupaConfig = { roles: config.roles, rules: config.rules } as any
+    const r = retarAnalyze(events, state, lupaConfig)
+    retarPossibilities = r.possibilities
+    maxSurvivingNV = r.maxSurvivingNV
+    const ppResult = retarAnalyzePerPlayer(events, state, lupaConfig, alivePlayers(state))
+    perPlayerRetar = ppResult.perPlayer
+    globalRetarPossibilities = ppResult.global.possibilities
+    retarAccMs += performance.now() - t0
   }
 
   function buildCtx(
     pctx: PhaseContext, player: PlayerState, view: PlayerView,
     extra?: Partial<DecisionContext>,
   ): DecisionContext {
+    const playerRetarResult = perPlayerRetar?.get(player.seat)
+    const playerRetar = playerRetarResult?.possibilities ?? retarPossibilities
+    const playerMaxNV = playerRetarResult?.maxSurvivingNV ?? maxSurvivingNV
+
     return {
       mySeat: player.seat,
       myRole: player.role,
@@ -49,10 +86,10 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       rng,
       gameState: pctx.state as GameState,
       lastExecutedSeat: null,
-      retarPossibilities: null,
-      maxSurvivingNV: null,
-      globalRetarPossibilities: null,
-      fakeRetarPossibilities: null,
+      retarPossibilities: playerRetar,
+      maxSurvivingNV: playerMaxNV,
+      globalRetarPossibilities,
+      fakeRetarPossibilities: globalRetarPossibilities,
       wolfTeammates: view.wolfTeammates,
       knownWolves: view.knownWolves,
       knownHamster: view.knownHamster,
@@ -119,6 +156,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
     },
 
     onDayClaims(pctx) {
+      runRetar(pctx)
       const state = pctx.state as GameState
       const claims = new Map<number, DayClaim>()
 
@@ -145,6 +183,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
     // onPreVote なし → 議論フェーズ全スキップ
 
     onVote(vctx) {
+      runRetar(vctx)
       const state = vctx.state as GameState
       const votes = new Map<number, number>()
 
@@ -168,6 +207,10 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       }
 
       return votes
+    },
+
+    getTiming(): GameTiming {
+      return { retarMs: retarAccMs }
     },
   }
 }
