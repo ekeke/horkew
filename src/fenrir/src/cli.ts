@@ -27,6 +27,7 @@ Options:
   --target-faction <s>      チェックする陣営 (villageWin/wolfWin/hamsterWin)
   --workers <n|auto>        ゲーム生成の並列ワーカー数 (auto=CPU-1, default: 直列)
   --transformer             Transformerアーキテクチャを使用 (default: MLP)
+  --strategy-only           戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
   --no-retar                Retar論理推論を無効化
   --resume [dir]            チェックポイントから再開 (default: --checkpoint-dir)
   --help, -h                このヘルプを表示
@@ -93,6 +94,9 @@ function parseArgs(): ParsedArgs {
         break
       case '--transformer':
         config.useTransformer = true
+        break
+      case '--strategy-only':
+        config.strategyOnly = true
         break
       case '--no-retar':
         config.enableRetar = false

@@ -224,7 +224,7 @@ function generateGame(
   const onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
     for (const [seat, role] of seatRoles) {
       if (mlRolesSet.has(role)) {
-        strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+        strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: trainingConfig.strategyOnly }))
       }
     }
   }

@@ -91,9 +91,9 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
 
         if (usePool && poolNets.length > 0 && seat % 3 === 0) {
           const pastNet = poolNets[Math.floor(Math.random() * poolNets.length)]
-          strategies.set(seat, new FenrirStrategy(pastNet, { explore: true }))
+          strategies.set(seat, new FenrirStrategy(pastNet, { explore: true, strategyOnly: config.strategyOnly }))
         } else {
-          strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+          strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
         }
       }
     }
@@ -125,7 +125,7 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
           const groupName = ROLE_TO_GROUP[role]
           const net = groupName ? groupNets.get(groupName) : undefined
           if (net) {
-            strategies.set(seat, new FenrirStrategy(net, { explore: true }))
+            strategies.set(seat, new FenrirStrategy(net, { explore: true, strategyOnly: config.strategyOnly }))
           }
           // groupName が無い (possessed等) → defaultStrategy にフォールバック
         }
@@ -135,7 +135,7 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
         seatRoleMap = seatRoles
         for (const [seat, role] of seatRoles) {
           if (mlRolesSet.has(role)) {
-            strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+            strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
           }
         }
       }

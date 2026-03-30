@@ -77,6 +77,8 @@ export type TrainingConfig = {
   entropyCoeff: number
   /** Predict補助損失係数 (0でオフ) */
   predictLossCoeff?: number
+  /** 戦略NNのみ学習（行動はルールベース、Step 1 bootstrap） */
+  strategyOnly?: boolean
   /** 割引率 */
   gamma: number
   /** GAE lambda */
@@ -1036,7 +1038,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
               const groupName = ROLE_TO_GROUP_NAME.get(role)
               const group = groupName ? modelGroups.get(groupName) : undefined
               if (group && !group.heuristicOnly) {
-                strategies.set(seat, new FenrirStrategy(group.network, { explore: true }))
+                strategies.set(seat, new FenrirStrategy(group.network, { explore: true, strategyOnly: config.strategyOnly }))
               }
             }
           }
@@ -1049,9 +1051,9 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
                 const pastWeights = pool[Math.floor(Math.random() * pool.length)]
                 const pastNet = makeNetwork()
                 pastNet.loadWeights(pastWeights)
-                strategies.set(seat, new FenrirStrategy(pastNet, { explore: true }))
+                strategies.set(seat, new FenrirStrategy(pastNet, { explore: true, strategyOnly: config.strategyOnly }))
               } else {
-                strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+                strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
               }
             }
           }
@@ -1059,7 +1061,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
           onRolesAssigned = (useHeuristic && mlRolesSet) ? (seatRoles: Map<number, SystemRole>) => {
             for (const [seat, role] of seatRoles) {
               if (mlRolesSet.has(role)) {
-                strategies.set(seat, new FenrirStrategy(network, { explore: true }))
+                strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
               }
             }
           } : undefined
