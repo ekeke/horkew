@@ -100,9 +100,17 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       }
     }
 
-    let wolfTeamStrategy: WolfTeamStrategy | undefined
-    let masonTeamStrategy: MasonTeamStrategy | undefined
-    if (req.useTeamStrategy) {
+    let wolfTeamStrategy: WolfTeamStrategy | WolfTeamHeuristic | undefined
+    let masonTeamStrategy: MasonTeamStrategy | MasonTeamHeuristic | undefined
+    if (config.strategyOnly) {
+      // strategy-only: チーム戦略はheuristicにフォールバック（チームNNはstrategy-only未対応）
+      if (req.useTeamStrategy === 'wolf_team' || (!req.useTeamStrategy && (!useHeuristic || multiModel))) {
+        wolfTeamStrategy = new WolfTeamHeuristic()
+      }
+      if (req.useTeamStrategy === 'mason_team' || (!req.useTeamStrategy && (!useHeuristic || multiModel))) {
+        masonTeamStrategy = new MasonTeamHeuristic()
+      }
+    } else if (req.useTeamStrategy) {
       // orchestrator: 指定チームだけML
       if (req.useTeamStrategy === 'wolf_team' && wolfTeamNet) {
         wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
