@@ -1,7 +1,9 @@
 import type { SystemRole } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 import type { LupaConfig } from './types.ts'
-import { runGame } from './engine.ts'
+import type { GameConfig } from './handlers.ts'
+import { runGame } from './engine-next.ts'
+import { strategyAdapter } from './adapters/strategy-adapter.ts'
 import { formatHowl } from './format.ts'
 import { parse } from '../howl/index.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
@@ -11,8 +13,12 @@ import { RandomStrategy } from './random-strategy.ts'
 import { findScenario, scenarioToRoles, scenarios } from './scenarios.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 
+import type { StrategyAdapterConfig } from './adapters/strategy-adapter.ts'
+
 type CliOptions = {
-  config: LupaConfig
+  gameConfig: GameConfig
+  lupaConfig: LupaConfig
+  adapterConfig: StrategyAdapterConfig
   tsumi: boolean
   stats: boolean
   games: number
@@ -21,8 +27,6 @@ type CliOptions = {
 function parseArgs(args: string[]): CliOptions {
   const roles = new Map<SystemRole, number>()
   let seed: number | undefined
-  let verify = false
-  let useRandomNames = false
   let tsumi = false
   let stats = false
   let heuristic = false
@@ -33,8 +37,8 @@ function parseArgs(args: string[]): CliOptions {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
-    if (arg === '--test') { verify = true; continue }
-    if (arg === '--use-random-names') { useRandomNames = true; continue }
+    if (arg === '--test') { continue }
+    if (arg === '--use-random-names') { continue }
     if (arg === '--tsumi') { tsumi = true; continue }
     if (arg === '--stats') { stats = true; continue }
     if (arg === '--heuristic') { heuristic = true; continue }
@@ -93,20 +97,28 @@ function parseArgs(args: string[]): CliOptions {
   }
 
   const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
-  const config: LupaConfig = { roles, seed, verify, useRandomNames, hasFirstGhost, revoteConfig }
+  const gameConfig: GameConfig = { roles, seed, hasFirstGhost, revoteConfig }
+  const lupaConfig: LupaConfig = { roles, seed, hasFirstGhost, revoteConfig }
+
+  const adapterConfig: StrategyAdapterConfig = {
+    defaultStrategy: new RandomStrategy(),
+    seed,
+    roles,
+  }
 
   if (heuristic) {
     const h = new HeuristicStrategy()
     const strategies = new Map<number, import('./strategy.ts').Strategy>()
     for (let s = 1; s <= totalPlayers; s++) strategies.set(s, h)
-    config.strategies = strategies
-    config.wolfTeamStrategy = new WolfTeamHeuristic()
-    config.masonTeamStrategy = new MasonTeamHeuristic()
+    adapterConfig.strategies = strategies
+    adapterConfig.defaultStrategy = h
+    adapterConfig.wolfTeamStrategy = new WolfTeamHeuristic()
+    adapterConfig.masonTeamStrategy = new MasonTeamHeuristic()
 
     if (randomRoles.length > 0) {
       const randomRoleSet = new Set(randomRoles)
       const r = new RandomStrategy()
-      config.onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
+      adapterConfig.onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
         for (const [seat, role] of seatRoles) {
           if (randomRoleSet.has(role)) {
             strategies.set(seat, r)
@@ -116,7 +128,7 @@ function parseArgs(args: string[]): CliOptions {
     }
   }
 
-  return { config, tsumi, stats, games }
+  return { gameConfig, lupaConfig, adapterConfig, tsumi, stats, games }
 }
 
 const ANALYZE_OPTIONS: AnalyzeOptions = {
@@ -186,18 +198,19 @@ function runTsumiCheck(howl: string, execLine: number, _day: number): {
   }
 }
 
-const { config, tsumi, stats, games } = parseArgs(process.argv.slice(2))
+const { gameConfig, lupaConfig, adapterConfig, tsumi, stats, games } = parseArgs(process.argv.slice(2))
 
 if (stats) {
   // 勝率統計モード
-  const baseSeed = config.seed ?? Date.now()
+  const baseSeed = gameConfig.seed ?? Date.now()
   const counts: Record<string, number> = {}
   let totalLen = 0
 
   for (let g = 0; g < games; g++) {
     const seed = baseSeed + g
     try {
-      const { state } = runGame({ ...config, seed })
+      const handlers = strategyAdapter({ ...adapterConfig, seed })
+      const { state } = await runGame({ ...gameConfig, seed }, handlers)
       const result = state.result ?? 'unknown'
       counts[result] = (counts[result] ?? 0) + 1
       totalLen += state.day
@@ -212,13 +225,15 @@ if (stats) {
   console.log(`avgLen: ${(totalLen / games).toFixed(1)}`)
 } else if (!tsumi) {
   // 通常モード: howl出力のみ
-  const { events, state } = runGame(config)
-  console.log(formatHowl(events, state, config))
+  const handlers = strategyAdapter(adapterConfig)
+  const { events, state } = await runGame(gameConfig, handlers)
+  console.log(formatHowl(events, state, lupaConfig))
 } else if (games === 1) {
   // 単発tsumi: howl出力 + 各日の詰みチェック
-  const seed = config.seed ?? Date.now()
-  const { events, state } = runGame({ ...config, seed })
-  const howl = formatHowl(events, state, { ...config, seed })
+  const seed = gameConfig.seed ?? Date.now()
+  const handlers = strategyAdapter({ ...adapterConfig, seed })
+  const { events, state } = await runGame({ ...gameConfig, seed }, handlers)
+  const howl = formatHowl(events, state, { ...lupaConfig, seed })
   const execLines = findExecutionLines(howl)
 
   console.log(howl)
@@ -236,13 +251,14 @@ if (stats) {
 } else {
   // 複数ゲーム: 統計モード
   let tsumiGames = 0
-  const baseSeed = config.seed ?? Date.now()
+  const baseSeed = gameConfig.seed ?? Date.now()
 
   for (let g = 0; g < games; g++) {
     const seed = baseSeed + g
     try {
-      const { events, state } = runGame({ ...config, seed })
-      const howl = formatHowl(events, state, { ...config, seed })
+      const handlers = strategyAdapter({ ...adapterConfig, seed })
+      const { events, state } = await runGame({ ...gameConfig, seed }, handlers)
+      const howl = formatHowl(events, state, { ...lupaConfig, seed })
       const execLines = findExecutionLines(howl)
 
       let found = false

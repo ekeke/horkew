@@ -23,7 +23,10 @@ import { deepStrictEqual } from 'node:assert'
 import { join } from 'node:path'
 import type { SystemRole } from '../types/index.ts'
 import type { LupaConfig, GameEvent, GameState } from './types.ts'
-import { runGame } from './engine.ts'
+import type { GameConfig as EngineGameConfig } from './handlers.ts'
+import { runGame } from './engine-next.ts'
+import { strategyAdapter } from './adapters/strategy-adapter.ts'
+import { RandomStrategy } from './random-strategy.ts'
 import { formatHowl } from './format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
@@ -594,7 +597,7 @@ function verifyPriorEquivCheckpoint(
   }
 }
 
-type GameConfig = {
+type VerifyGameConfig = {
   name: string
   roles: Record<string, number>
   seeds: [number, number]
@@ -602,7 +605,7 @@ type GameConfig = {
   revoteConfig?: import('./types.ts').RevoteConfig
 }
 
-const configs: GameConfig[] = [
+const configs: VerifyGameConfig[] = [
   // 基本構成
   { name: 'basic-5p', roles: { werewolf: 1, villager: 3, seer: 1 }, seeds: [0, 2000] },
   { name: 'basic-7p', roles: { werewolf: 1, villager: 4, seer: 1, medium: 1 }, seeds: [0, 2000] },
@@ -723,7 +726,7 @@ function renderProgress(
   )
 }
 
-function main() {
+async function main() {
   const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet, prior, priorEquiv, compat } = parseArgs()
   if (compat && !wasmAnalyze) {
     console.error('--compat: WASM版が利用できません。npm run build:wasm:node でビルドしてください。')
@@ -760,9 +763,12 @@ function main() {
   const nameCount = new Map<string, number>()
   if (outdir) mkdirSync(outdir, { recursive: true })
 
+  const defaultStrategy = new RandomStrategy()
+
   for (const gc of activeConfigs) {
+    const roles = new Map(Object.entries(gc.roles) as [SystemRole, number][])
     const lupaConfig: LupaConfig = {
-      roles: new Map(Object.entries(gc.roles) as [SystemRole, number][]),
+      roles,
       hasFirstGhost: gc.hasFirstGhost,
       revoteConfig: gc.revoteConfig,
     }
@@ -777,7 +783,14 @@ function main() {
     for (let seed = seedStart; seed < seedEnd; seed++) {
       const gameStart = performance.now()
       lupaConfig.seed = seed
-      const { events, state } = runGame(lupaConfig)
+      const engineConfig: EngineGameConfig = {
+        roles,
+        seed,
+        hasFirstGhost: gc.hasFirstGhost,
+        revoteConfig: gc.revoteConfig,
+      }
+      const handlers = strategyAdapter({ defaultStrategy, seed, roles })
+      const { events, state } = await runGame(engineConfig, handlers)
       totalGames++
       if (state.result) configResults[state.result]++
 
@@ -864,4 +877,4 @@ function main() {
   process.exit(1)
 }
 
-main()
+await main()

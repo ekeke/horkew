@@ -1,7 +1,11 @@
 import type { SystemRole } from '../../types/index.ts'
-import type { AsyncStrategy } from '../strategy.ts'
 import type { LupaConfig } from '../types.ts'
-import { runGameAsync } from '../engine.ts'
+import type { GameConfig, GameHandlers, PhaseContext } from '../handlers.ts'
+import type { GameState } from '../types.ts'
+import type { DecisionContext } from '../strategy.ts'
+import { runGame } from '../engine-next.ts'
+import { strategyAdapter } from '../adapters/strategy-adapter.ts'
+import { RandomStrategy } from '../random-strategy.ts'
 import { scenarios, findScenario } from '../scenarios.ts'
 import { HumanCliStrategy } from './human-strategy.ts'
 import { roleName, roleColor, displayNewEvents } from './display.ts'
@@ -27,7 +31,7 @@ Options:
   --scenario <name>     シナリオ名 (例: 14d-neko, standard-10p)
   --roles <spec>        配役指定 (例: werewolf:2,villager:5,seer:1)
   --my-role <role>      希望役職 (例: seer, werewolf)
-  --seed <n>            乱数���ード
+  --seed <n>            乱数シード
   --no-retar            Retar推論を無効化
   --list-scenarios      シナリオ一覧を表示
 
@@ -50,6 +54,38 @@ function parseRoles(spec: string): Map<SystemRole, number> {
     roles.set(role.trim() as SystemRole, count)
   }
   return roles
+}
+
+function buildHumanCtx(pctx: PhaseContext, seat: number): DecisionContext {
+  const state = pctx.state as GameState
+  const player = state.players.find(p => p.seat === seat)!
+  return {
+    mySeat: player.seat,
+    myRole: player.role,
+    myPlayer: player,
+    day: pctx.day,
+    phase: state.phase,
+    alivePlayers: pctx.alivePlayers,
+    publicEvents: [...pctx.events],
+    signals: [],
+    commander: state.commander,
+    proposals: [],
+    rng: { next: () => Math.random(), nextInt: (n: number) => Math.floor(Math.random() * n), shuffle: <T>(a: T[]) => a } as any,
+    gameState: state,
+    lastExecutedSeat: null,
+    retarPossibilities: null,
+    maxSurvivingNV: null,
+    globalRetarPossibilities: null,
+    fakeRetarPossibilities: null,
+    wolfTeammates: null,
+    knownWolves: null,
+    knownHamster: null,
+    masonPartner: null,
+    revoteRound: null,
+    revoteCandidates: null,
+    executionPlans: [],
+    rules: pctx.rules,
+  }
 }
 
 async function main() {
@@ -127,19 +163,21 @@ async function main() {
   console.log()
 
   const humanStrategy = new HumanCliStrategy()
-  const asyncStrategies = new Map<number, AsyncStrategy>()
+  let humanSeat: number | undefined
 
-  const config: LupaConfig = {
+  const gameConfig: GameConfig = {
     roles,
     seed,
-    useRandomNames: true,
-    enableRetar,
     hasFirstGhost,
     revoteConfig,
-    asyncStrategies,
-    onRolesAssigned: (seatRoles) => {
-      let humanSeat: number | undefined
+  }
 
+  const baseHandlers = strategyAdapter({
+    defaultStrategy: new RandomStrategy(),
+    enableRetar,
+    seed,
+    roles,
+    onRolesAssigned: (seatRoles) => {
       if (myRole) {
         // 希望役職のseatを探す
         for (const [seat, role] of seatRoles) {
@@ -149,7 +187,7 @@ async function main() {
           }
         }
         if (humanSeat === undefined) {
-          console.error(`希望役職 ${myRole} が割り当���に存在しません`)
+          console.error(`希望役職 ${myRole} が割り当てに存在しません`)
           process.exit(1)
         }
       } else {
@@ -158,18 +196,51 @@ async function main() {
         humanSeat = seats[Math.floor(Math.random() * seats.length)]
       }
 
-      asyncStrategies.set(humanSeat, humanStrategy)
-      humanStrategy.setSeat(humanSeat)
+      humanStrategy.setSeat(humanSeat!)
 
-      const assignedRole = seatRoles.get(humanSeat)!
+      const assignedRole = seatRoles.get(humanSeat!)!
       console.log(`${C.bold}あなたの席: ${humanSeat}${C.reset}`)
-      console.log(`${C.bold}あなた���役職: ${roleColor(assignedRole)}${roleName(assignedRole)}${C.reset}`)
+      console.log(`${C.bold}あなたの役職: ${roleColor(assignedRole)}${roleName(assignedRole)}${C.reset}`)
       console.log()
+    },
+  })
+
+  // Wrap base handlers to intercept human player's async decisions
+  const handlers: GameHandlers = {
+    onSetup: baseHandlers.onSetup,
+
+    async onNight(ctx) {
+      const actions = await baseHandlers.onNight(ctx)
+      if (humanSeat !== undefined && ctx.alivePlayers.includes(humanSeat)) {
+        const decisionCtx = buildHumanCtx(ctx, humanSeat)
+        actions.set(humanSeat, await humanStrategy.decideNightAction(decisionCtx))
+      }
+      return actions
+    },
+
+    async onDayClaims(ctx) {
+      const claims = await baseHandlers.onDayClaims(ctx)
+      if (humanSeat !== undefined && ctx.alivePlayers.includes(humanSeat)) {
+        const decisionCtx = buildHumanCtx(ctx, humanSeat)
+        claims.set(humanSeat, await humanStrategy.decideDayClaim(decisionCtx))
+      }
+      return claims
+    },
+
+    onPreVote: baseHandlers.onPreVote,
+
+    async onVote(vctx) {
+      const votes = await baseHandlers.onVote(vctx)
+      if (humanSeat !== undefined && vctx.alivePlayers.includes(humanSeat)) {
+        const decisionCtx = buildHumanCtx(vctx, humanSeat)
+        votes.set(humanSeat, await humanStrategy.decideVote(decisionCtx))
+      }
+      return votes
     },
   }
 
   try {
-    const result = await runGameAsync(config)
+    const result = await runGame(gameConfig, handlers)
 
     // 人間が死んだ後のイベントも含め、未表示のイベントを全て表示
     const lastCursor = humanStrategy.getEventCursor()
