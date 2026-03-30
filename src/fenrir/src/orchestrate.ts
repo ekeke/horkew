@@ -13,7 +13,7 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame } from '../../lupa/engine-next.ts'
+import { runGame } from '../../lupa/engine.ts'
 import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
@@ -117,7 +117,11 @@ function parseArgs(): OrchestratorConfig {
       case '--target-winrate': config.targetWinRate = parseFloat(args[++i]); break
       case '--resume': config.resume = true; break
       case '--lr': config.learningRate = parseFloat(args[++i]); break
-      case '--workers': config.workers = parseInt(args[++i]); break
+      case '--workers': {
+        const val = args[++i]
+        config.workers = val === 'auto' ? -1 : parseInt(val)
+        break
+      }
       case '--transformer': config.transformer = true; break
       case '--help': case '-h': showHelp(); break
     }
@@ -152,7 +156,7 @@ Options:
   --target-winrate <n>     目標勝率の上書き (default: baseline eval から自動算出)
   --resume                 既存チェックポイントから再開
   --lr <n>                 学習率 (default: ${DEFAULT_CONFIG.learningRate})
-  --workers <n>            ゲーム生成ワーカー数 (default: ${DEFAULT_CONFIG.workers})
+  --workers <n|auto>       ゲーム生成ワーカー数 (auto=CPU-1, default: 直列)
   --transformer            Transformerアーキテクチャを使用 (default: MLP)
   --help, -h               このヘルプを表示`)
   process.exit(0)
@@ -443,8 +447,8 @@ async function main(): Promise<void> {
   log(`TfNN: 1 shared (GPU)`)
 
   // === ゲーム生成ワーカープール ===
-  if (config.workers > 0) {
-    initGameWorkerPool(config.workers)
+  if (config.workers !== 0) {
+    initGameWorkerPool(config.workers === -1 ? undefined : config.workers)
   }
 
   // === Resume ===
@@ -602,6 +606,7 @@ async function main(): Promise<void> {
             }
           }
           const tGameEnd = performance.now()
+          const tPpoStart = performance.now()
 
           // PPO update (shared TfNN に重みをスワップ)
           if (allIndividual.length > 0) {
@@ -631,6 +636,8 @@ async function main(): Promise<void> {
             masonTeamNet.loadWeights(masonTeamTf.cloneWeights())
           }
 
+          const tPpoEnd = performance.now()
+
           const iterMs = performance.now() - iterStart
           iterElapsed += iterMs
           iterCount++
@@ -639,19 +646,27 @@ async function main(): Promise<void> {
 
           // Progress
           const pct = (iter / config.iterations * 100).toFixed(1)
-          const wallGameMs = ((tGameEnd - tGameStart) / config.batch).toFixed(0)
+          const gameMs = tGameEnd - tGameStart
+          const ppoMs = tPpoEnd - tPpoStart
+          const gamePct = (gameMs / iterMs * 100).toFixed(0)
+          const ppoPct = (ppoMs / iterMs * 100).toFixed(0)
+          const totalSteps = allIndividual.length + allWolfTeam.length + allMasonTeam.length
           const avgIterMs = (iterElapsed / iterCount / 1000).toFixed(1)
           const remaining = ((targetIter - iter) * iterElapsed / iterCount / 1000).toFixed(0)
           // worker timing breakdown (if available from parallel path)
-          let timingStr = `${wallGameMs}ms/game`
+          let timingStr = ''
           if (lastBatchTimings.length > 0) {
             const avgGame = lastBatchTimings.reduce((a, t) => a + t.gameMs, 0) / lastBatchTimings.length
             const avgInfer = lastBatchTimings.reduce((a, t) => a + t.inferMs, 0) / lastBatchTimings.length
             const avgRetar = lastBatchTimings.reduce((a, t) => a + t.retarMs, 0) / lastBatchTimings.length
             const avgTsumi = lastBatchTimings.reduce((a, t) => a + t.tsumiMs, 0) / lastBatchTimings.length
-            timingStr = `${avgGame.toFixed(0)}ms/game (infer ${avgInfer.toFixed(0)}ms retar ${avgRetar.toFixed(0)}ms tsumi ${avgTsumi.toFixed(0)}ms) wall ${wallGameMs}ms`
+            timingStr = `${avgGame.toFixed(0)}ms/game (infer ${avgInfer.toFixed(0)}ms retar ${avgRetar.toFixed(0)}ms tsumi ${avgTsumi.toFixed(0)}ms) `
           }
-          process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ${timingStr} ${avgIterMs}s/iter ETA ${remaining}s`)
+          process.stderr.write(
+            `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
+            `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
+            `steps=${totalSteps} ${avgIterMs}s/iter ETA ${remaining}s`
+          )
 
           // Eval
           if (iter % config.evalInterval === 0) {

@@ -7,7 +7,7 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame } from '../../lupa/engine-next.ts'
+import { runGame } from '../../lupa/engine.ts'
 import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-node-bridge.ts'

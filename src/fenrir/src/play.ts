@@ -11,7 +11,7 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame } from '../../lupa/engine-next.ts'
+import { runGame } from '../../lupa/engine.ts'
 import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'

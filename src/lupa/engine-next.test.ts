@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { SystemRole } from '../types/index.ts'
-import { runGame } from './engine-next.ts'
+import { runGame } from './engine.ts'
 import type { GameConfig } from './handlers.ts'
 import { minimalAdapter } from './adapters/minimal-adapter.ts'
 import { strategyAdapter } from './adapters/strategy-adapter.ts'
