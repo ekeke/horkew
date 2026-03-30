@@ -253,6 +253,7 @@ function generateGame(
     enableRetar: trainingConfig.enableRetar,
     hasFirstGhost: trainingConfig.hasFirstGhost,
     revoteConfig: trainingConfig.revoteConfig,
+    rules: trainingConfig.rules,
     wolfTeamStrategy: wolfTeamStrategy ?? new WolfTeamHeuristic(),
     masonTeamStrategy: masonTeamStrategy ?? new MasonTeamHeuristic(),
   }

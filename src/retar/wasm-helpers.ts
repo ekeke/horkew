@@ -56,8 +56,9 @@ export function serializeVillageStatus(vs: any): any {
 }
 
 export function serializeOptions(options: AnalyzeOptions, setup?: Map<SystemRole, number>): any {
+  const { seerFirstSeek: _unused, ...rest } = options
   const result: any = {
-    ...options,
+    ...rest,
     assumptions: Object.fromEntries(options.assumptions),
     hocusPocus: Object.fromEntries(options.hocusPocus),
   }

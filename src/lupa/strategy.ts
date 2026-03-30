@@ -1,4 +1,4 @@
-import type { SystemRole } from '../types/index.ts'
+import type { SystemRole, ResolvedRules } from '../types/index.ts'
 import type { GameState, PlayerState, NightAction, DayClaim, GameEvent } from './types.ts'
 import type { SignalRecord, CommunicationAction } from './communication.ts'
 import type { Proposal, LeadershipResponse } from './leadership.ts'
@@ -38,6 +38,8 @@ export type DecisionContext = {
   revoteCandidates: number[] | null
   /** 処刑プラン (空配列 = プランなし) */
   executionPlans: ExecutionPlan[]
+  /** ゲームルール */
+  rules: ResolvedRules
 }
 
 /** 処刑プランの種別 */

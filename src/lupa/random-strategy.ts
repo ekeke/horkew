@@ -1,4 +1,4 @@
-import type { EnumSpecies } from '../types/index.ts'
+import type { EnumSpecies, ResolvedRules } from '../types/index.ts'
 import type { GameState, PlayerState, NightAction, DayClaim } from './types.ts'
 import type { Signal, CommunicationAction } from './communication.ts'
 import type { Proposal, LeadershipResponse } from './leadership.ts'
@@ -15,11 +15,11 @@ export class RandomStrategy implements Strategy {
   // ============================================================
 
   decideNightAction(ctx: DecisionContext): NightAction {
-    const { gameState: state, myPlayer: player, day, rng } = ctx
+    const { gameState: state, myPlayer: player, day, rng, rules } = ctx
     const night = ctx.phase === 'night' ? day - 1 : day
     switch (player.role) {
-      case 'seer':      return decideSeerNight(state, player, night, rng)
-      case 'bodyguard':  return decideBodyguardNight(state, player, rng)
+      case 'seer':      return decideSeerNight(state, player, night, rng, rules)
+      case 'bodyguard':  return decideBodyguardNight(state, player, rng, rules)
       case 'werewolf':   return decideWerewolfNight(state, player, rng)
       default:           return { type: 'none' }
     }
@@ -269,7 +269,20 @@ function getFollowRate(role: string): number {
 // 夜アクション（内部）
 // ============================================================
 
-function decideSeerNight(state: GameState, seer: PlayerState, _night: number, rng: Rng): NightAction {
+function decideSeerNight(state: GameState, seer: PlayerState, night: number, rng: Rng, rules: ResolvedRules): NightAction {
+  // 初日占いルール
+  if (night === 0) {
+    const firstSeek = rules['role.seer.first-seek']
+    if (firstSeek === 'none') return { type: 'none' }
+    // 'no-wolf' と 'all' はここでは区別不要（結果は getSeerResult で決まる）
+    // ただし 'no-wolf' の場合、狼を選ばないようにフィルタ
+    if (firstSeek === 'no-wolf') {
+      const all = alivePlayersExcept(state, seer.seat).filter(p => p.role !== 'werewolf')
+      if (all.length === 0) return { type: 'none' }
+      return { type: 'divine', target: rng.pick(all).seat }
+    }
+  }
+
   const all = alivePlayersExcept(state, seer.seat)
   if (all.length === 0) return { type: 'none' }
 
@@ -285,14 +298,19 @@ function decideSeerNight(state: GameState, seer: PlayerState, _night: number, rn
   return { type: 'divine', target: rng.pick(candidates).seat }
 }
 
-function decideBodyguardNight(state: GameState, guard: PlayerState, rng: Rng): NightAction {
+function decideBodyguardNight(state: GameState, guard: PlayerState, rng: Rng, rules: ResolvedRules): NightAction {
   const all = alivePlayersExcept(state, guard.seat)
-  const lastNight = Math.max(...Array.from(guard.guardHistory.keys()), -1)
-  const lastTarget = guard.guardHistory.get(lastNight)
-  const eligible = lastTarget !== undefined
-    ? all.filter(p => p.seat !== lastTarget)
-    : all
-  const candidates = eligible.length > 0 ? eligible : all
+  let candidates = all
+
+  // 連続護衛禁止ルール
+  if (!rules['role.bodyguard.allow-continuous-protection']) {
+    const lastNight = Math.max(...Array.from(guard.guardHistory.keys()), -1)
+    const lastTarget = guard.guardHistory.get(lastNight)
+    if (lastTarget !== undefined) {
+      const eligible = all.filter(p => p.seat !== lastTarget)
+      candidates = eligible.length > 0 ? eligible : all
+    }
+  }
 
   const seerClaimers = candidates.filter(p => p.claimedRole === 'seer')
   if (seerClaimers.length > 0) return { type: 'guard', target: rng.pick(seerClaimers).seat }

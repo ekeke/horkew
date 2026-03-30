@@ -151,3 +151,17 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
   }],
 ])
+
+export type ResolvedRules = {
+  'general.countFirstDay': boolean
+  'vote.style': 'free' | 'ordered' | 'concurrent'
+  'vote.final': 'revote' | 'final'
+  'vote.tiebreaker': 'random' | 'no-lynch' | 'draw'
+  'first-victim': 'none' | 'random' | 'first-vote'
+  'role.seer.first-seek': 'none' | 'no-wolf' | 'all'
+  'role.bodyguard.allow-continuous-protection': boolean
+  'role.nekomata.curse-target': 'all-survivors' | 'villager'
+  'role.nekomata.curse-immediately': boolean
+  'role.immoralist.follow-immediately': boolean
+  'role.immoralist.reveal-following': boolean
+}

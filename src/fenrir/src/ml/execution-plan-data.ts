@@ -8,9 +8,11 @@
 import type { DecisionContext, ExecutionPlan } from '../../../lupa/strategy.ts'
 import type { SystemRole } from '../../../types/index.ts'
 import type { GameEvent } from '../../../lupa/types.ts'
+import { resolveRules } from '../../../howl/ruleset.ts'
 import { Rng } from '../../../lupa/random.ts'
-import { encodeObservation, SEATS } from '../observation.ts'
+import { encodeObservation, SEATS, CO_ROLES, ROLE_INDEX } from '../observation.ts'
 import { maskVote } from '../action.ts'
+import { PLAN_VOCAB } from '../rule-action.ts'
 
 export type PlanTrainingSample = {
   observation: Float32Array
@@ -20,7 +22,6 @@ export type PlanTrainingSample = {
 }
 
 const VILLAGE_ROLES: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata']
-const CO_ROLES: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
 
 /**
  * 合成 CO 状況を生成
@@ -158,6 +159,7 @@ function buildSyntheticContext(params: {
     revoteRound: null,
     revoteCandidates: null,
     executionPlans: [params.plan],
+    rules: resolveRules(),
   }
 }
 
@@ -231,6 +233,118 @@ export function generatePlanTrainingBatch(count: number, seed: number = 42): Pla
     if (!valid) continue
 
     samples.push({ observation, voteLabel: label, voteMask })
+  }
+
+  return samples
+}
+
+// ============================================================
+// Pointer token 教師データ生成 (Step 4: 新アーキテクチャ用)
+// ============================================================
+
+export type PlanTokenTrainingSample = {
+  observation: Float32Array
+  /** Forward plan token labels: vocab index per token */
+  forwardLabels: number[]    // [numForwardTokens]
+  /** 各トークンが有効か (学習対象か) */
+  forwardMask: boolean[]     // [numForwardTokens]
+}
+
+const NUM_FORWARD_TOKENS = 8
+
+/**
+ * パターンからForward plan tokenの教師ラベル列を生成
+ * 語彙: 14 seats + 5 roles + grayran + next + stop = 22
+ */
+function patternToForwardLabels(
+  pattern: PatternType,
+  claims: Map<number, SystemRole>,
+  aliveSeats: number[],
+  mySeat: number,
+  rng: Rng,
+): { labels: number[], mask: boolean[] } | null {
+  const labels = new Array(NUM_FORWARD_TOKENS).fill(PLAN_VOCAB.STOP)
+  const mask = new Array(NUM_FORWARD_TOKENS).fill(false)
+  const claimants = [...claims.keys()].filter((s: number) => s !== mySeat)
+  const claimedRole = claims.size > 0 ? [...claims.values()][0] : null
+
+  // CO役職のvocab index
+  const roleVocabIdx = claimedRole ? PLAN_VOCAB.ROLE_START + CO_ROLES.indexOf(claimedRole) : -1
+
+  switch (pattern) {
+    case 'roller': {
+      // [role, next, role, stop, ...]
+      if (claimants.length < 2 || roleVocabIdx < 0) return null
+      let pos = 0
+      labels[pos] = roleVocabIdx; mask[pos++] = true
+      labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
+      labels[pos] = roleVocabIdx; mask[pos++] = true
+      labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      return { labels, mask }
+    }
+    case 'decision': {
+      // [role, stop, ...]
+      if (claimants.length === 0 || roleVocabIdx < 0) return null
+      let pos = 0
+      labels[pos] = roleVocabIdx; mask[pos++] = true
+      labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      return { labels, mask }
+    }
+    case 'designated': {
+      // [seat_i, stop, ...]
+      const candidates = aliveSeats.filter((s: number) => s !== mySeat)
+      if (candidates.length === 0) return null
+      const target = candidates[Math.floor(rng.next() * candidates.length)]
+      let pos = 0
+      labels[pos] = target - 1; mask[pos++] = true  // seat idx = seat - 1
+      labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      return { labels, mask }
+    }
+    case 'grayran': {
+      // [grayran, stop, ...]
+      let pos = 0
+      labels[pos] = PLAN_VOCAB.GRAYRAN; mask[pos++] = true
+      labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      return { labels, mask }
+    }
+  }
+}
+
+/**
+ * Pointer token 教師データを一括生成
+ */
+export function generatePlanTokenTrainingBatch(count: number, seed: number = 42): PlanTokenTrainingSample[] {
+  const rng = new Rng(seed)
+  const samples: PlanTokenTrainingSample[] = []
+
+  while (samples.length < count) {
+    const day = 2 + Math.floor(rng.next() * 4)
+    const aliveCount = 7 + Math.floor(rng.next() * 7)
+    const allSeats = Array.from({ length: SEATS }, (_, i) => i + 1)
+    const aliveSeats = shuffleArray(allSeats, rng).slice(0, aliveCount)
+    const mySeat = aliveSeats[Math.floor(rng.next() * aliveSeats.length)]
+    const myRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
+
+    const { claims, events } = generateCOSituation(aliveSeats, rng)
+    const pattern = pickPattern(rng)
+
+    const result = patternToForwardLabels(pattern, claims, aliveSeats, mySeat, rng)
+    if (!result) continue
+
+    // 旧形式のプランも生成（observation encodingで使用）
+    const planResult = generatePlanAndLabel(pattern, claims, aliveSeats, mySeat, rng)
+    const plan: ExecutionPlan = planResult?.plan ?? { targets: [], type: 'grayran' }
+
+    const ctx = buildSyntheticContext({
+      day, mySeat, myRole, aliveSeats, events, plan, rng,
+    })
+    const observation = encodeObservation(ctx)
+
+    samples.push({
+      observation,
+      forwardLabels: result.labels,
+      forwardMask: result.mask,
+    })
   }
 
   return samples

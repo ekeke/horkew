@@ -98,10 +98,12 @@ export type TrainingConfig = {
   learningRate: number
   /** Retar論理推論を有効化 */
   enableRetar: boolean
-  /** 初日犠牲者あり */
+  /** 初日犠牲者あり (rules['first-victim'] で代替可) */
   hasFirstGhost: boolean
   /** 再投票設定 */
   revoteConfig?: RevoteConfig
+  /** オプションルール */
+  rules?: Partial<import('../../types/index.ts').ResolvedRules>
   /** ゲーム生成の並列ワーカー数（0で直列、未指定でauto） */
   numWorkers?: number
   /** Phase 1でMLにする役職（未指定時は偶数seat） */
@@ -395,6 +397,7 @@ function generateGame(
     enableRetar: config.enableRetar,
     hasFirstGhost: config.hasFirstGhost,
     revoteConfig: config.revoteConfig,
+    rules: config.rules,
     wolfTeamStrategy: agents.wolfTeamStrategy,
     masonTeamStrategy: agents.masonTeamStrategy,
   }
@@ -503,6 +506,7 @@ async function generateGameAsync(
     enableRetar: config.enableRetar,
     hasFirstGhost: config.hasFirstGhost,
     revoteConfig: config.revoteConfig,
+    rules: config.rules,
     wolfTeamStrategy: agents.wolfTeamStrategy,
     masonTeamStrategy: agents.masonTeamStrategy,
     retarFn: analyzeFromEventsParallel,
@@ -661,6 +665,7 @@ export function evaluate(
       enableRetar: config.enableRetar,
       hasFirstGhost: config.hasFirstGhost,
       revoteConfig: config.revoteConfig,
+      rules: config.rules,
       wolfTeamStrategy: wolfTeamNet
         ? new WolfTeamStrategy(wolfTeamNet, { explore: false })
         : new WolfTeamHeuristic(),

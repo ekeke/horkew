@@ -23,6 +23,8 @@ export type RoleTesterEnv = {
   lastHamsterMustDieAt?: number
   lastHamsterMustDiedBy?: CauseOfDeath
   dayCountFrom: number
+  /** 占い師の初日占いルール: 'none'=初日占いなし, 'no-wolf'=白確定, 'all'=制限なし */
+  seerFirstSeek?: 'none' | 'no-wolf' | 'all'
 }
 
 export function cloneContext(context: AnalyzeContext): AnalyzeContext {
@@ -187,13 +189,19 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
     }
     // Add 'unknown' only for genuinely unreported nights beyond known assertions
     const maxActiveDay = self.surviving ? env.vs.day - 1 : (self.causeOfDeath === 'night_kill' ? self.diedDay! : self.diedDay! - 1)
-    for (let d = env.dayCountFrom; d <= maxActiveDay; d++) {
+    // seerFirstSeek === 'none' のとき、初日夜(dayCountFrom)の占いをスキップ
+    const firstSeerNight = (env.seerFirstSeek === 'none') ? env.dayCountFrom + 1 : env.dayCountFrom
+    for (let d = firstSeerNight; d <= maxActiveDay; d++) {
       if (!seerTargets.has(d)) {
         const forecastTarget = self.forecasts.get(d)
         seerTargets.set(d, [forecastTarget ?? 'unknown'])
       }
     }
     for (const [assertionNight, { target: targetSeat, species }] of self.assertions) {
+      // seerFirstSeek === 'no-wolf': 初日夜の占い結果は白確定（狼判定は矛盾）
+      if (env.seerFirstSeek === 'no-wolf' && assertionNight === env.dayCountFrom && species === 'wolf') {
+        return false
+      }
       if ( species === 'wolf' ) {
         if ( ! context.possibilities.fixRole(targetSeat,'werewolf') ) {
           return false

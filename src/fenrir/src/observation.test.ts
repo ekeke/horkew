@@ -4,6 +4,7 @@ import { OBSERVATION_SIZE, SEATS, NUM_ROLES, encodeObservation, tokenize,
   PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS } from './observation.ts'
 import type { DecisionContext, ExecutionPlan } from '../../lupa/strategy.ts'
 import { Rng } from '../../lupa/random.ts'
+import { resolveRules } from '../../howl/ruleset.ts'
 
 // セクションサイズ定数（observation.ts内部と一致すること）
 const GLOBAL_SIZE = 19
@@ -49,6 +50,7 @@ function makeCtx(overrides: Partial<DecisionContext> = {}): DecisionContext {
     revoteRound: null,
     revoteCandidates: null,
     executionPlans: [],
+    rules: resolveRules(),
     ...overrides,
   }
 }

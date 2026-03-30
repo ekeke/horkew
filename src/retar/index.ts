@@ -35,6 +35,8 @@ export type AnalyzeOptions = {
   // regulation options
   dayCountFrom: number
   hasFirstGhost: boolean
+  /** 占い師の初日占いルール */
+  seerFirstSeek?: 'none' | 'no-wolf' | 'all'
 
   // ユーザーが仮定した役職
   assumptions: Map<Seat, SystemRole>
@@ -143,6 +145,7 @@ export class VillageRetar {
       lastHamsterMustDieAt: this.lastHamsterMustDieAt,
       lastHamsterMustDiedBy: this.lastHamsterMustDiedBy,
       dayCountFrom: this.options.dayCountFrom,
+      seerFirstSeek: this.options.seerFirstSeek,
     }
 
     // Compute strides for flat-index batch splitting

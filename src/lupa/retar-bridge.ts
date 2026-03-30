@@ -7,6 +7,7 @@
  */
 
 import type { SystemRole } from '../types/index.ts'
+import { resolveRules } from '../howl/ruleset.ts'
 import type { LupaConfig, GameState, GameEvent } from './types.ts'
 import { formatHowl } from './format.ts'
 import { parse } from '../howl/parser.ts'
@@ -52,6 +53,20 @@ export const DEFAULT_RETAR_OPTIONS: AnalyzeOptions = {
   id: 0,
   batches: 1,
   batch: 0,
+}
+
+/** LupaConfig のルールから Retar AnalyzeOptions を構築 */
+function buildRetarOptions(config: LupaConfig): AnalyzeOptions {
+  const rules = resolveRules(config.rules)
+  const hasFirstGhost = config.hasFirstGhost ?? rules['first-victim'] !== 'none'
+  const seerFirstSeek = rules['role.seer.first-seek']
+  // dayCountFrom は Retar 内部の占い行動開始夜。countFirstDay は表示問題であり Retar に影響しない。
+  // hasFirstGhost が true なら night 0 から行動するので dayCountFrom=1 は正しいまま。
+  return {
+    ...DEFAULT_RETAR_OPTIONS,
+    hasFirstGhost,
+    seerFirstSeek,
+  }
 }
 
 // ============================================================
@@ -120,9 +135,7 @@ export function analyzeFromEvents(
 
   const { vs, setup } = buildVillageStatus(statements, meta)
 
-  const baseOptions = config.hasFirstGhost
-    ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
-    : DEFAULT_RETAR_OPTIONS
+  const baseOptions = buildRetarOptions(config)
 
   const options = assumptions && assumptions.size > 0
     ? { ...baseOptions, assumptions }
@@ -218,9 +231,7 @@ export function analyzePerPlayer(
 
   const { vs, setup } = buildVillageStatus(statements, meta)
 
-  const baseOptions = config.hasFirstGhost
-    ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
-    : DEFAULT_RETAR_OPTIONS
+  const baseOptions = buildRetarOptions(config)
 
   // 共通 Retar を1回走らせ、結果を prior として再利用
   const common = runRetar(vs, setup, baseOptions)
@@ -259,11 +270,10 @@ export function checkRetarConsistency(
 
   const { vs, setup } = buildVillageStatus(statements, meta)
 
+  const baseOpts = buildRetarOptions(config)
   const options = assumptions && assumptions.size > 0
-    ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: config.hasFirstGhost ?? false, assumptions }
-    : config.hasFirstGhost
-      ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
-      : DEFAULT_RETAR_OPTIONS
+    ? { ...baseOpts, assumptions }
+    : baseOpts
 
   const { possibilities } = runRetar(vs, setup, options)
   if (possibilities.size === 0) return false
@@ -289,9 +299,7 @@ export function searchTsumiFromEvents(
   if (unknowns.length > 0) return null
 
   const { vs, setup } = buildVillageStatus(statements, meta)
-  const options: AnalyzeOptions = config.hasFirstGhost
-    ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
-    : DEFAULT_RETAR_OPTIONS
+  const options: AnalyzeOptions = buildRetarOptions(config)
 
   try {
     return searchTsumi(vs, setup, options, { maxDepth }, lupaRunRetar)

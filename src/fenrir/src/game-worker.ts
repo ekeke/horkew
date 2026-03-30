@@ -157,6 +157,7 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
       enableRetar: config.enableRetar,
       hasFirstGhost: config.hasFirstGhost,
       revoteConfig: config.revoteConfig,
+      rules: config.rules,
       wolfTeamStrategy,
       masonTeamStrategy,
     }

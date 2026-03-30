@@ -1,5 +1,6 @@
 import type { LupaConfig, GameState, GameEvent, NightAction, DayClaim } from './types.ts'
-import type { SystemRole } from '../types/index.ts'
+import type { SystemRole, ResolvedRules } from '../types/index.ts'
+import { resolveRules } from '../howl/ruleset.ts'
 import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction, AsyncStrategy, AsyncTeamStrategy, ExecutionPlan } from './strategy.ts'
 import type { SignalRecord, CommunicationAction } from './communication.ts'
 import type { Proposal } from './leadership.ts'
@@ -87,6 +88,7 @@ function buildContext(
   perPlayerRetar: PerPlayerRetar | null = null,
   maxSurvivingNV: number | null = null,
   executionPlans: ExecutionPlan[] = [],
+  rules?: ResolvedRules,
 ): DecisionContext {
   // 初期知識の注入
   let wolfTeammates: number[] | null = null
@@ -138,6 +140,7 @@ function buildContext(
     revoteRound,
     revoteCandidates,
     executionPlans,
+    rules: rules ?? resolveRules(),
   }
 }
 
@@ -157,6 +160,7 @@ export function runGame(config: LupaConfig): GameResult {
     return r
   }
 
+  const rules = resolveRules(config.rules)
   const rng = new Rng(config.seed)
   const totalPlayers = Array.from(config.roles.values()).reduce((a, b) => a + b, 0)
 
@@ -200,10 +204,19 @@ export function runGame(config: LupaConfig): GameResult {
   const signals: SignalRecord[] = []
   const proposals: Proposal[] = []
 
+  const hasFirstVictim = config.hasFirstGhost ?? rules['first-victim'] !== 'none'
+
+  // rules をキャプチャした buildContext ラッパー
+  const makeCtx: typeof buildContext = (...args) => {
+    const c = buildContext(...args)
+    c.rules = rules
+    return c
+  }
+
   // Night 0: 全員に夜アクションを問い合わせ
   for (const player of players) {
     const strategy = getStrategy(config, player.seat)
-    const ctx = buildContext(state, player, events, rng, signals, proposals, null)
+    const ctx = makeCtx(state, player, events, rng, signals, proposals, null)
     const action = strategy.decideNightAction(ctx)
     applyNightAction(state, player, 0, action)
   }
@@ -221,7 +234,7 @@ export function runGame(config: LupaConfig): GameResult {
   }
 
   // 初日犠牲者（人狼・猫又・妖狐以外からランダムに選出）
-  if (config.hasFirstGhost) {
+  if (hasFirstVictim) {
     const immuneRoles: SystemRole[] = ['werewolf', 'nekomata', 'werehamster']
     const candidates = alivePlayers(state).filter(p => !immuneRoles.includes(p.role))
     if (candidates.length > 0) {
@@ -252,7 +265,7 @@ export function runGame(config: LupaConfig): GameResult {
         const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
         if (aliveWolves.length > 0) {
           const leader = aliveWolves[0]
-          const ctx = buildContext(state, leader, events, rng, signals, proposals, lastExecutedSeat)
+          const ctx = makeCtx(state, leader, events, rng, signals, proposals, lastExecutedSeat)
           const teamCtx = buildTeamContext(ctx, state, 'werewolf')
           const wolfAction = config.wolfTeamStrategy.decideNightAction(teamCtx) as WolfNightAction
           chosenAttacker = wolfAction.attacker
@@ -271,7 +284,7 @@ export function runGame(config: LupaConfig): GameResult {
       for (const player of alivePlayers(state)) {
         if (config.wolfTeamStrategy && player.role === 'werewolf') continue  // 既に処理済み
         const strategy = getStrategy(config, player.seat)
-        const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat)
+        const ctx = makeCtx(state, player, events, rng, signals, proposals, lastExecutedSeat)
         const action = strategy.decideNightAction(ctx)
         actions.push({ player, action })
       }
@@ -306,7 +319,7 @@ export function runGame(config: LupaConfig): GameResult {
 
     // COフェーズ
     for (const player of alivePlayers(state)) {
-      const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar, null, null, preCoPerPlayer, preCoMaxNV)
+      const ctx = makeCtx(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar, null, null, preCoPerPlayer, preCoMaxNV)
       const claim = decideForPlayer(config, state, player, ctx,
         (s, c) => s.decideDayClaim(c),
         (s, c) => s.decideDayClaim(c),
@@ -347,7 +360,7 @@ export function runGame(config: LupaConfig): GameResult {
     for (let round = 0; round < 3; round++) {
       for (const player of alivePlayers(state)) {
         const prevClaimed = player.claimedRole
-        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+        const ctx = makeCtx(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
         const commAction = decideForPlayer(config, state, player, ctx,
           (s, c) => s.decideCommunication(c),
           (s, c) => s.decideCommunication(c),
@@ -371,7 +384,7 @@ export function runGame(config: LupaConfig): GameResult {
       // 指揮者提案
       const commander = state.players.find(p => p.seat === state.commander)!
       if (commander.alive) {
-        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+        const ctx = makeCtx(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
         const proposal = decideForPlayer(config, state, commander, ctx,
           (s, c) => s.decideProposal(c),
           (s, c) => s.decideProposal(c),
@@ -384,7 +397,7 @@ export function runGame(config: LupaConfig): GameResult {
           if (proposal.type === 'execute_order') {
             const target = state.players.find(p => p.seat === proposal.target)
             if (target && target.alive && target.claimedRole === null) {
-              const targetCtx = buildContext(state, target, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+              const targetCtx = makeCtx(state, target, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
               const claim = decideForPlayer(config, state, target, targetCtx,
                 (s, c) => s.decideDayClaim(c),
                 (s, c) => s.decideDayClaim(c),
@@ -398,7 +411,7 @@ export function runGame(config: LupaConfig): GameResult {
           // 他プレイヤーの応答
           for (const player of alivePlayers(state)) {
             if (player.seat === state.commander) continue
-            const pCtx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+            const pCtx = makeCtx(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
             const response = decideForPlayer(config, state, player, pCtx,
               (s, c) => s.decideLeadershipResponse(c, proposal),
               (s, c) => s.decideLeadershipResponse(c, proposal),
@@ -411,7 +424,7 @@ export function runGame(config: LupaConfig): GameResult {
 
     // 予告フェーズ
     for (const player of alivePlayers(state)) {
-      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+      const ctx = makeCtx(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
       const forecast = decideForPlayer(config, state, player, ctx,
         (s, c) => s.decideForecast(c),
         (s, c) => s.decideForecast(c),
@@ -426,7 +439,7 @@ export function runGame(config: LupaConfig): GameResult {
     let defensiveCOHappened = false
     for (const player of alivePlayers(state)) {
       if (player.claimedRole !== null) continue
-      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+      const ctx = makeCtx(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
       const claim = decideForPlayer(config, state, player, ctx,
         (s, c) => s.decideDefensiveClaim(c),
         (s, c) => s.decideDefensiveClaim(c),
@@ -447,7 +460,7 @@ export function runGame(config: LupaConfig): GameResult {
     if (defensiveCOHappened && state.commander !== null) {
       const commander = state.players.find(p => p.seat === state.commander)!
       if (commander.alive) {
-        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+        const ctx = makeCtx(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
         const proposal = decideForPlayer(config, state, commander, ctx,
           (s, c) => s.decideProposal(c),
           (s, c) => s.decideProposal(c),
@@ -483,7 +496,7 @@ export function runGame(config: LupaConfig): GameResult {
           target = revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
         } else {
           // 初回投票 or full_revote: Strategyに委任
-          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates, perPlayerRetar, maxSurvivingNV)
+          const ctx = makeCtx(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates, perPlayerRetar, maxSurvivingNV)
           target = decideForPlayer(config, state, voter, ctx,
             (s, c) => s.decideVote(c),
             (s, c) => s.decideVote(c),
@@ -548,7 +561,11 @@ export function runGame(config: LupaConfig): GameResult {
 
     // 処刑後: 猫又道連れ
     if (executedPlayer.role === 'nekomata') {
-      const curseCandidates = alivePlayers(state)
+      let curseCandidates = alivePlayers(state)
+      if (rules['role.nekomata.curse-target'] === 'villager') {
+        const wolfFoxRoles: SystemRole[] = ['werewolf', 'werehamster']
+        curseCandidates = curseCandidates.filter(p => !wolfFoxRoles.includes(p.role))
+      }
       if (curseCandidates.length > 0) {
         const curseTarget = rng.pick(curseCandidates)
         killPlayer(state, curseTarget.seat)
@@ -640,6 +657,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
     return r
   }
 
+  const rules = resolveRules(config.rules)
   const retarFn = config.retarFn ?? ((e, s, c) => Promise.resolve(retarAnalyze(e, s, c)))
   const rng = new Rng(config.seed)
   const totalPlayers = Array.from(config.roles.values()).reduce((a, b) => a + b, 0)
@@ -668,10 +686,19 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
   const signals: SignalRecord[] = []
   const proposals: Proposal[] = []
 
+  const hasFirstVictim = config.hasFirstGhost ?? rules['first-victim'] !== 'none'
+
+  // rules をキャプチャした buildContext ラッパー
+  const makeCtx: typeof buildContext = (...args) => {
+    const c = buildContext(...args)
+    c.rules = rules
+    return c
+  }
+
   // Night 0
   for (const player of players) {
     const strategy = getAsyncStrategy(config, player.seat)
-    const ctx = buildContext(state, player, events, rng, signals, proposals, null)
+    const ctx = makeCtx(state, player, events, rng, signals, proposals, null)
     applyNightAction(state, player, 0, await strategy.decideNightAction(ctx))
   }
   for (const player of players) {
@@ -684,7 +711,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
       checkImmoralistFollow(state, events)
     }
   }
-  if (config.hasFirstGhost) {
+  if (hasFirstVictim) {
     const immuneRoles: SystemRole[] = ['werewolf', 'nekomata', 'werehamster']
     const candidates = alivePlayers(state).filter(p => !immuneRoles.includes(p.role))
     if (candidates.length > 0) {
@@ -712,7 +739,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
         const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
         if (aliveWolves.length > 0) {
           const leader = aliveWolves[0]
-          const ctx = buildContext(state, leader, events, rng, signals, proposals, lastExecutedSeat)
+          const ctx = makeCtx(state, leader, events, rng, signals, proposals, lastExecutedSeat)
           const teamCtx = buildTeamContext(ctx, state, 'werewolf')
           const wolfAction = await asyncWolfTeam.decideNightAction(teamCtx) as WolfNightAction
           chosenAttacker = wolfAction.attacker
@@ -728,7 +755,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
       for (const player of alivePlayers(state)) {
         if (asyncWolfTeam && player.role === 'werewolf') continue
         const strategy = getAsyncStrategy(config, player.seat)
-        const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat)
+        const ctx = makeCtx(state, player, events, rng, signals, proposals, lastExecutedSeat)
         actions.push({ player, action: await strategy.decideNightAction(ctx) })
       }
       for (const { player, action } of actions) {
@@ -756,7 +783,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
 
     // COフェーズ
     for (const player of alivePlayers(state)) {
-      const ctx = buildContext(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar, null, null, preCoPerPlayer, preCoMaxNV)
+      const ctx = makeCtx(state, player, events, rng, signals, proposals, lastExecutedSeat, preCoRetar, null, null, preCoPerPlayer, preCoMaxNV)
       const claim = await asyncDecideForPlayer(config, state, player, ctx, (s, c) => s.decideDayClaim(c), (s, c) => s.decideDayClaim(c))
       applyClaim(state, player, day, claim, events)
     }
@@ -784,7 +811,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
     state.commander = null
     for (let round = 0; round < 3; round++) {
       for (const player of alivePlayers(state)) {
-        const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+        const ctx = makeCtx(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
         const commAction = await asyncDecideForPlayer(config, state, player, ctx, (s, c) => s.decideCommunication(c), (s, c) => s.decideCommunication(c))
         applyCommAction(state, player, day, commAction, events, daySignals, signals, signalIdCounter)
         signalIdCounter += 1
@@ -796,7 +823,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
       events.push({ type: 'commander_appointed', seat: state.commander })
       const commander = state.players.find(p => p.seat === state.commander)!
       if (commander.alive) {
-        const ctx = buildContext(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+        const ctx = makeCtx(state, commander, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
         const proposal = await asyncDecideForPlayer(config, state, commander, ctx, (s, c) => s.decideProposal(c), (s, c) => s.decideProposal(c))
         if (proposal) {
           dayProposals.push(proposal)
@@ -804,14 +831,14 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
           if (proposal.type === 'execute_order') {
             const target = state.players.find(p => p.seat === proposal.target)
             if (target && target.alive && target.claimedRole === null) {
-              const targetCtx = buildContext(state, target, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+              const targetCtx = makeCtx(state, target, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
               const claim = await asyncDecideForPlayer(config, state, target, targetCtx, (s, c) => s.decideDayClaim(c), (s, c) => s.decideDayClaim(c))
               if (claim.type !== 'none') applyClaim(state, target, day, claim, events)
             }
           }
           for (const player of alivePlayers(state)) {
             if (player.seat === state.commander) continue
-            const pCtx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+            const pCtx = makeCtx(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
             const response = await asyncDecideForPlayer(config, state, player, pCtx, (s, c) => s.decideLeadershipResponse(c, proposal), (s, c) => s.decideLeadershipResponse(c, proposal))
             events.push({ type: 'leadership_response', actor: player.seat, response })
           }
@@ -819,7 +846,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
       }
     }
     for (const player of alivePlayers(state)) {
-      const ctx = buildContext(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
+      const ctx = makeCtx(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
       const forecast = await asyncDecideForPlayer(config, state, player, ctx, (s, c) => s.decideForecast(c), (s, c) => s.decideForecast(c))
       if (forecast.type === 'forecast') { player.forecastTarget = forecast.target; events.push({ type: 'forecast', actor: player.seat, target: forecast.target }) }
     }
@@ -840,7 +867,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
         if (revoteCandidates && revoteStyle === 'random_tied') {
           target = revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
         } else {
-          const ctx = buildContext(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates, perPlayerRetar, maxSurvivingNV)
+          const ctx = makeCtx(state, voter, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, revoteCount, revoteCandidates, perPlayerRetar, maxSurvivingNV)
           target = await asyncDecideForPlayer(config, state, voter, ctx, (s, c) => s.decideVote(c), (s, c) => s.decideVote(c))
         }
         // 自投票禁止: 自分に投票した場合はランダムに変更
@@ -879,7 +906,11 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
     const medResult = getSeerResult(executedPlayer.role)
     events.push({ type: 'comment', text: `霊能: ${executedPlayer.name} = ${medResult === 'human' ? '○' : '●'}` })
     if (executedPlayer.role === 'nekomata') {
-      const curseCandidates = alivePlayers(state)
+      let curseCandidates = alivePlayers(state)
+      if (rules['role.nekomata.curse-target'] === 'villager') {
+        const wolfFoxRoles: SystemRole[] = ['werewolf', 'werehamster']
+        curseCandidates = curseCandidates.filter(p => !wolfFoxRoles.includes(p.role))
+      }
       if (curseCandidates.length > 0) { const ct = rng.pick(curseCandidates); killPlayer(state, ct.seat); events.push({ type: 'curse_kill', target: ct.seat }) }
     }
     checkImmoralistFollow(state, events)

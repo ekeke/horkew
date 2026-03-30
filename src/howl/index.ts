@@ -26,7 +26,7 @@ export type {
 } from './statement.ts'
 // GrelanStatement is exported for external consumers even though bridge.ts doesn't need it
 export { FlexibleDictionary } from './flexibleDictionary.ts'
-export { Rules } from './ruleset.ts'
+export { Rules, resolveRules } from './ruleset.ts'
 export * as vocabulary from './vocabulary.ts'
 export type {
   SystemRole,
@@ -38,6 +38,7 @@ export type {
   Role as VillageRole,
   SeatStatus,
   VillageStatus,
+  ResolvedRules,
 } from '../types/index.ts'
 export { systemRoles } from '../types/index.ts'
 export { buildVillageStatus } from './bridge.ts'

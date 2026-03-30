@@ -1,4 +1,4 @@
-import type { SystemRole, EnumSpecies } from '../types/index.ts'
+import type { SystemRole, EnumSpecies, ResolvedRules } from '../types/index.ts'
 import type { Strategy, TeamStrategy, AsyncStrategy, AsyncTeamStrategy } from './strategy.ts'
 import type { Signal, RolePrediction } from './communication.ts'
 
@@ -34,6 +34,8 @@ export type LupaConfig = {
   asyncWolfTeamStrategy?: AsyncTeamStrategy
   /** 非同期共有者チーム戦略 */
   asyncMasonTeamStrategy?: AsyncTeamStrategy
+  /** オプションルール（未指定分はるる鯛14D猫デフォルト） */
+  rules?: Partial<ResolvedRules>
 }
 
 export type RevoteConfig = {

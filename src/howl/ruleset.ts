@@ -1,3 +1,5 @@
+import type { ResolvedRules } from '../types/index.ts'
+
 type RuleBase = {
   description: string,
 }
@@ -24,7 +26,7 @@ export const Rules: { [key: string]: Rule } = {
   "general.countFirstDay": {
     type: "boolean",
     description: "Count the first day of the game story (the day before the day first vote has taken) as day 1.",
-    default: false,
+    default: true,
   },
 
   "vote.style": {
@@ -45,7 +47,7 @@ export const Rules: { [key: string]: Rule } = {
       "revote",
       "final",
     ],
-    default: "final",
+    default: "revote",
   },
 
   "vote.tiebreaker": {
@@ -54,8 +56,9 @@ export const Rules: { [key: string]: Rule } = {
     choices: [
       "random",
       "no-lynch",
+      "draw",
     ],
-    default: "no-lynch",
+    default: "draw",
   },
 
   "first-victim": {
@@ -66,7 +69,7 @@ export const Rules: { [key: string]: Rule } = {
       "random",
       "first-vote",
     ],
-    default: "none",
+    default: "random",
   },
 
   "role.seer.first-seek": {
@@ -77,13 +80,13 @@ export const Rules: { [key: string]: Rule } = {
       "no-wolf",
       "all",
     ],
-    default: "none",
+    default: "all",
   },
 
   "role.bodyguard.allow-continuous-protection": {
     type: "boolean",
     description: "Whether the bodyguard can protect the same player on consecutive nights.",
-    default: false,
+    default: true,
   },
 
   "role.nekomata.curse-target": {
@@ -113,4 +116,19 @@ export const Rules: { [key: string]: Rule } = {
     description: "Whether the immoralist reveals the role of the lynched werehamster.",
     default: true,
   },
+}
+
+const defaultRules: ResolvedRules = Object.fromEntries(
+  Object.entries(Rules).map(([key, rule]) => [key, rule.default])
+) as unknown as ResolvedRules
+
+export function resolveRules(raw?: Record<string, any>): ResolvedRules {
+  if (!raw) return defaultRules
+  const result = { ...defaultRules }
+  for (const [key, value] of Object.entries(raw)) {
+    if (key in Rules && value !== undefined) {
+      (result as any)[key] = value
+    }
+  }
+  return result
 }

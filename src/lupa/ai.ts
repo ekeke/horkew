@@ -6,6 +6,7 @@ import type { GameState, PlayerState, NightAction, DayClaim } from './types.ts'
 import type { Rng } from './random.ts'
 import { HeuristicStrategy, forceTrueRoleCO as _forceTrueRoleCO, resolveVotes as _resolveVotes } from './heuristic.ts'
 import type { DecisionContext } from './strategy.ts'
+import { resolveRules } from '../howl/ruleset.ts'
 
 const heuristic = new HeuristicStrategy()
 
@@ -36,6 +37,7 @@ function makeCompatCtx(
     revoteRound: null,
     revoteCandidates: null,
     executionPlans: [],
+    rules: resolveRules(),
   }
 }
 

@@ -216,6 +216,7 @@ if (mldir) {
     enableRetar: true,
     hasFirstGhost: DEFAULT_TRAINING_CONFIG.hasFirstGhost,
     revoteConfig: DEFAULT_TRAINING_CONFIG.revoteConfig,
+    rules: DEFAULT_TRAINING_CONFIG.rules,
     wolfTeamStrategy,
     masonTeamStrategy,
   }
@@ -254,6 +255,7 @@ if (mldir) {
     enableRetar: true,
     hasFirstGhost: DEFAULT_TRAINING_CONFIG.hasFirstGhost,
     revoteConfig: DEFAULT_TRAINING_CONFIG.revoteConfig,
+    rules: DEFAULT_TRAINING_CONFIG.rules,
   }
 
   const { events, state } = runGame(config)
