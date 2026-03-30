@@ -604,10 +604,17 @@ async function main(): Promise<void> {
       entropyCoeff: trainingConfig.entropyCoeff,
     }
 
+    // Phase 1: village のみ学習（wolf/third は strategy-only 未対応）
+    const phase1Models: ModelName[] = ['village']
+    // wolf/third は即 graduated 扱い
+    for (const name of MODEL_NAMES) {
+      if (!phase1Models.includes(name)) graduated.add(name)
+    }
+
     let round = 0
     while (graduated.size < MODEL_NAMES.length) {
       round++
-      for (const name of MODEL_NAMES) {
+      for (const name of phase1Models) {
         if (graduated.has(name)) continue
 
         const group = MODEL_GROUPS[name]
