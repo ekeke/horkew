@@ -16,6 +16,7 @@ import {
   sampleMasked,
   decodeNightActionWithRole, decodeClaim, decodeComm, decodePropose, decodePredict, decodeLeader,
 } from './action.ts'
+import { endgameVoteReward } from './reward.ts'
 import { sigmoid } from './ml/nn.ts'
 import * as ruleAction from './rule-action.ts'
 import { isVillagerAligned } from '../../lupa/roles.ts'
@@ -334,7 +335,17 @@ export class FenrirStrategy implements Strategy {
     const mask = maskVote(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
 
-    this.record('vote', action, logProb, result.value, 0, ctx.mySeat)
+    // Endgame vote reward: Retar可能性に基づく投票先評価
+    let reward = 0
+    if (ctx.retarPossibilities) {
+      const targetSeat = action + 1
+      reward = endgameVoteReward(
+        ctx.alivePlayers.length,
+        ctx.retarPossibilities.get(targetSeat),
+      )
+    }
+
+    this.record('vote', action, logProb, result.value, reward, ctx.mySeat)
 
     // predict head: 投票時に常時出力（trajectoryに記録、ゲームイベントには非公開）
     const predictLogits = result.policies.get('predict')

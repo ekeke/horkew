@@ -9,6 +9,7 @@
  */
 
 import type { GameState, GameEvent } from '../../lupa/types.ts'
+import type { SystemRole } from '../../types/index.ts'
 import { SEATS, NUM_ROLES } from './observation.ts'
 
 export type RewardConfig = {
@@ -38,6 +39,16 @@ export type RewardConfig = {
   guardSuccess: number
   /** 中間報酬: 占い呪殺 (seer, fox_kill時) */
   foxKillReward: number
+  /** 中間報酬: 最終日前日に狐候補を処刑 (村陣営) */
+  endgamePreFinalFoxTarget: number
+  /** 中間報酬: 最終日前日にLW候補を処刑 (村陣営、負値) */
+  endgamePreFinalLWTarget: number
+  /** 中間報酬: 最終日に狐候補を処刑 (村陣営、負値) */
+  endgameFinalFoxTarget: number
+  /** 中間報酬: 最終日に狼候補(狐なし)を処刑 (村陣営) */
+  endgameFinalWolfTarget: number
+  /** 中間報酬: 最終日に確定狼を処刑 (村陣営) */
+  endgameFinalConfirmedWolf: number
 }
 
 export const DEFAULT_REWARD_CONFIG: RewardConfig = {
@@ -54,6 +65,11 @@ export const DEFAULT_REWARD_CONFIG: RewardConfig = {
   predictKnownSeatDiscount: 0.25,
   guardSuccess: 0,     // TODO: Lupa改修後に正確なイベント判定で有効化
   foxKillReward: 0,    // TODO: 同上
+  endgamePreFinalFoxTarget: 0.08,
+  endgamePreFinalLWTarget: -0.06,
+  endgameFinalFoxTarget: -0.12,
+  endgameFinalWolfTarget: 0.08,
+  endgameFinalConfirmedWolf: 0.15,
 }
 
 type Alignment = 'village' | 'wolf' | 'hamster'
@@ -221,4 +237,34 @@ export function buildKnownSeats(seat: number, role: string, state: GameState): S
     for (const p of state.players) if (p.role === 'werehamster') known.add(p.seat)
   }
   return known
+}
+
+/**
+ * エンドゲーム投票報酬: 投票先の Retar 可能性集合に基づく中間報酬
+ *
+ * - 最終日前日 (4 < alive <= 6): 狐候補処刑 → +, LW候補処刑 → -
+ * - 最終日 (alive <= 4): 狐候補処刑 → --, 狼候補(狐なし)処刑 → +, 確定狼 → ++
+ */
+export function endgameVoteReward(
+  aliveCount: number,
+  targetPossibilities: Set<SystemRole> | undefined,
+  config: RewardConfig = DEFAULT_REWARD_CONFIG,
+): number {
+  if (!targetPossibilities || aliveCount > 6) return 0
+
+  const hasWolf = targetPossibilities.has('werewolf')
+  const hasFox = targetPossibilities.has('werehamster')
+
+  if (aliveCount <= 4) {
+    // 最終日
+    if (targetPossibilities.size === 1 && hasWolf) return config.endgameFinalConfirmedWolf
+    if (hasFox) return config.endgameFinalFoxTarget
+    if (hasWolf) return config.endgameFinalWolfTarget
+    return 0
+  }
+
+  // 最終日前日 (4 < alive <= 6)
+  if (hasFox) return config.endgamePreFinalFoxTarget
+  if (targetPossibilities.size === 1 && hasWolf) return config.endgamePreFinalLWTarget
+  return 0
 }
