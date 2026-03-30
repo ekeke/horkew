@@ -92,7 +92,7 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   checkpointInterval: 10,
   phase1Only: false,
   phase2Only: false,
-  resume: true,
+  resume: false,
   learningRate: 3e-4,
   workers: 0,
   transformer: false,
@@ -391,29 +391,41 @@ async function main(): Promise<void> {
   // === Resume ===
   const iterCounts = new Map<ModelName, number>()
   let anyResumed = false
-  for (const name of MODEL_NAMES) {
-    let startIter = 0
-    const dir = `${config.checkpointBase}/ckpt-${name}`
-    const ckpt = findCheckpoint(dir)
-    if (ckpt) {
-      loadCheckpoint(networks.get(name)!, ckpt.path)
-      startIter = ckpt.iteration
-      anyResumed = true
+  if (config.resume) {
+    for (const name of MODEL_NAMES) {
+      let startIter = 0
+      const dir = `${config.checkpointBase}/ckpt-${name}`
+      const ckpt = findCheckpoint(dir)
+      if (ckpt) {
+        try {
+          loadCheckpoint(networks.get(name)!, ckpt.path)
+          startIter = ckpt.iteration
+          anyResumed = true
+        } catch (e) {
+          log(`  ${COLORS[name]}${name}${RESET}: checkpoint incompatible, starting fresh (${(e as Error).message})`)
+        }
+      }
+      iterCounts.set(name, startIter)
     }
-    iterCounts.set(name, startIter)
-  }
-  // チームNNも resume
-  const wolfDir = `${config.checkpointBase}/ckpt-werewolf`
-  const wolfCkpt = findCheckpoint(wolfDir)
-  if (wolfCkpt) {
-    const teamPath = wolfCkpt.path.replace('checkpoint_', 'wolf_team_').replace('final.json', 'wolf_team_final.json')
-    if (existsSync(teamPath)) loadCheckpoint(wolfTeamNet, teamPath)
-  }
-  const masonDir = `${config.checkpointBase}/ckpt-mason`
-  const masonCkpt = findCheckpoint(masonDir)
-  if (masonCkpt) {
-    const teamPath = masonCkpt.path.replace('checkpoint_', 'mason_team_').replace('final.json', 'mason_team_final.json')
-    if (existsSync(teamPath)) loadCheckpoint(masonTeamNet, teamPath)
+    // チームNNも resume
+    const wolfDir = `${config.checkpointBase}/ckpt-werewolf`
+    const wolfCkpt = findCheckpoint(wolfDir)
+    if (wolfCkpt) {
+      const teamPath = wolfCkpt.path.replace('checkpoint_', 'wolf_team_').replace('final.json', 'wolf_team_final.json')
+      if (existsSync(teamPath)) {
+        try { loadCheckpoint(wolfTeamNet, teamPath) } catch { /* incompatible */ }
+      }
+    }
+    const masonDir = `${config.checkpointBase}/ckpt-mason`
+    const masonCkpt = findCheckpoint(masonDir)
+    if (masonCkpt) {
+      const teamPath = masonCkpt.path.replace('checkpoint_', 'mason_team_').replace('final.json', 'mason_team_final.json')
+      if (existsSync(teamPath)) {
+        try { loadCheckpoint(masonTeamNet, teamPath) } catch { /* incompatible */ }
+      }
+    }
+  } else {
+    for (const name of MODEL_NAMES) iterCounts.set(name, 0)
   }
 
   // Resume 状況の表示
@@ -424,7 +436,7 @@ async function main(): Promise<void> {
       log(`  ${COLORS[name]}${name.padEnd(12)}${RESET} iter ${iter}`)
     }
   } else {
-    log('Starting from scratch (no checkpoints found)')
+    log('Starting from scratch')
   }
 
   // === Baseline eval ===
