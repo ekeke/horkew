@@ -204,10 +204,10 @@ const MASON_TEAM_NETWORK_CONFIG = {
 // ============================================================
 
 const TRANSFORMER_COMMON = {
-  dModel: 128,
-  numLayers: 3,
+  dModel: 64,
+  numLayers: 2,
   numHeads: 4,
-  dFf: 256,
+  dFf: 128,
   planFeatures: PLAN_TOKEN_FEATURES,
   maxPlanTokens: MAX_PLAN_TOKENS,
 }
