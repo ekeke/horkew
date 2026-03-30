@@ -9,7 +9,7 @@ import type { CommunicationAction } from '../../lupa/communication.ts'
 import type { Proposal, LeadershipResponse } from '../../lupa/leadership.ts'
 import type { AnyNetwork, ForwardResult } from './ml/nn.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
-import { encodeObservation, encodeTeamObservation } from './observation.ts'
+import { encodeObservation, encodeTeamObservation, encodeCollectiveWolfObservation, encodeCollectiveMasonObservation, type VillageNNOutput } from './observation.ts'
 import {
   maskNightAction, maskClaim, maskVote, maskComm, maskPropose, maskPredict, maskLeader, maskTarget,
   maskAttackTarget, maskAttacker, decodeWolfNightAction,
@@ -444,7 +444,7 @@ abstract class TeamStrategyBase {
     this.config = { explore: true, ...config }
   }
 
-  private lastObs: Float32Array | null = null
+  protected lastObs: Float32Array | null = null
 
   protected infer(ctx: TeamDecisionContext): ForwardResult {
     const t = performance.now()
@@ -680,6 +680,150 @@ export class WolfTeamStrategy extends TeamStrategyBase implements TeamStrategy {
 // ============================================================
 
 export class MasonTeamStrategy extends TeamStrategyBase implements TeamStrategy {
+  decideNightAction(_ctx: TeamDecisionContext): NightAction {
+    return { type: 'none' }
+  }
+
+  decideDayClaim(ctx: TeamDecisionContext): DayClaim {
+    return this.decideDayClaimImpl(ctx)
+  }
+
+  decideForecast(ctx: TeamDecisionContext): DayClaim {
+    return this.decideForecastImpl(ctx)
+  }
+
+  decideVote(ctx: TeamDecisionContext): number {
+    return this.decideVoteImpl(ctx)
+  }
+
+  decideCommunication(ctx: TeamDecisionContext): CommunicationAction {
+    return this.decideCommunicationImpl(ctx)
+  }
+
+  decideProposal(ctx: TeamDecisionContext): Proposal | null {
+    return this.decideProposalImpl(ctx)
+  }
+
+  decideLeadershipResponse(ctx: TeamDecisionContext, _proposal: Proposal): LeadershipResponse {
+    return this.decideLeadershipResponseImpl(ctx)
+  }
+
+  decideDefensiveClaim(_ctx: TeamDecisionContext): DayClaim {
+    return { type: 'none' }
+  }
+}
+
+// ============================================================
+// 集団エージェント共通ベース
+// ============================================================
+
+/**
+ * 集団戦略の共通基盤。TeamStrategyBase を拡張し、
+ * once-per-day キャッシュと集団用observation encoding を提供する。
+ */
+abstract class CollectiveStrategyBase extends TeamStrategyBase {
+  private cachedResult: ForwardResult | null = null
+  private cachedDay = -1
+
+  /**
+   * キャッシュ付き推論。同じ日の2回目以降はキャッシュを返す。
+   */
+  protected getOrInfer(ctx: TeamDecisionContext): ForwardResult {
+    if (this.cachedDay === ctx.day && this.cachedResult) {
+      return this.cachedResult
+    }
+    const result = this.infer(ctx)
+    this.cachedResult = result
+    this.cachedDay = ctx.day
+    return result
+  }
+
+  resetTrajectory(): void {
+    super.resetTrajectory()
+    this.cachedResult = null
+    this.cachedDay = -1
+  }
+}
+
+// ============================================================
+// 狼集団MLエージェント
+// ============================================================
+
+export class WolfCollectiveStrategy extends CollectiveStrategyBase implements TeamStrategy {
+  /** frozen村NNの出力（外部から注入） */
+  villageNNOutput: VillageNNOutput | undefined = undefined
+
+  protected override infer(ctx: TeamDecisionContext): ForwardResult {
+    const t = performance.now()
+    const obs = encodeCollectiveWolfObservation(ctx, this.villageNNOutput)
+    this.lastObs = obs
+    const result = this.network.forward(obs)
+    this.inferMs += performance.now() - t
+    this.inferCount++
+    return result
+  }
+
+  decideNightAction(ctx: TeamDecisionContext): WolfNightAction {
+    const result = this.getOrInfer(ctx)
+
+    const attackLogits = result.policies.get('attack_target')!
+    const attackMask = maskAttackTarget(ctx)
+    const { action: attackIdx, logProb: attackLogProb } = this.selectAction(attackLogits, attackMask)
+    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
+    this.record('attack_target', attackIdx, attackLogProb, result.value, 0, seat)
+
+    const attackerLogits = result.policies.get('attacker')!
+    const attackerMask = maskAttacker(ctx)
+    const { action: attackerIdx, logProb: attackerLogProb } = this.selectAction(attackerLogits, attackerMask)
+    this.record('attacker', attackerIdx, attackerLogProb, result.value, 0, seat)
+
+    return decodeWolfNightAction(attackIdx, attackerIdx, ctx.teamSeats)
+  }
+
+  decideDayClaim(ctx: TeamDecisionContext): DayClaim {
+    return this.decideDayClaimImpl(ctx)
+  }
+
+  decideForecast(ctx: TeamDecisionContext): DayClaim {
+    return this.decideForecastImpl(ctx)
+  }
+
+  decideVote(ctx: TeamDecisionContext): number {
+    return this.decideVoteImpl(ctx)
+  }
+
+  decideCommunication(ctx: TeamDecisionContext): CommunicationAction {
+    return this.decideCommunicationImpl(ctx)
+  }
+
+  decideProposal(ctx: TeamDecisionContext): Proposal | null {
+    return this.decideProposalImpl(ctx)
+  }
+
+  decideLeadershipResponse(ctx: TeamDecisionContext, _proposal: Proposal): LeadershipResponse {
+    return this.decideLeadershipResponseImpl(ctx)
+  }
+
+  decideDefensiveClaim(_ctx: TeamDecisionContext): DayClaim {
+    return { type: 'none' }
+  }
+}
+
+// ============================================================
+// 共有集団MLエージェント
+// ============================================================
+
+export class MasonCollectiveStrategy extends CollectiveStrategyBase implements TeamStrategy {
+  protected override infer(ctx: TeamDecisionContext): ForwardResult {
+    const t = performance.now()
+    const obs = encodeCollectiveMasonObservation(ctx)
+    this.lastObs = obs
+    const result = this.network.forward(obs)
+    this.inferMs += performance.now() - t
+    this.inferCount++
+    return result
+  }
+
   decideNightAction(_ctx: TeamDecisionContext): NightAction {
     return { type: 'none' }
   }

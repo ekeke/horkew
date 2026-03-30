@@ -21,7 +21,7 @@
 import type { NetworkConfig, ForwardResult, TransformerNetworkConfig } from './nn.ts'
 import { DenseLayer } from './nn.ts'
 import { TransformerEncoder, type TransformerConfig, linearBatchedPublic } from './transformer.ts'
-import { tokenize, SEATS, NUM_ROLE_TOKENS } from '../observation.ts'
+import { tokenize, SEATS, NUM_ROLE_TOKENS, type ObservationMode } from '../observation.ts'
 
 export class TransformerNetwork {
   readonly config: NetworkConfig
@@ -66,13 +66,21 @@ export class TransformerNetwork {
   private _roleProjected: Float32Array // [NUM_ROLE_TOKENS * dModel]
 
   readonly isTeam: boolean
+  readonly observationMode: ObservationMode
 
-  constructor(config: NetworkConfig, isTeam: boolean = false) {
+  constructor(config: NetworkConfig, isTeam: boolean | ObservationMode = false) {
     if (!config.transformer) throw new Error('NetworkConfig.transformer is required')
 
     this.config = config
     this.tConfig = config.transformer
-    this.isTeam = isTeam
+    // 後方互換: boolean → ObservationMode
+    if (typeof isTeam === 'boolean') {
+      this.observationMode = isTeam ? 'team' : 'individual'
+      this.isTeam = isTeam
+    } else {
+      this.observationMode = isTeam
+      this.isTeam = isTeam === 'team'
+    }
 
     const tc = this.tConfig
     const dm = tc.dModel
@@ -177,7 +185,7 @@ export class TransformerNetwork {
     const stratSeqLen = seatSeqLen + numForward + numEndgame
 
     // Tokenize
-    const tok = tokenize(input, this.isTeam)
+    const tok = tokenize(input, this.observationMode)
 
     // ========== Stage 1: Seat Transformer ==========
     // Build token sequence: [CLS, Seat0..Seat13, Role0..Role4]
