@@ -199,6 +199,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       )
       state = result.state
       events = result.events
+      gameRetarMs = result.timing?.retarMs ?? 0
     }
     const tGameEnd = performance.now()
 

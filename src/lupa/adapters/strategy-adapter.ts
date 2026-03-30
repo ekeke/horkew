@@ -13,7 +13,7 @@ import type {
 } from '../strategy.ts'
 import type { SignalRecord } from '../communication.ts'
 import type { Proposal } from '../leadership.ts'
-import type { GameHandlers, PhaseContext, PlayerView } from '../handlers.ts'
+import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../handlers.ts'
 import { buildPlayerView } from '../player-view.ts'
 import { alivePlayers } from '../roles.ts'
 import { detectCommander } from '../leadership.ts'
@@ -48,6 +48,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
   let dayProposals: Proposal[] = []
   let signalIdCounter = 0
   let lastExecutedSeat: number | null = null
+  let retarAccMs = 0
 
   function getStrategy(seat: number): Strategy {
     return adapterConfig.strategies?.get(seat) ?? adapterConfig.defaultStrategy
@@ -126,6 +127,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
 
   function runRetar(pctx: PhaseContext): void {
     if (adapterConfig.enableRetar === false) return
+    const t0 = performance.now()
     const state = pctx.state as GameState
     const events = [...pctx.events] as GameEvent[]
     const lupaConfig = {
@@ -138,6 +140,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
     const ppResult = retarAnalyzePerPlayer(events, state, lupaConfig, alivePlayers(state))
     perPlayerRetar = ppResult.perPlayer
     globalRetarPossibilities = ppResult.global.possibilities
+    retarAccMs += performance.now() - t0
   }
 
   return {
@@ -315,6 +318,10 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
       }
 
       return votes
+    },
+
+    getTiming(): GameTiming {
+      return { retarMs: retarAccMs }
     },
   }
 }

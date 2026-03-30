@@ -287,7 +287,8 @@ export async function runGame(config: GameConfig, handlers: GameHandlers): Promi
     emit({ type: 'reveal', seat: player.seat, role: player.role })
   }
 
-  return { events, state, config }
+  const timing = handlers.getTiming?.()
+  return { events, state, config, timing }
 }
 
 // ============================================================

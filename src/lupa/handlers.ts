@@ -84,6 +84,9 @@ export type GameHandlers = {
 
   /** イベント通知（観測用、任意） */
   onEvent?(event: GameEvent): void
+
+  /** ゲーム終了後に計測値を取得（任意） */
+  getTiming?(): GameTiming
 }
 
 // ============================================================
@@ -94,6 +97,14 @@ export type GameResult = {
   events: GameEvent[]
   state: GameState
   config: GameConfig
+  /** ハンドラーが報告した計測値 */
+  timing?: GameTiming
+}
+
+/** ハンドラーからエンジンに報告する計測値 */
+export type GameTiming = {
+  retarMs?: number
+  [key: string]: number | undefined
 }
 
 // ============================================================
