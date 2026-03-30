@@ -37,21 +37,25 @@ export class FenrirStrategy implements Strategy {
     this.config = { explore: true, ...config }
   }
 
+  private lastObs: Float32Array | null = null
+
   private infer(ctx: DecisionContext): ForwardResult {
     const t = performance.now()
     const obs = encodeObservation(ctx)
+    this.lastObs = obs
     const result = this.network.forward(obs)
     this.inferMs += performance.now() - t
     return result
   }
 
   private record(
-    ctx: DecisionContext, head: string, actionIdx: number,
+    head: string, actionIdx: number,
     logProb: number, value: number, reward: number,
+    seat: number,
   ): void {
     this.trajectory.push({
-      seat: ctx.mySeat,
-      observation: encodeObservation(ctx),
+      seat,
+      observation: this.lastObs!,
       actionHead: head,
       actionIdx,
       logProb,
@@ -113,12 +117,13 @@ export class FenrirStrategy implements Strategy {
   }
 
   private recordSigmoid(
-    ctx: DecisionContext, head: string, actions: Float32Array,
+    head: string, actions: Float32Array,
     logProb: number, value: number, reward: number,
+    seat: number,
   ): void {
     this.trajectory.push({
-      seat: ctx.mySeat,
-      observation: encodeObservation(ctx),
+      seat,
+      observation: this.lastObs!,
       actionHead: head,
       actionIdx: -1,
       logProb,
@@ -139,7 +144,7 @@ export class FenrirStrategy implements Strategy {
     const mask = maskNightAction(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
 
-    this.record(ctx, 'night', action, logProb, result.value, 0)
+    this.record('night', action, logProb, result.value, 0, ctx.mySeat)
 
     return decodeNightActionWithRole(action, ctx.myRole)
   }
@@ -155,7 +160,7 @@ export class FenrirStrategy implements Strategy {
     const targetMask = maskTarget(ctx)
     const { action: targetIdx } = this.selectAction(targetLogits, targetMask)
 
-    this.record(ctx, 'claim', claimIdx, claimLogProb, result.value, 0)
+    this.record('claim', claimIdx, claimLogProb, result.value, 0, ctx.mySeat)
 
     return decodeClaim(claimIdx, targetIdx, ctx)
   }
@@ -180,7 +185,7 @@ export class FenrirStrategy implements Strategy {
     const mask = maskVote(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
 
-    this.record(ctx, 'vote', action, logProb, result.value, 0)
+    this.record('vote', action, logProb, result.value, 0, ctx.mySeat)
 
     return action + 1  // action is seat-1
   }
@@ -192,14 +197,14 @@ export class FenrirStrategy implements Strategy {
     const commLogits = result.policies.get('comm')!
     const commMask = maskComm(ctx)
     const { action: commAction, logProb: commLogProb } = this.selectAction(commLogits, commMask)
-    this.record(ctx, 'comm', commAction, commLogProb, result.value, 0)
+    this.record('comm', commAction, commLogProb, result.value, 0, ctx.mySeat)
     const signal = decodeComm(commAction)
 
     // propose head (sigmoid)
     const proposeLogits = result.policies.get('propose')!
     const proposeMask = maskPropose(ctx)
     const { actions: proposeActions, logProb: proposeLogProb } = this.selectSigmoidAction(proposeLogits, proposeMask)
-    this.recordSigmoid(ctx, 'propose', proposeActions, proposeLogProb, result.value, 0)
+    this.recordSigmoid('propose', proposeActions, proposeLogProb, result.value, 0, ctx.mySeat)
     const proposals = decodePropose(proposeActions, 0.5)
 
     // prediction head (sigmoid, submit_prediction時のみ)
@@ -208,7 +213,7 @@ export class FenrirStrategy implements Strategy {
     if (predictMask[0] !== -Infinity) {
       const predictLogits = result.policies.get('predict')!
       const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
-      this.recordSigmoid(ctx, 'predict', predictActions, predictLogProb, result.value, 0)
+      this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, ctx.mySeat)
       predictions = decodePredict(predictActions, 0.5)
     }
 
@@ -233,7 +238,7 @@ export class FenrirStrategy implements Strategy {
     const mask = maskLeader(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
 
-    this.record(ctx, 'leader', action, logProb, result.value, 0)
+    this.record('leader', action, logProb, result.value, 0, ctx.mySeat)
 
     return decodeLeader(action)
   }
@@ -265,21 +270,25 @@ abstract class TeamStrategyBase {
     this.config = { explore: true, ...config }
   }
 
+  private lastObs: Float32Array | null = null
+
   protected infer(ctx: TeamDecisionContext): ForwardResult {
     const t = performance.now()
     const obs = encodeTeamObservation(ctx)
+    this.lastObs = obs
     const result = this.network.forward(obs)
     this.inferMs += performance.now() - t
     return result
   }
 
   protected record(
-    ctx: TeamDecisionContext, head: string, actionIdx: number,
+    head: string, actionIdx: number,
     logProb: number, value: number, reward: number,
+    seat: number,
   ): void {
     this.trajectory.push({
-      seat: ctx.currentActorSeat ?? ctx.teamSeats[0],
-      observation: encodeTeamObservation(ctx),
+      seat,
+      observation: this.lastObs!,
       actionHead: head,
       actionIdx,
       logProb,
@@ -290,12 +299,13 @@ abstract class TeamStrategyBase {
   }
 
   protected recordSigmoid(
-    ctx: TeamDecisionContext, head: string, actions: Float32Array,
+    head: string, actions: Float32Array,
     logProb: number, value: number, reward: number,
+    seat: number,
   ): void {
     this.trajectory.push({
-      seat: ctx.currentActorSeat ?? ctx.teamSeats[0],
-      observation: encodeTeamObservation(ctx),
+      seat,
+      observation: this.lastObs!,
       actionHead: head,
       actionIdx: -1,
       logProb,
@@ -358,7 +368,8 @@ abstract class TeamStrategyBase {
     const targetMask = maskTarget(ctx)
     const { action: targetIdx } = this.selectAction(targetLogits, targetMask)
 
-    this.record(ctx, 'claim', claimIdx, claimLogProb, result.value, 0)
+    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
+    this.record('claim', claimIdx, claimLogProb, result.value, 0, seat)
     return decodeClaim(claimIdx, targetIdx, ctx)
   }
 
@@ -379,23 +390,25 @@ abstract class TeamStrategyBase {
     const logits = result.policies.get('vote')!
     const mask = maskVote(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
-    this.record(ctx, 'vote', action, logProb, result.value, 0)
+    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
+    this.record('vote', action, logProb, result.value, 0, seat)
     return action + 1
   }
 
   protected decideCommunicationImpl(ctx: TeamDecisionContext): CommunicationAction {
     const result = this.infer(ctx)
+    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
 
     const commLogits = result.policies.get('comm')!
     const commMask = maskComm(ctx)
     const { action: commAction, logProb: commLogProb } = this.selectAction(commLogits, commMask)
-    this.record(ctx, 'comm', commAction, commLogProb, result.value, 0)
+    this.record('comm', commAction, commLogProb, result.value, 0, seat)
     const signal = decodeComm(commAction)
 
     const proposeLogits = result.policies.get('propose')!
     const proposeMask = maskPropose(ctx)
     const { actions: proposeActions, logProb: proposeLogProb } = this.selectSigmoidAction(proposeLogits, proposeMask)
-    this.recordSigmoid(ctx, 'propose', proposeActions, proposeLogProb, result.value, 0)
+    this.recordSigmoid('propose', proposeActions, proposeLogProb, result.value, 0, seat)
     const proposals = decodePropose(proposeActions, 0.5)
 
     const predictMask = maskPredict(commAction)
@@ -403,7 +416,7 @@ abstract class TeamStrategyBase {
     if (predictMask[0] !== -Infinity) {
       const predictLogits = result.policies.get('predict')!
       const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
-      this.recordSigmoid(ctx, 'predict', predictActions, predictLogProb, result.value, 0)
+      this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, seat)
       predictions = decodePredict(predictActions, 0.5)
     }
 
@@ -424,7 +437,8 @@ abstract class TeamStrategyBase {
     const logits = result.policies.get('leader')!
     const mask = maskLeader(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
-    this.record(ctx, 'leader', action, logProb, result.value, 0)
+    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
+    this.record('leader', action, logProb, result.value, 0, seat)
     return decodeLeader(action)
   }
 
@@ -445,12 +459,13 @@ export class WolfTeamStrategy extends TeamStrategyBase implements TeamStrategy {
     const attackLogits = result.policies.get('attack_target')!
     const attackMask = maskAttackTarget(ctx)
     const { action: attackIdx, logProb: attackLogProb } = this.selectAction(attackLogits, attackMask)
-    this.record(ctx, 'attack_target', attackIdx, attackLogProb, result.value, 0)
+    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
+    this.record('attack_target', attackIdx, attackLogProb, result.value, 0, seat)
 
     const attackerLogits = result.policies.get('attacker')!
     const attackerMask = maskAttacker(ctx)
     const { action: attackerIdx, logProb: attackerLogProb } = this.selectAction(attackerLogits, attackerMask)
-    this.record(ctx, 'attacker', attackerIdx, attackerLogProb, result.value, 0)
+    this.record('attacker', attackerIdx, attackerLogProb, result.value, 0, seat)
 
     return decodeWolfNightAction(attackIdx, attackerIdx, ctx.teamSeats)
   }
