@@ -186,7 +186,8 @@ export class TfTransformerNetwork {
 
     // Transformer layers
     this.layers = []
-    for (let l = 0; l < tc.numLayers; l++) {
+    const numLayers = tc.seatLayers ?? tc.numLayers ?? 2
+    for (let l = 0; l < numLayers; l++) {
       const layer = {
         ln1Scale: tf.variable(tf.ones([dm]), true, `${prefix}l${l}_ln1_s`),
         ln1Bias: this.makeZeroVar([dm], `${prefix}l${l}_ln1_b`),

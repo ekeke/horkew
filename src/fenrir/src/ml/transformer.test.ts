@@ -3,7 +3,8 @@ import * as assert from 'node:assert/strict'
 import { LayerNorm, MultiHeadAttention, FeedForward, TransformerBlock, TransformerEncoder } from './transformer.ts'
 import { TransformerNetwork } from './transformer-network.ts'
 import { tokenize, OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE, SEATS, NUM_ROLES,
-         CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES } from '../observation.ts'
+         CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES,
+         ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS } from '../observation.ts'
 import type { NetworkConfig } from './nn.ts'
 
 // ============================================================
@@ -34,13 +35,19 @@ function makeConfig(isTeam = false): NetworkConfig {
     },
     transformer: {
       dModel: D_MODEL,
-      numLayers: NUM_LAYERS,
       numHeads: NUM_HEADS,
       dFf: D_FF,
       seatFeatures: isTeam ? TEAM_SEAT_TOKEN_FEATURES : SEAT_TOKEN_FEATURES,
       clsFeatures: isTeam ? TEAM_CLS_FEATURES : CLS_FEATURES,
       planFeatures: 20,
       maxPlanTokens: MAX_PLAN_TOKENS,
+      roleFeatures: ROLE_TOKEN_FEATURES,
+      numRoleTokens: NUM_ROLE_TOKENS,
+      seatLayers: NUM_LAYERS,
+      strategyLayers: 2,
+      numForwardTokens: 8,
+      numEndgameTokens: 4,
+      planVocabSize: 23,
       perSeatHeads: ['vote', 'target'],
       perSeatSigmoidHeads: ['propose', 'predict'],
     },

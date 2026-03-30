@@ -16,7 +16,8 @@ import { TransformerNetwork } from './ml/transformer-network.ts'
 import { TfTransformerNetwork } from './ml/nn-tf-transformer.ts'
 import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
   CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES,
-  PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS } from './observation.ts'
+  PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS,
+  ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS } from './observation.ts'
 import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
 import { encodeTrueRoles } from './observation.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
@@ -203,13 +204,20 @@ const MASON_TEAM_NETWORK_CONFIG = {
 // Transformer Network Configuration
 // ============================================================
 
+/** 戦略NN共通設定 */
 const TRANSFORMER_COMMON = {
   dModel: 64,
-  numLayers: 2,
   numHeads: 4,
   dFf: 128,
   planFeatures: PLAN_TOKEN_FEATURES,
   maxPlanTokens: MAX_PLAN_TOKENS,
+  roleFeatures: ROLE_TOKEN_FEATURES,
+  numRoleTokens: NUM_ROLE_TOKENS,
+  seatLayers: 3,
+  strategyLayers: 2,
+  numForwardTokens: 8,
+  numEndgameTokens: 4,
+  planVocabSize: 23,  // 14 seats + 5 roles + grayran + next + stop
 }
 
 const TRANSFORMER_NETWORK_CONFIG: NetworkConfig = {

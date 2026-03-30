@@ -115,6 +115,14 @@ export const TEAM_CLS_FEATURES = 26
 export const SEAT_TOKEN_FEATURES = 57
 /** 席トークンの特徴量次元 (team) */
 export const TEAM_SEAT_TOKEN_FEATURES = 60
+
+/** CO可能役職 (Role token対象) */
+export const CO_ROLES: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+/** Role token数 */
+export const NUM_ROLE_TOKENS = CO_ROLES.length  // 5
+/** Role tokenの特徴量次元: co_count(1) + co_seats(14) = 15 */
+export const ROLE_TOKEN_FEATURES = 1 + SEATS  // 15
+
 /** トークン化されたobservation */
 export type TokenizedObservation = {
   /** CLSトークン [clsFeatures] */
@@ -123,6 +131,8 @@ export type TokenizedObservation = {
   seats: Float32Array
   /** プラントークン [planCount * PLAN_TOKEN_FEATURES] — flat */
   plans: Float32Array
+  /** Role tokens [NUM_ROLE_TOKENS * ROLE_TOKEN_FEATURES] — flat */
+  roles: Float32Array
   /** プラントークン数 (0 = プランなし) */
   planCount: number
   /** 席特徴量次元 */
@@ -214,10 +224,30 @@ export function tokenize(obs: Float32Array, isTeam: boolean = false): TokenizedO
     plans = new Float32Array(0)
   }
 
+  // ========== Role tokens ==========
+  // CO可能5役職それぞれについて、seat tokensのclaimed_roleからCO者情報を集約
+  // claimed_role one-hot は各seat token内のoffset 1..11 (PER_SEAT_SIZE = 25, claimed_role starts at index 1)
+  const roles = new Float32Array(NUM_ROLE_TOKENS * ROLE_TOKEN_FEATURES)
+  for (let ri = 0; ri < NUM_ROLE_TOKENS; ri++) {
+    const roleIdx = ROLE_INDEX.get(CO_ROLES[ri])!
+    const ro = ri * ROLE_TOKEN_FEATURES
+    let coCount = 0
+    for (let s = 0; s < SEATS; s++) {
+      // claimed_role one-hot: seat token offset 1 + roleIdx
+      const claimedVal = seats[s * sf + 1 + roleIdx]
+      if (claimedVal > 0) {
+        coCount++
+        roles[ro + 1 + s] = 1  // co_seats[s] = 1
+      }
+    }
+    roles[ro] = coCount / SEATS  // co_count normalized
+  }
+
   return {
     cls,
     seats,
     plans,
+    roles,
     planCount,
     seatFeatures: sf,
     clsFeatures: cf,

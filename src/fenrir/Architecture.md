@@ -113,7 +113,7 @@ Strategy Layer（M層）:
     → 各トークンから出力読み出し
 ```
 
-d_model=128, N=3, M=2 が基本構成（~430Kパラメータ）。
+d_model=64, N=3, M=2 が基本構成。
 
 ### 出力
 
@@ -496,8 +496,6 @@ entropy_coeff = 0.01
 
 ## 未解決の設計判断
 
-- **d_model**: 64 vs 128
-- **層数配分**: Seat Transformer N=? / Strategy M=?
 - **行動NNのSeat Transformer**: 戦略NNから重みコピーして独自に持つか、Step 3で共有重み化するか
 - **comm headのPointer化**: signal_type softmax × Pointer(14) の分解方式
 - **predict headの制約**: 配役の定員制約（villager×5, seer×1 等）をsoftmax(11)でどう扱うか

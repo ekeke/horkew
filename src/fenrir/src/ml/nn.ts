@@ -144,15 +144,31 @@ export type NetworkConfig = {
 /** Transformerアーキテクチャ設定 */
 export type TransformerNetworkConfig = {
   dModel: number            // e.g. 128
-  numLayers: number         // e.g. 3
   numHeads: number          // e.g. 4
   dFf: number               // e.g. 256
   seatFeatures: number      // 生の1席あたり特徴量次元
   clsFeatures: number       // CLSトークンの生特徴量次元
-  planFeatures: number      // プラントークンの生特徴量次元
-  maxPlanTokens: number     // プラントークンの最大数
+  planFeatures: number      // プラントークンの生特徴量次元 (入力plan tokens、旧互換)
+  maxPlanTokens: number     // プラントークンの最大数 (入力plan tokens、旧互換)
+  roleFeatures: number      // Role tokenの生特徴量次元
+  numRoleTokens: number     // Role token数 (5 = CO可能役職)
+
+  /** Seat Transformer層数 */
+  seatLayers: number        // e.g. 3
+  /** Strategy Layer層数 */
+  strategyLayers: number    // e.g. 2
+  /** Forward Plan token数 (Strategy Layerの出力トークン) */
+  numForwardTokens: number  // e.g. 8
+  /** Endgame Plan token数 (Strategy Layerの出力トークン) */
+  numEndgameTokens: number  // e.g. 4
+  /** Pointer語彙サイズ (14席 + 5役職 + grayran + next + stop) */
+  planVocabSize: number     // 23
+
+  // 旧互換
+  numLayers?: number
+
   /** per-seatヘッドの名前リスト (seat token出力から読み出す) */
-  perSeatHeads: string[]    // e.g. ['vote', 'target', 'propose']
+  perSeatHeads: string[]    // e.g. ['vote', 'target']
   /** per-seat sigmoid headの名前リスト (seat token出力から読み出す) */
   perSeatSigmoidHeads?: string[]  // e.g. ['predict']
 }
