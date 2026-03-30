@@ -32,10 +32,14 @@ describe('endgameVoteReward', () => {
       assert.ok(r > 0)
     })
 
-    it('wolf-only (LW candidate) → negative penalty', () => {
-      const r = endgameVoteReward(6, roles('werewolf', 'villager'))
+    it('confirmed wolf (LW candidate) → negative penalty', () => {
+      const r = endgameVoteReward(6, roles('werewolf'))
       assert.equal(r, DEFAULT_REWARD_CONFIG.endgamePreFinalLWTarget)
       assert.ok(r < 0)
+    })
+
+    it('wolf among multiple possibilities → 0 (not confirmed LW)', () => {
+      assert.equal(endgameVoteReward(6, roles('werewolf', 'villager')), 0)
     })
 
     it('no wolf/fox → 0', () => {

@@ -192,6 +192,6 @@ export function endgameVoteReward(
 
   // 最終日前日 (4 < alive <= 6)
   if (hasFox) return config.endgamePreFinalFoxTarget
-  if (hasWolf) return config.endgamePreFinalLWTarget
+  if (targetPossibilities.size === 1 && hasWolf) return config.endgamePreFinalLWTarget
   return 0
 }
