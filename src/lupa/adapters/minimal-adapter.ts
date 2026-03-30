@@ -179,17 +179,33 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
     },
 
     // onPreVote なし → 議論フェーズ全スキップ
+    // ただし共有者の提案は executionPlans に直接注入
 
     onVote(vctx) {
       runRetar(vctx)
       const state = vctx.state as GameState
       const votes = new Map<number, number>()
 
+      // 共有者の提案を executionPlans に注入（指揮者選出をスキップ）
+      const executionPlans: import('../strategy.ts').ExecutionPlan[] = []
+      const aliveMasons = alivePlayers(state).filter(p => p.role === 'mason')
+      if (aliveMasons.length > 0) {
+        const mason = aliveMasons[0]
+        const masonView = buildPlayerView(state, mason.seat)
+        const masonCtx = buildCtx(vctx as PhaseContext, mason, masonView)
+        masonCtx.commander = mason.seat  // 提案を出すために指揮者扱い
+        const proposal = getStrategy(mason.seat).decideProposal(masonCtx)
+        if (proposal && proposal.type === 'execute_order') {
+          executionPlans.push({ targets: [proposal.target], type: 'designated' })
+        }
+      }
+
       for (const player of alivePlayers(state)) {
         const view = buildPlayerView(state, player.seat)
         const ctx = buildCtx(vctx as PhaseContext, player, view, {
           revoteRound: vctx.revoteRound,
           revoteCandidates: vctx.candidates,
+          executionPlans,
         })
 
         const teamStrategy = player.role === 'werewolf' ? config.wolfTeamStrategy
