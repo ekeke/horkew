@@ -10,7 +10,7 @@ import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame, runGameAsync } from '../../lupa/engine.ts'
 import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-node-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
-import type { NetworkConfig } from './ml/nn.ts'
+import type { NetworkConfig, AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import { TfNeuralNetwork } from './ml/nn-tf.ts'
 import { TransformerNetwork } from './ml/transformer-network.ts'
 import { TfTransformerNetwork } from './ml/nn-tf-transformer.ts'
@@ -51,8 +51,8 @@ for (const [name, def] of Object.entries(MODEL_GROUP_DEFS) as [ModelGroupName, {
 type ModelGroup = {
   name: ModelGroupName
   roles: SystemRole[]
-  network: NeuralNetwork
-  tfNetwork: TfNeuralNetwork
+  network: AnyNetwork
+  tfNetwork: AnyTfNetwork
   /** チェックポイント未発見 → heuristic フォールバック、PPO更新スキップ */
   heuristicOnly: boolean
 }
@@ -105,6 +105,8 @@ export type TrainingConfig = {
   numWorkers?: number
   /** Phase 1でMLにする役職（未指定時は偶数seat） */
   mlRoles?: SystemRole[]
+  /** Transformerアーキテクチャを使用 */
+  useTransformer?: boolean
   /** Phase 2マルチモデル: 6モデルのチェックポイントDir (mason,village,werewolf,fanatic,hamster,immoralist順) */
   phase2ModelDirs?: string[]
   /** 目標勝率 (0-1)。eval でこの勝率を超えたら早期終了 */
@@ -529,7 +531,7 @@ async function generateGameAsync(
 // ============================================================
 
 function ppoUpdate(
-  tfNetwork: TfNeuralNetwork,
+  tfNetwork: AnyTfNetwork,
   batch: ProcessedStep[],
   config: TrainingConfig,
 ): { policyLoss: number, valueLoss: number, entropy: number } {
@@ -582,11 +584,11 @@ function ppoUpdate(
 // ============================================================
 
 export function evaluate(
-  network: NeuralNetwork,
+  network: AnyNetwork,
   config: TrainingConfig,
   numGames: number = 50,
-  wolfTeamNet?: NeuralNetwork,
-  masonTeamNet?: NeuralNetwork,
+  wolfTeamNet?: AnyNetwork,
+  masonTeamNet?: AnyNetwork,
 ): { winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number } {
   const heuristic = new HeuristicStrategy()
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
@@ -770,25 +772,35 @@ function findLatestCheckpointMulti(dir: string): {
 }
 
 export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDir?: string): Promise<void> {
-  log('Fenrir Training Started')
-  log(`Observation size: individual=${OBSERVATION_SIZE}, team=${TEAM_OBSERVATION_SIZE}`)
-
+  const useTransformer = config.useTransformer ?? false
   const multiModel = config.phase2ModelDirs != null
+
+  log('Fenrir Training Started')
+  log(`Architecture: ${useTransformer ? 'Transformer' : 'MLP'}`)
+  log(`Observation size: individual=${OBSERVATION_SIZE}, team=${TEAM_OBSERVATION_SIZE}`)
 
   // === マルチモデル用 ===
   const modelGroups = new Map<ModelGroupName, ModelGroup>()
 
+  // === ファクトリ関数 (MLP / Transformer 切り替え) ===
+  const makeNetwork = (): AnyNetwork => useTransformer ? createTransformerNetwork() : createNetwork()
+  const makeTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createTransformerTfNetwork(lr) : createTfNetwork(lr)
+  const makeWolfTeamNetwork = (): AnyNetwork => useTransformer ? createWolfTeamTransformerNetwork() : createWolfTeamNetwork()
+  const makeWolfTeamTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createWolfTeamTransformerTfNetwork(lr) : createWolfTeamTfNetwork(lr)
+  const makeMasonTeamNetwork = (): AnyNetwork => useTransformer ? createMasonTeamTransformerNetwork() : createMasonTeamNetwork()
+  const makeMasonTeamTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createMasonTeamTransformerTfNetwork(lr) : createMasonTeamTfNetwork(lr)
+
   // === 個人エージェント (単一モデルモード用) ===
-  const network = multiModel ? undefined! as NeuralNetwork : createNetwork()
-  const tfNetwork = multiModel ? undefined! as TfNeuralNetwork : createTfNetwork(config.learningRate)
+  const network = multiModel ? undefined! as AnyNetwork : makeNetwork()
+  const tfNetwork = multiModel ? undefined! as AnyTfNetwork : makeTfNetwork(config.learningRate)
 
   // === 狼チームエージェント ===
-  const wolfTeamNet = createWolfTeamNetwork()
-  const wolfTeamTf = createWolfTeamTfNetwork(config.learningRate)
+  const wolfTeamNet = makeWolfTeamNetwork()
+  const wolfTeamTf = makeWolfTeamTfNetwork(config.learningRate)
 
   // === 共有者チームエージェント ===
-  const masonTeamNet = createMasonTeamNetwork()
-  const masonTeamTf = createMasonTeamTfNetwork(config.learningRate)
+  const masonTeamNet = makeMasonTeamNetwork()
+  const masonTeamTf = makeMasonTeamTfNetwork(config.learningRate)
 
   if (multiModel) {
     // Phase 2 マルチモデル: 6グループ初期化 + チェックポイント読込
@@ -802,8 +814,8 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       // チェックポイント読込
       const ckpt = findLatestCheckpoint(dirs[i])
       if (ckpt) {
-        const net = createNetwork()
-        const tf = createTfNetwork(config.learningRate)
+        const net = makeNetwork()
+        const tf = makeTfNetwork(config.learningRate)
         loadCheckpoint(net, ckpt.individual)
         log(`  ${name}: loaded from ${ckpt.individual} (iter ${ckpt.iteration})`)
         // チームネットワークも読込
@@ -904,7 +916,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       const sharedWolfWeights = (!useHeuristic || multiModel) ? packWeights(wolfTeamNet) : undefined
       const sharedMasonWeights = (!useHeuristic || multiModel) ? packWeights(masonTeamNet) : undefined
       const poolSharedWeights = (usePool && pool.length > 0)
-        ? pool.map(w => { const net = createNetwork(); net.loadWeights(w); return packWeights(net) })
+        ? pool.map(w => { const net = makeNetwork(); net.loadWeights(w); return packWeights(net) })
         : undefined
 
       // マルチモデル: グループ別の重みをパック (heuristicOnly は除外)
@@ -1003,7 +1015,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
 
               if (usePool && pool.length > 0 && seat % 3 === 0) {
                 const pastWeights = pool[Math.floor(Math.random() * pool.length)]
-                const pastNet = createNetwork()
+                const pastNet = makeNetwork()
                 pastNet.loadWeights(pastWeights)
                 strategies.set(seat, new FenrirStrategy(pastNet, { explore: true }))
               } else {

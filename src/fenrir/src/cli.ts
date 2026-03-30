@@ -26,6 +26,7 @@ Options:
   --target-winrate <n>      目標勝率 (0-1)。evalでこの勝率を超えたら早期終了
   --target-faction <s>      チェックする陣営 (villageWin/wolfWin/hamsterWin)
   --workers <n|auto>        ゲーム生成の並列ワーカー数 (auto=CPU-1, default: 直列)
+  --transformer             Transformerアーキテクチャを使用 (default: MLP)
   --no-retar                Retar論理推論を無効化
   --resume [dir]            チェックポイントから再開 (default: --checkpoint-dir)
   --help, -h                このヘルプを表示
@@ -86,6 +87,9 @@ function parseArgs(): ParsedArgs {
       case '--help':
       case '-h':
         config.help = true
+        break
+      case '--transformer':
+        config.useTransformer = true
         break
       case '--no-retar':
         config.enableRetar = false
@@ -167,6 +171,7 @@ console.error('Configuration:')
 console.error(`  Total iterations: ${config.totalIterations}`)
 console.error(`  Games per batch: ${config.gamesPerBatch}`)
 console.error(`  Learning rate: ${config.learningRate}`)
+console.error(`  Architecture: ${config.useTransformer ? 'Transformer' : 'MLP'}`)
 console.error(`  Retar: ${config.enableRetar ? 'enabled' : 'disabled'}`)
 console.error(`  Checkpoint dir: ${config.checkpointDir}`)
 if (resumeDir) console.error(`  Resume from: ${resumeDir}`)

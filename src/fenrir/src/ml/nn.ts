@@ -162,7 +162,7 @@ export type ForwardResult = {
   value: number                         // scalar value estimate
 }
 
-/** NeuralNetwork / TransformerNetwork 共通インターフェース */
+/** NeuralNetwork / TransformerNetwork 共通インターフェース (推論用) */
 export interface AnyNetwork {
   readonly config: NetworkConfig
   forward(input: Float32Array): ForwardResult
@@ -170,6 +170,28 @@ export interface AnyNetwork {
   cloneWeights(): Map<string, Float32Array>
   loadWeights(weights: Map<string, Float32Array>): void
   get totalParams(): number
+}
+
+/** TfNeuralNetwork / TfTransformerNetwork 共通インターフェース (学習用) */
+export interface AnyTfNetwork {
+  readonly config: NetworkConfig
+  forward(input: Float32Array): ForwardResult
+  trainBatch(batch: {
+    observations: Float32Array[]
+    actionHeads: string[]
+    actionIndices: number[]
+    oldLogProbs: number[]
+    advantages: number[]
+    returns: number[]
+    sigmoidActions?: (Float32Array | undefined)[]
+    clipEpsilon: number
+    valueLossCoeff: number
+    entropyCoeff: number
+  }): { policyLoss: number, valueLoss: number, entropy: number }
+  cloneWeights(): Map<string, Float32Array>
+  loadWeights(weights: Map<string, Float32Array>): void
+  get totalParams(): number
+  dispose(): void
 }
 
 export class NeuralNetwork {

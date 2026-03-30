@@ -4,7 +4,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
-import type { NeuralNetwork, NetworkConfig } from './nn.ts'
+import type { AnyNetwork, NetworkConfig } from './nn.ts'
 
 export type CheckpointData = {
   version: number
@@ -28,7 +28,7 @@ function base64ToFloat32(b64: string): Float32Array {
 }
 
 export function saveCheckpoint(
-  network: NeuralNetwork,
+  network: AnyNetwork,
   path: string,
   metadata: { iteration: number, winRate: number },
 ): void {
@@ -55,7 +55,7 @@ export function saveCheckpoint(
 }
 
 export function loadCheckpoint(
-  network: NeuralNetwork,
+  network: AnyNetwork,
   path: string,
 ): CheckpointData {
   const raw = readFileSync(path, 'utf-8')
