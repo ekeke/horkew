@@ -130,6 +130,10 @@ export class TfNeuralNetwork {
     returns: number[]
     sigmoidActions?: (Float32Array | undefined)[]  // sigmoid heads用
     trueRoles?: (Float32Array | undefined)[]  // predict補助損失用
+    planForwardActions?: (number[] | undefined)[]
+    planForwardLogProbs?: (number[] | undefined)[]
+    planEndgameActions?: (number[] | undefined)[]
+    planEndgameLogProbs?: (number[] | undefined)[]
     predictLossCoeff?: number  // predict BCEの重み (default: 0)
     clipEpsilon: number
     valueLossCoeff: number

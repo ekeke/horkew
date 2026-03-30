@@ -221,7 +221,7 @@ const TRANSFORMER_COMMON = {
   strategyLayers: 2,
   numForwardTokens: 8,
   numEndgameTokens: 4,
-  planVocabSize: 23,  // 14 seats + 5 roles + grayran + next + stop
+  planVocabSize: 22,  // 14 seats + 5 roles + grayran + next + stop = PLAN_VOCAB.SIZE
 }
 
 const TRANSFORMER_NETWORK_CONFIG: NetworkConfig = {
@@ -591,6 +591,10 @@ function ppoUpdate(
       returns: miniBatch.map(s => s.returnValue),
       sigmoidActions: miniBatch.map(s => s.sigmoidActions),
       trueRoles: miniBatch.map(s => s.trueRoles),
+      planForwardActions: miniBatch.map(s => s.planForwardActions),
+      planForwardLogProbs: miniBatch.map(s => s.planForwardLogProbs),
+      planEndgameActions: miniBatch.map(s => s.planEndgameActions),
+      planEndgameLogProbs: miniBatch.map(s => s.planEndgameLogProbs),
       predictLossCoeff: config.predictLossCoeff ?? 0.1,
       clipEpsilon: config.clipEpsilon,
       valueLossCoeff: config.valueLossCoeff,

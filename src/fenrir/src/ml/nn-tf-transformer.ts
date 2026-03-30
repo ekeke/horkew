@@ -602,13 +602,7 @@ export class TfTransformerNetwork {
       const queryFlat = planTokens.reshape([batch * count, this.dm])
       const queries = tf.add(tf.matMul(queryFlat, this.pointerQueryW), this.pointerQueryB)
         .reshape([batch, count, this.dm])  // [batch, count, dm]
-      // Dot product: [batch, count, 22] (but we need vocab=23, padding handled by numTargets+3=22)
-      // Actually 14+5+3 = 22, but vocabSize is 23... let me check
-      // vocab: 14 seats + 5 roles + grayran + next + stop = 23
-      // keys: 14 seat keys + 5 role keys + 3 special = 22
-      // Hmm, 22 keys for vocab 23? No — the 14 seats map to vocab[0..13], 5 roles to vocab[14..18], 3 special to vocab[19..21]
-      // That's only 22. But vocabSize=23? Actually 14+5+1+1+1 = 22 targets, matching vocab indices 0-21.
-      // So vocabSize should be 22, not 23. Let me produce 22 logits per token.
+      // Dot product: [batch, count, 22] — 14 seats + 5 roles + 3 special = PLAN_VOCAB.SIZE
       const scale = tf.scalar(1 / Math.sqrt(this.dm))
       const scores = tf.mul(tf.matMul(queries, allKeys, false, true), scale)  // [batch, count, 22]
       // Flatten: [batch, count * 22]
@@ -700,6 +694,10 @@ export class TfTransformerNetwork {
     returns: number[]
     sigmoidActions?: (Float32Array | undefined)[]
     trueRoles?: (Float32Array | undefined)[]
+    planForwardActions?: (number[] | undefined)[]
+    planForwardLogProbs?: (number[] | undefined)[]
+    planEndgameActions?: (number[] | undefined)[]
+    planEndgameLogProbs?: (number[] | undefined)[]
     predictLossCoeff?: number
     clipEpsilon: number
     valueLossCoeff: number
@@ -745,6 +743,89 @@ export class TfTransformerNetwork {
 
       let totalPolicyLoss = tf.scalar(0)
       let totalEntropy = tf.scalar(0)
+
+      // Plan token PPO loss (Pointer head)
+      const planIndices = headGroups.get('plan')
+      if (planIndices && planIndices.length > 0) {
+        const tc = this.config.transformer!
+        const numFwd = tc.numForwardTokens ?? 8
+        const numEg = tc.numEndgameTokens ?? 4
+        const vocabSize = tc.planVocabSize ?? 22
+
+        const computePlanLoss = (
+          logitsTensor: tf.Tensor2D, // [n, numTokens * vocabSize]
+          numTokens: number,
+          getActions: (i: number) => number[] | undefined,
+          getLogProbs: (i: number) => number[] | undefined,
+        ): { loss: tf.Scalar, entropy: tf.Scalar } => {
+          // Gather plan samples
+          const planLogits = tf.gather(logitsTensor, planIndices)  // [m, numTokens * vocabSize]
+          const m = planIndices.length
+          const reshaped = planLogits.reshape([m, numTokens, vocabSize])  // [m, numTokens, vocabSize]
+          const probs = tf.softmax(reshaped, 2)  // softmax over vocab dimension
+
+          // Build action indices tensor [m, numTokens]
+          const actionData = new Int32Array(m * numTokens)
+          const oldLpData = new Float32Array(m)
+          for (let j = 0; j < m; j++) {
+            const actions = getActions(planIndices[j])
+            const logProbs = getLogProbs(planIndices[j])
+            if (actions) {
+              for (let k = 0; k < numTokens; k++) {
+                actionData[j * numTokens + k] = actions[k] ?? 0
+              }
+            }
+            // Sum per-position old log probs
+            if (logProbs) {
+              for (let k = 0; k < numTokens; k++) oldLpData[j] += logProbs[k] ?? 0
+            }
+          }
+
+          // Per-position new log probs
+          const actionMask = tf.oneHot(
+            tf.tensor2d(actionData, [m, numTokens], 'int32'),
+            vocabSize,
+          )  // [m, numTokens, vocabSize]
+          const selectedProbs = tf.sum(tf.mul(probs, actionMask), 2)  // [m, numTokens]
+          const posLogProbs = tf.log(tf.add(selectedProbs, tf.scalar(1e-8)))  // [m, numTokens]
+          const newLogProbs = tf.sum(posLogProbs, 1)  // [m]
+
+          // PPO clipped surrogate
+          const headAdvantages = planIndices.map(i => batch.advantages[i])
+          const ratio = tf.exp(tf.sub(newLogProbs, tf.tensor1d(oldLpData)))
+          const advTensor = tf.tensor1d(headAdvantages)
+          const surr1 = tf.mul(ratio, advTensor)
+          const surr2 = tf.mul(
+            tf.clipByValue(ratio, 1 - batch.clipEpsilon, 1 + batch.clipEpsilon),
+            advTensor,
+          )
+          const loss = tf.neg(tf.mean(tf.minimum(surr1, surr2))) as tf.Scalar
+
+          // Entropy over vocab per position
+          const logProbs2d = tf.log(tf.add(probs, tf.scalar(1e-8)))
+          const ent = tf.neg(tf.mean(tf.sum(tf.mul(probs, logProbs2d), 2))) as tf.Scalar
+
+          return { loss, entropy: ent }
+        }
+
+        const fwdResult = computePlanLoss(
+          planForwardLogits, numFwd,
+          i => batch.planForwardActions?.[i],
+          i => batch.planForwardLogProbs?.[i],
+        )
+        totalPolicyLoss = tf.add(totalPolicyLoss, fwdResult.loss)
+        totalEntropy = tf.add(totalEntropy, fwdResult.entropy)
+
+        const egResult = computePlanLoss(
+          planEndgameLogits, numEg,
+          i => batch.planEndgameActions?.[i],
+          i => batch.planEndgameLogProbs?.[i],
+        )
+        totalPolicyLoss = tf.add(totalPolicyLoss, egResult.loss)
+        totalEntropy = tf.add(totalEntropy, egResult.entropy)
+
+        headGroups.delete('plan')  // 通常ヘッドループでは処理しない
+      }
 
       for (const [headName, indices] of headGroups) {
         const headLogitsTensor = allLogits.get(headName)!

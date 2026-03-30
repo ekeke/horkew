@@ -162,7 +162,7 @@ export type TransformerNetworkConfig = {
   /** Endgame Plan token数 (Strategy Layerの出力トークン) */
   numEndgameTokens: number  // e.g. 4
   /** Pointer語彙サイズ (14席 + 5役職 + grayran + next + stop) */
-  planVocabSize: number     // 23
+  planVocabSize: number     // 22 = PLAN_VOCAB.SIZE
 
   // 旧互換
   numLayers?: number

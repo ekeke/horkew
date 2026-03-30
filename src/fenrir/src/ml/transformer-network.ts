@@ -282,9 +282,8 @@ export class TransformerNetwork {
     }
 
     // ========== Pointer mechanism for plan tokens ==========
-    // Keys: Seat(14) + Role(5) + special(3) = 22 targets → vocab 23 (but seat indices 0-13, role 14-18, special 19-21)
-    // Actually vocab = 14 seats + 5 roles + grayran + next + stop = 23
-    const vocabSize = tc.planVocabSize ?? 23
+    // Keys: Seat(14) + Role(5) + special(3) = 22 targets = PLAN_VOCAB.SIZE
+    const vocabSize = tc.planVocabSize ?? 22
     const numTargetTokens = SEATS + numRoles  // 14 + 5 = 19 tokens provide keys
     const numSpecial = 3  // grayran, next, stop
     const invSqrtD = 1 / Math.sqrt(dm)

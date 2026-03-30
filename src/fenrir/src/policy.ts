@@ -74,6 +74,14 @@ export class FenrirStrategy implements Strategy {
     return this.network.config.transformer?.numForwardTokens ?? 8
   }
 
+  private get numEndgameTokens(): number {
+    return this.network.config.transformer?.numEndgameTokens ?? 4
+  }
+
+  private get planVocabSize(): number {
+    return this.network.config.transformer?.planVocabSize ?? 22
+  }
+
   private record(
     head: string, actionIdx: number,
     logProb: number, value: number, reward: number,
@@ -160,6 +168,78 @@ export class FenrirStrategy implements Strategy {
     })
   }
 
+  /** Plan token logitsから各位置のアクションをサンプリング/argmax */
+  private selectPlanTokens(
+    logits: Float32Array, numTokens: number, vocabSize: number,
+  ): { actions: number[], logProbs: number[] } {
+    const actions: number[] = []
+    const logProbs: number[] = []
+    for (let k = 0; k < numTokens; k++) {
+      const off = k * vocabSize
+      // softmax over vocab for this position
+      let maxVal = -Infinity
+      for (let v = 0; v < vocabSize; v++) {
+        if (logits[off + v] > maxVal) maxVal = logits[off + v]
+      }
+      const expVals = new Float32Array(vocabSize)
+      let sumExp = 0
+      for (let v = 0; v < vocabSize; v++) {
+        expVals[v] = Math.exp(logits[off + v] - maxVal)
+        sumExp += expVals[v]
+      }
+
+      let chosenIdx: number
+      if (this.config.explore) {
+        // Sample from distribution
+        const r = Math.random() * sumExp
+        let cumulative = 0
+        chosenIdx = vocabSize - 1
+        for (let v = 0; v < vocabSize; v++) {
+          cumulative += expVals[v]
+          if (cumulative >= r) { chosenIdx = v; break }
+        }
+      } else {
+        // Greedy
+        chosenIdx = 0
+        for (let v = 1; v < vocabSize; v++) {
+          if (expVals[v] > expVals[chosenIdx]) chosenIdx = v
+        }
+      }
+
+      const prob = expVals[chosenIdx] / sumExp
+      actions.push(chosenIdx)
+      logProbs.push(Math.log(prob + 1e-8))
+    }
+    return { actions, logProbs }
+  }
+
+  /** Plan tokenの選択をtrajectoryに記録 */
+  private recordPlan(
+    forwardActions: number[], forwardLogProbs: number[],
+    endgameActions: number[], endgameLogProbs: number[],
+    value: number, seat: number,
+  ): void {
+    // 合算logProbでtrajectoryステップを1つ作成
+    let totalLogProb = 0
+    for (const lp of forwardLogProbs) totalLogProb += lp
+    for (const lp of endgameLogProbs) totalLogProb += lp
+
+    this.trajectory.push({
+      seat,
+      observation: this.lastObs!,
+      actionHead: 'plan',
+      actionIdx: -1,
+      logProb: totalLogProb,
+      reward: 0,
+      value,
+      done: false,
+      planForwardActions: forwardActions,
+      planForwardLogProbs: forwardLogProbs,
+      planEndgameActions: endgameActions,
+      planEndgameLogProbs: endgameLogProbs,
+    })
+  }
+
   // ============================================================
   // Strategy interface implementation
   // ============================================================
@@ -214,12 +294,21 @@ export class FenrirStrategy implements Strategy {
       // 戦略NNの推論（キャッシュ or 新規）+ plan logitsで投票
       const result = this.getStrategyResult(ctx)
       const forwardLogits = result.policies.get('plan_forward')
+      const endgameLogits = result.policies.get('plan_endgame')
+
+      // observationを確保（キャッシュ済みなら高速）
+      if (!this.lastObs) this.infer(ctx)
+
+      // plan tokensを記録（PPO勾配を流すため）
+      if (forwardLogits && endgameLogits) {
+        const fwd = this.selectPlanTokens(forwardLogits, this.numForwardTokens, this.planVocabSize)
+        const eg = this.selectPlanTokens(endgameLogits, this.numEndgameTokens, this.planVocabSize)
+        this.recordPlan(fwd.actions, fwd.logProbs, eg.actions, eg.logProbs, result.value, ctx.mySeat)
+      }
 
       // predict headを記録
       const predictLogits = result.policies.get('predict')
       if (predictLogits) {
-        // strategyOnly時もobservationを記録するためinferを呼ぶ（キャッシュ済みなら高速）
-        if (!this.lastObs) this.infer(ctx)
         const predictMask = new Float32Array(predictLogits.length).fill(0)
         const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
         this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, ctx.mySeat)

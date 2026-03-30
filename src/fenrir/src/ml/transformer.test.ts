@@ -47,7 +47,7 @@ function makeConfig(isTeam = false): NetworkConfig {
       strategyLayers: 2,
       numForwardTokens: 8,
       numEndgameTokens: 4,
-      planVocabSize: 23,
+      planVocabSize: 22,
       perSeatHeads: ['vote', 'target'],
       perSeatSigmoidHeads: ['propose', 'predict'],
     },

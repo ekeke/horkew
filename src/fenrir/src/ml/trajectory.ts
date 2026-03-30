@@ -13,6 +13,14 @@ export type TrajectoryStep = {
   done: boolean                   // エピソード終了か
   /** sigmoid head用: 各次元の0/1アクション */
   sigmoidActions?: Float32Array
+  /** plan forward tokens: 各位置の選択index (vocab 22) */
+  planForwardActions?: number[]
+  /** plan forward tokens: 各位置のlog prob */
+  planForwardLogProbs?: number[]
+  /** plan endgame tokens: 各位置の選択index (vocab 22) */
+  planEndgameActions?: number[]
+  /** plan endgame tokens: 各位置のlog prob */
+  planEndgameLogProbs?: number[]
   /** predict補助損失用: 実際の役職 (14席×11役職 = 154次元one-hot、ゲーム終了後に注入) */
   trueRoles?: Float32Array
 }
