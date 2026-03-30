@@ -17,12 +17,15 @@ import { TfNeuralNetwork } from './ml/nn-tf.ts'
 import { TransformerNetwork } from './ml/transformer-network.ts'
 import { TfTransformerNetwork } from './ml/nn-tf-transformer.ts'
 import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
+  WOLF_COLLECTIVE_OBSERVATION_SIZE, MASON_COLLECTIVE_OBSERVATION_SIZE,
   CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES,
+  WOLF_COLLECTIVE_CLS_FEATURES, WOLF_COLLECTIVE_SEAT_FEATURES,
+  MASON_COLLECTIVE_CLS_FEATURES, MASON_COLLECTIVE_SEAT_FEATURES,
   PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS,
   ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS } from './observation.ts'
 import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
 import { encodeTrueRoles } from './observation.ts'
-import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
+import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import { terminalReward, intermediateReward, predictAccuracyReward, buildKnownSeats, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
@@ -299,6 +302,60 @@ const MASON_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
 }
 
 // ============================================================
+// Collective Network Configurations (Transformer only)
+// ============================================================
+
+const WOLF_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
+  inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
+  hiddenSizes: [],
+  heads: {
+    attack_target: TEAM_HEAD_SIZES.attack_target,
+    attacker: TEAM_HEAD_SIZES.attacker,
+    claim: HEAD_SIZES.claim,
+    vote: HEAD_SIZES.vote,
+    comm: HEAD_SIZES.comm,
+    leader: HEAD_SIZES.leader,
+    target: HEAD_SIZES.target,
+    co_policy: 8,  // per-member output (読み出しはper-seat headとして)
+  },
+  sigmoidHeads: {
+    propose: HEAD_SIZES.propose,
+    predict: HEAD_SIZES.predict,
+  },
+  transformer: {
+    ...TRANSFORMER_COMMON,
+    seatFeatures: WOLF_COLLECTIVE_SEAT_FEATURES,
+    clsFeatures: WOLF_COLLECTIVE_CLS_FEATURES,
+    perSeatHeads: ['vote', 'target', 'attack_target', 'co_policy'],
+    perSeatSigmoidHeads: ['propose', 'predict'],
+  },
+}
+
+const MASON_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
+  inputSize: MASON_COLLECTIVE_OBSERVATION_SIZE,
+  hiddenSizes: [],
+  heads: {
+    claim: HEAD_SIZES.claim,
+    vote: HEAD_SIZES.vote,
+    comm: HEAD_SIZES.comm,
+    leader: HEAD_SIZES.leader,
+    target: HEAD_SIZES.target,
+    co_policy: 8,
+  },
+  sigmoidHeads: {
+    propose: HEAD_SIZES.propose,
+    predict: HEAD_SIZES.predict,
+  },
+  transformer: {
+    ...TRANSFORMER_COMMON,
+    seatFeatures: MASON_COLLECTIVE_SEAT_FEATURES,
+    clsFeatures: MASON_COLLECTIVE_CLS_FEATURES,
+    perSeatHeads: ['vote', 'target', 'co_policy'],
+    perSeatSigmoidHeads: ['propose', 'predict'],
+  },
+}
+
+// ============================================================
 // Factory Functions
 // ============================================================
 
@@ -354,6 +411,24 @@ export function createWolfTeamTransformerTfNetwork(lr: number = 3e-4): TfTransfo
 
 export function createMasonTeamTransformerTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
   return new TfTransformerNetwork(MASON_TEAM_TRANSFORMER_CONFIG, lr, true)
+}
+
+// ---- Collective variants (Transformer only) ----
+
+export function createWolfCollectiveNetwork(): TransformerNetwork {
+  return new TransformerNetwork(WOLF_COLLECTIVE_TRANSFORMER_CONFIG, 'wolf_collective')
+}
+
+export function createMasonCollectiveNetwork(): TransformerNetwork {
+  return new TransformerNetwork(MASON_COLLECTIVE_TRANSFORMER_CONFIG, 'mason_collective')
+}
+
+export function createWolfCollectiveTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+  return new TfTransformerNetwork(WOLF_COLLECTIVE_TRANSFORMER_CONFIG, lr, true)
+}
+
+export function createMasonCollectiveTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+  return new TfTransformerNetwork(MASON_COLLECTIVE_TRANSFORMER_CONFIG, lr, true)
 }
 
 // ============================================================
