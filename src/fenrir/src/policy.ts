@@ -17,10 +17,13 @@ import {
   decodeNightActionWithRole, decodeClaim, decodeComm, decodePropose, decodePredict, decodeLeader,
 } from './action.ts'
 import { sigmoid } from './ml/nn.ts'
+import * as ruleAction from './rule-action.ts'
 
 export type FenrirStrategyConfig = {
   /** trueなら探索ノイズあり（学習時）、falseなら貪欲（評価時） */
   explore: boolean
+  /** trueなら戦略NNのみ使用、行動はルールベース (Step 1 bootstrap) */
+  strategyOnly?: boolean
 }
 
 export class FenrirStrategy implements Strategy {
@@ -31,6 +34,9 @@ export class FenrirStrategy implements Strategy {
   trajectory: TrajectoryStep[] = []
   /** NN推論の累積時間 (ms) */
   inferMs = 0
+  /** 戦略NN出力キャッシュ（strategyOnly時、1日1回計算） */
+  private cachedStrategyResult: ForwardResult | null = null
+  private cachedDay = -1
 
   constructor(network: AnyNetwork, config?: Partial<FenrirStrategyConfig>) {
     this.network = network
@@ -46,6 +52,25 @@ export class FenrirStrategy implements Strategy {
     const result = this.network.forward(obs)
     this.inferMs += performance.now() - t
     return result
+  }
+
+  /** 戦略NNの出力を取得（strategyOnly時はキャッシュ） */
+  private getStrategyResult(ctx: DecisionContext): ForwardResult {
+    if (this.config.strategyOnly && this.cachedDay === ctx.day && this.cachedStrategyResult) {
+      // 同じ日のキャッシュを再利用（observationは投票時に記録）
+      return this.cachedStrategyResult
+    }
+    const result = this.infer(ctx)
+    if (this.config.strategyOnly) {
+      this.cachedStrategyResult = result
+      this.cachedDay = ctx.day
+    }
+    return result
+  }
+
+  /** Forward plan tokensの数（config依存） */
+  private get numForwardTokens(): number {
+    return this.network.config.transformer?.numForwardTokens ?? 8
   }
 
   private record(
@@ -139,6 +164,8 @@ export class FenrirStrategy implements Strategy {
   // ============================================================
 
   decideNightAction(ctx: DecisionContext): NightAction {
+    if (this.config.strategyOnly) return ruleAction.nightAction(ctx)
+
     const result = this.infer(ctx)
     const logits = result.policies.get('night')!
     const mask = maskNightAction(ctx)
@@ -150,6 +177,8 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideDayClaim(ctx: DecisionContext): DayClaim {
+    if (this.config.strategyOnly) return ruleAction.dayClaim(ctx)
+
     const result = this.infer(ctx)
     const claimLogits = result.policies.get('claim')!
     const claimMask = maskClaim(ctx)
@@ -166,8 +195,8 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideForecast(ctx: DecisionContext): DayClaim {
-    // Forecast はclaim headで FORECAST を選んだ時に発動
-    // ここでは別途推論する
+    if (this.config.strategyOnly) return { type: 'none' }
+
     const result = this.infer(ctx)
     const targetLogits = result.policies.get('target')!
     const targetMask = maskTarget(ctx)
@@ -180,6 +209,31 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideVote(ctx: DecisionContext): number {
+    if (this.config.strategyOnly) {
+      // 戦略NNの推論（キャッシュ or 新規）+ plan logitsで投票
+      const result = this.getStrategyResult(ctx)
+      const forwardLogits = result.policies.get('plan_forward')
+
+      // predict headを記録
+      const predictLogits = result.policies.get('predict')
+      if (predictLogits) {
+        // strategyOnly時もobservationを記録するためinferを呼ぶ（キャッシュ済みなら高速）
+        if (!this.lastObs) this.infer(ctx)
+        const predictMask = new Float32Array(predictLogits.length).fill(0)
+        const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
+        this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, ctx.mySeat)
+      }
+
+      // planに従って投票
+      if (forwardLogits) {
+        const voteSeat = ruleAction.planToVote(forwardLogits, this.numForwardTokens, ctx)
+        if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
+      }
+      // フォールバック: ランダム生存者
+      const targets = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
+      return targets[Math.floor(ctx.rng.next() * targets.length)]
+    }
+
     const result = this.infer(ctx)
     const logits = result.policies.get('vote')!
     const mask = maskVote(ctx)
@@ -190,7 +244,7 @@ export class FenrirStrategy implements Strategy {
     // predict head: 投票時に常時出力（trajectoryに記録、ゲームイベントには非公開）
     const predictLogits = result.policies.get('predict')
     if (predictLogits) {
-      const predictMask = new Float32Array(predictLogits.length).fill(0)  // 全有効
+      const predictMask = new Float32Array(predictLogits.length).fill(0)
       const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
       this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, ctx.mySeat)
     }
@@ -199,6 +253,12 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideCommunication(ctx: DecisionContext): CommunicationAction {
+    if (this.config.strategyOnly) {
+      const result = this.getStrategyResult(ctx)
+      const forwardLogits = result.policies.get('plan_forward') ?? null
+      return ruleAction.communication(forwardLogits, this.numForwardTokens, ctx)
+    }
+
     const result = this.infer(ctx)
 
     // comm head (softmax)
@@ -231,6 +291,12 @@ export class FenrirStrategy implements Strategy {
   decideProposal(ctx: DecisionContext): Proposal | null {
     if (ctx.commander !== ctx.mySeat) return null
 
+    if (this.config.strategyOnly) {
+      const result = this.getStrategyResult(ctx)
+      const forwardLogits = result.policies.get('plan_forward') ?? null
+      return ruleAction.proposal(forwardLogits, this.numForwardTokens, ctx)
+    }
+
     // 指揮者は vote head を使って処刑対象を提案
     const result = this.infer(ctx)
     const logits = result.policies.get('vote')!
@@ -241,6 +307,8 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideLeadershipResponse(ctx: DecisionContext, _proposal: Proposal): LeadershipResponse {
+    if (this.config.strategyOnly) return ruleAction.leadershipResponse()
+
     const result = this.infer(ctx)
     const logits = result.policies.get('leader')!
     const mask = maskLeader(ctx)
