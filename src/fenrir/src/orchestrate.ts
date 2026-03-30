@@ -32,8 +32,9 @@ import {
   DEFAULT_TRAINING_CONFIG,
   type TrainingConfig,
 } from './training.ts'
-import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, unlinkSync, rmSync } from 'node:fs'
 import { spawn, execSync } from 'node:child_process'
+import { createInterface } from 'node:readline'
 import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
   generateGamesParallel, deserializeStep,
@@ -362,6 +363,71 @@ async function generateGame(
 // Checkpoint helpers
 // ============================================================
 
+function promptYesNo(question: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stderr })
+  return new Promise(resolve => {
+    rl.question(question, answer => {
+      rl.close()
+      resolve(answer.trim().toLowerCase() === 'y')
+    })
+  })
+}
+
+/** checkpoint ディレクトリの最古・最新 timestamp を取得 */
+function getCheckpointTimeRange(baseDir: string): { oldest: string, newest: string, totalFiles: number } | null {
+  let oldest = '', newest = ''
+  let totalFiles = 0
+  for (const name of MODEL_NAMES) {
+    const dir = `${baseDir}/ckpt-${name}`
+    if (!existsSync(dir)) continue
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.json')) continue
+      try {
+        const data = JSON.parse(readFileSync(`${dir}/${f}`, 'utf-8'))
+        const ts = data.metadata?.timestamp as string | undefined
+        if (!ts) continue
+        totalFiles++
+        if (!oldest || ts < oldest) oldest = ts
+        if (!newest || ts > newest) newest = ts
+      } catch { /* corrupt file */ }
+    }
+  }
+  if (totalFiles === 0) return null
+  return { oldest, newest, totalFiles }
+}
+
+/** --resume 無しで既存 checkpoint がある場合、削除確認を出す */
+async function checkExistingCheckpoints(config: OrchestratorConfig): Promise<void> {
+  if (config.resume) return
+  const range = getCheckpointTimeRange(config.checkpointBase)
+  if (!range) return
+
+  const fmtTime = (iso: string) => {
+    const d = new Date(iso)
+    return d.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+  }
+
+  log(`${BOLD}既存チェックポイントを検出:${RESET}`)
+  log(`  パス: ${config.checkpointBase}/`)
+  log(`  ファイル数: ${range.totalFiles}`)
+  log(`  学習期間: ${fmtTime(range.oldest)} 〜 ${fmtTime(range.newest)}`)
+  log('')
+  log(`  [y] 削除して新規学習`)
+  log(`  [n] 中断 (--resume で再開可能)`)
+
+  const yes = await promptYesNo(`  削除しますか? (y/N): `)
+  if (!yes) {
+    log('中断しました。--resume を付けて再実行してください。')
+    process.exit(0)
+  }
+
+  for (const name of MODEL_NAMES) {
+    const dir = `${config.checkpointBase}/ckpt-${name}`
+    if (existsSync(dir)) rmSync(dir, { recursive: true })
+  }
+  log('既存チェックポイントを削除しました。')
+}
+
 function findCheckpoint(dir: string): { iteration: number, path: string } | null {
   if (!existsSync(dir)) return null
   const files = readdirSync(dir)
@@ -414,6 +480,7 @@ function validateConfig(config: OrchestratorConfig): void {
 async function main(): Promise<void> {
   const config = parseArgs()
   validateConfig(config)
+  await checkExistingCheckpoints(config)
 
   // Git情報
   const gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
