@@ -157,8 +157,8 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     // Reset trajectories
     for (const s of strategies.values()) s.resetTrajectory?.()
-    wolfTeamStrategy?.resetTrajectory()
-    masonTeamStrategy?.resetTrajectory()
+    wolfTeamStrategy?.resetTrajectory?.()
+    masonTeamStrategy?.resetTrajectory?.()
 
     const tGameStart = performance.now()
     let state: import('../../lupa/types.ts').GameState
@@ -329,8 +329,8 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     // NN推論時間の集計
     let totalInferMs = 0
     for (const s of strategies.values()) totalInferMs += s.inferMs
-    if (wolfTeamStrategy) totalInferMs += wolfTeamStrategy.inferMs
-    if (masonTeamStrategy) totalInferMs += masonTeamStrategy.inferMs
+    if (wolfTeamStrategy && 'inferMs' in wolfTeamStrategy) totalInferMs += wolfTeamStrategy.inferMs
+    if (masonTeamStrategy && 'inferMs' in masonTeamStrategy) totalInferMs += masonTeamStrategy.inferMs
 
     results.push({
       individualSteps,
