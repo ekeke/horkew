@@ -21,7 +21,7 @@ import { terminalReward, intermediateReward, DEFAULT_REWARD_CONFIG } from './rew
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import {
-  evaluate,
+  evaluate, appendEvalLog,
   createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
   createTfNetwork, createWolfTeamTfNetwork, createMasonTeamTfNetwork,
   createTransformerNetwork, createWolfTeamTransformerNetwork, createMasonTeamTransformerNetwork,
@@ -606,6 +606,7 @@ async function main(): Promise<void> {
             process.stderr.write('\r\x1b[K')
             const evalConfig = { ...trainingConfig, mlRoles: group.roles }
             const evalResult = evaluate(network, evalConfig, 30, wolfTeamNet, masonTeamNet)
+            appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
             const factionRate = evalResult.winRates[group.faction] ?? 0
             log(
               `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +

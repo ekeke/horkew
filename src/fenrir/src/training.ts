@@ -668,7 +668,26 @@ function log(msg: string): void {
   process.stderr.write(msg + '\n')
 }
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, appendFileSync, mkdirSync } from 'node:fs'
+
+/** eval結果を checkpointDir/eval_log.jsonl に追記 */
+export function appendEvalLog(
+  checkpointDir: string,
+  iteration: number,
+  evalResult: { winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number },
+  label?: string,
+): void {
+  mkdirSync(checkpointDir, { recursive: true })
+  const entry = {
+    iter: iteration,
+    winRates: evalResult.winRates,
+    avgLen: Math.round(evalResult.avgGameLength * 10) / 10,
+    ms: Math.round(evalResult.avgElapsedMs),
+    ts: new Date().toISOString(),
+    ...(label != null ? { label } : {}),
+  }
+  appendFileSync(`${checkpointDir}/eval_log.jsonl`, JSON.stringify(entry) + '\n')
+}
 
 /**
  * チェックポイントディレクトリから最新のイテレーション番号を検出し、
@@ -1188,6 +1207,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
         log(`[${iter}] Eval: skipped (multi-model eval not yet implemented)`)
       } else {
         const evalResult = evaluate(network, config, 30, wolfTeamNet, masonTeamNet)
+        appendEvalLog(config.checkpointDir, iter, evalResult)
         log(
           `[${iter}] Eval: ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
           `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/game`
