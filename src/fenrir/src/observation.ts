@@ -8,6 +8,7 @@
  */
 
 import type { DecisionContext, TeamDecisionContext, PlanType } from '../../lupa/strategy.ts'
+import type { ForwardResult } from './ml/nn.ts'
 import type { SystemRole } from '../../types/index.ts'
 
 // プラン種別インデックス
@@ -152,14 +153,26 @@ export type TokenizedObservation = {
   clsFeatures: number
 }
 
+/** 観測モード */
+export type ObservationMode = 'individual' | 'team' | 'wolf_collective' | 'mason_collective'
+
 /**
  * フラットobservationをTransformer用トークンに分割
- * @param obs フラットobservation (OBSERVATION_SIZE or TEAM_OBSERVATION_SIZE)
- * @param isTeam チーム観測かどうか
+ * @param obs フラットobservation
+ * @param mode 観測モード (default: 'individual')。後方互換のためbooleanも受付（true='team', false='individual'）
  */
-export function tokenize(obs: Float32Array, isTeam: boolean = false): TokenizedObservation {
-  const sf = isTeam ? TEAM_SEAT_TOKEN_FEATURES : SEAT_TOKEN_FEATURES
-  const cf = isTeam ? TEAM_CLS_FEATURES : CLS_FEATURES
+export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'individual'): TokenizedObservation {
+  // 後方互換: boolean → mode
+  if (typeof mode === 'boolean') mode = mode ? 'team' : 'individual'
+  const sf = mode === 'wolf_collective' ? WOLF_COLLECTIVE_SEAT_FEATURES
+    : mode === 'mason_collective' ? MASON_COLLECTIVE_SEAT_FEATURES
+    : mode === 'team' ? TEAM_SEAT_TOKEN_FEATURES
+    : SEAT_TOKEN_FEATURES
+  const cf = mode === 'wolf_collective' ? WOLF_COLLECTIVE_CLS_FEATURES
+    : mode === 'mason_collective' ? MASON_COLLECTIVE_CLS_FEATURES
+    : mode === 'team' ? TEAM_CLS_FEATURES
+    : CLS_FEATURES
+  const isTeam = mode === 'team'
 
   const cls = new Float32Array(cf)
   const seats = new Float32Array(SEATS * sf)
@@ -178,9 +191,11 @@ export function tokenize(obs: Float32Array, isTeam: boolean = false): TokenizedO
   cls[co++] = obs[PLAN_GLOBAL_START]
   cls[co++] = obs[PLAN_GLOBAL_START + 1]
   cls[co++] = obs[PLAN_GLOBAL_START + 2]
-  // team extension
+  // team/collective extension
   if (isTeam) {
     cls[co++] = obs[TEAM_SIZE_START]
+  } else if (mode === 'wolf_collective' || mode === 'mason_collective') {
+    cls[co++] = obs[COLLECTIVE_TEAM_SIZE_START]
   }
 
   // ========== Seat tokens ==========
@@ -227,6 +242,14 @@ export function tokenize(obs: Float32Array, isTeam: boolean = false): TokenizedO
       seats[so++] = obs[TEAM_IS_MY_TEAM_START + s]
       seats[so++] = obs[TEAM_IS_CURRENT_ACTOR_START + s]
       seats[so++] = obs[TEAM_FAKE_DIVINE_START + s]
+    }
+
+    // wolf collective extension per-seat (+13: village_predict(11) + village_trust(1) + fake_divine(1))
+    if (mode === 'wolf_collective') {
+      const vpOff = WOLF_VILLAGE_PREDICT_START + s * NUM_ROLES
+      for (let i = 0; i < NUM_ROLES; i++) seats[so++] = obs[vpOff + i]
+      seats[so++] = obs[WOLF_VILLAGE_TRUST_START + s]
+      seats[so++] = obs[WOLF_FAKE_DIVINE_START + s]
     }
   }
 
@@ -681,6 +704,55 @@ const TEAM_PRIVATE_EXTRA = SEATS
 export const TEAM_OBSERVATION_SIZE =
   OBSERVATION_SIZE + TEAM_GLOBAL_EXTRA + SEATS * TEAM_PER_SEAT_EXTRA + TEAM_PRIVATE_EXTRA
 
+// ============================================================
+// 集団エージェント用定数
+// ============================================================
+
+// 集団共通拡張: team_size(1)
+const COLLECTIVE_GLOBAL_EXTRA = 1
+
+// 狼集団拡張: fake_divine(14) + village_predict(14×11) + village_trust(14)
+const WOLF_COLLECTIVE_FAKE_DIVINE_SIZE = SEATS       // 14
+const WOLF_COLLECTIVE_VILLAGE_PREDICT_SIZE = SEATS * NUM_ROLES  // 154
+const WOLF_COLLECTIVE_VILLAGE_TRUST_SIZE = SEATS     // 14
+const WOLF_COLLECTIVE_EXTRA = COLLECTIVE_GLOBAL_EXTRA
+  + WOLF_COLLECTIVE_FAKE_DIVINE_SIZE
+  + WOLF_COLLECTIVE_VILLAGE_PREDICT_SIZE
+  + WOLF_COLLECTIVE_VILLAGE_TRUST_SIZE  // 1 + 14 + 154 + 14 = 183
+
+export const WOLF_COLLECTIVE_OBSERVATION_SIZE = OBSERVATION_SIZE + WOLF_COLLECTIVE_EXTRA
+
+// 共有集団拡張: team_size(1) のみ
+export const MASON_COLLECTIVE_OBSERVATION_SIZE = OBSERVATION_SIZE + COLLECTIVE_GLOBAL_EXTRA
+
+// 集団用オフセット (OBSERVATION_SIZE基準)
+const COLLECTIVE_TEAM_SIZE_START = OBSERVATION_SIZE
+const WOLF_FAKE_DIVINE_START = COLLECTIVE_TEAM_SIZE_START + 1
+const WOLF_VILLAGE_PREDICT_START = WOLF_FAKE_DIVINE_START + WOLF_COLLECTIVE_FAKE_DIVINE_SIZE
+const WOLF_VILLAGE_TRUST_START = WOLF_VILLAGE_PREDICT_START + WOLF_COLLECTIVE_VILLAGE_PREDICT_SIZE
+
+/** 狼集団 Seat token特徴量次元: individual(73) + village_predict(11) + village_trust(1) + fake_divine(1) */
+export const WOLF_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1 + 1  // 86
+/** 狼集団 CLS token特徴量次元: individual(25) + team_size(1) — my_role(11)は0埋め */
+export const WOLF_COLLECTIVE_CLS_FEATURES = CLS_FEATURES + 1  // 26
+/** 共有集団 Seat token特徴量次元: individual(73) — is_meがis_my_teamになるだけ */
+export const MASON_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES  // 73
+/** 共有集団 CLS token特徴量次元: individual(25) + team_size(1) */
+export const MASON_COLLECTIVE_CLS_FEATURES = CLS_FEATURES + 1  // 26
+
+/** 村NN出力の注入データ */
+export type VillageNNOutput = {
+  /** predict: 14席×11役職のsoftmax出力 (flat) */
+  predict: Float32Array
+  /** trust: 14席のscalar */
+  trust: Float32Array
+}
+
+// per-seat内のis_meフィールドのオフセット (alive(1) + claimed_role(12) = 13)
+const IS_ME_OFFSET_IN_SEAT = 1 + (NUM_ROLES + 1)  // 13
+// global内のmy_roleフィールドのオフセット (day, phase, alive_ratio = 3)
+const MY_ROLE_OFFSET_IN_GLOBAL = 3
+
 /**
  * チームエージェント用の観測エンコード
  *
@@ -732,6 +804,100 @@ export function encodeTeamObservation(ctx: TeamDecisionContext): Float32Array {
     }
     obs[offset++] = fakeResult
   }
+
+  return obs
+}
+
+// ============================================================
+// 集団エージェント用観測エンコーダ
+// ============================================================
+
+/**
+ * 集団観測の共通処理: 個人観測をベースに is_me→is_my_team, my_role→zeros に変換
+ */
+function overrideForCollective(obs: Float32Array, teamSeats: number[]): void {
+  const teamSet = new Set(teamSeats)
+
+  // my_role(11) をゼロ化 — 集団は単一役職を持たない
+  for (let i = 0; i < NUM_ROLES; i++) {
+    obs[GLOBAL_START + MY_ROLE_OFFSET_IN_GLOBAL + i] = 0
+  }
+
+  // is_me → is_my_team: 全メンバー席を1にする
+  for (let seat = 1; seat <= SEATS; seat++) {
+    const seatOffset = PER_SEAT_START + (seat - 1) * PER_SEAT_SIZE + IS_ME_OFFSET_IN_SEAT
+    obs[seatOffset] = teamSet.has(seat) ? 1 : 0
+  }
+}
+
+/**
+ * 狼集団エージェント用の観測エンコード
+ *
+ * 個人観測ベース + 集団オーバーライド + 狼集団拡張:
+ * 1. team_size (global)
+ * 2. fake_divine per seat (14)
+ * 3. village_predict per seat (154)
+ * 4. village_trust per seat (14)
+ */
+export function encodeCollectiveWolfObservation(
+  ctx: TeamDecisionContext,
+  villageNNOutput?: VillageNNOutput,
+): Float32Array {
+  const obs = new Float32Array(WOLF_COLLECTIVE_OBSERVATION_SIZE)
+
+  // 個人観測をベースにコピー（primary memberの視点）
+  const base = encodeObservation(ctx)
+  obs.set(base)
+
+  // 集団共通オーバーライド
+  overrideForCollective(obs, ctx.teamSeats)
+
+  // ========== 狼集団拡張 ==========
+  // team_size
+  obs[COLLECTIVE_TEAM_SIZE_START] = ctx.teamSeats.length / SEATS
+
+  // fake_divine: 全メンバーの偽占い結果を統合
+  for (let seat = 1; seat <= SEATS; seat++) {
+    let fakeResult = 0
+    for (const tp of ctx.teamPlayers) {
+      const fake = tp.fakeDivineHistory
+      if (fake) {
+        for (const [, entry] of fake) {
+          if (entry.target === seat) {
+            fakeResult = entry.result === 'human' ? 0.5 : 1.0
+          }
+        }
+      }
+    }
+    obs[WOLF_FAKE_DIVINE_START + seat - 1] = fakeResult
+  }
+
+  // village NN output injection
+  if (villageNNOutput) {
+    obs.set(villageNNOutput.predict, WOLF_VILLAGE_PREDICT_START)
+    obs.set(villageNNOutput.trust, WOLF_VILLAGE_TRUST_START)
+  }
+
+  return obs
+}
+
+/**
+ * 共有集団エージェント用の観測エンコード
+ *
+ * 個人観測ベース + 集団オーバーライド + team_size
+ */
+export function encodeCollectiveMasonObservation(ctx: TeamDecisionContext): Float32Array {
+  const obs = new Float32Array(MASON_COLLECTIVE_OBSERVATION_SIZE)
+
+  // 個人観測をベースにコピー（primary memberの視点）
+  const base = encodeObservation(ctx)
+  obs.set(base)
+
+  // 集団共通オーバーライド
+  overrideForCollective(obs, ctx.teamSeats)
+
+  // team_size
+  obs[COLLECTIVE_TEAM_SIZE_START] = ctx.teamSeats.length / SEATS
 
   return obs
 }

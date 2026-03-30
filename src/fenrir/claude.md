@@ -4,25 +4,27 @@
 
 当面の目標では **possessed は学習対象外**。
 
-### 3陣営モデル構成
+### 5モデル構成（集団NN採用）
 
-| # | モデル | 役職 | チームNW |
-|---|--------|------|----------|
-| 1 | village | villager, seer, medium, bodyguard, nekomata, mason | mason_team |
-| 2 | wolf | werewolf, fanatic | wolf_team |
-| 3 | third | werehamster, immoralist | - |
+| # | モデル | 種別 | 役職 | 村NN注入 |
+|---|--------|------|------|---------|
+| 1 | village | 個人 | villager, seer, medium, bodyguard, nekomata | - |
+| 2 | wolf_collective | 集団 | werewolf | あり |
+| 3 | mason_collective | 集団 | mason | なし |
+| 4 | fanatic | 個人 | fanatic | あり |
+| 5 | third | 個人 | werehamster, immoralist | - |
 
-- 3モデル並列で Phase 1 を同時学習 → Phase 2 で合流して自己対戦
-- Seat Transformerが`my_role(11)` + Private知識 + Action maskで役職差異を吸収
-- チーム戦略(wolf_team / mason_team)は所属モデルと一緒に学習（重みは別）
-- Phase 1.5: チェックポイントが無いグループは heuristic フォールバック + PPO スキップ
+- 集団NN: 1つのNNがチーム全員を同時制御（個人NN + チームNNを統合）
+- 狂信者は狼と通信不可のため集団に入れない（情報隔壁）
+- 村NN注入: frozen村NNの出力（predict, trust）をper-seat特徴量として注入
+- Phase 1: 村個人 → Phase 1': 狼集団+共有集団+狂信者（frozen村NN注入）→ Phase 2: 自己対戦
 
 ### オーケストレーター (`npm run orchestrate`)
 
-Phase 1 → Phase 2 を自動管理するスクリプト。
+Phase 1 → 1' → 2 を自動管理するスクリプト。
 
 - baseline eval で heuristic の陣営別勝率を取得
-- 3モデル並列起動、自陣営勝率が baseline を超えたら自動卒業 (`--target-winrate` / `--target-faction`)
-- モデル終了時にコアを再配分（SIGTERM + --resume + --workers 増）
-- 全 Phase 1 完了後に Phase 2 を自動起動
-- 陣営マッピング: village→villageWin, wolf→wolfWin, third→hamsterWin
+- Phase 1: 村個人のみ学習 → frozen化
+- Phase 1': 狼集団・共有集団・狂信者・第三を学習（frozen村NNを注入）
+- Phase 2: 全モデル自己対戦
+- 陣営マッピング: village→villageWin, wolf_collective→wolfWin, fanatic→wolfWin, mason_collective→villageWin, third→hamsterWin
