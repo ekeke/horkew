@@ -528,22 +528,25 @@ export class TfTransformerNetwork {
     advantages: number[]
     returns: number[]
     sigmoidActions?: (Float32Array | undefined)[]
+    trueRoles?: (Float32Array | undefined)[]
+    predictLossCoeff?: number
     clipEpsilon: number
     valueLossCoeff: number
     entropyCoeff: number
-  }): { policyLoss: number, valueLoss: number, entropy: number } {
+  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number } {
     const n = batch.observations.length
-    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0 }
+    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
 
     const inputSize = this.config.inputSize
     const sigmoidHeadNames = new Set(Object.keys(this.config.sigmoidHeads ?? {}))
+    const predictLossCoeff = batch.predictLossCoeff ?? 0
 
     const obsData = new Float32Array(n * inputSize)
     for (let i = 0; i < n; i++) {
       obsData.set(batch.observations[i], i * inputSize)
     }
 
-    const result = { policyLoss: 0, valueLoss: 0, entropy: 0 }
+    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
 
     // ヘッド別グループ化
     const headGroups = new Map<string, number[]>()
@@ -646,11 +649,49 @@ export class TfTransformerNetwork {
       }
 
       const entBonus = tf.mul(tf.scalar(-batch.entropyCoeff), totalEntropy)
-      const totalLoss = tf.add(tf.add(totalPolicyLoss, vLoss), entBonus) as tf.Scalar
+      let totalLoss = tf.add(tf.add(totalPolicyLoss, vLoss), entBonus) as tf.Scalar
+
+      // Predict auxiliary loss: BCE between predict sigmoid head and true roles
+      let pLossVal = 0
+      if (predictLossCoeff > 0 && allLogits.has('predict')) {
+        const predictLogits = allLogits.get('predict')!  // [n, 154]
+        const predictProbs = tf.sigmoid(predictLogits)
+
+        const predictSize = predictLogits.shape[1]!
+        const targetsData = new Float32Array(n * predictSize)
+        let validCount = 0
+        const validMask = new Float32Array(n)
+        for (let i = 0; i < n; i++) {
+          const tr = batch.trueRoles?.[i]
+          if (tr) {
+            targetsData.set(tr, i * predictSize)
+            validMask[i] = 1
+            validCount++
+          }
+        }
+
+        if (validCount > 0) {
+          const targetsTensor = tf.tensor2d(targetsData, [n, predictSize])
+          const maskTensor = tf.tensor1d(validMask).expandDims(1)
+
+          const logP = tf.log(tf.add(predictProbs, tf.scalar(1e-8)))
+          const log1mP = tf.log(tf.add(tf.sub(tf.scalar(1), predictProbs), tf.scalar(1e-8)))
+          const bce = tf.neg(tf.add(
+            tf.mul(targetsTensor, logP),
+            tf.mul(tf.sub(tf.scalar(1), targetsTensor), log1mP),
+          ))
+          const maskedBce = tf.mul(bce, maskTensor)
+          const predictLoss = tf.div(tf.sum(maskedBce), tf.scalar(validCount * predictSize))
+          const scaledPredictLoss = tf.mul(tf.scalar(predictLossCoeff), predictLoss)
+          totalLoss = tf.add(totalLoss, scaledPredictLoss) as tf.Scalar
+          pLossVal = predictLoss.dataSync()[0]
+        }
+      }
 
       result.policyLoss = totalPolicyLoss.dataSync()[0]
       result.valueLoss = vLoss.dataSync()[0]
       result.entropy = totalEntropy.dataSync()[0]
+      result.predictLoss = pLossVal
 
       return totalLoss
     }

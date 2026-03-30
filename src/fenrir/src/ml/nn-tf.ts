@@ -129,15 +129,18 @@ export class TfNeuralNetwork {
     advantages: number[]
     returns: number[]
     sigmoidActions?: (Float32Array | undefined)[]  // sigmoid heads用
+    trueRoles?: (Float32Array | undefined)[]  // predict補助損失用
+    predictLossCoeff?: number  // predict BCEの重み (default: 0)
     clipEpsilon: number
     valueLossCoeff: number
     entropyCoeff: number
-  }): { policyLoss: number, valueLoss: number, entropy: number } {
+  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number } {
     const n = batch.observations.length
-    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0 }
+    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
 
     const inputSize = this.config.inputSize
     const sigmoidHeadNames = new Set(Object.keys(this.config.sigmoidHeads ?? {}))
+    const predictLossCoeff = batch.predictLossCoeff ?? 0
 
     // バッチテンソル構築
     const obsData = new Float32Array(n * inputSize)
@@ -145,7 +148,7 @@ export class TfNeuralNetwork {
       obsData.set(batch.observations[i], i * inputSize)
     }
 
-    const result = { policyLoss: 0, valueLoss: 0, entropy: 0 }
+    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
 
     // ヘッド別にグループ化してバッチ処理
     const headGroups = new Map<string, number[]>()
@@ -253,12 +256,54 @@ export class TfNeuralNetwork {
       }
 
       const entBonus = tf.mul(tf.scalar(-batch.entropyCoeff), totalEntropy)
-      const totalLoss = tf.add(tf.add(totalPolicyLoss, vLoss), entBonus) as tf.Scalar
+      let totalLoss = tf.add(tf.add(totalPolicyLoss, vLoss), entBonus) as tf.Scalar
+
+      // Predict auxiliary loss: BCE between predict sigmoid head and true roles
+      let pLossVal = 0
+      if (predictLossCoeff > 0 && this.sigmoidHeadWeights.has('predict')) {
+        const [pw, pb] = this.sigmoidHeadWeights.get('predict')!
+        const allPredictLogits = tf.add(tf.matMul(trunk, pw), pb)  // [n, 154]
+        const predictProbs = tf.sigmoid(allPredictLogits)  // [n, 154]
+
+        // Build targets tensor from trueRoles
+        const predictSize = allPredictLogits.shape[1]!
+        const targetsData = new Float32Array(n * predictSize)
+        let validCount = 0
+        const validMask = new Float32Array(n)
+        for (let i = 0; i < n; i++) {
+          const tr = batch.trueRoles?.[i]
+          if (tr) {
+            targetsData.set(tr, i * predictSize)
+            validMask[i] = 1
+            validCount++
+          }
+        }
+
+        if (validCount > 0) {
+          const targetsTensor = tf.tensor2d(targetsData, [n, predictSize])
+          const maskTensor = tf.tensor1d(validMask).expandDims(1)  // [n, 1]
+
+          // Per-element BCE: -(t*log(p) + (1-t)*log(1-p))
+          const logP = tf.log(tf.add(predictProbs, tf.scalar(1e-8)))
+          const log1mP = tf.log(tf.add(tf.sub(tf.scalar(1), predictProbs), tf.scalar(1e-8)))
+          const bce = tf.neg(tf.add(
+            tf.mul(targetsTensor, logP),
+            tf.mul(tf.sub(tf.scalar(1), targetsTensor), log1mP),
+          ))
+          // Mask out samples without trueRoles, then mean
+          const maskedBce = tf.mul(bce, maskTensor)
+          const predictLoss = tf.div(tf.sum(maskedBce), tf.scalar(validCount * predictSize))
+          const scaledPredictLoss = tf.mul(tf.scalar(predictLossCoeff), predictLoss)
+          totalLoss = tf.add(totalLoss, scaledPredictLoss) as tf.Scalar
+          pLossVal = predictLoss.dataSync()[0]
+        }
+      }
 
       // Record for logging (sync values)
       result.policyLoss = totalPolicyLoss.dataSync()[0]
       result.valueLoss = vLoss.dataSync()[0]
       result.entropy = totalEntropy.dataSync()[0]
+      result.predictLoss = pLossVal
 
       return totalLoss
     }

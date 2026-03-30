@@ -187,6 +187,14 @@ export class FenrirStrategy implements Strategy {
 
     this.record('vote', action, logProb, result.value, 0, ctx.mySeat)
 
+    // predict head: 投票時に常時出力（trajectoryに記録、ゲームイベントには非公開）
+    const predictLogits = result.policies.get('predict')
+    if (predictLogits) {
+      const predictMask = new Float32Array(predictLogits.length).fill(0)  // 全有効
+      const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
+      this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, ctx.mySeat)
+    }
+
     return action + 1  // action is seat-1
   }
 

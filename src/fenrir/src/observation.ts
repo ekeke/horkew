@@ -28,8 +28,20 @@ const ROLES: SystemRole[] = [
   'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
   'werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist',
 ]
-const ROLE_INDEX = new Map(ROLES.map((r, i) => [r, i]))
+export const ROLE_INDEX = new Map(ROLES.map((r, i) => [r, i]))
 export const NUM_ROLES = ROLES.length
+
+/** 全席の実際の役職をone-hotエンコード (SEATS × NUM_ROLES = 154次元) */
+export function encodeTrueRoles(players: Array<{ seat: number, role: string }>): Float32Array {
+  const result = new Float32Array(SEATS * NUM_ROLES)
+  for (const player of players) {
+    const rIdx = ROLE_INDEX.get(player.role as SystemRole)
+    if (rIdx !== undefined && player.seat >= 1 && player.seat <= SEATS) {
+      result[(player.seat - 1) * NUM_ROLES + rIdx] = 1
+    }
+  }
+  return result
+}
 
 // セクションサイズ
 const GLOBAL_SIZE = 2 + 1 + NUM_ROLES + 1 + 1 + 1 + 1 + 1  // day, phase, alive_ratio, role_onehot, commander, progress, demand_wolf_co_count, rope_margin, alive_parity = 19

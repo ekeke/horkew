@@ -13,13 +13,14 @@ import { runGame } from '../../lupa/engine.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
-import { terminalReward, intermediateReward, tsumiReward, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { terminalReward, intermediateReward, tsumiReward, predictAccuracyReward, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { parse } from '../../howl/parser.ts'
 import { buildVillageStatus } from '../../howl/bridge.ts'
 import { searchTsumi } from '../../hati/index.ts'
 import { DEFAULT_RETAR_OPTIONS } from '../../lupa/retar-bridge.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
+import { encodeTrueRoles } from './observation.ts'
 import {
   buildNetworkFromShared,
   serializeStep,
@@ -42,12 +43,9 @@ function buildNetwork(shared: SharedWeights, isTeam: boolean = false): AnyNetwor
 
 /** role → モデルグループ名の逆引きマップ (コンパイル時定数相当) */
 const ROLE_TO_GROUP: Record<string, string> = {
-  mason: 'mason',
-  villager: 'village', seer: 'village', medium: 'village', bodyguard: 'village', nekomata: 'village',
-  werewolf: 'werewolf',
-  fanatic: 'fanatic',
-  werehamster: 'hamster',
-  immoralist: 'immoralist',
+  villager: 'village', seer: 'village', medium: 'village', bodyguard: 'village', nekomata: 'village', mason: 'village',
+  werewolf: 'wolf', fanatic: 'wolf',
+  werehamster: 'third', immoralist: 'third',
 }
 
 function runBatch(req: WorkerRequest): SerializedGameResult[] {
@@ -212,6 +210,21 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
         }
         if (player?.role === 'mason' && mSteps.length > 0) {
           mSteps[mSteps.length - 1].reward += reward
+        }
+      }
+    }
+
+    // trueRoles注入 + 推理精度報酬
+    const trueRoles = encodeTrueRoles(state.players)
+    const trueRolesArray = Array.from(trueRoles)
+    for (const entry of individualSteps) {
+      for (const step of entry.steps) {
+        step.trueRoles = trueRolesArray
+        // predict stepに推理精度報酬を付与
+        if (step.actionHead === 'predict' && step.sigmoidActions) {
+          step.reward += predictAccuracyReward(
+            new Float32Array(step.sigmoidActions), trueRoles, entry.role, config.rewardConfig,
+          )
         }
       }
     }

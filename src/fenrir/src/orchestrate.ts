@@ -2,12 +2,12 @@
 /**
  * Fenrir Training Orchestrator (シングルプロセス・ラウンドロビン)
  *
- * GPU の TfNeuralNetwork は1セットだけ保持し、6モデルの推論用 NN (Pure JS) を
+ * GPU の TfNeuralNetwork は1セットだけ保持し、3モデルの推論用 NN (Pure JS) を
  * ラウンドロビンで切り替えながら学習する。
  *
  * メモリ:
  *   GPU: TfNN × 3 (individual + wolf_team + mason_team) — 単一モデル学習と同じ
- *   CPU: Pure JS NN × 6 (推論用、合計 ~15MB)
+ *   CPU: Pure JS NN × 3 (推論用)
  */
 
 import type { SystemRole } from '../../types/index.ts'
@@ -17,7 +17,8 @@ import { runGame } from '../../lupa/engine.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
-import { terminalReward, intermediateReward, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { terminalReward, intermediateReward, predictAccuracyReward, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { encodeTrueRoles } from './observation.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import {
@@ -41,20 +42,16 @@ import {
 // ============================================================
 
 const MODEL_GROUPS = {
-  mason:      { roles: ['mason'] as SystemRole[], faction: 'villageWin', teamType: 'mason_team' as const },
-  village:    { roles: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata'] as SystemRole[], faction: 'villageWin', teamType: undefined },
-  werewolf:   { roles: ['werewolf'] as SystemRole[], faction: 'wolfWin', teamType: 'wolf_team' as const },
-  fanatic:    { roles: ['fanatic'] as SystemRole[], faction: 'wolfWin', teamType: undefined },
-  hamster:    { roles: ['werehamster'] as SystemRole[], faction: 'hamsterWin', teamType: undefined },
-  immoralist: { roles: ['immoralist'] as SystemRole[], faction: 'hamsterWin', teamType: undefined },
+  village:  { roles: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata', 'mason'] as SystemRole[], faction: 'villageWin', teamType: 'mason_team' as const },
+  wolf:     { roles: ['werewolf', 'fanatic'] as SystemRole[], faction: 'wolfWin', teamType: 'wolf_team' as const },
+  third:    { roles: ['werehamster', 'immoralist'] as SystemRole[], faction: 'hamsterWin', teamType: undefined },
 }
 
 type ModelName = keyof typeof MODEL_GROUPS
 const MODEL_NAMES = Object.keys(MODEL_GROUPS) as ModelName[]
 
 const COLORS: Record<ModelName, string> = {
-  mason: '\x1b[36m', village: '\x1b[33m', werewolf: '\x1b[31m',
-  fanatic: '\x1b[35m', hamster: '\x1b[32m', immoralist: '\x1b[34m',
+  village: '\x1b[33m', wolf: '\x1b[31m', third: '\x1b[32m',
 }
 const RESET = '\x1b[0m'
 const BOLD = '\x1b[1m'
@@ -166,11 +163,12 @@ Options:
 function ppoUpdate(
   tfNetwork: AnyTfNetwork,
   batch: ProcessedStep[],
-  config: { miniBatchSize: number, clipEpsilon: number, valueLossCoeff: number, entropyCoeff: number },
-): { policyLoss: number } {
-  if (batch.length === 0) return { policyLoss: 0 }
+  config: { miniBatchSize: number, clipEpsilon: number, valueLossCoeff: number, entropyCoeff: number, predictLossCoeff?: number },
+): { policyLoss: number, predictLoss: number } {
+  if (batch.length === 0) return { policyLoss: 0, predictLoss: 0 }
 
   let totalPolicyLoss = 0
+  let totalPredictLoss = 0
   let batchCount = 0
 
   for (let i = batch.length - 1; i > 0; i--) {
@@ -189,15 +187,21 @@ function ppoUpdate(
       advantages: miniBatch.map(s => s.advantage),
       returns: miniBatch.map(s => s.returnValue),
       sigmoidActions: miniBatch.map(s => s.sigmoidActions),
+      trueRoles: miniBatch.map(s => s.trueRoles),
+      predictLossCoeff: config.predictLossCoeff ?? 0.1,
       clipEpsilon: config.clipEpsilon,
       valueLossCoeff: config.valueLossCoeff,
       entropyCoeff: config.entropyCoeff,
     })
     totalPolicyLoss += result.policyLoss
+    totalPredictLoss += result.predictLoss
     batchCount++
   }
 
-  return { policyLoss: totalPolicyLoss / Math.max(batchCount, 1) }
+  return {
+    policyLoss: totalPolicyLoss / Math.max(batchCount, 1),
+    predictLoss: totalPredictLoss / Math.max(batchCount, 1),
+  }
 }
 
 // ============================================================
@@ -291,6 +295,20 @@ function generateGame(
       const player = state.players.find(p => p.seat === seat)
       if (player?.role === 'werewolf' && wolfTeamSteps.length > 0) wolfTeamSteps[wolfTeamSteps.length - 1].reward += reward
       if (player?.role === 'mason' && masonTeamSteps.length > 0) masonTeamSteps[masonTeamSteps.length - 1].reward += reward
+    }
+  }
+
+  // trueRoles注入 + 推理精度報酬
+  const trueRoles = encodeTrueRoles(state.players)
+  for (const [seat, steps] of allSteps) {
+    const player = state.players.find(p => p.seat === seat)
+    for (const step of steps) {
+      step.trueRoles = trueRoles
+      if (step.actionHead === 'predict' && step.sigmoidActions && player) {
+        step.reward += predictAccuracyReward(
+          step.sigmoidActions, trueRoles, player.role, trainingConfig.rewardConfig,
+        )
+      }
     }
   }
 

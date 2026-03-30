@@ -18,9 +18,10 @@ import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
   CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES,
   PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS } from './observation.ts'
 import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
+import { encodeTrueRoles } from './observation.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
-import { terminalReward, intermediateReward, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { terminalReward, intermediateReward, predictAccuracyReward, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import { packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize, generateGamesParallel, deserializeStep, type SharedWeights } from './parallel.ts'
@@ -29,18 +30,15 @@ import { packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoo
 // Model Groups (Phase 2 マルチモデル)
 // ============================================================
 
-export type ModelGroupName = 'mason' | 'village' | 'werewolf' | 'fanatic' | 'hamster' | 'immoralist'
+export type ModelGroupName = 'village' | 'wolf' | 'third'
 
 export const MODEL_GROUP_DEFS: Record<ModelGroupName, { roles: SystemRole[], teamType?: 'wolf_team' | 'mason_team' }> = {
-  mason:      { roles: ['mason'], teamType: 'mason_team' },
-  village:    { roles: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata'] },
-  werewolf:   { roles: ['werewolf'], teamType: 'wolf_team' },
-  fanatic:    { roles: ['fanatic'] },
-  hamster:    { roles: ['werehamster'] },
-  immoralist: { roles: ['immoralist'] },
+  village:  { roles: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata', 'mason'], teamType: 'mason_team' },
+  wolf:     { roles: ['werewolf', 'fanatic'], teamType: 'wolf_team' },
+  third:    { roles: ['werehamster', 'immoralist'] },
 }
 
-export const MODEL_GROUP_NAMES: ModelGroupName[] = ['mason', 'village', 'werewolf', 'fanatic', 'hamster', 'immoralist']
+export const MODEL_GROUP_NAMES: ModelGroupName[] = ['village', 'wolf', 'third']
 
 /** role → ModelGroupName の逆引き */
 const ROLE_TO_GROUP_NAME = new Map<SystemRole, ModelGroupName>()
@@ -76,6 +74,8 @@ export type TrainingConfig = {
   valueLossCoeff: number
   /** Entropy bonus係数 */
   entropyCoeff: number
+  /** Predict補助損失係数 (0でオフ) */
+  predictLossCoeff?: number
   /** 割引率 */
   gamma: number
   /** GAE lambda */
@@ -107,7 +107,7 @@ export type TrainingConfig = {
   mlRoles?: SystemRole[]
   /** Transformerアーキテクチャを使用 */
   useTransformer?: boolean
-  /** Phase 2マルチモデル: 6モデルのチェックポイントDir (mason,village,werewolf,fanatic,hamster,immoralist順) */
+  /** Phase 2マルチモデル: 3モデルのチェックポイントDir (village,wolf,third順) */
   phase2ModelDirs?: string[]
   /** 目標勝率 (0-1)。eval でこの勝率を超えたら早期終了 */
   targetWinRate?: number
@@ -450,6 +450,20 @@ function generateGame(
     }
   }
 
+  // trueRoles注入 + 推理精度報酬
+  const trueRoles = encodeTrueRoles(state.players)
+  for (const [seat, steps] of allSteps) {
+    const player = state.players.find(p => p.seat === seat)
+    for (const step of steps) {
+      step.trueRoles = trueRoles
+      if (step.actionHead === 'predict' && step.sigmoidActions && player) {
+        step.reward += predictAccuracyReward(
+          step.sigmoidActions, trueRoles, player.role, config.rewardConfig,
+        )
+      }
+    }
+  }
+
   return {
     steps: allSteps,
     wolfTeamSteps,
@@ -534,12 +548,13 @@ function ppoUpdate(
   tfNetwork: AnyTfNetwork,
   batch: ProcessedStep[],
   config: TrainingConfig,
-): { policyLoss: number, valueLoss: number, entropy: number } {
-  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0 }
+): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number } {
+  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
 
   let totalPolicyLoss = 0
   let totalValueLoss = 0
   let totalEntropy = 0
+  let totalPredictLoss = 0
   let batchCount = 0
 
   // Shuffle batch
@@ -561,6 +576,8 @@ function ppoUpdate(
       advantages: miniBatch.map(s => s.advantage),
       returns: miniBatch.map(s => s.returnValue),
       sigmoidActions: miniBatch.map(s => s.sigmoidActions),
+      trueRoles: miniBatch.map(s => s.trueRoles),
+      predictLossCoeff: config.predictLossCoeff ?? 0.1,
       clipEpsilon: config.clipEpsilon,
       valueLossCoeff: config.valueLossCoeff,
       entropyCoeff: config.entropyCoeff,
@@ -569,6 +586,7 @@ function ppoUpdate(
     totalPolicyLoss += result.policyLoss
     totalValueLoss += result.valueLoss
     totalEntropy += result.entropy
+    totalPredictLoss += result.predictLoss
     batchCount++
   }
 
@@ -576,6 +594,7 @@ function ppoUpdate(
     policyLoss: totalPolicyLoss / Math.max(batchCount, 1),
     valueLoss: totalValueLoss / Math.max(batchCount, 1),
     entropy: totalEntropy / Math.max(batchCount, 1),
+    predictLoss: totalPredictLoss / Math.max(batchCount, 1),
   }
 }
 
@@ -803,7 +822,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
   const masonTeamTf = makeMasonTeamTfNetwork(config.learningRate)
 
   if (multiModel) {
-    // Phase 2 マルチモデル: 6グループ初期化 + チェックポイント読込
+    // Phase 2 マルチモデル: 3グループ初期化 + チェックポイント読込
     const dirs = config.phase2ModelDirs!
     if (dirs.length !== MODEL_GROUP_NAMES.length) {
       throw new Error(`--phase2-models requires exactly ${MODEL_GROUP_NAMES.length} directories, got ${dirs.length}`)
@@ -1097,6 +1116,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     // === PPO更新 ===
     const tPpoStart = performance.now()
     let totalPolicyLoss = 0
+    let totalPredictLoss = 0
 
     if (multiModel) {
       // マルチモデル: グループ別に PPO update
@@ -1106,21 +1126,26 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
         normalizeAdvantages(steps)
         group.tfNetwork.loadWeights(group.network.cloneWeights())
         for (let epoch = 0; epoch < config.ppoEpochs; epoch++) {
-          const { policyLoss } = ppoUpdate(group.tfNetwork, steps, config)
+          const { policyLoss, predictLoss } = ppoUpdate(group.tfNetwork, steps, config)
           totalPolicyLoss += policyLoss
+          totalPredictLoss += predictLoss
         }
         group.network.loadWeights(group.tfNetwork.cloneWeights())
       }
       // 平均化: グループ数で割る
       const activeGroups = [...groupTrajectories.values()].filter(s => s.length > 0).length
-      if (activeGroups > 0) totalPolicyLoss /= activeGroups
+      if (activeGroups > 0) {
+        totalPolicyLoss /= activeGroups
+        totalPredictLoss /= activeGroups
+      }
     } else {
       // 単一モデル: 既存パス
       normalizeAdvantages(allIndividualTrajectories)
       tfNetwork.loadWeights(network.cloneWeights())
       for (let epoch = 0; epoch < config.ppoEpochs; epoch++) {
-        const { policyLoss } = ppoUpdate(tfNetwork, allIndividualTrajectories, config)
+        const { policyLoss, predictLoss } = ppoUpdate(tfNetwork, allIndividualTrajectories, config)
         totalPolicyLoss += policyLoss
+        totalPredictLoss += predictLoss
       }
       network.loadWeights(tfNetwork.cloneWeights())
     }
@@ -1164,7 +1189,8 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     const etaStr = etaSec < 60 ? `${etaSec.toFixed(0)}s`
       : etaSec < 3600 ? `${(etaSec / 60).toFixed(1)}m`
       : `${(etaSec / 3600).toFixed(1)}h`
-    const avgPL = multiModel ? totalPolicyLoss / config.ppoEpochs : totalPolicyLoss / config.ppoEpochs
+    const avgPL = totalPolicyLoss / config.ppoEpochs
+    const avgPredL = totalPredictLoss / config.ppoEpochs
     const individualStepCount = multiModel
       ? [...groupTrajectories.values()].reduce((sum, s) => sum + s.length, 0)
       : allIndividualTrajectories.length
@@ -1175,7 +1201,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     process.stderr.write(
       `\r\x1b[K  ${bar} ${pctStr}% ${iter}/${config.totalIterations} | ` +
       `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ETA ${etaStr} | ` +
-      `loss=${avgPL.toFixed(4)} steps=${totalSteps} | ` +
+      `loss=${avgPL.toFixed(4)} pred=${avgPredL.toFixed(4)} steps=${totalSteps} | ` +
       `phase ${phase} (${phaseLabel})`
     )
 

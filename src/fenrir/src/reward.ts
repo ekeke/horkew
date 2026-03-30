@@ -9,6 +9,7 @@
  */
 
 import type { GameState, GameEvent } from '../../lupa/types.ts'
+import { SEATS, NUM_ROLES } from './observation.ts'
 
 export type RewardConfig = {
   /** 勝利報酬 */
@@ -29,6 +30,8 @@ export type RewardConfig = {
   tsumiVillagePerDay: number
   /** 中間報酬: Hati 被詰み (狼陣営、詰み後の1日あたり) */
   tsumiWolfPerDay: number
+  /** 推理中間報酬: 村陣営のみ、正解席数/14 × この値 */
+  predictAccuracyReward: number
 }
 
 export const DEFAULT_REWARD_CONFIG: RewardConfig = {
@@ -41,6 +44,7 @@ export const DEFAULT_REWARD_CONFIG: RewardConfig = {
   foxSurvival: 0.07,
   tsumiVillagePerDay: 0.1,
   tsumiWolfPerDay: -0.2,
+  predictAccuracyReward: 0.02,
 }
 
 type Alignment = 'village' | 'wolf' | 'hamster'
@@ -148,4 +152,40 @@ export function tsumiReward(
     }
   }
   return rewards
+}
+
+/**
+ * 推理精度報酬: predict headの出力と実際の役職を比較
+ * 村陣営のみ、正解席数/14 × predictAccuracyReward
+ *
+ * @param predictActions sigmoid出力 (154次元, 0/1)
+ * @param trueRoles 実際の役職 one-hot (154次元)
+ * @param playerRole プレイヤーの役職
+ * @returns 報酬 (村陣営以外は0)
+ */
+export function predictAccuracyReward(
+  predictActions: Float32Array,
+  trueRoles: Float32Array,
+  playerRole: string,
+  config: RewardConfig = DEFAULT_REWARD_CONFIG,
+): number {
+  if (getAlignment(playerRole) !== 'village') return 0
+
+  let correct = 0
+  for (let seat = 0; seat < SEATS; seat++) {
+    // 各席でargmaxの役職が一致しているか
+    let predMax = 0, predIdx = 0
+    let trueIdx = 0
+    for (let r = 0; r < NUM_ROLES; r++) {
+      const idx = seat * NUM_ROLES + r
+      if (predictActions[idx] > predMax) {
+        predMax = predictActions[idx]
+        predIdx = r
+      }
+      if (trueRoles[idx] > 0) trueIdx = r
+    }
+    if (predIdx === trueIdx) correct++
+  }
+
+  return (correct / SEATS) * config.predictAccuracyReward
 }

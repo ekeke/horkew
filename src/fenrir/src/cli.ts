@@ -21,8 +21,8 @@ Options:
   --phase1-end <n>          Phase1終了イテレーション (default: ${d.phase1End})
   --phase2-end <n>          Phase2終了イテレーション (default: ${d.phase2End})
   --ml-roles <roles>        Phase1でMLにする役職 (カンマ区切り, 例: villager,seer)
-  --phase2-models <dirs>    Phase2マルチモデル: 6モデルのチェックポイントDir
-                            (mason,village,werewolf,fanatic,hamster,immoralist順、カンマ区切り)
+  --phase2-models <dirs>    Phase2マルチモデル: 3モデルのチェックポイントDir
+                            (village,wolf,third順、カンマ区切り)
   --target-winrate <n>      目標勝率 (0-1)。evalでこの勝率を超えたら早期終了
   --target-faction <s>      チェックする陣営 (villageWin/wolfWin/hamsterWin)
   --workers <n|auto>        ゲーム生成の並列ワーカー数 (auto=CPU-1, default: 直列)
@@ -53,8 +53,8 @@ Examples:
   # 特定ディレクトリから再開
   npm run train -- --resume ./checkpoints-v2
 
-  # Phase2マルチモデル学習 (6モデルのPhase1チェックポイントから)
-  npm run train -- --phase2-models ./ckpt-mason,./ckpt-village,./ckpt-werewolf,./ckpt-fanatic,./ckpt-hamster,./ckpt-immoralist
+  # Phase2マルチモデル学習 (3モデルのPhase1チェックポイントから)
+  npm run train -- --phase2-models ./ckpt-village,./ckpt-wolf,./ckpt-third
 
   # 学習済みモデルでゲームを実行 (Howl出力)
   npm run play -- --checkpoint ./checkpoints/final.json --seed 42

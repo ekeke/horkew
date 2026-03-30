@@ -164,6 +164,7 @@ export type SerializedStep = {
   value: number
   done: boolean
   sigmoidActions?: number[]
+  trueRoles?: number[]
 }
 
 /** TrajectoryStep → SerializedStep */
@@ -178,6 +179,7 @@ export function serializeStep(step: TrajectoryStep): SerializedStep {
     value: step.value,
     done: step.done,
     sigmoidActions: step.sigmoidActions ? Array.from(step.sigmoidActions) : undefined,
+    trueRoles: step.trueRoles ? Array.from(step.trueRoles) : undefined,
   }
 }
 
@@ -193,6 +195,7 @@ export function deserializeStep(s: SerializedStep): TrajectoryStep {
     value: s.value,
     done: s.done,
     sigmoidActions: s.sigmoidActions ? new Float32Array(s.sigmoidActions) : undefined,
+    trueRoles: s.trueRoles ? new Float32Array(s.trueRoles) : undefined,
   }
 }
 

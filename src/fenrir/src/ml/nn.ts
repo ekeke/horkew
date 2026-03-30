@@ -184,10 +184,12 @@ export interface AnyTfNetwork {
     advantages: number[]
     returns: number[]
     sigmoidActions?: (Float32Array | undefined)[]
+    trueRoles?: (Float32Array | undefined)[]
+    predictLossCoeff?: number
     clipEpsilon: number
     valueLossCoeff: number
     entropyCoeff: number
-  }): { policyLoss: number, valueLoss: number, entropy: number }
+  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number }
   cloneWeights(): Map<string, Float32Array>
   loadWeights(weights: Map<string, Float32Array>): void
   get totalParams(): number
