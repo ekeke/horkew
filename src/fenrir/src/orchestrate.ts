@@ -14,8 +14,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame } from '../../lupa/engine.ts'
-import { NeuralNetwork } from './ml/nn.ts'
-import { TfNeuralNetwork } from './ml/nn-tf.ts'
+import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import { terminalReward, intermediateReward, DEFAULT_REWARD_CONFIG } from './reward.ts'
@@ -25,6 +24,8 @@ import {
   evaluate,
   createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
   createTfNetwork, createWolfTeamTfNetwork, createMasonTeamTfNetwork,
+  createTransformerNetwork, createWolfTeamTransformerNetwork, createMasonTeamTransformerNetwork,
+  createTransformerTfNetwork, createWolfTeamTransformerTfNetwork, createMasonTeamTransformerTfNetwork,
   DEFAULT_TRAINING_CONFIG,
   type TrainingConfig,
 } from './training.ts'
@@ -77,6 +78,7 @@ type OrchestratorConfig = {
   resume: boolean
   learningRate: number
   workers: number
+  transformer: boolean
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -93,6 +95,7 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   resume: true,
   learningRate: 3e-4,
   workers: 0,
+  transformer: false,
 }
 
 function parseArgs(): OrchestratorConfig {
@@ -115,6 +118,7 @@ function parseArgs(): OrchestratorConfig {
       case '--resume': config.resume = true; break
       case '--lr': config.learningRate = parseFloat(args[++i]); break
       case '--workers': config.workers = parseInt(args[++i]); break
+      case '--transformer': config.transformer = true; break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -141,6 +145,7 @@ Options:
   --resume                 既存チェックポイントから再開
   --lr <n>                 学習率 (default: ${DEFAULT_CONFIG.learningRate})
   --workers <n>            ゲーム生成ワーカー数 (default: ${DEFAULT_CONFIG.workers})
+  --transformer            Transformerアーキテクチャを使用 (default: MLP)
   --help, -h               このヘルプを表示`)
   process.exit(0)
 }
@@ -150,7 +155,7 @@ Options:
 // ============================================================
 
 function ppoUpdate(
-  tfNetwork: TfNeuralNetwork,
+  tfNetwork: AnyTfNetwork,
   batch: ProcessedStep[],
   config: { miniBatchSize: number, clipEpsilon: number, valueLossCoeff: number, entropyCoeff: number },
 ): { policyLoss: number } {
@@ -192,9 +197,9 @@ function ppoUpdate(
 
 function generateGame(
   trainingConfig: TrainingConfig,
-  network: NeuralNetwork,
-  wolfTeamNet: NeuralNetwork,
-  masonTeamNet: NeuralNetwork,
+  network: AnyNetwork,
+  wolfTeamNet: AnyNetwork,
+  masonTeamNet: AnyNetwork,
   mlRolesSet: Set<SystemRole>,
   seed: number,
   useTeam: 'wolf_team' | 'mason_team' | undefined,
@@ -341,6 +346,7 @@ async function main(): Promise<void> {
   validateConfig(config)
 
   log(`${BOLD}Fenrir Training Orchestrator (round-robin)${RESET}`)
+  log(`Architecture: ${config.transformer ? 'Transformer' : 'MLP'}`)
   log(`Iterations: ${config.iterations}/model, Chunk: ${config.chunkSize}, Batch: ${config.batch}`)
 
   const trainingConfig: TrainingConfig = {
@@ -349,21 +355,30 @@ async function main(): Promise<void> {
     enableRetar: !config.noRetar,
     learningRate: config.learningRate,
     rewardConfig: DEFAULT_REWARD_CONFIG,
+    useTransformer: config.transformer,
   }
+
+  // === ファクトリ関数 (MLP / Transformer 切り替え) ===
+  const makeNetwork = (): AnyNetwork => config.transformer ? createTransformerNetwork() : createNetwork()
+  const makeTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createTransformerTfNetwork(lr) : createTfNetwork(lr)
+  const makeWolfTeamNetwork = (): AnyNetwork => config.transformer ? createWolfTeamTransformerNetwork() : createWolfTeamNetwork()
+  const makeWolfTeamTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createWolfTeamTransformerTfNetwork(lr) : createWolfTeamTfNetwork(lr)
+  const makeMasonTeamNetwork = (): AnyNetwork => config.transformer ? createMasonTeamTransformerNetwork() : createMasonTeamNetwork()
+  const makeMasonTeamTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createMasonTeamTransformerTfNetwork(lr) : createMasonTeamTfNetwork(lr)
 
   // === ネットワーク作成 ===
   // 推論用 (Pure JS, CPU): モデルごとに1つ
-  const networks = new Map<ModelName, NeuralNetwork>()
-  for (const name of MODEL_NAMES) networks.set(name, createNetwork())
+  const networks = new Map<ModelName, AnyNetwork>()
+  for (const name of MODEL_NAMES) networks.set(name, makeNetwork())
 
   // チーム推論用
-  const wolfTeamNet = createWolfTeamNetwork()
-  const masonTeamNet = createMasonTeamNetwork()
+  const wolfTeamNet = makeWolfTeamNetwork()
+  const masonTeamNet = makeMasonTeamNetwork()
 
   // 学習用 (TF.js GPU): 1セットだけ — 重みをスワップして共有
-  const tfNetwork = createTfNetwork(config.learningRate)
-  const wolfTeamTf = createWolfTeamTfNetwork(config.learningRate)
-  const masonTeamTf = createMasonTeamTfNetwork(config.learningRate)
+  const tfNetwork = makeTfNetwork(config.learningRate)
+  const wolfTeamTf = makeWolfTeamTfNetwork(config.learningRate)
+  const masonTeamTf = makeMasonTeamTfNetwork(config.learningRate)
 
   log(`Individual NN: ${networks.values().next().value!.totalParams} params × 6 (CPU)`)
   log(`TfNN: 1 shared (GPU)`)
@@ -416,7 +431,7 @@ async function main(): Promise<void> {
   let baselineRates: Record<string, number> = {}
   if (!config.phase2Only) {
     log('Running baseline eval (all heuristic, 100 games)...')
-    const dummyNet = createNetwork()
+    const dummyNet = makeNetwork()
     const baselineConfig = { ...trainingConfig, mlRoles: [] as SystemRole[] }
     const result = evaluate(dummyNet, baselineConfig, 100)
     baselineRates = result.winRates
@@ -656,6 +671,7 @@ async function main(): Promise<void> {
       '--checkpoint-interval', String(config.checkpointInterval),
     ]
     if (config.noRetar) args.push('--no-retar')
+    if (config.transformer) args.push('--transformer')
 
     await new Promise<void>((resolve, reject) => {
       const child = spawn('node', args, { stdio: ['ignore', 'inherit', 'inherit'] })
