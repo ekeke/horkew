@@ -12,6 +12,7 @@ import {
   SEATS, NUM_ROLES,
   CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES,
   HISTORY_WINDOW, OBSERVATION_SIZE,
+  ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS, ROLE_INDEX, CO_ROLES,
 } from '../observation.ts'
 
 let _tfTransformerId = 0
@@ -102,6 +103,23 @@ function buildSeatIndices(isTeam: boolean): number[] {
   return indices
 }
 
+/**
+ * Role tokenインデックス構築 — CO可能5役職ごとに、各席のclaimed_role one-hotの該当位置を返す
+ * 結果: [NUM_ROLE_TOKENS * (1 + SEATS)] のインデックス配列
+ * 各Role token: co_count_placeholder(1, 後で計算) + co_seats(14, 各席のclaimed_role[roleIdx])
+ */
+function buildRoleTokenSeatClaimIndices(): { roleIdx: number, seatClaimOffsets: number[] }[] {
+  return CO_ROLES.map(role => {
+    const roleIdx = ROLE_INDEX.get(role)!
+    const seatClaimOffsets: number[] = []
+    for (let s = 0; s < SEATS; s++) {
+      // claimed_role one-hot starts at per_seat offset + 1 (after alive flag)
+      seatClaimOffsets.push(PER_SEAT_START + s * PER_SEAT_SIZE + 1 + roleIdx)
+    }
+    return { roleIdx, seatClaimOffsets }
+  })
+}
+
 // ============================================================
 // TfTransformerNetwork
 // ============================================================
@@ -115,9 +133,11 @@ export class TfTransformerNetwork {
   private projClsB: tf.Variable
   private projSeatW: tf.Variable
   private projSeatB: tf.Variable
+  private projRoleW: tf.Variable
+  private projRoleB: tf.Variable
 
-  // Transformer layer weights (per layer)
-  private layers: {
+  // Transformer layer type
+  private static readonly LayerShape = {} as {
     ln1Scale: tf.Variable, ln1Bias: tf.Variable
     wQ: tf.Variable, bQ: tf.Variable
     wK: tf.Variable, bK: tf.Variable
@@ -126,9 +146,25 @@ export class TfTransformerNetwork {
     ln2Scale: tf.Variable, ln2Bias: tf.Variable
     ffnW1: tf.Variable, ffnB1: tf.Variable
     ffnW2: tf.Variable, ffnB2: tf.Variable
-  }[]
-  private finalLnScale: tf.Variable
-  private finalLnBias: tf.Variable
+  }
+  // 2-stage encoder layers
+  private seatLayers: (typeof TfTransformerNetwork.LayerShape)[]
+  private seatFinalLnScale: tf.Variable
+  private seatFinalLnBias: tf.Variable
+  private stratLayers: (typeof TfTransformerNetwork.LayerShape)[]
+  private stratFinalLnScale: tf.Variable
+  private stratFinalLnBias: tf.Variable
+
+  // Learnable Forward/Endgame embeddings
+  private forwardEmbeddings: tf.Variable    // [numForward, dModel]
+  private endgameEmbeddings: tf.Variable    // [numEndgame, dModel]
+
+  // Pointer mechanism
+  private pointerQueryW: tf.Variable
+  private pointerQueryB: tf.Variable
+  private pointerKeyW: tf.Variable
+  private pointerKeyB: tf.Variable
+  private specialKeys: tf.Variable          // [3, dModel] grayran/next/stop
 
   // Head weights
   private perSeatHeadWeights: Map<string, [tf.Variable, tf.Variable]>  // [dModel, 1]
@@ -179,45 +215,81 @@ export class TfTransformerNetwork {
     this.seatGatherIndices = tf.tensor1d(buildSeatIndices(isTeam), 'int32')
 
     // Input projections
+    const rf = tc.roleFeatures ?? ROLE_TOKEN_FEATURES
     this.projClsW = this.makeVar([cf, dm], cf, `${prefix}proj_cls_w`)
     this.projClsB = this.makeZeroVar([dm], `${prefix}proj_cls_b`)
     this.projSeatW = this.makeVar([sf, dm], sf, `${prefix}proj_seat_w`)
     this.projSeatB = this.makeZeroVar([dm], `${prefix}proj_seat_b`)
+    this.projRoleW = this.makeVar([rf, dm], rf, `${prefix}proj_role_w`)
+    this.projRoleB = this.makeZeroVar([dm], `${prefix}proj_role_b`)
 
-    // Transformer layers
-    this.layers = []
-    const numLayers = tc.seatLayers ?? tc.numLayers ?? 2
-    for (let l = 0; l < numLayers; l++) {
-      const layer = {
-        ln1Scale: tf.variable(tf.ones([dm]), true, `${prefix}l${l}_ln1_s`),
-        ln1Bias: this.makeZeroVar([dm], `${prefix}l${l}_ln1_b`),
-        wQ: this.makeVar([dm, dm], dm, `${prefix}l${l}_wq`),
-        bQ: this.makeZeroVar([dm], `${prefix}l${l}_bq`),
-        wK: this.makeVar([dm, dm], dm, `${prefix}l${l}_wk`),
-        bK: this.makeZeroVar([dm], `${prefix}l${l}_bk`),
-        wV: this.makeVar([dm, dm], dm, `${prefix}l${l}_wv`),
-        bV: this.makeZeroVar([dm], `${prefix}l${l}_bv`),
-        wO: this.makeVar([dm, dm], dm, `${prefix}l${l}_wo`),
-        bO: this.makeZeroVar([dm], `${prefix}l${l}_bo`),
-        ln2Scale: tf.variable(tf.ones([dm]), true, `${prefix}l${l}_ln2_s`),
-        ln2Bias: this.makeZeroVar([dm], `${prefix}l${l}_ln2_b`),
-        ffnW1: this.makeVar([dm, tc.dFf], dm, `${prefix}l${l}_ff1w`),
-        ffnB1: this.makeZeroVar([tc.dFf], `${prefix}l${l}_ff1b`),
-        ffnW2: this.makeVar([tc.dFf, dm], tc.dFf, `${prefix}l${l}_ff2w`),
-        ffnB2: this.makeZeroVar([dm], `${prefix}l${l}_ff2b`),
+    const makeTransformerLayers = (count: number, tag: string) => {
+      const layers: (typeof TfTransformerNetwork.LayerShape)[] = []
+      for (let l = 0; l < count; l++) {
+        const layer = {
+          ln1Scale: tf.variable(tf.ones([dm]), true, `${prefix}${tag}${l}_ln1_s`),
+          ln1Bias: this.makeZeroVar([dm], `${prefix}${tag}${l}_ln1_b`),
+          wQ: this.makeVar([dm, dm], dm, `${prefix}${tag}${l}_wq`),
+          bQ: this.makeZeroVar([dm], `${prefix}${tag}${l}_bq`),
+          wK: this.makeVar([dm, dm], dm, `${prefix}${tag}${l}_wk`),
+          bK: this.makeZeroVar([dm], `${prefix}${tag}${l}_bk`),
+          wV: this.makeVar([dm, dm], dm, `${prefix}${tag}${l}_wv`),
+          bV: this.makeZeroVar([dm], `${prefix}${tag}${l}_bv`),
+          wO: this.makeVar([dm, dm], dm, `${prefix}${tag}${l}_wo`),
+          bO: this.makeZeroVar([dm], `${prefix}${tag}${l}_bo`),
+          ln2Scale: tf.variable(tf.ones([dm]), true, `${prefix}${tag}${l}_ln2_s`),
+          ln2Bias: this.makeZeroVar([dm], `${prefix}${tag}${l}_ln2_b`),
+          ffnW1: this.makeVar([dm, tc.dFf], dm, `${prefix}${tag}${l}_ff1w`),
+          ffnB1: this.makeZeroVar([tc.dFf], `${prefix}${tag}${l}_ff1b`),
+          ffnW2: this.makeVar([tc.dFf, dm], tc.dFf, `${prefix}${tag}${l}_ff2w`),
+          ffnB2: this.makeZeroVar([dm], `${prefix}${tag}${l}_ff2b`),
+        }
+        this.allVariables.push(
+          layer.ln1Scale, layer.ln1Bias,
+          layer.wQ, layer.bQ, layer.wK, layer.bK, layer.wV, layer.bV, layer.wO, layer.bO,
+          layer.ln2Scale, layer.ln2Bias,
+          layer.ffnW1, layer.ffnB1, layer.ffnW2, layer.ffnB2,
+        )
+        layers.push(layer)
       }
-      this.allVariables.push(
-        layer.ln1Scale, layer.ln1Bias,
-        layer.wQ, layer.bQ, layer.wK, layer.bK, layer.wV, layer.bV, layer.wO, layer.bO,
-        layer.ln2Scale, layer.ln2Bias,
-        layer.ffnW1, layer.ffnB1, layer.ffnW2, layer.ffnB2,
-      )
-      this.layers.push(layer)
+      return layers
     }
 
-    this.finalLnScale = tf.variable(tf.ones([dm]), true, `${prefix}fln_s`)
-    this.finalLnBias = this.makeZeroVar([dm], `${prefix}fln_b`)
-    this.allVariables.push(this.finalLnScale, this.finalLnBias)
+    // Seat Transformer (N layers)
+    const numSeatLayers = tc.seatLayers ?? tc.numLayers ?? 3
+    this.seatLayers = makeTransformerLayers(numSeatLayers, 'seat')
+    this.seatFinalLnScale = tf.variable(tf.ones([dm]), true, `${prefix}seat_fln_s`)
+    this.seatFinalLnBias = this.makeZeroVar([dm], `${prefix}seat_fln_b`)
+    this.allVariables.push(this.seatFinalLnScale, this.seatFinalLnBias)
+
+    // Strategy Layer (M layers)
+    const numStratLayers = tc.strategyLayers ?? 2
+    this.stratLayers = makeTransformerLayers(numStratLayers, 'strat')
+    this.stratFinalLnScale = tf.variable(tf.ones([dm]), true, `${prefix}strat_fln_s`)
+    this.stratFinalLnBias = this.makeZeroVar([dm], `${prefix}strat_fln_b`)
+    this.allVariables.push(this.stratFinalLnScale, this.stratFinalLnBias)
+
+    // Learnable Forward/Endgame embeddings
+    const numForward = tc.numForwardTokens ?? 8
+    const numEndgame = tc.numEndgameTokens ?? 4
+    this.forwardEmbeddings = tf.variable(
+      tf.randomNormal([numForward, dm], 0, 0.02), true, `${prefix}fwd_emb`,
+    )
+    this.endgameEmbeddings = tf.variable(
+      tf.randomNormal([numEndgame, dm], 0, 0.02), true, `${prefix}eg_emb`,
+    )
+    this.allVariables.push(this.forwardEmbeddings, this.endgameEmbeddings)
+
+    // Pointer mechanism
+    this.pointerQueryW = this.makeVar([dm, dm], dm, `${prefix}ptr_q_w`)
+    this.pointerQueryB = this.makeZeroVar([dm], `${prefix}ptr_q_b`)
+    this.pointerKeyW = this.makeVar([dm, dm], dm, `${prefix}ptr_k_w`)
+    this.pointerKeyB = this.makeZeroVar([dm], `${prefix}ptr_k_b`)
+    this.specialKeys = tf.variable(
+      tf.randomNormal([3, dm], 0, 0.02), true, `${prefix}special_keys`,
+    )
+    this.allVariables.push(this.pointerQueryW, this.pointerQueryB,
+      this.pointerKeyW, this.pointerKeyB, this.specialKeys)
 
     // Heads
     const perSeatSet = new Set(tc.perSeatHeads)
@@ -291,32 +363,49 @@ export class TfTransformerNetwork {
   // ============================================================
 
   /**
-   * バッチ観測テンソルからトークンシーケンスを構築
-   * @param obsTensor [batch, obsSize]
-   * @returns [batch, seqLen, dModel]
+   * バッチ観測テンソルからトークンシーケンスを構築 (Seat Transformer入力: CLS+Seat+Role = 20)
    */
   private tokenizeAndProject(obsTensor: tf.Tensor2D): tf.Tensor3D {
     const batch = obsTensor.shape[0]
     const sf = this.isTeam ? TEAM_SEAT_TOKEN_FEATURES : SEAT_TOKEN_FEATURES
+    const numRoles = this.tConfig.numRoleTokens ?? NUM_ROLE_TOKENS
+    const rf = this.tConfig.roleFeatures ?? ROLE_TOKEN_FEATURES
 
-    // CLS features: [batch, clsFeatures]
+    // CLS: [batch, clsFeatures] → [batch, 1, dModel]
     const clsRaw = tf.gather(obsTensor, this.clsGatherIndices, 1)
-    // Project: [batch, dModel]
     const clsProj = tf.add(tf.matMul(clsRaw, this.projClsW), this.projClsB)
-    // Reshape to [batch, 1, dModel]
     const clsToken = clsProj.reshape([batch, 1, this.dm])
 
-    // Seat features: [batch, SEATS * seatFeatures]
+    // Seats: [batch, SEATS*sf] → [batch, SEATS, dModel]
     const seatRaw = tf.gather(obsTensor, this.seatGatherIndices, 1)
-    // Reshape to [batch * SEATS, seatFeatures]
-    const seatRaw3d = seatRaw.reshape([batch * SEATS, sf])
-    // Project: [batch * SEATS, dModel]
-    const seatProj = tf.add(tf.matMul(seatRaw3d, this.projSeatW), this.projSeatB)
-    // Reshape to [batch, SEATS, dModel]
+    const seatProj = tf.add(
+      tf.matMul(seatRaw.reshape([batch * SEATS, sf]), this.projSeatW),
+      this.projSeatB,
+    )
     const seatTokens = seatProj.reshape([batch, SEATS, this.dm])
 
-    // Concat: [CLS, seat1..seat14] → [batch, 15, dModel]
-    return tf.concat([clsToken, seatTokens], 1) as tf.Tensor3D
+    // Role tokens: build from claimed_role in observation
+    // For each CO role, extract co_count + co_seats from per-seat data
+    const roleInfo = buildRoleTokenSeatClaimIndices()
+    const roleFeatureArrays: tf.Tensor[] = []
+    for (const { seatClaimOffsets } of roleInfo) {
+      // Gather claimed_role flags for this role from all seats: [batch, SEATS]
+      const claimFlags = tf.gather(obsTensor, tf.tensor1d(seatClaimOffsets, 'int32'), 1)
+      // co_count: sum of flags, normalized by SEATS
+      const coCount = tf.sum(claimFlags, 1, true).div(tf.scalar(SEATS))  // [batch, 1]
+      // [batch, 1 + SEATS] = [co_count, co_seats]
+      roleFeatureArrays.push(tf.concat([coCount, claimFlags], 1))
+    }
+    // Stack: [batch, numRoles, rf]
+    const roleRaw = tf.stack(roleFeatureArrays, 1)  // [batch, numRoles, rf]
+    const roleProj = tf.add(
+      tf.matMul(roleRaw.reshape([batch * numRoles, rf]), this.projRoleW),
+      this.projRoleB,
+    )
+    const roleTokens = roleProj.reshape([batch, numRoles, this.dm])
+
+    // Concat: [CLS, Seat0..13, Role0..4] → [batch, 20, dModel]
+    return tf.concat([clsToken, seatTokens, roleTokens], 1) as tf.Tensor3D
   }
 
   // ============================================================
@@ -383,15 +472,17 @@ export class TfTransformerNetwork {
   }
 
   /**
-   * Transformer encoder forward
-   * tokens: [batch, seqLen, dModel]
-   * Returns: [batch, seqLen, dModel]
+   * Transformer encoder forward (汎用: 任意のlayer配列+finalLN)
    */
-  private forwardTransformer(tokens: tf.Tensor3D): tf.Tensor3D {
+  private forwardEncoder(
+    tokens: tf.Tensor3D,
+    layers: (typeof TfTransformerNetwork.LayerShape)[],
+    finalLnScale: tf.Variable,
+    finalLnBias: tf.Variable,
+  ): tf.Tensor3D {
     let x = tokens
 
-    for (const layer of this.layers) {
-      // Pre-LN attention
+    for (const layer of layers) {
       const normed1 = this.layerNorm(x, layer.ln1Scale, layer.ln1Bias) as tf.Tensor3D
       const attnOut = this.multiHeadAttention(
         normed1,
@@ -399,7 +490,6 @@ export class TfTransformerNetwork {
       )
       x = tf.add(x, attnOut) as tf.Tensor3D
 
-      // Pre-LN FFN
       const normed2 = this.layerNorm(x, layer.ln2Scale, layer.ln2Bias) as tf.Tensor3D
       const batch = x.shape[0]
       const seq = x.shape[1]
@@ -409,8 +499,7 @@ export class TfTransformerNetwork {
       x = tf.add(x, ffnOut.reshape([batch, seq, this.dm])) as tf.Tensor3D
     }
 
-    // Final LN
-    return this.layerNorm(x, this.finalLnScale, this.finalLnBias) as tf.Tensor3D
+    return this.layerNorm(x, finalLnScale, finalLnBias) as tf.Tensor3D
   }
 
   // ============================================================
@@ -441,19 +530,75 @@ export class TfTransformerNetwork {
   }
 
   /**
-   * Trunk forward: obs → Transformer → (cls_out, seat_outputs)
+   * Trunk forward: obs → Seat Transformer → Strategy Layer → outputs
    */
-  private forwardTrunk(obsTensor: tf.Tensor2D): { clsOut: tf.Tensor2D, seatOutputs: tf.Tensor3D } {
-    const tokens = this.tokenizeAndProject(obsTensor)
-    const encoded = this.forwardTransformer(tokens)
-
+  private forwardTrunk(obsTensor: tf.Tensor2D): {
+    clsOut: tf.Tensor2D
+    seatOutputs: tf.Tensor3D
+    planForwardLogits: tf.Tensor2D   // [batch, numForward * vocabSize]
+    planEndgameLogits: tf.Tensor2D   // [batch, numEndgame * vocabSize]
+  } {
     const batch = obsTensor.shape[0]
-    // CLS: [batch, dModel]
-    const clsOut = encoded.slice([0, 0, 0], [batch, 1, this.dm]).reshape([batch, this.dm]) as tf.Tensor2D
-    // Seats: [batch, SEATS, dModel]
-    const seatOutputs = encoded.slice([0, 1, 0], [batch, SEATS, this.dm]) as tf.Tensor3D
+    const numRoles = this.tConfig.numRoleTokens ?? NUM_ROLE_TOKENS
+    const numForward = this.tConfig.numForwardTokens ?? 8
+    const numEndgame = this.tConfig.numEndgameTokens ?? 4
+    const seatSeqLen = 1 + SEATS + numRoles  // 20
 
-    return { clsOut, seatOutputs }
+    // Stage 1: Seat Transformer
+    const seatInput = this.tokenizeAndProject(obsTensor)  // [batch, 20, dm]
+    const seatEncoded = this.forwardEncoder(
+      seatInput, this.seatLayers, this.seatFinalLnScale, this.seatFinalLnBias,
+    )  // [batch, 20, dm]
+
+    // Stage 2: Strategy Layer
+    // Append Forward + Endgame embeddings (broadcast to batch)
+    const fwdEmb = this.forwardEmbeddings.expandDims(0).tile([batch, 1, 1])  // [batch, numForward, dm]
+    const egEmb = this.endgameEmbeddings.expandDims(0).tile([batch, 1, 1])   // [batch, numEndgame, dm]
+    const stratInput = tf.concat([seatEncoded, fwdEmb, egEmb], 1) as tf.Tensor3D  // [batch, 32, dm]
+    const stratEncoded = this.forwardEncoder(
+      stratInput, this.stratLayers, this.stratFinalLnScale, this.stratFinalLnBias,
+    )  // [batch, 32, dm]
+
+    // Extract outputs
+    const clsOut = stratEncoded.slice([0, 0, 0], [batch, 1, this.dm]).reshape([batch, this.dm]) as tf.Tensor2D
+    const seatOutputs = stratEncoded.slice([0, 1, 0], [batch, SEATS, this.dm]) as tf.Tensor3D
+
+    // Pointer mechanism for Forward and Endgame tokens
+    // Keys from seat + role tokens: [batch, SEATS+numRoles, dm]
+    const targetTokens = stratEncoded.slice([0, 1, 0], [batch, SEATS + numRoles, this.dm])
+    // Project keys: [batch * (SEATS+numRoles), dm]
+    const numTargets = SEATS + numRoles
+    const targetFlat = targetTokens.reshape([batch * numTargets, this.dm])
+    const projectedKeys = tf.add(tf.matMul(targetFlat, this.pointerKeyW), this.pointerKeyB)
+      .reshape([batch, numTargets, this.dm])  // [batch, 19, dm]
+    // Append special keys: [batch, 19+3, dm] = [batch, 22, dm]
+    const specialExpanded = this.specialKeys.expandDims(0).tile([batch, 1, 1])  // [batch, 3, dm]
+    const allKeys = tf.concat([projectedKeys, specialExpanded], 1) as tf.Tensor3D  // [batch, 22, dm]
+
+    const computePointer = (startIdx: number, count: number): tf.Tensor2D => {
+      // Extract plan tokens: [batch, count, dm]
+      const planTokens = stratEncoded.slice([0, startIdx, 0], [batch, count, this.dm])
+      // Project queries: [batch * count, dm]
+      const queryFlat = planTokens.reshape([batch * count, this.dm])
+      const queries = tf.add(tf.matMul(queryFlat, this.pointerQueryW), this.pointerQueryB)
+        .reshape([batch, count, this.dm])  // [batch, count, dm]
+      // Dot product: [batch, count, 22] (but we need vocab=23, padding handled by numTargets+3=22)
+      // Actually 14+5+3 = 22, but vocabSize is 23... let me check
+      // vocab: 14 seats + 5 roles + grayran + next + stop = 23
+      // keys: 14 seat keys + 5 role keys + 3 special = 22
+      // Hmm, 22 keys for vocab 23? No — the 14 seats map to vocab[0..13], 5 roles to vocab[14..18], 3 special to vocab[19..21]
+      // That's only 22. But vocabSize=23? Actually 14+5+1+1+1 = 22 targets, matching vocab indices 0-21.
+      // So vocabSize should be 22, not 23. Let me produce 22 logits per token.
+      const scale = tf.scalar(1 / Math.sqrt(this.dm))
+      const scores = tf.mul(tf.matMul(queries, allKeys, false, true), scale)  // [batch, count, 22]
+      // Flatten: [batch, count * 22]
+      return scores.reshape([batch, count * (numTargets + 3)]) as tf.Tensor2D
+    }
+
+    const planForwardLogits = computePointer(seatSeqLen, numForward)
+    const planEndgameLogits = computePointer(seatSeqLen + numForward, numEndgame)
+
+    return { clsOut, seatOutputs, planForwardLogits, planEndgameLogits }
   }
 
   /**
@@ -462,6 +607,7 @@ export class TfTransformerNetwork {
    */
   private computeAllHeadLogits(
     clsOut: tf.Tensor2D, seatOutputs: tf.Tensor3D,
+    planForwardLogits: tf.Tensor2D, planEndgameLogits: tf.Tensor2D,
   ): Map<string, tf.Tensor2D> {
     const result = new Map<string, tf.Tensor2D>()
 
@@ -490,6 +636,10 @@ export class TfTransformerNetwork {
       result.set(name, tf.add(tf.matMul(clsOut, w), b) as tf.Tensor2D)
     }
 
+    // Plan pointer logits
+    result.set('plan_forward', planForwardLogits)
+    result.set('plan_endgame', planEndgameLogits)
+
     return result
   }
 
@@ -504,9 +654,9 @@ export class TfTransformerNetwork {
 
     tf.tidy(() => {
       const obsTensor = tf.tensor2d(input, [1, this.config.inputSize])
-      const { clsOut, seatOutputs } = this.forwardTrunk(obsTensor)
+      const { clsOut, seatOutputs, planForwardLogits, planEndgameLogits } = this.forwardTrunk(obsTensor)
 
-      const allLogits = this.computeAllHeadLogits(clsOut, seatOutputs)
+      const allLogits = this.computeAllHeadLogits(clsOut, seatOutputs, planForwardLogits, planEndgameLogits)
       for (const [name, logits] of allLogits) {
         policies.set(name, logits.dataSync() as Float32Array)
       }
@@ -559,7 +709,7 @@ export class TfTransformerNetwork {
 
     const lossFunc = () => {
       const obsTensor = tf.tensor2d(obsData, [n, inputSize])
-      const { clsOut, seatOutputs } = this.forwardTrunk(obsTensor)
+      const { clsOut, seatOutputs, planForwardLogits, planEndgameLogits } = this.forwardTrunk(obsTensor)
 
       // Value loss
       const rawValues = tf.add(tf.matMul(clsOut, this.valueW), this.valueB).squeeze([1])
@@ -571,7 +721,7 @@ export class TfTransformerNetwork {
       )
 
       // Compute all head logits
-      const allLogits = this.computeAllHeadLogits(clsOut, seatOutputs)
+      const allLogits = this.computeAllHeadLogits(clsOut, seatOutputs, planForwardLogits, planEndgameLogits)
 
       let totalPolicyLoss = tf.scalar(0)
       let totalEntropy = tf.scalar(0)
@@ -738,7 +888,7 @@ export class TfTransformerNetwork {
 
     const lossFunc = () => {
       const obsTensor = tf.tensor2d(obsData, [n, inputSize])
-      const { seatOutputs } = this.forwardTrunk(obsTensor)
+      const { seatOutputs } = this.forwardTrunk(obsTensor)  // other outputs unused here
 
       // vote logits: per-seat readout
       const logits = this.perSeatLogits(seatOutputs, voteW, voteB)  // [n, SEATS]
@@ -778,29 +928,44 @@ export class TfTransformerNetwork {
     weights.set('proj_cls_b', this.projClsB.dataSync() as Float32Array)
     weights.set('proj_seat_w', this.projSeatW.dataSync() as Float32Array)
     weights.set('proj_seat_b', this.projSeatB.dataSync() as Float32Array)
+    weights.set('proj_role_w', this.projRoleW.dataSync() as Float32Array)
+    weights.set('proj_role_b', this.projRoleB.dataSync() as Float32Array)
 
-    for (let l = 0; l < this.layers.length; l++) {
-      const ly = this.layers[l]
-      weights.set(`layer_${l}_ln1_scale`, ly.ln1Scale.dataSync() as Float32Array)
-      weights.set(`layer_${l}_ln1_bias`, ly.ln1Bias.dataSync() as Float32Array)
-      weights.set(`layer_${l}_attn_wq`, ly.wQ.dataSync() as Float32Array)
-      weights.set(`layer_${l}_attn_bq`, ly.bQ.dataSync() as Float32Array)
-      weights.set(`layer_${l}_attn_wk`, ly.wK.dataSync() as Float32Array)
-      weights.set(`layer_${l}_attn_bk`, ly.bK.dataSync() as Float32Array)
-      weights.set(`layer_${l}_attn_wv`, ly.wV.dataSync() as Float32Array)
-      weights.set(`layer_${l}_attn_bv`, ly.bV.dataSync() as Float32Array)
-      weights.set(`layer_${l}_attn_wo`, ly.wO.dataSync() as Float32Array)
-      weights.set(`layer_${l}_attn_bo`, ly.bO.dataSync() as Float32Array)
-      weights.set(`layer_${l}_ln2_scale`, ly.ln2Scale.dataSync() as Float32Array)
-      weights.set(`layer_${l}_ln2_bias`, ly.ln2Bias.dataSync() as Float32Array)
-      weights.set(`layer_${l}_ffn_w1`, ly.ffnW1.dataSync() as Float32Array)
-      weights.set(`layer_${l}_ffn_b1`, ly.ffnB1.dataSync() as Float32Array)
-      weights.set(`layer_${l}_ffn_w2`, ly.ffnW2.dataSync() as Float32Array)
-      weights.set(`layer_${l}_ffn_b2`, ly.ffnB2.dataSync() as Float32Array)
+    const cloneLayers = (layers: (typeof TfTransformerNetwork.LayerShape)[], prefix: string) => {
+      for (let l = 0; l < layers.length; l++) {
+        const ly = layers[l]
+        weights.set(`${prefix}_${l}_ln1_scale`, ly.ln1Scale.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_ln1_bias`, ly.ln1Bias.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_attn_wq`, ly.wQ.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_attn_bq`, ly.bQ.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_attn_wk`, ly.wK.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_attn_bk`, ly.bK.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_attn_wv`, ly.wV.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_attn_bv`, ly.bV.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_attn_wo`, ly.wO.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_attn_bo`, ly.bO.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_ln2_scale`, ly.ln2Scale.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_ln2_bias`, ly.ln2Bias.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_ffn_w1`, ly.ffnW1.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_ffn_b1`, ly.ffnB1.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_ffn_w2`, ly.ffnW2.dataSync() as Float32Array)
+        weights.set(`${prefix}_${l}_ffn_b2`, ly.ffnB2.dataSync() as Float32Array)
+      }
     }
+    cloneLayers(this.seatLayers, 'seat_layer')
+    weights.set('seat_final_ln_scale', this.seatFinalLnScale.dataSync() as Float32Array)
+    weights.set('seat_final_ln_bias', this.seatFinalLnBias.dataSync() as Float32Array)
+    cloneLayers(this.stratLayers, 'strat_layer')
+    weights.set('strat_final_ln_scale', this.stratFinalLnScale.dataSync() as Float32Array)
+    weights.set('strat_final_ln_bias', this.stratFinalLnBias.dataSync() as Float32Array)
 
-    weights.set('final_ln_scale', this.finalLnScale.dataSync() as Float32Array)
-    weights.set('final_ln_bias', this.finalLnBias.dataSync() as Float32Array)
+    weights.set('forward_embeddings', this.forwardEmbeddings.dataSync() as Float32Array)
+    weights.set('endgame_embeddings', this.endgameEmbeddings.dataSync() as Float32Array)
+    weights.set('pointer_query_w', this.pointerQueryW.dataSync() as Float32Array)
+    weights.set('pointer_query_b', this.pointerQueryB.dataSync() as Float32Array)
+    weights.set('pointer_key_w', this.pointerKeyW.dataSync() as Float32Array)
+    weights.set('pointer_key_b', this.pointerKeyB.dataSync() as Float32Array)
+    weights.set('special_keys', this.specialKeys.dataSync() as Float32Array)
 
     for (const [name, [w, b]] of this.perSeatHeadWeights) {
       weights.set(`head_${name}_w`, w.dataSync() as Float32Array)
@@ -837,29 +1002,44 @@ export class TfTransformerNetwork {
       this.projClsB.assign(tf.tensor(weights.get('proj_cls_b')!, this.projClsB.shape))
       this.projSeatW.assign(tf.tensor(weights.get('proj_seat_w')!, this.projSeatW.shape))
       this.projSeatB.assign(tf.tensor(weights.get('proj_seat_b')!, this.projSeatB.shape))
+      this.projRoleW.assign(tf.tensor(weights.get('proj_role_w')!, this.projRoleW.shape))
+      this.projRoleB.assign(tf.tensor(weights.get('proj_role_b')!, this.projRoleB.shape))
 
-      for (let l = 0; l < this.layers.length; l++) {
-        const ly = this.layers[l]
-        ly.ln1Scale.assign(tf.tensor(weights.get(`layer_${l}_ln1_scale`)!, ly.ln1Scale.shape))
-        ly.ln1Bias.assign(tf.tensor(weights.get(`layer_${l}_ln1_bias`)!, ly.ln1Bias.shape))
-        ly.wQ.assign(tf.tensor(weights.get(`layer_${l}_attn_wq`)!, ly.wQ.shape))
-        ly.bQ.assign(tf.tensor(weights.get(`layer_${l}_attn_bq`)!, ly.bQ.shape))
-        ly.wK.assign(tf.tensor(weights.get(`layer_${l}_attn_wk`)!, ly.wK.shape))
-        ly.bK.assign(tf.tensor(weights.get(`layer_${l}_attn_bk`)!, ly.bK.shape))
-        ly.wV.assign(tf.tensor(weights.get(`layer_${l}_attn_wv`)!, ly.wV.shape))
-        ly.bV.assign(tf.tensor(weights.get(`layer_${l}_attn_bv`)!, ly.bV.shape))
-        ly.wO.assign(tf.tensor(weights.get(`layer_${l}_attn_wo`)!, ly.wO.shape))
-        ly.bO.assign(tf.tensor(weights.get(`layer_${l}_attn_bo`)!, ly.bO.shape))
-        ly.ln2Scale.assign(tf.tensor(weights.get(`layer_${l}_ln2_scale`)!, ly.ln2Scale.shape))
-        ly.ln2Bias.assign(tf.tensor(weights.get(`layer_${l}_ln2_bias`)!, ly.ln2Bias.shape))
-        ly.ffnW1.assign(tf.tensor(weights.get(`layer_${l}_ffn_w1`)!, ly.ffnW1.shape))
-        ly.ffnB1.assign(tf.tensor(weights.get(`layer_${l}_ffn_b1`)!, ly.ffnB1.shape))
-        ly.ffnW2.assign(tf.tensor(weights.get(`layer_${l}_ffn_w2`)!, ly.ffnW2.shape))
-        ly.ffnB2.assign(tf.tensor(weights.get(`layer_${l}_ffn_b2`)!, ly.ffnB2.shape))
+      const loadLayers = (layers: (typeof TfTransformerNetwork.LayerShape)[], prefix: string) => {
+        for (let l = 0; l < layers.length; l++) {
+          const ly = layers[l]
+          ly.ln1Scale.assign(tf.tensor(weights.get(`${prefix}_${l}_ln1_scale`)!, ly.ln1Scale.shape))
+          ly.ln1Bias.assign(tf.tensor(weights.get(`${prefix}_${l}_ln1_bias`)!, ly.ln1Bias.shape))
+          ly.wQ.assign(tf.tensor(weights.get(`${prefix}_${l}_attn_wq`)!, ly.wQ.shape))
+          ly.bQ.assign(tf.tensor(weights.get(`${prefix}_${l}_attn_bq`)!, ly.bQ.shape))
+          ly.wK.assign(tf.tensor(weights.get(`${prefix}_${l}_attn_wk`)!, ly.wK.shape))
+          ly.bK.assign(tf.tensor(weights.get(`${prefix}_${l}_attn_bk`)!, ly.bK.shape))
+          ly.wV.assign(tf.tensor(weights.get(`${prefix}_${l}_attn_wv`)!, ly.wV.shape))
+          ly.bV.assign(tf.tensor(weights.get(`${prefix}_${l}_attn_bv`)!, ly.bV.shape))
+          ly.wO.assign(tf.tensor(weights.get(`${prefix}_${l}_attn_wo`)!, ly.wO.shape))
+          ly.bO.assign(tf.tensor(weights.get(`${prefix}_${l}_attn_bo`)!, ly.bO.shape))
+          ly.ln2Scale.assign(tf.tensor(weights.get(`${prefix}_${l}_ln2_scale`)!, ly.ln2Scale.shape))
+          ly.ln2Bias.assign(tf.tensor(weights.get(`${prefix}_${l}_ln2_bias`)!, ly.ln2Bias.shape))
+          ly.ffnW1.assign(tf.tensor(weights.get(`${prefix}_${l}_ffn_w1`)!, ly.ffnW1.shape))
+          ly.ffnB1.assign(tf.tensor(weights.get(`${prefix}_${l}_ffn_b1`)!, ly.ffnB1.shape))
+          ly.ffnW2.assign(tf.tensor(weights.get(`${prefix}_${l}_ffn_w2`)!, ly.ffnW2.shape))
+          ly.ffnB2.assign(tf.tensor(weights.get(`${prefix}_${l}_ffn_b2`)!, ly.ffnB2.shape))
+        }
       }
+      loadLayers(this.seatLayers, 'seat_layer')
+      this.seatFinalLnScale.assign(tf.tensor(weights.get('seat_final_ln_scale')!, this.seatFinalLnScale.shape))
+      this.seatFinalLnBias.assign(tf.tensor(weights.get('seat_final_ln_bias')!, this.seatFinalLnBias.shape))
+      loadLayers(this.stratLayers, 'strat_layer')
+      this.stratFinalLnScale.assign(tf.tensor(weights.get('strat_final_ln_scale')!, this.stratFinalLnScale.shape))
+      this.stratFinalLnBias.assign(tf.tensor(weights.get('strat_final_ln_bias')!, this.stratFinalLnBias.shape))
 
-      this.finalLnScale.assign(tf.tensor(weights.get('final_ln_scale')!, this.finalLnScale.shape))
-      this.finalLnBias.assign(tf.tensor(weights.get('final_ln_bias')!, this.finalLnBias.shape))
+      this.forwardEmbeddings.assign(tf.tensor(weights.get('forward_embeddings')!, this.forwardEmbeddings.shape))
+      this.endgameEmbeddings.assign(tf.tensor(weights.get('endgame_embeddings')!, this.endgameEmbeddings.shape))
+      this.pointerQueryW.assign(tf.tensor(weights.get('pointer_query_w')!, this.pointerQueryW.shape))
+      this.pointerQueryB.assign(tf.tensor(weights.get('pointer_query_b')!, this.pointerQueryB.shape))
+      this.pointerKeyW.assign(tf.tensor(weights.get('pointer_key_w')!, this.pointerKeyW.shape))
+      this.pointerKeyB.assign(tf.tensor(weights.get('pointer_key_b')!, this.pointerKeyB.shape))
+      this.specialKeys.assign(tf.tensor(weights.get('special_keys')!, this.specialKeys.shape))
 
       for (const [name, [wVar, bVar]] of this.perSeatHeadWeights) {
         wVar.assign(tf.tensor(weights.get(`head_${name}_w`)!, wVar.shape))
