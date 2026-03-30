@@ -30,8 +30,14 @@ export type RewardConfig = {
   tsumiVillagePerDay: number
   /** 中間報酬: Hati 被詰み (狼陣営、詰み後の1日あたり) */
   tsumiWolfPerDay: number
-  /** 推理中間報酬: 村陣営のみ、正解席数/14 × この値 */
+  /** 推理中間報酬: 未知席の正解1席あたり */
   predictAccuracyReward: number
+  /** 既知席の推理報酬の減衰率 (既知席の正解 = predictAccuracyReward × この値) */
+  predictKnownSeatDiscount: number
+  /** 中間報酬: 護衛成功 (bodyguard, peace時) */
+  guardSuccess: number
+  /** 中間報酬: 占い呪殺 (seer, fox_kill時) */
+  foxKillReward: number
 }
 
 export const DEFAULT_REWARD_CONFIG: RewardConfig = {
@@ -45,6 +51,9 @@ export const DEFAULT_REWARD_CONFIG: RewardConfig = {
   tsumiVillagePerDay: 0.1,
   tsumiWolfPerDay: -0.2,
   predictAccuracyReward: 0.02,
+  predictKnownSeatDiscount: 0.25,
+  guardSuccess: 0,     // TODO: Lupa改修後に正確なイベント判定で有効化
+  foxKillReward: 0,    // TODO: 同上
 }
 
 type Alignment = 'village' | 'wolf' | 'hamster'
@@ -104,28 +113,30 @@ export function intermediateReward(
 ): Map<number, number> {
   const rewards = new Map<number, number>()
 
-  // execution を日ごとのトリガーとして使用
-  if (event.type !== 'execution') return rewards
+  if (event.type === 'execution') {
+    // LW生存: 狼が1匹でも生きていれば狼陣営にボーナス
+    const hasAliveWolf = state.players.some(p => p.alive && p.role === 'werewolf')
+    if (hasAliveWolf) {
+      for (const p of state.players) {
+        if (p.alive && getAlignment(p.role) === 'wolf') {
+          rewards.set(p.seat, (rewards.get(p.seat) ?? 0) + config.lwSurvival)
+        }
+      }
+    }
 
-  // LW生存: 狼が1匹でも生きていれば狼陣営にボーナス
-  const hasAliveWolf = state.players.some(p => p.alive && p.role === 'werewolf')
-  if (hasAliveWolf) {
-    for (const p of state.players) {
-      if (p.alive && getAlignment(p.role) === 'wolf') {
-        rewards.set(p.seat, (rewards.get(p.seat) ?? 0) + config.lwSurvival)
+    // 妖狐生存: 妖狐が生きていれば狐陣営にボーナス
+    const hasAliveFox = state.players.some(p => p.alive && p.role === 'werehamster')
+    if (hasAliveFox) {
+      for (const p of state.players) {
+        if (p.alive && getAlignment(p.role) === 'hamster') {
+          rewards.set(p.seat, (rewards.get(p.seat) ?? 0) + config.foxSurvival)
+        }
       }
     }
   }
 
-  // 妖狐生存: 妖狐が生きていれば狐陣営にボーナス
-  const hasAliveFox = state.players.some(p => p.alive && p.role === 'werehamster')
-  if (hasAliveFox) {
-    for (const p of state.players) {
-      if (p.alive && getAlignment(p.role) === 'hamster') {
-        rewards.set(p.seat, (rewards.get(p.seat) ?? 0) + config.foxSurvival)
-      }
-    }
-  }
+  // TODO: 護衛成功・占い呪殺の中間報酬は、Lupa改修後に正確なイベント判定で追加
+  // 現状のpeace/fox_killイベントでは帰属が不正確（狐噛み平和、初日占い呪殺を区別できない）
 
   return rewards
 }
@@ -156,22 +167,23 @@ export function tsumiReward(
 
 /**
  * 推理精度報酬: predict headの出力と実際の役職を比較
- * 村陣営のみ、正解席数/14 × predictAccuracyReward
+ * 全陣営対象。既知席（自席・仲間等）は低い報酬、未知席は高い報酬。
  *
  * @param predictActions sigmoid出力 (154次元, 0/1)
  * @param trueRoles 実際の役職 one-hot (154次元)
  * @param playerRole プレイヤーの役職
- * @returns 報酬 (村陣営以外は0)
+ * @param config 報酬設定
+ * @param knownSeats 既知の席（自席、狼仲間、共有相方等）。0-indexed seat番号
+ * @returns 報酬
  */
 export function predictAccuracyReward(
   predictActions: Float32Array,
   trueRoles: Float32Array,
   playerRole: string,
   config: RewardConfig = DEFAULT_REWARD_CONFIG,
+  knownSeats?: Set<number>,
 ): number {
-  if (getAlignment(playerRole) !== 'village') return 0
-
-  let correct = 0
+  let reward = 0
   for (let seat = 0; seat < SEATS; seat++) {
     // 各席でargmaxの役職が一致しているか
     let predMax = 0, predIdx = 0
@@ -184,8 +196,29 @@ export function predictAccuracyReward(
       }
       if (trueRoles[idx] > 0) trueIdx = r
     }
-    if (predIdx === trueIdx) correct++
+    if (predIdx === trueIdx) {
+      const isKnown = knownSeats?.has(seat) ?? false
+      reward += isKnown
+        ? config.predictAccuracyReward * config.predictKnownSeatDiscount
+        : config.predictAccuracyReward
+    }
   }
 
-  return (correct / SEATS) * config.predictAccuracyReward
+  return reward / SEATS
+}
+
+/** プレイヤーが初期知識として知っている席のセットを構築 (0-indexed seat番号) */
+export function buildKnownSeats(seat: number, role: string, state: GameState): Set<number> {
+  const known = new Set<number>()
+  known.add(seat)  // 自席
+  if (role === 'werewolf') {
+    for (const p of state.players) if (p.role === 'werewolf' && p.seat !== seat) known.add(p.seat)
+  } else if (role === 'fanatic') {
+    for (const p of state.players) if (p.role === 'werewolf') known.add(p.seat)
+  } else if (role === 'mason') {
+    for (const p of state.players) if (p.role === 'mason' && p.seat !== seat) known.add(p.seat)
+  } else if (role === 'immoralist') {
+    for (const p of state.players) if (p.role === 'werehamster') known.add(p.seat)
+  }
+  return known
 }
