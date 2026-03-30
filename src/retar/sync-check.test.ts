@@ -32,7 +32,7 @@ const FILE_ALIASES: Record<string, string> = {
 }
 
 // 片方にしか存在しなくてよいファイル（WASMブリッジ、型定義など）
-const TS_ONLY_FILES = new Set(['wasm-helpers', 'dump'])
+const TS_ONLY_FILES = new Set(['wasm-helpers'])
 const RS_ONLY_FILES = new Set(['lib', 'types'])
 
 // ── 関数名の許可リスト（言語イディオムの違いで一致不要） ──
@@ -70,6 +70,24 @@ const ALLOWED_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: string[] 
     ],
     rsOnly: [
       'test_role', // Rustではディスパッチ関数として pub fn、TSでは roleTesterMap 経由
+    ],
+  },
+  dump: {
+    tsOnly: [
+      'enableDump',       // Rustでは dump::enable()（モジュールスコープで dump プレフィックス不要）
+      'disableDump',      // Rustでは dump::disable()
+      'resetDump',        // Rustでは dump::reset()
+      'dumpFinalizePre',  // Rustでは dump::finalize_pre()
+      'dumpSolveResult',  // Rustでは dump::solve_result()
+      'dumpAnalyze',      // Rustでは dump::analyze_result()
+    ],
+    rsOnly: [
+      'enable',           // TSでは enableDump（トップレベルexportのため dump プレフィックス付き）
+      'disable',          // TSでは disableDump
+      'reset',            // TSでは resetDump
+      'finalize_pre',     // TSでは dumpFinalizePre
+      'solve_result',     // TSでは dumpSolveResult
+      'analyze_result',   // TSでは dumpAnalyze
     ],
   },
 }
