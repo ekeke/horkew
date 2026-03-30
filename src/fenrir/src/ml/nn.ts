@@ -201,6 +201,10 @@ export interface AnyTfNetwork {
     returns: number[]
     sigmoidActions?: (Float32Array | undefined)[]
     trueRoles?: (Float32Array | undefined)[]
+    planForwardActions?: (number[] | undefined)[]
+    planForwardLogProbs?: (number[] | undefined)[]
+    planEndgameActions?: (number[] | undefined)[]
+    planEndgameLogProbs?: (number[] | undefined)[]
     predictLossCoeff?: number
     clipEpsilon: number
     valueLossCoeff: number

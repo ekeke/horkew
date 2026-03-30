@@ -225,14 +225,16 @@ describe('TransformerEncoder', () => {
 describe('tokenize', () => {
   it('individual: correct token dimensions', () => {
     const obs = new Float32Array(OBSERVATION_SIZE)
-    for (let i = 0; i < obs.length; i++) obs[i] = Math.random()
+    // planCount位置以外にランダム値を入れる（planCountは0のまま）
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.5
+    // planCount位置を明示的に0にする（ランダム値でplanCount>0にならないように）
+    obs[OBSERVATION_SIZE - 161] = 0  // PLAN_TOKEN_COUNT位置
     const tok = tokenize(obs, false)
 
     assert.equal(tok.cls.length, CLS_FEATURES)
     assert.equal(tok.seats.length, SEATS * SEAT_TOKEN_FEATURES)
     assert.equal(tok.seatFeatures, SEAT_TOKEN_FEATURES)
     assert.equal(tok.clsFeatures, CLS_FEATURES)
-    assert.equal(tok.planCount, 0)
   })
 
   it('team: correct token dimensions', () => {

@@ -1041,7 +1041,7 @@ export class TfTransformerNetwork {
 
     const result = { loss: 0, accuracy: 0 }
     const numTokens = batch.numTokens
-    const vocabSize = batch.vocabSize
+    const _vocabSize = batch.vocabSize
 
     const lossFunc = () => {
       const obsTensor = tf.tensor2d(obsData, [n, inputSize])
