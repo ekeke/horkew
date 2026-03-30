@@ -35,6 +35,8 @@ export class FenrirStrategy implements Strategy {
   trajectory: TrajectoryStep[] = []
   /** NN推論の累積時間 (ms) */
   inferMs = 0
+  /** NN推論の呼び出し回数 */
+  inferCount = 0
   /** 戦略NN出力キャッシュ（strategyOnly時、1日1回計算） */
   private cachedStrategyResult: ForwardResult | null = null
   private cachedDay = -1
@@ -52,6 +54,7 @@ export class FenrirStrategy implements Strategy {
     this.lastObs = obs
     const result = this.network.forward(obs)
     this.inferMs += performance.now() - t
+    this.inferCount++
     return result
   }
 
@@ -419,6 +422,7 @@ export class FenrirStrategy implements Strategy {
   resetTrajectory(): void {
     this.trajectory = []
     this.inferMs = 0
+    this.inferCount = 0
   }
 }
 
@@ -432,6 +436,8 @@ abstract class TeamStrategyBase {
   trajectory: TrajectoryStep[] = []
   /** NN推論の累積時間 (ms) */
   inferMs = 0
+  /** NN推論の呼び出し回数 */
+  inferCount = 0
 
   constructor(network: AnyNetwork, config?: Partial<FenrirStrategyConfig>) {
     this.network = network
@@ -446,6 +452,7 @@ abstract class TeamStrategyBase {
     this.lastObs = obs
     const result = this.network.forward(obs)
     this.inferMs += performance.now() - t
+    this.inferCount++
     return result
   }
 
@@ -613,6 +620,7 @@ abstract class TeamStrategyBase {
   resetTrajectory(): void {
     this.trajectory = []
     this.inferMs = 0
+    this.inferCount = 0
   }
 }
 

@@ -129,8 +129,11 @@ export type GameTiming = {
   totalMs: number
   gameMs: number
   retarMs: number
+  retarCount: number
   inferMs: number
+  inferCount: number
   tsumiMs: number
+  tsumiCount: number
 }
 
 /** 1ゲーム分の結果 */

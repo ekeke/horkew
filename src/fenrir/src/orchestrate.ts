@@ -742,11 +742,19 @@ async function main(): Promise<void> {
           // worker timing breakdown (if available from parallel path)
           let timingStr = ''
           if (lastBatchTimings.length > 0) {
-            const avgGame = lastBatchTimings.reduce((a, t) => a + t.gameMs, 0) / lastBatchTimings.length
-            const avgInfer = lastBatchTimings.reduce((a, t) => a + t.inferMs, 0) / lastBatchTimings.length
-            const avgRetar = lastBatchTimings.reduce((a, t) => a + t.retarMs, 0) / lastBatchTimings.length
-            const avgTsumi = lastBatchTimings.reduce((a, t) => a + t.tsumiMs, 0) / lastBatchTimings.length
-            timingStr = `${avgGame.toFixed(0)}ms/game (infer ${avgInfer.toFixed(0)}ms retar ${avgRetar.toFixed(0)}ms tsumi ${avgTsumi.toFixed(0)}ms) `
+            const n = lastBatchTimings.length
+            const avgGame = lastBatchTimings.reduce((a, t) => a + t.gameMs, 0) / n
+            const avgInfer = lastBatchTimings.reduce((a, t) => a + t.inferMs, 0) / n
+            const avgInferCount = lastBatchTimings.reduce((a, t) => a + t.inferCount, 0) / n
+            const avgRetar = lastBatchTimings.reduce((a, t) => a + t.retarMs, 0) / n
+            const avgRetarCount = lastBatchTimings.reduce((a, t) => a + t.retarCount, 0) / n
+            const avgTsumi = lastBatchTimings.reduce((a, t) => a + t.tsumiMs, 0) / n
+            const avgTsumiCount = lastBatchTimings.reduce((a, t) => a + t.tsumiCount, 0) / n
+            const fmtBreakdown = (totalMs: number, count: number) => {
+              if (count === 0) return `${totalMs.toFixed(0)}ms`
+              return `${(totalMs / count).toFixed(1)}ms×${count.toFixed(0)}=${totalMs.toFixed(0)}ms`
+            }
+            timingStr = `${avgGame.toFixed(0)}ms/game (infer ${fmtBreakdown(avgInfer, avgInferCount)} retar ${fmtBreakdown(avgRetar, avgRetarCount)} tsumi ${fmtBreakdown(avgTsumi, avgTsumiCount)}) `
           }
           process.stderr.write(
             `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +

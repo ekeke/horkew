@@ -164,6 +164,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     let state: import('../../lupa/types.ts').GameState
     let events: import('../../lupa/types.ts').GameEvent[]
     let gameRetarMs = 0
+    let gameRetarCount = 0
 
     const onRolesAssignedWrapped = onRolesAssigned ? (seatRoles: Map<number, SystemRole>) => {
       onRolesAssigned(seatRoles)
@@ -192,6 +193,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       state = result.state
       events = result.events
       gameRetarMs = result.timing?.retarMs ?? 0
+      gameRetarCount = result.timing?.retarCount ?? 0
     } else {
       // strategy-adapter: 全フェーズ実行
       const handlers = strategyAdapter({
@@ -212,6 +214,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       state = result.state
       events = result.events
       gameRetarMs = result.timing?.retarMs ?? 0
+      gameRetarCount = result.timing?.retarCount ?? 0
     }
     const tGameEnd = performance.now()
 
@@ -290,11 +293,13 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       : DEFAULT_RETAR_OPTIONS
 
     let firstTsumiDay = -1
+    let tsumiCallCount = 0
     for (let i = 0; i < execLines.length; i++) {
       const truncated = howlLines.slice(0, execLines[i] - 1).join('\n')
       try {
         const { meta, statements } = parse(truncated)
         const { vs, setup } = buildVillageStatus(statements, meta)
+        tsumiCallCount++
         const result = searchTsumi(vs, setup, hatiOptions, { buildStrategy: false })
         if (result.isTsumi) {
           firstTsumiDay = i + 1
@@ -326,11 +331,21 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     const tTsumiEnd = performance.now()
 
-    // NN推論時間の集計
+    // NN推論時間・回数の集計
     let totalInferMs = 0
-    for (const s of strategies.values()) totalInferMs += s.inferMs
-    if (wolfTeamStrategy && 'inferMs' in wolfTeamStrategy) totalInferMs += wolfTeamStrategy.inferMs
-    if (masonTeamStrategy && 'inferMs' in masonTeamStrategy) totalInferMs += masonTeamStrategy.inferMs
+    let totalInferCount = 0
+    for (const s of strategies.values()) {
+      totalInferMs += s.inferMs
+      totalInferCount += s.inferCount
+    }
+    if (wolfTeamStrategy && 'inferMs' in wolfTeamStrategy) {
+      totalInferMs += (wolfTeamStrategy as any).inferMs
+      totalInferCount += (wolfTeamStrategy as any).inferCount ?? 0
+    }
+    if (masonTeamStrategy && 'inferMs' in masonTeamStrategy) {
+      totalInferMs += (masonTeamStrategy as any).inferMs
+      totalInferCount += (masonTeamStrategy as any).inferCount ?? 0
+    }
 
     results.push({
       individualSteps,
@@ -341,8 +356,11 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         totalMs: tTsumiEnd - tGameStart,
         gameMs: tGameEnd - tGameStart,
         retarMs: gameRetarMs ?? 0,
+        retarCount: gameRetarCount,
         inferMs: totalInferMs,
+        inferCount: totalInferCount,
         tsumiMs: tTsumiEnd - tTsumiStart,
+        tsumiCount: tsumiCallCount,
       },
     })
   }

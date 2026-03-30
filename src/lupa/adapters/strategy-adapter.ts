@@ -48,6 +48,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
   let signalIdCounter = 0
   let lastExecutedSeat: number | null = null
   let retarAccMs = 0
+  let retarCallCount = 0
 
   function getStrategy(seat: number): Strategy {
     return adapterConfig.strategies?.get(seat) ?? adapterConfig.defaultStrategy
@@ -139,6 +140,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
     perPlayerRetar = ppResult.perPlayer
     globalRetarPossibilities = ppResult.global.possibilities
     retarAccMs += performance.now() - t0
+    retarCallCount++
   }
 
   return {
@@ -319,7 +321,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
     },
 
     getTiming(): GameTiming {
-      return { retarMs: retarAccMs }
+      return { retarMs: retarAccMs, retarCount: retarCallCount }
     },
   }
 }

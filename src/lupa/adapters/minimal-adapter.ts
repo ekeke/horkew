@@ -43,6 +43,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
   let globalRetarPossibilities: Map<number, Set<SystemRole>> | null = null
   let perPlayerRetar: Map<number, RetarResult> | null = null
   let retarAccMs = 0
+  let retarCallCount = 0
 
   function getStrategy(seat: number): Strategy {
     return config.strategies.get(seat) ?? config.defaultStrategy!
@@ -61,6 +62,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
     perPlayerRetar = ppResult.perPlayer
     globalRetarPossibilities = ppResult.global.possibilities
     retarAccMs += performance.now() - t0
+    retarCallCount++
   }
 
   function buildCtx(
@@ -224,7 +226,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
     },
 
     getTiming(): GameTiming {
-      return { retarMs: retarAccMs }
+      return { retarMs: retarAccMs, retarCount: retarCallCount }
     },
   }
 }
