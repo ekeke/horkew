@@ -453,19 +453,29 @@ function formatCompatDiff(
   }
 
   // dump diff: 最初に異なる行を特定
-  const maxLen = Math.max(tsDump.length, rsDump.length)
-  for (let i = 0; i < maxLen; i++) {
-    const ts = tsDump[i] ?? '(missing)'
-    const rs = rsDump[i] ?? '(missing)'
-    if (ts !== rs) {
-      lines.push(`\nfirst diff at step ${i}:`)
-      lines.push(`  TS:   ${ts}`)
-      lines.push(`  Rust: ${rs}`)
-      break
+  if (rsDump.length === 0) {
+    lines.push(`\n[dump] Rust dump が取得できません。dump 付き WASM をビルドしてください:`)
+    lines.push(`  bash src/retar-rs/build.sh build-dump`)
+    if (tsDump.length > 0) {
+      lines.push(`\n--- TS dump (${tsDump.length} steps, Rust 比較なし) ---`)
+      for (const line of tsDump.slice(0, 10)) lines.push(`  ${line}`)
+      if (tsDump.length > 10) lines.push(`  ... (${tsDump.length - 10} more)`)
     }
-  }
-  if (tsDump.length > 0 && tsDump.length === rsDump.length && tsDump.every((l, i) => l === rsDump[i])) {
-    lines.push(`\ndump identical (${tsDump.length} steps) — diff is in non-instrumented code`)
+  } else {
+    const maxLen = Math.max(tsDump.length, rsDump.length)
+    for (let i = 0; i < maxLen; i++) {
+      const ts = tsDump[i] ?? '(missing)'
+      const rs = rsDump[i] ?? '(missing)'
+      if (ts !== rs) {
+        lines.push(`\nfirst diff at step ${i}:`)
+        lines.push(`  TS:   ${ts}`)
+        lines.push(`  Rust: ${rs}`)
+        break
+      }
+    }
+    if (tsDump.length > 0 && tsDump.length === rsDump.length && tsDump.every((l, i) => l === rsDump[i])) {
+      lines.push(`\ndump identical (${tsDump.length} steps) — diff is in non-instrumented code`)
+    }
   }
 
   return lines.join('\n')
