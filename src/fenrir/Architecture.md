@@ -129,10 +129,10 @@ Seat[i] token:
   trust[i]:          tanh(1)       信頼度（-1=人外確信, +1=村確信）
 
 Forward[k] token:
-  target[k]:         Pointer(23)   処刑対象
+  target[k]:         Pointer(22)   処刑対象
 
 Endgame[k] token:
-  target[k]:         Pointer(23)   最終日プラン
+  target[k]:         Pointer(22)   最終日プラン
 ```
 
 #### 役職推理（predict）の位置づけ
@@ -148,12 +148,12 @@ predictは補助タスクではなく**戦略NNの主要出力**。
 
 ## 処刑プラン
 
-### 語彙（23トークン）
+### 語彙（22トークン）
 
 Forward / Endgame のPointer語彙は共通:
 
 ```
-softmax(14 seats + 5 roles + grayran + next + stop) = softmax(23)
+softmax(14 seats + 5 roles + grayran + next + stop) = softmax(22)
 ```
 
 | 出力 | 意味 |
@@ -272,8 +272,8 @@ fake hints は人外のときのみ行動NNに渡す（村陣営は情報隔壁�
 
 ```
 戦略NNから（構造化出力）:
-  forward plan:       8 tokens × Pointer(23)
-  endgame plan:       4 tokens × Pointer(23)
+  forward plan:       8 tokens × Pointer(22)
+  endgame plan:       4 tokens × Pointer(22)
   predict:            14 × 11         全席の役職推理
   trust:              14              信頼度
   co_policy:          8               CO方針
@@ -355,7 +355,7 @@ plan↔vote一貫性（村陣営のみ）:  内部planと投票先一致 → +0.
 投票:   村陣営は完全拘束
 ```
 
-戦略の行動空間が小さい（Plan語彙23 × 12トークン + predict + co_policy）ため高速に収束。
+戦略の行動空間が小さい（Plan語彙22 × 12トークン + predict + co_policy）ため高速に収束。
 
 ### Step 2: 行動NNを学習
 

@@ -18,6 +18,7 @@ import {
 } from './action.ts'
 import { sigmoid } from './ml/nn.ts'
 import * as ruleAction from './rule-action.ts'
+import { isVillagerAligned } from '../../lupa/roles.ts'
 
 export type FenrirStrategyConfig = {
   /** trueなら探索ノイズあり（学習時）、falseなら貪欲（評価時） */
@@ -224,8 +225,8 @@ export class FenrirStrategy implements Strategy {
         this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, ctx.mySeat)
       }
 
-      // planに従って投票
-      if (forwardLogits) {
+      // 村陣営のみplanに従って投票、人外は自由（ランダム）
+      if (isVillagerAligned(ctx.myRole) && forwardLogits) {
         const voteSeat = ruleAction.planToVote(forwardLogits, this.numForwardTokens, ctx)
         if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
       }

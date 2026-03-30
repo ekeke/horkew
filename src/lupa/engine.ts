@@ -210,11 +210,13 @@ export function runGame(config: LupaConfig): GameResult {
 
   // rules をキャプチャした buildContext ラッパー
   let globalRetarPossibilities: Map<number, Set<SystemRole>> | null = null
+  let activeExecutionPlans: ExecutionPlan[] = []
   const makeCtx: typeof buildContext = (...args) => {
     const c = buildContext(...args)
     c.rules = rules
     c.globalRetarPossibilities = globalRetarPossibilities
     c.fakeRetarPossibilities = globalRetarPossibilities // 暫定: グローバルRetarで代用
+    c.executionPlans = activeExecutionPlans
     return c
   }
 
@@ -364,6 +366,7 @@ export function runGame(config: LupaConfig): GameResult {
     let signalIdCounter = signals.length
     const dayProposals: Proposal[] = []
     state.commander = null
+    activeExecutionPlans = []  // 日開始時にリセット
 
     // シグナルラウンド (3ラウンド) — nominate_commander で指揮者を選出、CO時Retar再実行
     for (let round = 0; round < 3; round++) {
@@ -403,6 +406,11 @@ export function runGame(config: LupaConfig): GameResult {
         if (proposal) {
           dayProposals.push(proposal)
           events.push({ type: 'proposal', actor: commander.seat, proposal })
+
+          // 公認プラン注入: 指揮者の処刑指定をExecutionPlanとして全プレイヤーに配信
+          if (proposal.type === 'execute_order') {
+            activeExecutionPlans = [{ targets: [proposal.target], type: 'designated' as const }]
+          }
 
           // 指揮者指定後の追加COチャンス
           if (proposal.type === 'execute_order') {
@@ -481,6 +489,10 @@ export function runGame(config: LupaConfig): GameResult {
         if (proposal) {
           dayProposals.push(proposal)
           events.push({ type: 'proposal', actor: commander.seat, proposal })
+          // 公認プラン更新: 再提案で上書き
+          if (proposal.type === 'execute_order') {
+            activeExecutionPlans = [{ targets: [proposal.target], type: 'designated' as const }]
+          }
         }
       }
     }
@@ -703,11 +715,13 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
 
   // rules をキャプチャした buildContext ラッパー
   let globalRetarPossibilities: Map<number, Set<SystemRole>> | null = null
+  let activeExecutionPlans: ExecutionPlan[] = []
   const makeCtx: typeof buildContext = (...args) => {
     const c = buildContext(...args)
     c.rules = rules
     c.globalRetarPossibilities = globalRetarPossibilities
     c.fakeRetarPossibilities = globalRetarPossibilities // 暫定: グローバルRetarで代用
+    c.executionPlans = activeExecutionPlans
     return c
   }
 
@@ -829,6 +843,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
     let signalIdCounter = signals.length
     const dayProposals: Proposal[] = []
     state.commander = null
+    activeExecutionPlans = []  // 日開始時にリセット
     for (let round = 0; round < 3; round++) {
       for (const player of alivePlayers(state)) {
         const ctx = makeCtx(state, player, events, rng, daySignals, dayProposals, lastExecutedSeat, retarPossibilities, null, null, perPlayerRetar, maxSurvivingNV)
@@ -848,6 +863,10 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
         if (proposal) {
           dayProposals.push(proposal)
           events.push({ type: 'proposal', actor: commander.seat, proposal })
+          // 公認プラン注入: 指揮者の処刑指定をExecutionPlanとして全プレイヤーに配信
+          if (proposal.type === 'execute_order') {
+            activeExecutionPlans = [{ targets: [proposal.target], type: 'designated' as const }]
+          }
           if (proposal.type === 'execute_order') {
             const target = state.players.find(p => p.seat === proposal.target)
             if (target && target.alive && target.claimedRole === null) {
