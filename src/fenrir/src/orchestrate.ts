@@ -45,11 +45,11 @@ import {
 // ============================================================
 
 const MODEL_GROUPS = {
-  village:          { roles: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata'] as SystemRole[], faction: 'villageWin', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
-  wolf_collective:  { roles: ['werewolf'] as SystemRole[], faction: 'wolfWin', collective: true, teamType: 'wolf_team' as const },
-  mason_collective: { roles: ['mason'] as SystemRole[], faction: 'villageWin', collective: true, teamType: 'mason_team' as const },
-  fanatic:          { roles: ['fanatic'] as SystemRole[], faction: 'wolfWin', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
-  third:            { roles: ['werehamster', 'immoralist'] as SystemRole[], faction: 'hamsterWin', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
+  village:          { roles: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata'] as SystemRole[], faction: 'villager_won', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
+  wolf_collective:  { roles: ['werewolf'] as SystemRole[], faction: 'werewolf_won', collective: true, teamType: 'wolf_team' as const },
+  mason_collective: { roles: ['mason'] as SystemRole[], faction: 'villager_won', collective: true, teamType: 'mason_team' as const },
+  fanatic:          { roles: ['fanatic'] as SystemRole[], faction: 'werewolf_won', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
+  third:            { roles: ['werehamster', 'immoralist'] as SystemRole[], faction: 'werehamster_won', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
 }
 
 type ModelName = keyof typeof MODEL_GROUPS
@@ -74,6 +74,7 @@ type OrchestratorConfig = {
   noRetar: boolean
   evalInterval: number
   checkpointInterval: number
+  evalGames: number
   phase1Only: boolean
   phase2Only: boolean
   targetWinRate?: number
@@ -94,6 +95,7 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   noRetar: false,
   evalInterval: 100,
   checkpointInterval: 10,
+  evalGames: 100,
   phase1Only: false,
   phase2Only: false,
   resume: false,
@@ -118,6 +120,7 @@ function parseArgs(): OrchestratorConfig {
       case '--no-retar': config.noRetar = true; break
       case '--eval-interval': config.evalInterval = parseInt(args[++i]); break
       case '--checkpoint-interval': config.checkpointInterval = parseInt(args[++i]); break
+      case '--eval-games': config.evalGames = parseInt(args[++i]); break
       case '--phase1-only': config.phase1Only = true; break
       case '--phase2-only': config.phase2Only = true; break
       case '--target-winrate': config.targetWinRate = parseFloat(args[++i]); break
@@ -158,6 +161,7 @@ Options:
   --checkpoint-base <dir>  ベースDir (default: ${DEFAULT_CONFIG.checkpointBase})
   --eval-interval <n>      評価間隔 (default: ${DEFAULT_CONFIG.evalInterval})
   --checkpoint-interval <n> チェックポイント間隔 (default: ${DEFAULT_CONFIG.checkpointInterval})
+  --eval-games <n>       評価ゲーム数 (default: ${DEFAULT_CONFIG.evalGames})
   --no-retar               Retar無効化
   --phase1-only            Phase 2 をスキップ
   --phase2-only            Phase 1 をスキップ
@@ -768,7 +772,7 @@ async function main(): Promise<void> {
           if (iter % config.evalInterval === 0) {
             process.stderr.write('\r\x1b[K')
             const evalConfig = { ...trainingConfig, mlRoles: group.roles }
-            const evalResult = await evaluate(network, evalConfig, 30, wolfTeamNet, masonTeamNet)
+            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet)
             appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
             const factionRate = evalResult.winRates[group.faction] ?? 0
             log(
