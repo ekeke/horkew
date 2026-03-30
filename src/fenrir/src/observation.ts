@@ -56,7 +56,7 @@ const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 210
 const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
 // グローバルRetar: 公開情報のみで計算した可能性 (Step 6)
 const GLOBAL_RETAR_SIZE = SEATS * NUM_ROLES  // 154
-// 騙り前提Retar: 廃止 — 将来的に村NN出力注入で代替
+// 騙り前提Retar: 廃止 — 村NN出力注入で代替（Architecture.md参照）
 
 // 処刑プラン: per-seat(included, position) + global(length, is_grayran, active)
 const PLAN_PER_SEAT_SIZE = 2

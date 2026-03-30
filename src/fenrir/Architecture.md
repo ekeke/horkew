@@ -70,7 +70,7 @@ game_progress, demand_wolf_co_count, rope_margin, alive_parity
 ≈ 19次元
 ```
 
-#### Seat tokens（14個、各 ~62次元）
+#### Seat tokens（14個、各 ~73次元）
 
 ```
 基本 (25):          alive, claimed_role(12), is_me, black/white count,
@@ -78,12 +78,13 @@ game_progress, demand_wolf_co_count, rope_margin, alive_parity
                     is_commander, accuse_wolf/fox, vote_intent, nominate_commander
 自分視点Retar (11):  自分が持つ情報から計算した各役職の可能性
 グローバルRetar (11): 公開情報のみから計算した可能性
-騙り前提Retar (11):  自分が偽物だと仮定した場合の可能性
 Private知識 (5):     divine_result, wolf_teammate, mason_partner, guard_history, known_hamster
 再投票候補 (1)
 公認プラン (3):      plan_included, plan_position, plan_approved
 新シグナル (4):      confirm_human, confirm_wolf, vote_for, vote_against
 ```
+
+※ 騙り前提Retar（自分が偽物だと仮定した場合の可能性）は廃止。村NN出力注入で代替。
 
 情報隔壁: gameState.players[].roleは直接参照しない。
 
@@ -491,6 +492,46 @@ epochs = 4        ミニバッチ更新回数/iter
 value_coeff = 0.5
 entropy_coeff = 0.01
 ```
+
+---
+
+## 人外ネットワーク: 村NN出力の入力注入
+
+### 動機
+
+騙り中の人外（例: 占い騙り狼）は「本物っぽく振る舞いつつ、要所で裏切る」必要がある。
+これを自力で学ぶのは非効率。学習済み村NNの出力を人外NNに追加入力として渡すことで、
+「本物の行動パターン」を参照しながら逸脱ポイントを学習させる。
+
+### 構成
+
+```
+学習済み村NN（frozen）
+  入力: 人外席の観測（村陣営として見た場合の特徴量）
+  出力: plan_forward logits, predict, trust, co_policy, value 等
+    ↓ flatten
+人外NN
+  入力: 通常の観測 + 村NN出力（CLS tokenに連結 or 専用トークンとして追加）
+  出力: 通常の行動head
+```
+
+### 学習フロー
+
+1. **Phase 1完了後**: 村NNがある程度育ってから人外学習を開始
+2. **村NNはfrozen**: 人外学習中に村NNの重みは更新しない（安定した参照点）
+3. **推論時**: 村NN forward → 人外NN forward の逐次実行（推論コスト約2倍）
+
+### 設計判断
+
+- 村NN出力のどの部分を渡すか: plan logits, predict, trust の構造化出力をflatten
+- 注入先: CLS tokenへの連結（シンプル）vs 専用トークン追加（表現力高い）
+- 村NNの更新タイミング: 人外学習中は完全frozen、定期的に最新村NNに差し替え
+
+### 利点
+
+- 騙りの本質（模倣＋逸脱）を直接モデル化
+- 人外NNは「どこで村の行動から外れるか」だけを学べばよい → 探索空間の大幅縮小
+- 村NNの学習が進むほど、人外NNも良い参照点を得られる
 
 ---
 
