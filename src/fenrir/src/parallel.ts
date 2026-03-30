@@ -129,6 +129,7 @@ export type GameTiming = {
   totalMs: number
   gameMs: number
   retarMs: number
+  inferMs: number
   tsumiMs: number
 }
 

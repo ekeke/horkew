@@ -266,6 +266,12 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
 
     const tTsumiEnd = performance.now()
 
+    // NN推論時間の集計
+    let totalInferMs = 0
+    for (const s of strategies.values()) totalInferMs += s.inferMs
+    if (wolfTeamStrategy) totalInferMs += wolfTeamStrategy.inferMs
+    if (masonTeamStrategy) totalInferMs += masonTeamStrategy.inferMs
+
     results.push({
       individualSteps,
       wolfTeamSteps: wSteps.map(serializeStep),
@@ -275,6 +281,7 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
         totalMs: tTsumiEnd - tGameStart,
         gameMs: tGameEnd - tGameStart,
         retarMs: gameRetarMs ?? 0,
+        inferMs: totalInferMs,
         tsumiMs: tTsumiEnd - tTsumiStart,
       },
     })

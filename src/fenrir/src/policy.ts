@@ -29,6 +29,8 @@ export class FenrirStrategy implements Strategy {
 
   /** 学習時にトラジェクトリを収集するバッファ */
   trajectory: TrajectoryStep[] = []
+  /** NN推論の累積時間 (ms) */
+  inferMs = 0
 
   constructor(network: AnyNetwork, config?: Partial<FenrirStrategyConfig>) {
     this.network = network
@@ -36,8 +38,11 @@ export class FenrirStrategy implements Strategy {
   }
 
   private infer(ctx: DecisionContext): ForwardResult {
+    const t = performance.now()
     const obs = encodeObservation(ctx)
-    return this.network.forward(obs)
+    const result = this.network.forward(obs)
+    this.inferMs += performance.now() - t
+    return result
   }
 
   private record(
@@ -240,6 +245,7 @@ export class FenrirStrategy implements Strategy {
   /** トラジェクトリをリセット */
   resetTrajectory(): void {
     this.trajectory = []
+    this.inferMs = 0
   }
 }
 
@@ -251,6 +257,8 @@ abstract class TeamStrategyBase {
   readonly network: AnyNetwork
   readonly config: FenrirStrategyConfig
   trajectory: TrajectoryStep[] = []
+  /** NN推論の累積時間 (ms) */
+  inferMs = 0
 
   constructor(network: AnyNetwork, config?: Partial<FenrirStrategyConfig>) {
     this.network = network
@@ -258,8 +266,11 @@ abstract class TeamStrategyBase {
   }
 
   protected infer(ctx: TeamDecisionContext): ForwardResult {
+    const t = performance.now()
     const obs = encodeTeamObservation(ctx)
-    return this.network.forward(obs)
+    const result = this.network.forward(obs)
+    this.inferMs += performance.now() - t
+    return result
   }
 
   protected record(
@@ -419,6 +430,7 @@ abstract class TeamStrategyBase {
 
   resetTrajectory(): void {
     this.trajectory = []
+    this.inferMs = 0
   }
 }
 

@@ -596,9 +596,10 @@ async function main(): Promise<void> {
           let timingStr = `${wallGameMs}ms/game`
           if (lastBatchTimings.length > 0) {
             const avgGame = lastBatchTimings.reduce((a, t) => a + t.gameMs, 0) / lastBatchTimings.length
+            const avgInfer = lastBatchTimings.reduce((a, t) => a + t.inferMs, 0) / lastBatchTimings.length
             const avgRetar = lastBatchTimings.reduce((a, t) => a + t.retarMs, 0) / lastBatchTimings.length
             const avgTsumi = lastBatchTimings.reduce((a, t) => a + t.tsumiMs, 0) / lastBatchTimings.length
-            timingStr = `${avgGame.toFixed(0)}ms/game (retar ${avgRetar.toFixed(0)}ms tsumi ${avgTsumi.toFixed(0)}ms) wall ${wallGameMs}ms`
+            timingStr = `${avgGame.toFixed(0)}ms/game (infer ${avgInfer.toFixed(0)}ms retar ${avgRetar.toFixed(0)}ms tsumi ${avgTsumi.toFixed(0)}ms) wall ${wallGameMs}ms`
           }
           process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ${timingStr} ${avgIterMs}s/iter ETA ${remaining}s`)
 
