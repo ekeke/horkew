@@ -920,6 +920,88 @@ export class TfTransformerNetwork {
     return result
   }
 
+  /**
+   * Plan token Pointer 教師あり学習
+   * Forward plan tokensのPointer出力にcross-entropy損失を適用
+   */
+  trainSupervisedPlan(batch: {
+    observations: Float32Array[]
+    forwardLabels: number[][]      // [n, numTokens] vocab indices
+    forwardMasks: boolean[][]      // [n, numTokens] which tokens to train on
+    numTokens: number
+    vocabSize: number
+  }): { loss: number, accuracy: number } {
+    const n = batch.observations.length
+    if (n === 0) return { loss: 0, accuracy: 0 }
+
+    const inputSize = this.config.inputSize
+    const obsData = new Float32Array(n * inputSize)
+    for (let i = 0; i < n; i++) obsData.set(batch.observations[i], i * inputSize)
+
+    const result = { loss: 0, accuracy: 0 }
+    const numTokens = batch.numTokens
+    const vocabSize = batch.vocabSize
+
+    const lossFunc = () => {
+      const obsTensor = tf.tensor2d(obsData, [n, inputSize])
+      const { planForwardLogits } = this.forwardTrunk(obsTensor)
+      // planForwardLogits: [n, numTokens * vocabActual]
+      // vocabActual may differ from vocabSize if pointer targets != vocabSize
+      // Reshape to [n, numTokens, vocabActual]
+      const vocabActual = planForwardLogits.shape[1]! / numTokens
+      const logits3d = planForwardLogits.reshape([n, numTokens, vocabActual])
+
+      // Build labels and mask
+      let totalLoss = tf.scalar(0)
+      let correct = 0
+      let totalMasked = 0
+
+      for (let t = 0; t < numTokens; t++) {
+        // Gather valid samples for this token position
+        const validIndices: number[] = []
+        const validLabels: number[] = []
+        for (let i = 0; i < n; i++) {
+          if (batch.forwardMasks[i][t]) {
+            validIndices.push(i)
+            validLabels.push(batch.forwardLabels[i][t])
+          }
+        }
+        if (validIndices.length === 0) continue
+        totalMasked += validIndices.length
+
+        // Extract logits for this token: [valid, vocabActual]
+        const tokenLogits = logits3d.slice([0, t, 0], [n, 1, vocabActual]).squeeze([1])  // [n, vocab]
+        const validLogits = tf.gather(tokenLogits, validIndices)  // [valid, vocab]
+        const probs = tf.softmax(validLogits)
+
+        // Cross-entropy
+        const oneHot = tf.oneHot(validLabels, vocabActual)
+        const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
+        const ce = tf.neg(tf.sum(tf.mul(oneHot, logProbs), 1))  // [valid]
+        totalLoss = tf.add(totalLoss, tf.sum(ce))
+
+        // Accuracy
+        const predIdx = tf.argMax(probs, 1).dataSync()
+        for (let j = 0; j < validIndices.length; j++) {
+          if (predIdx[j] === validLabels[j]) correct++
+        }
+      }
+
+      if (totalMasked > 0) {
+        result.accuracy = correct / totalMasked
+        const avgLoss = tf.div(totalLoss, tf.scalar(totalMasked))
+        result.loss = avgLoss.dataSync()[0]
+        return avgLoss as tf.Scalar
+      }
+      result.loss = 0
+      result.accuracy = 0
+      return tf.scalar(0) as tf.Scalar
+    }
+
+    this.optimizer.minimize(lossFunc, false, this.allVariables)
+    return result
+  }
+
   /** 重みのクローン */
   cloneWeights(): Map<string, Float32Array> {
     const weights = new Map<string, Float32Array>()
