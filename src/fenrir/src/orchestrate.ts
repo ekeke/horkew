@@ -33,7 +33,7 @@ import {
   type TrainingConfig,
 } from './training.ts'
 import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { spawn, execSync } from 'node:child_process'
 import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
   generateGamesParallel, deserializeStep,
@@ -78,6 +78,8 @@ type OrchestratorConfig = {
   learningRate: number
   workers: number
   transformer: boolean
+  strategyOnly: boolean
+  miniBatchSize?: number
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -95,6 +97,7 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   learningRate: 3e-4,
   workers: 0,
   transformer: false,
+  strategyOnly: false,
 }
 
 function parseArgs(): OrchestratorConfig {
@@ -123,6 +126,8 @@ function parseArgs(): OrchestratorConfig {
         break
       }
       case '--transformer': config.transformer = true; break
+      case '--strategy-only': config.strategyOnly = true; break
+      case '--mini-batch': config.miniBatchSize = parseInt(args[++i]); break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -158,6 +163,8 @@ Options:
   --lr <n>                 学習率 (default: ${DEFAULT_CONFIG.learningRate})
   --workers <n|auto>       ゲーム生成ワーカー数 (auto=CPU-1, default: 直列)
   --transformer            Transformerアーキテクチャを使用 (default: MLP)
+  --strategy-only          戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
+  --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
   --help, -h               このヘルプを表示`)
   process.exit(0)
 }
@@ -408,8 +415,12 @@ async function main(): Promise<void> {
   const config = parseArgs()
   validateConfig(config)
 
+  // Git情報
+  const gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
+  const gitDirty = execSync('git status --porcelain', { encoding: 'utf-8' }).trim() !== ''
   log(`${BOLD}Fenrir Training Orchestrator (round-robin)${RESET}`)
-  log(`Architecture: ${config.transformer ? 'Transformer' : 'MLP'}`)
+  log(`Git: ${gitSha}${gitDirty ? ' (dirty)' : ''} | ${new Date().toISOString()}`)
+  log(`Architecture: ${config.transformer ? 'Transformer' : 'MLP'}${config.strategyOnly ? ' (strategy-only)' : ''}`)
   log(`Iterations: ${config.iterations}/model, Chunk: ${config.chunkSize}, Batch: ${config.batch}`)
 
   const trainingConfig: TrainingConfig = {
@@ -419,6 +430,8 @@ async function main(): Promise<void> {
     learningRate: config.learningRate,
     rewardConfig: DEFAULT_REWARD_CONFIG,
     useTransformer: config.transformer,
+    strategyOnly: config.strategyOnly,
+    miniBatchSize: config.miniBatchSize ?? DEFAULT_TRAINING_CONFIG.miniBatchSize,
   }
 
   // === ファクトリ関数 (MLP / Transformer 切り替え) ===
@@ -502,16 +515,15 @@ async function main(): Promise<void> {
     log('Starting from scratch')
   }
 
-  // === Baseline eval ===
-  let baselineRates: Record<string, number> = {}
-  if (!config.phase2Only) {
-    log('Running baseline eval (all heuristic, 100 games)...')
-    const dummyNet = makeNetwork()
-    const baselineConfig = { ...trainingConfig, mlRoles: [] as SystemRole[] }
-    const result = await evaluate(dummyNet, baselineConfig, 100)
-    baselineRates = result.winRates
-    log(`Baseline: ${Object.entries(baselineRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')}`)
+  // === Baseline (14D猫 heuristic vs heuristic, ハードコード) ===
+  // 100ゲーム × 複数回の測定結果から: village≈55%, hamster≈27%, wolf≈15%, draw≈3%
+  const baselineRates: Record<string, number> = {
+    villager_won: 0.55,
+    werehamster_won: 0.27,
+    werewolf_won: 0.15,
+    draw: 0.03,
   }
+  log(`Baseline (hardcoded): ${Object.entries(baselineRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')}`)
 
   // === Phase 1: ラウンドロビン ===
   if (!config.phase2Only) {
