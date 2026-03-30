@@ -90,30 +90,15 @@ export function parsePlanIndices(indices: number[]): PlanDayGroup[] {
 }
 
 /**
- * Forward plan logitsから今日の処刑対象seatを決定
- * @returns 投票先seat (1-indexed) or null (プランなし/解決不能)
+ * Plan tokensのグループから投票先seatを解決
+ * @returns 投票先seat (1-indexed) or null (解決不能)
  */
-export function planToVote(
-  forwardLogits: Float32Array,
-  numForwardTokens: number,
-  ctx: DecisionContext,
-): number | null {
-  const indices = argmaxPlanTokens(forwardLogits, numForwardTokens)
-  const groups = parsePlanIndices(indices)
-  if (groups.length === 0) return null
-
-  // 今日のグループ = 先頭
-  const today = groups[0]
-  if (today.targets.length === 0) return null
-
+function resolveGroup(group: PlanDayGroup, ctx: DecisionContext): number | null {
   const aliveSet = new Set(ctx.alivePlayers)
-
-  // 解決: seat/role/grayranを具体的な生存者seatに変換
-  for (const target of today.targets) {
+  for (const target of group.targets) {
     if (target.type === 'seat') {
       if (aliveSet.has(target.seat) && target.seat !== ctx.mySeat) return target.seat
     } else if (target.type === 'role') {
-      // この役職のCO者で生存者を探す
       for (const event of ctx.publicEvents) {
         if ('actor' in event && event.type.startsWith(target.role === 'seer' ? 'seer_claim' :
           target.role === 'medium' ? 'medium_claim' :
@@ -125,7 +110,6 @@ export function planToVote(
         }
       }
     } else if (target.type === 'grayran') {
-      // CO者以外の生存者からランダム選択
       const coClaimed = new Set<number>()
       for (const event of ctx.publicEvents) {
         if ('actor' in event && (
@@ -142,8 +126,54 @@ export function planToVote(
       }
     }
   }
-
   return null
+}
+
+/**
+ * Forward/Endgame plan logitsから今日の処刑対象seatを決定
+ *
+ * 生存者数で endgame に切り替え:
+ *   ≤4人: 最終日 → endgame groups[0] (右→左で先頭=最終日)
+ *   ≤6人: 最終日前日 → endgame groups[1] があればそれ、なければ groups[0]
+ *   それ以外: forward の先頭グループ
+ *
+ * @returns 投票先seat (1-indexed) or null (プランなし/解決不能)
+ */
+export function planToVote(
+  forwardLogits: Float32Array,
+  numForwardTokens: number,
+  ctx: DecisionContext,
+  endgameLogits?: Float32Array | null,
+  numEndgameTokens?: number,
+): number | null {
+  const alive = ctx.alivePlayers.length
+
+  // Endgame切り替え判定
+  if (endgameLogits && numEndgameTokens) {
+    const egIndices = argmaxPlanTokens(endgameLogits, numEndgameTokens)
+    const egGroups = parsePlanIndices(egIndices)  // 右→左: groups[0]=最終日, groups[1]=前日
+
+    if (alive <= 4 && egGroups.length >= 1) {
+      // 最終日
+      const seat = resolveGroup(egGroups[0], ctx)
+      if (seat) return seat
+    } else if (alive <= 6 && egGroups.length >= 1) {
+      // 最終日前日: groups[1]があればそれ、なければgroups[0]
+      const group = egGroups.length >= 2 ? egGroups[1] : egGroups[0]
+      const seat = resolveGroup(group, ctx)
+      if (seat) return seat
+    }
+  }
+
+  // Forward plan
+  const indices = argmaxPlanTokens(forwardLogits, numForwardTokens)
+  const groups = parsePlanIndices(indices)
+  if (groups.length === 0) return null
+
+  const today = groups[0]
+  if (today.targets.length === 0) return null
+
+  return resolveGroup(today, ctx)
 }
 
 /**

@@ -318,7 +318,7 @@ export class FenrirStrategy implements Strategy {
 
       // 村陣営のみplanに従って投票、人外は自由（ランダム）
       if (isVillagerAligned(ctx.myRole) && forwardLogits) {
-        const voteSeat = ruleAction.planToVote(forwardLogits, this.numForwardTokens, ctx)
+        const voteSeat = ruleAction.planToVote(forwardLogits, this.numForwardTokens, ctx, endgameLogits, this.numEndgameTokens)
         if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
       }
       // フォールバック: ランダム生存者
