@@ -41,6 +41,11 @@ export class TransformerNetwork {
   private forwardEmbeddings: Float32Array    // [numForward * dModel]
   private endgameEmbeddings: Float32Array    // [numEndgame * dModel]
 
+  // Pointer mechanism for plan tokens
+  private pointerQueryProj: DenseLayer       // dModel → dModel (plan token → query)
+  private pointerKeyProj: DenseLayer         // dModel → dModel (target token → key)
+  private specialKeys: Float32Array          // [3 * dModel] learnable keys for grayran/next/stop
+
   // Head layers (same structure as before for backward compat)
   private perSeatHeads: Map<string, DenseLayer>     // dModel → 1
   private perSeatSigmoidHeads: Map<string, DenseLayer>
@@ -112,6 +117,15 @@ export class TransformerNetwork {
     }
     for (let i = 0; i < this.endgameEmbeddings.length; i++) {
       this.endgameEmbeddings[i] = (Math.random() - 0.5) * scale
+    }
+
+    // Pointer mechanism
+    this.pointerQueryProj = new DenseLayer(dm, dm)
+    this.pointerKeyProj = new DenseLayer(dm, dm)
+    // 3 special keys: grayran, next, stop
+    this.specialKeys = new Float32Array(3 * dm)
+    for (let i = 0; i < this.specialKeys.length; i++) {
+      this.specialKeys[i] = (Math.random() - 0.5) * scale
     }
 
     // Head layers
@@ -267,6 +281,51 @@ export class TransformerNetwork {
       policies.set(name, head.forward(clsOut))
     }
 
+    // ========== Pointer mechanism for plan tokens ==========
+    // Keys: Seat(14) + Role(5) + special(3) = 22 targets → vocab 23 (but seat indices 0-13, role 14-18, special 19-21)
+    // Actually vocab = 14 seats + 5 roles + grayran + next + stop = 23
+    const vocabSize = tc.planVocabSize ?? 23
+    const numTargetTokens = SEATS + numRoles  // 14 + 5 = 19 tokens provide keys
+    const numSpecial = 3  // grayran, next, stop
+    const invSqrtD = 1 / Math.sqrt(dm)
+
+    // Compute keys for seat + role tokens
+    const keys = new Float32Array((numTargetTokens + numSpecial) * dm)
+    for (let t = 0; t < numTargetTokens; t++) {
+      // Seat tokens at offset dm*(1+t), role tokens follow seats
+      const tokenOff = (1 + t) * dm  // skip CLS
+      const keyOff = t * dm
+      const raw = this._stratTokens.subarray(tokenOff, tokenOff + dm)
+      const projected = this.pointerKeyProj.forward(raw)
+      keys.set(projected, keyOff)
+    }
+    // Special keys (learnable, no projection needed — already in key space)
+    keys.set(this.specialKeys, numTargetTokens * dm)
+
+    // Compute pointer logits for each Forward and Endgame token
+    const computePointerLogits = (tokenOffset: number, count: number): Float32Array => {
+      const allLogits = new Float32Array(count * vocabSize)
+      for (let k = 0; k < count; k++) {
+        const tokOff = tokenOffset + k * dm
+        const raw = this._stratTokens.subarray(tokOff, tokOff + dm)
+        const query = this.pointerQueryProj.forward(raw)
+
+        const logitOff = k * vocabSize
+        for (let t = 0; t < numTargetTokens + numSpecial; t++) {
+          let dot = 0
+          const kOff = t * dm
+          for (let i = 0; i < dm; i++) dot += query[i] * keys[kOff + i]
+          allLogits[logitOff + t] = dot * invSqrtD
+        }
+      }
+      return allLogits
+    }
+
+    const fwdTokenOffset = seatSeqLen * dm
+    policies.set('plan_forward', computePointerLogits(fwdTokenOffset, numForward))
+    const egTokenOffset = (seatSeqLen + numForward) * dm
+    policies.set('plan_endgame', computePointerLogits(egTokenOffset, numEndgame))
+
     // Value head
     const rawValue = this.valueHead.forward(clsOut)
     const value = Math.tanh(rawValue[0])
@@ -303,6 +362,13 @@ export class TransformerNetwork {
     // Forward/Endgame embeddings
     weights.set('forward_embeddings', new Float32Array(this.forwardEmbeddings))
     weights.set('endgame_embeddings', new Float32Array(this.endgameEmbeddings))
+
+    // Pointer mechanism
+    weights.set('pointer_query_w', new Float32Array(this.pointerQueryProj.weights))
+    weights.set('pointer_query_b', new Float32Array(this.pointerQueryProj.biases))
+    weights.set('pointer_key_w', new Float32Array(this.pointerKeyProj.weights))
+    weights.set('pointer_key_b', new Float32Array(this.pointerKeyProj.biases))
+    weights.set('special_keys', new Float32Array(this.specialKeys))
 
     // Heads
     for (const [name, head] of this.perSeatHeads) {
@@ -370,6 +436,14 @@ export class TransformerNetwork {
     const egEmb = weights.get('endgame_embeddings')
     if (egEmb) this.endgameEmbeddings.set(egEmb)
 
+    // Pointer mechanism
+    this.pointerQueryProj.weights.set(weights.get('pointer_query_w')!)
+    this.pointerQueryProj.biases.set(weights.get('pointer_query_b')!)
+    this.pointerKeyProj.weights.set(weights.get('pointer_key_w')!)
+    this.pointerKeyProj.biases.set(weights.get('pointer_key_b')!)
+    const sk = weights.get('special_keys')
+    if (sk) this.specialKeys.set(sk)
+
     // Heads
     for (const [name, head] of this.perSeatHeads) {
       head.weights.set(weights.get(`head_${name}_w`)!)
@@ -407,6 +481,8 @@ export class TransformerNetwork {
     total += this.seatEncoder.paramCount
     total += this.strategyEncoder.paramCount
     total += this.forwardEmbeddings.length + this.endgameEmbeddings.length
+    total += this.pointerQueryProj.paramCount + this.pointerKeyProj.paramCount
+    total += this.specialKeys.length
     for (const head of this.perSeatHeads.values()) total += head.paramCount
     if (this.nightSeatHead) total += this.nightSeatHead.paramCount + this.nightClsHead!.paramCount
     for (const head of this.perSeatSigmoidHeads.values()) total += head.paramCount
@@ -446,6 +522,11 @@ export class TransformerNetwork {
 
     // Forward/Endgame embeddings
     params.push(this.forwardEmbeddings, this.endgameEmbeddings)
+
+    // Pointer mechanism
+    params.push(this.pointerQueryProj.weights, this.pointerQueryProj.biases)
+    params.push(this.pointerKeyProj.weights, this.pointerKeyProj.biases)
+    params.push(this.specialKeys)
 
     // Heads
     for (const head of this.perSeatHeads.values()) params.push(head.weights, head.biases)
