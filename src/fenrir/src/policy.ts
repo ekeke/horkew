@@ -213,13 +213,14 @@ export class FenrirStrategy implements Strategy {
     return { actions, logProbs }
   }
 
-  /** Plan tokenの選択をtrajectoryに記録 */
-  private recordPlan(
+  /** 戦略ステップ（plan tokens + predict）を1つのtrajectoryステップとして記録 */
+  private recordStrategy(
     forwardActions: number[], forwardLogProbs: number[],
     endgameActions: number[], endgameLogProbs: number[],
+    predictActions: Float32Array | undefined,
     value: number, seat: number,
   ): void {
-    // 合算logProbでtrajectoryステップを1つ作成
+    // plan tokensの合算logProbをPPO用に使う（predictはBCE補助損失で別途処理）
     let totalLogProb = 0
     for (const lp of forwardLogProbs) totalLogProb += lp
     for (const lp of endgameLogProbs) totalLogProb += lp
@@ -227,7 +228,7 @@ export class FenrirStrategy implements Strategy {
     this.trajectory.push({
       seat,
       observation: this.lastObs!,
-      actionHead: 'plan',
+      actionHead: 'strategy',
       actionIdx: -1,
       logProb: totalLogProb,
       reward: 0,
@@ -237,6 +238,7 @@ export class FenrirStrategy implements Strategy {
       planForwardLogProbs: forwardLogProbs,
       planEndgameActions: endgameActions,
       planEndgameLogProbs: endgameLogProbs,
+      sigmoidActions: predictActions,
     })
   }
 
@@ -299,19 +301,19 @@ export class FenrirStrategy implements Strategy {
       // observationを確保（キャッシュ済みなら高速）
       if (!this.lastObs) this.infer(ctx)
 
-      // plan tokensを記録（PPO勾配を流すため）
+      // predict head のサンプリング
+      const predictLogits = result.policies.get('predict')
+      let predictActions: Float32Array | undefined
+      if (predictLogits) {
+        const predictMask = new Float32Array(predictLogits.length).fill(0)
+        predictActions = this.selectSigmoidAction(predictLogits, predictMask).actions
+      }
+
+      // plan + predict を1つの strategy ステップとして記録
       if (forwardLogits && endgameLogits) {
         const fwd = this.selectPlanTokens(forwardLogits, this.numForwardTokens, this.planVocabSize)
         const eg = this.selectPlanTokens(endgameLogits, this.numEndgameTokens, this.planVocabSize)
-        this.recordPlan(fwd.actions, fwd.logProbs, eg.actions, eg.logProbs, result.value, ctx.mySeat)
-      }
-
-      // predict headを記録
-      const predictLogits = result.policies.get('predict')
-      if (predictLogits) {
-        const predictMask = new Float32Array(predictLogits.length).fill(0)
-        const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
-        this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, ctx.mySeat)
+        this.recordStrategy(fwd.actions, fwd.logProbs, eg.actions, eg.logProbs, predictActions, result.value, ctx.mySeat)
       }
 
       // 村陣営のみplanに従って投票、人外は自由（ランダム）
