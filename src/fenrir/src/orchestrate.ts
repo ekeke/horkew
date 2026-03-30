@@ -101,6 +101,7 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
 function parseArgs(): OrchestratorConfig {
   const args = process.argv.slice(2)
   const config = { ...DEFAULT_CONFIG }
+  let checkpointBaseSet = false
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -108,7 +109,7 @@ function parseArgs(): OrchestratorConfig {
       case '--phase2-iterations': config.phase2Iterations = parseInt(args[++i]); break
       case '--chunk-size': config.chunkSize = parseInt(args[++i]); break
       case '--batch': config.batch = parseInt(args[++i]); break
-      case '--checkpoint-base': config.checkpointBase = args[++i]; break
+      case '--checkpoint-base': config.checkpointBase = args[++i]; checkpointBaseSet = true; break
       case '--no-retar': config.noRetar = true; break
       case '--eval-interval': config.evalInterval = parseInt(args[++i]); break
       case '--checkpoint-interval': config.checkpointInterval = parseInt(args[++i]); break
@@ -122,6 +123,14 @@ function parseArgs(): OrchestratorConfig {
       case '--help': case '-h': showHelp(); break
     }
   }
+
+  // checkpoint base にアーキテクチャサブディレクトリを付与
+  if (!checkpointBaseSet) {
+    config.checkpointBase = config.transformer
+      ? './checkpoints/transformer'
+      : './checkpoints/nn'
+  }
+
   return config
 }
 

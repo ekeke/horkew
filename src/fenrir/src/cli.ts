@@ -159,6 +159,13 @@ if (help) showHelp()
 
 const config: TrainingConfig = { ...DEFAULT_TRAINING_CONFIG, ...overrides }
 
+// checkpoint dir にアーキテクチャサブディレクトリを付与
+if (!overrides.checkpointDir) {
+  config.checkpointDir = config.useTransformer
+    ? './checkpoints/transformer'
+    : './checkpoints/nn'
+}
+
 // --phase2-models 指定時: Phase 1 をスキップ
 if (config.phase2ModelDirs) {
   config.phase1End = 0

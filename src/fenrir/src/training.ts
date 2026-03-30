@@ -134,7 +134,7 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
   totalIterations: 100000,
   evalInterval: 1000,
   checkpointInterval: 5000,
-  checkpointDir: './checkpoints',
+  checkpointDir: './checkpoints',  // CLI側で ./checkpoints/nn or ./checkpoints/transformer に自動変更
   rewardConfig: DEFAULT_REWARD_CONFIG,
   phase1End: 10000,
   phase2End: 50000,
