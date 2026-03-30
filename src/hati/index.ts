@@ -1,7 +1,7 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { AnalyzeOptions, AnalyzeResult } from '../retar/index.ts'
 import { VillageRetar } from '../retar/index.ts'
-import { Possibilities, possibilityFromSet } from '../retar/possibilities.ts'
+import { Possibilities, possibilityFromRoles } from '../retar/possibilities.ts'
 import type { TsumiResult, TsumiJudgment, ThreatProfile, SearchOptions, SimState, World } from './types.ts'
 import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
 import { collectWorlds } from './worlds.ts'
@@ -32,7 +32,7 @@ function defaultRunRetar(vs: VillageStatus, setup: Map<SystemRole, number>, opti
 function resultToPossibilitiesInternal(result: AnalyzeResult, setup: Map<SystemRole, number>): Possibilities {
   const p = new Possibilities(setup)
   for (const [seat, roles] of result.result) {
-    p.possibilities[seat] = possibilityFromSet(roles)
+    p.possibilities[seat] = possibilityFromRoles(roles)
   }
   p.maxSurvivingNV = result.maxSurvivingNV
   return p

@@ -392,8 +392,10 @@ pub fn solve_possibilities(
     );
 
     if !res {
+        #[cfg(feature = "dump")] crate::dump::solve_result(None);
         return None;
     }
+    #[cfg(feature = "dump")] crate::dump::solve_result(Some(&config.conclusion));
     Some(config.conclusion)
 }
 

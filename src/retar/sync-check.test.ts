@@ -32,7 +32,7 @@ const FILE_ALIASES: Record<string, string> = {
 }
 
 // 片方にしか存在しなくてよいファイル（WASMブリッジ、型定義など）
-const TS_ONLY_FILES = new Set(['wasm-helpers'])
+const TS_ONLY_FILES = new Set(['wasm-helpers', 'dump'])
 const RS_ONLY_FILES = new Set(['lib', 'types'])
 
 // ── 関数名の許可リスト（言語イディオムの違いで一致不要） ──
@@ -59,13 +59,9 @@ const ALLOWED_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: string[] 
   },
   possibilities: {
     tsOnly: [
-      'possibilityFromSet',             // → Rust側は possibility_from_roles（名前不一致、要rename検討）
-      'roleCount',                      // Rust未移植（pop_count で代替可能）
+      'roleCount',                      // Rust未移植（pop_count でインライン代替）
       'intersectionOfRolePossibility',  // Rust未移植（ビット演算でインライン化）
       'differenceOfRolePossibilities',  // Rust未移植（ビット演算でインライン化）
-    ],
-    rsOnly: [
-      'possibility_from_roles', // → TS側は possibilityFromSet（名前不一致、要rename検討）
     ],
   },
   roleTesters: {
@@ -89,9 +85,8 @@ const ALLOWED_METHOD_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: st
       'from_setup',              // Rustファクトリ、TSではコンストラクタで処理
       'with_seat_count',         // Rustファクトリ、TSではコンストラクタで処理
       'seat_count',              // Rustゲッター、TSでは直接フィールドアクセス
-      'clone_instance',          // → TS側は clone（名前不一致）
+      'clone_instance',          // TSでは clone（Cloneトレイト衝突回避のため名前が異なる）
       'set_role',                // Rust追加メソッド、TSでは set() で代替
-      'compute_max_surviving_nv', // TSでは computeMaxSurvivingNV（名前一致だが大文字略語変換の差）
     ],
   },
   VillageRetar: {

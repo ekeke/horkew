@@ -172,6 +172,7 @@ impl VillageRetar {
 
         self.run_analysis();
         self.conclusions.compute_max_surviving_nv(self.compute_alive_mask());
+        #[cfg(feature = "dump")] crate::dump::analyze_result(&self.conclusions);
 
         AnalyzeResult {
             elapsed_ms: 0.0, // timing done by caller

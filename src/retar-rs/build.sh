@@ -21,11 +21,14 @@ case "${1:-build}" in
   build-web)
     docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "wasm-pack build --target web --out-dir pkg-web 2>&1"
     ;;
+  build-dump)
+    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "wasm-pack build --target nodejs --out-dir pkg -- --features dump 2>&1"
+    ;;
   all)
     docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "cargo test 2>&1 && wasm-pack build --target nodejs --out-dir pkg 2>&1 && wasm-pack build --target web --out-dir pkg-web 2>&1"
     ;;
   *)
-    echo "Usage: $0 {test|build|build-web|all}"
+    echo "Usage: $0 {test|build|build-web|build-dump|all}"
     exit 1
     ;;
 esac

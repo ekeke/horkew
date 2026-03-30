@@ -169,6 +169,7 @@ pub fn finalize(
     cached_surviving_map: &HashMap<Seat, bool>,
 ) {
     debug_stash.finalizer_runs += 1;
+    #[cfg(feature = "dump")] crate::dump::finalize_pre(&context.possibilities);
 
     // Mark night-kill victims as non-wolf
     for (&seat, status) in &vs.statuses {
