@@ -2,7 +2,10 @@
 Coeff
 combinatorially
 decos
+Denyals
 frontmatter
+grayran
+hati
 immoralists
 lupa
 nawa
@@ -12,5 +15,6 @@ Pocus
 Retar
 revote
 satisfiability
+softmax
 tsumi
 werehamster
