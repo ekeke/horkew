@@ -7,7 +7,7 @@
  */
 import type { Possibilities } from './possibilities.ts'
 
-export let DUMP_ENABLED = !!process.env.RETAR_DUMP
+export let DUMP_ENABLED = typeof process !== 'undefined' && !!process.env?.RETAR_DUMP
 let dumpBuffer: string[] = []
 
 export function enableDump(): void { DUMP_ENABLED = true }

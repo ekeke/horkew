@@ -18,6 +18,8 @@
   import HatiPane from './HatiPane.svelte'
   import './theme.css'
   import { runGame } from '../src/lupa/engine.ts'
+  import { strategyAdapter } from '../src/lupa/adapters/strategy-adapter.ts'
+  import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../src/lupa/heuristic.ts'
   import { formatHowl } from '../src/lupa/format.ts'
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
@@ -273,15 +275,23 @@
     }
   }
 
-  function generateLupaGame() {
+  async function generateLupaGame() {
     const roles = new Map<SystemRole, number>([
       ['werewolf', 3], ['villager', 2], ['seer', 1], ['medium', 1],
       ['bodyguard', 1], ['mason', 2], ['nekomata', 1],
       ['possessed', 1], ['werehamster', 1], ['immoralist', 1],
     ])
-    const config = { roles, seed: Date.now() }
-    const { events, state } = runGame(config)
-    const howl = formatHowl(events, state, config)
+    const seed = Date.now()
+    const handlers = strategyAdapter({
+      defaultStrategy: new HeuristicStrategy(),
+      wolfTeamStrategy: new WolfTeamHeuristic(),
+      masonTeamStrategy: new MasonTeamHeuristic(),
+      enableRetar: false,
+      seed,
+      roles,
+    })
+    const { events, state } = await runGame({ roles, seed }, handlers)
+    const howl = formatHowl(events, state, { roles, seed } as any)
     if (trialMode || !activeKey) {
       handleStartTrial(howl)
     } else {
