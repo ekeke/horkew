@@ -188,3 +188,7 @@ The notation and vocabulary support dual Japanese/ASCII syntax:
 - Species results: 白/○ (human), 黒/● (wolf)
 - Game results: 村勝/villageWin, 狼勝/wolfWin, 狐勝/hamsterWin
 - Player names use flexible matching with katakana↔hiragana conversion
+
+## Development Stage
+
+このプロジェクトは現在**ブートストラップ段階**。GitHub のワークフロー（PR、Issues、CI など）は使用していない。リモートリポジトリへの push も不要。worktree を作る場合は**ローカルの `main` ブランチ**をベースにすること。
