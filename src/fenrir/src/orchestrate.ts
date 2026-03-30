@@ -13,11 +13,13 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame } from '../../lupa/engine.ts'
+import { runGame as runGameLegacy } from '../../lupa/engine.ts'
+import { runGame as runGameNext } from '../../lupa/engine-next.ts'
+import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
-import { terminalReward, intermediateReward, predictAccuracyReward, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { terminalReward, intermediateReward, predictAccuracyReward, buildKnownSeats, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { encodeTrueRoles } from './observation.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
@@ -208,7 +210,7 @@ function ppoUpdate(
 // Game Generation (1ゲーム分)
 // ============================================================
 
-function generateGame(
+async function generateGame(
   trainingConfig: TrainingConfig,
   network: AnyNetwork,
   wolfTeamNet: AnyNetwork,
@@ -216,7 +218,7 @@ function generateGame(
   mlRolesSet: Set<SystemRole>,
   seed: number,
   useTeam: 'wolf_team' | 'mason_team' | undefined,
-): { individualSteps: Map<number, TrajectoryStep[]>, wolfTeamSteps: TrajectoryStep[], masonTeamSteps: TrajectoryStep[] } {
+): Promise<{ individualSteps: Map<number, TrajectoryStep[]>, wolfTeamSteps: TrajectoryStep[], masonTeamSteps: TrajectoryStep[] }> {
   const roles = new Map(Object.entries(trainingConfig.roles) as [SystemRole, number][])
   const strategies = new Map<number, FenrirStrategy>()
   const heuristic = new HeuristicStrategy()
@@ -262,7 +264,34 @@ function generateGame(
   wolfTeamStrategy?.resetTrajectory()
   masonTeamStrategy?.resetTrajectory()
 
-  const { state, events } = runGame(lupaConfig)
+  let state: import('../../lupa/types.ts').GameState
+  let events: import('../../lupa/types.ts').GameEvent[]
+
+  if (trainingConfig.strategyOnly) {
+    const handlers = minimalAdapter({
+      strategies: strategiesMap,
+      defaultStrategy: heuristic,
+      wolfTeamStrategy: wolfTeamStrategy ?? new WolfTeamHeuristic(),
+      masonTeamStrategy: masonTeamStrategy ?? new MasonTeamHeuristic(),
+      onRolesAssigned: (seatRoles) => {
+        onRolesAssigned(seatRoles)
+        for (const [seat, s] of strategies) {
+          if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
+        }
+      },
+      seed,
+    })
+    const result = await runGameNext(
+      { roles, seed, hasFirstGhost: trainingConfig.hasFirstGhost, revoteConfig: trainingConfig.revoteConfig, rules: trainingConfig.rules },
+      handlers,
+    )
+    state = result.state
+    events = result.events
+  } else {
+    const result = runGameLegacy(lupaConfig)
+    state = result.state
+    events = result.events
+  }
 
   // Collect trajectories
   const allSteps = new Map<number, TrajectoryStep[]>()
@@ -303,11 +332,13 @@ function generateGame(
   const trueRoles = encodeTrueRoles(state.players)
   for (const [seat, steps] of allSteps) {
     const player = state.players.find(p => p.seat === seat)
+    if (!player) continue
+    const knownSeats = buildKnownSeats(seat, player.role, state)
     for (const step of steps) {
       step.trueRoles = trueRoles
-      if (step.actionHead === 'predict' && step.sigmoidActions && player) {
+      if (step.actionHead === 'predict' && step.sigmoidActions) {
         step.reward += predictAccuracyReward(
-          step.sigmoidActions, trueRoles, player.role, trainingConfig.rewardConfig,
+          step.sigmoidActions, trueRoles, player.role, trainingConfig.rewardConfig, knownSeats,
         )
       }
     }
@@ -473,7 +504,7 @@ async function main(): Promise<void> {
     log('Running baseline eval (all heuristic, 100 games)...')
     const dummyNet = makeNetwork()
     const baselineConfig = { ...trainingConfig, mlRoles: [] as SystemRole[] }
-    const result = evaluate(dummyNet, baselineConfig, 100)
+    const result = await evaluate(dummyNet, baselineConfig, 100)
     baselineRates = result.winRates
     log(`Baseline: ${Object.entries(baselineRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')}`)
   }
@@ -555,7 +586,7 @@ async function main(): Promise<void> {
           } else {
             // === 直列フォールバック ===
             for (const seed of seeds) {
-              const game = generateGame(trainingConfig, network, wolfTeamNet, masonTeamNet, mlRolesSet, seed, group.teamType)
+              const game = await generateGame(trainingConfig, network, wolfTeamNet, masonTeamNet, mlRolesSet, seed, group.teamType)
               const currentSteps = new Map<number, TrajectoryStep[]>()
               for (const [seat, steps] of game.individualSteps) {
                 currentSteps.set(seat, steps)
@@ -626,7 +657,7 @@ async function main(): Promise<void> {
           if (iter % config.evalInterval === 0) {
             process.stderr.write('\r\x1b[K')
             const evalConfig = { ...trainingConfig, mlRoles: group.roles }
-            const evalResult = evaluate(network, evalConfig, 30, wolfTeamNet, masonTeamNet)
+            const evalResult = await evaluate(network, evalConfig, 30, wolfTeamNet, masonTeamNet)
             const factionRate = evalResult.winRates[group.faction] ?? 0
             log(
               `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +

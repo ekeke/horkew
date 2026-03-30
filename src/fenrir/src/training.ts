@@ -7,7 +7,9 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame, runGameAsync } from '../../lupa/engine.ts'
+import { runGame as runGameLegacy, runGameAsync } from '../../lupa/engine.ts'
+import { runGame as runGameNext } from '../../lupa/engine-next.ts'
+import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-node-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
 import type { NetworkConfig, AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
@@ -22,7 +24,7 @@ import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
 import { encodeTrueRoles } from './observation.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
-import { terminalReward, intermediateReward, predictAccuracyReward, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { terminalReward, intermediateReward, predictAccuracyReward, buildKnownSeats, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import { packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize, generateGamesParallel, deserializeStep, type SharedWeights } from './parallel.ts'
@@ -376,40 +378,66 @@ type GameAgents = {
   masonTeamStrategy?: MasonTeamStrategy
 }
 
-function generateGame(
+async function generateGame(
   config: TrainingConfig,
   agents: GameAgents,
   seed: number,
-): GameTrajectories {
+): Promise<GameTrajectories> {
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
 
   const strategiesMap = new Map<number, Strategy>(agents.strategies)
-  const lupaConfig: LupaConfig = {
-    roles,
-    seed,
-    strategies: strategiesMap,
-    defaultStrategy: agents.defaultStrategy,
-    onRolesAssigned: agents.onRolesAssigned ? (seatRoles) => {
-      agents.onRolesAssigned!(seatRoles)
-      // フックが agents.strategies に追加した分を lupaConfig.strategies にも反映
-      for (const [seat, s] of agents.strategies) {
-        if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
-      }
-    } : undefined,
-    enableRetar: config.enableRetar,
-    hasFirstGhost: config.hasFirstGhost,
-    revoteConfig: config.revoteConfig,
-    rules: config.rules,
-    wolfTeamStrategy: agents.wolfTeamStrategy,
-    masonTeamStrategy: agents.masonTeamStrategy,
-  }
 
   // Reset trajectories
   for (const s of agents.strategies.values()) s.resetTrajectory?.()
   agents.wolfTeamStrategy?.resetTrajectory()
   agents.masonTeamStrategy?.resetTrajectory()
 
-  const { state, events } = runGame(lupaConfig)
+  let state: import('../../lupa/types.ts').GameState
+  let events: import('../../lupa/types.ts').GameEvent[]
+
+  if (config.strategyOnly) {
+    const handlers = minimalAdapter({
+      strategies: strategiesMap,
+      defaultStrategy: agents.defaultStrategy,
+      wolfTeamStrategy: agents.wolfTeamStrategy,
+      masonTeamStrategy: agents.masonTeamStrategy,
+      onRolesAssigned: agents.onRolesAssigned ? (seatRoles) => {
+        agents.onRolesAssigned!(seatRoles)
+        for (const [seat, s] of agents.strategies) {
+          if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
+        }
+      } : undefined,
+      seed,
+    })
+    const result = await runGameNext(
+      { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+      handlers,
+    )
+    state = result.state
+    events = result.events
+  } else {
+    const lupaConfig: LupaConfig = {
+      roles,
+      seed,
+      strategies: strategiesMap,
+      defaultStrategy: agents.defaultStrategy,
+      onRolesAssigned: agents.onRolesAssigned ? (seatRoles) => {
+        agents.onRolesAssigned!(seatRoles)
+        for (const [seat, s] of agents.strategies) {
+          if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
+        }
+      } : undefined,
+      enableRetar: config.enableRetar,
+      hasFirstGhost: config.hasFirstGhost,
+      revoteConfig: config.revoteConfig,
+      rules: config.rules,
+      wolfTeamStrategy: agents.wolfTeamStrategy,
+      masonTeamStrategy: agents.masonTeamStrategy,
+    }
+    const result = runGameLegacy(lupaConfig)
+    state = result.state
+    events = result.events
+  }
 
   // Collect individual trajectories and add terminal rewards
   const allSteps = new Map<number, TrajectoryStep[]>()
@@ -467,11 +495,13 @@ function generateGame(
   const trueRoles = encodeTrueRoles(state.players)
   for (const [seat, steps] of allSteps) {
     const player = state.players.find(p => p.seat === seat)
+    if (!player) continue
+    const knownSeats = buildKnownSeats(seat, player.role, state)
     for (const step of steps) {
       step.trueRoles = trueRoles
-      if (step.actionHead === 'predict' && step.sigmoidActions && player) {
+      if (step.actionHead === 'predict' && step.sigmoidActions) {
         step.reward += predictAccuracyReward(
-          step.sigmoidActions, trueRoles, player.role, config.rewardConfig,
+          step.sigmoidActions, trueRoles, player.role, config.rewardConfig, knownSeats,
         )
       }
     }
@@ -620,13 +650,13 @@ function ppoUpdate(
 // Evaluation
 // ============================================================
 
-export function evaluate(
+export async function evaluate(
   network: AnyNetwork,
   config: TrainingConfig,
   numGames: number = 50,
   wolfTeamNet?: AnyNetwork,
   masonTeamNet?: AnyNetwork,
-): { winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number } {
+): Promise<{ winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number }> {
   const heuristic = new HeuristicStrategy()
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
   const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
@@ -680,7 +710,25 @@ export function evaluate(
         : new MasonTeamHeuristic(),
     }
     const t0 = performance.now()
-    const { state } = runGame(lupaConfig)
+    let state: import('../../lupa/types.ts').GameState
+    if (config.strategyOnly) {
+      const handlers = minimalAdapter({
+        strategies,
+        defaultStrategy: heuristic,
+        wolfTeamStrategy: lupaConfig.wolfTeamStrategy,
+        masonTeamStrategy: lupaConfig.masonTeamStrategy,
+        onRolesAssigned,
+        seed: 10000 + i,
+      })
+      const result = await runGameNext(
+        { roles, seed: 10000 + i, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+        handlers,
+      )
+      state = result.state
+    } else {
+      const result = runGameLegacy(lupaConfig)
+      state = result.state
+    }
     totalElapsed += performance.now() - t0
 
     const result = state.result ?? 'unknown'
@@ -1085,8 +1133,8 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
             generateGameAsync(config, agents, seed).then(game => ({ game, strategies, wolfTeamStrategy, masonTeamStrategy }))
           )
         } else {
-          const game = generateGame(config, agents, seed)
-          gamePromises.push(Promise.resolve({ game, strategies, wolfTeamStrategy, masonTeamStrategy }))
+          const gamePromise = generateGame(config, agents, seed).then(game => ({ game, strategies, wolfTeamStrategy, masonTeamStrategy }))
+          gamePromises.push(gamePromise)
         }
       }
 
@@ -1232,7 +1280,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
         // TODO: マルチモデル用の evaluate (全グループのモデルを使った対heuristic評価)
         log(`[${iter}] Eval: skipped (multi-model eval not yet implemented)`)
       } else {
-        const evalResult = evaluate(network, config, 30, wolfTeamNet, masonTeamNet)
+        const evalResult = await evaluate(network, config, 30, wolfTeamNet, masonTeamNet)
         log(
           `[${iter}] Eval: ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
           `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/game`
