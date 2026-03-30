@@ -128,6 +128,7 @@ export type WorkerRequest = {
 export type GameTiming = {
   totalMs: number
   gameMs: number
+  retarMs: number
   tsumiMs: number
 }
 

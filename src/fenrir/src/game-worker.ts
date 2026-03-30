@@ -169,7 +169,7 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
     masonTeamStrategy?.resetTrajectory()
 
     const tGameStart = performance.now()
-    const { state, events } = runGame(lupaConfig)
+    const { state, events, retarMs: gameRetarMs } = runGame(lupaConfig)
     const tGameEnd = performance.now()
 
     // Collect trajectories
@@ -274,6 +274,7 @@ function runBatch(req: WorkerRequest): SerializedGameResult[] {
       timing: {
         totalMs: tTsumiEnd - tGameStart,
         gameMs: tGameEnd - tGameStart,
+        retarMs: gameRetarMs ?? 0,
         tsumiMs: tTsumiEnd - tTsumiStart,
       },
     })

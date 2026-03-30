@@ -12,12 +12,14 @@ import {
 import { RandomStrategy } from './random-strategy.ts'
 import { forceTrueRoleCO, resolveVotes } from './heuristic.ts'
 import { detectCommander } from './leadership.ts'
-import { analyzeFromEvents as retarAnalyze, analyzePerPlayer as retarAnalyzePerPlayer, type RetarResult } from './retar-bridge.ts'
+import { analyzeFromEvents as retarAnalyzeRaw, analyzePerPlayer as retarAnalyzePerPlayerRaw, type RetarResult } from './retar-bridge.ts'
 
 export type GameResult = {
   events: GameEvent[]
   state: GameState
   config: LupaConfig
+  /** Retar分析の累積時間 (ms) */
+  retarMs?: number
 }
 
 const defaultStrategy = new RandomStrategy()
@@ -140,6 +142,21 @@ function buildContext(
 }
 
 export function runGame(config: LupaConfig): GameResult {
+  // Retar累積計測ラッパー
+  let retarAccMs = 0
+  const retarAnalyze: typeof retarAnalyzeRaw = (...args) => {
+    const t = performance.now()
+    const r = retarAnalyzeRaw(...args)
+    retarAccMs += performance.now() - t
+    return r
+  }
+  const retarAnalyzePerPlayer: typeof retarAnalyzePerPlayerRaw = (...args) => {
+    const t = performance.now()
+    const r = retarAnalyzePerPlayerRaw(...args)
+    retarAccMs += performance.now() - t
+    return r
+  }
+
   const rng = new Rng(config.seed)
   const totalPlayers = Array.from(config.roles.values()).reduce((a, b) => a + b, 0)
 
@@ -560,8 +577,9 @@ export function runGame(config: LupaConfig): GameResult {
     events.push({ type: 'reveal', seat: player.seat, role: player.role })
   }
 
-  return { events, state, config }
+  return { events, state, config, retarMs: retarAccMs }
 }
+
 
 // ============================================================
 // 非同期版ヘルパー (AsyncStrategy 対応)
@@ -607,6 +625,21 @@ async function asyncDecideForPlayer<T>(
  * AsyncStrategy対応: 人間のCLI入力等、非同期の意思決定をサポート。
  */
 export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
+  // Retar累積計測ラッパー
+  let retarAccMs = 0
+  const retarAnalyze: typeof retarAnalyzeRaw = (...args) => {
+    const t = performance.now()
+    const r = retarAnalyzeRaw(...args)
+    retarAccMs += performance.now() - t
+    return r
+  }
+  const retarAnalyzePerPlayer: typeof retarAnalyzePerPlayerRaw = (...args) => {
+    const t = performance.now()
+    const r = retarAnalyzePerPlayerRaw(...args)
+    retarAccMs += performance.now() - t
+    return r
+  }
+
   const retarFn = config.retarFn ?? ((e, s, c) => Promise.resolve(retarAnalyze(e, s, c)))
   const rng = new Rng(config.seed)
   const totalPlayers = Array.from(config.roles.values()).reduce((a, b) => a + b, 0)
@@ -856,7 +889,7 @@ export async function runGameAsync(config: LupaConfig): Promise<GameResult> {
   }
 
   for (const player of state.players) events.push({ type: 'reveal', seat: player.seat, role: player.role })
-  return { events, state, config }
+  return { events, state, config, retarMs: retarAccMs }
 }
 
 /** 夜アクションを状態に適用（記録のみ） */
