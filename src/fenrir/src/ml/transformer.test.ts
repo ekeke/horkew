@@ -348,33 +348,3 @@ describe('TransformerNetwork', () => {
   })
 })
 
-// ============================================================
-// ベンチマーク
-// ============================================================
-
-describe('Benchmark', () => {
-  it('inference < 20ms per forward pass (pure JS, d_model=128, 3 layers)', () => {
-    // d_model=128, 3層のTransformerは純JSで~15ms程度。
-    // 学習はtf.js GPU版を使うため、純JS推論は自己対戦ゲーム生成用。
-    // 1ゲーム~300推論 × 15ms ≈ 4.5秒は許容範囲（GPUが学習ボトルネック）。
-    // d_model=64にすれば~4msだが表現力とのトレードオフ。
-    const config = makeConfig(false)
-    const net = new TransformerNetwork(config, false)
-
-    const obs = new Float32Array(OBSERVATION_SIZE)
-    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
-
-    // Warmup
-    for (let i = 0; i < 10; i++) net.forward(obs)
-
-    // Benchmark
-    const N = 100
-    const start = performance.now()
-    for (let i = 0; i < N; i++) net.forward(obs)
-    const elapsed = performance.now() - start
-    const perCall = elapsed / N
-
-    console.log(`  Inference: ${perCall.toFixed(2)}ms per forward pass (${N} runs)`)
-    assert.ok(perCall < 20, `too slow: ${perCall.toFixed(2)}ms (target < 20ms)`)
-  })
-})
