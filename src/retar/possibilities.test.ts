@@ -4,7 +4,7 @@ import {
   type SystemRole,
   type RolePossibility,
   combinationWithReplacementInLimit,
-  possibilityFromSet,
+  possibilityFromRoles,
   removeRoleFromPossibility,
   hasRoleInPossibility,
   popCount,
@@ -279,12 +279,12 @@ describe('union', () => {
       ['possessed', 1]
     ])
     const possibilitiesA = new Possibilities(setup)
-    possibilitiesA.set(1, possibilityFromSet(new Set(['seer', 'bodyguard'] as SystemRole[])))
-    possibilitiesA.set(2, possibilityFromSet(new Set(['possessed'] as SystemRole[])))
+    possibilitiesA.set(1, possibilityFromRoles(new Set(['seer', 'bodyguard'] as SystemRole[])))
+    possibilitiesA.set(2, possibilityFromRoles(new Set(['possessed'] as SystemRole[])))
 
     const possibilitiesB = new Possibilities(setup)
-    possibilitiesB.set(1, possibilityFromSet(new Set(['bodyguard'] as SystemRole[])))
-    possibilitiesB.set(2, possibilityFromSet(new Set(['seer'] as SystemRole[])))
+    possibilitiesB.set(1, possibilityFromRoles(new Set(['bodyguard'] as SystemRole[])))
+    possibilitiesB.set(2, possibilityFromRoles(new Set(['seer'] as SystemRole[])))
 
     possibilitiesA.union(possibilitiesB)
 

@@ -25,7 +25,7 @@ import { searchTsumi } from './index.ts'
 import { getEndgameStats, resetEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { VillageRetar } from '../retar/index.ts'
-import { RoleBitIndex, RoleSignatureBits, possibilityFromSet } from '../retar/possibilities.ts'
+import { RoleBitIndex, RoleSignatureBits, possibilityFromRoles } from '../retar/possibilities.ts'
 import { formatStrategy } from './format.ts'
 import type { StrategyNode, World } from './types.ts'
 import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
@@ -627,7 +627,7 @@ function runVerify(args: Args): void {
             const retarResult = retar.analyze()
             const poss = new Uint16Array(setup.values().reduce((a, b) => a + b, 0) + 1)
             for (const [seat, roles] of retarResult.result) {
-              poss[seat] = possibilityFromSet(roles)
+              poss[seat] = possibilityFromRoles(roles)
             }
             retarExcluded = checkRetarInclusion(state, poss, alive)
           } catch { /* ignore */ }

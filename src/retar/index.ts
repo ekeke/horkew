@@ -1,5 +1,5 @@
 import type { CauseOfDeath, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
-import { Possibilities, possibilityFromSet } from './possibilities.ts'
+import { Possibilities, possibilityFromRoles } from './possibilities.ts'
 import { generateCombinations } from './combinatorics.ts'
 import { roleTesterMap, saveContext, restoreContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
@@ -7,6 +7,7 @@ import { buildRoleTestPlan, LiarRoles } from './planBuilder.ts'
 import type { RoleTest } from './planBuilder.ts'
 import { finalize as runFinalize, constrainByDeathCounts, createDebugStash } from './finalizer.ts'
 import type { DebugStash } from './finalizer.ts'
+import { dumpAnalyze, resetDump } from './dump.ts'
 
 
 type SeatPossibility = Set<SystemRole>
@@ -181,7 +182,7 @@ export class VillageRetar {
   private initFromPrior(prior: AnalyzedPossibilities) {
     this.initialPossibilities = new Possibilities(this.setup)
     for ( const [seat, roles] of prior.entries() ) {
-      this.initialPossibilities.possibilities[seat] = possibilityFromSet(roles)
+      this.initialPossibilities.possibilities[seat] = possibilityFromRoles(roles)
     }
 
     // prior ビットマスクに合わせて setup カウントを同期し、確定席の伝播を実行
@@ -432,6 +433,7 @@ export class VillageRetar {
   }
 
   analyze(): AnalyzeResult {
+    resetDump()
     if (this.vs.result === 'werehamster_won' && this.lastDeaths.length > 0) {
       return this.analyzeHamsterWin()
     }
@@ -439,8 +441,8 @@ export class VillageRetar {
     this.runAnalysis()
     const elapsed = performance.now() - t0
     const aborted = this.isAborted()
-    if (!aborted) this.conclusions.computeMaxSurvivingNV(this.computeAliveMask())
-    return {
+    if (!aborted) this.conclusions.computeMaxSurvivingNv(this.computeAliveMask())
+    const res: AnalyzeResult = {
       elapsed,
       batch: this.options.batch,
       id: this.options.id,
@@ -448,6 +450,8 @@ export class VillageRetar {
       result: aborted ? new Map() : this.conclusions.toStructured(),
       maxSurvivingNV: this.conclusions.maxSurvivingNV,
     }
+    dumpAnalyze([...this.conclusions.possibilities].map((bits, seat) => ({ seat, bits })).filter(x => x.seat > 0))
+    return res
   }
 
   // werehamster_won を2パスに分解して分析する
@@ -496,7 +500,7 @@ export class VillageRetar {
 
     const elapsed = performance.now() - t0
     const aborted = this.isAborted()
-    if (!aborted) this.conclusions.computeMaxSurvivingNV(this.computeAliveMask())
+    if (!aborted) this.conclusions.computeMaxSurvivingNv(this.computeAliveMask())
     return {
       elapsed,
       batch: this.options.batch,

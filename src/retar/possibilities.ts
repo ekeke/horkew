@@ -83,7 +83,7 @@ export function rolesFromPossibility(bit: number): SystemRole[] {
   return bitsetToArray(bit).map(num => RoleSignatureBitsReverseMap.get(num)!)
 }
 
-export function possibilityFromSet(roles: Set<SystemRole>): RolePossibility {
+export function possibilityFromRoles(roles: Set<SystemRole>): RolePossibility {
   let result: RolePossibility = 0
   for (const role of roles) {
     result |= RoleSignatureBits[role]
@@ -184,7 +184,7 @@ export class Possibilities {
   possibilities: Uint16Array
   setup: Uint8Array
   setupOriginal!: Uint8Array
-  /** 最大生存人外数（事前計算済み。computeMaxSurvivingNV() で設定） */
+  /** 最大生存人外数（事前計算済み。computeMaxSurvivingNv() で設定） */
   maxSurvivingNV: number = 0
   constructor(
     setup: Map<SystemRole, number> | Uint16Array | number,
@@ -359,7 +359,7 @@ export class Possibilities {
    *
    * alive: 生存者ビットマスク (bit N = seat N が生存)
    */
-  computeMaxSurvivingNV(alive: number): void {
+  computeMaxSurvivingNv(alive: number): void {
     const villageMask = ~Liar & AllRoles
 
     // 配役上の人外総数

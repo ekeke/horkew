@@ -2,6 +2,7 @@ import type { VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
 import type { AnalyzeContext } from './roleTesters.ts'
 import { solvePossibilities } from './solver.ts'
+import { dumpFinalizePre } from './dump.ts'
 
 /**
  * 死体数の検証。各日の夜死体数が仮説と整合するか確認する。
@@ -97,6 +98,7 @@ export function finalize(
   cachedSurvivingMap: Map<Seat, boolean>,
 ): void {
   debugStash.finalizerRuns++
+  dumpFinalizePre(context.possibilities)
   // ここまで処理が終わったところで、襲撃死した人物は非狼とみなす
   for ( const [seat, status] of vs.statuses.entries() ) {
     if ( !status.surviving && status.causeOfDeath === 'night_kill' ) {

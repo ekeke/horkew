@@ -28,9 +28,10 @@ import { formatHowl } from './format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
-import type { AnalyzeOptions, AnalyzedPossibilities } from '../retar/index.ts'
+import type { AnalyzeOptions, AnalyzedPossibilities, AnalyzeResult } from '../retar/index.ts'
 import { serializeVillageStatus, serializeOptions, parseWasmResult } from '../retar/wasm-helpers.ts'
 import { buildAssumptions } from './retar-bridge.ts'
+import { enableDump, disableDump, resetDump, getDump } from '../retar/dump.ts'
 
 // WASM ロード（--compat 時のみ使用）
 let wasmAnalyze: ((village: string, setup: string, options: string) => string) | null = null
@@ -315,6 +316,7 @@ function verifyPriorCheckpoint(
 
 /**
  * Compat検証: JS版とWASM版の出力が完全一致するか
+ * 不一致時は dump を有効にして再実行し、最初に差異が出た中間ステップを特定する
  */
 function verifyCompatCheckpoint(
   events: GameEvent[],
@@ -360,7 +362,12 @@ function verifyCompatCheckpoint(
     deepStrictEqual({ ...wasmRaw, elapsed: undefined }, { ...jsResult, elapsed: undefined })
     return { failure: null, skipped: false, retarMs }
   } catch (e: any) {
-    const message = e.message ?? String(e)
+    // 不一致検出 → dump 有効で再実行し中間結果を収集
+    const tsDump = collectTsDump(vs, setup, options)
+    const rsDump = collectRsDump(vsJson, setupJson, optJson)
+    const diffSummary = formatCompatDiff(jsResult, wasmRaw, tsDump, rsDump)
+
+    const message = diffSummary
     const annotatedHowl = partialHowl.trimEnd() + '\n\n'
       + `# [compat] ${message}\n`
     return {
@@ -371,6 +378,107 @@ function verifyCompatCheckpoint(
       skipped: false, retarMs,
     }
   }
+}
+
+/**
+ * dump を有効にして TS 版を再実行し、中間結果を収集する
+ */
+function collectTsDump(
+  vs: VillageStatus,
+  setup: Map<SystemRole, number>,
+  options: AnalyzeOptions,
+): string[] {
+  resetDump()
+  enableDump()
+  try {
+    const retar2 = new VillageRetar(vs, setup, options)
+    retar2.analyze()
+  } finally {
+    disableDump()
+  }
+  return getDump()
+}
+
+/**
+ * WASM 版を dump 有効で実行し、中間結果を収集する
+ */
+let wasmAnalyzeWithDump: ((village: string, setup: string, options: string) => string) | null = null
+try {
+  const wasm = await import('../retar-rs/pkg/retar.js')
+  wasmAnalyzeWithDump = wasm.analyze_with_dump ?? null
+} catch {
+  // WASM not available
+}
+
+function collectRsDump(vsJson: string, setupJson: string, optJson: string): string[] {
+  if (!wasmAnalyzeWithDump) return []
+  const raw = wasmAnalyzeWithDump(vsJson, setupJson, optJson)
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed.dump ?? []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * TS dump と Rust dump を行単位で比較し、最初の差分箇所を報告する
+ */
+function formatCompatDiff(
+  jsResult: AnalyzeResult,
+  wasmResult: AnalyzeResult,
+  tsDump: string[],
+  rsDump: string[],
+): string {
+  const lines: string[] = []
+
+  // 最終結果の seat 差分
+  const allSeats = new Set([...jsResult.result.keys(), ...wasmResult.result.keys()])
+  for (const seat of [...allSeats].sort((a, b) => a - b)) {
+    const jsRoles = jsResult.result.get(seat)
+    const wasmRoles = wasmResult.result.get(seat)
+    const jsSet = jsRoles ? [...jsRoles].sort() : []
+    const wasmSet = wasmRoles ? [...wasmRoles].sort() : []
+    if (JSON.stringify(jsSet) !== JSON.stringify(wasmSet)) {
+      const tsOnly = jsSet.filter(r => !wasmSet.includes(r))
+      const rsOnly = wasmSet.filter(r => !jsSet.includes(r))
+      const parts: string[] = [`seat ${seat}:`]
+      if (tsOnly.length > 0) parts.push(`TS+[${tsOnly.join(',')}]`)
+      if (rsOnly.length > 0) parts.push(`Rust+[${rsOnly.join(',')}]`)
+      lines.push(parts.join(' '))
+    }
+  }
+  if (jsResult.maxSurvivingNV !== wasmResult.maxSurvivingNV) {
+    lines.push(`maxSurvivingNV: TS=${jsResult.maxSurvivingNV} Rust=${wasmResult.maxSurvivingNV}`)
+  }
+
+  // dump diff: 最初に異なる行を特定
+  if (rsDump.length === 0) {
+    lines.push(`\n[dump] Rust dump が取得できません。dump 付き WASM をビルドしてください:`)
+    lines.push(`  bash src/retar-rs/build.sh build-dump`)
+    if (tsDump.length > 0) {
+      lines.push(`\n--- TS dump (${tsDump.length} steps, Rust 比較なし) ---`)
+      for (const line of tsDump.slice(0, 10)) lines.push(`  ${line}`)
+      if (tsDump.length > 10) lines.push(`  ... (${tsDump.length - 10} more)`)
+    }
+  } else {
+    const maxLen = Math.max(tsDump.length, rsDump.length)
+    for (let i = 0; i < maxLen; i++) {
+      const ts = tsDump[i] ?? '(missing)'
+      const rs = rsDump[i] ?? '(missing)'
+      if (ts !== rs) {
+        lines.push(`\nfirst diff at step ${i}:`)
+        lines.push(`  TS:   ${ts}`)
+        lines.push(`  Rust: ${rs}`)
+        break
+      }
+    }
+    if (tsDump.length > 0 && tsDump.length === rsDump.length && tsDump.every((l, i) => l === rsDump[i])) {
+      lines.push(`\ndump identical (${tsDump.length} steps) — diff is in non-instrumented code`)
+    }
+  }
+
+  return lines.join('\n')
 }
 
 /**

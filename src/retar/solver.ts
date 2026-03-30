@@ -1,4 +1,5 @@
 import type { SystemRole, Seat } from '../types/index.ts'
+import { dumpSolveResult } from './dump.ts'
 import {
   Possibilities,
   RoleSignatureBits,
@@ -299,6 +300,10 @@ export function solvePossibilities(
     roleCount,
     0, 0, 0, [], true,
   )
-  if (!res) return undefined
+  if (!res) {
+    dumpSolveResult(undefined)
+    return undefined
+  }
+  dumpSolveResult(config.conclusion)
   return config.conclusion
 }
