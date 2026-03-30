@@ -7,9 +7,9 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame as runGameLegacy, runGameAsync } from '../../lupa/engine.ts'
-import { runGame as runGameNext } from '../../lupa/engine-next.ts'
+import { runGame } from '../../lupa/engine-next.ts'
 import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
+import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-node-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
 import type { NetworkConfig, AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
@@ -409,32 +409,33 @@ async function generateGame(
       } : undefined,
       seed,
     })
-    const result = await runGameNext(
+    const result = await runGame(
       { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
       handlers,
     )
     state = result.state
     events = result.events
   } else {
-    const lupaConfig: LupaConfig = {
-      roles,
-      seed,
+    const handlers = strategyAdapter({
       strategies: strategiesMap,
-      defaultStrategy: agents.defaultStrategy,
+      defaultStrategy: agents.defaultStrategy ?? new HeuristicStrategy(),
+      wolfTeamStrategy: agents.wolfTeamStrategy,
+      masonTeamStrategy: agents.masonTeamStrategy,
+      enableRetar: config.enableRetar,
       onRolesAssigned: agents.onRolesAssigned ? (seatRoles) => {
         agents.onRolesAssigned!(seatRoles)
         for (const [seat, s] of agents.strategies) {
           if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
         }
       } : undefined,
-      enableRetar: config.enableRetar,
-      hasFirstGhost: config.hasFirstGhost,
-      revoteConfig: config.revoteConfig,
+      seed,
+      roles,
       rules: config.rules,
-      wolfTeamStrategy: agents.wolfTeamStrategy,
-      masonTeamStrategy: agents.masonTeamStrategy,
-    }
-    const result = runGameLegacy(lupaConfig)
+    })
+    const result = await runGame(
+      { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+      handlers,
+    )
     state = result.state
     events = result.events
   }
@@ -515,7 +516,7 @@ async function generateGame(
   }
 }
 
-/** 非同期版: runGameAsync + 並列Retarを使用 */
+/** 非同期版: strategy-adapter + Retarを使用 */
 async function generateGameAsync(
   config: TrainingConfig,
   agents: GameAgents,
@@ -524,31 +525,31 @@ async function generateGameAsync(
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
 
   const strategiesMap = new Map<number, Strategy>(agents.strategies)
-  const lupaConfig: LupaConfig = {
-    roles,
-    seed,
+  const handlers = strategyAdapter({
     strategies: strategiesMap,
-    defaultStrategy: agents.defaultStrategy,
+    defaultStrategy: agents.defaultStrategy ?? new HeuristicStrategy(),
+    wolfTeamStrategy: agents.wolfTeamStrategy,
+    masonTeamStrategy: agents.masonTeamStrategy,
+    enableRetar: config.enableRetar,
     onRolesAssigned: agents.onRolesAssigned ? (seatRoles) => {
       agents.onRolesAssigned!(seatRoles)
       for (const [seat, s] of agents.strategies) {
         if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
       }
     } : undefined,
-    enableRetar: config.enableRetar,
-    hasFirstGhost: config.hasFirstGhost,
-    revoteConfig: config.revoteConfig,
+    seed,
+    roles,
     rules: config.rules,
-    wolfTeamStrategy: agents.wolfTeamStrategy,
-    masonTeamStrategy: agents.masonTeamStrategy,
-    retarFn: analyzeFromEventsParallel,
-  }
+  })
 
   for (const s of agents.strategies.values()) s.resetTrajectory?.()
   agents.wolfTeamStrategy?.resetTrajectory()
   agents.masonTeamStrategy?.resetTrajectory()
 
-  const { state, events } = await runGameAsync(lupaConfig)
+  const { state, events } = await runGame(
+    { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+    handlers,
+  )
 
   // 以降はgenerateGameと同一のトラジェクトリ収集
   const allSteps = new Map<number, TrajectoryStep[]>()
@@ -720,13 +721,27 @@ export async function evaluate(
         onRolesAssigned,
         seed: 10000 + i,
       })
-      const result = await runGameNext(
+      const result = await runGame(
         { roles, seed: 10000 + i, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
         handlers,
       )
       state = result.state
     } else {
-      const result = runGameLegacy(lupaConfig)
+      const handlers = strategyAdapter({
+        strategies,
+        defaultStrategy: heuristic,
+        wolfTeamStrategy: lupaConfig.wolfTeamStrategy,
+        masonTeamStrategy: lupaConfig.masonTeamStrategy,
+        enableRetar: config.enableRetar,
+        onRolesAssigned,
+        seed: 10000 + i,
+        roles,
+        rules: config.rules,
+      })
+      const result = await runGame(
+        { roles, seed: 10000 + i, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+        handlers,
+      )
       state = result.state
     }
     totalElapsed += performance.now() - t0

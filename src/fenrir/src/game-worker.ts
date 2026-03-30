@@ -9,9 +9,9 @@ import { parentPort } from 'node:worker_threads'
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame as runGameLegacy } from '../../lupa/engine.ts'
-import { runGame as runGameNext } from '../../lupa/engine-next.ts'
+import { runGame } from '../../lupa/engine-next.ts'
 import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
+import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
@@ -143,26 +143,9 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       }
     }
 
-    // Build LupaConfig
     const strategiesMap = new Map<number, Strategy>(strategies)
-    const lupaConfig: LupaConfig = {
-      roles,
-      seed,
-      strategies: strategiesMap,
-      defaultStrategy,
-      onRolesAssigned: onRolesAssigned ? (seatRoles) => {
-        onRolesAssigned(seatRoles)
-        for (const [seat, s] of strategies) {
-          if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
-        }
-      } : undefined,
-      enableRetar: config.enableRetar,
-      hasFirstGhost: config.hasFirstGhost,
-      revoteConfig: config.revoteConfig,
-      rules: config.rules,
-      wolfTeamStrategy,
-      masonTeamStrategy,
-    }
+    // formatHowl 用の最小設定
+    const lupaConfig = { roles, seed } as LupaConfig
 
     // Reset trajectories
     for (const s of strategies.values()) s.resetTrajectory?.()
@@ -174,33 +157,48 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     let events: import('../../lupa/types.ts').GameEvent[]
     let gameRetarMs = 0
 
+    const onRolesAssignedWrapped = onRolesAssigned ? (seatRoles: Map<number, SystemRole>) => {
+      onRolesAssigned(seatRoles)
+      for (const [seat, s] of strategies) {
+        if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
+      }
+    } : undefined
+
     if (config.strategyOnly) {
-      // 新エンジン + minimal-adapter: 議論フェーズ全スキップで高速化
+      // minimal-adapter: 議論フェーズ全スキップで高速化
       const handlers = minimalAdapter({
         strategies: strategiesMap,
         defaultStrategy,
         wolfTeamStrategy,
         masonTeamStrategy,
-        onRolesAssigned: onRolesAssigned ? (seatRoles) => {
-          onRolesAssigned(seatRoles)
-          for (const [seat, s] of strategies) {
-            if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
-          }
-        } : undefined,
+        onRolesAssigned: onRolesAssignedWrapped,
         seed,
       })
-      const result = await runGameNext(
+      const result = await runGame(
         { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
         handlers,
       )
       state = result.state
       events = result.events
     } else {
-      // 旧エンジン: 全フェーズ実行
-      const result = runGameLegacy(lupaConfig)
+      // strategy-adapter: 全フェーズ実行
+      const handlers = strategyAdapter({
+        strategies: strategiesMap,
+        defaultStrategy: defaultStrategy ?? new HeuristicStrategy(),
+        wolfTeamStrategy,
+        masonTeamStrategy,
+        enableRetar: config.enableRetar,
+        onRolesAssigned: onRolesAssignedWrapped,
+        seed,
+        roles,
+        rules: config.rules,
+      })
+      const result = await runGame(
+        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+        handlers,
+      )
       state = result.state
       events = result.events
-      gameRetarMs = result.retarMs ?? 0
     }
     const tGameEnd = performance.now()
 

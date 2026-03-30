@@ -4,7 +4,9 @@
  */
 import type { SystemRole } from '../types/index.ts'
 import type { GameEvent, GameState } from '../lupa/types.ts'
-import { runGame } from '../lupa/engine.ts'
+import { runGame } from '../lupa/engine-next.ts'
+import { strategyAdapter } from '../lupa/adapters/strategy-adapter.ts'
+import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../lupa/heuristic.ts'
 import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
@@ -45,7 +47,7 @@ type Config = {
   hasFirstGhost?: boolean
 }
 
-function benchConfig(cfg: Config) {
+async function benchConfig(cfg: Config) {
   resetEndgameStats()
 
   let totalMs = 0
@@ -56,11 +58,20 @@ function benchConfig(cfg: Config) {
   for (let seed = cfg.seeds[0]; seed < cfg.seeds[1]; seed++) {
     let events: GameEvent[], state: GameState
     try {
-      const result = runGame({
+      const gameConfig = {
         roles: cfg.roles, seed,
         hasFirstGhost: cfg.hasFirstGhost,
         revoteConfig: { maxRevotes: 2, style: 'full_revote' as const, tiebreaker: 'draw' as const },
+      }
+      const handlers = strategyAdapter({
+        defaultStrategy: new HeuristicStrategy(),
+        wolfTeamStrategy: new WolfTeamHeuristic(),
+        masonTeamStrategy: new MasonTeamHeuristic(),
+        enableRetar: false,
+        seed,
+        roles: cfg.roles,
       })
+      const result = await runGame(gameConfig, handlers)
       events = result.events; state = result.state
     } catch (e) { console.error('  game error:', e); continue }
 
@@ -113,7 +124,7 @@ function benchConfig(cfg: Config) {
 console.log('=== Hati Benchmark ===\n')
 const t0 = performance.now()
 
-benchConfig({
+await benchConfig({
   name: 'small-8p',
   roles: new Map<SystemRole, number>([
     ['werewolf', 1], ['villager', 4], ['seer', 1], ['mason', 2],
@@ -123,7 +134,7 @@ benchConfig({
 
 console.log('')
 
-benchConfig({
+await benchConfig({
   name: '14d-neko',
   roles: new Map<SystemRole, number>([
     ['werewolf', 3], ['villager', 2], ['seer', 1], ['medium', 1], ['bodyguard', 1],
@@ -135,7 +146,7 @@ benchConfig({
 
 console.log('')
 
-benchConfig({
+await benchConfig({
   name: '14d-neko-10k',
   roles: new Map<SystemRole, number>([
     ['werewolf', 3], ['villager', 2], ['seer', 1], ['medium', 1], ['bodyguard', 1],

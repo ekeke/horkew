@@ -11,7 +11,8 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame } from '../../lupa/engine.ts'
+import { runGame } from '../../lupa/engine-next.ts'
+import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import { createNetwork, createWolfTeamNetwork, createMasonTeamNetwork, DEFAULT_TRAINING_CONFIG } from './training.ts'
@@ -207,22 +208,29 @@ if (mldir) {
     ? new MasonTeamStrategy(masonTeamNet, { explore: false })
     : new MasonTeamHeuristic()
 
-  const config: LupaConfig = {
-    roles,
-    seed: seed ?? Math.floor(Math.random() * 100000),
+  const gameSeed = seed ?? Math.floor(Math.random() * 100000)
+  const handlers = strategyAdapter({
     strategies: strategiesMap,
     defaultStrategy: heuristic,
-    onRolesAssigned,
-    enableRetar: true,
-    hasFirstGhost: DEFAULT_TRAINING_CONFIG.hasFirstGhost,
-    revoteConfig: DEFAULT_TRAINING_CONFIG.revoteConfig,
-    rules: DEFAULT_TRAINING_CONFIG.rules,
     wolfTeamStrategy,
     masonTeamStrategy,
-  }
-
-  const { events, state } = runGame(config)
-  console.log(formatHowl(events, state, config))
+    enableRetar: true,
+    onRolesAssigned,
+    seed: gameSeed,
+    roles,
+    rules: DEFAULT_TRAINING_CONFIG.rules,
+  })
+  const { events, state, config } = await runGame(
+    {
+      roles,
+      seed: gameSeed,
+      hasFirstGhost: DEFAULT_TRAINING_CONFIG.hasFirstGhost,
+      revoteConfig: DEFAULT_TRAINING_CONFIG.revoteConfig,
+      rules: DEFAULT_TRAINING_CONFIG.rules,
+    },
+    handlers,
+  )
+  console.log(formatHowl(events, state, config as unknown as LupaConfig))
 
 } else {
   // === --checkpoint モード (レガシー) ===
@@ -248,16 +256,24 @@ if (mldir) {
     }
   }
 
-  const config: LupaConfig = {
-    roles,
-    seed: seed ?? Math.floor(Math.random() * 100000),
+  const gameSeed = seed ?? Math.floor(Math.random() * 100000)
+  const handlers = strategyAdapter({
     strategies,
+    defaultStrategy: heuristic,
     enableRetar: true,
-    hasFirstGhost: DEFAULT_TRAINING_CONFIG.hasFirstGhost,
-    revoteConfig: DEFAULT_TRAINING_CONFIG.revoteConfig,
+    seed: gameSeed,
+    roles,
     rules: DEFAULT_TRAINING_CONFIG.rules,
-  }
-
-  const { events, state } = runGame(config)
-  console.log(formatHowl(events, state, config))
+  })
+  const { events, state, config } = await runGame(
+    {
+      roles,
+      seed: gameSeed,
+      hasFirstGhost: DEFAULT_TRAINING_CONFIG.hasFirstGhost,
+      revoteConfig: DEFAULT_TRAINING_CONFIG.revoteConfig,
+      rules: DEFAULT_TRAINING_CONFIG.rules,
+    },
+    handlers,
+  )
+  console.log(formatHowl(events, state, config as unknown as LupaConfig))
 }

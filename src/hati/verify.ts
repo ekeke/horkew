@@ -17,7 +17,9 @@ function sleepMs(ms: number) { if (ms > 0) Atomics.wait(_sleepBuf, 0, 0, ms) }
 import { join } from 'node:path'
 import type { SystemRole } from '../types/index.ts'
 import type { GameEvent, GameState } from '../lupa/types.ts'
-import { runGame } from '../lupa/engine.ts'
+import { runGame } from '../lupa/engine-next.ts'
+import { strategyAdapter } from '../lupa/adapters/strategy-adapter.ts'
+import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../lupa/heuristic.ts'
 import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
@@ -342,7 +344,7 @@ Options:
   return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb, noStrategy, fnFromDb, deepCheck, cpuLimit }
 }
 
-function runVerify(args: Args): void {
+async function runVerify(args: Args): Promise<void> {
   const selectedConfigs = args.scenario
     ? configs.filter(c => c.name === args.scenario)
     : configs
@@ -415,12 +417,20 @@ function runVerify(args: Args): void {
       let events: GameEvent[]
       let state: GameState
       try {
-        const lupaConfig = {
+        const gameConfig = {
           roles, seed,
           hasFirstGhost: cfg.hasFirstGhost,
           revoteConfig: cfg.revoteConfig ?? { maxRevotes: 2, style: 'full_revote' as const, tiebreaker: 'draw' as const },
         }
-        const result = runGame(lupaConfig)
+        const handlers = strategyAdapter({
+          defaultStrategy: new HeuristicStrategy(),
+          wolfTeamStrategy: new WolfTeamHeuristic(),
+          masonTeamStrategy: new MasonTeamHeuristic(),
+          enableRetar: false,
+          seed,
+          roles,
+        })
+        const result = await runGame(gameConfig, handlers)
         events = result.events
         state = result.state
       } catch {
@@ -780,7 +790,7 @@ type TsumiDbEntry = {
   alive: number
 }
 
-function runFalseNegativeFromDb(args: Args): void {
+async function runFalseNegativeFromDb(args: Args): Promise<void> {
   const dbFile = args.fnFromDb!
   const lines = readFileSync(dbFile, 'utf-8').split('\n').filter(l => l.trim())
   const entries: TsumiDbEntry[] = lines.map(l => JSON.parse(l))
@@ -848,18 +858,26 @@ function runFalseNegativeFromDb(args: Args): void {
       // ゲームを再生
       let howl: string
       try {
-        const lupaConfig = {
+        const gameConfig = {
           roles, seed: entry.seed,
           hasFirstGhost: cfg.hasFirstGhost,
           revoteConfig: cfg.revoteConfig ?? { maxRevotes: 2, style: 'full_revote' as const, tiebreaker: 'draw' as const },
         }
-        const result = runGame(lupaConfig)
-        const lupaConfigForFormat = {
+        const handlers = strategyAdapter({
+          defaultStrategy: new HeuristicStrategy(),
+          wolfTeamStrategy: new WolfTeamHeuristic(),
+          masonTeamStrategy: new MasonTeamHeuristic(),
+          enableRetar: false,
+          seed: entry.seed,
+          roles,
+        })
+        const result = await runGame(gameConfig, handlers)
+        const formatConfig = {
           roles, seed: entry.seed,
           hasFirstGhost: cfg.hasFirstGhost,
           revoteConfig: cfg.revoteConfig,
         }
-        howl = formatHowl(result.events, result.state, lupaConfigForFormat)
+        howl = formatHowl(result.events, result.state, formatConfig)
       } catch { continue }
 
       const checkpoints = findExecutionCheckpoints(howl)
@@ -920,7 +938,7 @@ function runFalseNegativeFromDb(args: Args): void {
 // --- 実行 ---
 const args = parseArgs(process.argv.slice(2))
 if (args.fnFromDb) {
-  runFalseNegativeFromDb(args)
+  await runFalseNegativeFromDb(args)
 } else {
-  runVerify(args)
+  await runVerify(args)
 }

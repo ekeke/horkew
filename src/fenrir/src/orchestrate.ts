@@ -13,9 +13,9 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame as runGameLegacy } from '../../lupa/engine.ts'
-import { runGame as runGameNext } from '../../lupa/engine-next.ts'
+import { runGame } from '../../lupa/engine-next.ts'
 import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
+import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
@@ -241,25 +241,6 @@ async function generateGame(
   }
 
   const strategiesMap = new Map<number, Strategy>(strategies)
-  const lupaConfig: LupaConfig = {
-    roles,
-    seed,
-    strategies: strategiesMap,
-    defaultStrategy: heuristic,
-    onRolesAssigned: (seatRoles) => {
-      onRolesAssigned(seatRoles)
-      for (const [seat, s] of strategies) {
-        if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
-      }
-    },
-    enableRetar: trainingConfig.enableRetar,
-    hasFirstGhost: trainingConfig.hasFirstGhost,
-    revoteConfig: trainingConfig.revoteConfig,
-    rules: trainingConfig.rules,
-    wolfTeamStrategy: wolfTeamStrategy ?? new WolfTeamHeuristic(),
-    masonTeamStrategy: masonTeamStrategy ?? new MasonTeamHeuristic(),
-  }
-
   for (const s of strategies.values()) s.resetTrajectory?.()
   wolfTeamStrategy?.resetTrajectory()
   masonTeamStrategy?.resetTrajectory()
@@ -281,14 +262,33 @@ async function generateGame(
       },
       seed,
     })
-    const result = await runGameNext(
+    const result = await runGame(
       { roles, seed, hasFirstGhost: trainingConfig.hasFirstGhost, revoteConfig: trainingConfig.revoteConfig, rules: trainingConfig.rules },
       handlers,
     )
     state = result.state
     events = result.events
   } else {
-    const result = runGameLegacy(lupaConfig)
+    const handlers = strategyAdapter({
+      strategies: strategiesMap,
+      defaultStrategy: heuristic,
+      wolfTeamStrategy: wolfTeamStrategy ?? new WolfTeamHeuristic(),
+      masonTeamStrategy: masonTeamStrategy ?? new MasonTeamHeuristic(),
+      enableRetar: trainingConfig.enableRetar,
+      onRolesAssigned: (seatRoles) => {
+        onRolesAssigned(seatRoles)
+        for (const [seat, s] of strategies) {
+          if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
+        }
+      },
+      seed,
+      roles,
+      rules: trainingConfig.rules,
+    })
+    const result = await runGame(
+      { roles, seed, hasFirstGhost: trainingConfig.hasFirstGhost, revoteConfig: trainingConfig.revoteConfig, rules: trainingConfig.rules },
+      handlers,
+    )
     state = result.state
     events = result.events
   }
