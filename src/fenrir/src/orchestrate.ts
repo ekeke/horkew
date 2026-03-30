@@ -45,16 +45,18 @@ import {
 // ============================================================
 
 const MODEL_GROUPS = {
-  village:  { roles: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata', 'mason'] as SystemRole[], faction: 'villageWin', teamType: 'mason_team' as const },
-  wolf:     { roles: ['werewolf', 'fanatic'] as SystemRole[], faction: 'wolfWin', teamType: 'wolf_team' as const },
-  third:    { roles: ['werehamster', 'immoralist'] as SystemRole[], faction: 'hamsterWin', teamType: undefined },
+  village:          { roles: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata'] as SystemRole[], faction: 'villageWin', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
+  wolf_collective:  { roles: ['werewolf'] as SystemRole[], faction: 'wolfWin', collective: true, teamType: 'wolf_team' as const },
+  mason_collective: { roles: ['mason'] as SystemRole[], faction: 'villageWin', collective: true, teamType: 'mason_team' as const },
+  fanatic:          { roles: ['fanatic'] as SystemRole[], faction: 'wolfWin', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
+  third:            { roles: ['werehamster', 'immoralist'] as SystemRole[], faction: 'hamsterWin', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
 }
 
 type ModelName = keyof typeof MODEL_GROUPS
 const MODEL_NAMES = Object.keys(MODEL_GROUPS) as ModelName[]
 
 const COLORS: Record<ModelName, string> = {
-  village: '\x1b[33m', wolf: '\x1b[31m', third: '\x1b[32m',
+  village: '\x1b[33m', wolf_collective: '\x1b[31m', mason_collective: '\x1b[36m', fanatic: '\x1b[35m', third: '\x1b[32m',
 }
 const RESET = '\x1b[0m'
 const BOLD = '\x1b[1m'

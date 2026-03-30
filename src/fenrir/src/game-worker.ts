@@ -13,7 +13,7 @@ import { runGame } from '../../lupa/engine.ts'
 import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import type { AnyNetwork } from './ml/nn.ts'
-import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
+import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import { terminalReward, intermediateReward, tsumiReward, predictAccuracyReward, buildKnownSeats, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { formatHowl } from '../../lupa/format.ts'
@@ -43,10 +43,12 @@ function buildNetwork(shared: SharedWeights, isTeam: boolean = false): AnyNetwor
   return buildNetworkFromShared(shared, isTeam)
 }
 
-/** role → モデルグループ名の逆引きマップ (コンパイル時定数相当) */
+/** role → モデルグループ名の逆引きマップ (5モデル構成) */
 const ROLE_TO_GROUP: Record<string, string> = {
-  villager: 'village', seer: 'village', medium: 'village', bodyguard: 'village', nekomata: 'village', mason: 'village',
-  werewolf: 'wolf', fanatic: 'wolf',
+  villager: 'village', seer: 'village', medium: 'village', bodyguard: 'village', nekomata: 'village',
+  werewolf: 'wolf_collective',
+  mason: 'mason_collective',
+  fanatic: 'fanatic',
   werehamster: 'third', immoralist: 'third',
 }
 
