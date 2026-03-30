@@ -26,8 +26,6 @@ export type DecisionContext = {
   maxSurvivingNV: number | null
   /** グローバルRetar: 公開情報のみから計算した可能性 (enableRetar時にエンジンが注入) */
   globalRetarPossibilities: Map<number, Set<SystemRole>> | null
-  /** 騙り前提Retar: 自分が偽物だと仮定した場合の可能性 (暫定: globalRetarと同値) */
-  fakeRetarPossibilities: Map<number, Set<SystemRole>> | null
   /** 人狼 → 他の人狼のseat一覧 (人狼以外はnull) */
   wolfTeammates: number[] | null
   /** 狂信者 → 人狼のseat一覧 (狂信者以外はnull) */

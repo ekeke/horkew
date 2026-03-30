@@ -56,8 +56,7 @@ const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 210
 const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
 // グローバルRetar: 公開情報のみで計算した可能性 (Step 6)
 const GLOBAL_RETAR_SIZE = SEATS * NUM_ROLES  // 154
-// 騙り前提Retar: 自分が偽物だと仮定した場合の可能性 (Step 6)
-const FAKE_RETAR_SIZE = SEATS * NUM_ROLES  // 154
+// 騙り前提Retar: 廃止 — 将来的に村NN出力注入で代替
 
 // 処刑プラン: per-seat(included, position) + global(length, is_grayran, active)
 const PLAN_PER_SEAT_SIZE = 2
@@ -79,7 +78,7 @@ const PLAN_TOKENS_COUNT_SIZE = 1
 const PLAN_TOKENS_DATA_SIZE = MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES  // 160
 const PLAN_TOKENS_SIZE = PLAN_TOKENS_COUNT_SIZE + PLAN_TOKENS_DATA_SIZE  // 161
 
-export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + GLOBAL_RETAR_SIZE + FAKE_RETAR_SIZE + PLAN_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE + PLAN_TOKENS_SIZE
+export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + GLOBAL_RETAR_SIZE + PLAN_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE + PLAN_TOKENS_SIZE
 
 // ============================================================
 // Transformer用トークン化
@@ -100,8 +99,7 @@ const REVOTE_CANDIDATES_START = REVOTE_START + 1
 const HISTORY_START = REVOTE_START + REVOTE_SIZE
 const RETAR_START = HISTORY_START + HISTORY_SIZE
 const GLOBAL_RETAR_START = RETAR_START + RETAR_POSSIBILITIES_SIZE
-const FAKE_RETAR_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
-const PLAN_START = FAKE_RETAR_START + FAKE_RETAR_SIZE
+const PLAN_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
 const PLAN_INCLUDED_START = PLAN_START
 const PLAN_POSITION_START = PLAN_START + SEATS
 const PLAN_GLOBAL_START = PLAN_START + SEATS * PLAN_PER_SEAT_SIZE
@@ -125,9 +123,9 @@ export const CLS_FEATURES = 25
 /** CLSトークンの特徴量次元 (team) */
 export const TEAM_CLS_FEATURES = 26
 /** 席トークンの特徴量次元 (individual) */
-export const SEAT_TOKEN_FEATURES = 84  // 57 + globalRetar(11) + fakeRetar(11) + plan_approved(1) + new_signals(4)
+export const SEAT_TOKEN_FEATURES = 73  // 57 + globalRetar(11) + plan_approved(1) + new_signals(4)
 /** 席トークンの特徴量次元 (team) */
-export const TEAM_SEAT_TOKEN_FEATURES = 87  // 84 + team(3)
+export const TEAM_SEAT_TOKEN_FEATURES = 76  // 73 + team(3)
 
 /** CO可能役職 (Role token対象) */
 export const CO_ROLES: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
@@ -212,10 +210,6 @@ export function tokenize(obs: Float32Array, isTeam: boolean = false): TokenizedO
     // global retar possibilities (11) — 公開情報のみ
     const grOff = GLOBAL_RETAR_START + s * NUM_ROLES
     for (let i = 0; i < NUM_ROLES; i++) seats[so++] = obs[grOff + i]
-
-    // fake retar possibilities (11) — 騙り前提
-    const frOff = FAKE_RETAR_START + s * NUM_ROLES
-    for (let i = 0; i < NUM_ROLES; i++) seats[so++] = obs[frOff + i]
 
     // plan per-seat (2)
     seats[so++] = obs[PLAN_INCLUDED_START + s]
@@ -576,21 +570,6 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
     }
   }
   offset += GLOBAL_RETAR_SIZE
-
-  // ========== Fake Retar (騙り前提) ==========
-  if (ctx.fakeRetarPossibilities) {
-    for (let seat = 1; seat <= SEATS; seat++) {
-      const roles = ctx.fakeRetarPossibilities.get(seat)
-      if (!roles) continue
-      for (const role of roles) {
-        const rIdx = ROLE_INDEX.get(role)
-        if (rIdx !== undefined) {
-          obs[offset + (seat - 1) * NUM_ROLES + rIdx] = 1
-        }
-      }
-    }
-  }
-  offset += FAKE_RETAR_SIZE
 
   // ========== Execution Plan (primary plan — backward compat) ==========
   const primaryPlan = ctx.executionPlans.length > 0 ? ctx.executionPlans[0] : null

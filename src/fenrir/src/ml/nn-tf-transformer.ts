@@ -43,9 +43,7 @@ const RETAR_START = HISTORY_START + HISTORY_SIZE
 const RETAR_SIZE = SEATS * NUM_ROLES
 const GLOBAL_RETAR_START = RETAR_START + RETAR_SIZE
 const GLOBAL_RETAR_SIZE = SEATS * NUM_ROLES
-const FAKE_RETAR_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
-const FAKE_RETAR_SIZE = SEATS * NUM_ROLES
-const PLAN_START = FAKE_RETAR_START + FAKE_RETAR_SIZE
+const PLAN_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
 const PLAN_INCLUDED_START = PLAN_START
 const PLAN_POSITION_START = PLAN_START + SEATS
 const PLAN_GLOBAL_START = PLAN_START + SEATS * 2
@@ -102,9 +100,6 @@ function buildSeatIndices(isTeam: boolean): number[] {
     // global retar — 公開情報のみ (11)
     const grOff = GLOBAL_RETAR_START + s * NUM_ROLES
     for (let i = 0; i < NUM_ROLES; i++) indices.push(grOff + i)
-    // fake retar — 騙り前提 (11)
-    const frOff = FAKE_RETAR_START + s * NUM_ROLES
-    for (let i = 0; i < NUM_ROLES; i++) indices.push(frOff + i)
     // plan (2)
     indices.push(PLAN_INCLUDED_START + s)
     indices.push(PLAN_POSITION_START + s)

@@ -153,7 +153,6 @@ function buildSyntheticContext(params: {
     retarPossibilities: null,
     maxSurvivingNV: null,
     globalRetarPossibilities: null,
-    fakeRetarPossibilities: null,
     wolfTeammates: null,
     knownWolves: null,
     knownHamster: null,
