@@ -46,11 +46,7 @@ const MODULE_PREFIX_FILES = new Set(['dump'])
 // ここに入れた関数は比較対象外になる。理由をコメントで明記すること。
 const ALLOWED_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: string[] }> = {
   // combinatorics: 全関数が自動マッチ
-  finalizer: {
-    rsOnly: [
-      'constrain_by_death_counts_mut', // Rust所有権モデル用のミュータブル版
-    ],
-  },
+  // finalizer: 全関数が自動マッチ
   // roleTesters: 全関数が自動マッチ
   // dump: MODULE_PREFIX_FILES で自動マッチ（プレフィックス/サフィックス除去）
 }

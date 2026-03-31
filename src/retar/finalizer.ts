@@ -9,7 +9,53 @@ import { dumpFinalizePre } from './dump.ts'
  * @returns true: 検証パス、false: 仮説を棄却
  * 副作用: context.requireOneOf に背徳後追い制約を追加する場合がある
  */
+// 読み取り専用版: 夜死者数の矛盾チェックのみ。context を変更しない。
 export function constrainByDeathCounts(
+  context: AnalyzeContext,
+  vs: VillageStatus,
+  nightKillsByDay: Map<Day, Seat[]>,
+  setup: Map<SystemRole, number>,
+): boolean {
+  DAY:
+  for ( const [day, killed] of nightKillsByDay.entries() ) {
+    if ( vs.day <= day ) continue DAY
+    const addCount = context.deathChronicle.add[day]
+    let expected = 1
+    if ( addCount ) expected += addCount
+    const actual = killed.length
+    const immoralists = setup.get('immoralist') || 0
+    if ( actual === expected ) continue DAY
+    if ( expected + immoralists < actual ) {
+      return false
+    }
+    else if ( actual < expected - 1 ) {
+      return false
+    }
+    else if ( expected < actual && actual <= expected + immoralists ) {
+      const hamsterDiedThisNight = context.hamstersKilledBySeer.some(h => h.day === day)
+      if ( hamsterDiedThisNight ) {
+        // mut版では requireOneOf に制約を追加する。読み取り専用版では矛盾なしとして通す
+        continue DAY
+      }
+    }
+    if ( actual < expected ) {
+      for ( const [seat, status] of vs.statuses.entries() ) {
+        if ( !status.surviving && status.diedDay! < day ) continue
+        if (
+          context.possibilities.hasRole(seat, 'bodyguard')
+          || context.possibilities.hasRole(seat, 'werehamster')
+        ) {
+          continue DAY
+        }
+      }
+    }
+    return false
+  }
+  return true
+}
+
+// 変更あり版: 夜死者数の矛盾チェック + requireOneOf 制約の追加
+export function constrainByDeathCountsMut(
   context: AnalyzeContext,
   vs: VillageStatus,
   nightKillsByDay: Map<Day, Seat[]>,

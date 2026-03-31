@@ -5,7 +5,7 @@ import { roleTesterMap, saveContext, restoreContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
 import { buildRoleTestPlan, LiarRoles } from './planBuilder.ts'
 import type { RoleTest } from './planBuilder.ts'
-import { finalize as runFinalize, constrainByDeathCounts, createDebugStash } from './finalizer.ts'
+import { finalize as runFinalize, constrainByDeathCountsMut, createDebugStash } from './finalizer.ts'
 import type { DebugStash } from './finalizer.ts'
 import { dumpAnalyzeResult, resetDump } from './dump.ts'
 
@@ -554,7 +554,7 @@ export class VillageRetar {
     if (this.isSaturated()) return
     this.debugStash.preFinalizeTests++
     // 死体数の確認
-    if (!constrainByDeathCounts(this.context, this.vs, this.nightKillsByDay, this.setup)) {
+    if (!constrainByDeathCountsMut(this.context, this.vs, this.nightKillsByDay, this.setup)) {
       return
     }
 
