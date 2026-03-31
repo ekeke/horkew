@@ -45,11 +45,7 @@ const MODULE_PREFIX_FILES = new Set(['dump'])
 // ファイル単位の許可リスト: { tsFile: { tsOnly: [...], rsOnly: [...] } }
 // ここに入れた関数は比較対象外になる。理由をコメントで明記すること。
 const ALLOWED_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: string[] }> = {
-  combinatorics: {
-    rsOnly: [
-      'generate_combinations_collect', // Rustのcollect版、TSではジェネレータで代替
-    ],
-  },
+  // combinatorics: 全関数が自動マッチ
   finalizer: {
     rsOnly: [
       'constrain_by_death_counts_mut', // Rust所有権モデル用のミュータブル版

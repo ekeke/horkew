@@ -69,3 +69,7 @@ export function* generateCombinations<T>(arrays: T[][]): Generator<T[], void, un
   yield* combine(0, []);
 }
 
+export function generateCombinationsCollect<T>(arrays: T[][]): T[][] {
+  return [...generateCombinations(arrays)]
+}
+
