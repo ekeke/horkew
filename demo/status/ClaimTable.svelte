@@ -97,11 +97,12 @@
             <tbody>
               {#each group.rows as row}
                 {@const timeline = buildAssertionTimeline(row, maxDay, players)}
+                {@const coNight = row.claimedAt != null ? row.claimedAt - 1 : -1}
                 <tr>
-                  <td class="name-cell"><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)} seat={row.seat}>{row.name}</PlayerName></td>
+                  <td class="name-cell" class:co-timing={coNight < 1 && coNight >= 0}><PlayerName dead={!row.surviving} nightKill={nightKilled.has(row.seat)} executed={executed.has(row.seat)} claim={claimShortNames.get(row.seat)} seat={row.seat}>{row.name}</PlayerName></td>
                   {#each nights as night}
                     {@const assertion = timeline.get(night) ?? null}
-                    <td class="data-cell" class:human={assertion?.species === 'human' && !assertion?.forecast} class:wolf={assertion?.species === 'wolf' && !assertion?.forecast} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:forecast={assertion?.forecast}>
+                    <td class="data-cell" class:human={assertion?.species === 'human' && !assertion?.forecast} class:wolf={assertion?.species === 'wolf' && !assertion?.forecast} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:forecast={assertion?.forecast} class:co-timing={night === coNight}>
                       {#if assertion}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="forecast-label">(予)</span>{:else if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{/if}
                     </td>
                   {/each}
@@ -273,5 +274,19 @@
     font-size: 12px;
     font-family: 'Consolas', 'Menlo', monospace;
     color: var(--color-text);
+  }
+
+  .co-timing {
+    position: relative;
+  }
+
+  .co-timing::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    border-style: solid;
+    border-width: 5px 5px 0 0;
+    border-color: var(--color-co) transparent transparent transparent;
   }
 </style>
