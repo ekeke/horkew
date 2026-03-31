@@ -247,16 +247,22 @@ async function generateGame(
   mlRolesSet: Set<SystemRole>,
   seed: number,
   useTeam: 'wolf_team' | 'mason_team' | undefined,
+  mlMaxSeats?: number,
 ): Promise<{ individualSteps: Map<number, TrajectoryStep[]>, wolfTeamSteps: TrajectoryStep[], masonTeamSteps: TrajectoryStep[] }> {
   const roles = new Map(Object.entries(trainingConfig.roles) as [SystemRole, number][])
   const strategies = new Map<number, FenrirStrategy>()
   const heuristic = new HeuristicStrategy()
 
   const onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
-    for (const [seat, role] of seatRoles) {
-      if (mlRolesSet.has(role)) {
-        strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: trainingConfig.strategyOnly }))
-      }
+    const candidates = [...seatRoles].filter(([_, role]) => mlRolesSet.has(role))
+    // seed ベースでシャッフル
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = (seed * 7 + i * 13) % (i + 1)
+      ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
+    }
+    const limit = mlMaxSeats ?? candidates.length
+    for (let i = 0; i < Math.min(limit, candidates.length); i++) {
+      strategies.set(candidates[i][0], new FenrirStrategy(network, { explore: true, strategyOnly: trainingConfig.strategyOnly }))
     }
   }
 
@@ -691,6 +697,11 @@ async function main(): Promise<void> {
     log(`${BOLD}=== Phase 1: Round-Robin Training ===${RESET}`)
 
     const graduated = new Set<ModelName>()
+    // カリキュラム: NN 席数を徐々に増やす (village のみ)
+    let mlMaxSeats = 2
+    const ML_MAX_SEATS_CAP = 7  // 村役職の最大数
+    log(`  Initial mlMaxSeats=${mlMaxSeats}`)
+
     const ppoConfig = {
       miniBatchSize: trainingConfig.miniBatchSize,
       clipEpsilon: trainingConfig.clipEpsilon,
@@ -750,6 +761,7 @@ async function main(): Promise<void> {
               trainingConfig,
               phase: 1,
               mlRoles: group.roles,
+              mlMaxSeats: name === 'village' ? mlMaxSeats : undefined,
             }, seeds)
 
             for (const game of serializedResults) {
@@ -770,7 +782,7 @@ async function main(): Promise<void> {
           } else {
             // === 直列フォールバック ===
             for (const seed of seeds) {
-              const game = await generateGame(trainingConfig, network, wolfTeamNet, masonTeamNet, mlRolesSet, seed, group.teamType)
+              const game = await generateGame(trainingConfig, network, wolfTeamNet, masonTeamNet, mlRolesSet, seed, group.teamType, name === 'village' ? mlMaxSeats : undefined)
               const currentSteps = new Map<number, TrajectoryStep[]>()
               for (const [seat, steps] of game.individualSteps) {
                 currentSteps.set(seat, steps)
@@ -850,10 +862,11 @@ async function main(): Promise<void> {
             }
             timingStr = `${avgGame.toFixed(0)}ms/game (infer ${fmtBreakdown(avgInfer, avgInferCount)} retar ${fmtBreakdown(avgRetar, avgRetarCount)} tsumi ${fmtBreakdown(avgTsumi, avgTsumiCount)}) `
           }
+          const mlInfo = name === 'village' ? ` ml=${mlMaxSeats}/${ML_MAX_SEATS_CAP}` : ''
           process.stderr.write(
             `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
             `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
-            `steps=${totalSteps} ${avgIterMs}s/iter ETA ${remaining}s`
+            `steps=${totalSteps}${mlInfo} ${avgIterMs}s/iter ETA ${remaining}s`
           )
 
           // Eval
@@ -867,6 +880,12 @@ async function main(): Promise<void> {
               `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
               `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
             )
+
+            // カリキュラム: 勝率がベースラインの90%に達したら NN 席数を増やす
+            if (name === 'village' && mlMaxSeats < ML_MAX_SEATS_CAP && factionRate >= targetRate * 0.9) {
+              mlMaxSeats = Math.min(mlMaxSeats + 1, ML_MAX_SEATS_CAP)
+              log(`${prefix} Curriculum: mlMaxSeats → ${mlMaxSeats}`)
+            }
 
             if (factionRate >= targetRate) {
               log(`${prefix} ${BOLD}GRADUATED${RESET} (${group.faction}=${(factionRate * 100).toFixed(0)}% >= ${(targetRate * 100).toFixed(0)}%)`)

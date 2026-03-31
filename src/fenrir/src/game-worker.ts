@@ -39,8 +39,8 @@ parentPort.on('message', async (req: WorkerRequest) => {
   parentPort!.postMessage({ type: 'result', games: results } satisfies WorkerResult)
 })
 
-function buildNetwork(shared: SharedWeights, isTeam: boolean = false): AnyNetwork {
-  return buildNetworkFromShared(shared, isTeam)
+function buildNetwork(shared: SharedWeights, mode: import('./observation.ts').ObservationMode | boolean = false): AnyNetwork {
+  return buildNetworkFromShared(shared, mode)
 }
 
 /** role → モデルグループ名の逆引きマップ (5モデル構成) */
@@ -58,6 +58,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
   const network = buildNetwork(req.weights)
   const wolfTeamNet = req.wolfTeamWeights ? buildNetwork(req.wolfTeamWeights, true) : undefined
   const masonTeamNet = req.masonTeamWeights ? buildNetwork(req.masonTeamWeights, true) : undefined
+  const frozenVillageNet = req.villageFrozenWeights ? buildNetwork(req.villageFrozenWeights) : undefined
   const mlRolesSet = req.mlRoles ? new Set(req.mlRoles) : null
   const useHeuristic = req.phase === 1
   const usePool = req.phase === 3
@@ -65,10 +66,14 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
   const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
 
   // マルチモデル: グループ名 → AnyNetwork
+  const GROUP_MODE: Record<string, import('./observation.ts').ObservationMode> = {
+    wolf_collective: 'wolf_collective',
+    mason_collective: 'mason_collective',
+  }
   const groupNets = new Map<string, AnyNetwork>()
   if (multiModel) {
     for (const [name, sw] of Object.entries(req.modelGroupWeights!)) {
-      groupNets.set(name, buildNetwork(sw))
+      groupNets.set(name, buildNetwork(sw, GROUP_MODE[name] ?? false))
     }
   }
 
@@ -102,8 +107,8 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       }
     }
 
-    let wolfTeamStrategy: WolfTeamStrategy | WolfTeamHeuristic | undefined
-    let masonTeamStrategy: MasonTeamStrategy | MasonTeamHeuristic | undefined
+    let wolfTeamStrategy: WolfTeamStrategy | WolfCollectiveStrategy | WolfTeamHeuristic | undefined
+    let masonTeamStrategy: MasonTeamStrategy | MasonCollectiveStrategy | MasonTeamHeuristic | undefined
     if (config.strategyOnly) {
       // strategy-only: チーム戦略はheuristicにフォールバック（チームNNはstrategy-only未対応）
       if (req.useTeamStrategy === 'wolf_team' || (!req.useTeamStrategy && (!useHeuristic || multiModel))) {
@@ -131,10 +136,26 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     if (multiModel) {
       // マルチモデル: role に応じたグループの network を割り当て
+      // 集団NN (wolf_collective, mason_collective) は team strategy として設定
       onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
         seatRoleMap = seatRoles
+
+        // 集団 strategy の構築
+        const wolfNet = groupNets.get('wolf_collective')
+        if (wolfNet) {
+          const ws = new WolfCollectiveStrategy(wolfNet, { explore: true })
+          if (frozenVillageNet) ws.frozenVillageNetwork = frozenVillageNet
+          wolfTeamStrategy = ws
+        }
+        const masonNet = groupNets.get('mason_collective')
+        if (masonNet) {
+          masonTeamStrategy = new MasonCollectiveStrategy(masonNet, { explore: true })
+        }
+
+        // 個人NN の割り当て (collective roles はチーム strategy 経由なのでスキップ)
         for (const [seat, role] of seatRoles) {
           const groupName = ROLE_TO_GROUP[role]
+          if (groupName === 'wolf_collective' || groupName === 'mason_collective') continue
           const net = groupName ? groupNets.get(groupName) : undefined
           if (net) {
             strategies.set(seat, new FenrirStrategy(net, { explore: true, strategyOnly: config.strategyOnly }))
@@ -145,10 +166,16 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     } else if (useHeuristic && mlRolesSet) {
       onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
         seatRoleMap = seatRoles
-        for (const [seat, role] of seatRoles) {
-          if (mlRolesSet.has(role)) {
-            strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
-          }
+        // mlMaxSeats で NN 席数を制限（カリキュラム学習）
+        const candidates = [...seatRoles].filter(([_, role]) => mlRolesSet.has(role))
+        // seed ベースでシャッフル（再現性）
+        for (let i = candidates.length - 1; i > 0; i--) {
+          const j = (seed * 7 + i * 13) % (i + 1)
+          ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
+        }
+        const limit = req.mlMaxSeats ?? candidates.length
+        for (let i = 0; i < Math.min(limit, candidates.length); i++) {
+          strategies.set(candidates[i][0], new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
         }
       }
     }

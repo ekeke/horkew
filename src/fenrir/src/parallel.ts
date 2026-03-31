@@ -30,6 +30,7 @@ import { dirname, join } from 'node:path'
 import type { NetworkConfig, AnyNetwork } from './ml/nn.ts'
 import { NeuralNetwork } from './ml/nn.ts'
 import { TransformerNetwork } from './ml/transformer-network.ts'
+import type { ObservationMode } from './observation.ts'
 import type { TrainingConfig } from './training.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
 
@@ -82,10 +83,10 @@ export function unpackWeights(network: AnyNetwork, shared: SharedWeights): void 
 }
 
 /** SharedWeightsからネットワークを構築（config.transformerで自動判別） */
-export function buildNetworkFromShared(shared: SharedWeights, isTeam: boolean = false): AnyNetwork {
+export function buildNetworkFromShared(shared: SharedWeights, mode: ObservationMode | boolean = false): AnyNetwork {
   let net: AnyNetwork
   if (shared.config.transformer) {
-    net = new TransformerNetwork(shared.config, isTeam)
+    net = new TransformerNetwork(shared.config, mode)
   } else {
     net = new NeuralNetwork(shared.config)
   }
@@ -122,6 +123,10 @@ export type WorkerRequest = {
   mlRoles?: string[]
   /** チーム戦略の選択制御 (orchestrator用: 指定チームだけML、残りはheuristic) */
   useTeamStrategy?: 'wolf_team' | 'mason_team'
+  /** MLにする最大席数 (カリキュラム学習用、未指定=制限なし) */
+  mlMaxSeats?: number
+  /** frozen村NNの重み (集団NN/狂信者の村NN出力注入用) */
+  villageFrozenWeights?: SharedWeights
 }
 
 /** 1ゲーム分のタイミング情報 */
