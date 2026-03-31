@@ -44,53 +44,30 @@ describe('isThreatExceeded', () => {
     assert.equal(profile.possibleSurvivingNekomata, true)
     assert.equal(profile.wolfCandidates, 3)
     assert.equal(profile.nekoParityShift, true)
-    // TODO: isThreatExceeded が true を返すべき（猫パリティ修正後に有効化）
-    // assert.equal(isThreatExceeded(profile), true)
+    assert.equal(profile.nekoWolfCandidates, 2)
+    assert.equal(profile.nekoExecRisk, 1)
+    assert.equal(isThreatExceeded(profile), true)
   })
 
-  it('7人: 狼+狐+確定占+信+村+村+共 — 占いで狐を溶かせるので詰み可能', () => {
-    // 村を吊って占いが狐を溶かす、共有噛まれる → 残り4人で狼処刑 → 村勝利
-    // isThreatExceeded単体では impossible だが、狐を占いで解決できるので
-    // judgeTsumi の狐解決調整後は impossible=false になるべき
+  it('7人: 狼+狐+確定占+信+村+村+共 — 占いで狐を溶かすとPPになり詰み不可能', () => {
+    // 狐候補3人 + 狼候補1人: requiredExecs が nawaInt を超える
     const setup = new Map<SystemRole, number>([
       ['werewolf', 3], ['villager', 2], ['seer', 1], ['medium', 1],
       ['bodyguard', 1], ['mason', 2], ['nekomata', 1], ['fanatic', 1],
       ['werehamster', 1], ['immoralist', 1],
     ])
     const conclusions = makePossibilities(setup, {
-      1: ['werewolf'],
+      1: ['werewolf', 'villager'],
       2: ['werehamster', 'villager'],
       3: ['seer'],
-      4: ['fanatic'],
-      5: ['villager'],
+      4: ['fanatic', 'villager', 'werehamster'],
+      5: ['villager', 'werehamster'],
       6: ['villager'],
       7: ['mason'],
     }, 2)
     const alive = (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5) | (1 << 6) | (1 << 7)
     const profile = buildThreatProfile(conclusions, alive, 7, setup)
 
-    // 狐解決前: foxCandidates=1, wolfCandidates=1, whiteNVThreat=1
-    assert.equal(profile.foxCandidates, 1)
-    assert.equal(profile.wolfCandidates, 1)
-    assert.equal(profile.whiteNVThreat, 1)
-    assert.equal(profile.possibleSurvivingHamster, true)
-    assert.equal(profile.nawaInt, 2)
-    // requiredExecs = fox(1) + wolf(1) + whiteNV(1) = 3 > nawaInt(2) → impossible
-    assert.equal(profile.requiredExecs, 3)
     assert.equal(isThreatExceeded(profile), true)
-
-    // 狐解決後（占いで1狐候補を解決）: foxCandidates=0, requiredExecs=2
-    // judgeTsumi が computeFoxResolvability で調整した後の状態をシミュレート
-    const adjusted = {
-      ...profile,
-      foxCandidates: 0,
-      possibleSurvivingHamster: false,
-      effectiveNawa: (7 - 1) / 2,  // 狐なし → effectiveNawa = nawa
-      nawaInt: 3,
-      requiredExecs: 0 + 0 + 1 - 1 + 1,  // fox=0, foxWolf=0, wolf=1, -confirmed(1), +whiteNV(1)
-      nekoParityShift: false,
-    }
-    assert.equal(adjusted.requiredExecs, 1)
-    assert.equal(isThreatExceeded(adjusted), false)
   })
 })

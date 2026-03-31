@@ -202,6 +202,7 @@ export function buildThreatProfile(
   let foxWolfCandidates = 0
   let wolfCandidates = 0
   let wolfConfirmedCount = 0
+  let nekoWolfCandidates = 0
   let whiteNVCandidates = 0
   let possibleSurvivingHamster = false
   let possibleSurvivingNekomata = false
@@ -216,6 +217,7 @@ export function buildThreatProfile(
     else if (wolfCandidate) {
       wolfCandidates++
       if (wolfConfirmed) wolfConfirmedCount++
+      if (conclusions.hasRole(seat, 'nekomata' as SystemRole)) nekoWolfCandidates++
     } else if (conclusions.hasRole(seat, 'fanatic' as SystemRole) || conclusions.hasRole(seat, 'possessed' as SystemRole)) {
       whiteNVCandidates++
     }
@@ -238,13 +240,16 @@ export function buildThreatProfile(
   // effectiveNawa に .5 の余裕がないとき、狼が猫又を噛むと道連れで
   // 生存者が2人減り、縄が想定より1本減る。
   const nekoParityShift = possibleSurvivingNekomata && effectiveNawa % 1 === 0
+  // 猫又処刑リスク: 猫又兼狼候補を処刑して猫又だった場合、
+  // 道連れで生存者が追加死亡し実効縄が 0.5 減る。
+  const nekoExecRisk = Math.min(nekoWolfCandidates, setup.get('nekomata' as SystemRole) ?? 0)
 
   return {
     foxCandidates, foxWolfCandidates, wolfCandidates, wolfConfirmedCount,
     whiteNVCandidates, whiteNVThreat,
     possibleSurvivingHamster, possibleSurvivingNekomata,
     nawa, effectiveNawa, nawaInt, threat,
-    requiredExecs, nekoParityShift,
+    requiredExecs, nekoParityShift, nekoWolfCandidates, nekoExecRisk,
   }
 }
 
@@ -265,6 +270,10 @@ export function isThreatExceeded(p: ThreatProfile): boolean {
     || p.foxWolfCandidates + p.wolfCandidates > p.nawaInt
     || p.requiredExecs > p.nawaInt
     || (p.nekoParityShift && p.requiredExecs === p.nawaInt)
+    // 猫又兼狼候補の処刑リスク: 猫又処刑の道連れで 0.5 nawa 損失
+    || (p.nekoExecRisk > 0
+      && p.requiredExecs + p.nekoExecRisk * 0.5
+         > p.effectiveNawa - (p.possibleSurvivingHamster ? 0 : p.wolfConfirmedCount))
 }
 
 // ---------------------------------------------------------------------------
@@ -484,7 +493,7 @@ export function searchTsumi(
     const p = judgment.profile
     console.log(`[hati:debug]   judgment: impossible=${judgment.impossible} nawa=${p.nawa} effNawa=${p.effectiveNawa} nawaInt=${p.nawaInt}`)
     console.log(`[hati:debug]   wolf=${p.wolfCandidates}(conf=${p.wolfConfirmedCount}) fox=${p.foxCandidates} foxWolf=${p.foxWolfCandidates} whiteNV=${p.whiteNVCandidates}(threat=${p.whiteNVThreat})`)
-    console.log(`[hati:debug]   requiredExecs=${p.requiredExecs} hamster=${p.possibleSurvivingHamster} neko=${p.possibleSurvivingNekomata} nekoShift=${p.nekoParityShift}`)
+    console.log(`[hati:debug]   requiredExecs=${p.requiredExecs} hamster=${p.possibleSurvivingHamster} neko=${p.possibleSurvivingNekomata} nekoShift=${p.nekoParityShift} nekoWolfOverlap=${p.nekoWolfCandidates} nekoExecRisk=${p.nekoExecRisk}`)
     console.log(`[hati:debug]   isThreatExceeded: foxWolf+wolf(${p.foxWolfCandidates + p.wolfCandidates})>nawaInt(${p.nawaInt})=${p.foxWolfCandidates + p.wolfCandidates > p.nawaInt} || reqExecs(${p.requiredExecs})>nawaInt=${p.requiredExecs > p.nawaInt} || nekoShift&&req==nawa=${p.nekoParityShift && p.requiredExecs === p.nawaInt}`)
 
     if (p.possibleSurvivingHamster) {
@@ -545,7 +554,7 @@ export function searchTsumiDirect(
     whiteNVCandidates: 0, whiteNVThreat: 0,
     possibleSurvivingHamster: false, possibleSurvivingNekomata: false,
     nawa: 0, effectiveNawa: 0, nawaInt: 0, threat: 0,
-    requiredExecs: 0, nekoParityShift: false,
+    requiredExecs: 0, nekoParityShift: false, nekoWolfCandidates: 0, nekoExecRisk: 0,
   }
 
   return {

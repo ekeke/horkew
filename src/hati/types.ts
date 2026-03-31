@@ -111,6 +111,10 @@ export type ThreatProfile = {
   requiredExecs: number
   /** 猫又パリティシフト: 縄に.5余裕がなく猫又候補が生存 */
   nekoParityShift: boolean
+  /** 猫又兼狼候補数: wolfCandidateかつnekomata可能性がある席数 */
+  nekoWolfCandidates: number
+  /** 猫又処刑リスク: min(nekoWolfCandidates, setup猫又数) — 最悪ケース猫又処刑回数 */
+  nekoExecRisk: number
 }
 
 /** 詰み判定の中間結果（探索前の計算ベース判定） */
