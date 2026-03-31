@@ -787,7 +787,6 @@ async function runVerify(args: Args): Promise<void> {
       console.log(`    偽陰性チェック: 候補=${fnCandidates}, スキップ=${fnSkipped}, 発見=${fnFound}`)
     }
     if (args.deepCheck) {
-      process.stdout.write('\n')
       console.log(`    深探索チェック: ${deepCheckCount}件(alive<=${args.maxAliveForFN}), 偽陰性=${deepCheckFound}`)
     }
     if (args.stopOnFirst && failures.length > 0) break
@@ -929,7 +928,12 @@ async function runFalseNegativeFromDb(args: Args): Promise<void> {
       globalIdx++
       if (scenarioIdx % 100 === 0 || scenarioIdx === scenarioEntries.length) {
         const elapsed = ((performance.now() - globalStart) / 1000).toFixed(0)
-        process.stdout.write(`\r  [${scenarioName}] ${scenarioIdx}/${scenarioEntries.length}  (全体 ${globalIdx}/${totalCandidates}  ${elapsed}s  FN=${found})`)
+        const line = `  [${scenarioName}] ${scenarioIdx}/${scenarioEntries.length}  (全体 ${globalIdx}/${totalCandidates}  ${elapsed}s  FN=${found})`
+        if (process.stderr.isTTY) {
+          process.stderr.write('\r' + line + '    ')
+        } else {
+          console.error(line)
+        }
       }
       const entryStart = fnThrottle ? performance.now() : 0
       // ゲームを再生
@@ -1004,7 +1008,7 @@ async function runFalseNegativeFromDb(args: Args): Promise<void> {
       }
     }
 
-    process.stdout.write('\n')
+    if (process.stderr.isTTY) process.stderr.write('\r' + ' '.repeat(120) + '\r')
     console.log(`  ${scenarioName}: ${scenarioEntries.length}候補 → チェック済み, 偽陰性=${scenarioFound}`)
   }
 
