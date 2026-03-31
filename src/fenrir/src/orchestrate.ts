@@ -887,9 +887,10 @@ async function main(): Promise<void> {
 
           // Eval
           if (iter % config.evalInterval === 0) {
-            process.stderr.write('\r\x1b[K')
+            process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
             const evalConfig = { ...trainingConfig, mlRoles: group.roles }
             const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet)
+            process.stderr.write('\r\x1b[K')
             appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
             const factionRate = evalResult.winRates[group.faction] ?? 0
             log(
