@@ -41,6 +41,27 @@ Rust版（retar-rs）が実運用ターゲット、TypeScript版（retar）が�
 
 TS版とRust版はファイル構成・関数名を一致させる。TS版で設計・検証を済ませてからRustに移すことで、型システムの違いによるバグを最小化し、差分比較を容易にする。
 
+### TS↔Rust 同一性規約
+
+`src/retar/sync-check.test.ts` がファイル名・関数名・メソッド名の一致を静的に検証する。例外は最小限に保つ。
+
+#### 命名規約
+- **camelCase ↔ snake_case**: 自動変換で対応。`analyzeHamsterWin` ↔ `analyze_hamster_win`
+- **モジュールプレフィックス**: TSのトップレベルexportではファイル名をプレフィックス/サフィックスに付ける（例: `enableDump`）。Rustではモジュールスコープで呼ぶためプレフィックス不要（例: `dump::enable`）。sync-check が自動認識する
+- **コンストラクタ**: TS `constructor` ↔ Rust `new`（例外として許容）
+
+#### 副作用の分離（mut規約）
+Rustの `&self` / `&mut self` 分離パターンをTS側にも適用する:
+- **読み取り専用**: `check...` / `validate...` — context を変更しない
+- **変更あり**: `update...` / `apply...` — context の配列に push する等の副作用がある
+- Rustでは `_fn` / `_fn_mut` の命名、TSでは動詞の使い分けで表現
+
+例: `checkDeathCounts`（判定のみ）↔ `updateDeathCountConstraints`（判定 + requireOneOf への push）
+
+#### アクセサ
+- TSのpublicプロパティは getter/setter で実装し、Rustの pub getter メソッドと対応させる
+- 例: TS `get initialPossibilities()` ↔ Rust `pub fn initial_possibilities(&self)`
+
 ### Legacy Directories
 
 `howl/` と `common/` は外部プロジェクトから抽出した**リファレンス実装**。現在は `src/` 配下の統合版が正。
