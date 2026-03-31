@@ -387,6 +387,11 @@ export class TfTransformerNetwork {
     this.optimizer = tf.train.adam(lr)
   }
 
+  /** 学習率を変更（optimizer を再作成） */
+  setLearningRate(lr: number): void {
+    this.optimizer = tf.train.adam(lr)
+  }
+
   // ============================================================
   // Helper: variable creation
   // ============================================================

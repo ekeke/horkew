@@ -696,6 +696,13 @@ async function main(): Promise<void> {
     }
     const tDTotal = performance.now() - tD0
     log(`  Method D complete: ${pretrainGames} games, ${pretrainDEpochs} epochs, ${(tDTotal / 1000).toFixed(1)}s total`)
+
+    // PPO 用に学習率を下げる（pretrain の知識を保持するため）
+    const ppoLr = config.learningRate * 0.2  // 3e-4 → 6e-5
+    ;(tfNetwork as any).setLearningRate(ppoLr)
+    ;(wolfTeamTf as any).setLearningRate?.(ppoLr)
+    ;(masonTeamTf as any).setLearningRate?.(ppoLr)
+    log(`  PPO learning rate: ${ppoLr.toExponential(1)} (${config.learningRate.toExponential(1)} × 0.2)`)
   }
 
   // === Baseline (14D猫 heuristic vs heuristic, ハードコード) ===
