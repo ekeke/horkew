@@ -66,7 +66,7 @@ function generateCOSituation(
   return { claims, events }
 }
 
-type PatternType = 'roller' | 'decision' | 'designated' | 'grayran'
+type PatternType = 'roller' | 'decision' | 'designated' | 'grayran' | 'retar_suspect'
 
 /** パターンに応じてプランと正解ラベルを生成 */
 function generatePlanAndLabel(
@@ -119,6 +119,9 @@ function generatePlanAndLabel(
       }
       return { plan, label }
     }
+    case 'retar_suspect':
+      // この関数には来ない（呼び出し元で 'designated' に変換済み）
+      return null
   }
 }
 
@@ -131,6 +134,7 @@ function buildSyntheticContext(params: {
   events: GameEvent[]
   plan: ExecutionPlan
   rng: Rng
+  retarPossibilities?: Map<number, Set<SystemRole>>
 }): DecisionContext {
   return {
     mySeat: params.mySeat,
@@ -150,9 +154,9 @@ function buildSyntheticContext(params: {
     rng: params.rng,
     gameState: { day: params.day, phase: 'day', players: [], commander: null } as any,
     lastExecutedSeat: null,
-    retarPossibilities: null,
+    retarPossibilities: params.retarPossibilities ?? null,
     maxSurvivingNV: null,
-    globalRetarPossibilities: null,
+    globalRetarPossibilities: params.retarPossibilities ?? null,
     wolfTeammates: null,
     knownWolves: null,
     knownHamster: null,
@@ -173,8 +177,51 @@ function shuffleArray<T>(arr: T[], rng: Rng): T[] {
   return a
 }
 
-const PATTERNS: PatternType[] = ['roller', 'decision', 'designated', 'grayran']
-const PATTERN_WEIGHTS = [0.3, 0.2, 0.2, 0.3]
+/**
+ * 合成 Retar possibilities を生成
+ * 数席を「狼不可能（確定白）」に、残りを「狼可能」にする。
+ * 狼可能席のうちランダムに選んだ席を suspectSeats として返す。
+ */
+function generateSyntheticRetar(
+  aliveSeats: number[],
+  mySeat: number,
+  claims: Map<number, SystemRole>,
+  rng: Rng,
+): { possibilities: Map<number, Set<SystemRole>>, suspectSeats: number[] } {
+  const ALL_ROLES: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'werewolf', 'fanatic', 'werehamster', 'immoralist']
+  const VILLAGE_ONLY: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+  const possibilities = new Map<number, Set<SystemRole>>()
+
+  // 自分は村側確定
+  possibilities.set(mySeat, new Set(VILLAGE_ONLY))
+
+  // CO者のうちランダムに1人を確定白に
+  const claimants = [...claims.keys()].filter(s => s !== mySeat)
+  const confirmedWhites = new Set<number>([mySeat])
+  if (claimants.length > 0 && rng.next() < 0.5) {
+    const confirmed = claimants[Math.floor(rng.next() * claimants.length)]
+    possibilities.set(confirmed, new Set(VILLAGE_ONLY))
+    confirmedWhites.add(confirmed)
+  }
+
+  // 残りの席: 全役職可能（狼含む）
+  const wolfPossibleSeats: number[] = []
+  for (const seat of aliveSeats) {
+    if (confirmedWhites.has(seat)) continue
+    possibilities.set(seat, new Set(ALL_ROLES))
+    wolfPossibleSeats.push(seat)
+  }
+
+  // suspect: 狼可能席からランダムに 1〜3 席
+  const shuffled = shuffleArray(wolfPossibleSeats, rng)
+  const numSuspects = Math.min(1 + Math.floor(rng.next() * 3), shuffled.length)
+  const suspectSeats = shuffled.slice(0, numSuspects)
+
+  return { possibilities, suspectSeats }
+}
+
+const PATTERNS: PatternType[] = ['roller', 'decision', 'designated', 'grayran', 'retar_suspect']
+const PATTERN_WEIGHTS = [0.2, 0.15, 0.15, 0.2, 0.3]
 
 function pickPattern(rng: Rng): PatternType {
   const r = rng.next()
@@ -263,6 +310,7 @@ function patternToForwardLabels(
   aliveSeats: number[],
   mySeat: number,
   rng: Rng,
+  suspectSeats?: number[],
 ): { labels: number[], mask: boolean[] } | null {
   const labels = new Array(NUM_FORWARD_TOKENS).fill(PLAN_VOCAB.STOP)
   const mask = new Array(NUM_FORWARD_TOKENS).fill(false)
@@ -308,6 +356,16 @@ function patternToForwardLabels(
       labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
       return { labels, mask }
     }
+    case 'retar_suspect': {
+      // Retar で狼候補の席を直接指定: [suspect_seat, stop, ...]
+      if (!suspectSeats || suspectSeats.length === 0) return null
+      const target = suspectSeats[Math.floor(rng.next() * suspectSeats.length)]
+      if (target === mySeat) return null
+      let pos = 0
+      labels[pos] = target - 1; mask[pos++] = true
+      labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      return { labels, mask }
+    }
   }
 }
 
@@ -329,15 +387,23 @@ export function generatePlanTokenTrainingBatch(count: number, seed: number = 42)
     const { claims, events } = generateCOSituation(aliveSeats, rng)
     const pattern = pickPattern(rng)
 
-    const result = patternToForwardLabels(pattern, claims, aliveSeats, mySeat, rng)
+    // Retar 合成データ (retar_suspect パターン時は必須、他でも50%の確率で付与)
+    const needsRetar = pattern === 'retar_suspect' || rng.next() < 0.5
+    const retar = needsRetar ? generateSyntheticRetar(aliveSeats, mySeat, claims, rng) : null
+
+    const result = patternToForwardLabels(pattern, claims, aliveSeats, mySeat, rng, retar?.suspectSeats)
     if (!result) continue
 
     // 旧形式のプランも生成（observation encodingで使用）
-    const planResult = generatePlanAndLabel(pattern, claims, aliveSeats, mySeat, rng)
+    const planResult = generatePlanAndLabel(
+      pattern === 'retar_suspect' ? 'designated' : pattern,
+      claims, aliveSeats, mySeat, rng,
+    )
     const plan: ExecutionPlan = planResult?.plan ?? { targets: [], type: 'grayran' }
 
     const ctx = buildSyntheticContext({
       day, mySeat, myRole, aliveSeats, events, plan, rng,
+      retarPossibilities: retar?.possibilities,
     })
     const observation = encodeObservation(ctx)
 
