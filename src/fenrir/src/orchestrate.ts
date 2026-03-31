@@ -607,7 +607,8 @@ async function main(): Promise<void> {
 
   // === Pretrain: plan tokens の事前学習 (新規学習時のみ、Transformer限定) ===
   if (!anyResumed && config.transformer) {
-    log(`${BOLD}=== Pretrain: Plan Token Supervised Learning ===${RESET}`)
+    log(`${BOLD}=== Pretrain B: Plan Token Supervised Learning ===${RESET}`)
+    const tB0 = performance.now()
     const pretrainBatchSize = 512
     const pretrainMaxEpochs = 2000
     const pretrainTargetAcc = 0.85
@@ -638,7 +639,7 @@ async function main(): Promise<void> {
       villageNet.loadWeights(tfNetwork.cloneWeights())
       log(`  Pretrained weights → village network`)
     }
-    log(`  Final best accuracy: ${(bestAcc * 100).toFixed(1)}%`)
+    log(`  Method B complete: ${(bestAcc * 100).toFixed(1)}% accuracy, ${((performance.now() - tB0) / 1000).toFixed(1)}s`)
 
     // === Method D: 実ゲームで predict + value の事前学習 ===
     log(`${BOLD}=== Pretrain D: Heuristic Game Supervised Learning ===${RESET}`)
@@ -646,9 +647,10 @@ async function main(): Promise<void> {
     const pretrainDEpochs = 30
 
     log(`  Collecting data from ${pretrainGames} heuristic games...`)
-    const t0 = performance.now()
+    const tD0 = performance.now()
     const gameSamples = await collectBatchGameData(trainingConfig, pretrainGames)
-    log(`  Collected ${gameSamples.length} vote samples in ${((performance.now() - t0) / 1000).toFixed(1)}s`)
+    const tDCollect = performance.now() - tD0
+    log(`  Collected ${gameSamples.length} vote samples from ${pretrainGames} games in ${(tDCollect / 1000).toFixed(1)}s (${(tDCollect / pretrainGames).toFixed(0)}ms/game)`)
 
     if (gameSamples.length > 0) {
       for (let epoch = 1; epoch <= pretrainDEpochs; epoch++) {
@@ -680,6 +682,8 @@ async function main(): Promise<void> {
         log(`  Method D pretrained weights → village network`)
       }
     }
+    const tDTotal = performance.now() - tD0
+    log(`  Method D complete: ${pretrainGames} games, ${pretrainDEpochs} epochs, ${(tDTotal / 1000).toFixed(1)}s total`)
   }
 
   // === Baseline (14D猫 heuristic vs heuristic, ハードコード) ===
