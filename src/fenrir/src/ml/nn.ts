@@ -209,6 +209,7 @@ export interface AnyTfNetwork {
     clipEpsilon: number
     valueLossCoeff: number
     entropyCoeff: number
+    freezePlan?: boolean
   }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number }
   cloneWeights(): Map<string, Float32Array>
   loadWeights(weights: Map<string, Float32Array>): void

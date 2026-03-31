@@ -65,6 +65,10 @@ const WOLF_COLL_FAKE_DIVINE_START = COLLECTIVE_TEAM_SIZE_START + 1
 const WOLF_COLL_VILLAGE_PREDICT_START = WOLF_COLL_FAKE_DIVINE_START + SEATS
 const WOLF_COLL_VILLAGE_TRUST_START = WOLF_COLL_VILLAGE_PREDICT_START + SEATS * NUM_ROLES
 
+// Fanatic offsets (OBSERVATION_SIZEの直後に配置 — team_sizeなし)
+const FANATIC_VILLAGE_PREDICT_START = OBSERVATION_SIZE
+const FANATIC_VILLAGE_TRUST_START = FANATIC_VILLAGE_PREDICT_START + SEATS * NUM_ROLES
+
 /** CLSトークンのインデックス配列を構築 */
 function buildClsIndices(mode: ObservationMode): number[] {
   const indices: number[] = []
@@ -129,6 +133,12 @@ function buildSeatIndices(mode: ObservationMode): number[] {
       indices.push(WOLF_COLL_FAKE_DIVINE_START + s)
     }
     // mason_collective: same as individual (no extra per-seat)
+    // fanatic per-seat (+12): village_predict(11), village_trust(1)
+    if (mode === 'fanatic') {
+      const vpOff = FANATIC_VILLAGE_PREDICT_START + s * NUM_ROLES
+      for (let i = 0; i < NUM_ROLES; i++) indices.push(vpOff + i)
+      indices.push(FANATIC_VILLAGE_TRUST_START + s)
+    }
   }
   return indices
 }
@@ -732,6 +742,8 @@ export class TfTransformerNetwork {
     clipEpsilon: number
     valueLossCoeff: number
     entropyCoeff: number
+    /** plan head の PPO 更新を凍結 (pretrain 後の知識保持用) */
+    freezePlan?: boolean
   }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number } {
     const n = batch.observations.length
     if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
@@ -776,7 +788,7 @@ export class TfTransformerNetwork {
 
       // Strategy head: plan token PPO loss + predict BCE (combined step)
       const strategyIndices = headGroups.get('strategy')
-      if (strategyIndices && strategyIndices.length > 0) {
+      if (strategyIndices && strategyIndices.length > 0 && !batch.freezePlan) {
         const tc = this.config.transformer!
         const numFwd = tc.numForwardTokens ?? 8
         const numEg = tc.numEndgameTokens ?? 4
@@ -846,6 +858,8 @@ export class TfTransformerNetwork {
         totalEntropy = tf.add(totalEntropy, egResult.entropy)
 
         headGroups.delete('strategy')  // 通常ヘッドループでは処理しない
+      } else {
+        headGroups.delete('strategy')  // freezePlan でも通常ヘッドループでは処理しない
       }
 
       for (const [headName, indices] of headGroups) {

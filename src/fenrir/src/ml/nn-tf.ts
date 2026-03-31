@@ -138,6 +138,7 @@ export class TfNeuralNetwork {
     clipEpsilon: number
     valueLossCoeff: number
     entropyCoeff: number
+    freezePlan?: boolean  // unused in MLP
   }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number } {
     const n = batch.observations.length
     if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }

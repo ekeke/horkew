@@ -195,7 +195,7 @@ Options:
 function ppoUpdate(
   tfNetwork: AnyTfNetwork,
   batch: ProcessedStep[],
-  config: { miniBatchSize: number, clipEpsilon: number, valueLossCoeff: number, entropyCoeff: number, predictLossCoeff?: number },
+  config: { miniBatchSize: number, clipEpsilon: number, valueLossCoeff: number, entropyCoeff: number, predictLossCoeff?: number, freezePlan?: boolean },
 ): { policyLoss: number, predictLoss: number } {
   if (batch.length === 0) return { policyLoss: 0, predictLoss: 0 }
 
@@ -224,6 +224,7 @@ function ppoUpdate(
       clipEpsilon: config.clipEpsilon,
       valueLossCoeff: config.valueLossCoeff,
       entropyCoeff: config.entropyCoeff,
+      freezePlan: config.freezePlan,
     })
     totalPolicyLoss += result.policyLoss
     totalPredictLoss += result.predictLoss
@@ -473,20 +474,25 @@ async function checkExistingCheckpoints(config: OrchestratorConfig): Promise<voi
   }
 }
 
-function findCheckpoint(dir: string): { iteration: number, path: string } | null {
+function findCheckpoint(dir: string, prefix: string = 'checkpoint'): { iteration: number, path: string } | null {
   if (!existsSync(dir)) return null
   const files = readdirSync(dir)
-  if (files.includes('final.json')) {
-    const raw = JSON.parse(readFileSync(`${dir}/final.json`, 'utf-8'))
-    return { iteration: raw.metadata?.iteration ?? 0, path: `${dir}/final.json` }
+  // final variants: prefix_final.json or final.json
+  const finalName = `${prefix}_final.json`
+  for (const candidate of [finalName, 'final.json']) {
+    if (files.includes(candidate)) {
+      const raw = JSON.parse(readFileSync(`${dir}/${candidate}`, 'utf-8'))
+      return { iteration: raw.metadata?.iteration ?? 0, path: `${dir}/${candidate}` }
+    }
   }
   let maxIter = -1
+  const regex = new RegExp(`^${prefix}_(\\d+)\\.json$`)
   for (const f of files) {
-    const m = f.match(/^checkpoint_(\d+)\.json$/)
+    const m = f.match(regex)
     if (m) { const n = parseInt(m[1]); if (n > maxIter) maxIter = n }
   }
   if (maxIter < 0) return null
-  return { iteration: maxIter, path: `${dir}/checkpoint_${maxIter}.json` }
+  return { iteration: maxIter, path: `${dir}/${prefix}_${maxIter}.json` }
 }
 
 // ============================================================
@@ -766,6 +772,7 @@ async function main(): Promise<void> {
       clipEpsilon: trainingConfig.clipEpsilon,
       valueLossCoeff: trainingConfig.valueLossCoeff,
       entropyCoeff: trainingConfig.entropyCoeff,
+      freezePlan: config.transformer,  // pretrain 済み plan head を PPO で壊さない
     }
 
     // Phase 1: village のみ学習（wolf/third は strategy-only 未対応）
@@ -1032,6 +1039,43 @@ async function main(): Promise<void> {
     const phase1PrimeIterCounts = new Map<ModelName, number>()
     for (const name of phase1PrimeModels) phase1PrimeIterCounts.set(name, 0)
 
+    // === Phase 1' Resume ===
+    if (config.resume) {
+      let anyResumedPrime = false
+      for (const name of phase1PrimeModels) {
+        const group = MODEL_GROUPS[name]
+        const dir = `${config.checkpointBase}/ckpt-${name}`
+        const prefix = group.collective ? 'collective' : 'checkpoint'
+        const ckpt = findCheckpoint(dir, prefix)
+        if (ckpt) {
+          try {
+            const net = group.collective
+              ? (name === 'wolf_collective' ? wolfCollectiveNet : masonCollectiveNet)
+              : networks.get(name)!
+            loadCheckpoint(net, ckpt.path)
+            phase1PrimeIterCounts.set(name, ckpt.iteration)
+            anyResumedPrime = true
+            log(`  ${COLORS[name]}${name}${RESET}: resumed from iter ${ckpt.iteration}`)
+          } catch (e) {
+            log(`  ${COLORS[name]}${name}${RESET}: checkpoint incompatible, starting fresh (${(e as Error).message})`)
+          }
+        }
+        // final checkpoint → graduated
+        const finalName = group.collective ? 'collective_final.json' : 'final.json'
+        if (existsSync(`${dir}/${finalName}`)) {
+          phase1PrimeGraduated.add(name)
+          log(`  ${COLORS[name]}${name}${RESET}: already graduated`)
+        }
+      }
+      if (anyResumedPrime) {
+        log('Phase 1\' Resume:')
+        for (const name of phase1PrimeModels) {
+          const iter = phase1PrimeIterCounts.get(name)!
+          log(`  ${COLORS[name]}${name.padEnd(16)}${RESET} iter ${iter}${phase1PrimeGraduated.has(name) ? ' (graduated)' : ''}`)
+        }
+      }
+    }
+
     const ppoConfig = {
       miniBatchSize: trainingConfig.miniBatchSize,
       clipEpsilon: trainingConfig.clipEpsilon,
@@ -1152,6 +1196,41 @@ async function main(): Promise<void> {
               saveCheckpoint(collectiveNet, `${dir}/collective_${iter}.json`, { iteration: iter, winRate: 0 })
             } else {
               saveCheckpoint(networks.get(name)!, `${dir}/checkpoint_${iter}.json`, { iteration: iter, winRate: 0 })
+            }
+          }
+
+          // Eval (全5モデル同時評価)
+          if (iter % config.evalInterval === 0) {
+            process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
+            // 全役職をMLで動かすため、全モデルの roles を集約
+            const allMlRoles = Object.values(MODEL_GROUPS).flatMap(g => g.roles)
+            const evalConfig = { ...trainingConfig, mlRoles: allMlRoles }
+            const individualNets = new Map<string, AnyNetwork>()
+            for (const role of MODEL_GROUPS.village.roles) individualNets.set(role, networks.get('village')!)
+            for (const role of MODEL_GROUPS.third.roles) individualNets.set(role, networks.get('third')!)
+            const evalResult = await evaluate(
+              networks.get('village')!, evalConfig, config.evalGames,
+              undefined, undefined, undefined,
+              {
+                wolfCollectiveNet,
+                masonCollectiveNet,
+                fanaticNet: networks.get('fanatic')!,
+                frozenVillageNet: networks.get('village')!,
+                individualNets,
+              },
+            )
+            process.stderr.write('\r\x1b[K')
+            appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
+            const factionRate = evalResult.winRates[group.faction] ?? 0
+            const targetRate = config.targetWinRate ?? (baselineRates[group.faction] ?? 0.5)
+            log(
+              `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
+              `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
+            )
+            if (factionRate >= targetRate) {
+              log(`${prefix} ${BOLD}GRADUATED${RESET} (${group.faction}=${(factionRate * 100).toFixed(0)}% >= ${(targetRate * 100).toFixed(0)}%)`)
+              phase1PrimeGraduated.add(name)
+              break
             }
           }
         }
