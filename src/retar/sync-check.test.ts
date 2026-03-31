@@ -60,7 +60,6 @@ const ALLOWED_METHOD_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: st
     ],
     rsOnly: [
       'new',                    // Rustコンストラクタ慣習、TSでは constructor
-      'initial_possibilities',  // Rustゲッター、TSでは直接プロパティアクセス（代入箇所多数のためgetter化困難）
     ],
   },
 }
@@ -94,8 +93,8 @@ function extractTsClassMethods(source: string, className: string): { name: strin
   const classBody = source.slice(startIdx, endIdx)
 
   const methods: { name: string, isPrivate: boolean }[] = []
-  // メソッド定義: "  methodName(" or "  private methodName(" or "  static methodName("
-  for (const m of classBody.matchAll(/^  (?:(private|static)\s+)?(\w+)\s*\(/gm)) {
+  // メソッド定義: "  methodName(" or "  private methodName(" or "  get methodName(" etc.
+  for (const m of classBody.matchAll(/^  (?:(private|static)\s+)?(?:get\s+|set\s+)?(\w+)\s*\(/gm)) {
     const modifier = m[1]
     const name = m[2]
     if (name === 'constructor') continue

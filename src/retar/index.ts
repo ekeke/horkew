@@ -70,7 +70,9 @@ function subtreeContainsBatch(start: number, size: number, batches: number, batc
 export class VillageRetar {
   // 状況の初期値
   // 死因が明らかな場合や仮説が存在するなど、明確な条件が反映済みの値
-  initialPossibilities: Possibilities
+  private _initialPossibilities!: Possibilities
+  get initialPossibilities(): Possibilities { return this._initialPossibilities }
+  set initialPossibilities(value: Possibilities) { this._initialPossibilities = value }
   // 実行中の解析状況
   // コンテキスト的なものにまとめるべき？
   totalLiarRoles: number
