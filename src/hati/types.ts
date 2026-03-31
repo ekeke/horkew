@@ -115,6 +115,8 @@ export type ThreatProfile = {
   nekoWolfCandidates: number
   /** 猫又処刑リスク: min(nekoWolfCandidates, setup猫又数) — 最悪ケース猫又処刑回数 */
   nekoExecRisk: number
+  /** 背徳者候補数: 生存席で immoralist 可能性がある数 */
+  immoralistCandidates: number
 }
 
 /** 詰み判定の中間結果（探索前の計算ベース判定） */

@@ -204,6 +204,7 @@ export function buildThreatProfile(
   let wolfConfirmedCount = 0
   let nekoWolfCandidates = 0
   let whiteNVCandidates = 0
+  let immoralistCandidates = 0
   let possibleSurvivingHamster = false
   let possibleSurvivingNekomata = false
 
@@ -223,6 +224,7 @@ export function buildThreatProfile(
     }
     if (foxCandidate) possibleSurvivingHamster = true
     if (conclusions.hasRole(seat, 'nekomata' as SystemRole)) possibleSurvivingNekomata = true
+    if (conclusions.hasRole(seat, 'immoralist' as SystemRole)) immoralistCandidates++
   }
 
   const setupWhiteNV = (setup.get('fanatic' as SystemRole) ?? 0)
@@ -250,6 +252,7 @@ export function buildThreatProfile(
     possibleSurvivingHamster, possibleSurvivingNekomata,
     nawa, effectiveNawa, nawaInt, threat,
     requiredExecs, nekoParityShift, nekoWolfCandidates, nekoExecRisk,
+    immoralistCandidates,
   }
 }
 
@@ -311,36 +314,37 @@ export function judgeTsumi(
     // 解決可能な狐候補: foxWolfCandidates → wolfCandidates に移行
     //                    foxCandidates → 消滅
     const resolved = fr.divinableFoxCandidates
-    if (resolved < fr.aliveFoxCandidates) {
-      const unresolved = fr.aliveFoxCandidates - resolved
-      // foxWolfCandidates と foxCandidates から解決分を引く
-      // まず foxCandidates（純狐候補）から引き、余りを foxWolfCandidates から引く
-      const resolvedFromFox = Math.min(resolved, profile.foxCandidates)
-      const resolvedFromFoxWolf = resolved - resolvedFromFox
-      const adjFoxCandidates = profile.foxCandidates - resolvedFromFox
-      const adjFoxWolfCandidates = profile.foxWolfCandidates - resolvedFromFoxWolf
-      const adjWolfCandidates = profile.wolfCandidates + resolvedFromFoxWolf
-      const adjPossibleHamster = unresolved > 0
-      const adjEffectiveNawa = (aliveCount - 1 - (adjPossibleHamster ? 1 : 0)) / 2
-      const adjNawaInt = adjEffectiveNawa | 0
-      const adjRequiredExecs = adjFoxCandidates + Math.min(adjFoxWolfCandidates, 1) + adjWolfCandidates
-        - (adjPossibleHamster ? 0 : profile.wolfConfirmedCount)
-        + profile.whiteNVThreat
-      const adjNekoShift = profile.possibleSurvivingNekomata && adjEffectiveNawa % 1 === 0
-      const adjusted: ThreatProfile = {
-        ...profile,
-        foxCandidates: adjFoxCandidates,
-        foxWolfCandidates: adjFoxWolfCandidates,
-        wolfCandidates: adjWolfCandidates,
-        possibleSurvivingHamster: adjPossibleHamster,
-        effectiveNawa: adjEffectiveNawa,
-        nawaInt: adjNawaInt,
-        requiredExecs: adjRequiredExecs,
-        nekoParityShift: adjNekoShift,
-      }
-      if (isThreatExceeded(adjusted)) {
-        return { alive, profile: adjusted, impossible: true }
-      }
+    const unresolved = fr.aliveFoxCandidates - resolved
+    // foxWolfCandidates と foxCandidates から解決分を引く
+    // まず foxCandidates（純狐候補）から引き、余りを foxWolfCandidates から引く
+    const resolvedFromFox = Math.min(resolved, profile.foxCandidates)
+    const resolvedFromFoxWolf = resolved - resolvedFromFox
+    const adjFoxCandidates = profile.foxCandidates - resolvedFromFox
+    const adjFoxWolfCandidates = profile.foxWolfCandidates - resolvedFromFoxWolf
+    const adjWolfCandidates = profile.wolfCandidates + resolvedFromFoxWolf
+    const adjPossibleHamster = unresolved > 0
+    // 背徳者道連れ: 全狐解決時、背徳者が後追いで死亡し alive が減少
+    const immoralistFollowDeaths = adjPossibleHamster ? 0
+      : Math.min(profile.immoralistCandidates, setup.get('immoralist' as SystemRole) ?? 0)
+    const adjEffectiveNawa = (aliveCount - 1 - (adjPossibleHamster ? 1 : 0) - immoralistFollowDeaths) / 2
+    const adjNawaInt = adjEffectiveNawa | 0
+    const adjRequiredExecs = adjFoxCandidates + Math.min(adjFoxWolfCandidates, 1) + adjWolfCandidates
+      - (adjPossibleHamster ? 0 : profile.wolfConfirmedCount)
+      + profile.whiteNVThreat
+    const adjNekoShift = profile.possibleSurvivingNekomata && adjEffectiveNawa % 1 === 0
+    const adjusted: ThreatProfile = {
+      ...profile,
+      foxCandidates: adjFoxCandidates,
+      foxWolfCandidates: adjFoxWolfCandidates,
+      wolfCandidates: adjWolfCandidates,
+      possibleSurvivingHamster: adjPossibleHamster,
+      effectiveNawa: adjEffectiveNawa,
+      nawaInt: adjNawaInt,
+      requiredExecs: adjRequiredExecs,
+      nekoParityShift: adjNekoShift,
+    }
+    if (isThreatExceeded(adjusted)) {
+      return { alive, profile: adjusted, impossible: true }
     }
   }
 
@@ -526,7 +530,7 @@ export function searchTsumi(
   // !! 変更不可: 詰みの可否は判定フェーズ (judgeTsumi) が決定する。
   // !! 探索 (searchTsumiStrategy) は手順構築のみ。探索結果で isTsumi を変えてはならない。
   return {
-    isTsumi: true,
+    isTsumi: true, // This must be true, since searchTsumi() never use deep tree search. THIS IS BY DESIGN.
     strategy: sr.strategy, judgment,
     stats: {
       worldsTotal: sr.worldsTotal, nodesVisited: sr.nodesVisited, maxDepth: sr.maxDepth,
@@ -556,7 +560,7 @@ export function searchTsumiDirect(
     whiteNVCandidates: 0, whiteNVThreat: 0,
     possibleSurvivingHamster: false, possibleSurvivingNekomata: false,
     nawa: 0, effectiveNawa: 0, nawaInt: 0, threat: 0,
-    requiredExecs: 0, nekoParityShift: false, nekoWolfCandidates: 0, nekoExecRisk: 0,
+    requiredExecs: 0, nekoParityShift: false, nekoWolfCandidates: 0, nekoExecRisk: 0, immoralistCandidates: 0,
   }
 
   return {
