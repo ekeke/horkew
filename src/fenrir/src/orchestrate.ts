@@ -610,7 +610,7 @@ async function main(): Promise<void> {
     log(`${BOLD}=== Pretrain: Plan Token Supervised Learning ===${RESET}`)
     const pretrainBatchSize = 512
     const pretrainMaxEpochs = 2000
-    const pretrainTargetAcc = 0.95
+    const pretrainTargetAcc = 0.85
     const pretrainLogInterval = 100
 
     let bestAcc = 0
