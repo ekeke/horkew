@@ -15,6 +15,7 @@ import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { serializeVillageStatus, serializeOptions, parseWasmResult, resultToPossibilities } from '../retar/wasm-helpers.ts'
+import { Possibilities, RoleBitIndex, possibilityFromRoles } from '../retar/possibilities.ts'
 import { searchTsumi } from '../hati/index.ts'
 import type { RunRetar } from '../hati/index.ts'
 import type { TsumiResult } from '../hati/index.ts'
@@ -212,6 +213,46 @@ export function buildAssumptions(
   return assumptions
 }
 
+/** global prior に refix を適用し、Rust側と同等の effective prior を Possibilities で返す */
+function buildRefixedPrior(
+  prior: Map<number, Set<SystemRole>>,
+  setup: Map<SystemRole, number>,
+): Possibilities | null {
+  let maxSeat = 0
+  for (const seat of prior.keys()) {
+    if (seat > maxSeat) maxSeat = seat
+  }
+  if (maxSeat === 0) return null
+  const p = new Possibilities(maxSeat)
+  for (const [role, count] of setup) {
+    p.setup[RoleBitIndex[role]] = count
+  }
+  p.setupOriginal = new Uint8Array(p.setup)
+  for (const [seat, roles] of prior) {
+    p.possibilities[seat] = possibilityFromRoles(roles)
+  }
+  p.refix()
+  return p
+}
+
+/**
+ * assumptions を effective prior 上で逐次 fix_role し、
+ * 矛盾なく適用できるもののみ返す（Rust側の init_from_prior と同じ順序制約を模倣）
+ */
+function validateAssumptions(
+  assumptions: Map<number, SystemRole>,
+  refixed: Possibilities,
+): Map<number, SystemRole> {
+  const p = refixed.clone()
+  const valid = new Map<number, SystemRole>()
+  for (const [seat, role] of assumptions) {
+    if (!p.hasRole(seat, role)) continue
+    if (!p.fixRole(seat, role)) continue
+    valid.set(seat, role)
+  }
+  return valid
+}
+
 /** analyzePerPlayer の戻り値: グローバル結果 + プレイヤー別結果 */
 export type PerPlayerRetarResult = {
   /** 仮定なし（公開情報のみ）のRetar結果 */
@@ -250,8 +291,16 @@ export function analyzePerPlayer(
   // 共通 Retar が破綻していたら per-player もスキップ
   if (global.possibilities.size === 0) return { global, perPlayer }
 
+  // Rust側の init_from_prior は prior に refix() → assumptions を逐次 fix_role する。
+  // 各ステップで連鎖伝播が発生し可能性が絞り込まれるため、
+  // TS側でも同等のシミュレートで矛盾する assumption を事前に除外する。
+  const refixed = buildRefixedPrior(prior, setup)
+
   for (const player of players) {
-    const assumptions = buildAssumptions(state, player, prior)
+    const raw = buildAssumptions(state, player, prior)
+    const assumptions = refixed && raw.size > 0
+      ? validateAssumptions(raw, refixed)
+      : raw
     if (assumptions.size === 0) {
       perPlayer.set(player.seat, global)
     } else {
