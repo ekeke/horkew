@@ -9,7 +9,7 @@ use crate::plan_builder::{build_role_test_plan, RoleTest, RoleTestRole};
 use crate::finalizer::{
     DebugStash, HamsterWinPath, update_death_count_constraints, finalize,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub struct AnalyzeResult {
     pub elapsed_ms: f64,
@@ -532,7 +532,7 @@ fn init_from_scratch(
     }
 
     // Apply fixed positions
-    let mut fixed_positions: HashMap<Seat, SystemRole> = HashMap::new();
+    let mut fixed_positions: BTreeMap<Seat, SystemRole> = BTreeMap::new();
 
     for (&seat, status) in vs.statuses.iter() {
         if status.claiming && status.claiming_role == "villager" {
@@ -633,7 +633,8 @@ fn init_from_prior(
     // prior ビットマスクに合わせて setup カウントを同期し、確定席の伝播を実行
     initial_possibilities.refix();
 
-    for (&seat, &role) in &options.assumptions {
+    let sorted_assumptions: BTreeMap<Seat, SystemRole> = options.assumptions.iter().map(|(&k, &v)| (k, v)).collect();
+    for (&seat, &role) in &sorted_assumptions {
         if !initial_possibilities.has_role(seat, role) {
             panic!(
                 "Prior-based re-analysis: seat {} cannot be {:?} (not in prior possibilities)",
