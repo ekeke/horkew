@@ -9,7 +9,7 @@ use crate::plan_builder::{build_role_test_plan, RoleTest, RoleTestRole};
 use crate::finalizer::{
     DebugStash, HamsterWinPath, update_death_count_constraints, finalize,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub struct AnalyzeResult {
     pub elapsed_ms: f64,
@@ -17,7 +17,7 @@ pub struct AnalyzeResult {
     pub id: u32,
     pub aborted: bool,
     pub error: Option<String>,
-    pub result: HashMap<Seat, HashSet<SystemRole>>,
+    pub result: BTreeMap<Seat, BTreeSet<SystemRole>>,
     pub max_surviving_nv: i32,
 }
 
@@ -32,7 +32,7 @@ fn subtree_contains_batch(start: i64, size: i64, batches: i64, batch: i64) -> bo
 
 pub struct VillageRetar {
     vs: VillageStatus,
-    setup: HashMap<SystemRole, u32>,
+    setup: BTreeMap<SystemRole, u32>,
     options: AnalyzeOptions,
 
     initial_possibilities: Possibilities,
@@ -44,7 +44,7 @@ pub struct VillageRetar {
 
     last_hamster_must_die_at: Option<Day>,
     last_hamster_must_died_by: Option<CauseOfDeath>,
-    night_kills_by_day: HashMap<Day, Vec<Seat>>,
+    night_kills_by_day: BTreeMap<Day, Vec<Seat>>,
     last_deaths: Vec<Seat>,
     hamster_win_path: Option<HamsterWinPath>,
 
@@ -52,7 +52,7 @@ pub struct VillageRetar {
     strides: Vec<i64>,
 
     cached_survivors: Vec<Seat>,
-    cached_surviving_map: HashMap<Seat, bool>,
+    cached_surviving_map: BTreeMap<Seat, bool>,
 
     pub debug_stash: DebugStash,
 }
@@ -60,7 +60,7 @@ pub struct VillageRetar {
 impl VillageRetar {
     pub fn new(
         mut vs: VillageStatus,
-        setup: HashMap<SystemRole, u32>,
+        setup: BTreeMap<SystemRole, u32>,
         options: AnalyzeOptions,
     ) -> Self {
         let conclusions = Possibilities::empty(&setup);
@@ -69,7 +69,7 @@ impl VillageRetar {
         let (last_hamster_must_die_at, last_hamster_must_died_by) =
             extract_hamster_death_info(&vs);
 
-        let mut night_kills_by_day: HashMap<Day, Vec<Seat>> = HashMap::new();
+        let mut night_kills_by_day: BTreeMap<Day, Vec<Seat>> = BTreeMap::new();
         let first_kill = options.day_count_from - if options.has_first_ghost { 1 } else { 0 };
         for d in first_kill..vs.day {
             night_kills_by_day.insert(d, Vec::new());
@@ -128,7 +128,7 @@ impl VillageRetar {
             .filter(|(_, s)| s.surviving)
             .map(|(&seat, _)| seat)
             .collect();
-        let cached_surviving_map: HashMap<Seat, bool> =
+        let cached_surviving_map: BTreeMap<Seat, bool> =
             cached_survivors.iter().map(|&s| (s, true)).collect();
 
         VillageRetar {
@@ -504,9 +504,9 @@ fn extract_hamster_death_info(vs: &VillageStatus) -> (Option<Day>, Option<CauseO
 /// ゼロから初期化（従来のフルパス）
 fn init_from_scratch(
     vs: &mut VillageStatus,
-    setup: &HashMap<SystemRole, u32>,
+    setup: &BTreeMap<SystemRole, u32>,
     options: &AnalyzeOptions,
-    night_kills_by_day: &HashMap<Day, Vec<Seat>>,
+    night_kills_by_day: &BTreeMap<Day, Vec<Seat>>,
     last_deaths: &[Seat],
 ) -> Possibilities {
     // Apply hocus pocus
@@ -522,7 +522,7 @@ fn init_from_scratch(
     let mut initial_possibilities = Possibilities::from_setup(setup);
 
     // 処刑道連れが発生した日を事前収集（処刑者が猫又の可能性を残すため）
-    let mut curse_days: HashSet<Day> = HashSet::new();
+    let mut curse_days: BTreeSet<Day> = BTreeSet::new();
     for status in vs.statuses.values() {
         if status.cause_of_death == CauseOfDeath::CursedByExecutedNekomata {
             if let Some(d) = status.died_day {

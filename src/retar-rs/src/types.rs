@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize, Deserializer};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt;
 
 pub type Seat = u32;
 pub type Day = i32;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SystemRole {
     Villager,
@@ -92,7 +92,7 @@ impl fmt::Display for SystemRole {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CauseOfDeath {
     Execution,
@@ -103,7 +103,7 @@ pub enum CauseOfDeath {
     CursedByKilledNekomata,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VillageResult {
     WerewolfWon,
@@ -112,7 +112,7 @@ pub enum VillageResult {
     Draw,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EnumSpecies {
     Human,
@@ -129,11 +129,11 @@ pub struct Assertion {
 pub struct PreviousClaim {
     pub role: String,
     #[serde(deserialize_with = "deserialize_day_map")]
-    pub assertions: HashMap<Day, Assertion>,
+    pub assertions: BTreeMap<Day, Assertion>,
     #[serde(deserialize_with = "deserialize_day_seat_map")]
-    pub actions: HashMap<Day, Seat>,
+    pub actions: BTreeMap<Day, Seat>,
     #[serde(deserialize_with = "deserialize_day_seat_map")]
-    pub forecasts: HashMap<Day, Seat>,
+    pub forecasts: BTreeMap<Day, Seat>,
     #[serde(rename = "claimedAt")]
     pub claimed_at: Option<Day>,
     #[serde(rename = "claimOrder")]
@@ -170,15 +170,15 @@ pub struct SeatStatus {
     #[serde(rename = "votedOrder")]
     pub voted_order: u32,
     #[serde(deserialize_with = "deserialize_day_seat_map")]
-    pub actions: HashMap<Day, Seat>,
+    pub actions: BTreeMap<Day, Seat>,
     #[serde(deserialize_with = "deserialize_day_map")]
-    pub assertions: HashMap<Day, Assertion>,
+    pub assertions: BTreeMap<Day, Assertion>,
     #[serde(deserialize_with = "deserialize_day_seat_map")]
-    pub forecasts: HashMap<Day, Seat>,
+    pub forecasts: BTreeMap<Day, Seat>,
     #[serde(rename = "noCoOpportunity", default)]
     pub no_co_opportunity: Option<bool>,
     #[serde(rename = "previousAssertions", default, deserialize_with = "deserialize_optional_day_assertion_vec_map")]
-    pub previous_assertions: Option<HashMap<Day, Vec<Assertion>>>,
+    pub previous_assertions: Option<BTreeMap<Day, Vec<Assertion>>>,
     #[serde(rename = "previousClaims", default)]
     pub previous_claims: Option<Vec<PreviousClaim>>,
 }
@@ -192,13 +192,13 @@ pub struct VoteRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VillageStatus {
     #[serde(deserialize_with = "deserialize_seat_status_map")]
-    pub statuses: HashMap<Seat, SeatStatus>,
+    pub statuses: BTreeMap<Seat, SeatStatus>,
     #[serde(deserialize_with = "deserialize_day_seat_vec_map")]
-    pub executions: HashMap<Day, Vec<Seat>>,
+    pub executions: BTreeMap<Day, Vec<Seat>>,
     #[serde(deserialize_with = "deserialize_day_seat_vec_map")]
-    pub kills: HashMap<Day, Vec<Seat>>,
+    pub kills: BTreeMap<Day, Vec<Seat>>,
     #[serde(rename = "voteHistory", deserialize_with = "deserialize_day_vote_map")]
-    pub vote_history: HashMap<Day, Vec<VoteRecord>>,
+    pub vote_history: BTreeMap<Day, Vec<VoteRecord>>,
     #[serde(rename = "revoteTargets", default)]
     pub revote_targets: Vec<Seat>,
     #[serde(rename = "voteFinalRule", default = "default_vote_final_rule")]
@@ -233,11 +233,11 @@ pub struct AnalyzeOptions {
     #[serde(rename = "hasFirstGhost")]
     pub has_first_ghost: bool,
     #[serde(deserialize_with = "deserialize_seat_role_map", default)]
-    pub assumptions: HashMap<Seat, SystemRole>,
+    pub assumptions: BTreeMap<Seat, SystemRole>,
     #[serde(rename = "wolfPairDenyals", default)]
     pub wolf_pair_denyals: Vec<(Seat, Seat)>,
     #[serde(rename = "hocusPocus", deserialize_with = "deserialize_seat_bool_map", default)]
-    pub hocus_pocus: HashMap<Seat, bool>,
+    pub hocus_pocus: BTreeMap<Seat, bool>,
     #[serde(default)]
     pub id: u32,
     #[serde(default = "default_batches")]
@@ -254,14 +254,14 @@ fn default_batches() -> u32 {
     1
 }
 
-// Custom deserializers for JSON string-keyed maps → numeric-keyed HashMaps
+// Custom deserializers for JSON string-keyed maps → numeric-keyed BTreeMaps
 
-fn deserialize_day_map<'de, D>(deserializer: D) -> Result<HashMap<Day, Assertion>, D::Error>
+fn deserialize_day_map<'de, D>(deserializer: D) -> Result<BTreeMap<Day, Assertion>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let string_map: HashMap<String, Assertion> = HashMap::deserialize(deserializer)?;
-    let mut result = HashMap::new();
+    let string_map: BTreeMap<String, Assertion> = BTreeMap::deserialize(deserializer)?;
+    let mut result = BTreeMap::new();
     for (k, v) in string_map {
         let key: Day = k.parse().map_err(serde::de::Error::custom)?;
         result.insert(key, v);
@@ -269,12 +269,12 @@ where
     Ok(result)
 }
 
-fn deserialize_day_seat_map<'de, D>(deserializer: D) -> Result<HashMap<Day, Seat>, D::Error>
+fn deserialize_day_seat_map<'de, D>(deserializer: D) -> Result<BTreeMap<Day, Seat>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let string_map: HashMap<String, Seat> = HashMap::deserialize(deserializer)?;
-    let mut result = HashMap::new();
+    let string_map: BTreeMap<String, Seat> = BTreeMap::deserialize(deserializer)?;
+    let mut result = BTreeMap::new();
     for (k, v) in string_map {
         let key: Day = k.parse().map_err(serde::de::Error::custom)?;
         result.insert(key, v);
@@ -282,12 +282,12 @@ where
     Ok(result)
 }
 
-fn deserialize_day_seat_vec_map<'de, D>(deserializer: D) -> Result<HashMap<Day, Vec<Seat>>, D::Error>
+fn deserialize_day_seat_vec_map<'de, D>(deserializer: D) -> Result<BTreeMap<Day, Vec<Seat>>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let string_map: HashMap<String, Vec<Seat>> = HashMap::deserialize(deserializer)?;
-    let mut result = HashMap::new();
+    let string_map: BTreeMap<String, Vec<Seat>> = BTreeMap::deserialize(deserializer)?;
+    let mut result = BTreeMap::new();
     for (k, v) in string_map {
         let key: Day = k.parse().map_err(serde::de::Error::custom)?;
         result.insert(key, v);
@@ -295,12 +295,12 @@ where
     Ok(result)
 }
 
-fn deserialize_day_vote_map<'de, D>(deserializer: D) -> Result<HashMap<Day, Vec<VoteRecord>>, D::Error>
+fn deserialize_day_vote_map<'de, D>(deserializer: D) -> Result<BTreeMap<Day, Vec<VoteRecord>>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let string_map: HashMap<String, Vec<VoteRecord>> = HashMap::deserialize(deserializer)?;
-    let mut result = HashMap::new();
+    let string_map: BTreeMap<String, Vec<VoteRecord>> = BTreeMap::deserialize(deserializer)?;
+    let mut result = BTreeMap::new();
     for (k, v) in string_map {
         let key: Day = k.parse().map_err(serde::de::Error::custom)?;
         result.insert(key, v);
@@ -308,12 +308,12 @@ where
     Ok(result)
 }
 
-fn deserialize_seat_status_map<'de, D>(deserializer: D) -> Result<HashMap<Seat, SeatStatus>, D::Error>
+fn deserialize_seat_status_map<'de, D>(deserializer: D) -> Result<BTreeMap<Seat, SeatStatus>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let string_map: HashMap<String, SeatStatus> = HashMap::deserialize(deserializer)?;
-    let mut result = HashMap::new();
+    let string_map: BTreeMap<String, SeatStatus> = BTreeMap::deserialize(deserializer)?;
+    let mut result = BTreeMap::new();
     for (k, v) in string_map {
         let key: Seat = k.parse().map_err(serde::de::Error::custom)?;
         result.insert(key, v);
@@ -321,12 +321,12 @@ where
     Ok(result)
 }
 
-fn deserialize_seat_role_map<'de, D>(deserializer: D) -> Result<HashMap<Seat, SystemRole>, D::Error>
+fn deserialize_seat_role_map<'de, D>(deserializer: D) -> Result<BTreeMap<Seat, SystemRole>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let string_map: HashMap<String, SystemRole> = HashMap::deserialize(deserializer)?;
-    let mut result = HashMap::new();
+    let string_map: BTreeMap<String, SystemRole> = BTreeMap::deserialize(deserializer)?;
+    let mut result = BTreeMap::new();
     for (k, v) in string_map {
         let key: Seat = k.parse().map_err(serde::de::Error::custom)?;
         result.insert(key, v);
@@ -334,12 +334,12 @@ where
     Ok(result)
 }
 
-fn deserialize_seat_bool_map<'de, D>(deserializer: D) -> Result<HashMap<Seat, bool>, D::Error>
+fn deserialize_seat_bool_map<'de, D>(deserializer: D) -> Result<BTreeMap<Seat, bool>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let string_map: HashMap<String, bool> = HashMap::deserialize(deserializer)?;
-    let mut result = HashMap::new();
+    let string_map: BTreeMap<String, bool> = BTreeMap::deserialize(deserializer)?;
+    let mut result = BTreeMap::new();
     for (k, v) in string_map {
         let key: Seat = k.parse().map_err(serde::de::Error::custom)?;
         result.insert(key, v);
@@ -349,15 +349,15 @@ where
 
 fn deserialize_optional_day_assertion_vec_map<'de, D>(
     deserializer: D,
-) -> Result<Option<HashMap<Day, Vec<Assertion>>>, D::Error>
+) -> Result<Option<BTreeMap<Day, Vec<Assertion>>>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let opt: Option<HashMap<String, Vec<Assertion>>> = Option::deserialize(deserializer)?;
+    let opt: Option<BTreeMap<String, Vec<Assertion>>> = Option::deserialize(deserializer)?;
     match opt {
         None => Ok(None),
         Some(string_map) => {
-            let mut result = HashMap::new();
+            let mut result = BTreeMap::new();
             for (k, v) in string_map {
                 let key: Day = k.parse().map_err(serde::de::Error::custom)?;
                 result.insert(key, v);

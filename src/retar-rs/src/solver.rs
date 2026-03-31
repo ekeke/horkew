@@ -3,7 +3,7 @@ use crate::possibilities::{
     Possibilities, ROLE_COUNT, pop_count, bit_indices_from_mask,
     combination_with_replacement_bit,
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 const WOLF_BIT: usize = SystemRole::Werewolf.bit_index_const() as usize;
 const HAMSTER_BIT: usize = SystemRole::Werehamster.bit_index_const() as usize;
@@ -118,7 +118,7 @@ fn backtrack_for_role_assignment(
                 }
 
                 // Naked subset: groups whose possibilities ⊆ mask consume exactly those roles
-                let mut checked = std::collections::HashSet::new();
+                let mut checked = std::collections::BTreeSet::new();
                 for idx in 0..dead_entries.len() {
                     let mask = dead_entries[idx].0;
                     if mask == 0 || checked.contains(&mask) {
@@ -305,17 +305,17 @@ fn backtrack_for_role_assignment(
 /// or None if no valid assignment exists.
 pub fn solve_possibilities(
     source: &Possibilities,
-    survivors: &HashMap<Seat, bool>,
+    survivors: &BTreeMap<Seat, bool>,
     min_surviving_wolves: u32,
     max_surviving_wolves: u32,
     min_surviving_hamsters: u32,
     max_surviving_hamsters: u32,
-    setup: &HashMap<SystemRole, u32>,
+    setup: &BTreeMap<SystemRole, u32>,
 ) -> Option<Possibilities> {
     // Group seats by possibility bitmask, separated by survival status
-    let mut survivors_map: HashMap<u16, Vec<Seat>> = HashMap::new();
-    let mut dead_map: HashMap<u16, Vec<Seat>> = HashMap::new();
-    let mut fixed_map: HashMap<u16, Vec<Seat>> = HashMap::new();
+    let mut survivors_map: BTreeMap<u16, Vec<Seat>> = BTreeMap::new();
+    let mut dead_map: BTreeMap<u16, Vec<Seat>> = BTreeMap::new();
+    let mut fixed_map: BTreeMap<u16, Vec<Seat>> = BTreeMap::new();
     let mut fixed_died_wolves: u32 = 0;
     let mut fixed_died_hamsters: u32 = 0;
 
@@ -403,7 +403,7 @@ pub fn solve_possibilities(
 mod tests {
     use super::*;
 
-    fn make_setup(pairs: &[(SystemRole, u32)]) -> HashMap<SystemRole, u32> {
+    fn make_setup(pairs: &[(SystemRole, u32)]) -> BTreeMap<SystemRole, u32> {
         pairs.iter().cloned().collect()
     }
 
@@ -422,7 +422,7 @@ mod tests {
         p.fix_role(3, SystemRole::Werewolf);
         p.fix_role(4, SystemRole::Possessed);
 
-        let survivors: HashMap<Seat, bool> =
+        let survivors: BTreeMap<Seat, bool> =
             [(1, true), (2, true), (3, true), (4, true)].into_iter().collect();
 
         let result = solve_possibilities(&p, &survivors, 0, 2, 0, 0, &setup);
@@ -440,7 +440,7 @@ mod tests {
         let p = Possibilities::from_setup(&setup);
 
         // seat 1 dead, seats 2,3 alive
-        let survivors: HashMap<Seat, bool> =
+        let survivors: BTreeMap<Seat, bool> =
             [(1, false), (2, true), (3, true)].into_iter().collect();
 
         let result = solve_possibilities(&p, &survivors, 1, 1, 0, 0, &setup);
@@ -458,7 +458,7 @@ mod tests {
         // 2 seats, 2 wolves, but require 0 surviving wolves with all alive
         let setup = make_setup(&[(SystemRole::Werewolf, 2)]);
         let p = Possibilities::from_setup(&setup);
-        let survivors: HashMap<Seat, bool> =
+        let survivors: BTreeMap<Seat, bool> =
             [(1, true), (2, true)].into_iter().collect();
 
         // min/max surviving wolves = 0, but both seats are alive and must be wolves

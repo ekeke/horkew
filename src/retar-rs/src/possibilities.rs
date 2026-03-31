@@ -1,5 +1,5 @@
 use crate::types::{SystemRole, Seat};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const ROLE_COUNT: usize = 11;
 
@@ -81,8 +81,8 @@ pub fn roles_from_possibility(bit: u16) -> Vec<SystemRole> {
     result
 }
 
-pub fn set_of_roles_from_possibility(possibility: u16) -> HashSet<SystemRole> {
-    let mut result = HashSet::new();
+pub fn set_of_roles_from_possibility(possibility: u16) -> BTreeSet<SystemRole> {
+    let mut result = BTreeSet::new();
     for role in SystemRole::ALL {
         if possibility & role.bit() != 0 {
             result.insert(role);
@@ -91,7 +91,7 @@ pub fn set_of_roles_from_possibility(possibility: u16) -> HashSet<SystemRole> {
     result
 }
 
-pub fn possibility_from_roles(roles: &HashSet<SystemRole>) -> u16 {
+pub fn possibility_from_roles(roles: &BTreeSet<SystemRole>) -> u16 {
     let mut result: u16 = 0;
     for &role in roles {
         result |= role.bit();
@@ -125,7 +125,7 @@ pub struct Possibilities {
 
 impl Possibilities {
     /// Create from a setup map (role → count). Initializes all seats with all roles present in setup.
-    pub fn from_setup(setup: &HashMap<SystemRole, u32>) -> Self {
+    pub fn from_setup(setup: &BTreeMap<SystemRole, u32>) -> Self {
         let mut count: usize = 0;
         let mut initial: u16 = 0;
         let mut setup_arr = [0u8; ROLE_COUNT];
@@ -148,7 +148,7 @@ impl Possibilities {
     }
 
     /// Create empty (all zeros) with same dimensions as setup
-    pub fn empty(setup: &HashMap<SystemRole, u32>) -> Self {
+    pub fn empty(setup: &BTreeMap<SystemRole, u32>) -> Self {
         let mut p = Self::from_setup(setup);
         for i in 0..p.possibilities.len() {
             p.possibilities[i] = 0;
@@ -294,8 +294,8 @@ impl Possibilities {
         result
     }
 
-    pub fn to_structured(&self) -> HashMap<Seat, HashSet<SystemRole>> {
-        let mut result = HashMap::new();
+    pub fn to_structured(&self) -> BTreeMap<Seat, BTreeSet<SystemRole>> {
+        let mut result = BTreeMap::new();
         for i in 1..self.possibilities.len() {
             result.insert(i as Seat, set_of_roles_from_possibility(self.possibilities[i]));
         }
@@ -456,14 +456,14 @@ fn combination_with_replacement_bit_inner(
 }
 
 /// Higher-level combination with replacement using role names.
-/// Returns all combinations as Vec of HashMaps.
+/// Returns all combinations as Vec of BTreeMaps.
 pub fn combination_with_replacement_in_limit(
     roles: &[SystemRole],
     k: u32,
-    limits: &HashMap<SystemRole, u32>,
-) -> Vec<HashMap<SystemRole, u32>> {
+    limits: &BTreeMap<SystemRole, u32>,
+) -> Vec<BTreeMap<SystemRole, u32>> {
     let mut results = Vec::new();
-    let mut current = HashMap::new();
+    let mut current = BTreeMap::new();
     combination_with_replacement_in_limit_inner(roles, k, limits, 0, &mut current, &mut results);
     results
 }
@@ -471,10 +471,10 @@ pub fn combination_with_replacement_in_limit(
 fn combination_with_replacement_in_limit_inner(
     roles: &[SystemRole],
     k: u32,
-    limits: &HashMap<SystemRole, u32>,
+    limits: &BTreeMap<SystemRole, u32>,
     left: usize,
-    current: &mut HashMap<SystemRole, u32>,
-    results: &mut Vec<HashMap<SystemRole, u32>>,
+    current: &mut BTreeMap<SystemRole, u32>,
+    results: &mut Vec<BTreeMap<SystemRole, u32>>,
 ) {
     if left > roles.len() || k == 0 {
         results.push(current.clone());
@@ -502,7 +502,7 @@ fn combination_with_replacement_in_limit_inner(
 mod tests {
     use super::*;
 
-    fn make_setup(pairs: &[(SystemRole, u32)]) -> HashMap<SystemRole, u32> {
+    fn make_setup(pairs: &[(SystemRole, u32)]) -> BTreeMap<SystemRole, u32> {
         pairs.iter().cloned().collect()
     }
 
@@ -541,7 +541,7 @@ mod tests {
     fn set_of_roles_from_possibility_test() {
         let p: u16 = 0b10101010;
         let result = set_of_roles_from_possibility(p);
-        let expected: HashSet<SystemRole> = [
+        let expected: BTreeSet<SystemRole> = [
             SystemRole::Seer,
             SystemRole::Bodyguard,
             SystemRole::Nekomata,
@@ -635,7 +635,7 @@ mod tests {
         let mut p = Possibilities::from_setup(&setup);
         p.mark_as_liar(1);
         let roles = set_of_roles_from_possibility(p.get(1));
-        let expected: HashSet<SystemRole> = [SystemRole::Possessed].into_iter().collect();
+        let expected: BTreeSet<SystemRole> = [SystemRole::Possessed].into_iter().collect();
         assert_eq!(roles, expected);
     }
 
@@ -651,7 +651,7 @@ mod tests {
         let mut p = Possibilities::from_setup(&setup);
         p.mark_as_human(1);
         let roles = set_of_roles_from_possibility(p.get(1));
-        let expected: HashSet<SystemRole> = [
+        let expected: BTreeSet<SystemRole> = [
             SystemRole::Seer,
             SystemRole::Bodyguard,
             SystemRole::Nekomata,
@@ -732,7 +732,7 @@ mod tests {
     #[test]
     fn combination_with_replacement_in_limit_test() {
         let roles = vec![SystemRole::Seer, SystemRole::Bodyguard, SystemRole::Nekomata];
-        let limits: HashMap<SystemRole, u32> = [
+        let limits: BTreeMap<SystemRole, u32> = [
             (SystemRole::Seer, 1),
             (SystemRole::Bodyguard, 2),
             (SystemRole::Nekomata, 1),

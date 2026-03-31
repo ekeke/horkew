@@ -1,7 +1,7 @@
 use crate::types::{CauseOfDeath, VillageStatus, SystemRole, Seat};
 use crate::possibilities::Possibilities;
 use crate::combinatorics::select_combinations_from_array;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const LIAR_ROLES: &[SystemRole] = &[
     SystemRole::Werewolf,
@@ -40,14 +40,14 @@ pub struct BuildPlanResult {
 
 pub fn build_role_test_plan(
     village: &VillageStatus,
-    setup: &HashMap<SystemRole, u32>,
+    setup: &BTreeMap<SystemRole, u32>,
     multiple_victims: &[Seat],
-    initial_possibilities: Option<&Possibilities>,
+    _initial_possibilities: Option<&Possibilities>,
 ) -> BuildPlanResult {
     let mut num_liars: u32 = 0;
 
-    let mut claims: HashMap<SystemRole, Vec<Seat>> = HashMap::new();
-    let mut min_claim_day: HashMap<SystemRole, i32> = HashMap::new();
+    let mut claims: BTreeMap<SystemRole, Vec<Seat>> = BTreeMap::new();
+    let mut min_claim_day: BTreeMap<SystemRole, i32> = BTreeMap::new();
     for &role in ROLES_IN_TEST_PLANNING {
         claims.insert(role, Vec::new());
         min_claim_day.insert(role, i32::MAX);
@@ -193,7 +193,7 @@ pub fn build_role_test_plan(
                 }
             }
             let mason_pool: Vec<Seat> = {
-                let mut set: HashSet<Seat> = unrevealed_seats.iter().cloned().collect();
+                let mut set: BTreeSet<Seat> = unrevealed_seats.iter().cloned().collect();
                 for &s in &alive_candidates {
                     set.insert(s);
                 }
@@ -208,7 +208,7 @@ pub fn build_role_test_plan(
                         asserted_partners.push(assertion.target);
                     }
                 }
-                let mut fixed: HashSet<Seat> = HashSet::new();
+                let mut fixed: BTreeSet<Seat> = BTreeSet::new();
                 fixed.insert(claim_seat);
                 for &p in &asserted_partners {
                     fixed.insert(p);
@@ -219,7 +219,7 @@ pub fn build_role_test_plan(
                 let remaining_slots = num as usize - fixed.len();
                 if remaining_slots == 0 {
                     let rest: Vec<Seat> = {
-                        let mut all: HashSet<Seat> = claim_seats.iter().cloned().collect();
+                        let mut all: BTreeSet<Seat> = claim_seats.iter().cloned().collect();
                         for &s in &mason_pool {
                             all.insert(s);
                         }
@@ -282,7 +282,7 @@ pub fn build_role_test_plan(
             }
         } else {
             let pool: Vec<Seat> = {
-                let mut set: HashSet<Seat> = role_claims.iter().cloned().collect();
+                let mut set: BTreeSet<Seat> = role_claims.iter().cloned().collect();
                 for &s in &unrevealed_seats {
                     set.insert(s);
                 }

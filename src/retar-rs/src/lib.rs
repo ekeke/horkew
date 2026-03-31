@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub mod types;
 pub mod possibilities;
@@ -26,7 +26,7 @@ pub fn analyze(village_json: &str, setup_json: &str, options_json: &str) -> Stri
         Ok(v) => v,
         Err(e) => return format!("{{\"error\": \"village parse error: {}\"}}", e),
     };
-    let setup_raw: HashMap<SystemRole, u32> = match serde_json::from_str(setup_json) {
+    let setup_raw: BTreeMap<SystemRole, u32> = match serde_json::from_str(setup_json) {
         Ok(v) => v,
         Err(e) => return format!("{{\"error\": \"setup parse error: {}\"}}", e),
     };
@@ -54,7 +54,7 @@ pub fn analyze(village_json: &str, setup_json: &str, options_json: &str) -> Stri
     };
 
     // Serialize result matching JS AnalyzeResult shape
-    let result_map: HashMap<String, Vec<SystemRole>> = result
+    let result_map: BTreeMap<String, Vec<SystemRole>> = result
         .result
         .into_iter()
         .map(|(seat, roles)| {
@@ -87,7 +87,7 @@ pub fn analyze_with_dump(village_json: &str, setup_json: &str, options_json: &st
         Ok(v) => v,
         Err(e) => return format!("{{\"error\": \"village parse error: {}\"}}", e),
     };
-    let setup_raw: HashMap<SystemRole, u32> = match serde_json::from_str(setup_json) {
+    let setup_raw: BTreeMap<SystemRole, u32> = match serde_json::from_str(setup_json) {
         Ok(v) => v,
         Err(e) => return format!("{{\"error\": \"setup parse error: {}\"}}", e),
     };
@@ -121,7 +121,7 @@ pub fn analyze_with_dump(village_json: &str, setup_json: &str, options_json: &st
         }
     };
 
-    let result_map: HashMap<String, Vec<SystemRole>> = result
+    let result_map: BTreeMap<String, Vec<SystemRole>> = result
         .result
         .into_iter()
         .map(|(seat, roles)| {
@@ -147,9 +147,9 @@ pub fn analyze_with_dump(village_json: &str, setup_json: &str, options_json: &st
 /// Non-WASM entry point for direct Rust usage
 pub fn analyze_direct(
     vs: VillageStatus,
-    setup: HashMap<SystemRole, u32>,
+    setup: BTreeMap<SystemRole, u32>,
     options: AnalyzeOptions,
-) -> HashMap<Seat, HashSet<SystemRole>> {
+) -> BTreeMap<Seat, BTreeSet<SystemRole>> {
     let mut retar = VillageRetar::new(vs, setup, options);
     let result = retar.analyze();
     result.result
@@ -166,7 +166,7 @@ mod tests {
         let options_json = include_str!("../13597_options.json");
 
         let vs: VillageStatus = serde_json::from_str(vs_json).unwrap();
-        let setup: HashMap<SystemRole, u32> = serde_json::from_str(setup_json).unwrap();
+        let setup: BTreeMap<SystemRole, u32> = serde_json::from_str(setup_json).unwrap();
         let options: AnalyzeOptions = serde_json::from_str(options_json).unwrap();
 
         let mut retar = VillageRetar::new(vs, setup, options);
@@ -183,7 +183,7 @@ mod tests {
         let options_json = include_str!("../std10p_s0_options.json");
 
         let vs: VillageStatus = serde_json::from_str(vs_json).unwrap();
-        let setup: HashMap<SystemRole, u32> = serde_json::from_str(setup_json).unwrap();
+        let setup: BTreeMap<SystemRole, u32> = serde_json::from_str(setup_json).unwrap();
         let options: AnalyzeOptions = serde_json::from_str(options_json).unwrap();
 
         let mut retar = VillageRetar::new(vs, setup, options);
@@ -199,5 +199,58 @@ mod tests {
         for (&seat, roles) in &result.result {
             assert!(!roles.is_empty(), "seat {} should not be empty", seat);
         }
+    }
+
+    #[test]
+    fn test_772_assumption_immoralist() {
+        let vs_json = include_str!("../772_vs.json");
+        let setup_json = include_str!("../772_setup.json");
+        let options_json = include_str!("../772_options_assume.json");
+
+        let vs: VillageStatus = serde_json::from_str(vs_json).unwrap();
+        let setup: BTreeMap<SystemRole, u32> = serde_json::from_str(setup_json).unwrap();
+        let options: AnalyzeOptions = serde_json::from_str(options_json).unwrap();
+
+        // Verify assumption is loaded
+        assert_eq!(options.assumptions.get(&11), Some(&SystemRole::Immoralist),
+            "assumption: seat 11 should be immoralist");
+
+        let mut retar = VillageRetar::new(vs, setup, options);
+        let result = retar.analyze();
+
+        eprintln!("debug_stash: {:?}", retar.debug_stash);
+        for (seat, roles) in &result.result {
+            eprintln!("seat {}: {:?}", seat, roles);
+        }
+
+        // seat 13 (信) should NOT have werehamster when seat 11 (狼２) is assumed immoralist
+        // Reason: 信 died day 1, immoralist (狼２) is alive → werehamster can't have died
+        let seat13 = result.result.get(&13).expect("seat 13 should exist");
+        assert!(!seat13.contains(&SystemRole::Werehamster),
+            "seat 13 (信) should NOT be werehamster when seat 11 is assumed immoralist, but got: {:?}", seat13);
+    }
+
+    #[test]
+    fn test_772_no_assumption() {
+        let vs_json = include_str!("../772_vs.json");
+        let setup_json = include_str!("../772_setup.json");
+        let options_json = include_str!("../772_options_no_assume.json");
+
+        let vs: VillageStatus = serde_json::from_str(vs_json).unwrap();
+        let setup: BTreeMap<SystemRole, u32> = serde_json::from_str(setup_json).unwrap();
+        let options: AnalyzeOptions = serde_json::from_str(options_json).unwrap();
+
+        let mut retar = VillageRetar::new(vs, setup, options);
+        let result = retar.analyze();
+
+        eprintln!("debug_stash (no assume): {:?}", retar.debug_stash);
+        for (seat, roles) in &result.result {
+            eprintln!("seat {}: {:?}", seat, roles);
+        }
+
+        // Without assumption, seat 13 should also not have werehamster (baseline)
+        let seat13 = result.result.get(&13).expect("seat 13 should exist");
+        assert!(!seat13.contains(&SystemRole::Werehamster),
+            "seat 13 (信) should NOT be werehamster even without assumption, but got: {:?}", seat13);
     }
 }

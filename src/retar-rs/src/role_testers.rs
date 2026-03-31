@@ -1,6 +1,6 @@
 use crate::types::{CauseOfDeath, SeatStatus, VillageStatus, SystemRole, Seat, Day};
 use crate::possibilities::Possibilities;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub struct DeathChronicle {
     pub add: Vec<i8>,
@@ -46,7 +46,7 @@ pub struct AnalyzeContext {
 
 pub struct RoleTesterEnv<'a> {
     pub vs: &'a VillageStatus,
-    pub night_kills_by_day: &'a HashMap<Day, Vec<Seat>>,
+    pub night_kills_by_day: &'a BTreeMap<Day, Vec<Seat>>,
     pub total_liar_roles: u32,
     pub known_fake_claim_count: u32,
     pub last_hamster_must_die_at: Option<Day>,
@@ -93,7 +93,7 @@ fn get_status<'a>(env: &'a RoleTesterEnv, seat: Seat) -> &'a SeatStatus {
     env.vs.statuses.get(&seat).unwrap()
 }
 
-fn deny_role_for_others(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, role: SystemRole, exclude: &HashSet<Seat>) -> bool {
+fn deny_role_for_others(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, role: SystemRole, exclude: &BTreeSet<Seat>) -> bool {
     for &seat in env.vs.statuses.keys() {
         if exclude.contains(&seat) {
             continue;
@@ -110,7 +110,7 @@ fn is_exec_phase(c: CauseOfDeath) -> bool {
 }
 
 pub fn test_hamster(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
-    let mut hamsters = HashSet::new();
+    let mut hamsters = BTreeSet::new();
     let mut last_hamster_died_at: i32 = i32::MIN;
     let mut last_hamster_died_by: Option<CauseOfDeath> = None;
     let mut living_hamsters = 0u32;
@@ -177,10 +177,10 @@ pub fn test_hamster(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[S
 }
 
 pub fn test_seer(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
-    let mut seers = HashSet::new();
+    let mut seers = BTreeSet::new();
     let mut max_surviving: i32 = i32::MIN;
-    let mut seer_targets: HashMap<Day, Vec<SeerTarget>> = HashMap::new();
-    let mut unresolved_hamster_death: HashMap<Day, i32> = HashMap::new();
+    let mut seer_targets: BTreeMap<Day, Vec<SeerTarget>> = BTreeMap::new();
+    let mut unresolved_hamster_death: BTreeMap<Day, i32> = BTreeMap::new();
 
     if !ctx.hamsters_killed_by_seer.is_empty() {
         for hk in &ctx.hamsters_killed_by_seer {
@@ -376,7 +376,7 @@ enum SeerTarget {
 }
 
 pub fn test_medium(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
-    let mut mediums = HashSet::new();
+    let mut mediums = BTreeSet::new();
     for &seat in selected {
         mediums.insert(seat);
         if !ctx.possibilities.fix_role(seat, SystemRole::Medium) {
@@ -414,7 +414,7 @@ pub fn test_medium(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Se
 }
 
 pub fn test_bodyguard(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
-    let mut bodyguards = HashSet::new();
+    let mut bodyguards = BTreeSet::new();
     for &seat in selected {
         bodyguards.insert(seat);
         if !ctx.possibilities.fix_role(seat, SystemRole::Bodyguard) {
@@ -440,7 +440,7 @@ pub fn test_bodyguard(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &
 }
 
 pub fn test_mason(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
-    let mut masons = HashSet::new();
+    let mut masons = BTreeSet::new();
     for &seat in selected {
         masons.insert(seat);
         if !ctx.possibilities.fix_role(seat, SystemRole::Mason) {
@@ -475,7 +475,7 @@ pub fn test_mason(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Sea
 }
 
 pub fn test_nekomata(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
-    let mut nekomatas = HashSet::new();
+    let mut nekomatas = BTreeSet::new();
     let mut possible_cursed: Vec<Seat> = Vec::new();
 
     for &seat in selected {

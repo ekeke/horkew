@@ -2,7 +2,7 @@ use crate::types::{CauseOfDeath, VillageStatus, VillageResult, SystemRole, Seat,
 use crate::possibilities::Possibilities;
 use crate::role_testers::AnalyzeContext;
 use crate::solver::solve_possibilities;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default)]
 pub struct DebugStash {
@@ -41,8 +41,8 @@ pub enum HamsterWinPath {
 pub fn check_death_counts(
     context: &AnalyzeContext,
     vs: &VillageStatus,
-    night_kills_by_day: &HashMap<Day, Vec<Seat>>,
-    setup: &HashMap<SystemRole, u32>,
+    night_kills_by_day: &BTreeMap<Day, Vec<Seat>>,
+    setup: &BTreeMap<SystemRole, u32>,
 ) -> bool {
     for (&day, killed) in night_kills_by_day {
         if vs.day <= day {
@@ -99,8 +99,8 @@ pub fn check_death_counts(
 pub fn update_death_count_constraints(
     context: &mut AnalyzeContext,
     vs: &VillageStatus,
-    night_kills_by_day: &HashMap<Day, Vec<Seat>>,
-    setup: &HashMap<SystemRole, u32>,
+    night_kills_by_day: &BTreeMap<Day, Vec<Seat>>,
+    setup: &BTreeMap<SystemRole, u32>,
 ) -> bool {
     for (&day, killed) in night_kills_by_day {
         if vs.day <= day {
@@ -165,12 +165,12 @@ pub fn update_death_count_constraints(
 pub fn finalize(
     context: &mut AnalyzeContext,
     vs: &VillageStatus,
-    setup: &HashMap<SystemRole, u32>,
+    setup: &BTreeMap<SystemRole, u32>,
     conclusions: &mut Possibilities,
     debug_stash: &mut DebugStash,
     hamster_win_path: Option<HamsterWinPath>,
     cached_survivors: &[Seat],
-    cached_surviving_map: &HashMap<Seat, bool>,
+    cached_surviving_map: &BTreeMap<Seat, bool>,
 ) {
     debug_stash.finalizer_runs += 1;
     #[cfg(feature = "dump")] crate::dump::finalize_pre(&context.possibilities);
