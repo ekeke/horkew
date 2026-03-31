@@ -31,6 +31,7 @@ import {
   createTransformerTfNetwork, createWolfTeamTransformerTfNetwork, createMasonTeamTransformerTfNetwork,
   createWolfCollectiveNetwork, createMasonCollectiveNetwork,
   createWolfCollectiveTfNetwork, createMasonCollectiveTfNetwork,
+  createFanaticNetwork, createFanaticTfNetwork,
   DEFAULT_TRAINING_CONFIG,
   type TrainingConfig,
 } from './training.ts'
@@ -931,7 +932,8 @@ async function main(): Promise<void> {
           if (iter % config.evalInterval === 0) {
             process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
             const evalConfig = { ...trainingConfig, mlRoles: group.roles }
-            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet)
+            const evalMlMax = name === 'village' ? mlMaxSeats : undefined
+            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax)
             process.stderr.write('\r\x1b[K')
             appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
             const factionRate = evalResult.winRates[group.faction] ?? 0
@@ -1015,6 +1017,11 @@ async function main(): Promise<void> {
     const masonCollectiveNet = createMasonCollectiveNetwork()
     const wolfCollectiveTf = createWolfCollectiveTfNetwork(config.learningRate)
     const masonCollectiveTf = createMasonCollectiveTfNetwork(config.learningRate)
+
+    // 狂信者専用NN (村NN注入のため個人NNとは config が異なる)
+    const fanaticNet = createFanaticNetwork()
+    const fanaticTf = createFanaticTfNetwork(config.learningRate)
+    networks.set('fanatic', fanaticNet)  // 汎用個人NNを狂信者専用に置き換え
 
     // frozen村NNの重み (Phase 1 で学習済み)
     const frozenVillageWeights = packWeights(networks.get('village')!)
@@ -1114,11 +1121,12 @@ async function main(): Promise<void> {
             if (allIndividual.length > 0) {
               normalizeAdvantages(allIndividual)
               const network = networks.get(name)!
-              tfNetwork.loadWeights(network.cloneWeights())
+              const tf = name === 'fanatic' ? fanaticTf : tfNetwork
+              tf.loadWeights(network.cloneWeights())
               for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
-                ppoUpdate(tfNetwork, allIndividual, ppoConfig)
+                ppoUpdate(tf, allIndividual, ppoConfig)
               }
-              network.loadWeights(tfNetwork.cloneWeights())
+              network.loadWeights(tf.cloneWeights())
             }
           }
 
@@ -1174,6 +1182,7 @@ async function main(): Promise<void> {
     // Phase 1' cleanup
     wolfCollectiveTf.dispose()
     masonCollectiveTf.dispose()
+    fanaticTf.dispose()
 
     log(`${BOLD}=== Phase 1' Complete ===${RESET}`)
   }

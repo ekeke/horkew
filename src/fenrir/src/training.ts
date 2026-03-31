@@ -18,9 +18,11 @@ import { TransformerNetwork } from './ml/transformer-network.ts'
 import { TfTransformerNetwork } from './ml/nn-tf-transformer.ts'
 import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
   WOLF_COLLECTIVE_OBSERVATION_SIZE, MASON_COLLECTIVE_OBSERVATION_SIZE,
+  FANATIC_OBSERVATION_SIZE,
   CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES,
   WOLF_COLLECTIVE_CLS_FEATURES, WOLF_COLLECTIVE_SEAT_FEATURES,
   MASON_COLLECTIVE_CLS_FEATURES, MASON_COLLECTIVE_SEAT_FEATURES,
+  FANATIC_CLS_FEATURES, FANATIC_SEAT_FEATURES,
   PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS,
   ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS } from './observation.ts'
 import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
@@ -356,6 +358,34 @@ const MASON_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
 }
 
 // ============================================================
+// Fanatic Network Configuration (Transformer only)
+// ============================================================
+
+const FANATIC_TRANSFORMER_CONFIG: NetworkConfig = {
+  inputSize: FANATIC_OBSERVATION_SIZE,
+  hiddenSizes: [],
+  heads: {
+    night: HEAD_SIZES.night,
+    claim: HEAD_SIZES.claim,
+    vote: HEAD_SIZES.vote,
+    comm: HEAD_SIZES.comm,
+    leader: HEAD_SIZES.leader,
+    target: HEAD_SIZES.target,
+  },
+  sigmoidHeads: {
+    propose: HEAD_SIZES.propose,
+    predict: HEAD_SIZES.predict,
+  },
+  transformer: {
+    ...TRANSFORMER_COMMON,
+    seatFeatures: FANATIC_SEAT_FEATURES,
+    clsFeatures: FANATIC_CLS_FEATURES,
+    perSeatHeads: ['vote', 'target'],
+    perSeatSigmoidHeads: ['propose', 'predict'],
+  },
+}
+
+// ============================================================
 // Factory Functions
 // ============================================================
 
@@ -424,11 +454,21 @@ export function createMasonCollectiveNetwork(): TransformerNetwork {
 }
 
 export function createWolfCollectiveTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
-  return new TfTransformerNetwork(WOLF_COLLECTIVE_TRANSFORMER_CONFIG, lr, true)
+  return new TfTransformerNetwork(WOLF_COLLECTIVE_TRANSFORMER_CONFIG, lr, 'wolf_collective')
 }
 
 export function createMasonCollectiveTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
-  return new TfTransformerNetwork(MASON_COLLECTIVE_TRANSFORMER_CONFIG, lr, true)
+  return new TfTransformerNetwork(MASON_COLLECTIVE_TRANSFORMER_CONFIG, lr, 'mason_collective')
+}
+
+// ---- Fanatic variants (Transformer only) ----
+
+export function createFanaticNetwork(): TransformerNetwork {
+  return new TransformerNetwork(FANATIC_TRANSFORMER_CONFIG, 'fanatic')
+}
+
+export function createFanaticTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+  return new TfTransformerNetwork(FANATIC_TRANSFORMER_CONFIG, lr, 'fanatic')
 }
 
 // ============================================================
@@ -732,6 +772,7 @@ export async function evaluate(
   numGames: number = 50,
   wolfTeamNet?: AnyNetwork,
   masonTeamNet?: AnyNetwork,
+  mlMaxSeats?: number,
 ): Promise<{ winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number }> {
   const heuristic = new HeuristicStrategy()
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
@@ -758,19 +799,24 @@ export async function evaluate(
       }
     }
 
+    const seed = 10000 + i
     const onRolesAssigned = mlRolesSet ? (seatRoles: Map<number, SystemRole>) => {
-      for (const [seat, role] of seatRoles) {
-        if (mlRolesSet.has(role)) {
-          strategies.set(seat, new FenrirStrategy(network, { explore: false }))
-        } else {
-          strategies.set(seat, heuristic)
+      const candidates = [...seatRoles].filter(([_, role]) => mlRolesSet.has(role))
+      if (mlMaxSeats !== undefined && mlMaxSeats < candidates.length) {
+        for (let j = candidates.length - 1; j > 0; j--) {
+          const k = (seed * 7 + j * 13) % (j + 1)
+          ;[candidates[j], candidates[k]] = [candidates[k], candidates[j]]
         }
+        candidates.length = mlMaxSeats
+      }
+      for (const [seat] of candidates) {
+        strategies.set(seat, new FenrirStrategy(network, { explore: false, strategyOnly: config.strategyOnly }))
       }
     } : undefined
 
     const lupaConfig: LupaConfig = {
       roles,
-      seed: 10000 + i,
+      seed,
       strategies,
       defaultStrategy: heuristic,
       onRolesAssigned,
@@ -794,10 +840,10 @@ export async function evaluate(
         wolfTeamStrategy: lupaConfig.wolfTeamStrategy,
         masonTeamStrategy: lupaConfig.masonTeamStrategy,
         onRolesAssigned,
-        seed: 10000 + i,
+        seed,
       })
       const result = await runGame(
-        { roles, seed: 10000 + i, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
         handlers,
       )
       state = result.state
@@ -809,12 +855,12 @@ export async function evaluate(
         masonTeamStrategy: lupaConfig.masonTeamStrategy,
         enableRetar: config.enableRetar,
         onRolesAssigned,
-        seed: 10000 + i,
+        seed,
         roles,
         rules: config.rules,
       })
       const result = await runGame(
-        { roles, seed: 10000 + i, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
         handlers,
       )
       state = result.state
