@@ -322,6 +322,23 @@ export class FenrirStrategy implements Strategy {
 
       // 村陣営のみplanに従って投票、人外は自由（ランダム）
       if (isVillagerAligned(ctx.myRole) && forwardLogits) {
+        // Debug: plan tokens の生出力
+        // TODO: FENRIR_DEBUG=howl でデバッグ用Howlコメント（# [plan] ...）として出力できるようにする
+        if (process.env.FENRIR_DEBUG) {
+          const fwdIdx = ruleAction.argmaxPlanTokens(forwardLogits, this.numForwardTokens, this.planVocabSize)
+          const fwdGroups = ruleAction.parsePlanIndices(fwdIdx)
+          const egIdx = endgameLogits ? ruleAction.argmaxPlanTokens(endgameLogits, this.numEndgameTokens, this.planVocabSize) : []
+          const egGroups = ruleAction.parsePlanIndices(egIdx)
+          const fmtGroup = (g: ruleAction.PlanDayGroup) => g.targets.map(t =>
+            t.type === 'seat' ? `seat${t.seat}` : t.type === 'role' ? t.role : 'grayran'
+          ).join(',')
+          process.stderr.write(
+            `[plan] seat${ctx.mySeat}(${ctx.myRole}) day${ctx.day} alive=${ctx.alivePlayers.length}` +
+            ` fwd=[${fwdIdx.join(',')}]→[${fwdGroups.map(fmtGroup).join('|')}]` +
+            ` eg=[${egIdx.join(',')}]→[${egGroups.map(fmtGroup).join('|')}]` +
+            ` plans=[${(ctx as any).executionPlans?.map((p: any) => p.targets?.join(','))?.join('|') ?? 'none'}]\n`
+          )
+        }
         const voteSeat = ruleAction.planToVote(forwardLogits, this.numForwardTokens, ctx, endgameLogits, this.numEndgameTokens)
         if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
       }
@@ -761,11 +778,22 @@ abstract class CollectiveStrategyBase extends TeamStrategyBase {
 // ============================================================
 
 export class WolfCollectiveStrategy extends CollectiveStrategyBase implements TeamStrategy {
-  /** frozen村NNの出力（外部から注入） */
+  /** frozen村NNの出力（外部から注入、またはfrozenVillageNetworkから自動生成） */
   villageNNOutput: VillageNNOutput | undefined = undefined
+  /** frozen村NN（セットされていれば infer 時に自動で forward して villageNNOutput を更新） */
+  frozenVillageNetwork: AnyNetwork | undefined = undefined
 
   protected override infer(ctx: TeamDecisionContext): ForwardResult {
     const t = performance.now()
+    // frozen村NNからpredict/trust出力を取得
+    if (this.frozenVillageNetwork) {
+      const villageObs = encodeObservation(ctx)
+      const villageResult = this.frozenVillageNetwork.forward(villageObs)
+      this.villageNNOutput = {
+        predict: villageResult.policies.get('predict')!,
+        trust: villageResult.policies.get('trust')!,
+      }
+    }
     const obs = encodeCollectiveWolfObservation(ctx, this.villageNNOutput)
     this.lastObs = obs
     const result = this.network.forward(obs)

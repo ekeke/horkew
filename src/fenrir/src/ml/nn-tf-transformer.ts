@@ -10,9 +10,9 @@ import * as tf from '@tensorflow/tfjs-node-gpu'
 import type { NetworkConfig, ForwardResult, TransformerNetworkConfig } from './nn.ts'
 import {
   SEATS, NUM_ROLES,
-  CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES,
   HISTORY_WINDOW, OBSERVATION_SIZE,
   ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS, ROLE_INDEX, CO_ROLES,
+  type ObservationMode,
 } from '../observation.ts'
 
 let _tfTransformerId = 0
@@ -59,8 +59,14 @@ const TEAM_IS_MY_TEAM_START = TEAM_SIZE_START + 1
 const TEAM_IS_CURRENT_ACTOR_START = TEAM_IS_MY_TEAM_START + SEATS
 const TEAM_FAKE_DIVINE_START = TEAM_IS_CURRENT_ACTOR_START + SEATS
 
+// Collective offsets (OBSERVATION_SIZEの直後に配置)
+const COLLECTIVE_TEAM_SIZE_START = OBSERVATION_SIZE
+const WOLF_COLL_FAKE_DIVINE_START = COLLECTIVE_TEAM_SIZE_START + 1
+const WOLF_COLL_VILLAGE_PREDICT_START = WOLF_COLL_FAKE_DIVINE_START + SEATS
+const WOLF_COLL_VILLAGE_TRUST_START = WOLF_COLL_VILLAGE_PREDICT_START + SEATS * NUM_ROLES
+
 /** CLSトークンのインデックス配列を構築 */
-function buildClsIndices(isTeam: boolean): number[] {
+function buildClsIndices(mode: ObservationMode): number[] {
   const indices: number[] = []
   // global (19)
   for (let i = 0; i < GLOBAL_SIZE; i++) indices.push(i)
@@ -72,13 +78,14 @@ function buildClsIndices(isTeam: boolean): number[] {
   indices.push(REVOTE_ROUND_START)
   // plan_global (3)
   indices.push(PLAN_GLOBAL_START, PLAN_GLOBAL_START + 1, PLAN_GLOBAL_START + 2)
-  // team
-  if (isTeam) indices.push(TEAM_SIZE_START)
+  // team_size (1) — team/collective共通
+  if (mode === 'team') indices.push(TEAM_SIZE_START)
+  else if (mode === 'wolf_collective' || mode === 'mason_collective') indices.push(COLLECTIVE_TEAM_SIZE_START)
   return indices
 }
 
 /** 全席トークンのインデックス配列を構築 [SEATS * seatFeatures] */
-function buildSeatIndices(isTeam: boolean): number[] {
+function buildSeatIndices(mode: ObservationMode): number[] {
   const indices: number[] = []
   for (let s = 0; s < SEATS; s++) {
     // per_seat (25)
@@ -108,12 +115,20 @@ function buildSeatIndices(isTeam: boolean): number[] {
     // new signals (4): confirm_human, confirm_wolf, vote_for, vote_against
     const nsOff = NEW_SIGNALS_START + s * NEW_SIGNALS_PER_SEAT
     for (let i = 0; i < NEW_SIGNALS_PER_SEAT; i++) indices.push(nsOff + i)
-    // team per-seat (3)
-    if (isTeam) {
+    // team per-seat (3): is_my_team, is_current_actor, fake_divine
+    if (mode === 'team') {
       indices.push(TEAM_IS_MY_TEAM_START + s)
       indices.push(TEAM_IS_CURRENT_ACTOR_START + s)
       indices.push(TEAM_FAKE_DIVINE_START + s)
     }
+    // wolf_collective per-seat (+13): village_predict(11), village_trust(1), fake_divine(1)
+    if (mode === 'wolf_collective') {
+      const vpOff = WOLF_COLL_VILLAGE_PREDICT_START + s * NUM_ROLES
+      for (let i = 0; i < NUM_ROLES; i++) indices.push(vpOff + i)
+      indices.push(WOLF_COLL_VILLAGE_TRUST_START + s)
+      indices.push(WOLF_COLL_FAKE_DIVINE_START + s)
+    }
+    // mason_collective: same as individual (no extra per-seat)
   }
   return indices
 }
@@ -194,6 +209,8 @@ export class TfTransformerNetwork {
   private valueB: tf.Variable
 
   private allVariables: tf.Variable[]
+  /** trunk + plan head のみ (supervised pretrain で他 head を凍結するため) */
+  private trunkAndPlanVariables: tf.Variable[]
   private optimizer: tf.AdamOptimizer
 
   // Pre-computed index tensors for tokenization
@@ -201,18 +218,23 @@ export class TfTransformerNetwork {
   private seatGatherIndices: tf.Tensor1D
 
   // Config
-  private readonly isTeam: boolean
+  private readonly observationMode: ObservationMode
   private readonly dm: number
   private readonly numHeads: number
   private readonly dHead: number
 
-  constructor(config: NetworkConfig, lr: number = 3e-4, isTeam: boolean = false) {
+  constructor(config: NetworkConfig, lr: number = 3e-4, isTeam: boolean | ObservationMode = false) {
     if (!config.transformer) throw new Error('NetworkConfig.transformer required')
 
     const prefix = `tftr${_tfTransformerId++}_`
     this.config = config
     this.tConfig = config.transformer
-    this.isTeam = isTeam
+    // 後方互換: boolean → ObservationMode
+    if (typeof isTeam === 'boolean') {
+      this.observationMode = isTeam ? 'team' : 'individual'
+    } else {
+      this.observationMode = isTeam
+    }
     this.allVariables = []
 
     const tc = this.tConfig
@@ -222,12 +244,12 @@ export class TfTransformerNetwork {
 
 
     const dm = this.dm
-    const cf = isTeam ? TEAM_CLS_FEATURES : CLS_FEATURES
-    const sf = isTeam ? TEAM_SEAT_TOKEN_FEATURES : SEAT_TOKEN_FEATURES
+    const cf = tc.clsFeatures
+    const sf = tc.seatFeatures
 
     // Gather indices
-    this.clsGatherIndices = tf.tensor1d(buildClsIndices(isTeam), 'int32')
-    this.seatGatherIndices = tf.tensor1d(buildSeatIndices(isTeam), 'int32')
+    this.clsGatherIndices = tf.tensor1d(buildClsIndices(this.observationMode), 'int32')
+    this.seatGatherIndices = tf.tensor1d(buildSeatIndices(this.observationMode), 'int32')
 
     // Input projections
     const rf = tc.roleFeatures ?? ROLE_TOKEN_FEATURES
@@ -354,6 +376,14 @@ export class TfTransformerNetwork {
     this.valueB = this.makeZeroVar([1], `${prefix}value_b`)
     this.allVariables.push(this.valueW, this.valueB)
 
+    // trunk + plan head のみ: action heads (h_*) と value head を除外
+    this.trunkAndPlanVariables = this.allVariables.filter(v => {
+      const n = v.name
+      if (n.includes('value_')) return false
+      if (n.includes('_h_')) return false
+      return true
+    })
+
     this.optimizer = tf.train.adam(lr)
   }
 
@@ -382,7 +412,7 @@ export class TfTransformerNetwork {
    */
   private tokenizeAndProject(obsTensor: tf.Tensor2D): tf.Tensor3D {
     const batch = obsTensor.shape[0]
-    const sf = this.isTeam ? TEAM_SEAT_TOKEN_FEATURES : SEAT_TOKEN_FEATURES
+    const sf = this.tConfig.seatFeatures
     const numRoles = this.tConfig.numRoleTokens ?? NUM_ROLE_TOKENS
     const rf = this.tConfig.roleFeatures ?? ROLE_TOKEN_FEATURES
 
@@ -1085,7 +1115,7 @@ export class TfTransformerNetwork {
       return tf.scalar(0) as tf.Scalar
     }
 
-    this.optimizer.minimize(lossFunc, false, this.allVariables)
+    this.optimizer.minimize(lossFunc, false, this.trunkAndPlanVariables)
     return result
   }
 

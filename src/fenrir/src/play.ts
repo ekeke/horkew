@@ -13,12 +13,17 @@ import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame } from '../../lupa/engine.ts'
 import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
+import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
-import { createNetwork, createWolfTeamNetwork, createMasonTeamNetwork, DEFAULT_TRAINING_CONFIG } from './training.ts'
+import {
+  createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
+  createTransformerNetwork, createWolfTeamTransformerNetwork, createMasonTeamTransformerNetwork,
+  DEFAULT_TRAINING_CONFIG,
+} from './training.ts'
 import { loadCheckpoint } from './ml/checkpoint.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
-import { NeuralNetwork } from './ml/nn.ts'
+import type { AnyNetwork } from './ml/nn.ts'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 
 // ============================================================
@@ -51,6 +56,8 @@ function parseArgs() {
   let allMl = false
   let rolesStr: string | undefined
   let defaultModel: 'ml' | 'heuristic' = 'ml'
+  let transformer = false
+  let strategyOnly = false
   const modelOverrides = new Map<string, 'ml' | 'heuristic'>()
 
   for (let i = 0; i < args.length; i++) {
@@ -80,10 +87,16 @@ function parseArgs() {
         modelOverrides.set(role, model as 'ml' | 'heuristic')
         break
       }
+      case '--transformer':
+        transformer = true
+        break
+      case '--strategy-only':
+        strategyOnly = true
+        break
     }
   }
 
-  return { checkpoint, mldir, seed, allMl, rolesStr, defaultModel, modelOverrides }
+  return { checkpoint, mldir, seed, allMl, rolesStr, defaultModel, modelOverrides, transformer, strategyOnly }
 }
 
 // ============================================================
@@ -121,7 +134,7 @@ function findTeamCheckpoint(dir: string, teamType: 'wolf_team' | 'mason_team'): 
 // Main
 // ============================================================
 
-const { checkpoint, mldir, seed, allMl, rolesStr, defaultModel, modelOverrides } = parseArgs()
+const { checkpoint, mldir, seed, allMl, rolesStr, defaultModel, modelOverrides, transformer, strategyOnly } = parseArgs()
 
 // 役職構成
 const rolesConfig = rolesStr
@@ -142,28 +155,36 @@ let masonTeamStrategy: MasonTeamStrategy | MasonTeamHeuristic | undefined
 
 if (mldir) {
   // === --mldir モード: グループ別にモデルをロード ===
-  const groupNets = new Map<string, NeuralNetwork>()
-  const wolfTeamNet = createWolfTeamNetwork()
-  const masonTeamNet = createMasonTeamNetwork()
+  const makeNet = (): AnyNetwork => transformer ? createTransformerNetwork() : createNetwork()
+  const makeWolfTeam = (): AnyNetwork => transformer ? createWolfTeamTransformerNetwork() : createWolfTeamNetwork()
+  const makeMasonTeam = (): AnyNetwork => transformer ? createMasonTeamTransformerNetwork() : createMasonTeamNetwork()
+
+  const groupNets = new Map<string, AnyNetwork>()
+  const wolfTeamNet = makeWolfTeam()
+  const masonTeamNet = makeMasonTeam()
 
   for (const [name, def] of Object.entries(MODEL_GROUPS)) {
     const dir = `${mldir}/ckpt-${name}`
     const ckptPath = findBestCheckpoint(dir)
     if (ckptPath) {
-      const net = createNetwork()
-      loadCheckpoint(net, ckptPath)
-      groupNets.set(name, net)
-      const raw = JSON.parse(readFileSync(ckptPath, 'utf-8'))
-      console.error(`# ${name}: loaded (iter ${raw.metadata?.iteration ?? '?'})`)
+      try {
+        const net = makeNet()
+        loadCheckpoint(net, ckptPath)
+        groupNets.set(name, net)
+        const raw = JSON.parse(readFileSync(ckptPath, 'utf-8'))
+        console.error(`# ${name}: loaded (iter ${raw.metadata?.iteration ?? '?'})`)
 
-      // チーム NW
-      if (def.teamType) {
-        const teamPath = findTeamCheckpoint(dir, def.teamType)
-        if (teamPath) {
-          if (def.teamType === 'wolf_team') loadCheckpoint(wolfTeamNet, teamPath)
-          else loadCheckpoint(masonTeamNet, teamPath)
-          console.error(`#   ${def.teamType}: loaded`)
+        // チーム NW
+        if (def.teamType) {
+          const teamPath = findTeamCheckpoint(dir, def.teamType)
+          if (teamPath) {
+            if (def.teamType === 'wolf_team') loadCheckpoint(wolfTeamNet, teamPath)
+            else loadCheckpoint(masonTeamNet, teamPath)
+            console.error(`#   ${def.teamType}: loaded`)
+          }
         }
+      } catch (e) {
+        console.error(`# ${name}: checkpoint incompatible, skipping (${(e as Error).message})`)
       }
     } else {
       console.error(`# ${name}: no checkpoint → heuristic`)
@@ -188,7 +209,7 @@ if (mldir) {
       const groupName = ROLE_TO_GROUP.get(role)
       const net = groupName ? groupNets.get(groupName) : undefined
       if (net) {
-        strategiesMap.set(seat, new FenrirStrategy(net, { explore: false }))
+        strategiesMap.set(seat, new FenrirStrategy(net, { explore: false, strategyOnly }))
       } else {
         strategiesMap.set(seat, heuristic)
       }
@@ -209,17 +230,29 @@ if (mldir) {
     : new MasonTeamHeuristic()
 
   const gameSeed = seed ?? Math.floor(Math.random() * 100000)
-  const handlers = strategyAdapter({
-    strategies: strategiesMap,
-    defaultStrategy: heuristic,
-    wolfTeamStrategy,
-    masonTeamStrategy,
-    enableRetar: true,
-    onRolesAssigned,
-    seed: gameSeed,
-    roles,
-    rules: DEFAULT_TRAINING_CONFIG.rules,
-  })
+  const handlers = strategyOnly
+    ? minimalAdapter({
+        strategies: strategiesMap,
+        defaultStrategy: heuristic,
+        wolfTeamStrategy,
+        masonTeamStrategy,
+        onRolesAssigned,
+        seed: gameSeed,
+        enableRetar: true,
+        roles,
+        rules: DEFAULT_TRAINING_CONFIG.rules,
+      })
+    : strategyAdapter({
+        strategies: strategiesMap,
+        defaultStrategy: heuristic,
+        wolfTeamStrategy,
+        masonTeamStrategy,
+        enableRetar: true,
+        onRolesAssigned,
+        seed: gameSeed,
+        roles,
+        rules: DEFAULT_TRAINING_CONFIG.rules,
+      })
   const { events, state, config } = await runGame(
     {
       roles,
@@ -246,10 +279,10 @@ if (mldir) {
   const strategies = new Map<number, Strategy>()
   for (let seat = 1; seat <= totalPlayers; seat++) {
     if (allMl) {
-      strategies.set(seat, new FenrirStrategy(network, { explore: false }))
+      strategies.set(seat, new FenrirStrategy(network, { explore: false, strategyOnly }))
     } else {
       if (seat % 2 === 0) {
-        strategies.set(seat, new FenrirStrategy(network, { explore: false }))
+        strategies.set(seat, new FenrirStrategy(network, { explore: false, strategyOnly }))
       } else {
         strategies.set(seat, heuristic)
       }

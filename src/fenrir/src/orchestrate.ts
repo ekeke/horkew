@@ -29,12 +29,16 @@ import {
   createTfNetwork, createWolfTeamTfNetwork, createMasonTeamTfNetwork,
   createTransformerNetwork, createWolfTeamTransformerNetwork, createMasonTeamTransformerNetwork,
   createTransformerTfNetwork, createWolfTeamTransformerTfNetwork, createMasonTeamTransformerTfNetwork,
+  createWolfCollectiveNetwork, createMasonCollectiveNetwork,
+  createWolfCollectiveTfNetwork, createMasonCollectiveTfNetwork,
   DEFAULT_TRAINING_CONFIG,
   type TrainingConfig,
 } from './training.ts'
 import { existsSync, readdirSync, readFileSync, unlinkSync, rmSync } from 'node:fs'
 import { spawn, execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { generatePlanTokenTrainingBatch } from './ml/execution-plan-data.ts'
+import { PLAN_VOCAB } from './rule-action.ts'
 import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
   generateGamesParallel, deserializeStep,
@@ -54,6 +58,12 @@ const MODEL_GROUPS = {
 
 type ModelName = keyof typeof MODEL_GROUPS
 const MODEL_NAMES = Object.keys(MODEL_GROUPS) as ModelName[]
+
+/** role → モデルグループ名の逆引きマップ (MODEL_GROUPSから自動構築) */
+const ROLE_TO_GROUP: Record<string, ModelName> = {}
+for (const [name, group] of Object.entries(MODEL_GROUPS) as [ModelName, typeof MODEL_GROUPS[ModelName]][]) {
+  for (const role of group.roles) ROLE_TO_GROUP[role] = name
+}
 
 const COLORS: Record<ModelName, string> = {
   village: '\x1b[33m', wolf_collective: '\x1b[31m', mason_collective: '\x1b[36m', fanatic: '\x1b[35m', third: '\x1b[32m',
@@ -588,6 +598,42 @@ async function main(): Promise<void> {
     log('Starting from scratch')
   }
 
+  // === Pretrain: plan tokens の事前学習 (新規学習時のみ、Transformer限定) ===
+  if (!anyResumed && config.transformer) {
+    log(`${BOLD}=== Pretrain: Plan Token Supervised Learning ===${RESET}`)
+    const pretrainBatchSize = 512
+    const pretrainMaxEpochs = 500
+    const pretrainTargetAcc = 0.80
+    const pretrainLogInterval = 50
+
+    let bestAcc = 0
+    for (let epoch = 1; epoch <= pretrainMaxEpochs; epoch++) {
+      const samples = generatePlanTokenTrainingBatch(pretrainBatchSize, epoch)
+      const { loss, accuracy } = (tfNetwork as any).trainSupervisedPlan({
+        observations: samples.map(s => s.observation),
+        forwardLabels: samples.map(s => s.forwardLabels),
+        forwardMasks: samples.map(s => s.forwardMask),
+        numTokens: samples[0].forwardLabels.length,
+        vocabSize: PLAN_VOCAB.SIZE,
+      })
+      if (accuracy > bestAcc) bestAcc = accuracy
+      if (epoch % pretrainLogInterval === 0 || epoch === 1) {
+        log(`  epoch=${epoch} loss=${loss.toFixed(4)} acc=${(accuracy * 100).toFixed(1)}% best=${(bestAcc * 100).toFixed(1)}%`)
+      }
+      if (accuracy >= pretrainTargetAcc) {
+        log(`  Target accuracy ${(pretrainTargetAcc * 100).toFixed(0)}% reached at epoch ${epoch}`)
+        break
+      }
+    }
+    // pretrain 済みの重みを village の推論用 NN にコピー
+    const villageNet = networks.get('village' as ModelName)
+    if (villageNet) {
+      villageNet.loadWeights(tfNetwork.cloneWeights())
+      log(`  Pretrained weights → village network`)
+    }
+    log(`  Final best accuracy: ${(bestAcc * 100).toFixed(1)}%`)
+  }
+
   // === Baseline (14D猫 heuristic vs heuristic, ハードコード) ===
   // 100ゲーム × 複数回の測定結果から: village≈55%, hamster≈27%, wolf≈15%, draw≈3%
   const baselineRates: Record<string, number> = {
@@ -838,6 +884,178 @@ async function main(): Promise<void> {
     }
 
     log(`${BOLD}=== Phase 1 Complete ===${RESET}`)
+  }
+
+  // === Phase 1': 集団NN + 狂信者 + 第三勢力の学習 (frozen村NN注入) ===
+  if (!config.phase2Only) {
+    log(`${BOLD}=== Phase 1': Collective + Non-Village Training ===${RESET}`)
+
+    // 集団NN用の推論/学習ネットワーク (config が異なるため専用インスタンスが必要)
+    const wolfCollectiveNet = createWolfCollectiveNetwork()
+    const masonCollectiveNet = createMasonCollectiveNetwork()
+    const wolfCollectiveTf = createWolfCollectiveTfNetwork(config.learningRate)
+    const masonCollectiveTf = createMasonCollectiveTfNetwork(config.learningRate)
+
+    // frozen村NNの重み (Phase 1 で学習済み)
+    const frozenVillageWeights = packWeights(networks.get('village')!)
+
+    // Phase 1' の学習対象
+    const phase1PrimeModels: ModelName[] = ['wolf_collective', 'mason_collective', 'fanatic', 'third']
+    const phase1PrimeGraduated = new Set<ModelName>()
+    const phase1PrimeIterCounts = new Map<ModelName, number>()
+    for (const name of phase1PrimeModels) phase1PrimeIterCounts.set(name, 0)
+
+    const ppoConfig = {
+      miniBatchSize: trainingConfig.miniBatchSize,
+      clipEpsilon: trainingConfig.clipEpsilon,
+      valueLossCoeff: trainingConfig.valueLossCoeff,
+      entropyCoeff: trainingConfig.entropyCoeff,
+    }
+
+    // 全5モデルの weights を modelGroupWeights として pack
+    const packAllModelWeights = (): Record<string, import('./parallel.ts').SharedWeights> => {
+      const result: Record<string, import('./parallel.ts').SharedWeights> = {}
+      result['village'] = frozenVillageWeights
+      result['wolf_collective'] = packWeights(wolfCollectiveNet)
+      result['mason_collective'] = packWeights(masonCollectiveNet)
+      result['fanatic'] = packWeights(networks.get('fanatic')!)
+      result['third'] = packWeights(networks.get('third')!)
+      return result
+    }
+
+    let round = 0
+    while (phase1PrimeGraduated.size < phase1PrimeModels.length) {
+      round++
+      for (const name of phase1PrimeModels) {
+        if (phase1PrimeGraduated.has(name)) continue
+
+        const group = MODEL_GROUPS[name]
+        const currentIter = phase1PrimeIterCounts.get(name)!
+        const targetIter = Math.min(currentIter + config.chunkSize, config.iterations)
+        const prefix = `${COLORS[name]}[${name.padEnd(16)}]${RESET}`
+
+        for (let iter = currentIter + 1; iter <= targetIter; iter++) {
+          const iterStart = performance.now()
+          const seeds = Array.from({ length: config.batch }, (_, g) => (10000 + iter) * config.batch + g)
+
+          // ゲーム生成 (マルチモデルモード)
+          const tGameStart = performance.now()
+          const allIndividual: ProcessedStep[] = []
+          const allWolfCollective: ProcessedStep[] = []
+          const allMasonCollective: ProcessedStep[] = []
+
+          if (gameWorkerPoolSize() > 0) {
+            const modelGroupWeights = packAllModelWeights()
+            const serializedResults = await generateGamesParallel({
+              weights: frozenVillageWeights,  // fallback
+              modelGroupWeights,
+              villageFrozenWeights: frozenVillageWeights,
+              trainingConfig,
+              phase: 1,
+            }, seeds)
+
+            for (const game of serializedResults) {
+              // 個人steps: fanatic/third のみ収集 (village は frozen)
+              for (const { role, steps } of game.individualSteps) {
+                const groupName = ROLE_TO_GROUP[role]
+                if (groupName === name && steps.length > 0) {
+                  const deserialized = steps.map(deserializeStep)
+                  allIndividual.push(...computeGAE(deserialized, trainingConfig.gamma, trainingConfig.lambda, 0))
+                }
+              }
+              // 集団steps
+              if (game.wolfTeamSteps.length > 0 && name === 'wolf_collective') {
+                allWolfCollective.push(...computeGAE(game.wolfTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
+              }
+              if (game.masonTeamSteps.length > 0 && name === 'mason_collective') {
+                allMasonCollective.push(...computeGAE(game.masonTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
+              }
+            }
+          }
+          const tGameEnd = performance.now()
+          const tPpoStart = performance.now()
+
+          // PPO update
+          if (group.collective) {
+            // 集団NN の PPO
+            const steps = name === 'wolf_collective' ? allWolfCollective : allMasonCollective
+            if (steps.length > 0) {
+              normalizeAdvantages(steps)
+              const collectiveNet = name === 'wolf_collective' ? wolfCollectiveNet : masonCollectiveNet
+              const collectiveTf = name === 'wolf_collective' ? wolfCollectiveTf : masonCollectiveTf
+              collectiveTf.loadWeights(collectiveNet.cloneWeights())
+              for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
+                ppoUpdate(collectiveTf, steps, ppoConfig)
+              }
+              collectiveNet.loadWeights(collectiveTf.cloneWeights())
+            }
+          } else {
+            // 個人NN (fanatic, third) の PPO
+            if (allIndividual.length > 0) {
+              normalizeAdvantages(allIndividual)
+              const network = networks.get(name)!
+              tfNetwork.loadWeights(network.cloneWeights())
+              for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
+                ppoUpdate(tfNetwork, allIndividual, ppoConfig)
+              }
+              network.loadWeights(tfNetwork.cloneWeights())
+            }
+          }
+
+          const tPpoEnd = performance.now()
+          const iterMs = performance.now() - iterStart
+          phase1PrimeIterCounts.set(name, iter)
+
+          // Progress
+          const totalSteps = allIndividual.length + allWolfCollective.length + allMasonCollective.length
+          const gameMs = tGameEnd - tGameStart
+          const ppoMs = tPpoEnd - tPpoStart
+          process.stderr.write(
+            `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} ` +
+            `${iterMs.toFixed(0)}ms (game${(gameMs / iterMs * 100).toFixed(0)}% ppo${(ppoMs / iterMs * 100).toFixed(0)}%) ` +
+            `steps=${totalSteps}`
+          )
+
+          // Checkpoint
+          if (iter % config.checkpointInterval === 0) {
+            const dir = `${config.checkpointBase}/ckpt-${name}`
+            if (group.collective) {
+              const collectiveNet = name === 'wolf_collective' ? wolfCollectiveNet : masonCollectiveNet
+              saveCheckpoint(collectiveNet, `${dir}/collective_${iter}.json`, { iteration: iter, winRate: 0 })
+            } else {
+              saveCheckpoint(networks.get(name)!, `${dir}/checkpoint_${iter}.json`, { iteration: iter, winRate: 0 })
+            }
+          }
+        }
+
+        process.stderr.write('\r\x1b[K')
+
+        // 上限到達チェック
+        if (!phase1PrimeGraduated.has(name) && phase1PrimeIterCounts.get(name)! >= config.iterations) {
+          log(`${prefix} reached max iterations (${config.iterations})`)
+          phase1PrimeGraduated.add(name)
+        }
+
+        // Final save
+        if (phase1PrimeGraduated.has(name)) {
+          const dir = `${config.checkpointBase}/ckpt-${name}`
+          if (group.collective) {
+            const collectiveNet = name === 'wolf_collective' ? wolfCollectiveNet : masonCollectiveNet
+            saveCheckpoint(collectiveNet, `${dir}/collective_final.json`, { iteration: phase1PrimeIterCounts.get(name)!, winRate: 0 })
+          } else {
+            saveCheckpoint(networks.get(name)!, `${dir}/final.json`, { iteration: phase1PrimeIterCounts.get(name)!, winRate: 0 })
+          }
+        }
+      }
+
+      log(`Round ${round}: ${phase1PrimeGraduated.size}/${phase1PrimeModels.length} graduated [${phase1PrimeModels.map(n => phase1PrimeGraduated.has(n) ? `${COLORS[n]}OK${RESET}` : `${COLORS[n]}..${RESET}`).join(' ')}]`)
+    }
+
+    // Phase 1' cleanup
+    wolfCollectiveTf.dispose()
+    masonCollectiveTf.dispose()
+
+    log(`${BOLD}=== Phase 1' Complete ===${RESET}`)
   }
 
   // === Cleanup GPU ===
