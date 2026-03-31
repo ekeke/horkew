@@ -523,6 +523,8 @@ export function searchTsumi(
     console.log(`[hati:debug]   → final: isTsumi=true (hardcoded) strategy=${sr.strategy ? 'yes' : 'null'} total=${elapsed.toFixed(1)}ms`)
   }
 
+  // !! 変更不可: 詰みの可否は判定フェーズ (judgeTsumi) が決定する。
+  // !! 探索 (searchTsumiStrategy) は手順構築のみ。探索結果で isTsumi を変えてはならない。
   return {
     isTsumi: true,
     strategy: sr.strategy, judgment,
