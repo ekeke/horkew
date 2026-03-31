@@ -653,25 +653,37 @@ async function main(): Promise<void> {
     log(`  Collected ${gameSamples.length} vote samples from ${pretrainGames} games in ${(tDCollect / 1000).toFixed(1)}s (${(tDCollect / pretrainGames).toFixed(0)}ms/game)`)
 
     if (gameSamples.length > 0) {
+      const dMiniBatch = 256
       for (let epoch = 1; epoch <= pretrainDEpochs; epoch++) {
-        // Plan tokens (trainSupervisedPlan)
-        const planResult = (tfNetwork as any).trainSupervisedPlan({
-          observations: gameSamples.map(s => s.observation),
-          forwardLabels: gameSamples.map(s => s.forwardLabels),
-          forwardMasks: gameSamples.map(s => s.forwardMask),
-          numTokens: gameSamples[0].forwardLabels.length,
-          vocabSize: PLAN_VOCAB.SIZE,
-        })
+        let epochPlanLoss = 0, epochPlanAcc = 0, epochPredLoss = 0, epochValLoss = 0
+        let batchCount = 0
 
-        // Predict + Value (trainSupervisedMulti)
-        const multiResult = (tfNetwork as any).trainSupervisedMulti({
-          observations: gameSamples.map(s => s.observation),
-          predictLabels: gameSamples.map(s => s.predictLabel),
-          valueLabels: gameSamples.map(s => s.valueLabel),
-        })
+        for (let offset = 0; offset < gameSamples.length; offset += dMiniBatch) {
+          const batch = gameSamples.slice(offset, offset + dMiniBatch)
 
-        if (epoch % 5 === 0 || epoch === 1) {
-          log(`  epoch=${epoch} plan_loss=${planResult.loss.toFixed(4)} plan_acc=${(planResult.accuracy * 100).toFixed(1)}% pred_loss=${multiResult.predictLoss.toFixed(4)} val_loss=${multiResult.valueLoss.toFixed(4)}`)
+          const planResult = (tfNetwork as any).trainSupervisedPlan({
+            observations: batch.map(s => s.observation),
+            forwardLabels: batch.map(s => s.forwardLabels),
+            forwardMasks: batch.map(s => s.forwardMask),
+            numTokens: batch[0].forwardLabels.length,
+            vocabSize: PLAN_VOCAB.SIZE,
+          })
+
+          const multiResult = (tfNetwork as any).trainSupervisedMulti({
+            observations: batch.map(s => s.observation),
+            predictLabels: batch.map(s => s.predictLabel),
+            valueLabels: batch.map(s => s.valueLabel),
+          })
+
+          epochPlanLoss += planResult.loss
+          epochPlanAcc += planResult.accuracy
+          epochPredLoss += multiResult.predictLoss
+          epochValLoss += multiResult.valueLoss
+          batchCount++
+        }
+
+        if ((epoch % 5 === 0 || epoch === 1) && batchCount > 0) {
+          log(`  epoch=${epoch} plan_loss=${(epochPlanLoss / batchCount).toFixed(4)} plan_acc=${(epochPlanAcc / batchCount * 100).toFixed(1)}% pred_loss=${(epochPredLoss / batchCount).toFixed(4)} val_loss=${(epochValLoss / batchCount).toFixed(4)}`)
         }
       }
 
