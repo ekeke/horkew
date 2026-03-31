@@ -82,21 +82,9 @@ export function computeFoxResolvability(
     else deadSeers.push(seat)
   }
 
-  // 各占い師候補が占った対象の集合（死亡占い師: assertions + forecasts）
+  // 各占い師候補の占い履歴（assertions + forecasts）
   const seerTargets = new Map<number, Set<number>>()
-  for (const seat of deadSeers) {
-    const status = vs.statuses.get(seat)!
-    const targets = new Set<number>()
-    for (const [, assertion] of status.assertions) {
-      targets.add(assertion.target)
-    }
-    for (const [, target] of status.forecasts) {
-      targets.add(target)
-    }
-    seerTargets.set(seat, targets)
-  }
-  // 生存占い師: 既出の assertions + forecasts（今後さらに占える）
-  for (const seat of aliveSeers) {
+  for (const seat of [...deadSeers, ...aliveSeers]) {
     const status = vs.statuses.get(seat)!
     const targets = new Set<number>()
     for (const [, assertion] of status.assertions) {
@@ -108,15 +96,7 @@ export function computeFoxResolvability(
     seerTargets.set(seat, targets)
   }
 
-  // 生存者のうち、全死亡占い師候補がすでに占っている人数
-  let coverableAlive = 0
-  for (const [seat, status] of vs.statuses) {
-    if (!status.surviving) continue
-    const coveredByAllDead = deadSeers.every(s => seerTargets.get(s)!.has(seat))
-    if (coveredByAllDead) coverableAlive++
-  }
-
-  // 生存狐候補（Retarが werehamster を可能性に含めている生存席）
+  // 生存狐候補
   const aliveFoxSeats: number[] = []
   for (let seat = 1; seat < conclusions.possibilities.length; seat++) {
     if (!(alive & (1 << seat))) continue
@@ -125,36 +105,78 @@ export function computeFoxResolvability(
     }
   }
 
-  // 各狐候補について、全占い師候補の結果が揃えるか判定
-  // 死亡占い師: すでに占い済みが必要
-  // 生存占い師: 未占いでも自分自身でなければ今後占える
-  let divinableFoxCandidates = 0
+  // 狩人確定生存チェック: possibilitiesでbodyguardが唯一の役職の生存席
+  let bodyguardConfirmed = false
+  for (let seat = 1; seat < conclusions.possibilities.length; seat++) {
+    if (!(alive & (1 << seat))) continue
+    if (conclusions.isActualRole(seat, 'bodyguard' as SystemRole)) {
+      bodyguardConfirmed = true
+      break
+    }
+  }
+
+  // 占いターン数: 1（今夜）+ 狩人確定なら+1（護衛で占い師が生き残る）
+  const turns = aliveSeers.length > 0 ? 1 + (bodyguardConfirmed ? 1 : 0) : 0
+
+  // 各狐候補について、解決に必要な占い回数を計算
+  // 狐候補から除外する条件: すべての占い師候補に占われて溶けていない
+  // → 死亡占い師は既に占い済みが必須
+  // → 生存占い師は既占いか今後占えるか（自分自身は占えない）
+  const resolvableFoxes: number[] = []  // 占いで解決可能な狐候補
+  const unresolvableFoxes: number[] = [] // 占いでは解決不能な狐候補
+
   for (const foxSeat of aliveFoxSeats) {
-    let canComplete = true
+    // 死亡占い師が全員占い済みか
+    let blockedByDead = false
     for (const seerSeat of deadSeers) {
       if (!seerTargets.get(seerSeat)!.has(foxSeat)) {
-        canComplete = false
+        blockedByDead = true
         break
       }
     }
-    if (canComplete) {
-      for (const seerSeat of aliveSeers) {
-        if (seerTargets.get(seerSeat)!.has(foxSeat)) continue // 既に占い済み
-        if (seerSeat === foxSeat) { canComplete = false; break } // 自分自身は占えない
-        // 未占いだが今後占える → OK
+    if (blockedByDead) {
+      unresolvableFoxes.push(foxSeat)
+      continue
+    }
+
+    // 占い師自身が狐候補の場合、自分を占えない
+    let blockedBySelf = false
+    for (const seerSeat of aliveSeers) {
+      if (seerSeat === foxSeat && !seerTargets.get(seerSeat)!.has(foxSeat)) {
+        blockedBySelf = true
+        break
       }
     }
-    if (canComplete) divinableFoxCandidates++
+    if (blockedBySelf) {
+      unresolvableFoxes.push(foxSeat)
+      continue
+    }
+
+    resolvableFoxes.push(foxSeat)
   }
 
-  // 狐排除判定: 全占い師の結果を揃えられる狐候補が0なら排除不能
+  // 生存占い師の占い回数制限チェック
+  // 各生存占い師が未占いの解決可能狐候補をターン内に占いきれるか
+  // ボトルネック: 最も多く占う必要がある占い師
+  let maxResolvable = resolvableFoxes.length
+  for (const seerSeat of aliveSeers) {
+    const divined = seerTargets.get(seerSeat)!
+    let needToDivine = 0
+    for (const foxSeat of resolvableFoxes) {
+      if (!divined.has(foxSeat)) needToDivine++
+    }
+    const overflow = Math.max(0, needToDivine - turns)
+    maxResolvable = Math.min(maxResolvable, resolvableFoxes.length - overflow)
+  }
+
+  const divinableFoxCandidates = maxResolvable
   const resolvable = aliveFoxSeats.length === 0 || divinableFoxCandidates > 0
 
   return {
     setupSeerCount,
     deadSeerCandidates: deadSeers.length,
     aliveSeerCandidates: aliveSeers.length,
-    coverableAlive,
+    coverableAlive: 0,
     aliveFoxCandidates: aliveFoxSeats.length,
     divinableFoxCandidates,
     resolvable,
@@ -264,7 +286,55 @@ export function judgeTsumi(
   const aliveCount = popCount32(alive)
   const profile = buildThreatProfile(conclusions, alive, aliveCount, setup)
 
-  return { alive, profile, impossible: isThreatExceeded(profile) }
+  if (isThreatExceeded(profile)) {
+    return { alive, profile, impossible: true }
+  }
+
+  // 狐候補が存在する場合、占いで解決可能な分を差し引いて再判定
+  if (profile.possibleSurvivingHamster) {
+    const fr = computeFoxResolvability(vs, setup, conclusions, alive)
+    if (!fr.resolvable) {
+      return { alive, profile, impossible: true }
+    }
+
+    // 占いで解決可能な狐候補を引いてプロファイルを調整
+    // 解決可能な狐候補: foxWolfCandidates → wolfCandidates に移行
+    //                    foxCandidates → 消滅
+    const resolved = fr.divinableFoxCandidates
+    if (resolved < fr.aliveFoxCandidates) {
+      const unresolved = fr.aliveFoxCandidates - resolved
+      // foxWolfCandidates と foxCandidates から解決分を引く
+      // まず foxCandidates（純狐候補）から引き、余りを foxWolfCandidates から引く
+      const resolvedFromFox = Math.min(resolved, profile.foxCandidates)
+      const resolvedFromFoxWolf = resolved - resolvedFromFox
+      const adjFoxCandidates = profile.foxCandidates - resolvedFromFox
+      const adjFoxWolfCandidates = profile.foxWolfCandidates - resolvedFromFoxWolf
+      const adjWolfCandidates = profile.wolfCandidates + resolvedFromFoxWolf
+      const adjPossibleHamster = unresolved > 0
+      const adjEffectiveNawa = (aliveCount - 1 - (adjPossibleHamster ? 1 : 0)) / 2
+      const adjNawaInt = adjEffectiveNawa | 0
+      const adjRequiredExecs = adjFoxCandidates + Math.min(adjFoxWolfCandidates, 1) + adjWolfCandidates
+        - (adjPossibleHamster ? 0 : profile.wolfConfirmedCount)
+        + profile.whiteNVThreat
+      const adjNekoShift = profile.possibleSurvivingNekomata && adjEffectiveNawa % 1 === 0
+      const adjusted: ThreatProfile = {
+        ...profile,
+        foxCandidates: adjFoxCandidates,
+        foxWolfCandidates: adjFoxWolfCandidates,
+        wolfCandidates: adjWolfCandidates,
+        possibleSurvivingHamster: adjPossibleHamster,
+        effectiveNawa: adjEffectiveNawa,
+        nawaInt: adjNawaInt,
+        requiredExecs: adjRequiredExecs,
+        nekoParityShift: adjNekoShift,
+      }
+      if (isThreatExceeded(adjusted)) {
+        return { alive, profile: adjusted, impossible: true }
+      }
+    }
+  }
+
+  return { alive, profile, impossible: false }
 }
 
 // ---------------------------------------------------------------------------

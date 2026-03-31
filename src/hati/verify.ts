@@ -395,6 +395,7 @@ async function runVerify(args: Args): Promise<void> {
     let configFailures = 0
     let retarExclusions = 0
     let falseNegatives = 0
+    let judgmentFalsePositives = 0
     let searchEntered = 0
     let searchTsumiFound = 0
     let prunedByThreat = 0
@@ -622,8 +623,35 @@ async function runVerify(args: Args): Promise<void> {
           maxAliveDay = cp.day
         }
 
-        // --no-strategy: 戦略木がないので検証スキップ
+        // --no-strategy: 意図的に戦略構築をスキップした場合は検証不要
+        if (args.noStrategy) {
+          prevCp = { truncated, day: cp.day, aliveCount: currentAliveCount, wasTsumi: true }
+          continue
+        }
+
+        // 判定は詰みだが戦略が構築できなかった → 偽陽性
         if (!tsumiResult.strategy) {
+          judgmentFalsePositives++
+          const failure: Failure = {
+            config: cfg.name,
+            seed,
+            day: cp.day,
+            message: `判定偽陽性: isTsumi=true だが戦略構築不可 (worlds=${tsumiResult.stats.worldsTotal}, nodes=${tsumiResult.stats.nodesVisited})`,
+            trace: [
+              `判定: impossible=false`,
+              `探索: worlds=${tsumiResult.stats.worldsTotal}, nodes=${tsumiResult.stats.nodesVisited}, strategy=null`,
+            ],
+            howl: truncated,
+          }
+          failures.push(failure)
+          if (args.outdir) {
+            const filename = `${cfg.name}_s${seed}_day${cp.day}_fp.howl`
+            const content = truncated + '\n\n'
+              + `# [判定偽陽性: 詰み判定だが戦略構築不可]\n`
+              + `# worlds=${tsumiResult.stats.worldsTotal}, nodes=${tsumiResult.stats.nodesVisited}\n`
+            writeFileSync(join(args.outdir, filename), content)
+          }
+          if (args.stopOnFirst) break seedLoop
           prevCp = { truncated, day: cp.day, aliveCount: currentAliveCount, wasTsumi: true }
           continue
         }
@@ -713,6 +741,9 @@ async function runVerify(args: Args): Promise<void> {
     console.log(`    枝刈り: 脅威数=${prunedByThreat}, ワールド0=${prunedByWorlds}, 狐=${prunedByFox}`)
     console.log(`    探索突入: ${searchEntered}/${checkpointCount} → 詰み=${searchTsumiFound}, なし=${searchEntered - searchTsumiFound} (詰み率${searchEntered > 0 ? (searchTsumiFound / searchEntered * 100).toFixed(1) : '-'}%)`)
     console.log(`    戦略検証: ${configFailures === 0 && retarExclusions === 0 ? '全通過' : `Hati=${configFailures}失敗, Retar排除=${retarExclusions}`}`)
+    if (judgmentFalsePositives > 0) {
+      console.log(`    判定偽陽性: ${judgmentFalsePositives}件`)
+    }
     if (args.checkHamsterPruning && (cfg.roles.werehamster || cfg.roles.nekomata)) {
       console.log(`    枝刈り偽陰性: ${falseNegatives === 0 ? 'なし' : `${falseNegatives}件`}`)
     }
