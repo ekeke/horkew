@@ -654,7 +654,7 @@ Options:
   --outdir <dir>      失敗howlファイルの出力先ディレクトリ
   --prior             priorモード検証: 各座席の真の役職でprior再計算し他席と矛盾しないか
   --prior-equiv       prior等価性検証: buildAssumptionsでprior有無の結果が完全一致するか
-  --compat            JS版とWASM版の出力が完全一致するか検証
+  --compat            JS版とWASM版の出力が完全一致するか検証（他モードと併用可）
   --quiet, -q         プログレスバーを非表示
   --help, -h          このヘルプを表示
 
@@ -800,13 +800,25 @@ async function main() {
         totalCheckpoints++
         configCheckpoints++
         if (gameFailed) continue
-        const { failure, skipped, retarMs } = compat
-          ? verifyCompatCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
-          : priorEquiv
-          ? verifyPriorEquivCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
+        // 選択モード（default/prior/prior-equiv）を実行
+        const verifyFn = priorEquiv
+          ? verifyPriorEquivCheckpoint
           : prior
-          ? verifyPriorCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
-          : verifyCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
+          ? verifyPriorCheckpoint
+          : verifyCheckpoint
+        let { failure, skipped, retarMs } = verifyFn(events, state, lupaConfig, cp, gc.name, seed)
+
+        // compat: モード検証が成功かつskipでない場合、追加でTS↔Rust一致を検証
+        if (compat && !failure && !skipped) {
+          const compatResult = verifyCompatCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
+          if (compatResult.failure) {
+            failure = compatResult.failure
+          }
+          if (compatResult.skipped) {
+            skipped = compatResult.skipped
+          }
+          retarMs += compatResult.retarMs
+        }
         if (failure) {
           allFailures.push(failure)
           gameFailed = true
