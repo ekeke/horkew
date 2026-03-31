@@ -261,7 +261,8 @@ export function buildThreatProfile(
  * - 猫又パリティシフトにより必要処刑数 == 縄数でも実質超過
  */
 export function isThreatExceeded(p: ThreatProfile): boolean {
-  return p.foxWolfCandidates + p.wolfCandidates > p.nawaInt
+  return p.threat > p.nawa
+    || p.foxWolfCandidates + p.wolfCandidates > p.nawaInt
     || p.requiredExecs > p.nawaInt
     || (p.nekoParityShift && p.requiredExecs === p.nawaInt)
 }
