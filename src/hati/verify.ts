@@ -420,10 +420,23 @@ async function runVerify(args: Args): Promise<void> {
     const scenarioStart = performance.now()
     const throttle = args.cpuLimit < 1.0
     const sleepRatio = throttle ? (1.0 - args.cpuLimit) / args.cpuLimit : 0
+    const totalSeeds = seedTo - seedFrom
+    const progressInterval = Math.max(50, Math.ceil(totalSeeds / 200))
     seedLoop: for (let seed = seedFrom; seed < seedTo; seed++) {
-      if (args.deepCheck && (seed - seedFrom) % 500 === 0 && seed > seedFrom) {
-        const elapsed = ((performance.now() - scenarioStart) / 1000).toFixed(0)
-        process.stdout.write(`\r  [${cfg.name}] seed=${seed}/${seedTo}  (${elapsed}s  deep=${deepCheckCount}  FN=${deepCheckFound})`)
+      if ((seed - seedFrom) % progressInterval === 0 && seed > seedFrom) {
+        const done = seed - seedFrom
+        const elapsed = (performance.now() - scenarioStart) / 1000
+        const pct = (done / totalSeeds * 100).toFixed(1)
+        const eta = done > 0 ? ((totalSeeds - done) * elapsed / done).toFixed(0) : '?'
+        const failCount = configFailures + judgmentFalsePositives
+        let line = `  [${cfg.name}] ${done}/${totalSeeds} (${pct}%)  ${elapsed.toFixed(0)}s  ETA ${eta}s  cp=${checkpointCount} tsumi=${tsumiCount} fail=${failCount}`
+        if (args.deepCheck) line += `  deep=${deepCheckCount} FN=${deepCheckFound}`
+        if (process.stderr.isTTY) {
+          process.stderr.write('\r' + line + '    ')
+        } else {
+          console.error(line)
+        }
+        try { writeFileSync('tmp/verify-progress.txt', line + '\n') } catch {}
       }
       const seedStart = throttle ? performance.now() : 0
       resetEndgameStats()
@@ -741,6 +754,7 @@ async function runVerify(args: Args): Promise<void> {
         sleepMs(Math.round(workMs * sleepRatio))
       }
     }
+    if (totalSeeds > progressInterval && process.stderr.isTTY) process.stderr.write('\r' + ' '.repeat(120) + '\r')
 
     totalGames += gameCount
     totalCheckpoints += checkpointCount
