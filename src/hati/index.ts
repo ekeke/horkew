@@ -170,7 +170,7 @@ export function computeFoxResolvability(
   }
 
   const divinableFoxCandidates = maxResolvable
-  const resolvable = aliveFoxSeats.length === 0 || divinableFoxCandidates > 0
+  const resolvable = aliveFoxSeats.length === 0 || divinableFoxCandidates >= aliveFoxSeats.length
 
   return {
     setupSeerCount,
