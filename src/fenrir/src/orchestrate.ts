@@ -38,6 +38,7 @@ import { existsSync, readdirSync, readFileSync, unlinkSync, rmSync } from 'node:
 import { spawn, execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { generatePlanTokenTrainingBatch } from './ml/execution-plan-data.ts'
+import { collectBatchGameData } from './ml/pretrain-game-data.ts'
 import { PLAN_VOCAB } from './rule-action.ts'
 import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
@@ -632,6 +633,47 @@ async function main(): Promise<void> {
       log(`  Pretrained weights → village network`)
     }
     log(`  Final best accuracy: ${(bestAcc * 100).toFixed(1)}%`)
+
+    // === Method D: 実ゲームで predict + value の事前学習 ===
+    log(`${BOLD}=== Pretrain D: Heuristic Game Supervised Learning ===${RESET}`)
+    const pretrainGames = 100
+    const pretrainDEpochs = 30
+
+    log(`  Collecting data from ${pretrainGames} heuristic games...`)
+    const t0 = performance.now()
+    const gameSamples = await collectBatchGameData(trainingConfig, pretrainGames)
+    log(`  Collected ${gameSamples.length} vote samples in ${((performance.now() - t0) / 1000).toFixed(1)}s`)
+
+    if (gameSamples.length > 0) {
+      for (let epoch = 1; epoch <= pretrainDEpochs; epoch++) {
+        // Plan tokens (trainSupervisedPlan)
+        const planResult = (tfNetwork as any).trainSupervisedPlan({
+          observations: gameSamples.map(s => s.observation),
+          forwardLabels: gameSamples.map(s => s.forwardLabels),
+          forwardMasks: gameSamples.map(s => s.forwardMask),
+          numTokens: gameSamples[0].forwardLabels.length,
+          vocabSize: PLAN_VOCAB.SIZE,
+        })
+
+        // Predict + Value (trainSupervisedMulti)
+        const multiResult = (tfNetwork as any).trainSupervisedMulti({
+          observations: gameSamples.map(s => s.observation),
+          predictLabels: gameSamples.map(s => s.predictLabel),
+          valueLabels: gameSamples.map(s => s.valueLabel),
+        })
+
+        if (epoch % 5 === 0 || epoch === 1) {
+          log(`  epoch=${epoch} plan_loss=${planResult.loss.toFixed(4)} plan_acc=${(planResult.accuracy * 100).toFixed(1)}% pred_loss=${multiResult.predictLoss.toFixed(4)} val_loss=${multiResult.valueLoss.toFixed(4)}`)
+        }
+      }
+
+      // 重みを village にコピー
+      const villageNet2 = networks.get('village' as ModelName)
+      if (villageNet2) {
+        villageNet2.loadWeights(tfNetwork.cloneWeights())
+        log(`  Method D pretrained weights → village network`)
+      }
+    }
   }
 
   // === Baseline (14D猫 heuristic vs heuristic, ハードコード) ===

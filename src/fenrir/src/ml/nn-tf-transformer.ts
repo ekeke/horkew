@@ -969,6 +969,73 @@ export class TfTransformerNetwork {
   }
 
   /**
+   * 教師あり学習: predict (BCE) + value (MSE) 同時学習
+   * trunk + predict head + value head を更新 (plan head は凍結)
+   */
+  trainSupervisedMulti(batch: {
+    observations: Float32Array[]
+    predictLabels: Float32Array[]   // [n, SEATS * NUM_ROLES] soft one-hot
+    valueLabels: number[]           // [n] scalar ±1.0
+  }): { predictLoss: number, valueLoss: number } {
+    const n = batch.observations.length
+    if (n === 0) return { predictLoss: 0, valueLoss: 0 }
+
+    const inputSize = this.config.inputSize
+    const obsData = new Float32Array(n * inputSize)
+    for (let i = 0; i < n; i++) obsData.set(batch.observations[i], i * inputSize)
+
+    const predictEntry = this.perSeatSigmoidHeadWeights.get('predict')
+    const predictSize = predictEntry ? predictEntry[0].shape[1]! * SEATS : 0
+
+    const predictData = new Float32Array(n * predictSize)
+    for (let i = 0; i < n; i++) {
+      if (batch.predictLabels[i]) predictData.set(batch.predictLabels[i], i * predictSize)
+    }
+
+    const valueData = new Float32Array(n)
+    for (let i = 0; i < n; i++) valueData[i] = batch.valueLabels[i]
+
+    const result = { predictLoss: 0, valueLoss: 0 }
+
+    const lossFunc = () => {
+      const obsTensor = tf.tensor2d(obsData, [n, inputSize])
+      const { clsOut, seatOutputs } = this.forwardTrunk(obsTensor)
+
+      let totalLoss = tf.scalar(0) as tf.Scalar
+
+      // === Predict head (BCE) ===
+      if (predictEntry && predictSize > 0) {
+        const [pw, pb] = predictEntry
+        const predictLogits = this.perSeatSigmoidLogits(seatOutputs, pw, pb)  // [n, SEATS * perDim]
+        const predictProbs = tf.sigmoid(predictLogits)
+        const targetsTensor = tf.tensor2d(predictData, [n, predictSize])
+
+        const logP = tf.log(tf.add(predictProbs, tf.scalar(1e-8)))
+        const log1mP = tf.log(tf.add(tf.sub(tf.scalar(1), predictProbs), tf.scalar(1e-8)))
+        const bce = tf.neg(tf.add(
+          tf.mul(targetsTensor, logP),
+          tf.mul(tf.sub(tf.scalar(1), targetsTensor), log1mP),
+        ))
+        const predictLoss = tf.mean(bce)
+        totalLoss = tf.add(totalLoss, predictLoss) as tf.Scalar
+        result.predictLoss = predictLoss.dataSync()[0]
+      }
+
+      // === Value head (MSE) ===
+      const valueOut = tf.add(tf.matMul(clsOut, this.valueW), this.valueB).squeeze([1])  // [n]
+      const valueTensor = tf.tensor1d(valueData)
+      const valueLoss = tf.mean(tf.squaredDifference(valueOut, valueTensor))
+      totalLoss = tf.add(totalLoss, valueLoss) as tf.Scalar
+      result.valueLoss = valueLoss.dataSync()[0]
+
+      return totalLoss
+    }
+
+    this.optimizer.minimize(lossFunc, false, this.allVariables)
+    return result
+  }
+
+  /**
    * 教師あり学習（vote head用 cross-entropy）
    */
   trainSupervisedVote(batch: {
