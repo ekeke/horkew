@@ -278,6 +278,7 @@ type Args = {
   fnFromDb: string | null
   deepCheck: boolean
   cpuLimit: number
+  stopOnFirst: boolean
 }
 
 function parseArgs(argv: string[]): Args {
@@ -292,6 +293,7 @@ function parseArgs(argv: string[]): Args {
   let fnFromDb: string | null = null
   let deepCheck = false
   let cpuLimit = 1.0
+  let stopOnFirst = false
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -316,6 +318,8 @@ function parseArgs(argv: string[]): Args {
       deepCheck = true
     } else if (arg === '--cpu-limit' && i + 1 < argv.length) {
       cpuLimit = parseFloat(argv[++i])
+    } else if (arg === '--stop-on-first') {
+      stopOnFirst = true
     } else if (arg === '--help' || arg === '-h') {
       const names = configs.map(c => c.name).join(', ')
       console.log(`Hati 詰み探索 検証スクリプト
@@ -334,6 +338,7 @@ Options:
   --fn-from-db <file>          詰みDBから偽陰性チェック（前日CP再探索）
   --deep-check                 詰みなしCPをmaxDepth=aliveで再探索（--max-aliveで生存者上限）
   --cpu-limit <0-1>            CPUスロットリング（デフォルト: 1.0 = 制限なし、0.8 = 80%）
+  --stop-on-first              最初の失敗/発見で即停止
   --help, -h                   このヘルプ
 
 シナリオ: ${names}`)
@@ -341,7 +346,7 @@ Options:
     }
   }
 
-  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb, noStrategy, fnFromDb, deepCheck, cpuLimit }
+  return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb, noStrategy, fnFromDb, deepCheck, cpuLimit, stopOnFirst }
 }
 
 async function runVerify(args: Args): Promise<void> {
@@ -407,7 +412,7 @@ async function runVerify(args: Args): Promise<void> {
     const scenarioStart = performance.now()
     const throttle = args.cpuLimit < 1.0
     const sleepRatio = throttle ? (1.0 - args.cpuLimit) / args.cpuLimit : 0
-    for (let seed = seedFrom; seed < seedTo; seed++) {
+    seedLoop: for (let seed = seedFrom; seed < seedTo; seed++) {
       if (args.deepCheck && (seed - seedFrom) % 500 === 0 && seed > seedFrom) {
         const elapsed = ((performance.now() - scenarioStart) / 1000).toFixed(0)
         process.stdout.write(`\r  [${cfg.name}] seed=${seed}/${seedTo}  (${elapsed}s  deep=${deepCheckCount}  FN=${deepCheckFound})`)
@@ -530,6 +535,7 @@ async function runVerify(args: Args): Promise<void> {
                     + `# 翌日Day${cp.day}(${currentAliveCount}人)では通常探索で詰み発見\n`
                   writeFileSync(join(args.outdir, filename), content)
                 }
+                if (args.stopOnFirst) break seedLoop
               }
             } catch {
               // parse/build失敗は無視
@@ -563,6 +569,7 @@ async function runVerify(args: Args): Promise<void> {
                     + `# 枝刈りなし: worlds=${noPruneResult.stats.worldsTotal}, ${noPruneResult.stats.searchElapsed.toFixed(1)}ms\n`
                   writeFileSync(join(args.outdir, filename), content)
                 }
+                if (args.stopOnFirst) break seedLoop
               }
             } catch {
               // parse/build失敗は無視（上でも同様）
@@ -586,6 +593,7 @@ async function runVerify(args: Args): Promise<void> {
                     + `# worlds=${deepResult.stats.worldsTotal}, nodes=${deepResult.stats.nodesVisited}, ${deepResult.stats.searchElapsed.toFixed(1)}ms\n`
                   writeFileSync(join(args.outdir, filename), content)
                 }
+                if (args.stopOnFirst) break seedLoop
               }
               deepCheckCount++
             } catch { /* ignore */ }
@@ -674,6 +682,7 @@ async function runVerify(args: Args): Promise<void> {
               + formatStrategy(tsumiResult.strategy!) + '\n'
             writeFileSync(join(args.outdir, filename), content)
           }
+          if (args.stopOnFirst) break seedLoop
         }
         prevCp = { truncated, day: cp.day, aliveCount: currentAliveCount, wasTsumi: true }
       }
@@ -714,6 +723,7 @@ async function runVerify(args: Args): Promise<void> {
       process.stdout.write('\n')
       console.log(`    深探索チェック: ${deepCheckCount}件(alive<=${args.maxAliveForFN}), 偽陰性=${deepCheckFound}`)
     }
+    if (args.stopOnFirst && failures.length > 0) break
   }
 
   console.log('')
