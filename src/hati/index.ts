@@ -11,6 +11,8 @@ import { RoleBitIndex } from '../retar/possibilities.ts'
 
 export type { TsumiResult, TsumiJudgment, ThreatProfile, SearchOptions } from './types.ts'
 export type { StrategyNode, World, VillageAction } from './types.ts'
+export { evaluateWolfRisk } from './wolfRisk.ts'
+export type { WolfRiskResult } from './wolfRisk.ts'
 
 /**
  * Retar解析を実行し Possibilities を返す関数の型。
@@ -46,7 +48,7 @@ function resultToPossibilitiesInternal(result: AnalyzeResult, setup: Map<SystemR
  * 生存者の役職候補を分類し、縄数・脅威指標を算出する。
  * 判定ロジックは含まない。学習特徴量としても利用可能。
  */
-function buildThreatProfile(
+export function buildThreatProfile(
   conclusions: Possibilities,
   alive: number,
   aliveCount: number,
@@ -115,7 +117,7 @@ function buildThreatProfile(
  * - 必要処刑数が縄数を超える
  * - 猫又パリティシフトにより必要処刑数 == 縄数でも実質超過
  */
-function isThreatExceeded(p: ThreatProfile): boolean {
+export function isThreatExceeded(p: ThreatProfile): boolean {
   return p.foxWolfCandidates + p.wolfCandidates > p.nawaInt
     || p.requiredExecs > p.nawaInt
     || (p.nekoParityShift && p.requiredExecs === p.nawaInt)
