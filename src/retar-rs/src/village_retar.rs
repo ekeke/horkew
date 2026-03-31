@@ -214,6 +214,13 @@ impl VillageRetar {
         let mut path2_valid = true;
         for &seat in &self.last_deaths {
             if poss2.is_fixed(seat) {
+                // 確定席が狼/狐なら飽和パスの前提と矛盾 → 無効
+                if poss2.has_role(seat, SystemRole::Werewolf)
+                    || poss2.has_role(seat, SystemRole::Werehamster)
+                {
+                    path2_valid = false;
+                    break;
+                }
                 continue;
             }
             if !poss2.deny_role(seat, SystemRole::Werewolf) {

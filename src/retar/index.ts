@@ -471,7 +471,14 @@ export class VillageRetar {
     const poss2 = originalPossibilities.cloneInstance()
     let path2Valid = true
     for (const seat of this.lastDeaths) {
-      if (poss2.isFixed(seat)) continue
+      if (poss2.isFixed(seat)) {
+        // 確定席が狼/狐なら飽和パスの前提と矛盾 → 無効
+        if (poss2.hasRole(seat, 'werewolf') || poss2.hasRole(seat, 'werehamster')) {
+          path2Valid = false
+          break
+        }
+        continue
+      }
       if (!poss2.denyRole(seat, 'werewolf')) { path2Valid = false; break }
       if (!poss2.denyRole(seat, 'werehamster')) { path2Valid = false; break }
     }
