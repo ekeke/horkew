@@ -155,6 +155,8 @@ export type SearchOptions = {
   disableHamsterPruning?: boolean
   /** 戦略木を構築する（デフォルト: true）。falseなら詰み判定のみ高速実行 */
   buildStrategy?: boolean
+  /** デバッグ出力（各段階の数値を console.log） */
+  debug?: boolean
 }
 
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {

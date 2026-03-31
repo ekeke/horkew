@@ -7,7 +7,7 @@ import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
 import { collectWorlds } from './worlds.ts'
 import { searchTsumi as runSearch } from './search.ts'
 import { simulateFoxElimination } from './foxResolver.ts'
-import { RoleBitIndex } from '../retar/possibilities.ts'
+import { RoleBitIndex, RoleSignatureBits } from '../retar/possibilities.ts'
 
 export type { TsumiResult, TsumiJudgment, ThreatProfile, SearchOptions } from './types.ts'
 export type { StrategyNode, World, VillageAction } from './types.ts'
@@ -38,6 +38,127 @@ function resultToPossibilitiesInternal(result: AnalyzeResult, setup: Map<SystemR
   }
   p.maxSurvivingNV = result.maxSurvivingNV
   return p
+}
+
+// ---------------------------------------------------------------------------
+// 狐排除可能性の計算
+// ---------------------------------------------------------------------------
+
+export type FoxResolvability = {
+  /** 配役の占い師数 */
+  setupSeerCount: number
+  /** 死亡した占い師候補数 */
+  deadSeerCandidates: number
+  /** 生存占い師候補数 */
+  aliveSeerCandidates: number
+  /** 生存占い師候補が占うだけで全占い師候補の占い結果が出そろう生存者数 */
+  coverableAlive: number
+  /** 生存狐候補の数 */
+  aliveFoxCandidates: number
+  /** 生存占い師候補が占える生存狐候補の数（占い師自身を除く） */
+  divinableFoxCandidates: number
+  /** 狐排除可能と判断するか */
+  resolvable: boolean
+}
+
+/**
+ * 狐排除に関わる占い師カバレッジを計算し、排除可能かを判定する。
+ */
+export function computeFoxResolvability(
+  vs: VillageStatus,
+  setup: Map<SystemRole, number>,
+  conclusions: Possibilities,
+  alive: number,
+): FoxResolvability {
+  const setupSeerCount = setup.get('seer' as SystemRole) ?? 0
+  const seerClaimants = vs.claims.get('seer' as SystemRole) ?? []
+
+  const deadSeers: number[] = []
+  const aliveSeers: number[] = []
+  for (const seat of seerClaimants) {
+    const status = vs.statuses.get(seat)
+    if (!status) continue
+    if (status.surviving) aliveSeers.push(seat)
+    else deadSeers.push(seat)
+  }
+
+  // 各占い師候補が占った対象の集合（死亡占い師: assertions + forecasts）
+  const seerTargets = new Map<number, Set<number>>()
+  for (const seat of deadSeers) {
+    const status = vs.statuses.get(seat)!
+    const targets = new Set<number>()
+    for (const [, assertion] of status.assertions) {
+      targets.add(assertion.target)
+    }
+    for (const [, target] of status.forecasts) {
+      targets.add(target)
+    }
+    seerTargets.set(seat, targets)
+  }
+  // 生存占い師: 既出の assertions + forecasts（今後さらに占える）
+  for (const seat of aliveSeers) {
+    const status = vs.statuses.get(seat)!
+    const targets = new Set<number>()
+    for (const [, assertion] of status.assertions) {
+      targets.add(assertion.target)
+    }
+    for (const [, target] of status.forecasts) {
+      targets.add(target)
+    }
+    seerTargets.set(seat, targets)
+  }
+
+  // 生存者のうち、全死亡占い師候補がすでに占っている人数
+  let coverableAlive = 0
+  for (const [seat, status] of vs.statuses) {
+    if (!status.surviving) continue
+    const coveredByAllDead = deadSeers.every(s => seerTargets.get(s)!.has(seat))
+    if (coveredByAllDead) coverableAlive++
+  }
+
+  // 生存狐候補（Retarが werehamster を可能性に含めている生存席）
+  const aliveFoxSeats: number[] = []
+  for (let seat = 1; seat < conclusions.possibilities.length; seat++) {
+    if (!(alive & (1 << seat))) continue
+    if (conclusions.hasRole(seat, 'werehamster' as SystemRole)) {
+      aliveFoxSeats.push(seat)
+    }
+  }
+
+  // 各狐候補について、全占い師候補の結果が揃えるか判定
+  // 死亡占い師: すでに占い済みが必要
+  // 生存占い師: 未占いでも自分自身でなければ今後占える
+  let divinableFoxCandidates = 0
+  for (const foxSeat of aliveFoxSeats) {
+    let canComplete = true
+    for (const seerSeat of deadSeers) {
+      if (!seerTargets.get(seerSeat)!.has(foxSeat)) {
+        canComplete = false
+        break
+      }
+    }
+    if (canComplete) {
+      for (const seerSeat of aliveSeers) {
+        if (seerTargets.get(seerSeat)!.has(foxSeat)) continue // 既に占い済み
+        if (seerSeat === foxSeat) { canComplete = false; break } // 自分自身は占えない
+        // 未占いだが今後占える → OK
+      }
+    }
+    if (canComplete) divinableFoxCandidates++
+  }
+
+  // 狐排除判定: 全占い師の結果を揃えられる狐候補が0なら排除不能
+  const resolvable = aliveFoxSeats.length === 0 || divinableFoxCandidates > 0
+
+  return {
+    setupSeerCount,
+    deadSeerCandidates: deadSeers.length,
+    aliveSeerCandidates: aliveSeers.length,
+    coverableAlive,
+    aliveFoxCandidates: aliveFoxSeats.length,
+    divinableFoxCandidates,
+    resolvable,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -261,19 +382,49 @@ export function searchTsumi(
   searchOptions: SearchOptions = DEFAULT_SEARCH_OPTIONS,
   runRetar: RunRetar = defaultRunRetar,
 ): TsumiResult {
+  const dbg = searchOptions.debug
   const t0 = performance.now()
 
   // 1. Retar解析
   const conclusions = runRetar(vs, setup, analyzeOptions)
   const t1 = performance.now()
 
+  if (dbg) {
+    const aliveSeats: string[] = []
+    for (const [seat, status] of vs.statuses) {
+      if (!status.surviving) continue
+      const mask = conclusions.possibilities[seat]
+      const roles: string[] = []
+      for (const [role, bit] of Object.entries(RoleSignatureBits)) {
+        if (mask & (bit as number)) roles.push(role)
+      }
+      aliveSeats.push(`${status.name ?? seat}(${seat})=[${roles}]`)
+    }
+    console.log(`[hati:debug] day=${vs.day} retar=${(t1 - t0).toFixed(1)}ms maxSurvNV=${conclusions.maxSurvivingNV}`)
+    console.log(`[hati:debug]   alive: ${aliveSeats.join(' ')}`)
+  }
+
   // 2. 判定フェーズ
   const judgment = judgeTsumi(conclusions, vs, setup)
   const isTsumi = !judgment.impossible
   const t2 = performance.now()
 
+  if (dbg) {
+    const p = judgment.profile
+    console.log(`[hati:debug]   judgment: impossible=${judgment.impossible} nawa=${p.nawa} effNawa=${p.effectiveNawa} nawaInt=${p.nawaInt}`)
+    console.log(`[hati:debug]   wolf=${p.wolfCandidates}(conf=${p.wolfConfirmedCount}) fox=${p.foxCandidates} foxWolf=${p.foxWolfCandidates} whiteNV=${p.whiteNVCandidates}(threat=${p.whiteNVThreat})`)
+    console.log(`[hati:debug]   requiredExecs=${p.requiredExecs} hamster=${p.possibleSurvivingHamster} neko=${p.possibleSurvivingNekomata} nekoShift=${p.nekoParityShift}`)
+    console.log(`[hati:debug]   isThreatExceeded: foxWolf+wolf(${p.foxWolfCandidates + p.wolfCandidates})>nawaInt(${p.nawaInt})=${p.foxWolfCandidates + p.wolfCandidates > p.nawaInt} || reqExecs(${p.requiredExecs})>nawaInt=${p.requiredExecs > p.nawaInt} || nekoShift&&req==nawa=${p.nekoParityShift && p.requiredExecs === p.nawaInt}`)
+
+    if (p.possibleSurvivingHamster) {
+      const fr = computeFoxResolvability(vs, setup, conclusions, judgment.alive)
+      console.log(`[hati:debug]   foxResolvability: setupSeers=${fr.setupSeerCount} deadSeerCand=${fr.deadSeerCandidates} aliveSeerCand=${fr.aliveSeerCandidates} coverable=${fr.coverableAlive} foxCand=${fr.aliveFoxCandidates} divinable=${fr.divinableFoxCandidates} resolvable=${fr.resolvable}`)
+    }
+  }
+
   // 戦略構築が不要、または詰み不可能なら探索をスキップ
   if (!isTsumi || searchOptions.buildStrategy === false) {
+    if (dbg) console.log(`[hati:debug]   → skip search (isTsumi=${isTsumi} buildStrategy=${searchOptions.buildStrategy})`)
     return {
       isTsumi, strategy: null, judgment,
       stats: {
@@ -286,6 +437,11 @@ export function searchTsumi(
   // 3. 戦略探索（手順の構築）
   const sr = searchTsumiStrategy(conclusions, judgment, setup, vs.day, searchOptions)
   const elapsed = performance.now() - t0
+
+  if (dbg) {
+    console.log(`[hati:debug]   → search: isTsumi=${sr.isTsumi} worlds=${sr.worldsTotal} nodes=${sr.nodesVisited} maxDepth=${sr.maxDepth} search=${sr.searchElapsed.toFixed(1)}ms`)
+    console.log(`[hati:debug]   → final: isTsumi=true (hardcoded) strategy=${sr.strategy ? 'yes' : 'null'} total=${elapsed.toFixed(1)}ms`)
+  }
 
   return {
     isTsumi: true,
