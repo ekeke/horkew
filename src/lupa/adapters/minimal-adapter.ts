@@ -86,7 +86,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       proposals: [],
       rng,
       gameState: pctx.state as GameState,
-      lastExecutedSeat: null,
+      lastExecutedSeat: pctx.state.executionHistory.get(pctx.day - 1) ?? null,
       retarPossibilities: playerRetar,
       maxSurvivingNV: playerMaxNV,
       globalRetarPossibilities,

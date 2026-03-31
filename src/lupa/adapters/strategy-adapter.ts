@@ -46,7 +46,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
   let daySignals: SignalRecord[] = []
   let dayProposals: Proposal[] = []
   let signalIdCounter = 0
-  let lastExecutedSeat: number | null = null
+  // lastExecutedSeat は buildCtx 内で executionHistory から導出する
   let retarAccMs = 0
   let retarCallCount = 0
 
@@ -75,7 +75,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
       proposals: dayProposals,
       rng,
       gameState: pctx.state as GameState,
-      lastExecutedSeat,
+      lastExecutedSeat: pctx.state.executionHistory.get(pctx.day - 1) ?? null,
       retarPossibilities: playerRetar,
       maxSurvivingNV: playerMaxNV,
       globalRetarPossibilities,
