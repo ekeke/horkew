@@ -386,12 +386,12 @@ async function generateGame(
 // Checkpoint helpers
 // ============================================================
 
-function promptYesNo(question: string): Promise<boolean> {
+function promptChoice(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stderr })
   return new Promise(resolve => {
     rl.question(question, answer => {
       rl.close()
-      resolve(answer.trim().toLowerCase() === 'y')
+      resolve(answer.trim().toLowerCase())
     })
   })
 }
@@ -435,20 +435,41 @@ async function checkExistingCheckpoints(config: OrchestratorConfig): Promise<voi
   log(`  ファイル数: ${range.totalFiles}`)
   log(`  学習期間: ${fmtTime(range.oldest)} 〜 ${fmtTime(range.newest)}`)
   log('')
-  log(`  [y] 削除して新規学習`)
+  log(`  [y] 全削除して新規学習 (pretrain からやり直し)`)
+  log(`  [p] PPOチェックポイントだけ削除 (pretrain は残して PPO からやり直し)`)
   log(`  [n] 中断 (--resume で再開可能)`)
 
-  const yes = await promptYesNo(`  削除しますか? (y/N): `)
-  if (!yes) {
+  const choice = await promptChoice(`  選択 (y/p/N): `)
+  if (choice === 'y') {
+    for (const name of MODEL_NAMES) {
+      const dir = `${config.checkpointBase}/ckpt-${name}`
+      if (existsSync(dir)) rmSync(dir, { recursive: true })
+    }
+    log('全チェックポイントを削除しました。')
+  } else if (choice === 'p') {
+    // checkpoint_0.json (pretrain) だけ残し、iter>0 のチェックポイントを削除
+    for (const name of MODEL_NAMES) {
+      const dir = `${config.checkpointBase}/ckpt-${name}`
+      if (!existsSync(dir)) continue
+      for (const f of readdirSync(dir)) {
+        const m = f.match(/^(?:checkpoint|wolf_team|mason_team)_(\d+)\.json$/)
+        if (m && parseInt(m[1]) > 0) {
+          try { unlinkSync(`${dir}/${f}`) } catch {}
+        }
+        if (f === 'final.json' || f === 'wolf_team_final.json' || f === 'mason_team_final.json') {
+          try { unlinkSync(`${dir}/${f}`) } catch {}
+        }
+        if (f === 'eval_log.jsonl') {
+          try { unlinkSync(`${dir}/${f}`) } catch {}
+        }
+      }
+    }
+    log('PPOチェックポイントを削除しました (pretrain checkpoint_0 は保持)。')
+    config.resume = true  // pretrain checkpoint から resume
+  } else {
     log('中断しました。--resume を付けて再実行してください。')
     process.exit(0)
   }
-
-  for (const name of MODEL_NAMES) {
-    const dir = `${config.checkpointBase}/ckpt-${name}`
-    if (existsSync(dir)) rmSync(dir, { recursive: true })
-  }
-  log('既存チェックポイントを削除しました。')
 }
 
 function findCheckpoint(dir: string): { iteration: number, path: string } | null {
