@@ -349,6 +349,13 @@ Options:
   return { outdir, scenario, seeds, checkHamsterPruning, checkFalseNegative, maxAliveForFN, tsumiDb, noStrategy, fnFromDb, deepCheck, cpuLimit, stopOnFirst }
 }
 
+function dumpHowlOnStop(args: Args, howl: string, cfg: GameConfig, seed: number, day: number): void {
+  if (args.stopOnFirst && !args.outdir) {
+    console.log(`\n--- ${cfg.name} seed=${seed} Day${day} ---`)
+    console.log(howl)
+  }
+}
+
 async function runVerify(args: Args): Promise<void> {
   const selectedConfigs = args.scenario
     ? configs.filter(c => c.name === args.scenario)
@@ -536,7 +543,10 @@ async function runVerify(args: Args): Promise<void> {
                     + `# 翌日Day${cp.day}(${currentAliveCount}人)では通常探索で詰み発見\n`
                   writeFileSync(join(args.outdir, filename), content)
                 }
-                if (args.stopOnFirst) break seedLoop
+                if (args.stopOnFirst) {
+                  dumpHowlOnStop(args, prevCp.truncated, cfg, seed, prevCp.day)
+                  break seedLoop
+                }
               }
             } catch {
               // parse/build失敗は無視
@@ -570,7 +580,10 @@ async function runVerify(args: Args): Promise<void> {
                     + `# 枝刈りなし: worlds=${noPruneResult.stats.worldsTotal}, ${noPruneResult.stats.searchElapsed.toFixed(1)}ms\n`
                   writeFileSync(join(args.outdir, filename), content)
                 }
-                if (args.stopOnFirst) break seedLoop
+                if (args.stopOnFirst) {
+                  dumpHowlOnStop(args, truncated, cfg, seed, cp.day)
+                  break seedLoop
+                }
               }
             } catch {
               // parse/build失敗は無視（上でも同様）
@@ -594,7 +607,10 @@ async function runVerify(args: Args): Promise<void> {
                     + `# worlds=${deepResult.stats.worldsTotal}, nodes=${deepResult.stats.nodesVisited}, ${deepResult.stats.searchElapsed.toFixed(1)}ms\n`
                   writeFileSync(join(args.outdir, filename), content)
                 }
-                if (args.stopOnFirst) break seedLoop
+                if (args.stopOnFirst) {
+                  dumpHowlOnStop(args, truncated, cfg, seed, cp.day)
+                  break seedLoop
+                }
               }
               deepCheckCount++
             } catch { /* ignore */ }
@@ -651,7 +667,10 @@ async function runVerify(args: Args): Promise<void> {
               + `# worlds=${tsumiResult.stats.worldsTotal}, nodes=${tsumiResult.stats.nodesVisited}\n`
             writeFileSync(join(args.outdir, filename), content)
           }
-          if (args.stopOnFirst) break seedLoop
+          if (args.stopOnFirst) {
+            dumpHowlOnStop(args, truncated, cfg, seed, cp.day)
+            break seedLoop
+          }
           prevCp = { truncated, day: cp.day, aliveCount: currentAliveCount, wasTsumi: true }
           continue
         }
@@ -710,7 +729,10 @@ async function runVerify(args: Args): Promise<void> {
               + formatStrategy(tsumiResult.strategy!) + '\n'
             writeFileSync(join(args.outdir, filename), content)
           }
-          if (args.stopOnFirst) break seedLoop
+          if (args.stopOnFirst) {
+            dumpHowlOnStop(args, truncated, cfg, seed, cp.day)
+            break seedLoop
+          }
         }
         prevCp = { truncated, day: cp.day, aliveCount: currentAliveCount, wasTsumi: true }
       }
