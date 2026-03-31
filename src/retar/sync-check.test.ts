@@ -35,6 +35,11 @@ const FILE_ALIASES: Record<string, string> = {
 const TS_ONLY_FILES = new Set(['wasm-helpers'])
 const RS_ONLY_FILES = new Set(['lib', 'types'])
 
+// モジュールプレフィックスファイル: TSではトップレベルexportのためファイル名をプレフィックス/サフィックスに付ける
+// Rustではモジュールスコープ（dump::enable()）で呼ぶためプレフィックス不要
+// 例: TS enableDump / dumpFinalizePre → Rust dump::enable / dump::finalize_pre
+const MODULE_PREFIX_FILES = new Set(['dump'])
+
 // ── 関数名の許可リスト（言語イディオムの違いで一致不要） ──
 
 // ファイル単位の許可リスト: { tsFile: { tsOnly: [...], rsOnly: [...] } }
@@ -50,74 +55,28 @@ const ALLOWED_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: string[] 
     ],
   },
   finalizer: {
-    tsOnly: [
-      'createDebugStash', // TSファクトリ関数、Rustでは構造体の Default/初期化で代替
-    ],
     rsOnly: [
       'constrain_by_death_counts_mut', // Rust所有権モデル用のミュータブル版
     ],
   },
-  possibilities: {
-    tsOnly: [
-      'roleCount',                      // Rust未移植（pop_count でインライン代替）
-      'intersectionOfRolePossibility',  // Rust未移植（ビット演算でインライン化）
-      'differenceOfRolePossibilities',  // Rust未移植（ビット演算でインライン化）
-    ],
-  },
-  roleTesters: {
-    tsOnly: [
-      'cloneContext', // Rustでは save_context/restore_context で代替
-    ],
-    rsOnly: [
-      'test_role', // Rustではディスパッチ関数として pub fn、TSでは roleTesterMap 経由
-    ],
-  },
-  dump: {
-    tsOnly: [
-      'enableDump',       // Rustでは dump::enable()（モジュールスコープで dump プレフィックス不要）
-      'disableDump',      // Rustでは dump::disable()
-      'resetDump',        // Rustでは dump::reset()
-      'dumpFinalizePre',  // Rustでは dump::finalize_pre()
-      'dumpSolveResult',  // Rustでは dump::solve_result()
-      'dumpAnalyze',      // Rustでは dump::analyze_result()
-    ],
-    rsOnly: [
-      'enable',           // TSでは enableDump（トップレベルexportのため dump プレフィックス付き）
-      'disable',          // TSでは disableDump
-      'reset',            // TSでは resetDump
-      'finalize_pre',     // TSでは dumpFinalizePre
-      'solve_result',     // TSでは dumpSolveResult
-      'analyze_result',   // TSでは dumpAnalyze
-    ],
-  },
+  // roleTesters: 全関数が自動マッチ
+  // dump: MODULE_PREFIX_FILES で自動マッチ（プレフィックス/サフィックス除去）
 }
 
 // クラス/structメソッドの許可リスト
 const ALLOWED_METHOD_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: string[] }> = {
   Possibilities: {
     tsOnly: [
-      'clone',  // Rustでは clone_instance（Cloneトレイトとの衝突回避）
       'toObj',  // TSデバッグ用、Rust不要
-    ],
-    rsOnly: [
-      'from_setup',              // Rustファクトリ、TSではコンストラクタで処理
-      'with_seat_count',         // Rustファクトリ、TSではコンストラクタで処理
-      'seat_count',              // Rustゲッター、TSでは直接フィールドアクセス
-      'clone_instance',          // TSでは clone（Cloneトレイト衝突回避のため名前が異なる）
-      'set_role',                // Rust追加メソッド、TSでは set() で代替
     ],
   },
   VillageRetar: {
     tsOnly: [
-      'getStatus',       // Rust未移植（WASM経由で不要）
-      'extractMetadata', // Rust未移植（WASM経由で不要）
-      'testRole',        // Rust未移植
-      'finalize',        // TSでは public wrapper、Rustでは内部呼び出しのみ
-      'analyzeSafe',     // TSエラーハンドリング用、Rustでは Result 型で代替
+      'analyzeSafe',     // TSエントリポイント用エラーラッパー、Rustでは Result 型で代替
     ],
     rsOnly: [
       'new',                    // Rustコンストラクタ慣習、TSでは constructor
-      'initial_possibilities',  // Rustゲッター、TSでは直接フィールドアクセス
+      'initial_possibilities',  // Rustゲッター、TSでは直接プロパティアクセス（代入箇所多数のためgetter化困難）
     ],
   },
 }
@@ -288,12 +247,44 @@ describe('retar TS↔Rust sync check', () => {
         const tsAllowed = new Set(allowed.tsOnly ?? [])
         const rsAllowed = new Set(allowed.rsOnly ?? [])
 
+        const isModulePrefix = MODULE_PREFIX_FILES.has(tsFile)
+        const snakePrefix = isModulePrefix ? `${camelToSnake(tsFile)}_` : ''
+        const snakeSuffix = isModulePrefix ? `_${camelToSnake(tsFile)}` : ''
+
+        // モジュールプレフィックスファイル用: snake_case化後にプレフィックス/サフィックスを除去して再マッチ
+        function matchesRsFn(tsSnake: string, rsFnList: string[]): boolean {
+          if (rsFnList.includes(tsSnake)) return true
+          if (!isModulePrefix) return false
+          // dump_finalize_pre → finalize_pre (prefix除去)
+          if (snakePrefix && tsSnake.startsWith(snakePrefix)) {
+            if (rsFnList.includes(tsSnake.slice(snakePrefix.length))) return true
+          }
+          // enable_dump → enable (suffix除去)
+          if (snakeSuffix && tsSnake.endsWith(snakeSuffix)) {
+            if (rsFnList.includes(tsSnake.slice(0, -snakeSuffix.length))) return true
+          }
+          return false
+        }
+
+        function matchesTsFn(rsSnake: string, tsFnSet: Set<string>): boolean {
+          const camel = snakeToCamel(rsSnake)
+          if (tsFnSet.has(camel)) return true
+          if (!isModulePrefix) return false
+          const prefix = snakeToCamel(camelToSnake(tsFile))
+          // enable → enableDump (suffix付与) or dumpEnable (prefix付与)
+          const withSuffix = camel + prefix.charAt(0).toUpperCase() + prefix.slice(1)
+          if (tsFnSet.has(withSuffix)) return true
+          const withPrefix = prefix + camel.charAt(0).toUpperCase() + camel.slice(1)
+          if (tsFnSet.has(withPrefix)) return true
+          return false
+        }
+
         // TS export → Rust: TS exportにあってRustにない
         const tsOnlyFns: string[] = []
         for (const fn of tsExported) {
           if (tsAllowed.has(fn)) continue
           const expectedRs = camelToSnake(fn)
-          if (!rsFns.includes(expectedRs)) {
+          if (!matchesRsFn(expectedRs, rsFns)) {
             tsOnlyFns.push(`${fn} (expected: ${expectedRs})`)
           }
         }
@@ -303,9 +294,8 @@ describe('retar TS↔Rust sync check', () => {
         const rsOnlyFns: string[] = []
         for (const fn of rsFns) {
           if (rsAllowed.has(fn)) continue
-          const expectedTs = snakeToCamel(fn)
-          if (!tsAll.has(expectedTs)) {
-            rsOnlyFns.push(`${fn} (expected: ${expectedTs})`)
+          if (!matchesTsFn(fn, tsAll)) {
+            rsOnlyFns.push(`${fn} (expected: ${snakeToCamel(fn)})`)
           }
         }
 

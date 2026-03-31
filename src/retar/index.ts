@@ -7,7 +7,7 @@ import { buildRoleTestPlan, LiarRoles } from './planBuilder.ts'
 import type { RoleTest } from './planBuilder.ts'
 import { finalize as runFinalize, constrainByDeathCounts, createDebugStash } from './finalizer.ts'
 import type { DebugStash } from './finalizer.ts'
-import { dumpAnalyze, resetDump } from './dump.ts'
+import { dumpAnalyzeResult, resetDump } from './dump.ts'
 
 
 type SeatPossibility = Set<SystemRole>
@@ -54,13 +54,6 @@ export type AnalyzeOptions = {
 
   // 事前計算済みanalyze結果を基に再計算する場合に指定
   prior?: AnalyzedPossibilities
-}
-
-export type VillageMetadata = {
-  nightKillsByDay: Map<Day, Seat[]>
-  lastDeaths: Seat[]
-  lastHamsterMustDieAt?: number
-  lastHamsterMustDiedBy?: CauseOfDeath
 }
 
 const HumanRoles: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'possessed', 'fanatic', 'immoralist', 'werehamster']
@@ -402,20 +395,11 @@ export class VillageRetar {
     return true
   }
 
-  getStatus(seat: Seat) {
+  private getStatus(seat: Seat) {
     return this.vs.statuses.get(seat)
   }
 
-  extractMetadata(): VillageMetadata {
-    return {
-      nightKillsByDay: this.nightKillsByDay,
-      lastDeaths: this.lastDeaths,
-      lastHamsterMustDieAt: this.lastHamsterMustDieAt,
-      lastHamsterMustDiedBy: this.lastHamsterMustDiedBy,
-    }
-  }
-
-  testRole(scenario: RoleTest) {
+  private testRole(scenario: RoleTest) {
     const { role, selected, rest } = scenario
     if (role === 'allpass') return true
     const tester = roleTesterMap[role]
@@ -450,7 +434,7 @@ export class VillageRetar {
       result: aborted ? new Map() : this.conclusions.toStructured(),
       maxSurvivingNV: this.conclusions.maxSurvivingNV,
     }
-    dumpAnalyze([...this.conclusions.possibilities].map((bits, seat) => ({ seat, bits })).filter(x => x.seat > 0))
+    dumpAnalyzeResult([...this.conclusions.possibilities].map((bits, seat) => ({ seat, bits })).filter(x => x.seat > 0))
     return res
   }
 
@@ -461,7 +445,7 @@ export class VillageRetar {
 
     // パス1: 狼全滅（村勝利相当）→ 最終死者に狼が1以上含まれる
     this.hamsterWinPath = 'village'
-    const poss1 = originalPossibilities.clone()
+    const poss1 = originalPossibilities.cloneInstance()
     let path1Valid = true
     const wolfCandidates = this.lastDeaths.filter(seat => poss1.hasRole(seat, 'werewolf'))
     if (wolfCandidates.length === 1) {
@@ -482,7 +466,7 @@ export class VillageRetar {
 
     // パス2: 飽和（狼勝利相当）→ 最終死者は非狼・非狐
     this.hamsterWinPath = 'wolf'
-    const poss2 = originalPossibilities.clone()
+    const poss2 = originalPossibilities.cloneInstance()
     let path2Valid = true
     for (const seat of this.lastDeaths) {
       if (poss2.isFixed(seat)) continue
@@ -518,7 +502,7 @@ export class VillageRetar {
       hamstersKilledBySeer: [],
       requireOneOf: [],
       deathChronicle: { add: new Int8Array(maxDay), sub: new Int8Array(maxDay) },
-      possibilities: this.initialPossibilities.clone(),
+      possibilities: this.initialPossibilities.cloneInstance(),
       hamstersMaxSurvivingDay: Infinity,
     }
 
@@ -636,7 +620,7 @@ export class VillageRetar {
     }
   }
 
-  finalize() {
+  private finalize() {
     runFinalize(this.context, this.vs, this.setup, this.conclusions, this.debugStash, this.hamsterWinPath, this.cachedSurvivors, this.cachedSurvivingMap)
   }
 

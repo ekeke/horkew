@@ -45,6 +45,18 @@ pub fn pop_count(x: u16) -> u32 {
     x.count_ones()
 }
 
+pub fn role_count(possibility: u16) -> u32 {
+    possibility.count_ones()
+}
+
+pub fn intersection_of_role_possibility(a: u16, b: u16) -> u16 {
+    a & b
+}
+
+pub fn difference_of_role_possibilities(a: u16, b: u16) -> u16 {
+    a & !b
+}
+
 pub fn bit_indices_from_mask(mask: u16) -> Vec<u8> {
     let mut result = Vec::new();
     let mut m = mask;
@@ -144,15 +156,6 @@ impl Possibilities {
         p
     }
 
-    /// Create with a given seat count (all zeros), empty setup
-    pub fn with_seat_count(seat_count: usize) -> Self {
-        Possibilities {
-            possibilities: vec![0u16; seat_count + 1],
-            setup: [0u8; ROLE_COUNT],
-            setup_original: [0u8; ROLE_COUNT],
-            max_surviving_nv: 0,
-        }
-    }
 
     pub fn seat_count(&self) -> usize {
         self.possibilities.len() - 1

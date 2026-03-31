@@ -145,7 +145,7 @@ describe('Possibilities', () => {
     const possibilities = new Possibilities(setup)
 
     assert.ok(possibilities !== undefined)
-    assert.deepStrictEqual(possibilities.clone().possibilities, possibilities.possibilities)
+    assert.deepStrictEqual(possibilities.cloneInstance().possibilities, possibilities.possibilities)
   })
 
   it('should throw an error when setup is Uint16Array without setupObject', () => {

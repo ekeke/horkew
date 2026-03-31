@@ -108,7 +108,7 @@ export function evaluateWolfRisk(
   // --- スナップショット ---
   const basePoss = new Uint16Array(villagePossibilities.possibilities)
   const baseSetup = new Uint8Array(villagePossibilities.setup)
-  const working = villagePossibilities.clone()
+  const working = villagePossibilities.cloneInstance()
 
   // --- Phase 2: 各襲撃候補の評価 ---
   forEachSeat(attackTargets, target => {

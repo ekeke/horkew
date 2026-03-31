@@ -27,16 +27,6 @@ export type RoleTesterEnv = {
   seerFirstSeek?: 'none' | 'no-wolf' | 'all'
 }
 
-export function cloneContext(context: AnalyzeContext): AnalyzeContext {
-  return {
-    hamstersKilledBySeer: context.hamstersKilledBySeer.map(x => ({ ...x })),
-    hamstersMaxSurvivingDay: context.hamstersMaxSurvivingDay,
-    requireOneOf: context.requireOneOf.map(arr => arr.map(x => ({ ...x }))),
-    deathChronicle: { add: new Int8Array(context.deathChronicle.add), sub: new Int8Array(context.deathChronicle.sub) },
-    possibilities: context.possibilities.clone(),
-  }
-}
-
 export type ContextSnapshot = {
   possArr: Uint16Array
   possSetup: Uint8Array
@@ -449,4 +439,10 @@ export const roleTesterMap: Partial<Record<SystemRole, RoleTester>> = {
   bodyguard: testBodyguard,
   mason: testMason,
   nekomata: testNekomata,
+}
+
+export function testRole(env: RoleTesterEnv, context: AnalyzeContext, role: SystemRole, selected: Seat[], rest: Seat[]): boolean {
+  const tester = roleTesterMap[role]
+  if (!tester) return true
+  return tester(env, context, selected, rest)
 }

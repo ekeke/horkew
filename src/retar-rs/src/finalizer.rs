@@ -26,6 +26,10 @@ pub struct DebugStash {
     pub pre_finalize_passes: u32,
 }
 
+pub fn create_debug_stash() -> DebugStash {
+    DebugStash::default()
+}
+
 /// Hamster win path for 2-pass analysis
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HamsterWinPath {

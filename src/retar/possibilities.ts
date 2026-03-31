@@ -221,13 +221,21 @@ export class Possibilities {
     }
   }
 
+  static fromSetup(setup: Map<SystemRole, number>): Possibilities {
+    return new Possibilities(setup)
+  }
+
+  seatCount(): number {
+    return this.possibilities.length - 1
+  }
+
   static empty(setup: Map<SystemRole, number>): Possibilities {
     const p = new Possibilities(setup)
     p.possibilities.fill(0)
     return p
   }
 
-  clone(): Possibilities {
+  cloneInstance(): Possibilities {
     return new Possibilities(new Uint16Array(this.possibilities), this.setup, this.setupOriginal)
   }
 
@@ -290,6 +298,10 @@ export class Possibilities {
       return
     }
     this.possibilities[seat] = RoleSignatureBits[possibility]
+  }
+
+  setRole(seat: number, role: SystemRole): void {
+    this.possibilities[seat] = RoleSignatureBits[role]
   }
 
   isFixed(seat: number): boolean {

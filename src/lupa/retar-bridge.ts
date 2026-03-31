@@ -243,7 +243,7 @@ function validateAssumptions(
   assumptions: Map<number, SystemRole>,
   refixed: Possibilities,
 ): Map<number, SystemRole> {
-  const p = refixed.clone()
+  const p = refixed.cloneInstance()
   const valid = new Map<number, SystemRole>()
   for (const [seat, role] of assumptions) {
     if (!p.hasRole(seat, role)) continue

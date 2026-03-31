@@ -47,7 +47,7 @@ export function dumpSolveResult(result: Possibilities | undefined): void {
   emit('solve_possibilities', result ? possObj(result) : { result: 'none' as unknown as number })
 }
 
-export function dumpAnalyze(result: Record<string, number>[]): void {
+export function dumpAnalyzeResult(result: Record<string, number>[]): void {
   // result は [{seat: n, bits: n}, ...] のソート済み配列
   const obj: Record<string, number> = {}
   for (const { seat, bits } of result) {
