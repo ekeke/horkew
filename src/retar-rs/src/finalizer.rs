@@ -38,7 +38,7 @@ pub enum HamsterWinPath {
 }
 
 /// Validate night death counts against role hypotheses.
-pub fn constrain_by_death_counts(
+pub fn check_death_counts(
     context: &AnalyzeContext,
     vs: &VillageStatus,
     night_kills_by_day: &HashMap<Day, Vec<Seat>>,
@@ -96,7 +96,7 @@ pub fn constrain_by_death_counts(
 }
 
 /// Mutable version that can add requireOneOf constraints
-pub fn constrain_by_death_counts_mut(
+pub fn update_death_count_constraints(
     context: &mut AnalyzeContext,
     vs: &VillageStatus,
     night_kills_by_day: &HashMap<Day, Vec<Seat>>,

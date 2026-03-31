@@ -10,7 +10,7 @@ import { dumpFinalizePre } from './dump.ts'
  * 副作用: context.requireOneOf に背徳後追い制約を追加する場合がある
  */
 // 読み取り専用版: 夜死者数の矛盾チェックのみ。context を変更しない。
-export function constrainByDeathCounts(
+export function checkDeathCounts(
   context: AnalyzeContext,
   vs: VillageStatus,
   nightKillsByDay: Map<Day, Seat[]>,
@@ -55,7 +55,7 @@ export function constrainByDeathCounts(
 }
 
 // 変更あり版: 夜死者数の矛盾チェック + requireOneOf 制約の追加
-export function constrainByDeathCountsMut(
+export function updateDeathCountConstraints(
   context: AnalyzeContext,
   vs: VillageStatus,
   nightKillsByDay: Map<Day, Seat[]>,

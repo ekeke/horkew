@@ -7,7 +7,7 @@ use crate::role_testers::{
 };
 use crate::plan_builder::{build_role_test_plan, RoleTest, RoleTestRole};
 use crate::finalizer::{
-    DebugStash, HamsterWinPath, constrain_by_death_counts_mut, finalize,
+    DebugStash, HamsterWinPath, update_death_count_constraints, finalize,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -370,7 +370,7 @@ impl VillageRetar {
 
         // Death count validation
         let ctx = self.context.as_mut().unwrap();
-        if !constrain_by_death_counts_mut(ctx, &self.vs, &self.night_kills_by_day, &self.setup) {
+        if !update_death_count_constraints(ctx, &self.vs, &self.night_kills_by_day, &self.setup) {
             return;
         }
 
