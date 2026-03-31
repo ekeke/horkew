@@ -355,7 +355,7 @@ export function parseMasonStatement(text: string, line: number): MasonStatement 
 const historyRegexText = [
   `(?:(?<day>${V.dayNumber})${V.dayUnit})?`,
   `(?:${V.optionalSpace})?`,
-  `(?<target>${V.possibleName})?`,
+  `(?<target>(?!(?:${V.race}|${V.guard})(?:[${V.whiteSpaceClass}${V.delimiterClass}]|$))${V.possibleName})?`,
   `(?:${V.optionalSpace})?`,
   `(?<action>${V.race}|${V.guard})`,
 ].join('')
