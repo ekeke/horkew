@@ -52,22 +52,6 @@ export function* selectCombinationsFromArray<T>(arr: T[], min: number, max: numb
   }
 }
 
-// 与えられた配列から一つの要素を返すジェネレータ
-// 戻り値は [選択された要素、選択済みの要素の配列、未選択の要素の配列]のタプル
-// 動的に組み合わせを生成するのに使う
-// 元の並び順序は維持されないので注意
-export function* selectOne<T>(arr: T[], additionalLeft: T[] = []): Generator<[T, T[], T[]], void, undefined> {
-  if ( arr.length === 0 ) return
-  const left: T[] = additionalLeft
-  const right: T[] = [...arr]
-  while (right.length) {
-    const item: T = right.pop()!
-    yield [item, left, right]
-    left.push(item)
-  }
-  return
-}
-
 export function* generateCombinations<T>(arrays: T[][]): Generator<T[], void, undefined> {
   // 再帰的なヘルパー関数を定義
   function* combine(index: number, current: T[]): Generator<T[], void, undefined> {
@@ -85,28 +69,3 @@ export function* generateCombinations<T>(arrays: T[][]): Generator<T[], void, un
   yield* combine(0, []);
 }
 
-/**
- * バックトラックを使った組み合わせ生成器
- * @param matrix 要素の配列の配列
- */
-export function* backtrackForMatrix<T, U>(matrix: T[][], context: U): Generator<{item: T, context: U, depth: number, index: number, last: boolean }, void, [boolean, U]> {
-  let stack: { index: number, subIndex: number, context: U }[] = [{ index: 0, subIndex: 0, context: context }]
-  if (matrix.length === 0) return
-  while (stack.length > 0) {
-    const top = stack[stack.length - 1]
-    if (top.subIndex >= matrix[top.index].length) {
-      stack.pop() // No more tests in this group, backtrack
-      continue
-    }
-    const test = matrix[top.index][top.subIndex]
-    const payload = {item: test, depth: top.index, index: top.subIndex, context: top.context, finished: false, last: top.index === matrix.length - 1}
-    top.subIndex++ // Prepare next test in the current group
-    const [result, newContext] = yield payload
-    if (result) {
-      if (top.index + 1 < matrix.length) {
-        // Move to the next group
-        stack.push({ index: top.index + 1, subIndex: 0, context: newContext })
-      }
-    }
-  }
-}

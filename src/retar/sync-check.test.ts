@@ -46,10 +46,6 @@ const MODULE_PREFIX_FILES = new Set(['dump'])
 // ここに入れた関数は比較対象外になる。理由をコメントで明記すること。
 const ALLOWED_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: string[] }> = {
   combinatorics: {
-    tsOnly: [
-      'selectOne',          // TSジェネレータ、Rustではコールバックパターンで不要
-      'backtrackForMatrix', // TSジェネレータ、Rustでは未使用
-    ],
     rsOnly: [
       'generate_combinations_collect', // Rustのcollect版、TSではジェネレータで代替
     ],
