@@ -789,6 +789,7 @@ export class TfTransformerNetwork {
       // Strategy head: plan token PPO loss + predict BCE (combined step)
       const strategyIndices = headGroups.get('strategy')
       if (strategyIndices && strategyIndices.length > 0 && !batch.freezePlan) {
+        // 通常モード: plan PPO loss + predict BCE 両方計算
         const tc = this.config.transformer!
         const numFwd = tc.numForwardTokens ?? 8
         const numEg = tc.numEndgameTokens ?? 4
@@ -858,8 +859,16 @@ export class TfTransformerNetwork {
         totalEntropy = tf.add(totalEntropy, egResult.entropy)
 
         headGroups.delete('strategy')  // 通常ヘッドループでは処理しない
+      } else if (strategyIndices && strategyIndices.length > 0) {
+        // freezePlan: plan PPO はスキップするが、predict sigmoid PPO は残す
+        // strategy indices を predict head として通常ループに回す
+        if (sigmoidHeadNames.has('predict')) {
+          const existing = headGroups.get('predict') ?? []
+          headGroups.set('predict', [...existing, ...strategyIndices])
+        }
+        headGroups.delete('strategy')
       } else {
-        headGroups.delete('strategy')  // freezePlan でも通常ヘッドループでは処理しない
+        headGroups.delete('strategy')
       }
 
       for (const [headName, indices] of headGroups) {
