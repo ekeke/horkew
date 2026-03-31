@@ -239,15 +239,7 @@ export class Possibilities {
     return new Possibilities(new Uint16Array(this.possibilities), this.setup, this.setupOriginal)
   }
 
-  /** @internal debug用 */
-  toObj() {
-    const obj: { [seat: Seat]: SystemRole[] } = {}
-    for (let i = 1; i < this.possibilities.length; i++) {
-      obj[i] = Array.from(setOfRolesFromPossibility(this.possibilities[i]))
-    }
-    const setup = new Uint8Array(this.setup)
-    return { obj, setup }
-  }
+
 
   toStructured(): Map<Seat, Set<SystemRole>> {
     const result = new Map<Seat, Set<SystemRole>>()

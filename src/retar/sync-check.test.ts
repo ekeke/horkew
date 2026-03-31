@@ -53,11 +53,7 @@ const ALLOWED_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: string[] 
 
 // クラス/structメソッドの許可リスト
 const ALLOWED_METHOD_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: string[] }> = {
-  Possibilities: {
-    tsOnly: [
-      'toObj',  // TSデバッグ用、Rust不要
-    ],
-  },
+  // Possibilities: 全メソッドが自動マッチ
   VillageRetar: {
     tsOnly: [
       'analyzeSafe',     // TSエントリポイント用エラーラッパー、Rustでは Result 型で代替
