@@ -458,12 +458,12 @@ function findCheckpoint(dir: string): { iteration: number, path: string } | null
     const raw = JSON.parse(readFileSync(`${dir}/final.json`, 'utf-8'))
     return { iteration: raw.metadata?.iteration ?? 0, path: `${dir}/final.json` }
   }
-  let maxIter = 0
+  let maxIter = -1
   for (const f of files) {
     const m = f.match(/^checkpoint_(\d+)\.json$/)
     if (m) { const n = parseInt(m[1]); if (n > maxIter) maxIter = n }
   }
-  if (maxIter === 0) return null
+  if (maxIter < 0) return null
   return { iteration: maxIter, path: `${dir}/checkpoint_${maxIter}.json` }
 }
 
@@ -605,6 +605,15 @@ async function main(): Promise<void> {
     log('Starting from scratch')
   }
 
+  // resume 時も PPO lr を適用（pretrain 後の低 lr）
+  if (anyResumed && config.transformer) {
+    const ppoLr = config.learningRate * 0.2
+    ;(tfNetwork as any).setLearningRate(ppoLr)
+    ;(wolfTeamTf as any).setLearningRate?.(ppoLr)
+    ;(masonTeamTf as any).setLearningRate?.(ppoLr)
+    log(`  PPO learning rate: ${ppoLr.toExponential(1)}`)
+  }
+
   // === Pretrain: plan tokens の事前学習 (新規学習時のみ、Transformer限定) ===
   if (!anyResumed && config.transformer) {
     log(`${BOLD}=== Pretrain B: Plan Token Supervised Learning ===${RESET}`)
@@ -696,6 +705,11 @@ async function main(): Promise<void> {
     }
     const tDTotal = performance.now() - tD0
     log(`  Method D complete: ${pretrainGames} games, ${pretrainDEpochs} epochs, ${(tDTotal / 1000).toFixed(1)}s total`)
+
+    // Pretrain 済み checkpoint を保存 (--resume で復帰可能)
+    const villageDir = `${config.checkpointBase}/ckpt-village`
+    saveCheckpoint(networks.get('village' as ModelName)!, `${villageDir}/checkpoint_0.json`, { iteration: 0, winRate: 0 })
+    log(`  Pretrain checkpoint saved → ${villageDir}/checkpoint_0.json`)
 
     // PPO 用に学習率を下げる（pretrain の知識を保持するため）
     const ppoLr = config.learningRate * 0.2  // 3e-4 → 6e-5
