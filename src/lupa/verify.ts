@@ -485,6 +485,89 @@ function formatCompatDiff(
 }
 
 /**
+ * Tightness検証: 可能性集合の各役職が実際に有効な配役を持つか
+ * 各席Sの各役職Rについて S=R を仮定して analyzeSafe → 矛盾なら偽陽性
+ */
+function verifyTightnessCheckpoint(
+  events: GameEvent[],
+  state: GameState,
+  config: LupaConfig,
+  checkpoint: Checkpoint,
+  configName: string,
+  seed: number,
+): VerifyResult {
+  const partialEvents = events.slice(0, checkpoint.index)
+  const partialHowl = formatHowl(partialEvents, state, config)
+
+  const { meta, statements } = parse(partialHowl)
+  const unknowns = statements.filter(s => s.type === 'unknown')
+  if (unknowns.length > 0) {
+    return { failure: null, skipped: true, retarMs: 0 }
+  }
+
+  const { vs, setup } = buildVillageStatus(statements, meta)
+
+  // Retarの前提条件チェック
+  for (const player of state.players) {
+    if (!VILLAGE_ROLES.includes(player.role)) continue
+    const seatStatus = vs.statuses.get(player.seat)
+    if (!seatStatus) continue
+    if (!seatStatus.surviving && seatStatus.causeOfDeath === 'execution' && !seatStatus.claiming) {
+      return { failure: null, skipped: true, retarMs: 0 }
+    }
+  }
+
+  const options = config.hasFirstGhost
+    ? { ...lupaOptions, hasFirstGhost: true }
+    : lupaOptions
+
+  // ベースRetarを実行して可能性集合を取得
+  const baseRetar = new VillageRetar(vs, setup, options)
+  const baseResult = baseRetar.analyze()
+  if (baseResult.error) {
+    return { failure: null, skipped: true, retarMs: 0 }
+  }
+
+  const t0 = performance.now()
+  const falsePositives: { name: string, message: string }[] = []
+
+  for (const player of state.players) {
+    const possibilities = baseResult.result.get(player.seat)
+    if (!possibilities) continue
+
+    for (const role of possibilities) {
+      const assumptions = new Map<number, SystemRole>([[player.seat, role]])
+      const testRetar = new VillageRetar(vs, setup, { ...options, assumptions })
+      const result = testRetar.analyzeSafe()
+
+      if (result.error) {
+        falsePositives.push({
+          name: player.name,
+          message: `${player.name}=${role} を仮定すると矛盾: ${result.error}`,
+        })
+      }
+    }
+  }
+
+  const retarMs = performance.now() - t0
+
+  if (falsePositives.length === 0) {
+    return { failure: null, skipped: false, retarMs }
+  }
+
+  const annotatedHowl = partialHowl.trimEnd() + '\n\n'
+    + falsePositives.map(p => `# [tightness] ${p.message}`).join('\n') + '\n'
+
+  return {
+    failure: {
+      config: configName, seed, checkpoint, howl: annotatedHowl,
+      players: falsePositives,
+    },
+    skipped: false, retarMs,
+  }
+}
+
+/**
  * Prior等価性検証: buildAssumptions を使い prior+assumptions と assumptions のみの結果が完全一致するか
  */
 function verifyPriorEquivCheckpoint(
@@ -638,6 +721,7 @@ type Args = {
   quiet: boolean
   prior: boolean
   priorEquiv: boolean
+  tightness: boolean
   compat: boolean
 }
 
@@ -654,6 +738,7 @@ Options:
   --outdir <dir>      失敗howlファイルの出力先ディレクトリ
   --prior             priorモード検証: 各座席の真の役職でprior再計算し他席と矛盾しないか
   --prior-equiv       prior等価性検証: buildAssumptionsでprior有無の結果が完全一致するか
+  --tightness         厳密性検証: 可能性集合の各役職を仮定して矛盾しないか（偽陽性検出）
   --compat            JS版とWASM版の出力が完全一致するか検証（他モードと併用可）
   --quiet, -q         プログレスバーを非表示
   --help, -h          このヘルプを表示
@@ -672,7 +757,7 @@ Examples:
 function parseArgs(): Args {
   const args = process.argv.slice(2)
   if (args.includes('--help') || args.includes('-h')) showHelp()
-  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false, prior: false, priorEquiv: false, compat: false }
+  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false, prior: false, priorEquiv: false, tightness: false, compat: false }
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -695,6 +780,9 @@ function parseArgs(): Args {
         break
       case '--prior-equiv':
         result.priorEquiv = true
+        break
+      case '--tightness':
+        result.tightness = true
         break
       case '--compat':
         result.compat = true
@@ -727,7 +815,7 @@ function renderProgress(
 }
 
 async function main() {
-  const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet, prior, priorEquiv, compat } = parseArgs()
+  const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet, prior, priorEquiv, tightness, compat } = parseArgs()
   if (compat && !wasmAnalyze) {
     console.error('--compat: WASM版が利用できません。npm run build:wasm:node でビルドしてください。')
     process.exit(1)
@@ -808,6 +896,17 @@ async function main() {
           : verifyCheckpoint
         let { failure, skipped, retarMs } = verifyFn(events, state, lupaConfig, cp, gc.name, seed)
 
+        // tightness: モード検証が成功かつskipでない場合、追加で厳密性を検証
+        if (tightness && !failure && !skipped) {
+          const tightnessResult = verifyTightnessCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
+          if (tightnessResult.failure) {
+            failure = tightnessResult.failure
+          }
+          if (tightnessResult.skipped) {
+            skipped = tightnessResult.skipped
+          }
+          retarMs += tightnessResult.retarMs
+        }
         // compat: モード検証が成功かつskipでない場合、追加でTS↔Rust一致を検証
         if (compat && !failure && !skipped) {
           const compatResult = verifyCompatCheckpoint(events, state, lupaConfig, cp, gc.name, seed)
