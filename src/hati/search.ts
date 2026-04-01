@@ -1,9 +1,9 @@
 import type { Seat, EnumSpecies } from '../types/index.ts'
 import type {
   World, SimState, StrategyNode,
-  ObservationKey, SearchOptions,
+  ObservationKey, SearchOptions, PnDn,
 } from './types.ts'
-import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
+import { hasSeat, removeSeat, forEachSeat, popCount32, PN_INF } from './types.ts'
 import {
   checkOutcome, allWorldsVillageWin, anyWorldVillageLoss,
   applyExecution, simulateNight, validBiteTargetsMask,
@@ -44,29 +44,459 @@ type SearchState = {
   memo: Map<string, StrategyNode | null>
 }
 
+// --- DFPN (Depth-First Proof Number Search) ---
+
+type DfpnState = {
+  nodesVisited: number
+  maxDepthReached: number
+  options: SearchOptions
+  tt: Map<string, PnDn>
+  /** 各OR節点で証明された最善手（戦略構築の高速化用） */
+  bestMove: Map<string, Seat>
+}
+
+const PROVEN: PnDn = { pn: 0, dn: PN_INF }
+const DISPROVEN: PnDn = { pn: PN_INF, dn: 0 }
+
+function clampAdd(a: number, b: number): number {
+  return a + b >= PN_INF ? PN_INF : a + b
+}
+
 /**
  * AND-OR探索の本体。
+ * - buildStrategy=true（デフォルト）: DFSで戦略木を構築
+ * - buildStrategy=false: DFPNで高速に詰み判定のみ（噛み等価クラス最適化あり）
  */
 export function searchTsumi(
   worlds: World[],
   state: SimState,
   options: SearchOptions,
 ): { result: StrategyNode | null, nodesVisited: number, maxDepthReached: number } {
-  const searchState: SearchState = {
-    nodesVisited: 0,
-    maxDepthReached: 0,
-    options,
-    build: options.buildStrategy !== false,
-    memo: new Map(),
+  if (options.buildStrategy === false) {
+    // DFPN proof-only mode
+    const ds: DfpnState = {
+      nodesVisited: 0, maxDepthReached: 0, options,
+      tt: new Map(), bestMove: new Map(),
+    }
+    const proof = mid(worlds, state, 0, PN_INF, PN_INF, ds)
+    return {
+      result: proof.pn === 0 ? WIN : null,
+      nodesVisited: ds.nodesVisited,
+      maxDepthReached: ds.maxDepthReached,
+    }
   }
 
-  const result = isTsumi(worlds, state, 0, searchState)
+  // DFS strategy construction mode
+  const ss: SearchState = {
+    nodesVisited: 0, maxDepthReached: 0, options,
+    build: true, memo: new Map(),
+  }
+  const result = isTsumi(worlds, state, 0, ss)
   return {
     result,
-    nodesVisited: searchState.nodesVisited,
-    maxDepthReached: searchState.maxDepthReached,
+    nodesVisited: ss.nodesVisited,
+    maxDepthReached: ss.maxDepthReached,
   }
 }
+
+// ---------------------------------------------------------------------------
+// DFPN 探索関数
+// ---------------------------------------------------------------------------
+
+/**
+ * DFPN OR節点: 処刑候補から最善手を選択。
+ * MID (Multiple Iterative Deepening) ループで証明数が最小の候補を優先展開。
+ */
+function mid(
+  worlds: World[],
+  state: SimState,
+  depth: number,
+  pnThr: number,
+  dnThr: number,
+  ss: DfpnState,
+): PnDn {
+  ss.nodesVisited++
+  if (depth > ss.maxDepthReached) ss.maxDepthReached = depth
+
+  worlds = deduplicateWorlds(worlds, state.alive)
+
+  // 終端チェック
+  if (worlds.length === 0) return PROVEN
+  if (allWorldsVillageWin(worlds, state.alive)) return PROVEN
+  if (anyWorldVillageLoss(worlds, state.alive)) return DISPROVEN
+  if (depth >= ss.options.maxDepth) return DISPROVEN
+
+  // エンドゲームテーブル参照
+  const aliveCount = popCount32(state.alive)
+  let canonKey: string | undefined
+  if (aliveCount <= ENDGAME_THRESHOLD) {
+    canonKey = canonicalKey(worlds, state.alive)
+    const cached = endgameTable.get(canonKey)
+    if (cached !== undefined) {
+      endgameHits++
+      return cached ? PROVEN : DISPROVEN
+    }
+  }
+
+  // TT参照
+  const key = memoKey(worlds, state.alive)
+  const ttEntry = ss.tt.get(key)
+  if (ttEntry) {
+    if (ttEntry.pn === 0 || ttEntry.dn === 0) return ttEntry
+    if (ttEntry.pn >= pnThr || ttEntry.dn >= dnThr) return ttEntry
+  }
+
+  // 事前チェック
+  const precheck = precheckWorlds(worlds, state.alive, ss.options.disableHamsterPruning)
+  if (precheck >= 0) {
+    ss.tt.set(key, PROVEN)
+    if (canonKey !== undefined) endgameTable.set(canonKey, true)
+    return PROVEN
+  }
+  if (precheck === PRECHECK_PRUNED) {
+    ss.tt.set(key, DISPROVEN)
+    if (canonKey !== undefined) endgameTable.set(canonKey, false)
+    return DISPROVEN
+  }
+
+  // OR: 処刑候補
+  const candidates = getExecutionCandidates(worlds, state.alive)
+  if (candidates.length === 0) {
+    ss.tt.set(key, DISPROVEN)
+    if (canonKey !== undefined) endgameTable.set(canonKey, false)
+    return DISPROVEN
+  }
+
+  // 狼カウントで初期ソート（証明しやすい候補を先に）
+  const wolfCounts = new Uint16Array(32)
+  for (const w of worlds) {
+    let mask = w.wolfMask & state.alive
+    while (mask !== 0) {
+      const bit = mask & (-mask)
+      wolfCounts[31 - Math.clz32(bit)]++
+      mask ^= bit
+    }
+  }
+  candidates.sort((a, b) => wolfCounts[b] - wolfCounts[a])
+
+  const childPnDn: PnDn[] = new Array(candidates.length)
+  for (let i = 0; i < candidates.length; i++) childPnDn[i] = { pn: 1, dn: 1 }
+
+  // MID ループ
+  while (true) {
+    // OR集約: pn=min, dn=sum
+    let bestIdx = 0
+    let bestPn = childPnDn[0].pn
+    let secondPn = PN_INF
+    let nodeDn = 0
+
+    for (let i = 0; i < candidates.length; i++) {
+      const cpn = childPnDn[i].pn
+      if (cpn < bestPn) {
+        secondPn = bestPn
+        bestPn = cpn
+        bestIdx = i
+      } else if (cpn < secondPn) {
+        secondPn = cpn
+      }
+      nodeDn = clampAdd(nodeDn, childPnDn[i].dn)
+    }
+
+    // 閾値チェック
+    if (bestPn >= pnThr || nodeDn >= dnThr) {
+      const result: PnDn = { pn: bestPn, dn: nodeDn }
+      ss.tt.set(key, result)
+      if (bestPn === 0) {
+        ss.bestMove.set(key, candidates[bestIdx])
+        if (canonKey !== undefined) endgameTable.set(canonKey, true)
+      }
+      if (nodeDn === 0 && canonKey !== undefined) endgameTable.set(canonKey, false)
+      return result
+    }
+
+    // 最善候補を展開
+    const cPnThr = Math.min(pnThr, clampAdd(secondPn, 1))
+    const cDnThr = clampAdd(dnThr - nodeDn, childPnDn[bestIdx].dn)
+
+    childPnDn[bestIdx] = dfpnExecution(
+      worlds, state, candidates[bestIdx], depth,
+      cPnThr, cDnThr, ss,
+    )
+  }
+}
+
+/**
+ * DFPN AND節点: 処刑後の観測分岐。
+ * 全観測分岐で詰みを証明する必要がある。
+ */
+function dfpnExecution(
+  worlds: World[],
+  state: SimState,
+  target: Seat,
+  depth: number,
+  pnThr: number,
+  dnThr: number,
+  ss: DfpnState,
+): PnDn {
+  const afterExecAlive = applyExecution(state.alive, target)
+  const obsGroups = partitionWorldsByExecution(worlds, afterExecAlive, target)
+
+  // 終端判定 & 非終端子ノード収集
+  const children: { worlds: World[], alive: number }[] = []
+  for (const [, group] of obsGroups) {
+    if (allWorldsVillageWin(group.worlds, group.alive)) continue
+    if (anyWorldVillageLoss(group.worlds, group.alive)) return DISPROVEN
+    children.push(group)
+  }
+  if (children.length === 0) return PROVEN
+
+  const childPnDn: PnDn[] = new Array(children.length)
+  for (let i = 0; i < children.length; i++) childPnDn[i] = { pn: 1, dn: 1 }
+
+  // AND MIDループ: pn=sum, dn=min
+  while (true) {
+    let bestIdx = 0
+    let bestDn = childPnDn[0].dn
+    let secondDn = PN_INF
+    let nodePn = 0
+
+    for (let i = 0; i < children.length; i++) {
+      const cdn = childPnDn[i].dn
+      if (cdn < bestDn) {
+        secondDn = bestDn
+        bestDn = cdn
+        bestIdx = i
+      } else if (cdn < secondDn) {
+        secondDn = cdn
+      }
+      nodePn = clampAdd(nodePn, childPnDn[i].pn)
+    }
+
+    if (nodePn >= pnThr || bestDn >= dnThr) return { pn: nodePn, dn: bestDn }
+
+    const cDnThr = Math.min(dnThr, clampAdd(secondDn, 1))
+    const cPnThr = clampAdd(pnThr - nodePn, childPnDn[bestIdx].pn)
+    const c = children[bestIdx]
+
+    childPnDn[bestIdx] = dfpnNight(
+      c.worlds, c.alive, state.day, depth,
+      cPnThr, cDnThr, ss,
+    )
+  }
+}
+
+/**
+ * DFPN OR節点: 夜行動（護衛先×占い先）の選択。
+ */
+function dfpnNight(
+  worlds: World[],
+  alive: number,
+  day: number,
+  depth: number,
+  pnThr: number,
+  dnThr: number,
+  ss: DfpnState,
+): PnDn {
+  const bgCandidates = getBodyguardCandidates(worlds, alive)
+  const seerCandidates = getSeerCandidates(worlds, alive)
+  let maxSeerCount = 0
+  for (const w of worlds) {
+    const c = popCount32(w.seerMask & alive)
+    if (c > maxSeerCount) maxSeerCount = c
+  }
+
+  // 全夜行動を列挙
+  const actions: { bg: Seat | null, seerTargets: Seat[] }[] = []
+  for (const bg of bgCandidates) {
+    const combos = enumerateSeerTargetCombos(seerCandidates, maxSeerCount)
+    for (const st of combos) actions.push({ bg, seerTargets: st })
+  }
+  if (actions.length === 0) return DISPROVEN
+
+  const childPnDn: PnDn[] = new Array(actions.length)
+  for (let i = 0; i < actions.length; i++) childPnDn[i] = { pn: 1, dn: 1 }
+
+  // OR MIDループ
+  while (true) {
+    let bestIdx = 0
+    let bestPn = childPnDn[0].pn
+    let secondPn = PN_INF
+    let nodeDn = 0
+
+    for (let i = 0; i < actions.length; i++) {
+      const cpn = childPnDn[i].pn
+      if (cpn < bestPn) {
+        secondPn = bestPn
+        bestPn = cpn
+        bestIdx = i
+      } else if (cpn < secondPn) {
+        secondPn = cpn
+      }
+      nodeDn = clampAdd(nodeDn, childPnDn[i].dn)
+    }
+
+    if (bestPn >= pnThr || nodeDn >= dnThr) return { pn: bestPn, dn: nodeDn }
+
+    const cPnThr = Math.min(pnThr, clampAdd(secondPn, 1))
+    const cDnThr = clampAdd(dnThr - nodeDn, childPnDn[bestIdx].dn)
+    const a = actions[bestIdx]
+
+    childPnDn[bestIdx] = dfpnNightAction(
+      worlds, alive, day, a.bg, a.seerTargets, depth,
+      cPnThr, cDnThr, ss,
+    )
+  }
+}
+
+/**
+ * DFPN AND節点: 夜の観測分岐（狼の噛み先選択）。
+ * 噛み先等価クラスで分岐を削減。
+ */
+function dfpnNightAction(
+  worlds: World[],
+  alive: number,
+  day: number,
+  bodyguardTarget: Seat | null,
+  seerTargets: Seat[],
+  depth: number,
+  pnThr: number,
+  dnThr: number,
+  ss: DfpnState,
+): PnDn {
+  // 噛み先等価クラス
+  const biteRepMask = computeBiteRepMask(worlds, alive)
+
+  // 観測グループ構築
+  const possibleByObs = new Map<number, { worlds: World[], alive: number }>()
+
+  for (const world of worlds) {
+    const biteMask = validBiteTargetsMask(world, alive) & biteRepMask
+    if (biteMask === 0) {
+      const group = possibleByObs.get(0)
+      if (group) group.worlds.push(world)
+      else possibleByObs.set(0, { worlds: [world], alive })
+      continue
+    }
+
+    let remainBite = biteMask
+    while (remainBite !== 0) {
+      const biteBit = remainBite & (-remainBite)
+      const biteTarget = 31 - Math.clz32(biteBit)
+      remainBite ^= biteBit
+
+      const { nextAlive: baseAlive, obsKey: baseKey } = simulateNight(
+        world, alive, biteTarget, bodyguardTarget, seerTargets,
+      )
+
+      const isNekoBite = world.roleIds[biteTarget] === NEKOMATA_ROLE_ID
+        && hasSeat(alive, biteTarget)
+        && (bodyguardTarget !== biteTarget || !hasSeat(alive, world.bodyguardSeat))
+      const curseWolfMask = isNekoBite ? (world.wolfMask & baseAlive) : 0
+
+      if (curseWolfMask === 0) {
+        const outcome = checkOutcome(world, baseAlive)
+        if (outcome === 'wolf_win' || outcome === 'hamster_win') return DISPROVEN
+        const group = possibleByObs.get(baseKey)
+        if (group) { if (!group.worlds.includes(world)) group.worlds.push(world) }
+        else possibleByObs.set(baseKey, { worlds: [world], alive: baseAlive })
+      } else {
+        const seerShift = popCount32(world.seerMask) * 2
+        let wolfBits = curseWolfMask
+        while (wolfBits !== 0) {
+          const wolfBit = wolfBits & (-wolfBits)
+          wolfBits ^= wolfBit
+          const curseWolf = 31 - Math.clz32(wolfBit)
+          const nextAlive = removeSeat(baseAlive, curseWolf)
+          const numKey = baseKey | ((1 << curseWolf) << seerShift)
+          const outcome = checkOutcome(world, nextAlive)
+          if (outcome === 'wolf_win' || outcome === 'hamster_win') return DISPROVEN
+          const group = possibleByObs.get(numKey)
+          if (group) { if (!group.worlds.includes(world)) group.worlds.push(world) }
+          else possibleByObs.set(numKey, { worlds: [world], alive: nextAlive })
+        }
+      }
+    }
+  }
+
+  // 終端判定 & 非終端子ノード収集
+  const children: { worlds: World[], alive: number }[] = []
+  for (const [, group] of possibleByObs) {
+    if (allWorldsVillageWin(group.worlds, group.alive)) continue
+    if (anyWorldVillageLoss(group.worlds, group.alive)) return DISPROVEN
+    children.push(group)
+  }
+  if (children.length === 0) return PROVEN
+
+  const childPnDn: PnDn[] = new Array(children.length)
+  for (let i = 0; i < children.length; i++) childPnDn[i] = { pn: 1, dn: 1 }
+
+  // AND MIDループ
+  while (true) {
+    let bestIdx = 0
+    let bestDn = childPnDn[0].dn
+    let secondDn = PN_INF
+    let nodePn = 0
+
+    for (let i = 0; i < children.length; i++) {
+      const cdn = childPnDn[i].dn
+      if (cdn < bestDn) {
+        secondDn = bestDn
+        bestDn = cdn
+        bestIdx = i
+      } else if (cdn < secondDn) {
+        secondDn = cdn
+      }
+      nodePn = clampAdd(nodePn, childPnDn[i].pn)
+    }
+
+    if (nodePn >= pnThr || bestDn >= dnThr) return { pn: nodePn, dn: bestDn }
+
+    const cDnThr = Math.min(dnThr, clampAdd(secondDn, 1))
+    const cPnThr = clampAdd(pnThr - nodePn, childPnDn[bestIdx].pn)
+    const c = children[bestIdx]
+    const nextState: SimState = { alive: c.alive, day: day + 1 }
+
+    childPnDn[bestIdx] = mid(
+      c.worlds, nextState, depth + 1,
+      cPnThr, cDnThr, ss,
+    )
+  }
+}
+
+/**
+ * 噛み先等価クラスの代表席マスクを計算。
+ * 全ワールドで同じroleIdの席は同型の部分木を生むため、代表1つだけ残す。
+ */
+function computeBiteRepMask(worlds: World[], alive: number): number {
+  let biteRepMask = 0
+  const seen = new Set<number>()
+  let mask = alive
+  while (mask !== 0) {
+    const bit = mask & (-mask)
+    const seat = 31 - Math.clz32(bit)
+    mask ^= bit
+    let alwaysWolf = true
+    for (let wi = 0; wi < worlds.length; wi++) {
+      if (!hasSeat(worlds[wi].wolfMask, seat)) { alwaysWolf = false; break }
+    }
+    if (alwaysWolf) { biteRepMask |= bit; continue }
+    let h = 0x811c9dc5
+    for (let wi = 0; wi < worlds.length; wi++) {
+      h ^= worlds[wi].roleIds[seat]
+      h = Math.imul(h, 0x01000193)
+    }
+    h = h >>> 0
+    if (!seen.has(h)) {
+      seen.add(h)
+      biteRepMask |= bit
+    }
+  }
+  return biteRepMask
+}
+
+// ---------------------------------------------------------------------------
+// 共有ヘルパー
+// ---------------------------------------------------------------------------
 
 /**
  * 数値ハッシュベースのメモ化キー。
@@ -127,10 +557,8 @@ function isTsumi(
     const cached = endgameTable.get(canonKey)
     if (cached !== undefined) {
       endgameHits++
-      // テーブルは詰み可否のみ保持。
+      // テーブルは詰み可否のみ保持。不成功ならnull、成功ならフォールスルーして戦略構築。
       if (!cached) return null
-      // 詰みの場合: 戦略木不要なら即返却、必要ならフォールスルーして構築
-      if (!ss.build) return WIN
     }
   }
 
@@ -142,7 +570,6 @@ function isTsumi(
   const precheck = precheckWorlds(worlds, state.alive, ss.options.disableHamsterPruning)
   if (precheck >= 0) {
     // 自明な詰み: seat = precheck を処刑して即勝ち
-    if (!ss.build) { ss.memo.set(key, WIN); return WIN }
     const result: StrategyNode = {
       type: 'action',
       action: { execute: precheck, bodyguardTarget: null, seerTargets: [] },
@@ -417,19 +844,9 @@ function tryExecution(
   const obsGroups = partitionWorldsByExecution(worlds, afterExecAlive, target)
 
   // ムーブオーダリング: ワールド数が多い分岐を先に（AND節点の早期打ち切り）
+  // 注: この関数は戦略構築(build=true)専用。判定のみのパスはDFPNが担当。
   const sortedExecObs = [...obsGroups.entries()]
     .sort((a, b) => b[1].worlds.length - a[1].worlds.length)
-
-  if (!ss.build) {
-    for (const [, group] of sortedExecObs) {
-      const { worlds: groupWorlds, alive: groupAlive } = group
-      if (allWorldsVillageWin(groupWorlds, groupAlive)) continue
-      if (anyWorldVillageLoss(groupWorlds, groupAlive)) return null
-      const nightResult = searchNight(groupWorlds, groupAlive, state.day, depth, ss)
-      if (nightResult === null) return null
-    }
-    return WIN
-  }
 
   const branches = {} as Record<ObservationKey, StrategyNode>
 
@@ -683,6 +1100,7 @@ function tryNightAction(
   ss: SearchState,
 ): StrategyNode | null {
   // 数値キーでグルーピング（高速）
+  // 注: この関数は戦略��築(build=true)専用。判定のみのパスはDFPNが担当。
   const possibleByObs = new Map<number, { worlds: World[], alive: number }>()
 
   for (const world of worlds) {
@@ -753,15 +1171,6 @@ function tryNightAction(
   // ムーブオーダリング: ワールド数が多い（難しい）分岐を先に試す → 失敗時の早期打ち切り
   const sortedObs = [...possibleByObs.entries()]
     .sort((a, b) => b[1].worlds.length - a[1].worlds.length)
-
-  if (!ss.build) {
-    for (const [, group] of sortedObs) {
-      const nextState: SimState = { alive: group.alive, day: day + 1 }
-      const result = isTsumi(group.worlds, nextState, depth + 1, ss)
-      if (result === null) return null
-    }
-    return WIN
-  }
 
   const branches = {} as Record<ObservationKey, StrategyNode>
 

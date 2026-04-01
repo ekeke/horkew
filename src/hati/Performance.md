@@ -123,17 +123,20 @@ PNS や反復深化の効果を測る良いベンチマーク。「詰みなし�
 
 ランタイムキャッシュ（73エントリで3,778ヒット）が十分に機能しており、事前計算の必要性は低い。
 
+### 8. DFPN (Depth-First Proof Number Search) + 噛み等価クラス (2026-04-01)
+
+`buildStrategy=false` 時の proof-only モードに DFPN を導入。AND-OR木の各レベルで MID (Multiple Iterative Deepening) ループを実装し、proof/disproof number で最も証明に近い分岐を優先展開。
+
+加えて、噛み先（AND節点）に等価クラス最適化を追加。全ワールドで同じ roleId の席は同型の部分木を生むため、代表1つだけ simulate（FNVハッシュで等価判定）。
+
+- `buildStrategy=true`（戦略構築）: 従来の DFS を維持。non-build パスの分岐削除で若干軽量化。
+- `buildStrategy=false`（判定のみ）: DFPN + 噛み等価クラスで高速判定。Fenrir 学習パイプライン向け。
+
+verify.ts: 全通過（2,455詰み検証）
+DFS worst: 25.9ms → 10.2ms（噛み等価クラス不要ケースでも non-build 分岐削除により改善）
+
 ## 未実装の最適化案
-
-### Proof Number Search (PNS)
-
-AND-OR木に特化した最良優先探索。各ノードに証明数(pn)/反証数(dn)を持ち、「結果が変わりやすい場所」を優先展開する。DFSが深い枝にハマる問題を回避。
-
-- 類似ゲームでの実績: DFS+αβ比で2-10倍
-- Hatiでの期待改善: 2-5倍（Day2: 444ms → 100-200ms 見込み）
-- 実装コスト: 高（search.ts大幅書き換え）
-- df-pn変種ならメモリ効率とノード選択効率を両立
 
 ### 反復深化
 
-浅い深さで先に探索し、詰みなしなら即棄却。深い探索が不要なケースを高速排除。PNSより実装が容易。
+浅い深さで先に探索し、詰みなしなら即棄却。深い探索が不要なケースを高速排除。

@@ -465,4 +465,52 @@ describe('Hati searchTsumi', () => {
       assert.ok(result.stats.worldsTotal > 0)
     })
   })
+
+  describe('DFPN (buildStrategy=false)', () => {
+    it('3人確定狼: DFPN で詰み判定', () => {
+      const worlds = [makeWorld({ 1: 'werewolf', 2: 'villager', 3: 'villager' })]
+      const alive = new Set([1, 2, 3])
+      const result = searchTsumiDirect(worlds, alive, { maxDepth: 5, buildStrategy: false })
+      assert.equal(result.isTsumi, true)
+      // buildStrategy=false でも詰みセンチネル(WIN)は返る。完全な戦略木は構築されない。
+      assert.equal(result.strategy?.type, 'win')
+    })
+
+    it('3人狼不明: DFPN で詰み不可判定', () => {
+      const worlds = [
+        makeWorld({ 1: 'werewolf', 2: 'villager', 3: 'villager' }),
+        makeWorld({ 1: 'villager', 2: 'werewolf', 3: 'villager' }),
+        makeWorld({ 1: 'villager', 2: 'villager', 3: 'werewolf' }),
+      ]
+      const alive = new Set([1, 2, 3])
+      const result = searchTsumiDirect(worlds, alive, { maxDepth: 5, buildStrategy: false })
+      assert.equal(result.isTsumi, false)
+    })
+
+    it('5人1狼2候補: DFS と DFPN で結果一致', () => {
+      const worlds = [
+        makeWorld({ 1: 'werewolf', 2: 'villager', 3: 'villager', 4: 'medium', 5: 'mason' }),
+        makeWorld({ 1: 'villager', 2: 'werewolf', 3: 'villager', 4: 'medium', 5: 'mason' }),
+      ]
+      const alive = new Set([1, 2, 3, 4, 5])
+      const dfs = searchTsumiDirect(worlds, alive, { maxDepth: 5 })
+      const dfpn = searchTsumiDirect(worlds, alive, { maxDepth: 5, buildStrategy: false })
+      assert.equal(dfs.isTsumi, dfpn.isTsumi, 'DFS と DFPN の判定が一致')
+    })
+
+    it('7人2狼: DFS と DFPN で結果一致', () => {
+      const worlds = [
+        makeWorld({ 1: 'werewolf', 2: 'werewolf', 3: 'villager', 4: 'villager', 5: 'villager', 6: 'mason', 7: 'mason' }),
+        makeWorld({ 1: 'werewolf', 2: 'villager', 3: 'werewolf', 4: 'villager', 5: 'villager', 6: 'mason', 7: 'mason' }),
+        makeWorld({ 1: 'werewolf', 2: 'villager', 3: 'villager', 4: 'werewolf', 5: 'villager', 6: 'mason', 7: 'mason' }),
+        makeWorld({ 1: 'villager', 2: 'werewolf', 3: 'werewolf', 4: 'villager', 5: 'villager', 6: 'mason', 7: 'mason' }),
+        makeWorld({ 1: 'villager', 2: 'werewolf', 3: 'villager', 4: 'werewolf', 5: 'villager', 6: 'mason', 7: 'mason' }),
+        makeWorld({ 1: 'villager', 2: 'villager', 3: 'werewolf', 4: 'werewolf', 5: 'villager', 6: 'mason', 7: 'mason' }),
+      ]
+      const alive = new Set([1, 2, 3, 4, 5, 6, 7])
+      const dfs = searchTsumiDirect(worlds, alive, { maxDepth: 5 })
+      const dfpn = searchTsumiDirect(worlds, alive, { maxDepth: 5, buildStrategy: false })
+      assert.equal(dfs.isTsumi, dfpn.isTsumi, 'DFS と DFPN の判定が一致')
+    })
+  })
 })

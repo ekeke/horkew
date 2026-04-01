@@ -171,3 +171,11 @@ export type SearchOptions = {
 export const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
   maxDepth: 5,
 }
+
+// --- DFPN (Depth-First Proof Number Search) ---
+
+/** Proof/disproof number pair */
+export type PnDn = { pn: number, dn: number }
+
+/** 無限大センチネル（安全な算術のために有限の大きい値） */
+export const PN_INF = 1 << 30
