@@ -143,8 +143,10 @@
               {#if node.action.bodyguardTarget !== null}
                 <span class="hati-night-act">護衛→{playerName(node.action.bodyguardTarget)}</span>
               {/if}
-              {#if node.action.seerTarget !== null}
-                <span class="hati-night-act">占い→{playerName(node.action.seerTarget)}</span>
+              {#if node.action.seerTargets.length > 0}
+                {#each node.action.seerTargets as st}
+                  <span class="hati-night-act">占い→{playerName(st)}</span>
+                {/each}
               {/if}
               {#if isTrivialWin}
                 <span class="hati-arrow">→</span>

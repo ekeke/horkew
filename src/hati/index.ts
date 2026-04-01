@@ -158,7 +158,8 @@ export function computeFoxResolvability(
   // 生存占い師の占い回数制限チェック
   // 各生存占い師が未占いの解決可能狐候補をターン内に占いきれるか
   // ボトルネック: 最も多く占う必要がある占い師
-  let maxResolvable = resolvableFoxes.length
+  // 生存占い師がいなければ占いで狐を排除できない
+  let maxResolvable = aliveSeers.length === 0 ? 0 : resolvableFoxes.length
   for (const seerSeat of aliveSeers) {
     const divined = seerTargets.get(seerSeat)!
     let needToDivine = 0

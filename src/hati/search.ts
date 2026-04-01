@@ -805,13 +805,24 @@ function getExecutionCandidates(worlds: World[], alive: number): Seat[] {
   const candidates: Seat[] = []
   const seen = new Set<number>()
 
+  // 狐生存時は確定村吊り（時間稼ぎ）が有効戦略になりうる
+  const hasAliveHamster = worlds.some(w => (w.hamsterMask & alive) !== 0)
+  let addedVillagerRep = false
+
   forEachSeat(alive, seat => {
     // #4: 数値IDで村人確定判定（Set再生成不要）
     let isVillager = true
     for (const w of worlds) {
       if (!VILLAGER_ROLE_IDS.has(w.roleIds[seat])) { isVillager = false; break }
     }
-    if (isVillager) return
+    if (isVillager) {
+      if (!hasAliveHamster) return
+      // 狐生存時: 確定村は等価なので代表1人だけ候補に追加
+      if (addedVillagerRep) return
+      addedVillagerRep = true
+      candidates.push(seat)
+      return
+    }
 
     // 等価クラス: 全ワールドでの役職IDハッシュが同一なら1つだけ試す
     let h = 0x811c9dc5
