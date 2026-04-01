@@ -30,6 +30,8 @@ type SerializedSnapshot = {
   events: GameEvent[]
   rngState: number
   config: { roles: [string, number][], seed?: number, hasFirstGhost?: boolean, revoteConfig?: any, rules?: any }
+  /** 生存役職ごとの席数（フィルタ用メタデータ） */
+  aliveRoleCounts?: [string, number][]
   seatRoles: [number, string][]
 }
 
@@ -90,7 +92,31 @@ function serializeSnapshot(snap: GameSnapshot): SerializedSnapshot {
       rules: snap.config.rules,
     },
     seatRoles: [...snap.seatRoles],
+    aliveRoleCounts: computeAliveRoleCounts(snap),
   }
+}
+
+function computeAliveRoleCounts(snap: GameSnapshot): [string, number][] {
+  const counts = new Map<string, number>()
+  for (const p of snap.state.players) {
+    if (!p.alive) continue
+    counts.set(p.role, (counts.get(p.role) ?? 0) + 1)
+  }
+  return [...counts]
+}
+
+/** 指定役職が minAlive 席以上生存しているか */
+function checkAliveRoles(
+  aliveRoleCounts: [string, number][],
+  targetRoles: string[],
+  minAlive: number,
+): boolean {
+  const counts = new Map(aliveRoleCounts)
+  let aliveCount = 0
+  for (const role of targetRoles) {
+    aliveCount += counts.get(role) ?? 0
+  }
+  return aliveCount >= minAlive
 }
 
 function deserializeSnapshot(data: SerializedSnapshot): GameSnapshot {
@@ -151,13 +177,34 @@ export function loadSnapshot(path: string): GameSnapshot {
   return deserializeSnapshot(JSON.parse(readFileSync(path, 'utf-8')))
 }
 
+export type SnapshotFilter = {
+  /** フィルタ対象の役職 */
+  aliveRoles?: string[]
+  /** 最低生存席数 (デフォルト: 1) */
+  minAlive?: number
+}
+
 /** ディレクトリからランダムに count 個のスナップショットを読み込む */
-export function loadRandomSnapshots(day: number, count: number, rng?: Rng): GameSnapshot[] {
+export function loadRandomSnapshots(day: number, count: number, rng?: Rng, filter?: SnapshotFilter): GameSnapshot[] {
   const dir = snapshotDir(day)
   if (!existsSync(dir)) throw new Error(`Snapshot directory not found: ${dir}`)
 
-  const files = readdirSync(dir).filter(f => f.endsWith('.json'))
+  let files = readdirSync(dir).filter(f => f.endsWith('.json'))
   if (files.length === 0) throw new Error(`No snapshots found in ${dir}`)
+
+  // フィルタ: メタデータを読んで条件に合うファイルだけ残す
+  if (filter?.aliveRoles && filter.aliveRoles.length > 0) {
+    const minAlive = filter.minAlive ?? 1
+    const targetRoles = filter.aliveRoles
+    files = files.filter(f => {
+      try {
+        const data: SerializedSnapshot = JSON.parse(readFileSync(`${dir}/${f}`, 'utf-8'))
+        if (!data.aliveRoleCounts) return true  // メタデータなし（旧形式）は通す
+        return checkAliveRoles(data.aliveRoleCounts, targetRoles, minAlive)
+      } catch { return false }
+    })
+    if (files.length === 0) throw new Error(`No snapshots in ${dir} match filter (aliveRoles=${targetRoles.join(',')}, minAlive=${minAlive})`)
+  }
 
   const r = rng ?? new Rng()
   const result: GameSnapshot[] = []
@@ -184,8 +231,12 @@ export async function generateSnapshotsToDir(opts: {
   count: number
   trainingConfig: TrainingConfig
   startSeed: number
+  /** 生存必須役職（指定時、これらが minAlive 席以上生存のスナップショットだけ保存） */
+  aliveRoles?: string[]
+  /** 最低生存席数 (デフォルト: 1) */
+  minAlive?: number
 }): Promise<{ generated: number, skipped: number, timeMs: number }> {
-  const { snapshotDay, count, trainingConfig, startSeed } = opts
+  const { snapshotDay, count, trainingConfig, startSeed, aliveRoles, minAlive = 1 } = opts
   const roles = new Map(Object.entries(trainingConfig.roles) as [SystemRole, number][])
   const dir = snapshotDir(snapshotDay)
   const existingCount = countSnapshots(snapshotDay)
@@ -219,6 +270,14 @@ export async function generateSnapshotsToDir(opts: {
     const snapshot = result.snapshots?.get(snapshotDay)
 
     if (snapshot) {
+      // 生存役職フィルタ
+      if (aliveRoles && aliveRoles.length > 0) {
+        const counts = computeAliveRoleCounts(snapshot)
+        if (!checkAliveRoles(counts, aliveRoles, minAlive)) {
+          skipped++
+          continue
+        }
+      }
       saveSnapshot(snapshot, dir, existingCount + generated)
       generated++
       if (generated % 100 === 0) {

@@ -879,7 +879,10 @@ async function main(): Promise<void> {
             // Seed Bank: スナップショットからリプレイ
             // Seed Bank: ディスクからランダムにスナップショットを読み込み
             const batchSnapshots = (snapshotCount > 0 && name === 'village')
-              ? loadRandomSnapshots(mlStartDay, seeds.length, new Rng(iter))
+              ? loadRandomSnapshots(mlStartDay, seeds.length, new Rng(iter), {
+                  aliveRoles: group.roles,
+                  minAlive: mlMaxSeats,
+                })
               : undefined
 
             const serializedResults = await generateGamesParallel({
