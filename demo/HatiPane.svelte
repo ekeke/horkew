@@ -20,7 +20,7 @@
   } = $props()
 
   let wasmReady = $state(false)
-  wasmInit(wasmUrl).then(() => { wasmReady = true }).catch(() => {})
+  wasmInit({ module_or_path: wasmUrl }).then(() => { wasmReady = true }).catch(() => {})
 
   const wasmRunRetar: RunRetar = (vs, setup, options) => {
     const vsJson = JSON.stringify(serializeVillageStatus(vs))

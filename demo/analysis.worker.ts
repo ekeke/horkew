@@ -26,7 +26,7 @@ export type RetarResponse =
 
 let signal: Int32Array | undefined
 let wasmReady = false
-const wasmReady$ = wasmInit(wasmUrl).then(() => { wasmReady = true }).catch(() => {})
+const wasmReady$ = wasmInit({ module_or_path: wasmUrl }).then(() => { wasmReady = true }).catch(() => {})
 
 self.onmessage = (e: MessageEvent<any>) => {
   const msg = e.data
