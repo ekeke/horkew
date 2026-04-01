@@ -21,8 +21,11 @@ import { Rng } from '../random.ts'
 import { forceTrueRoleCO, isVillagePowerRole } from '../heuristic.ts'
 import {
   analyzePerPlayer as retarAnalyzePerPlayer,
+  retarResultToPossibilities,
+  lupaRunRetar,
   type RetarResult,
 } from '../retar-bridge.ts'
+import { searchTsumi } from '../../hati/index.ts'
 
 export type StrategyAdapterConfig = {
   strategies?: Map<number, Strategy>
@@ -30,6 +33,8 @@ export type StrategyAdapterConfig = {
   wolfTeamStrategy?: TeamStrategy
   masonTeamStrategy?: TeamStrategy
   enableRetar?: boolean
+  /** 詰み探索を有効化（pretrain用、デフォルトfalse） */
+  enableTsumi?: boolean
   /** 役職割当後にstrategy差し替え用コールバック */
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   seed?: number
@@ -50,6 +55,8 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
   // lastExecutedSeat は buildCtx 内で executionHistory から導出する
   let retarAccMs = 0
   let retarCallCount = 0
+  let tsumiTarget: number | null = null
+  let lastRetarArtifacts: { vs: any, setup: Map<SystemRole, number>, options: any } | null = null
 
   function getStrategy(seat: number): Strategy {
     return adapterConfig.strategies?.get(seat) ?? adapterConfig.defaultStrategy
@@ -87,6 +94,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
       revoteRound: null,
       revoteCandidates: null,
       executionPlans: [],
+      tsumiTarget,
       rules: pctx.rules,
       ...extra,
     }
@@ -140,8 +148,30 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
     maxSurvivingNV = ppResult.global.maxSurvivingNV
     perPlayerRetar = ppResult.perPlayer
     globalRetarPossibilities = ppResult.global.possibilities
+    lastRetarArtifacts = ppResult.vs && ppResult.setup
+      ? { vs: ppResult.vs, setup: ppResult.setup, options: ppResult.analyzeOptions }
+      : null
     retarAccMs += performance.now() - t0
     retarCallCount++
+  }
+
+  function runTsumiSearch(): void {
+    tsumiTarget = null
+    if (!adapterConfig.enableTsumi || !lastRetarArtifacts || !retarPossibilities) return
+    const conclusions = retarResultToPossibilities(
+      { possibilities: retarPossibilities, maxSurvivingNV: maxSurvivingNV ?? 0 },
+      lastRetarArtifacts.setup,
+    )
+    try {
+      const result = searchTsumi(
+        lastRetarArtifacts.vs, lastRetarArtifacts.setup, lastRetarArtifacts.options,
+        { maxDepth: 4, buildStrategy: true, retarConclusions: conclusions },
+        lupaRunRetar,
+      )
+      if (result.isTsumi && result.strategy?.type === 'action') {
+        tsumiTarget = result.strategy.action.execute
+      }
+    } catch { /* skip */ }
   }
 
   return {
@@ -206,8 +236,9 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
       const additionalClaims = new Map<number, DayClaim>()
       const preVoteEvents: GameEvent[] = []
 
-      // Post-CO Retar
+      // Post-CO Retar + 詰み探索
       runRetar(pctx)
+      runTsumiSearch()
 
       // シグナルラウンド (3R)
       daySignals = []

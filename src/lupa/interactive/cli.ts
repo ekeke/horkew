@@ -83,6 +83,7 @@ function buildHumanCtx(pctx: PhaseContext, seat: number): DecisionContext {
     revoteRound: null,
     revoteCandidates: null,
     executionPlans: [],
+    tsumiTarget: null,
     rules: pctx.rules,
   }
 }

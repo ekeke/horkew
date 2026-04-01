@@ -103,7 +103,7 @@ function runRetar(
 // RunRetar (Possibilities を返す版 — hati DI 用)
 // ============================================================
 
-const lupaRunRetar: RunRetar = (vs, setup, options) => {
+export const lupaRunRetar: RunRetar = (vs, setup, options) => {
   if (wasmAnalyze) {
     const vsJson = JSON.stringify(serializeVillageStatus(vs))
     const setupJson = JSON.stringify(Object.fromEntries(setup))
@@ -253,12 +253,18 @@ function validateAssumptions(
   return valid
 }
 
-/** analyzePerPlayer の戻り値: グローバル結果 + プレイヤー別結果 */
+/** analyzePerPlayer の戻り値: グローバル結果 + プレイヤー別結果 + Hati再利用用中間成果物 */
 export type PerPlayerRetarResult = {
   /** 仮定なし（公開情報のみ）のRetar結果 */
   global: RetarResult
   /** プレイヤー別Retar結果 (seat → RetarResult) */
   perPlayer: Map<number, RetarResult>
+  /** VillageStatus (Hati再利用用、構築失敗時は null) */
+  vs: any | null
+  /** 役職配置 (Hati再利用用) */
+  setup: Map<SystemRole, number> | null
+  /** Retar解析オプション (Hati再利用用) */
+  analyzeOptions: AnalyzeOptions | null
 }
 
 /**
@@ -278,7 +284,7 @@ export function analyzePerPlayer(
   const howl = formatHowl(events, state, config)
   const { meta, statements } = parse(howl)
   const unknowns = statements.filter(s => s.type === 'unknown')
-  if (unknowns.length > 0) return { global: emptyGlobal, perPlayer }
+  if (unknowns.length > 0) return { global: emptyGlobal, perPlayer, vs: null, setup: null, analyzeOptions: null }
 
   const { vs, setup } = buildVillageStatus(statements, meta)
 
@@ -289,7 +295,7 @@ export function analyzePerPlayer(
   const prior = global.possibilities
 
   // 共通 Retar が破綻していたら per-player もスキップ
-  if (global.possibilities.size === 0) return { global, perPlayer }
+  if (global.possibilities.size === 0) return { global, perPlayer, vs, setup, analyzeOptions: baseOptions }
 
   // Rust側の init_from_prior は prior に refix() → assumptions を逐次 fix_role する。
   // 各ステップで連鎖伝播が発生し可能性が絞り込まれるため、
@@ -309,7 +315,7 @@ export function analyzePerPlayer(
     }
   }
 
-  return { global, perPlayer }
+  return { global, perPlayer, vs, setup, analyzeOptions: baseOptions }
 }
 
 /**
@@ -365,4 +371,28 @@ export function searchTsumiFromEvents(
   } catch {
     return null
   }
+}
+
+/**
+ * RetarResult (Map<seat, Set<role>>) → Possibilities 変換
+ * Hati の retarConclusions に渡すための変換ヘルパー
+ */
+export function retarResultToPossibilities(
+  result: RetarResult,
+  setup: Map<SystemRole, number>,
+): Possibilities {
+  let maxSeat = 0
+  for (const seat of result.possibilities.keys()) {
+    if (seat > maxSeat) maxSeat = seat
+  }
+  const p = new Possibilities(maxSeat)
+  for (const [role, count] of setup) {
+    p.setup[RoleBitIndex[role]] = count
+  }
+  p.setupOriginal = new Uint8Array(p.setup)
+  for (const [seat, roles] of result.possibilities) {
+    p.possibilities[seat] = possibilityFromRoles(roles)
+  }
+  p.refix()
+  return p
 }

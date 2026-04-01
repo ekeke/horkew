@@ -97,6 +97,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       revoteRound: null,
       revoteCandidates: null,
       executionPlans: [],
+      tsumiTarget: null,
       rules: pctx.rules,
       ...extra,
     }

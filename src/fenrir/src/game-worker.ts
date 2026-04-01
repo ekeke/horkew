@@ -238,6 +238,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         wolfTeamStrategy,
         masonTeamStrategy,
         enableRetar: config.enableRetar,
+        enableTsumi: true,
         onRolesAssigned: onRolesAssignedWrapped,
         seed,
         roles,

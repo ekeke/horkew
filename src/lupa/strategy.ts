@@ -40,6 +40,8 @@ export type DecisionContext = {
   revoteCandidates: number[] | null
   /** 処刑プラン (空配列 = プランなし) */
   executionPlans: ExecutionPlan[]
+  /** 詰み探索: 今日処刑すべき席 (詰みなし or 探索失敗時は null) */
+  tsumiTarget: number | null
   /** ゲームルール */
   rules: ResolvedRules
 }

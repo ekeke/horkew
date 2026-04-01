@@ -38,6 +38,7 @@ function makeCompatCtx(
     revoteRound: null,
     revoteCandidates: null,
     executionPlans: [],
+    tsumiTarget: null,
     rules: resolveRules(),
   }
 }
