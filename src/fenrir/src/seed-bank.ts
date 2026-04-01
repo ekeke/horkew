@@ -11,7 +11,7 @@
  *     ...
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import type { SystemRole } from '../../types/index.ts'
 import type { GameSnapshot, GameState, GameEvent } from '../../lupa/types.ts'
 import type { GameConfig } from '../../lupa/handlers.ts'
@@ -247,6 +247,16 @@ export function countSnapshots(day: number, aliveRoles?: string[], minAlive?: nu
     total += readdirSync(dir).filter(f => f.endsWith('.json')).length
   }
   return total
+}
+
+/** 古いスナップショットを削除（ファイル名ソートで先頭から n 個） */
+export function retireSnapshots(day: number, n: number, aliveRoles?: string[], minAlive?: number): number {
+  const dir = snapshotDirExact(day, aliveRoles, minAlive)
+  if (!existsSync(dir)) return 0
+  const files = readdirSync(dir).filter(f => f.endsWith('.json')).sort()
+  const toDelete = files.slice(0, n)
+  for (const f of toDelete) unlinkSync(`${dir}/${f}`)
+  return toDelete.length
 }
 
 // ============================================================
