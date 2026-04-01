@@ -809,7 +809,7 @@ async function main(): Promise<void> {
     const graduated = new Set<ModelName>()
     // カリキュラム: NN 席数を徐々に増やす (village のみ)
     let mlMaxSeats = 2
-    const ML_MAX_SEATS_CAP = 7  // 村役職の最大数
+    const ML_MAX_SEATS_CAP = 6  // 村役職の最大席数 (村2+占1+霊1+狩1+猫1、共有は集団NNなので除外)
     // カリキュラム: ML/Retar開始Dayを徐々に前に (序盤Retarコスト回避)
     let mlStartDay = 4
     const ML_START_DAY_MIN = 1  // 全日ML
