@@ -173,9 +173,52 @@ function main() {
     })
   }
 
+  // Compute stats per result
+  type Stat = {
+    name: string
+    label: string
+    med: number
+    mean: number
+    min: number
+    max: number
+    tests: number
+    passes: number
+    finalize: number
+    finalOK: number
+  }
+
+  const stats: Stat[] = results.map(r => {
+    const totalTests =
+      r.stash.seerTests + r.stash.mediumTests + r.stash.bodyguardTests +
+      r.stash.masonTests + r.stash.nekomataTests + r.stash.werehamsterTests
+    const totalPasses =
+      r.stash.seerTestPasses + r.stash.mediumTestPasses + r.stash.bodyguardTestPasses +
+      r.stash.masonTestPasses + r.stash.nekomataTestPasses + r.stash.werehamsterTestPasses
+    return {
+      name: r.name,
+      label: r.label,
+      med: median(r.times),
+      mean: r.times.reduce((a, b) => a + b, 0) / r.times.length,
+      min: Math.min(...r.times),
+      max: Math.max(...r.times),
+      tests: totalTests,
+      passes: totalPasses,
+      finalize: r.stash.finalizerRuns,
+      finalOK: r.stash.finalizerPasses,
+    }
+  })
+
+  // Group by scenario name
+  const groups: Map<string, Stat[]> = new Map()
+  for (const s of stats) {
+    let arr = groups.get(s.name)
+    if (!arr) { arr = []; groups.set(s.name, arr) }
+    arr.push(s)
+  }
+
   // Output table
-  console.log('─'.repeat(120))
-  console.log(
+  const W = 120
+  const header = [
     'Scenario'.padEnd(20),
     'Target'.padEnd(16),
     'Median'.padStart(10),
@@ -187,42 +230,48 @@ function main() {
     'Passes'.padStart(8),
     'Finalize'.padStart(8),
     'FinalOK'.padStart(8),
-  )
-  console.log('─'.repeat(120))
+  ].join(' ')
+  console.log('─'.repeat(W))
+  console.log(header)
+  console.log('─'.repeat(W))
 
   let totalMedian = 0
 
-  for (const r of results) {
-    const med = median(r.times)
-    const mean = r.times.reduce((a, b) => a + b, 0) / r.times.length
-    const min = Math.min(...r.times)
-    const max = Math.max(...r.times)
-    totalMedian += med
-
-    const totalTests =
-      r.stash.seerTests + r.stash.mediumTests + r.stash.bodyguardTests +
-      r.stash.masonTests + r.stash.nekomataTests + r.stash.werehamsterTests
-
-    const totalPasses =
-      r.stash.seerTestPasses + r.stash.mediumTestPasses + r.stash.bodyguardTestPasses +
-      r.stash.masonTestPasses + r.stash.nekomataTestPasses + r.stash.werehamsterTestPasses
-
-    console.log(
-      r.name.slice(0, 19).padEnd(20),
-      r.label.padEnd(16),
-      formatMs(med).padStart(10),
-      formatMs(mean).padStart(10),
-      formatMs(min).padStart(10),
-      formatMs(max).padStart(10),
-      '│',
-      String(totalTests).padStart(8),
-      String(totalPasses).padStart(8),
-      String(r.stash.finalizerRuns).padStart(8),
-      String(r.stash.finalizerPasses).padStart(8),
-    )
+  for (const [name, group] of groups) {
+    for (const s of group) {
+      totalMedian += s.med
+      console.log(
+        s.name.slice(0, 19).padEnd(20),
+        s.label.padEnd(16),
+        formatMs(s.med).padStart(10),
+        formatMs(s.mean).padStart(10),
+        formatMs(s.min).padStart(10),
+        formatMs(s.max).padStart(10),
+        '│',
+        String(s.tests).padStart(8),
+        String(s.passes).padStart(8),
+        String(s.finalize).padStart(8),
+        String(s.finalOK).padStart(8),
+      )
+    }
+    // Scenario summary row
+    if (group.length > 1) {
+      const avgMed = group.reduce((a, s) => a + s.med, 0) / group.length
+      const avgMean = group.reduce((a, s) => a + s.mean, 0) / group.length
+      const bestMin = Math.min(...group.map(s => s.min))
+      console.log(
+        ''.padEnd(20),
+        `(avg ×${group.length})`.padEnd(16),
+        formatMs(avgMed).padStart(10),
+        formatMs(avgMean).padStart(10),
+        formatMs(bestMin).padStart(10),
+        ''.padStart(10),
+        '│',
+      )
+    }
   }
 
-  console.log('─'.repeat(120))
+  console.log('─'.repeat(W))
   console.log(`Total median: ${formatMs(totalMedian)}`)
 }
 
