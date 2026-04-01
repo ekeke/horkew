@@ -979,7 +979,7 @@ async function main(): Promise<void> {
 
           // Adaptive KL: β を自動調整して KL を目標付近に維持
           if (ppoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
-            const klTarget = 0.01  // 目標 KL divergence
+            const klTarget = 0.05  // 目標 KL divergence
             if (lastPpoResult.klLoss > klTarget * 1.5) {
               ppoConfig.klCoeff *= 1.5  // KL 高すぎ → β 増
             } else if (lastPpoResult.klLoss < klTarget / 1.5) {
