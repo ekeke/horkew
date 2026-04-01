@@ -218,23 +218,44 @@ export type SnapshotFilter = {
 /** ディレクトリからランダムに count 個のスナップショットを読み込む */
 export function loadRandomSnapshots(day: number, count: number, rng?: Rng, filter?: SnapshotFilter): GameSnapshot[] {
   const dirs = snapshotDirsCompatible(day, filter?.aliveRoles, filter?.minAlive)
+  const r = rng ?? new Rng()
 
-  // 全互換ディレクトリのファイルを集める
-  const allFiles: string[] = []
-  for (const dir of dirs) {
-    for (const f of readdirSync(dir)) {
-      if (f.endsWith('.json')) allFiles.push(`${dir}/${f}`)
+  function scanFiles(): string[] {
+    const files: string[] = []
+    for (const dir of dirs) {
+      if (!existsSync(dir)) continue
+      for (const f of readdirSync(dir)) {
+        if (f.endsWith('.json')) files.push(`${dir}/${f}`)
+      }
     }
+    return files
   }
+
+  let allFiles = scanFiles()
   if (allFiles.length === 0) {
     const dirName = filter?.aliveRoles ? filterDirName(filter.aliveRoles, filter.minAlive ?? 1) : 'any'
     throw new Error(`No snapshots found for day${day}/${dirName}`)
   }
 
-  const r = rng ?? new Rng()
   const result: GameSnapshot[] = []
+  let retries = 0
+  const MAX_RETRIES = 3
   for (let i = 0; i < count; i++) {
-    result.push(loadSnapshot(allFiles[r.nextInt(allFiles.length)]))
+    const file = allFiles[r.nextInt(allFiles.length)]
+    try {
+      result.push(loadSnapshot(file))
+      retries = 0
+    } catch (e: any) {
+      if (e?.code !== 'ENOENT') throw e
+      // ファイルが削除された → リスキャン
+      retries++
+      if (retries > MAX_RETRIES) {
+        allFiles = scanFiles()
+        if (allFiles.length === 0) throw new Error(`All snapshots removed during loading`)
+        retries = 0
+      }
+      i--  // リトライ
+    }
   }
   return result
 }
