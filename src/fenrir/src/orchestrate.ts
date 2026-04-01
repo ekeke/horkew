@@ -45,7 +45,8 @@ import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
   generateGamesParallel, deserializeStep,
 } from './parallel.ts'
-import { generateSeedBank, type SeedBank } from './seed-bank.ts'
+import { loadRandomSnapshots, countSnapshots } from './seed-bank.ts'
+import { Rng } from '../../lupa/random.ts'
 
 // ============================================================
 // Model Group Definitions
@@ -823,17 +824,12 @@ async function main(): Promise<void> {
       klCoeff: refNetwork ? 0.2 : 0,
     }
 
-    // Seed Bank: 中盤スナップショットの事前生成
-    let seedBank: SeedBank | null = null
-    if (mlStartDay > ML_START_DAY_MIN) {
-      log(`  Generating seed bank at Day ${mlStartDay}...`)
-      seedBank = await generateSeedBank({
-        snapshotDay: mlStartDay,
-        bankSize: 256,
-        trainingConfig,
-        startSeed: 0,
-      })
-      log(`  Seed bank: ${seedBank.snapshots.length} snapshots (${(seedBank.generationTimeMs / 1000).toFixed(1)}s)`)
+    // Seed Bank: ディスクからスナップショットを読み込み
+    let snapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay) : 0
+    if (mlStartDay > ML_START_DAY_MIN && snapshotCount === 0) {
+      log(`  ⚠ No snapshots at Day ${mlStartDay} (run: npm run generate-snapshots -- --day ${mlStartDay}). Falling back to full games.`)
+    } else if (snapshotCount > 0) {
+      log(`  Seed bank: ${snapshotCount} snapshots at Day ${mlStartDay}`)
     }
 
     // Phase 1: village のみ学習（wolf/third は strategy-only 未対応）
@@ -881,8 +877,9 @@ async function main(): Promise<void> {
             const sharedMasonWeights = group.teamType === 'mason_team' ? packWeights(masonTeamNet) : undefined
 
             // Seed Bank: スナップショットからリプレイ
-            const batchSnapshots = (seedBank && name === 'village')
-              ? seeds.map((_, i) => seedBank!.snapshots[(iter * config.batch + i) % seedBank!.snapshots.length])
+            // Seed Bank: ディスクからランダムにスナップショットを読み込み
+            const batchSnapshots = (snapshotCount > 0 && name === 'village')
+              ? loadRandomSnapshots(mlStartDay, seeds.length, new Rng(iter))
               : undefined
 
             const serializedResults = await generateGamesParallel({
@@ -1053,18 +1050,12 @@ async function main(): Promise<void> {
             if (name === 'village' && mlStartDay > ML_START_DAY_MIN && factionRate >= targetRate * 0.9) {
               mlStartDay = Math.max(mlStartDay - 1, ML_START_DAY_MIN)
               log(`${prefix} Curriculum: mlStartDay → ${mlStartDay}`)
-              // Seed Bank 再生成
-              if (mlStartDay > ML_START_DAY_MIN) {
-                log(`${prefix} Regenerating seed bank at Day ${mlStartDay}...`)
-                seedBank = await generateSeedBank({
-                  snapshotDay: mlStartDay,
-                  bankSize: 256,
-                  trainingConfig,
-                  startSeed: iter * config.batch,
-                })
-                log(`${prefix} Seed bank: ${seedBank.snapshots.length} snapshots (${(seedBank.generationTimeMs / 1000).toFixed(1)}s)`)
-              } else {
-                seedBank = null  // mlStartDay=1: 全ゲーム生成に切り替え
+              // Seed Bank: 新しい Day のスナップショット数を確認
+              snapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay) : 0
+              if (mlStartDay > ML_START_DAY_MIN && snapshotCount === 0) {
+                log(`${prefix} ⚠ No snapshots at Day ${mlStartDay} (run: npm run generate-snapshots -- --day ${mlStartDay}). Falling back to full games.`)
+              } else if (snapshotCount > 0) {
+                log(`${prefix} Seed bank: ${snapshotCount} snapshots at Day ${mlStartDay}`)
               }
             }
 
