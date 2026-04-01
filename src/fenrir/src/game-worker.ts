@@ -219,6 +219,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         onRolesAssigned: onRolesAssignedWrapped,
         seed,
         enableRetar: config.enableRetar,
+        enableTsumi: true,
         roles,
         rules: config.rules,
       })

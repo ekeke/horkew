@@ -15,8 +15,11 @@ import { alivePlayers } from '../roles.ts'
 import { Rng } from '../random.ts'
 import {
   analyzePerPlayer as retarAnalyzePerPlayer,
+  retarResultToPossibilities,
+  lupaRunRetar,
   type RetarResult,
 } from '../retar-bridge.ts'
+import { searchTsumi, searchTsumiStrategy } from '../../hati/index.ts'
 
 export type MinimalAdapterConfig = {
   strategies: Map<number, Strategy>
@@ -28,6 +31,8 @@ export type MinimalAdapterConfig = {
   seed?: number
   /** Retar有効化（デフォルト: false） */
   enableRetar?: boolean
+  /** 詰み探索を有効化（デフォルトfalse） */
+  enableTsumi?: boolean
   /** enableRetar時に必要 */
   roles?: Map<SystemRole, number>
   /** enableRetar時に必要 */
@@ -44,6 +49,8 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
   let perPlayerRetar: Map<number, RetarResult> | null = null
   let retarAccMs = 0
   let retarCallCount = 0
+  let tsumiTarget: number | null = null
+  let lastRetarArtifacts: { vs: any, setup: Map<SystemRole, number>, options: any } | null = null
 
   function getStrategy(seat: number): Strategy {
     return config.strategies.get(seat) ?? config.defaultStrategy!
@@ -61,8 +68,32 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
     maxSurvivingNV = ppResult.global.maxSurvivingNV
     perPlayerRetar = ppResult.perPlayer
     globalRetarPossibilities = ppResult.global.possibilities
+    lastRetarArtifacts = ppResult.vs && ppResult.setup
+      ? { vs: ppResult.vs, setup: ppResult.setup, options: ppResult.analyzeOptions }
+      : null
     retarAccMs += performance.now() - t0
     retarCallCount++
+  }
+
+  function runTsumiSearch(): void {
+    tsumiTarget = null
+    if (!config.enableTsumi || !lastRetarArtifacts || !retarPossibilities) return
+    const conclusions = retarResultToPossibilities(
+      { possibilities: retarPossibilities, maxSurvivingNV: maxSurvivingNV ?? 0 },
+      lastRetarArtifacts.setup,
+    )
+    try {
+      const result = searchTsumi(
+        lastRetarArtifacts.vs, lastRetarArtifacts.setup, lastRetarArtifacts.options,
+        lupaRunRetar, conclusions,
+      )
+      if (result.isTsumi) {
+        const sr = searchTsumiStrategy(result, { maxDepth: 4 })
+        if (sr.strategy?.type === 'action') {
+          tsumiTarget = sr.strategy.action.execute
+        }
+      }
+    } catch { /* skip */ }
   }
 
   function buildCtx(
@@ -97,7 +128,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       revoteRound: null,
       revoteCandidates: null,
       executionPlans: [],
-      tsumiTarget: null,
+      tsumiTarget,
       rules: pctx.rules,
       ...extra,
     }
@@ -186,6 +217,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
 
     onVote(vctx) {
       runRetar(vctx)
+      runTsumiSearch()
       const state = vctx.state as GameState
       const votes = new Map<number, number>()
 
