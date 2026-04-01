@@ -1,5 +1,5 @@
 import type { SystemRole, Seat, VillageStatus, Day } from '../types/index.ts'
-import type { Checker, CheckerInput, DenialReason } from './reasons.ts'
+import type { Checker, CheckerInput, DenialReason, TaggedChecker } from './reasons.ts'
 import { villageSpecialRoles, villageSideRoles, evilRoles } from './reasons.ts'
 import type { AnalysisResult } from './analysis.ts'
 import { isTrustworthy } from './analysis.ts'
@@ -943,41 +943,39 @@ function checkPigeonholeVillageRole({ village, setup, seat, role, analysis, play
 }
 
 // ── Exported checker list ───────────────────────────────────────────
+// axiomatic → dependent → elimination の順。同カテゴリ内は旧Tier順を維持。
 
-export const allCheckers: Checker[] = [
-  // CO constraint
-  checkCoImpliesNotOtherVillageRole,
-  // Tier 0: Analysis-based
-  checkConfirmedSeerResult,
-  checkConfirmedMediumResult,
-  checkSeerClaimContradicted,
-  checkMediumClaimContradicted,
-  // Tier 1
-  checkNotInSetup,
-  checkNoHamsterNoImmoralist,
-  checkCursedByNekomata,
-  checkFollowHamster,
-  checkSoleNightKill,
-  checkVillagerCo,
-  checkSurrenderCo,
-  checkSilentExecution,
-  checkDeniedByNegativeCo,
-  // Tier 2
-  checkSeerBlack,
-  checkSeerWhite,
-  checkSeerFoxKill,
-  checkMediumBlack,
-  checkMediumWhite,
-  checkMasonPartner,
-  checkRoleSlotsFilled,
-  checkNekomataNoCompanion,
-  checkAllHamstersDead,
-  // Tier 3
-  checkVillageWon,
-  checkLiarBudget,
-  checkContradictionPairSlot,
-  checkContradictionTripleSlot,
-  checkPigeonholeVillageRole,
-  // Tier 4: 間接的な理由（他プレイヤーの確定に依存するため最低優先）
-  checkConfirmedRoleHolderExists,
+export const allCheckers: TaggedChecker[] = [
+  // ── axiomatic: ゲーム事実のみで完結 ──
+  { fn: checkCoImpliesNotOtherVillageRole, category: 'axiomatic' },
+  { fn: checkNotInSetup, category: 'axiomatic' },
+  { fn: checkNoHamsterNoImmoralist, category: 'axiomatic' },
+  { fn: checkCursedByNekomata, category: 'axiomatic' },
+  { fn: checkFollowHamster, category: 'axiomatic' },
+  { fn: checkSoleNightKill, category: 'axiomatic' },
+  { fn: checkVillagerCo, category: 'axiomatic' },
+  { fn: checkSurrenderCo, category: 'axiomatic' },
+  { fn: checkSilentExecution, category: 'axiomatic' },
+  { fn: checkDeniedByNegativeCo, category: 'axiomatic' },
+  { fn: checkMasonPartner, category: 'axiomatic' },
+  { fn: checkNekomataNoCompanion, category: 'axiomatic' },
+  { fn: checkAllHamstersDead, category: 'axiomatic' },
+  { fn: checkVillageWon, category: 'axiomatic' },
+  { fn: checkLiarBudget, category: 'axiomatic' },
+  // ── dependent: 他プレイヤーの確定/破綻に依存 ──
+  { fn: checkConfirmedSeerResult, category: 'dependent' },
+  { fn: checkConfirmedMediumResult, category: 'dependent' },
+  { fn: checkSeerClaimContradicted, category: 'dependent' },
+  { fn: checkMediumClaimContradicted, category: 'dependent' },
+  { fn: checkSeerBlack, category: 'dependent' },
+  { fn: checkSeerWhite, category: 'dependent' },
+  { fn: checkSeerFoxKill, category: 'dependent' },
+  { fn: checkMediumBlack, category: 'dependent' },
+  { fn: checkMediumWhite, category: 'dependent' },
+  { fn: checkContradictionPairSlot, category: 'dependent' },
+  { fn: checkContradictionTripleSlot, category: 'dependent' },
+  { fn: checkConfirmedRoleHolderExists, category: 'dependent' },
+  // ── elimination: 消去法（複数の否定/確定の集合に依存） ──
+  { fn: checkRoleSlotsFilled, category: 'elimination' },
+  { fn: checkPigeonholeVillageRole, category: 'elimination' },
 ]

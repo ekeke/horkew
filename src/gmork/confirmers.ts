@@ -1,5 +1,5 @@
 import type { Seat, Day, VillageStatus, SystemRole } from '../types/index.ts'
-import type { ConfirmationChecker, ConfirmationCheckerInput, ConfirmationReason } from './reasons.ts'
+import type { ConfirmationChecker, ConfirmationCheckerInput, ConfirmationReason, TaggedConfirmationChecker } from './reasons.ts'
 import { villageSideRoles } from './reasons.ts'
 import { isTrustworthy, analyzeSeer, analyzeMedium } from './analysis.ts'
 import { formatBustReason, formatReason } from './format.ts'
@@ -424,7 +424,7 @@ function checkDenialElimination({ village, setup, seat, role, status, analysis, 
 
     const input = { ...checkerInput, role: candidateRole }
     let denied = false
-    for (const checker of allCheckers) {
+    for (const { fn: checker } of allCheckers) {
       const denialReason = checker(input)
       if (denialReason) {
         eliminatedRoles.push({ role: candidateRole, reason: formatReason(denialReason, candidateRole) })
@@ -441,17 +441,22 @@ function checkDenialElimination({ village, setup, seat, role, status, analysis, 
 
 // ── Exported checker list ───────────────────────────────────────────
 
-export const allConfirmationCheckers: ConfirmationChecker[] = [
-  checkCursedByNekomataConfirm,
-  checkExecutionCompanionConfirm,
-  checkFollowHamsterConfirm,
-  checkAllOtherCosBusted,
-  checkSeerConsensusBlack,
-  checkMediumConsensusBlack,
-  checkMediumWhiteNonWolf,
-  checkMasonPartnerConfirm,
-  checkSeerFoxKillConfirm,
-  checkDeadWerewolfCount,
-  checkAllEvilAccounted,
-  checkDenialElimination,
+// axiomatic → dependent → elimination の順。
+
+export const allConfirmationCheckers: TaggedConfirmationChecker[] = [
+  // ── axiomatic: ゲーム事実のみで完結 ──
+  { fn: checkCursedByNekomataConfirm, category: 'axiomatic' },
+  { fn: checkExecutionCompanionConfirm, category: 'axiomatic' },
+  { fn: checkFollowHamsterConfirm, category: 'axiomatic' },
+  { fn: checkMasonPartnerConfirm, category: 'axiomatic' },
+  // ── dependent: 他プレイヤーの確定/破綻に依存 ──
+  { fn: checkAllOtherCosBusted, category: 'dependent' },
+  { fn: checkSeerConsensusBlack, category: 'dependent' },
+  { fn: checkMediumConsensusBlack, category: 'dependent' },
+  { fn: checkMediumWhiteNonWolf, category: 'dependent' },
+  { fn: checkSeerFoxKillConfirm, category: 'dependent' },
+  { fn: checkDeadWerewolfCount, category: 'dependent' },
+  // ── elimination: 消去法 ──
+  { fn: checkAllEvilAccounted, category: 'elimination' },
+  { fn: checkDenialElimination, category: 'elimination' },
 ]

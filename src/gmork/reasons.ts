@@ -77,6 +77,12 @@ export type ConfirmationCheckerInput = {
 
 export type ConfirmationChecker = (input: ConfirmationCheckerInput) => ConfirmationReason | null
 
+// ── カテゴリ定義 ──────────────────────────────────────────────────────
+
+export type ReasonCategory = 'axiomatic' | 'dependent' | 'elimination'
+export type TaggedChecker = { fn: Checker, category: ReasonCategory }
+export type TaggedConfirmationChecker = { fn: ConfirmationChecker, category: ReasonCategory }
+
 export type CheckerInput = {
   village: VillageStatus
   setup: Map<SystemRole, number>
