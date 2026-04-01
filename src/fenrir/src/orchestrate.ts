@@ -826,11 +826,11 @@ async function main(): Promise<void> {
 
     // Seed Bank: ディスクからスナップショットを読み込み
     const villageRoles = MODEL_GROUPS.village.roles as string[]
-    let snapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay, villageRoles, mlMaxSeats) : 0
+    let snapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay - 1, villageRoles, mlMaxSeats) : 0
     if (mlStartDay > ML_START_DAY_MIN && snapshotCount === 0) {
-      log(`  ⚠ No snapshots at Day ${mlStartDay} (run: npm run generate-snapshots -- --day ${mlStartDay} --alive village --min-alive ${mlMaxSeats}). Falling back to full games.`)
+      log(`  ⚠ No snapshots at Day ${mlStartDay - 1} (run: npm run generate-snapshots -- --day ${mlStartDay - 1} --alive village --min-alive ${mlMaxSeats}). Falling back to full games.`)
     } else if (snapshotCount > 0) {
-      log(`  Seed bank: ${snapshotCount} snapshots at Day ${mlStartDay}`)
+      log(`  Seed bank: ${snapshotCount} snapshots at Day ${mlStartDay - 1}`)
     }
 
     // Phase 1: village のみ学習（wolf/third は strategy-only 未対応）
@@ -880,7 +880,7 @@ async function main(): Promise<void> {
             // Seed Bank: スナップショットからリプレイ
             // Seed Bank: ディスクからランダムにスナップショットを読み込み
             const batchSnapshots = (snapshotCount > 0 && name === 'village')
-              ? loadRandomSnapshots(mlStartDay, seeds.length, new Rng(iter), {
+              ? loadRandomSnapshots(mlStartDay - 1, seeds.length, new Rng(iter), {
                   aliveRoles: group.roles,
                   minAlive: mlMaxSeats,
                 })
@@ -1055,9 +1055,9 @@ async function main(): Promise<void> {
               mlStartDay = Math.max(mlStartDay - 1, ML_START_DAY_MIN)
               log(`${prefix} Curriculum: mlStartDay → ${mlStartDay}`)
               // Seed Bank: 新しい Day のスナップショット数を確認
-              snapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay, villageRoles, mlMaxSeats) : 0
+              snapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay - 1, villageRoles, mlMaxSeats) : 0
               if (mlStartDay > ML_START_DAY_MIN && snapshotCount === 0) {
-                log(`${prefix} ⚠ No snapshots at Day ${mlStartDay} (run: npm run generate-snapshots -- --day ${mlStartDay} --alive village --min-alive ${mlMaxSeats}). Falling back to full games.`)
+                log(`${prefix} ⚠ No snapshots at Day ${mlStartDay - 1} (run: npm run generate-snapshots -- --day ${mlStartDay - 1} --alive village --min-alive ${mlMaxSeats}). Falling back to full games.`)
               } else if (snapshotCount > 0) {
                 log(`${prefix} Seed bank: ${snapshotCount} snapshots at Day ${mlStartDay}`)
               }
