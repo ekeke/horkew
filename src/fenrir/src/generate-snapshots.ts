@@ -56,15 +56,17 @@ const startSeed = argVal('seed', 0)
 const aliveGroup = argStr('alive', 'village')
 const minAlive = argVal('min-alive', 3)
 const retire = argOptVal('retire')
+const forEval = args.includes('--for-eval')
 const aliveRoles = ROLE_GROUPS[aliveGroup] ?? aliveGroup.split(',')
 const filterDir = filterDirName(aliveRoles, minAlive)
+const baseDir = forEval ? 'tmp/snapshots-eval' : 'tmp/snapshots'
 
-console.log(`Generating ${count} snapshots × Day ${days.join(',')}`)
+console.log(`Generating ${count} snapshots × Day ${days.join(',')}${forEval ? ' (for eval)' : ''}`)
 console.log(`  Filter: ${aliveGroup} (${aliveRoles.join(', ')}) >= ${minAlive} alive`)
 if (retire) console.log(`  Retire: oldest ${retire} per day after generation`)
 for (const day of days) {
-  const existing = countSnapshots(day, aliveRoles, minAlive)
-  console.log(`  Day ${day}: ${existing} existing → tmp/snapshots/day${day}/${filterDir}/`)
+  const existing = countSnapshots(day, aliveRoles, minAlive, forEval)
+  console.log(`  Day ${day}: ${existing} existing → ${baseDir}/day${day}/${filterDir}/`)
 }
 
 const result = await generateSnapshotsToDir({
@@ -74,18 +76,19 @@ const result = await generateSnapshotsToDir({
   startSeed,
   aliveRoles,
   minAlive,
+  forEval,
 })
 
 // Retire old snapshots
 if (retire) {
   for (const day of days) {
-    const deleted = retireSnapshots(day, retire, aliveRoles, minAlive)
+    const deleted = retireSnapshots(day, retire, aliveRoles, minAlive, forEval)
     if (deleted > 0) console.log(`  Day ${day}: retired ${deleted} old snapshots`)
   }
 }
 
 console.log(`Done in ${(result.timeMs / 1000).toFixed(1)}s (${result.skipped} games skipped)`)
 for (const day of days) {
-  const total = countSnapshots(day, aliveRoles, minAlive)
+  const total = countSnapshots(day, aliveRoles, minAlive, forEval)
   console.log(`  Day ${day}: +${result.generated.get(day)} → ${total} total`)
 }

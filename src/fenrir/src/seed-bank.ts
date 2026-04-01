@@ -153,17 +153,20 @@ export function filterDirName(aliveRoles: string[], minAlive: number): string {
   return `${sorted.join('+')}-${minAlive}`
 }
 
+const SNAPSHOT_BASE = 'tmp/snapshots'
+const SNAPSHOT_EVAL_BASE = 'tmp/snapshots-eval'
+
 /** 保存用: 条件に対応する単一ディレクトリ */
-function snapshotDirExact(day: number, aliveRoles?: string[], minAlive?: number): string {
+function snapshotDirExact(day: number, aliveRoles?: string[], minAlive?: number, base = SNAPSHOT_BASE): string {
   if (aliveRoles && aliveRoles.length > 0 && minAlive && minAlive > 0) {
-    return `tmp/snapshots/day${day}/${filterDirName(aliveRoles, minAlive)}`
+    return `${base}/day${day}/${filterDirName(aliveRoles, minAlive)}`
   }
-  return `tmp/snapshots/day${day}/any`
+  return `${base}/day${day}/any`
 }
 
 /** 読み込み用: minAlive 以上の条件を満たすディレクトリを全て返す */
-function snapshotDirsCompatible(day: number, aliveRoles?: string[], minAlive?: number): string[] {
-  const base = `tmp/snapshots/day${day}`
+function snapshotDirsCompatible(day: number, aliveRoles?: string[], minAlive?: number, baseDir = SNAPSHOT_BASE): string[] {
+  const base = `${baseDir}/day${day}`
   if (!existsSync(base)) return []
   if (!aliveRoles || aliveRoles.length === 0) {
     // フィルタなし → 全サブディレクトリ
@@ -213,11 +216,14 @@ export type SnapshotFilter = {
   aliveRoles?: string[]
   /** 最低生存席数 (デフォルト: 1) */
   minAlive?: number
+  /** eval 専用ディレクトリから読み込む */
+  forEval?: boolean
 }
 
 /** ディレクトリからランダムに count 個のスナップショットを読み込む */
 export function loadRandomSnapshots(day: number, count: number, rng?: Rng, filter?: SnapshotFilter): GameSnapshot[] {
-  const dirs = snapshotDirsCompatible(day, filter?.aliveRoles, filter?.minAlive)
+  const base = filter?.forEval ? SNAPSHOT_EVAL_BASE : SNAPSHOT_BASE
+  const dirs = snapshotDirsCompatible(day, filter?.aliveRoles, filter?.minAlive, base)
   const r = rng ?? new Rng()
 
   function scanFiles(): string[] {
@@ -261,8 +267,9 @@ export function loadRandomSnapshots(day: number, count: number, rng?: Rng, filte
 }
 
 /** 互換ディレクトリ内の合計スナップショット数を返す */
-export function countSnapshots(day: number, aliveRoles?: string[], minAlive?: number): number {
-  const dirs = snapshotDirsCompatible(day, aliveRoles, minAlive)
+export function countSnapshots(day: number, aliveRoles?: string[], minAlive?: number, forEval?: boolean): number {
+  const base = forEval ? SNAPSHOT_EVAL_BASE : SNAPSHOT_BASE
+  const dirs = snapshotDirsCompatible(day, aliveRoles, minAlive, base)
   let total = 0
   for (const dir of dirs) {
     total += readdirSync(dir).filter(f => f.endsWith('.json')).length
@@ -271,8 +278,8 @@ export function countSnapshots(day: number, aliveRoles?: string[], minAlive?: nu
 }
 
 /** 古いスナップショットを削除（ファイル名ソートで先頭から n 個） */
-export function retireSnapshots(day: number, n: number, aliveRoles?: string[], minAlive?: number): number {
-  const dir = snapshotDirExact(day, aliveRoles, minAlive)
+export function retireSnapshots(day: number, n: number, aliveRoles?: string[], minAlive?: number, forEval?: boolean): number {
+  const dir = snapshotDirExact(day, aliveRoles, minAlive, forEval ? SNAPSHOT_EVAL_BASE : SNAPSHOT_BASE)
   if (!existsSync(dir)) return 0
   const files = readdirSync(dir).filter(f => f.endsWith('.json')).sort()
   const toDelete = files.slice(0, n)
@@ -299,8 +306,11 @@ export async function generateSnapshotsToDir(opts: {
   aliveRoles?: string[]
   /** 最低生存席数 (デフォルト: 1) */
   minAlive?: number
+  /** eval 専用ディレクトリに保存 */
+  forEval?: boolean
 }): Promise<{ generated: Map<number, number>, skipped: number, timeMs: number }> {
-  const { snapshotDays, count, trainingConfig, startSeed, aliveRoles, minAlive = 1 } = opts
+  const { snapshotDays, count, trainingConfig, startSeed, aliveRoles, minAlive = 1, forEval } = opts
+  const base = forEval ? SNAPSHOT_EVAL_BASE : SNAPSHOT_BASE
   const roles = new Map(Object.entries(trainingConfig.roles) as [SystemRole, number][])
   const t0 = performance.now()
 
@@ -308,7 +318,7 @@ export async function generateSnapshotsToDir(opts: {
   const existing = new Map<number, number>()
   const generated = new Map<number, number>()
   for (const day of snapshotDays) {
-    existing.set(day, countSnapshots(day, aliveRoles, minAlive))
+    existing.set(day, countSnapshots(day, aliveRoles, minAlive, forEval))
     generated.set(day, 0)
   }
 
@@ -347,7 +357,7 @@ export async function generateSnapshotsToDir(opts: {
       if (!snapshot) continue
       if (aliveRoles && aliveRoles.length > 0 && countAliveRoles(snapshot, aliveRoles) < minAlive) continue
 
-      const dir = snapshotDirExact(day, aliveRoles, minAlive)
+      const dir = snapshotDirExact(day, aliveRoles, minAlive, base)
       saveSnapshot(snapshot, dir, existing.get(day)! + generated.get(day)!)
       generated.set(day, generated.get(day)! + 1)
       savedAny = true

@@ -827,10 +827,14 @@ async function main(): Promise<void> {
     // Seed Bank: ディスクからスナップショットを読み込み
     const villageRoles = MODEL_GROUPS.village.roles as string[]
     let snapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay - 1, villageRoles, mlMaxSeats) : 0
+    const evalSnapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay - 1, villageRoles, mlMaxSeats, true) : 0
     if (mlStartDay > ML_START_DAY_MIN && snapshotCount === 0) {
       log(`  ⚠ No snapshots at Day ${mlStartDay - 1} (run: npm run generate-snapshots -- --day ${mlStartDay - 1} --alive village --min-alive ${mlMaxSeats}). Falling back to full games.`)
     } else if (snapshotCount > 0) {
-      log(`  Seed bank: ${snapshotCount} snapshots at Day ${mlStartDay - 1}`)
+      log(`  Seed bank: ${snapshotCount} train + ${evalSnapshotCount} eval snapshots at Day ${mlStartDay - 1}`)
+    }
+    if (mlStartDay > ML_START_DAY_MIN && evalSnapshotCount === 0) {
+      log(`  ⚠ No eval snapshots (run: npm run generate-snapshots -- --day ${mlStartDay - 1} --alive village --min-alive ${mlMaxSeats} --for-eval)`)
     }
 
     // Phase 1: village のみ学習（wolf/third は strategy-only 未対応）
@@ -1041,6 +1045,7 @@ async function main(): Promise<void> {
               ? loadRandomSnapshots(mlStartDay - 1, config.evalGames, new Rng(42), {
                   aliveRoles: group.roles,
                   minAlive: mlMaxSeats,
+                  forEval: true,
                 })
               : undefined
             const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, evalSnapshots ? { snapshots: evalSnapshots } : undefined)
