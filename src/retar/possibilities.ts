@@ -186,6 +186,8 @@ export class Possibilities {
   setupOriginal!: Uint8Array
   /** 最大生存人外数（事前計算済み。computeMaxSurvivingNv() で設定） */
   maxSurvivingNV: number = 0
+  /** ワークリストバッファ（fix/refix 用。constructor で事前確保） */
+  private _pendingBuf!: Uint8Array
   constructor(
     setup: Map<SystemRole, number> | Uint16Array | number,
     setupArr?: Uint8Array,
@@ -194,6 +196,7 @@ export class Possibilities {
     if (typeof setup === 'number') {
       this.possibilities = new Uint16Array(setup + 1) // 0番目は使わない
       this.setup = new Uint8Array(ROLE_COUNT)
+      this._pendingBuf = new Uint8Array(setup + 1)
       return
     }
 
@@ -201,6 +204,7 @@ export class Possibilities {
       this.setup = new Uint8Array(setupArr)
       this.setupOriginal = new Uint8Array(originalSetupArr)
       this.possibilities = setup
+      this._pendingBuf = new Uint8Array(setup.length)
       return
     }
     if (setup instanceof Uint16Array) {
@@ -216,6 +220,7 @@ export class Possibilities {
     }
     this.setupOriginal = new Uint8Array(this.setup)
     this.possibilities = new Uint16Array(count + 1) // 0番目は使わない
+    this._pendingBuf = new Uint8Array(count + 1)
     for (let i = 1; i < this.possibilities.length; i++) {
       this.possibilities[i] = initial
     }
@@ -251,28 +256,47 @@ export class Possibilities {
 
   refix(): boolean {
     this.setup.set(this.setupOriginal)
+    const buf = this._pendingBuf
+    let head = 0, tail = 0
+    let inPending = 0
     for (let i = 1; i < this.possibilities.length; i++) {
-      if (!this.fix(i)) return false
+      if (popCount(this.possibilities[i]) === 1) {
+        buf[tail++] = i
+        inPending |= (1 << i)
+      }
     }
-    return true
+    return this._drain(buf, head, tail, inPending)
   }
 
   fix(seat: number): boolean {
-    const p = this.possibilities[seat]
-    const count = popCount(p)
-    if (count === 0) return false
-    if (count === 1) {
+    const buf = this._pendingBuf
+    buf[0] = seat
+    return this._drain(buf, 0, 1, 1 << seat)
+  }
+
+  /** ワークリストを処理し、全 singleton のカスケードを伝播する */
+  private _drain(buf: Uint8Array, head: number, tail: number, inPending: number): boolean {
+    while (head < tail) {
+      const s = buf[head++]
+      const p = this.possibilities[s]
+      const count = popCount(p)
+      if (count === 0) return false
+      if (count !== 1) continue
+
       const bitIdx = 31 - Math.clz32(p)
-      if (!this.setup[bitIdx]) {
-        return false
-      }
+      if (!this.setup[bitIdx]) return false
+
       if (this.setup[bitIdx] === 1) {
-        const theRole = p
         for (let i = 1; i < this.possibilities.length; i++) {
-          if (i === seat) continue
-          if (this.possibilities[i] === theRole) continue
-          this.possibilities[i] &= ~theRole
+          if (i === s) continue
+          if (this.possibilities[i] === p) continue
+          const old = this.possibilities[i]
+          this.possibilities[i] &= ~p
           if (this.possibilities[i] === 0) return false
+          if (popCount(old) > 1 && popCount(this.possibilities[i]) === 1 && !(inPending & (1 << i))) {
+            buf[tail++] = i
+            inPending |= (1 << i)
+          }
         }
       }
       this.setup[bitIdx]--

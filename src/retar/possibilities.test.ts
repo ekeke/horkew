@@ -323,6 +323,105 @@ describe('toStructured', () => {
   })
 })
 
+describe('fix confluence', () => {
+  it('should produce the same result regardless of fixRole order', () => {
+    // Setup: 1 seer, 1 bodyguard, 1 werewolf, 1 possessed, 1 villager (5 seats)
+    const makeSetup = () => new Map<SystemRole, number>([
+      ['seer', 1], ['bodyguard', 1], ['werewolf', 1], ['possessed', 1], ['villager', 1]
+    ])
+
+    // Order A: fix seats 1,2,3
+    const pA = new Possibilities(makeSetup())
+    pA.fixRole(1, 'seer')
+    pA.fixRole(2, 'werewolf')
+    pA.fixRole(3, 'bodyguard')
+
+    // Order B: fix seats 3,1,2 (reversed)
+    const pB = new Possibilities(makeSetup())
+    pB.fixRole(3, 'bodyguard')
+    pB.fixRole(1, 'seer')
+    pB.fixRole(2, 'werewolf')
+
+    // Order C: fix seats 2,3,1
+    const pC = new Possibilities(makeSetup())
+    pC.fixRole(2, 'werewolf')
+    pC.fixRole(3, 'bodyguard')
+    pC.fixRole(1, 'seer')
+
+    for (let i = 1; i <= 5; i++) {
+      assert.strictEqual(pA.get(i), pB.get(i), `seat ${i} differs between order A and B`)
+      assert.strictEqual(pA.get(i), pC.get(i), `seat ${i} differs between order A and C`)
+    }
+  })
+
+  it('should cascade through a chain of singletons', () => {
+    // Setup: 1 of each role, 4 seats
+    // Seat 1: {seer, bodyguard}
+    // Seat 2: {bodyguard, nekomata}
+    // Seat 3: {nekomata, possessed}
+    // Seat 4: {seer, possessed}
+    // Fixing seat 1 to seer should chain: seat 4 loses seer → {possessed} → seat 3 loses possessed → {nekomata} → seat 2 loses nekomata → {bodyguard}
+    const setup = new Map<SystemRole, number>([
+      ['seer', 1], ['bodyguard', 1], ['nekomata', 1], ['possessed', 1]
+    ])
+    const p = new Possibilities(setup)
+    // Manually narrow possibilities
+    p.denyRole(1, 'nekomata')
+    p.denyRole(1, 'possessed')
+    p.denyRole(2, 'seer')
+    p.denyRole(2, 'possessed')
+    p.denyRole(3, 'seer')
+    p.denyRole(3, 'bodyguard')
+    p.denyRole(4, 'bodyguard')
+    p.denyRole(4, 'nekomata')
+
+    // Fix seat 1 to seer — should cascade through the chain
+    const result = p.fixRole(1, 'seer')
+    assert.strictEqual(result, true)
+
+    // All seats should be fully determined
+    assert.strictEqual(roleCount(p.get(1)), 1)
+    assert.strictEqual(roleCount(p.get(2)), 1)
+    assert.strictEqual(roleCount(p.get(3)), 1)
+    assert.strictEqual(roleCount(p.get(4)), 1)
+
+    assert.strictEqual(hasRoleInPossibility(p.get(1), 'seer'), true)
+    assert.strictEqual(hasRoleInPossibility(p.get(2), 'bodyguard'), true)
+    assert.strictEqual(hasRoleInPossibility(p.get(3), 'nekomata'), true)
+    assert.strictEqual(hasRoleInPossibility(p.get(4), 'possessed'), true)
+  })
+
+  it('refix should produce confluent results with pre-set singletons', () => {
+    const setup = new Map<SystemRole, number>([
+      ['seer', 1], ['bodyguard', 1], ['nekomata', 1], ['possessed', 1]
+    ])
+    const p = new Possibilities(setup)
+    // Manually set seats 1,2 to singletons, leave 3,4 with 2 roles each
+    p.denyRole(1, 'bodyguard')
+    p.denyRole(1, 'nekomata')
+    p.denyRole(1, 'possessed')  // seat 1 = {seer}
+    p.denyRole(2, 'seer')
+    p.denyRole(2, 'nekomata')
+    p.denyRole(2, 'possessed')  // seat 2 = {bodyguard}
+    p.denyRole(3, 'seer')
+    p.denyRole(3, 'bodyguard')  // seat 3 = {nekomata, possessed}
+    p.denyRole(4, 'seer')
+    p.denyRole(4, 'bodyguard')  // seat 4 = {nekomata, possessed}
+
+    const result = p.refix()
+    assert.strictEqual(result, true)
+
+    // seer and bodyguard should be removed from seats 3,4 (already done)
+    // nekomata and possessed each have 1 slot → one cascade should fire
+    // Seat 3 and 4 each have {nekomata, possessed}, so refix can't fully determine them
+    // but setup counts should be correct
+    assert.strictEqual(hasRoleInPossibility(p.get(1), 'seer'), true)
+    assert.strictEqual(roleCount(p.get(1)), 1)
+    assert.strictEqual(hasRoleInPossibility(p.get(2), 'bodyguard'), true)
+    assert.strictEqual(roleCount(p.get(2)), 1)
+  })
+})
+
 describe('combinationWithReplacementInLimit', () => {
   it('should generate combinations with replacement within limits', () => {
     const roles: SystemRole[] = ['seer', 'bodyguard', 'nekomata']

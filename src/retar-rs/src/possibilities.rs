@@ -207,43 +207,66 @@ impl Possibilities {
     }
 
     pub fn fix(&mut self, seat: Seat) -> bool {
-        let seat_idx = seat as usize;
-        let p = self.possibilities[seat_idx];
-        let count = pop_count(p);
-        if count == 0 {
-            return false;
-        }
-        if count == 1 {
-            let bit_idx = p.trailing_zeros() as usize;
-            if self.setup[bit_idx] == 0 {
-                return false;
-            }
-            if self.setup[bit_idx] == 1 {
-                let the_role = p;
-                for i in 1..self.possibilities.len() {
-                    if i == seat_idx {
-                        continue;
-                    }
-                    if self.possibilities[i] == the_role {
-                        continue;
-                    }
-                    self.possibilities[i] &= !the_role;
-                    if self.possibilities[i] == 0 {
-                        return false;
-                    }
-                }
-            }
-            self.setup[bit_idx] -= 1;
-        }
-        true
+        let mut buf = [0u8; 21];
+        buf[0] = seat as u8;
+        self.drain(&mut buf, 0, 1, 1u32 << seat)
     }
 
     pub fn refix(&mut self) -> bool {
         self.setup = self.setup_original;
+        let mut buf = [0u8; 21];
+        let mut tail: usize = 0;
+        let mut in_pending: u32 = 0;
         for i in 1..self.possibilities.len() {
-            if !self.fix(i as Seat) {
+            if pop_count(self.possibilities[i]) == 1 {
+                buf[tail] = i as u8;
+                tail += 1;
+                in_pending |= 1u32 << i;
+            }
+        }
+        self.drain(&mut buf, 0, tail, in_pending)
+    }
+
+    /// ワークリストを処理し、全 singleton のカスケードを伝播する
+    fn drain(&mut self, buf: &mut [u8; 21], mut head: usize, mut tail: usize, mut in_pending: u32) -> bool {
+        while head < tail {
+            let s = buf[head] as usize;
+            head += 1;
+            let p = self.possibilities[s];
+            let count = pop_count(p);
+            if count == 0 {
                 return false;
             }
+            if count != 1 {
+                continue;
+            }
+
+            let bit_idx = p.trailing_zeros() as usize;
+            if self.setup[bit_idx] == 0 {
+                return false;
+            }
+
+            if self.setup[bit_idx] == 1 {
+                for i in 1..self.possibilities.len() {
+                    if i == s {
+                        continue;
+                    }
+                    if self.possibilities[i] == p {
+                        continue;
+                    }
+                    let old = self.possibilities[i];
+                    self.possibilities[i] &= !p;
+                    if self.possibilities[i] == 0 {
+                        return false;
+                    }
+                    if pop_count(old) > 1 && pop_count(self.possibilities[i]) == 1 && (in_pending & (1u32 << i)) == 0 {
+                        buf[tail] = i as u8;
+                        tail += 1;
+                        in_pending |= 1u32 << i;
+                    }
+                }
+            }
+            self.setup[bit_idx] -= 1;
         }
         true
     }
