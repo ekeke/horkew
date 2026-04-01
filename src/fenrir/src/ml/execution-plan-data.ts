@@ -232,7 +232,7 @@ function generateSyntheticRetar(
 }
 
 const PATTERNS: PatternType[] = ['tsumi', 'roller', 'decision', 'designated', 'grayran', 'retar_suspect']
-const PATTERN_WEIGHTS = [0.15, 0.17, 0.13, 0.13, 0.17, 0.25]
+const PATTERN_WEIGHTS = [0.12, 0.18, 0.14, 0.14, 0.18, 0.24]
 
 function pickPattern(rng: Rng): PatternType {
   const r = rng.next()
