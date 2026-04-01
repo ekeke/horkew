@@ -42,9 +42,11 @@ const aliveGroup = argStr('alive', 'village')
 const minAlive = argVal('min-alive', 3)
 const aliveRoles = ROLE_GROUPS[aliveGroup] ?? aliveGroup.split(',')
 
-const existing = countSnapshots(day)
+import { filterDirName } from './seed-bank.ts'
+const existing = countSnapshots(day, aliveRoles, minAlive)
 console.log(`Generating ${count} snapshots at Day ${day}`)
 console.log(`  Filter: ${aliveGroup} roles (${aliveRoles.join(', ')}) >= ${minAlive} alive`)
+console.log(`  Dir: tmp/snapshots/day${day}/${filterDirName(aliveRoles, minAlive)}/`)
 console.log(`  Existing: ${existing}, seed: ${startSeed}`)
 
 const result = await generateSnapshotsToDir({
@@ -58,5 +60,5 @@ const result = await generateSnapshotsToDir({
 
 const total = existing + result.generated
 console.log(`Done: ${result.generated} generated, ${result.skipped} skipped, ${(result.timeMs / 1000).toFixed(1)}s`)
-console.log(`Total snapshots at Day ${day}: ${total}`)
+console.log(`Total: ${total}`)
 console.log(`Directory: tmp/snapshots/day${day}/`)
