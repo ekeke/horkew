@@ -31,10 +31,11 @@ pub fn select_combinations_from_array<T: Clone>(
         comb_gen(arr.len(), size, 0, &mut indices, &mut |idx_combo| {
             let mut selected = Vec::with_capacity(idx_combo.len());
             let mut remaining = Vec::with_capacity(arr.len() - idx_combo.len());
-            let idx_set: std::collections::BTreeSet<usize> = idx_combo.iter().copied().collect();
+            let mut j = 0;
             for (i, item) in arr.iter().enumerate() {
-                if idx_set.contains(&i) {
+                if j < idx_combo.len() && idx_combo[j] == i {
                     selected.push(item.clone());
+                    j += 1;
                 } else {
                     remaining.push(item.clone());
                 }

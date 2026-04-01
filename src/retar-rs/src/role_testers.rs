@@ -65,6 +65,22 @@ pub struct ContextSnapshot {
     pub death_chronicle_sub: Vec<i8>,
 }
 
+impl ContextSnapshot {
+    /// Pre-allocate a snapshot with the given buffer sizes (no data copied yet).
+    pub fn new_empty(poss_len: usize, chronicle_len: usize) -> Self {
+        ContextSnapshot {
+            poss_arr: vec![0u16; poss_len],
+            poss_setup: [0u8; 11],
+            hamsters_max_surviving_day: 0,
+            need_seer_at_day: None,
+            hamsters_killed_by_seer_len: 0,
+            require_one_of_len: 0,
+            death_chronicle_add: vec![0i8; chronicle_len],
+            death_chronicle_sub: vec![0i8; chronicle_len],
+        }
+    }
+}
+
 pub fn save_context(ctx: &AnalyzeContext) -> ContextSnapshot {
     ContextSnapshot {
         poss_arr: ctx.possibilities.possibilities.clone(),
@@ -76,6 +92,18 @@ pub fn save_context(ctx: &AnalyzeContext) -> ContextSnapshot {
         death_chronicle_add: ctx.death_chronicle.add.clone(),
         death_chronicle_sub: ctx.death_chronicle.sub.clone(),
     }
+}
+
+/// Save context into a pre-allocated snapshot (zero heap allocation).
+pub fn save_into(snapshot: &mut ContextSnapshot, ctx: &AnalyzeContext) {
+    snapshot.poss_arr.copy_from_slice(&ctx.possibilities.possibilities);
+    snapshot.poss_setup = ctx.possibilities.setup;
+    snapshot.hamsters_max_surviving_day = ctx.hamsters_max_surviving_day;
+    snapshot.need_seer_at_day = ctx.need_seer_at_day;
+    snapshot.hamsters_killed_by_seer_len = ctx.hamsters_killed_by_seer.len();
+    snapshot.require_one_of_len = ctx.require_one_of.len();
+    snapshot.death_chronicle_add.copy_from_slice(&ctx.death_chronicle.add);
+    snapshot.death_chronicle_sub.copy_from_slice(&ctx.death_chronicle.sub);
 }
 
 pub fn restore_context(ctx: &mut AnalyzeContext, s: &ContextSnapshot) {

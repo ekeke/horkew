@@ -1,9 +1,9 @@
 use crate::types::{CauseOfDeath, VillageStatus, VillageResult, SystemRole, Seat, Day, AnalyzeOptions};
 use crate::possibilities::Possibilities;
-use crate::combinatorics::generate_combinations_collect;
+use crate::combinatorics::generate_combinations;
 use crate::role_testers::{
-    AnalyzeContext, RoleTesterEnv, DeathChronicle, SeatRole,
-    save_context, restore_context, test_role,
+    AnalyzeContext, RoleTesterEnv, DeathChronicle, SeatRole, ContextSnapshot,
+    save_into, restore_context, test_role,
 };
 use crate::plan_builder::{build_role_test_plan, RoleTest, RoleTestRole};
 use crate::finalizer::{
@@ -50,6 +50,7 @@ pub struct VillageRetar {
 
     role_tests: Vec<Vec<RoleTest>>,
     strides: Vec<i64>,
+    snapshot_pool: Vec<ContextSnapshot>,
 
     cached_survivors: Vec<Seat>,
     cached_surviving_map: BTreeMap<Seat, bool>,
@@ -147,6 +148,7 @@ impl VillageRetar {
             hamster_win_path: None,
             role_tests,
             strides,
+            snapshot_pool: Vec::new(),
             cached_survivors,
             cached_surviving_map,
             debug_stash: DebugStash::default(),
@@ -256,6 +258,7 @@ impl VillageRetar {
 
     fn run_analysis(&mut self) {
         let max_day = (self.vs.day + 1) as usize;
+        let poss_len = self.initial_possibilities.possibilities.len();
         self.context = Some(AnalyzeContext {
             hamsters_killed_by_seer: Vec::new(),
             require_one_of: Vec::new(),
@@ -264,6 +267,14 @@ impl VillageRetar {
             hamsters_max_surviving_day: i32::MAX,
             need_seer_at_day: None,
         });
+        // Pre-allocate snapshot pool: one per recursion depth + one for try_finalize
+        let pool_size = self.role_tests.len() + 1;
+        if self.snapshot_pool.len() < pool_size {
+            self.snapshot_pool.clear();
+            for _ in 0..pool_size {
+                self.snapshot_pool.push(ContextSnapshot::new_empty(poss_len, max_day));
+            }
+        }
         self.walk_role_tests(0, 0);
     }
 
@@ -304,14 +315,14 @@ impl VillageRetar {
                 }
             }
 
-            let snapshot = save_context(self.context.as_ref().unwrap());
+            save_into(&mut self.snapshot_pool[depth], self.context.as_ref().unwrap());
             let result = self.do_test_role(&test);
 
             if result {
                 self.walk_role_tests(depth + 1, my_index);
             }
 
-            restore_context(self.context.as_mut().unwrap(), &snapshot);
+            restore_context(self.context.as_mut().unwrap(), &self.snapshot_pool[depth]);
         }
     }
 
@@ -416,48 +427,42 @@ impl VillageRetar {
         let require_one_of = ctx.require_one_of.clone();
 
         if !require_one_of.is_empty() || !deny_one_of.is_empty() {
-            let snapshot = save_context(self.context.as_ref().unwrap());
+            let finalize_slot = self.role_tests.len();
+            save_into(&mut self.snapshot_pool[finalize_slot], self.context.as_ref().unwrap());
 
-            // Generate all fix/deny variations
-            let fix_variations = if !require_one_of.is_empty() {
-                generate_combinations_collect(&require_one_of)
-            } else {
-                vec![Vec::new()]
-            };
-            let deny_variations = if !deny_one_of.is_empty() {
-                generate_combinations_collect(&deny_one_of)
-            } else {
-                vec![Vec::new()]
-            };
+            let apply_deny_and_finalize = |slf: &mut VillageRetar, fix_var: &[SeatRole], deny_var: &[SeatRole]| {
+                restore_context(slf.context.as_mut().unwrap(), &slf.snapshot_pool[finalize_slot]);
 
-            for fix_var in &fix_variations {
-                for deny_var in &deny_variations {
-                    restore_context(self.context.as_mut().unwrap(), &snapshot);
-
-                    let mut ok = true;
-                    let ctx = self.context.as_mut().unwrap();
-                    for sr in fix_var {
-                        if !ctx.possibilities.fix_role(sr.seat, sr.role) {
-                            ok = false;
-                            break;
-                        }
+                let ctx = slf.context.as_mut().unwrap();
+                for sr in fix_var {
+                    if !ctx.possibilities.fix_role(sr.seat, sr.role) {
+                        return;
                     }
-                    if !ok {
-                        continue;
-                    }
-                    let ctx = self.context.as_mut().unwrap();
-                    for sr in deny_var {
-                        ctx.possibilities.deny_role(sr.seat, sr.role);
-                        if !ctx.possibilities.fix(sr.seat) {
-                            ok = false;
-                            break;
-                        }
-                    }
-                    if !ok {
-                        continue;
-                    }
-                    self.do_finalize();
                 }
+                let ctx = slf.context.as_mut().unwrap();
+                for sr in deny_var {
+                    ctx.possibilities.deny_role(sr.seat, sr.role);
+                    if !ctx.possibilities.fix(sr.seat) {
+                        return;
+                    }
+                }
+                slf.do_finalize();
+            };
+
+            if !require_one_of.is_empty() && !deny_one_of.is_empty() {
+                generate_combinations(&require_one_of, &mut |fix_var| {
+                    generate_combinations(&deny_one_of, &mut |deny_var| {
+                        apply_deny_and_finalize(self, fix_var, deny_var);
+                    });
+                });
+            } else if !require_one_of.is_empty() {
+                generate_combinations(&require_one_of, &mut |fix_var| {
+                    apply_deny_and_finalize(self, fix_var, &[]);
+                });
+            } else {
+                generate_combinations(&deny_one_of, &mut |deny_var| {
+                    apply_deny_and_finalize(self, &[], deny_var);
+                });
             }
         } else {
             self.do_finalize();
