@@ -51,6 +51,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
   let retarCallCount = 0
   let tsumiTarget: number | null = null
   let lastRetarArtifacts: { vs: any, setup: Map<SystemRole, number>, options: any } | null = null
+  const tsumiCache = new Map<number, boolean>()  // day → isTsumi
 
   function getStrategy(seat: number): Strategy {
     return config.strategies.get(seat) ?? config.defaultStrategy!
@@ -218,6 +219,10 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
     onVote(vctx) {
       runRetar(vctx)
       runTsumiSearch()
+      // 初回投票時のみキャッシュ（再投票は同じ日）
+      if (vctx.revoteRound === 0 || vctx.revoteRound == null) {
+        tsumiCache.set(vctx.day, tsumiTarget !== null)
+      }
       const state = vctx.state as GameState
       const votes = new Map<number, number>()
 
@@ -260,6 +265,11 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
 
     getTiming(): GameTiming {
       return { retarMs: retarAccMs, retarCount: retarCallCount }
+    },
+
+    /** ゲーム中の詰み判定キャッシュ (day → isTsumi) */
+    getTsumiCache(): Map<number, boolean> {
+      return tsumiCache
     },
   }
 }

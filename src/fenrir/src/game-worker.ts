@@ -209,6 +209,8 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       }
     } : undefined
 
+    let tsumiCacheGetter: (() => Map<number, boolean>) | undefined
+
     if (config.strategyOnly) {
       // minimal-adapter: 議論フェーズ全スキップで高速化
       const handlers = minimalAdapter({
@@ -223,6 +225,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         roles,
         rules: config.rules,
       })
+      tsumiCacheGetter = () => handlers.getTsumiCache()
       const result = await runGame(
         { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
         handlers,
@@ -245,6 +248,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         roles,
         rules: config.rules,
       })
+      tsumiCacheGetter = () => handlers.getTsumiCache()
       const result = await runGame(
         { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
         handlers,
@@ -317,39 +321,52 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       }
     }
 
-    // Hati 詰み報酬: ゲーム終了後に遡って判定
+    // Hati 詰み報酬: ゲーム中のキャッシュから判定（Retar再実行なし）
     const tTsumiStart = performance.now()
-    const howl = formatHowl(events, state, lupaConfig)
-    const howlLines = howl.split('\n')
-    const execLines: number[] = []
-    for (let li = 0; li < howlLines.length; li++) {
-      if (howlLines[li].match(/処刑$/)) execLines.push(li + 1)
-    }
-
-    const hatiOptions = config.hasFirstGhost
-      ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
-      : DEFAULT_RETAR_OPTIONS
-
     let firstTsumiDay = -1
     let tsumiCallCount = 0
-    for (let i = 0; i < execLines.length; i++) {
-      const truncated = howlLines.slice(0, execLines[i] - 1).join('\n')
-      try {
-        const { meta, statements } = parse(truncated)
-        const { vs, setup } = buildVillageStatus(statements, meta)
-        tsumiCallCount++
-        const result = searchTsumi(vs, setup, hatiOptions)
-        if (result.isTsumi) {
-          firstTsumiDay = i + 1
+    const cachedTsumi = tsumiCacheGetter?.()
+    if (cachedTsumi && cachedTsumi.size > 0) {
+      // 日数順にソートして最初の詰み日を探す
+      const days = [...cachedTsumi.keys()].sort((a, b) => a - b)
+      for (const day of days) {
+        if (cachedTsumi.get(day)) {
+          firstTsumiDay = day
           break
         }
-      } catch {
-        // parse error → skip
+      }
+    } else {
+      // キャッシュなし: フォールバック（howl再パース）
+      const howl = formatHowl(events, state, lupaConfig)
+      const howlLines = howl.split('\n')
+      const execLines: number[] = []
+      for (let li = 0; li < howlLines.length; li++) {
+        if (howlLines[li].match(/処刑$/)) execLines.push(li + 1)
+      }
+
+      const hatiOptions = config.hasFirstGhost
+        ? { ...DEFAULT_RETAR_OPTIONS, hasFirstGhost: true }
+        : DEFAULT_RETAR_OPTIONS
+
+      for (let i = 0; i < execLines.length; i++) {
+        const truncated = howlLines.slice(0, execLines[i] - 1).join('\n')
+        try {
+          const { meta, statements } = parse(truncated)
+          const { vs, setup } = buildVillageStatus(statements, meta)
+          tsumiCallCount++
+          const result = searchTsumi(vs, setup, hatiOptions)
+          if (result.isTsumi) {
+            firstTsumiDay = i + 1
+            break
+          }
+        } catch {
+          // parse error → skip
+        }
       }
     }
 
     if (firstTsumiDay > 0) {
-      const totalDays = execLines.length
+      const totalDays = state.executionHistory.size
       const tsumiDays = totalDays - firstTsumiDay + 1
       const tRewards = tsumiReward(state, tsumiDays, config.rewardConfig)
       for (const [seat, reward] of tRewards) {

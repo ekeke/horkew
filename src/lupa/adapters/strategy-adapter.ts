@@ -57,6 +57,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
   let retarCallCount = 0
   let tsumiTarget: number | null = null
   let lastRetarArtifacts: { vs: any, setup: Map<SystemRole, number>, options: any } | null = null
+  const tsumiCache = new Map<number, boolean>()  // day → isTsumi
 
   function getStrategy(seat: number): Strategy {
     return adapterConfig.strategies?.get(seat) ?? adapterConfig.defaultStrategy
@@ -241,6 +242,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
       // Post-CO Retar + 詰み探索
       runRetar(pctx)
       runTsumiSearch()
+      tsumiCache.set(pctx.day, tsumiTarget !== null)
 
       // シグナルラウンド (3R)
       daySignals = []
@@ -364,6 +366,10 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
 
     getTiming(): GameTiming {
       return { retarMs: retarAccMs, retarCount: retarCallCount }
+    },
+
+    getTsumiCache(): Map<number, boolean> {
+      return tsumiCache
     },
   }
 }
