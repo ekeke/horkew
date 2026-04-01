@@ -195,6 +195,12 @@
   let gmorkResult = $state('')
   let wolfPairSuggestions: WolfPairSuggestion[] = $state([])
   let baseAnalysisSeats: SeatResult[] = []
+  let allRolesDetermined = $derived(
+    analysisSeats.length > 0
+    && players.size > 0
+    && analysisSeats.length === players.size
+    && analysisSeats.every(s => s.roles.length === 1)
+  )
   // Retar結果キャッシュ: 行番号 → {hash, cached}
   let analysisCache = new Map<number, { hash: string, cached: SeatResult[], stats: AnalysisStats | null }>()
 
@@ -589,6 +595,26 @@
     denyWolfGroups = []
     gmorkResult = ''
     run()
+  }
+
+  function buildRevealText(): string {
+    const lines = analysisSeats.map(s => {
+      const name = players.get(s.seat) ?? `#${s.seat}`
+      const roleName = systemRoles.get(s.roles[0])?.name ?? s.roles[0]
+      return `${name}=${roleName}`
+    })
+    return '\n' + lines.join('\n')
+  }
+
+  function insertRevealRoles() {
+    if (!editorView || !allRolesDetermined) return
+    const text = buildRevealText()
+    const docLen = editorView.state.doc.length
+    editorView.dispatch({
+      changes: { from: docLen, insert: text },
+      selection: { anchor: docLen + text.length },
+    })
+    editorView.focus()
   }
 
   function openDenyWolfDialog() {
@@ -1037,6 +1063,12 @@
                     <button class="assumption-clear" onclick={() => clearAssumptions()}>全削除</button>
                   {/if}
                 </div>
+                {#if allRolesDetermined}
+                  <div class="determined-banner">
+                    <span class="determined-label">配役確定</span>
+                    <button class="determined-insert" onclick={insertRevealRoles}>挿入</button>
+                  </div>
+                {/if}
                 {#each [...assumptions] as [seat, role]}
                   <div class="assumption-item">
                     <span class="assumption-text">{playerShortNames.get(seat) ?? players.get(seat) ?? `#${seat}`}は{systemRoles.get(role)?.name ?? role}である</span>
@@ -1797,6 +1829,38 @@
   .assumption-clear:hover {
     color: var(--color-text);
     border-color: var(--color-text-muted);
+  }
+
+  .determined-banner {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    margin-bottom: 4px;
+    border: 1px solid var(--color-village);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--color-village) 12%, transparent);
+  }
+
+  .determined-label {
+    color: var(--color-village);
+    font-weight: bold;
+    font-size: 12px;
+  }
+
+  .determined-insert {
+    background: none;
+    border: 1px solid var(--color-village);
+    border-radius: 3px;
+    color: var(--color-village);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 1px 6px;
+    margin-left: auto;
+  }
+
+  .determined-insert:hover {
+    background: color-mix(in srgb, var(--color-village) 20%, transparent);
   }
 
   .deny-wolf {
