@@ -11,21 +11,24 @@ else
   MOUNT_DIR="$SCRIPT_DIR"
 fi
 
+# Clean cached build artifacts inside container to avoid stale intermediate objects
+CLEAN="find target -mindepth 1 -delete 2>/dev/null; "
+
 case "${1:-build}" in
   test)
-    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "cargo test 2>&1"
+    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}cargo test 2>&1"
     ;;
   build)
-    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "wasm-pack build --target nodejs --out-dir pkg 2>&1"
+    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}wasm-pack build --target nodejs --out-dir pkg 2>&1"
     ;;
   build-web)
-    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "wasm-pack build --target web --out-dir pkg-web 2>&1"
+    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}wasm-pack build --target web --out-dir pkg-web 2>&1"
     ;;
   build-dump)
-    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "wasm-pack build --target nodejs --out-dir pkg -- --features dump 2>&1"
+    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}wasm-pack build --target nodejs --out-dir pkg -- --features dump 2>&1"
     ;;
   all)
-    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "cargo test 2>&1 && wasm-pack build --target nodejs --out-dir pkg 2>&1 && wasm-pack build --target web --out-dir pkg-web 2>&1"
+    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}cargo test 2>&1 && wasm-pack build --target nodejs --out-dir pkg 2>&1 && wasm-pack build --target web --out-dir pkg-web 2>&1"
     ;;
   *)
     echo "Usage: $0 {test|build|build-web|build-dump|all}"
