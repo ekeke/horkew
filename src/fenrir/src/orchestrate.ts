@@ -250,6 +250,7 @@ async function generateGame(
   seed: number,
   useTeam: 'wolf_team' | 'mason_team' | undefined,
   mlMaxSeats?: number,
+  mlStartDay?: number,
 ): Promise<{ individualSteps: Map<number, TrajectoryStep[]>, wolfTeamSteps: TrajectoryStep[], masonTeamSteps: TrajectoryStep[] }> {
   const roles = new Map(Object.entries(trainingConfig.roles) as [SystemRole, number][])
   const strategies = new Map<number, FenrirStrategy>()
@@ -264,7 +265,7 @@ async function generateGame(
     }
     const limit = mlMaxSeats ?? candidates.length
     for (let i = 0; i < Math.min(limit, candidates.length); i++) {
-      strategies.set(candidates[i][0], new FenrirStrategy(network, { explore: true, strategyOnly: trainingConfig.strategyOnly }))
+      strategies.set(candidates[i][0], new FenrirStrategy(network, { explore: true, strategyOnly: trainingConfig.strategyOnly, activeFromDay: mlStartDay }))
     }
   }
 
@@ -298,6 +299,10 @@ async function generateGame(
         }
       },
       seed,
+      enableRetar: trainingConfig.enableRetar,
+      retarStartDay: mlStartDay,
+      roles,
+      rules: trainingConfig.rules,
     })
     const result = await runGame(
       { roles, seed, hasFirstGhost: trainingConfig.hasFirstGhost, revoteConfig: trainingConfig.revoteConfig, rules: trainingConfig.rules },
@@ -312,6 +317,7 @@ async function generateGame(
       wolfTeamStrategy: wolfTeamStrategy ?? new WolfTeamHeuristic(),
       masonTeamStrategy: masonTeamStrategy ?? new MasonTeamHeuristic(),
       enableRetar: trainingConfig.enableRetar,
+      retarStartDay: mlStartDay,
       onRolesAssigned: (seatRoles) => {
         onRolesAssigned(seatRoles)
         for (const [seat, s] of strategies) {
@@ -765,7 +771,10 @@ async function main(): Promise<void> {
     // カリキュラム: NN 席数を徐々に増やす (village のみ)
     let mlMaxSeats = 2
     const ML_MAX_SEATS_CAP = 7  // 村役職の最大数
-    log(`  Initial mlMaxSeats=${mlMaxSeats}`)
+    // カリキュラム: ML/Retar開始Dayを徐々に前に (序盤Retarコスト回避)
+    let mlStartDay = 4
+    const ML_START_DAY_MIN = 1  // 全日ML
+    log(`  Initial mlMaxSeats=${mlMaxSeats} mlStartDay=${mlStartDay}`)
 
     const ppoConfig = {
       miniBatchSize: trainingConfig.miniBatchSize,
@@ -828,6 +837,7 @@ async function main(): Promise<void> {
               phase: 1,
               mlRoles: group.roles,
               mlMaxSeats: name === 'village' ? mlMaxSeats : undefined,
+              mlStartDay: name === 'village' ? mlStartDay : undefined,
             }, seeds)
 
             for (const game of serializedResults) {
@@ -848,7 +858,7 @@ async function main(): Promise<void> {
           } else {
             // === 直列フォールバック ===
             for (const seed of seeds) {
-              const game = await generateGame(trainingConfig, network, wolfTeamNet, masonTeamNet, mlRolesSet, seed, group.teamType, name === 'village' ? mlMaxSeats : undefined)
+              const game = await generateGame(trainingConfig, network, wolfTeamNet, masonTeamNet, mlRolesSet, seed, group.teamType, name === 'village' ? mlMaxSeats : undefined, name === 'village' ? mlStartDay : undefined)
               const currentSteps = new Map<number, TrajectoryStep[]>()
               for (const [seat, steps] of game.individualSteps) {
                 currentSteps.set(seat, steps)
@@ -928,7 +938,7 @@ async function main(): Promise<void> {
             }
             timingStr = `${avgGame.toFixed(0)}ms/game (infer ${fmtBreakdown(avgInfer, avgInferCount)} retar ${fmtBreakdown(avgRetar, avgRetarCount)} tsumi ${fmtBreakdown(avgTsumi, avgTsumiCount)}) `
           }
-          const mlInfo = name === 'village' ? ` ml=${mlMaxSeats}/${ML_MAX_SEATS_CAP}` : ''
+          const mlInfo = name === 'village' ? ` ml=${mlMaxSeats}/${ML_MAX_SEATS_CAP} day=${mlStartDay}` : ''
           process.stderr.write(
             `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
             `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
@@ -949,10 +959,14 @@ async function main(): Promise<void> {
               `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
             )
 
-            // カリキュラム: 勝率がベースラインの90%に達したら NN 席数を増やす
+            // カリキュラム: 勝率がベースラインの90%に達したら NN 席数を増やす / 開始Dayを前に
             if (name === 'village' && mlMaxSeats < ML_MAX_SEATS_CAP && factionRate >= targetRate * 0.9) {
               mlMaxSeats = Math.min(mlMaxSeats + 1, ML_MAX_SEATS_CAP)
               log(`${prefix} Curriculum: mlMaxSeats → ${mlMaxSeats}`)
+            }
+            if (name === 'village' && mlStartDay > ML_START_DAY_MIN && factionRate >= targetRate * 0.9) {
+              mlStartDay = Math.max(mlStartDay - 1, ML_START_DAY_MIN)
+              log(`${prefix} Curriculum: mlStartDay → ${mlStartDay}`)
             }
 
             if (factionRate >= targetRate) {

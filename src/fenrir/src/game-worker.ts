@@ -100,9 +100,9 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
         if (usePool && poolNets.length > 0 && seat % 3 === 0) {
           const pastNet = poolNets[Math.floor(Math.random() * poolNets.length)]
-          strategies.set(seat, new FenrirStrategy(pastNet, { explore: true, strategyOnly: config.strategyOnly }))
+          strategies.set(seat, new FenrirStrategy(pastNet, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
         } else {
-          strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
+          strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
         }
       }
     }
@@ -158,7 +158,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
           if (groupName === 'wolf_collective' || groupName === 'mason_collective') continue
           const net = groupName ? groupNets.get(groupName) : undefined
           if (net) {
-            strategies.set(seat, new FenrirStrategy(net, { explore: true, strategyOnly: config.strategyOnly }))
+            strategies.set(seat, new FenrirStrategy(net, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
           }
           // groupName が無い (possessed等) → defaultStrategy にフォールバック
         }
@@ -175,7 +175,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         }
         const limit = req.mlMaxSeats ?? candidates.length
         for (let i = 0; i < Math.min(limit, candidates.length); i++) {
-          strategies.set(candidates[i][0], new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
+          strategies.set(candidates[i][0], new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
         }
       }
     }
@@ -212,6 +212,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         onRolesAssigned: onRolesAssignedWrapped,
         seed,
         enableRetar: config.enableRetar,
+        retarStartDay: req.mlStartDay,
         roles,
         rules: config.rules,
       })
@@ -231,6 +232,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         wolfTeamStrategy,
         masonTeamStrategy,
         enableRetar: config.enableRetar,
+        retarStartDay: req.mlStartDay,
         onRolesAssigned: onRolesAssignedWrapped,
         seed,
         roles,
