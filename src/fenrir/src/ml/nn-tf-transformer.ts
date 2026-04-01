@@ -11,6 +11,7 @@ import type { NetworkConfig, ForwardResult, TransformerNetworkConfig } from './n
 import {
   SEATS, NUM_ROLES,
   HISTORY_WINDOW, OBSERVATION_SIZE,
+  PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS,
   ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS, ROLE_INDEX, CO_ROLES,
   type ObservationMode,
 } from '../observation.ts'
@@ -52,6 +53,9 @@ const PLAN_APPROVED_START = PLAN_START + PLAN_SIZE
 const PLAN_APPROVED_SIZE = SEATS
 const NEW_SIGNALS_PER_SEAT = 4
 const NEW_SIGNALS_START = PLAN_APPROVED_START + PLAN_APPROVED_SIZE
+const NEW_SIGNALS_SIZE = SEATS * NEW_SIGNALS_PER_SEAT
+const PLAN_TOKENS_SIZE = 1 + MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES
+const TSUMI_START = NEW_SIGNALS_START + NEW_SIGNALS_SIZE + PLAN_TOKENS_SIZE
 
 // Team offsets
 const TEAM_SIZE_START = OBSERVATION_SIZE
@@ -82,6 +86,8 @@ function buildClsIndices(mode: ObservationMode): number[] {
   indices.push(REVOTE_ROUND_START)
   // plan_global (3)
   indices.push(PLAN_GLOBAL_START, PLAN_GLOBAL_START + 1, PLAN_GLOBAL_START + 2)
+  // tsumi (1)
+  indices.push(TSUMI_START)
   // team_size (1) — team/collective共通
   if (mode === 'team') indices.push(TEAM_SIZE_START)
   else if (mode === 'wolf_collective' || mode === 'mason_collective') indices.push(COLLECTIVE_TEAM_SIZE_START)
