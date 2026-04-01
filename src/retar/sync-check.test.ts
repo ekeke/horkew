@@ -47,8 +47,10 @@ const MODULE_PREFIX_FILES = new Set(['dump'])
 const ALLOWED_MISMATCHES: Record<string, { tsOnly?: string[], rsOnly?: string[] }> = {
   // combinatorics: 全関数が自動マッチ
   // finalizer: 全関数が自動マッチ
-  // roleTesters: 全関数が自動マッチ
   // dump: MODULE_PREFIX_FILES で自動マッチ（プレフィックス/サフィックス除去）
+  roleTesters: {
+    rsOnly: ['save_into'], // Rust専用: SnapshotPool用のゼロアロケーション版save_context
+  },
 }
 
 // クラス/structメソッドの許可リスト
