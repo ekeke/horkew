@@ -66,7 +66,7 @@ function generateCOSituation(
   return { claims, events }
 }
 
-type PatternType = 'roller' | 'decision' | 'designated' | 'grayran' | 'retar_suspect'
+type PatternType = 'tsumi' | 'roller' | 'decision' | 'designated' | 'grayran' | 'retar_suspect'
 
 /** パターンに応じてプランと正解ラベルを生成 */
 function generatePlanAndLabel(
@@ -75,12 +75,21 @@ function generatePlanAndLabel(
   aliveSeats: number[],
   mySeat: number,
   rng: Rng,
-): { plan: ExecutionPlan, label: Float32Array } | null {
+): { plan: ExecutionPlan, label: Float32Array, tsumiTarget?: number } | null {
   const label = new Float32Array(SEATS)
   const claimants = [...claims.keys()]
   const grays = aliveSeats.filter(s => s !== mySeat && !claims.has(s))
 
   switch (pattern) {
+    case 'tsumi': {
+      // 詰み: 自分以外のランダムな生存席を詰み対象に
+      const candidates = aliveSeats.filter(s => s !== mySeat)
+      if (candidates.length === 0) return null
+      const target = candidates[Math.floor(rng.next() * candidates.length)]
+      const plan: ExecutionPlan = { targets: [], type: 'grayran' }  // プランは空（tsumi優先）
+      label[target - 1] = 1
+      return { plan, label, tsumiTarget: target }
+    }
     case 'roller': {
       if (claimants.length < 2) return null
       const targets = claimants.filter(s => s !== mySeat)
@@ -135,6 +144,7 @@ function buildSyntheticContext(params: {
   plan: ExecutionPlan
   rng: Rng
   retarPossibilities?: Map<number, Set<SystemRole>>
+  tsumiTarget?: number
 }): DecisionContext {
   return {
     mySeat: params.mySeat,
@@ -164,7 +174,7 @@ function buildSyntheticContext(params: {
     revoteRound: null,
     revoteCandidates: null,
     executionPlans: [params.plan],
-    tsumiTarget: null,
+    tsumiTarget: params.tsumiTarget ?? null,
     rules: resolveRules(),
   }
 }
@@ -221,8 +231,8 @@ function generateSyntheticRetar(
   return { possibilities, suspectSeats }
 }
 
-const PATTERNS: PatternType[] = ['roller', 'decision', 'designated', 'grayran', 'retar_suspect']
-const PATTERN_WEIGHTS = [0.2, 0.15, 0.15, 0.2, 0.3]
+const PATTERNS: PatternType[] = ['tsumi', 'roller', 'decision', 'designated', 'grayran', 'retar_suspect']
+const PATTERN_WEIGHTS = [0.15, 0.17, 0.13, 0.13, 0.17, 0.25]
 
 function pickPattern(rng: Rng): PatternType {
   const r = rng.next()
@@ -262,11 +272,12 @@ export function generatePlanTrainingBatch(count: number, seed: number = 42): Pla
     const result = generatePlanAndLabel(pattern, claims, aliveSeats, mySeat, rng)
     if (!result) continue  // 条件に合わなければリトライ
 
-    const { plan, label } = result
+    const { plan, label, tsumiTarget } = result
 
     // DecisionContext構築 → observation
     const ctx = buildSyntheticContext({
       day, mySeat, myRole, aliveSeats, events, plan, rng,
+      tsumiTarget,
     })
     const observation = encodeObservation(ctx)
     const voteMask = maskVote(ctx)
@@ -312,7 +323,7 @@ function patternToForwardLabels(
   mySeat: number,
   rng: Rng,
   suspectSeats?: number[],
-): { labels: number[], mask: boolean[] } | null {
+): { labels: number[], mask: boolean[], tsumiTarget?: number } | null {
   const labels = new Array(NUM_FORWARD_TOKENS).fill(PLAN_VOCAB.STOP)
   const mask = new Array(NUM_FORWARD_TOKENS).fill(false)
   const claimants = [...claims.keys()].filter((s: number) => s !== mySeat)
@@ -322,6 +333,16 @@ function patternToForwardLabels(
   const roleVocabIdx = claimedRole ? PLAN_VOCAB.ROLE_START + CO_ROLES.indexOf(claimedRole) : -1
 
   switch (pattern) {
+    case 'tsumi': {
+      // 詰み: [target_seat, stop, ...]
+      const candidates = aliveSeats.filter((s: number) => s !== mySeat)
+      if (candidates.length === 0) return null
+      const target = candidates[Math.floor(rng.next() * candidates.length)]
+      let pos = 0
+      labels[pos] = target - 1; mask[pos++] = true  // seat idx = seat - 1
+      labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      return { labels, mask, tsumiTarget: target }
+    }
     case 'roller': {
       // [role, next, role, stop, ...]
       if (claimants.length < 2 || roleVocabIdx < 0) return null
@@ -405,6 +426,7 @@ export function generatePlanTokenTrainingBatch(count: number, seed: number = 42)
     const ctx = buildSyntheticContext({
       day, mySeat, myRole, aliveSeats, events, plan, rng,
       retarPossibilities: retar?.possibilities,
+      tsumiTarget: result.tsumiTarget,
     })
     const observation = encodeObservation(ctx)
 
