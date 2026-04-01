@@ -268,6 +268,39 @@ export class Possibilities {
     return this._drain(buf, head, tail, inPending)
   }
 
+  /**
+   * refix + hidden singles を fixpoint まで反復する。
+   * hidden singles: 役職 R の残カウントと候補席数が一致 → 全候補を R に確定。
+   * finalize() の solver 呼び出し前に最大限の席を確定させる。
+   */
+  propagateFull(): boolean {
+    for (;;) {
+      if (!this.refix()) return false
+      let changed = false
+      for (let bitIdx = 0; bitIdx < ROLE_COUNT; bitIdx++) {
+        const remaining = this.setup[bitIdx]
+        if (remaining === 0) continue
+        const bit = 1 << bitIdx
+        let candidateCount = 0
+        for (let i = 1; i < this.possibilities.length; i++) {
+          if (popCount(this.possibilities[i]) > 1 && (this.possibilities[i] & bit)) {
+            candidateCount++
+          }
+        }
+        if (candidateCount < remaining) return false
+        if (candidateCount === remaining) {
+          for (let i = 1; i < this.possibilities.length; i++) {
+            if (popCount(this.possibilities[i]) > 1 && (this.possibilities[i] & bit)) {
+              this.possibilities[i] = bit
+              changed = true
+            }
+          }
+        }
+      }
+      if (!changed) return true
+    }
+  }
+
   fix(seat: number): boolean {
     const buf = this._pendingBuf
     buf[0] = seat

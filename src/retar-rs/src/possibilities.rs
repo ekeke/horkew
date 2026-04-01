@@ -271,6 +271,45 @@ impl Possibilities {
         true
     }
 
+    /// refix + hidden singles を fixpoint まで反復する。
+    /// hidden singles: 役職 R の残カウントと候補席数が一致 → 全候補を R に確定。
+    /// finalize() の solver 呼び出し前に最大限の席を確定させる。
+    pub fn propagate_full(&mut self) -> bool {
+        loop {
+            if !self.refix() {
+                return false;
+            }
+            let mut changed = false;
+            for bit_idx in 0..ROLE_COUNT {
+                let remaining = self.setup[bit_idx];
+                if remaining == 0 {
+                    continue;
+                }
+                let bit: u16 = 1 << bit_idx;
+                let mut candidate_count: u8 = 0;
+                for i in 1..self.possibilities.len() {
+                    if pop_count(self.possibilities[i]) > 1 && (self.possibilities[i] & bit) != 0 {
+                        candidate_count += 1;
+                    }
+                }
+                if candidate_count < remaining {
+                    return false;
+                }
+                if candidate_count == remaining {
+                    for i in 1..self.possibilities.len() {
+                        if pop_count(self.possibilities[i]) > 1 && (self.possibilities[i] & bit) != 0 {
+                            self.possibilities[i] = bit;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if !changed {
+                return true;
+            }
+        }
+    }
+
     pub fn deny_role(&mut self, seat: Seat, role: SystemRole) -> bool {
         let seat_idx = seat as usize;
         self.possibilities[seat_idx] &= !role.bit();

@@ -187,26 +187,7 @@ pub fn finalize(
         }
     }
 
-    if !context.possibilities.refix() {
-        return;
-    }
-
-    // If candidates == count for a role, fix all
-    for (&role, &count) in setup {
-        let candidates = context.possibilities.get_possible_seats_for_role(role);
-        if (candidates.len() as u32) < count {
-            return;
-        }
-        if candidates.len() as u32 == count {
-            for &seat in &candidates {
-                if !context.possibilities.fix_role(seat, role) {
-                    return;
-                }
-            }
-        }
-    }
-
-    if !context.possibilities.refix() {
+    if !context.possibilities.propagate_full() {
         return;
     }
     debug_stash.finalizer_middle += 1;

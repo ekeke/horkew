@@ -157,23 +157,7 @@ export function finalize(
     }
   }
 
-  if (!context.possibilities.refix()) {
-    return
-  }
-  for (const [role, count] of setup.entries()) {
-    const candidates = context.possibilities.getPossibleSeatsForRole(role)
-    if (candidates.length < count) {
-      return
-    }
-    if ( candidates.length === count ) {
-      for ( const seat of candidates ) {
-        if ( !context.possibilities.fixRole(seat, role) ) {
-          return
-        }
-      }
-    }
-  }
-  if (!context.possibilities.refix()) {
+  if (!context.possibilities.propagateFull()) {
     return
   }
   debugStash.finalizerMiddle++
