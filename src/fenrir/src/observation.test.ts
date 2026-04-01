@@ -21,7 +21,7 @@ const PLAN_SIZE = SEATS * 2 + 3  // 31
 const PLAN_APPROVED_SIZE = SEATS  // 14
 const NEW_SIGNALS_SIZE = SEATS * 4  // 56
 const PLAN_TOKENS_SIZE = 1 + MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES  // 161
-const TSUMI_SIZE = 1 + SEATS  // 15
+const TSUMI_SIZE = 1
 const PLAN_GLOBAL_SIZE = 3
 
 // PLANセクションの開始オフセット
@@ -71,7 +71,7 @@ describe('OBSERVATION_SIZE', () => {
       + GLOBAL_RETAR_SIZE
       + PLAN_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE + PLAN_TOKENS_SIZE + TSUMI_SIZE
     assert.equal(OBSERVATION_SIZE, expected)
-    assert.equal(OBSERVATION_SIZE, 1223)
+    assert.equal(OBSERVATION_SIZE, 1209)
   })
 })
 

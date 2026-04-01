@@ -79,8 +79,8 @@ const PLAN_TOKENS_COUNT_SIZE = 1
 const PLAN_TOKENS_DATA_SIZE = MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES  // 160
 const PLAN_TOKENS_SIZE = PLAN_TOKENS_COUNT_SIZE + PLAN_TOKENS_DATA_SIZE  // 161
 
-// 詰み情報: is_tsumi(1) + tsumi_execute_target(SEATS)
-const TSUMI_SIZE = 1 + SEATS  // 15
+// 詰み情報: tsumi_target_seat スカラー (0=詰みなし, seat/SEATS=詰み対象席)
+const TSUMI_SIZE = 1
 
 export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + GLOBAL_RETAR_SIZE + PLAN_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE + PLAN_TOKENS_SIZE + TSUMI_SIZE
 
@@ -130,9 +130,9 @@ export const CLS_FEATURES = 26  // 25 + tsumi(1)
 /** CLSトークンの特徴量次元 (team) */
 export const TEAM_CLS_FEATURES = 27  // 26 + tsumi(1)
 /** 席トークンの特徴量次元 (individual) */
-export const SEAT_TOKEN_FEATURES = 74  // 57 + globalRetar(11) + plan_approved(1) + new_signals(4) + tsumi(1)
+export const SEAT_TOKEN_FEATURES = 73  // 57 + globalRetar(11) + plan_approved(1) + new_signals(4)
 /** 席トークンの特徴量次元 (team) */
-export const TEAM_SEAT_TOKEN_FEATURES = 77  // 74 + team(3)
+export const TEAM_SEAT_TOKEN_FEATURES = 76  // 73 + team(3)
 
 /** CO可能役職 (Role token対象) */
 export const CO_ROLES: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
@@ -246,9 +246,6 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
     // new signals (4): confirm_human, confirm_wolf, vote_for, vote_against
     const nsOff = NEW_SIGNALS_START + s * NEW_SIGNALS_PER_SEAT
     for (let i = 0; i < NEW_SIGNALS_PER_SEAT; i++) seats[so++] = obs[nsOff + i]
-
-    // tsumi execute target (1)
-    seats[so++] = obs[TSUMI_START + 1 + s]
 
     // team extension per-seat (3)
     if (isTeam) {
@@ -707,9 +704,9 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   offset += PLAN_TOKENS_DATA_SIZE  // always advance by max size
 
   // ========== Tsumi ==========
+  // commander と同じエンコーディング: 0=詰みなし, seat/SEATS=詰み対象席
   if (ctx.tsumiTarget !== null && ctx.tsumiTarget >= 1 && ctx.tsumiTarget <= SEATS) {
-    obs[TSUMI_START] = 1  // is_tsumi
-    obs[TSUMI_START + 1 + (ctx.tsumiTarget - 1)] = 1  // one-hot execute target
+    obs[TSUMI_START] = ctx.tsumiTarget / SEATS
   }
 
   return obs
@@ -757,12 +754,12 @@ const WOLF_FAKE_DIVINE_START = COLLECTIVE_TEAM_SIZE_START + 1
 const WOLF_VILLAGE_PREDICT_START = WOLF_FAKE_DIVINE_START + WOLF_COLLECTIVE_FAKE_DIVINE_SIZE
 const WOLF_VILLAGE_TRUST_START = WOLF_VILLAGE_PREDICT_START + WOLF_COLLECTIVE_VILLAGE_PREDICT_SIZE
 
-/** 狼集団 Seat token特徴量次元: individual(74) + village_predict(11) + village_trust(1) + fake_divine(1) */
-export const WOLF_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1 + 1  // 87
+/** 狼集団 Seat token特徴量次元: individual(73) + village_predict(11) + village_trust(1) + fake_divine(1) */
+export const WOLF_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1 + 1  // 86
 /** 狼集団 CLS token特徴量次元: individual(26) + team_size(1) — my_role(11)は0埋め */
 export const WOLF_COLLECTIVE_CLS_FEATURES = CLS_FEATURES + 1  // 27
-/** 共有集団 Seat token特徴量次元: individual(74) — is_meがis_my_teamになるだけ */
-export const MASON_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES  // 74
+/** 共有集団 Seat token特徴量次元: individual(73) — is_meがis_my_teamになるだけ */
+export const MASON_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES  // 73
 /** 共有集団 CLS token特徴量次元: individual(26) + team_size(1) */
 export const MASON_COLLECTIVE_CLS_FEATURES = CLS_FEATURES + 1  // 27
 
@@ -776,8 +773,8 @@ export const FANATIC_OBSERVATION_SIZE = OBSERVATION_SIZE + FANATIC_EXTRA
 const FANATIC_VILLAGE_PREDICT_START = OBSERVATION_SIZE
 const FANATIC_VILLAGE_TRUST_START = FANATIC_VILLAGE_PREDICT_START + FANATIC_VILLAGE_PREDICT_SIZE
 
-/** 狂信者 Seat token特徴量次元: individual(74) + village_predict(11) + village_trust(1) */
-export const FANATIC_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1  // 86
+/** 狂信者 Seat token特徴量次元: individual(73) + village_predict(11) + village_trust(1) */
+export const FANATIC_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1  // 85
 /** 狂信者 CLS token特徴量次元: individual(26) — team_sizeなし */
 export const FANATIC_CLS_FEATURES = CLS_FEATURES  // 26
 
