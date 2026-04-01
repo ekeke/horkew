@@ -800,7 +800,7 @@ async function main(): Promise<void> {
 
     const graduated = new Set<ModelName>()
     // カリキュラム: NN 席数を徐々に増やす (village のみ)
-    let mlMaxSeats = 2
+    let mlMaxSeats = 1
     const ML_MAX_SEATS_CAP = 7  // 村役職の最大数
     log(`  Initial mlMaxSeats=${mlMaxSeats}`)
 
