@@ -903,9 +903,14 @@ function shouldNominateSelf(ctx: DecisionContext): boolean {
   if (ctx.commander !== null) return false
   if (!ctx.retarPossibilities) return false
 
-  // 既にnominate_commanderが出ていればスキップ
+  // 既にnominate_commanderが出ていればスキップ（publicEventsとsignals両方を確認）
   for (const e of ctx.publicEvents) {
     if (e.type === 'signal' && e.signal.type === 'nominate_commander') return false
+  }
+  if (ctx.signals) {
+    for (const s of ctx.signals) {
+      if (s.signal.type === 'nominate_commander') return false
+    }
   }
 
   // 自分がRetar確定村陣営か

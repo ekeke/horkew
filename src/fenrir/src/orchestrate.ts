@@ -11,16 +11,9 @@
  */
 
 import type { SystemRole } from '../../types/index.ts'
-import type { LupaConfig } from '../../lupa/types.ts'
-import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame } from '../../lupa/engine.ts'
-import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
-import { fullAdapter } from './lupaAdapters/full-adapter.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
-import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy, computeRefPlanLogits } from './policy.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
-import { terminalReward, intermediateReward, predictAccuracyReward, buildKnownSeats, DEFAULT_REWARD_CONFIG } from './reward.ts'
-import { encodeTrueRoles } from './observation.ts'
+import { computeRefPlanLogits } from './policy.ts'
+import { DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import {
@@ -114,7 +107,7 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   phase2Only: false,
   resume: false,
   learningRate: 3e-4,
-  workers: 0,
+  workers: -1,
   transformer: false,
   strategyOnly: false,
 }
@@ -367,158 +360,6 @@ function ppoUpdate(
   }
 }
 
-// ============================================================
-// Game Generation (1ゲーム分)
-// ============================================================
-
-async function generateGame(
-  trainingConfig: TrainingConfig,
-  network: AnyNetwork,
-  wolfTeamNet: AnyNetwork,
-  masonTeamNet: AnyNetwork,
-  mlRolesSet: Set<SystemRole>,
-  seed: number,
-  useTeam: 'wolf_team' | 'mason_team' | undefined,
-  mlMaxSeats?: number,
-  mlStartDay?: number,
-): Promise<{ individualSteps: Map<number, TrajectoryStep[]>, wolfTeamSteps: TrajectoryStep[], masonTeamSteps: TrajectoryStep[] }> {
-  const roles = new Map(Object.entries(trainingConfig.roles) as [SystemRole, number][])
-  const strategies = new Map<number, FenrirStrategy>()
-  const heuristic = new HeuristicStrategy()
-
-  const onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
-    const candidates = [...seatRoles].filter(([_, role]) => mlRolesSet.has(role))
-    // seed ベースでシャッフル
-    for (let i = candidates.length - 1; i > 0; i--) {
-      const j = (seed * 7 + i * 13) % (i + 1)
-      ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
-    }
-    const limit = mlMaxSeats ?? candidates.length
-    for (let i = 0; i < Math.min(limit, candidates.length); i++) {
-      strategies.set(candidates[i][0], new FenrirStrategy(network, { explore: true, strategyOnly: trainingConfig.strategyOnly, activeFromDay: mlStartDay }))
-    }
-  }
-
-  let wolfTeamStrategy: WolfTeamStrategy | undefined
-  let masonTeamStrategy: MasonTeamStrategy | undefined
-  if (useTeam === 'wolf_team') {
-    wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
-  }
-  if (useTeam === 'mason_team') {
-    masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
-  }
-
-  const strategiesMap = new Map<number, Strategy>(strategies)
-  for (const s of strategies.values()) s.resetTrajectory?.()
-  wolfTeamStrategy?.resetTrajectory()
-  masonTeamStrategy?.resetTrajectory()
-
-  let state: import('../../lupa/types.ts').GameState
-  let events: import('../../lupa/types.ts').GameEvent[]
-
-  if (trainingConfig.strategyOnly) {
-    const handlers = minimalAdapter({
-      strategies: strategiesMap,
-      defaultStrategy: heuristic,
-      wolfTeamStrategy: wolfTeamStrategy ?? new WolfTeamHeuristic(),
-      masonTeamStrategy: masonTeamStrategy ?? new MasonTeamHeuristic(),
-      onRolesAssigned: (seatRoles) => {
-        onRolesAssigned(seatRoles)
-        for (const [seat, s] of strategies) {
-          if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
-        }
-      },
-      seed,
-      enableRetar: trainingConfig.enableRetar,
-      retarStartDay: mlStartDay,
-      roles,
-      rules: trainingConfig.rules,
-    })
-    const result = await runGame(
-      { roles, seed, hasFirstGhost: trainingConfig.hasFirstGhost, revoteConfig: trainingConfig.revoteConfig, rules: trainingConfig.rules },
-      handlers,
-    )
-    state = result.state
-    events = result.events
-  } else {
-    const handlers = fullAdapter({
-      strategies: strategiesMap,
-      defaultStrategy: heuristic,
-      wolfTeamStrategy: wolfTeamStrategy ?? new WolfTeamHeuristic(),
-      masonTeamStrategy: masonTeamStrategy ?? new MasonTeamHeuristic(),
-      enableRetar: trainingConfig.enableRetar,
-      retarStartDay: mlStartDay,
-      onRolesAssigned: (seatRoles) => {
-        onRolesAssigned(seatRoles)
-        for (const [seat, s] of strategies) {
-          if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
-        }
-      },
-      seed,
-      roles,
-      rules: trainingConfig.rules,
-    })
-    const result = await runGame(
-      { roles, seed, hasFirstGhost: trainingConfig.hasFirstGhost, revoteConfig: trainingConfig.revoteConfig, rules: trainingConfig.rules },
-      handlers,
-    )
-    state = result.state
-    events = result.events
-  }
-
-  // Collect trajectories
-  const allSteps = new Map<number, TrajectoryStep[]>()
-  for (const [seat, strategy] of strategies) {
-    const steps = strategy.trajectory
-    if (steps.length > 0) {
-      steps[steps.length - 1].done = true
-      const player = state.players.find(p => p.seat === seat)!
-      steps[steps.length - 1].reward += terminalReward(player.role, state.result ?? '', trainingConfig.rewardConfig)
-    }
-    allSteps.set(seat, steps)
-  }
-
-  const wolfTeamSteps = wolfTeamStrategy?.trajectory ?? []
-  if (wolfTeamSteps.length > 0) {
-    wolfTeamSteps[wolfTeamSteps.length - 1].done = true
-    wolfTeamSteps[wolfTeamSteps.length - 1].reward += terminalReward('werewolf', state.result ?? '', trainingConfig.rewardConfig)
-  }
-
-  const masonTeamSteps = masonTeamStrategy?.trajectory ?? []
-  if (masonTeamSteps.length > 0) {
-    masonTeamSteps[masonTeamSteps.length - 1].done = true
-    masonTeamSteps[masonTeamSteps.length - 1].reward += terminalReward('mason', state.result ?? '', trainingConfig.rewardConfig)
-  }
-
-  for (const event of events) {
-    const rewards = intermediateReward(event, state, trainingConfig.rewardConfig)
-    for (const [seat, reward] of rewards) {
-      const steps = allSteps.get(seat)
-      if (steps && steps.length > 0) steps[steps.length - 1].reward += reward
-      const player = state.players.find(p => p.seat === seat)
-      if (player?.role === 'werewolf' && wolfTeamSteps.length > 0) wolfTeamSteps[wolfTeamSteps.length - 1].reward += reward
-      if (player?.role === 'mason' && masonTeamSteps.length > 0) masonTeamSteps[masonTeamSteps.length - 1].reward += reward
-    }
-  }
-
-  // trueRoles注入 + 推理精度報酬
-  const trueRoles = encodeTrueRoles(state.players)
-  for (const [seat, steps] of allSteps) {
-    const player = state.players.find(p => p.seat === seat)
-    if (!player) continue
-    const knownSeats = buildKnownSeats(seat, player.role, state)
-    for (const step of steps) {
-      step.trueRoles = trueRoles
-      if (step.actionHead === 'predict' && step.sigmoidActions) {
-        step.reward += predictAccuracyReward(
-          step.sigmoidActions, trueRoles, player.role, trainingConfig.rewardConfig, knownSeats,
-        )
-      }
-    }
-  }
-
-  return { individualSteps: allSteps, wolfTeamSteps, masonTeamSteps }
-}
 
 // ============================================================
 // Checkpoint helpers
@@ -637,6 +478,23 @@ function findCheckpoint(dir: string, prefix: string = 'checkpoint'): { iteration
 
 function log(msg: string): void {
   process.stderr.write(`${BOLD}[orch]${RESET} ${msg}\n`)
+}
+
+function formatTimingStr(timings: import('./parallel.ts').GameTiming[]): string {
+  if (timings.length === 0) return ''
+  const n = timings.length
+  const avgGame = timings.reduce((a, t) => a + t.gameMs, 0) / n
+  const avgInfer = timings.reduce((a, t) => a + t.inferMs, 0) / n
+  const avgInferCount = timings.reduce((a, t) => a + t.inferCount, 0) / n
+  const avgRetar = timings.reduce((a, t) => a + t.retarMs, 0) / n
+  const avgRetarCount = timings.reduce((a, t) => a + t.retarCount, 0) / n
+  const avgTsumi = timings.reduce((a, t) => a + t.tsumiMs, 0) / n
+  const avgTsumiCount = timings.reduce((a, t) => a + t.tsumiCount, 0) / n
+  const fmt = (totalMs: number, count: number) => {
+    if (count === 0) return `${totalMs.toFixed(0)}ms`
+    return `${(totalMs / count).toFixed(1)}ms×${count.toFixed(0)}=${totalMs.toFixed(0)}ms`
+  }
+  return `${avgGame.toFixed(0)}ms/game (infer ${fmt(avgInfer, avgInferCount)} retar ${fmt(avgRetar, avgRetarCount)} tsumi ${fmt(avgTsumi, avgTsumiCount)}) `
 }
 
 // ============================================================
@@ -921,6 +779,253 @@ async function main(): Promise<void> {
   }
   log(`Baseline (hardcoded): ${Object.entries(baselineRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')}`)
 
+  // === Phase 0: Mason Individual (backbone pre-training) ===
+  // 確定白の共有者を個人モデルとして学習。1 ML席で村全体の投票を制御できるため学習シグナルが強い。
+  // 卒業後に全重みを village モデルに転送して Phase 1 を warm start する。
+  if (!config.phase2Only) {
+    const masonDir = `${config.checkpointBase}/ckpt-mason_individual`
+    const masonFinalPath = `${masonDir}/final.json`
+    const phase0Done = existsSync(masonFinalPath)
+
+    if (phase0Done) {
+      log(`${BOLD}=== Phase 0: Mason Individual (already graduated) ===${RESET}`)
+      // Backbone transfer: mason → village
+      const villageNet = networks.get('village' as ModelName)!
+      const masonNet = makeNetwork()
+      loadCheckpoint(masonNet, masonFinalPath)
+      villageNet.loadWeights(masonNet.cloneWeights())
+      log(`  Mason backbone transferred to village network`)
+      if (refNetwork) {
+        refNetwork.loadWeights(masonNet.cloneWeights())
+        log(`  Reference network updated from mason weights`)
+      }
+    } else {
+      log(`${BOLD}=== Phase 0: Mason Individual ===${RESET}`)
+
+      // Mason individual uses the same architecture as village
+      const masonNet = makeNetwork()
+      const masonTf = makeTfNetwork(config.learningRate * 0.2)
+
+      // Resume support
+      let masonIter = 0
+      if (config.resume) {
+        const ckpt = findCheckpoint(masonDir)
+        if (ckpt) {
+          try {
+            loadCheckpoint(masonNet, ckpt.path)
+            masonIter = ckpt.iteration
+            log(`  Resumed from ${ckpt.path} (iter ${masonIter})`)
+          } catch (e) {
+            log(`  Checkpoint incompatible, starting fresh (${(e as Error).message})`)
+          }
+        }
+      }
+
+      // Pretrain: mason も village の pretrain 重みを使う（同一アーキテクチャ）
+      if (masonIter === 0) {
+        const villageNet = networks.get('village' as ModelName)!
+        masonNet.loadWeights(villageNet.cloneWeights())
+        log(`  Mason initialized from village pretrain weights`)
+      }
+
+      const masonPpoConfig = {
+        miniBatchSize: trainingConfig.miniBatchSize,
+        clipEpsilon: trainingConfig.clipEpsilon,
+        valueLossCoeff: trainingConfig.valueLossCoeff,
+        entropyCoeff: trainingConfig.entropyCoeff,
+        freezePlan: false,
+        klCoeff: refNetwork ? 0.2 : 0,
+      }
+
+      // Mason ref network (KL anchor)
+      // KL reference network（MLP でも使用可能）
+      const masonRefNetwork = makeNetwork()
+      masonRefNetwork.loadWeights(masonNet.cloneWeights())
+
+      const masonMlRoles = ['mason'] as SystemRole[]
+      const masonMlStartDay = 4  // Day 3 スナップショットからリプレイ
+      const ML_START_DAY_MIN_MASON = 1
+      let masonSnapshotCount = masonMlStartDay > ML_START_DAY_MIN_MASON
+        ? countSnapshots(masonMlStartDay - 1, masonMlRoles, 1) : 0
+      const masonEvalSnapshotCount = masonMlStartDay > ML_START_DAY_MIN_MASON
+        ? countSnapshots(masonMlStartDay - 1, masonMlRoles, 1, true) : 0
+      if (masonSnapshotCount === 0 && masonMlStartDay > ML_START_DAY_MIN_MASON) {
+        // mason は village roles のスナップショットを使える（mason が生存していれば）
+        masonSnapshotCount = countSnapshots(masonMlStartDay - 1, MODEL_GROUPS.village.roles as string[], 1)
+        if (masonSnapshotCount > 0) {
+          log(`  Using village snapshots for mason (${masonSnapshotCount} at Day ${masonMlStartDay - 1})`)
+        } else {
+          log(`  ⚠ No snapshots at Day ${masonMlStartDay - 1}. Falling back to full games.`)
+        }
+      } else if (masonSnapshotCount > 0) {
+        log(`  Seed bank: ${masonSnapshotCount} train + ${masonEvalSnapshotCount} eval snapshots at Day ${masonMlStartDay - 1}`)
+      }
+
+      const masonTargetRate = baselineRates['villager_won'] ?? 0.55
+      const prefix = `\x1b[36m[mason_ind ]${RESET}`
+      mkdirSync(masonDir, { recursive: true })
+      let graduated = false
+      let iterElapsed = 0
+      let iterCount = 0
+
+      for (let iter = masonIter + 1; iter <= config.iterations && !graduated; iter++) {
+        const iterStart = performance.now()
+        const seeds = Array.from({ length: config.batch }, (_, g) => iter * config.batch + g)
+
+        // ゲーム生成
+        const allSteps: ProcessedStep[] = []
+
+        const sharedWeights = packWeights(masonNet)
+        const aliveRoles = MODEL_GROUPS.village.roles as string[]
+        const batchSnapshots = masonSnapshotCount > 0
+          ? loadRandomSnapshots(masonMlStartDay - 1, seeds.length, new Rng(iter), {
+              aliveRoles,
+              minAlive: 1,
+            })
+          : undefined
+
+        const serializedResults = await generateGamesParallel({
+          weights: sharedWeights,
+          trainingConfig,
+          phase: 1,
+          mlRoles: masonMlRoles,
+          mlMaxSeats: 1,
+          mlStartDay: (!batchSnapshots) ? masonMlStartDay : undefined,
+          snapshots: batchSnapshots,
+        }, seeds)
+
+        for (const game of serializedResults) {
+          const stepsMap = new Map<number, TrajectoryStep[]>()
+          for (const { seat, steps } of game.individualSteps) {
+            stepsMap.set(seat, steps.map(deserializeStep))
+          }
+          allSteps.push(...processTrajectories(stepsMap, trainingConfig.gamma, trainingConfig.lambda))
+        }
+        const lastBatchTimings = serializedResults.filter(g => g.timing).map(g => g.timing!)
+        const tGameEnd = performance.now()
+        const tPpoStart = performance.now()
+
+        // PPO update
+        let lastPpoResult = { policyLoss: 0, predictLoss: 0, klLoss: 0 }
+        if (allSteps.length > 0) {
+          normalizeAdvantages(allSteps)
+
+          let precomputedRefLogits: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }> | undefined
+          if (masonRefNetwork && masonPpoConfig.klCoeff > 0) {
+            precomputedRefLogits = new Map()
+            for (const step of allSteps) {
+              if (step.actionHead === 'strategy') {
+                const { refFwdLogits, refEgLogits } = computeRefPlanLogits(masonRefNetwork, step.observation)
+                precomputedRefLogits.set(step, { fwd: refFwdLogits, eg: refEgLogits })
+              }
+            }
+          }
+
+          masonTf.loadWeights(masonNet.cloneWeights())
+          for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
+            lastPpoResult = ppoUpdate(masonTf, allSteps, masonPpoConfig, precomputedRefLogits)
+          }
+          masonNet.loadWeights(masonTf.cloneWeights())
+        }
+
+        // Adaptive KL
+        if (masonPpoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
+          const klTarget = 0.05
+          if (lastPpoResult.klLoss > klTarget * 1.5) {
+            masonPpoConfig.klCoeff *= 1.5
+          } else if (lastPpoResult.klLoss < klTarget / 1.5) {
+            masonPpoConfig.klCoeff /= 1.5
+          }
+          masonPpoConfig.klCoeff = Math.max(0.01, Math.min(10, masonPpoConfig.klCoeff))
+        }
+
+        const tPpoEnd = performance.now()
+        const iterMs = performance.now() - iterStart
+        iterElapsed += iterMs
+        iterCount++
+        const gameMs = tGameEnd - iterStart
+        const ppoMs = tPpoEnd - tPpoStart
+        const gamePct = (gameMs / iterMs * 100).toFixed(0)
+        const ppoPct = (ppoMs / iterMs * 100).toFixed(0)
+        const pct = (iter / config.iterations * 100).toFixed(1)
+        const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
+        const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${masonPpoConfig.klCoeff.toFixed(3)})` : ''
+        const avgIterMs = (iterElapsed / iterCount / 1000).toFixed(1)
+        const remaining = ((config.iterations - iter) * iterElapsed / iterCount / 1000).toFixed(0)
+
+        // timing breakdown (same as Phase 1)
+        const timingStr = formatTimingStr(lastBatchTimings)
+
+        process.stderr.write(
+          `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
+          `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
+          `steps=${allSteps.length}${lossStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
+        )
+
+        // Eval
+        if (iter % config.evalInterval === 0) {
+          process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
+
+          const aliveRoles = MODEL_GROUPS.village.roles as string[]
+          const evalSnapshots = masonSnapshotCount > 0
+            ? loadRandomSnapshots(masonMlStartDay - 1, config.evalGames, new Rng(42), {
+                aliveRoles,
+                minAlive: 1,
+                forEval: true,
+              })
+            : undefined
+          const evalResult = await evaluate(
+            masonNet, { ...trainingConfig, mlRoles: masonMlRoles }, config.evalGames,
+            wolfTeamNet, masonTeamNet, 1,
+            { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), masonAsIndividual: true, evalIter: iter },
+          )
+          process.stderr.write('\r\x1b[K')
+          appendEvalLog(masonDir, iter, evalResult, 'mason_individual')
+          const factionRate = evalResult.winRates['villager_won'] ?? 0
+          log(
+            `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
+            `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
+          )
+
+          progress.evals.push({
+            time: new Date().toISOString(), model: 'mason_individual' as any, iter,
+            winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: factionRate >= masonTargetRate ? 'GRADUATED' : '',
+          })
+          progress.latest = { phase: '0', model: 'mason_individual', iter, maxIter: config.iterations, klCoeff: masonPpoConfig.klCoeff }
+          updateProgressFile(progress)
+
+          if (factionRate >= masonTargetRate) {
+            log(`${prefix} ${BOLD}GRADUATED${RESET} (villager_won=${(factionRate * 100).toFixed(0)}% >= ${(masonTargetRate * 100).toFixed(0)}%)`)
+            graduated = true
+          }
+        }
+
+        // Checkpoint
+        if (iter % config.checkpointInterval === 0) {
+          saveCheckpoint(masonNet, `${masonDir}/checkpoint_${iter}.json`, { iteration: iter, winRate: 0 })
+        }
+      }
+
+      process.stderr.write('\r\x1b[K')
+
+      // Final save
+      saveCheckpoint(masonNet, masonFinalPath, { iteration: config.iterations, winRate: 0 })
+      log(`Phase 0 complete. Mason individual checkpoint → ${masonFinalPath}`)
+
+      // Backbone transfer: mason → village
+      const villageNet = networks.get('village' as ModelName)!
+      villageNet.loadWeights(masonNet.cloneWeights())
+      log(`Mason backbone transferred to village network (all weights)`)
+      if (refNetwork) {
+        refNetwork.loadWeights(masonNet.cloneWeights())
+        log(`Reference network updated from mason weights`)
+      }
+
+      // TfNetwork も更新
+      tfNetwork.loadWeights(masonNet.cloneWeights())
+    }
+  }
+
   // === Phase 1: ラウンドロビン ===
   if (!config.phase2Only) {
     log(`${BOLD}=== Phase 1: Round-Robin Training ===${RESET}`)
@@ -971,7 +1076,6 @@ async function main(): Promise<void> {
 
         const group = MODEL_GROUPS[name]
         const network = networks.get(name)!
-        const mlRolesSet = new Set(group.roles)
         const currentIter = iterCounts.get(name)!
         const targetIter = Math.min(currentIter + config.chunkSize, config.iterations)
         const targetRate = config.targetWinRate ?? (baselineRates[group.faction] ?? 0.5)
@@ -992,69 +1096,46 @@ async function main(): Promise<void> {
           const allWolfTeam: ProcessedStep[] = []
           const allMasonTeam: ProcessedStep[] = []
 
-          let lastBatchTimings: import('./parallel.ts').GameTiming[] = []
+          const sharedWeights = packWeights(network)
+          const sharedWolfWeights = group.teamType === 'wolf_team' ? packWeights(wolfTeamNet) : undefined
+          const sharedMasonWeights = group.teamType === 'mason_team' ? packWeights(masonTeamNet) : undefined
 
-          if (gameWorkerPoolSize() > 0) {
-            // === 並列パス ===
-            const sharedWeights = packWeights(network)
-            const sharedWolfWeights = group.teamType === 'wolf_team' ? packWeights(wolfTeamNet) : undefined
-            const sharedMasonWeights = group.teamType === 'mason_team' ? packWeights(masonTeamNet) : undefined
+          // Seed Bank: ディスクからランダムにスナップショットを読み込み
+          const batchSnapshots = (snapshotCount > 0 && name === 'village')
+            ? loadRandomSnapshots(mlStartDay - 1, seeds.length, new Rng(iter), {
+                aliveRoles: group.roles,
+                minAlive: mlMaxSeats,
+              })
+            : undefined
 
-            // Seed Bank: スナップショットからリプレイ
-            // Seed Bank: ディスクからランダムにスナップショットを読み込み
-            const batchSnapshots = (snapshotCount > 0 && name === 'village')
-              ? loadRandomSnapshots(mlStartDay - 1, seeds.length, new Rng(iter), {
-                  aliveRoles: group.roles,
-                  minAlive: mlMaxSeats,
-                })
-              : undefined
+          const serializedResults = await generateGamesParallel({
+            weights: sharedWeights,
+            wolfTeamWeights: sharedWolfWeights,
+            masonTeamWeights: sharedMasonWeights,
+            useTeamStrategy: group.teamType,
+            trainingConfig,
+            phase: 1,
+            mlRoles: group.roles,
+            mlMaxSeats: name === 'village' ? mlMaxSeats : undefined,
+            mlStartDay: (!batchSnapshots && name === 'village') ? mlStartDay : undefined,
+            snapshots: batchSnapshots,
+          }, seeds)
 
-            const serializedResults = await generateGamesParallel({
-              weights: sharedWeights,
-              wolfTeamWeights: sharedWolfWeights,
-              masonTeamWeights: sharedMasonWeights,
-              useTeamStrategy: group.teamType,
-              trainingConfig,
-              phase: 1,
-              mlRoles: group.roles,
-              mlMaxSeats: name === 'village' ? mlMaxSeats : undefined,
-              mlStartDay: (!batchSnapshots && name === 'village') ? mlStartDay : undefined,
-              snapshots: batchSnapshots,
-            }, seeds)
-
-            for (const game of serializedResults) {
-              const stepsMap = new Map<number, TrajectoryStep[]>()
-              for (const { seat, steps } of game.individualSteps) {
-                stepsMap.set(seat, steps.map(deserializeStep))
-              }
-              allIndividual.push(...processTrajectories(stepsMap, trainingConfig.gamma, trainingConfig.lambda))
-
-              if (game.wolfTeamSteps.length > 0 && group.teamType === 'wolf_team') {
-                allWolfTeam.push(...computeGAE(game.wolfTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
-              }
-              if (game.masonTeamSteps.length > 0 && group.teamType === 'mason_team') {
-                allMasonTeam.push(...computeGAE(game.masonTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
-              }
+          for (const game of serializedResults) {
+            const stepsMap = new Map<number, TrajectoryStep[]>()
+            for (const { seat, steps } of game.individualSteps) {
+              stepsMap.set(seat, steps.map(deserializeStep))
             }
-            lastBatchTimings = serializedResults.filter(g => g.timing).map(g => g.timing!)
-          } else {
-            // === 直列フォールバック ===
-            for (const seed of seeds) {
-              const game = await generateGame(trainingConfig, network, wolfTeamNet, masonTeamNet, mlRolesSet, seed, group.teamType, name === 'village' ? mlMaxSeats : undefined, name === 'village' ? mlStartDay : undefined)
-              const currentSteps = new Map<number, TrajectoryStep[]>()
-              for (const [seat, steps] of game.individualSteps) {
-                currentSteps.set(seat, steps)
-              }
-              allIndividual.push(...processTrajectories(currentSteps, trainingConfig.gamma, trainingConfig.lambda))
+            allIndividual.push(...processTrajectories(stepsMap, trainingConfig.gamma, trainingConfig.lambda))
 
-              if (game.wolfTeamSteps.length > 0 && group.teamType === 'wolf_team') {
-                allWolfTeam.push(...computeGAE(game.wolfTeamSteps, trainingConfig.gamma, trainingConfig.lambda, 0))
-              }
-              if (game.masonTeamSteps.length > 0 && group.teamType === 'mason_team') {
-                allMasonTeam.push(...computeGAE(game.masonTeamSteps, trainingConfig.gamma, trainingConfig.lambda, 0))
-              }
+            if (game.wolfTeamSteps.length > 0 && group.teamType === 'wolf_team') {
+              allWolfTeam.push(...computeGAE(game.wolfTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
+            }
+            if (game.masonTeamSteps.length > 0 && group.teamType === 'mason_team') {
+              allMasonTeam.push(...computeGAE(game.masonTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
             }
           }
+          const lastBatchTimings = serializedResults.filter(g => g.timing).map(g => g.timing!)
           const tGameEnd = performance.now()
           const tPpoStart = performance.now()
 
@@ -1129,23 +1210,7 @@ async function main(): Promise<void> {
           const totalSteps = allIndividual.length + allWolfTeam.length + allMasonTeam.length
           const avgIterMs = (iterElapsed / iterCount / 1000).toFixed(1)
           const remaining = ((targetIter - iter) * iterElapsed / iterCount / 1000).toFixed(0)
-          // worker timing breakdown (if available from parallel path)
-          let timingStr = ''
-          if (lastBatchTimings.length > 0) {
-            const n = lastBatchTimings.length
-            const avgGame = lastBatchTimings.reduce((a, t) => a + t.gameMs, 0) / n
-            const avgInfer = lastBatchTimings.reduce((a, t) => a + t.inferMs, 0) / n
-            const avgInferCount = lastBatchTimings.reduce((a, t) => a + t.inferCount, 0) / n
-            const avgRetar = lastBatchTimings.reduce((a, t) => a + t.retarMs, 0) / n
-            const avgRetarCount = lastBatchTimings.reduce((a, t) => a + t.retarCount, 0) / n
-            const avgTsumi = lastBatchTimings.reduce((a, t) => a + t.tsumiMs, 0) / n
-            const avgTsumiCount = lastBatchTimings.reduce((a, t) => a + t.tsumiCount, 0) / n
-            const fmtBreakdown = (totalMs: number, count: number) => {
-              if (count === 0) return `${totalMs.toFixed(0)}ms`
-              return `${(totalMs / count).toFixed(1)}ms×${count.toFixed(0)}=${totalMs.toFixed(0)}ms`
-            }
-            timingStr = `${avgGame.toFixed(0)}ms/game (infer ${fmtBreakdown(avgInfer, avgInferCount)} retar ${fmtBreakdown(avgRetar, avgRetarCount)} tsumi ${fmtBreakdown(avgTsumi, avgTsumiCount)}) `
-          }
+          const timingStr = formatTimingStr(lastBatchTimings)
           const mlInfo = name === 'village' ? ` ml=${mlMaxSeats}/${ML_MAX_SEATS_CAP} day=${mlStartDay}` : ''
           const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
           const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${ppoConfig.klCoeff.toFixed(3)})` : ''
@@ -1167,7 +1232,7 @@ async function main(): Promise<void> {
                   forEval: true,
                 })
               : undefined
-            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, evalSnapshots ? { snapshots: evalSnapshots } : undefined)
+            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), evalIter: iter })
             process.stderr.write('\r\x1b[K')
             appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
             const factionRate = evalResult.winRates[group.faction] ?? 0
@@ -1473,6 +1538,7 @@ async function main(): Promise<void> {
                 fanaticNet: networks.get('fanatic')!,
                 frozenVillageNet: networks.get('village')!,
                 individualNets,
+                evalIter: iter,
               },
             )
             process.stderr.write('\r\x1b[K')

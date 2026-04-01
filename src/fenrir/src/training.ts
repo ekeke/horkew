@@ -794,6 +794,10 @@ export type EvaluateOptions = {
   individualNets?: Map<string, AnyNetwork>
   /** スナップショットからリプレイで eval（Seed Bank 用） */
   snapshots?: import('../../lupa/types.ts').GameSnapshot[]
+  /** mason を個人戦略で処理する（Phase 0: mason individual 用） */
+  masonAsIndividual?: boolean
+  /** eval シードの変動用 iteration 番号（後半ゲームのシードを iter 依存にする） */
+  evalIter?: number
 }
 
 export async function evaluate(
@@ -830,7 +834,9 @@ export async function evaluate(
       }
     }
 
-    const seed = 10000 + i
+    // 前半は固定シード（安定ベースライン）、後半は iter 依存（変動を検出）
+    const halfN = Math.floor(numGames / 2)
+    const seed = i < halfN ? 10000 + i : (options?.evalIter ?? 0) * 10000 + 50000 + i
     const onRolesAssigned = mlRolesSet ? (seatRoles: Map<number, SystemRole>) => {
       const candidates = [...seatRoles].filter(([_, role]) => mlRolesSet.has(role))
       if (mlMaxSeats !== undefined && mlMaxSeats < candidates.length) {
@@ -873,9 +879,11 @@ export async function evaluate(
       wolfTeamStrategy = new WolfTeamHeuristic()
     }
 
-    // Mason team strategy: collective > legacy team > heuristic
+    // Mason team strategy: individual(Phase0) > collective > legacy team > heuristic
     let masonTeamStrategy: any
-    if (options?.masonCollectiveNet) {
+    if (options?.masonAsIndividual) {
+      masonTeamStrategy = undefined  // 個人戦略にフォールバック
+    } else if (options?.masonCollectiveNet) {
       masonTeamStrategy = new MasonCollectiveStrategy(options.masonCollectiveNet, { explore: false })
     } else if (masonTeamNet) {
       masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: false })
