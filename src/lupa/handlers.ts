@@ -79,6 +79,9 @@ export type GameHandlers = {
    */
   onPreVote?(ctx: PhaseContext): MaybePromise<PreVoteResult>
 
+  /** 遺言フェーズ（オプション）: 処刑対象者が最後にCOする機会 */
+  onLastWill?(ctx: PhaseContext, executedSeat: number): MaybePromise<DayClaim>
+
   /** 投票フェーズ: 各プレイヤーの投票先を返す（再投票時にも呼ばれる） */
   onVote(ctx: VoteContext): MaybePromise<Map<number, number>>
 

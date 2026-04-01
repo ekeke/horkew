@@ -116,6 +116,12 @@ export const Rules: { [key: string]: Rule } = {
     description: "Whether the immoralist reveals the role of the lynched werehamster.",
     default: true,
   },
+
+  "phase.lastwill": {
+    type: "boolean",
+    description: "Whether executed players get a last-will phase to CO before death takes effect.",
+    default: true,
+  },
 }
 
 const defaultRules: ResolvedRules = Object.fromEntries(

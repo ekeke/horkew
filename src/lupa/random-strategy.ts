@@ -4,6 +4,7 @@ import type { Signal, CommunicationAction } from './communication.ts'
 import type { Proposal, LeadershipResponse } from './leadership.ts'
 import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from './strategy.ts'
 import { alivePlayers, alivePlayersExcept, getMediumResult, isWerewolfAligned } from './roles.ts'
+import { forceTrueRoleCO, isVillagePowerRole, isDefensiveCONeeded } from './heuristic.ts'
 import type { Rng } from './random.ts'
 
 const CO_PROBABILITY = 0.4
@@ -242,7 +243,14 @@ export class RandomStrategy implements Strategy {
     return 'defy'
   }
 
-  decideDefensiveClaim(_ctx: DecisionContext): DayClaim {
+  decideDefensiveClaim(ctx: DecisionContext): DayClaim {
+    if (ctx.myPlayer.claimedRole !== null) return { type: 'none' }
+
+    // 村能力者: 処刑対象なら必ずCO
+    if (isVillagePowerRole(ctx.myRole) && isDefensiveCONeeded(ctx)) {
+      return forceTrueRoleCO(ctx.gameState, ctx.myPlayer, ctx.day, ctx.lastExecutedSeat)
+    }
+
     return { type: 'none' }
   }
 }

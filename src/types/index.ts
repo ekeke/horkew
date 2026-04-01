@@ -164,4 +164,5 @@ export type ResolvedRules = {
   'role.nekomata.curse-immediately': boolean
   'role.immoralist.follow-immediately': boolean
   'role.immoralist.reveal-following': boolean
+  'phase.lastwill': boolean
 }

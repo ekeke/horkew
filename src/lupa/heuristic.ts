@@ -113,7 +113,13 @@ function isRollerSituation(events: GameEvent[], role: SystemRole, aliveSeats: Se
 // 防御CO判定
 // ============================================================
 
-function isDefensiveCONeeded(ctx: DecisionContext): boolean {
+const VILLAGE_POWER_ROLES: ReadonlySet<SystemRole> = new Set(['seer', 'medium', 'bodyguard', 'mason', 'nekomata'])
+
+export function isVillagePowerRole(role: SystemRole): boolean {
+  return VILLAGE_POWER_ROLES.has(role)
+}
+
+export function isDefensiveCONeeded(ctx: DecisionContext): boolean {
   // 1. 指揮者の処刑指示が自分を対象
   for (const e of ctx.publicEvents) {
     if (e.type === 'proposal' && e.proposal.type === 'execute_order' && e.proposal.target === ctx.mySeat) return true
@@ -466,6 +472,11 @@ export class HeuristicStrategy implements Strategy {
 
   decideDefensiveClaim(ctx: DecisionContext): DayClaim {
     if (ctx.myPlayer.claimedRole !== null) return { type: 'none' }
+
+    // 村能力者共通: 処刑対象なら必ずCO（グレランでない＝自分への提案が集中している）
+    if (isVillagePowerRole(ctx.myRole) && isDefensiveCONeeded(ctx)) {
+      return forceTrueRoleCO(ctx.gameState, ctx.myPlayer, ctx.day, ctx.lastExecutedSeat)
+    }
 
     switch (ctx.myRole) {
       case 'bodyguard': {

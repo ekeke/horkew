@@ -246,6 +246,16 @@ export async function runGame(config: GameConfig, handlers: GameHandlers): Promi
     // 引き分けの場合
     if (state.finished) break
 
+    // ==== 遺言フェーズ（処刑前CO） ====
+    if (rules['phase.lastwill'] && handlers.onLastWill) {
+      const lwCtx = makePhaseContext(state, events, rules)
+      const lwClaim = await handlers.onLastWill(lwCtx, executedSeat!)
+      if (lwClaim.type !== 'none') {
+        const lwPlayer = players.find(p => p.seat === executedSeat!)!
+        applyClaim(state, lwPlayer, day, lwClaim, emit)
+      }
+    }
+
     // ==== 処刑 + 後処理 ====
     killPlayer(state, executedSeat!)
     emit({ type: 'execution', target: executedSeat! })

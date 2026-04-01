@@ -18,6 +18,7 @@ import { buildPlayerView } from '../player-view.ts'
 import { alivePlayers } from '../roles.ts'
 import { detectCommander } from '../leadership.ts'
 import { Rng } from '../random.ts'
+import { forceTrueRoleCO, isVillagePowerRole } from '../heuristic.ts'
 import {
   analyzePerPlayer as retarAnalyzePerPlayer,
   type RetarResult,
@@ -276,12 +277,12 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
         }
       }
 
-      // 防御COフェーズ
+      // 防御COフェーズ（当日のシグナル・提案を含めたコンテキストで判定）
       for (const player of alivePlayers(state)) {
         if (player.claimedRole !== null) continue
         const claim = decideForPlayer(pctx, player,
-          (s, c) => s.decideDefensiveClaim(c),
-          (s, c) => s.decideDefensiveClaim(c),
+          (s, c) => s.decideDefensiveClaim({ ...c, publicEvents: [...c.publicEvents, ...preVoteEvents] }),
+          (s, c) => s.decideDefensiveClaim({ ...c, publicEvents: [...c.publicEvents, ...preVoteEvents] }),
         )
         if (claim.type !== 'none') {
           additionalClaims.set(player.seat, claim)
@@ -318,6 +319,14 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
       }
 
       return votes
+    },
+
+    onLastWill(_ctx, executedSeat) {
+      const state = _ctx.state as GameState
+      const player = state.players.find(p => p.seat === executedSeat)!
+      if (player.claimedRole !== null) return { type: 'none' as const }
+      if (!isVillagePowerRole(player.role)) return { type: 'none' as const }
+      return forceTrueRoleCO(state, player, _ctx.day, state.executionHistory.get(_ctx.day - 1) ?? null)
     },
 
     getTiming(): GameTiming {
