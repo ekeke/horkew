@@ -1037,7 +1037,13 @@ async function main(): Promise<void> {
             process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
             const evalConfig = { ...trainingConfig, mlRoles: group.roles }
             const evalMlMax = name === 'village' ? mlMaxSeats : undefined
-            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax)
+            const evalSnapshots = (snapshotCount > 0 && name === 'village')
+              ? loadRandomSnapshots(mlStartDay - 1, config.evalGames, new Rng(iter + 999999), {
+                  aliveRoles: group.roles,
+                  minAlive: mlMaxSeats,
+                })
+              : undefined
+            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, evalSnapshots ? { snapshots: evalSnapshots } : undefined)
             process.stderr.write('\r\x1b[K')
             appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
             const factionRate = evalResult.winRates[group.faction] ?? 0

@@ -7,7 +7,7 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame } from '../../lupa/engine.ts'
+import { runGame, resumeGame } from '../../lupa/engine.ts'
 import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-node-bridge.ts'
@@ -792,6 +792,8 @@ export type EvaluateOptions = {
   frozenVillageNet?: AnyNetwork
   /** role → network の個別マッピング（Phase 1' で全5モデル同時評価用） */
   individualNets?: Map<string, AnyNetwork>
+  /** スナップショットからリプレイで eval（Seed Bank 用） */
+  snapshots?: import('../../lupa/types.ts').GameSnapshot[]
 }
 
 export async function evaluate(
@@ -894,9 +896,34 @@ export async function evaluate(
       wolfTeamStrategy,
       masonTeamStrategy,
     }
+    const snapshot = options?.snapshots?.[i]
     const t0 = performance.now()
     let state: import('../../lupa/types.ts').GameState
-    if (config.strategyOnly) {
+    if (snapshot) {
+      // Seed Bank リプレイ
+      const handlers = config.strategyOnly
+        ? minimalAdapter({
+            strategies,
+            defaultStrategy: heuristic,
+            wolfTeamStrategy: lupaConfig.wolfTeamStrategy,
+            masonTeamStrategy: lupaConfig.masonTeamStrategy,
+            onRolesAssigned,
+            seed,
+          })
+        : strategyAdapter({
+            strategies,
+            defaultStrategy: heuristic,
+            wolfTeamStrategy: lupaConfig.wolfTeamStrategy,
+            masonTeamStrategy: lupaConfig.masonTeamStrategy,
+            enableRetar: config.enableRetar,
+            onRolesAssigned,
+            seed,
+            roles,
+            rules: config.rules,
+          })
+      const result = await resumeGame(snapshot, handlers)
+      state = result.state
+    } else if (config.strategyOnly) {
       const handlers = minimalAdapter({
         strategies,
         defaultStrategy: heuristic,
