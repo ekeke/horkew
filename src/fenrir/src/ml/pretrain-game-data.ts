@@ -8,7 +8,7 @@
 import type { SystemRole } from '../../../types/index.ts'
 import type { Strategy, DecisionContext } from '../../../lupa/strategy.ts'
 import { runGame } from '../../../lupa/engine.ts'
-import { minimalAdapter } from '../../../lupa/adapters/minimal-adapter.ts'
+import { minimalAdapter } from '../lupaAdapters/minimal-adapter.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../../lupa/heuristic.ts'
 import { encodeObservation, SEATS, NUM_ROLES, ROLE_INDEX } from '../observation.ts'
 import { PLAN_VOCAB } from '../rule-action.ts'

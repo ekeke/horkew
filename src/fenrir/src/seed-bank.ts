@@ -16,7 +16,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { GameSnapshot, GameState, GameEvent } from '../../lupa/types.ts'
 import type { GameConfig } from '../../lupa/handlers.ts'
 import { runGame } from '../../lupa/engine.ts'
-import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
+import { fullAdapter } from './lupaAdapters/full-adapter.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import type { TrainingConfig } from './training.ts'
 import { Rng } from '../../lupa/random.ts'
@@ -337,7 +337,7 @@ export async function generateSnapshotsToDir(opts: {
       captureSnapshotDays: snapshotDays,
     }
 
-    const handlers = strategyAdapter({
+    const handlers = fullAdapter({
       defaultStrategy: new HeuristicStrategy(),
       wolfTeamStrategy: new WolfTeamHeuristic(),
       masonTeamStrategy: new MasonTeamHeuristic(),

@@ -10,8 +10,8 @@ import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame, resumeGame } from '../../lupa/engine.ts'
-import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
-import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
+import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
+import { fullAdapter } from './lupaAdapters/full-adapter.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { FenrirStrategy, FanaticStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
@@ -228,7 +228,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
             roles,
             rules: config.rules,
           })
-        : strategyAdapter({
+        : fullAdapter({
             strategies: strategiesMap,
             defaultStrategy: defaultStrategy ?? new HeuristicStrategy(),
             wolfTeamStrategy,
@@ -272,7 +272,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       gameRetarCount = result.timing?.retarCount ?? 0
     } else {
       // strategy-adapter: 全フェーズ実行
-      const handlers = strategyAdapter({
+      const handlers = fullAdapter({
         strategies: strategiesMap,
         defaultStrategy: defaultStrategy ?? new HeuristicStrategy(),
         wolfTeamStrategy,

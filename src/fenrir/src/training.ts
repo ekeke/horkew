@@ -8,8 +8,8 @@ import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame, resumeGame } from '../../lupa/engine.ts'
-import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
-import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
+import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
+import { fullAdapter } from './lupaAdapters/full-adapter.ts'
 import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-node-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
 import type { NetworkConfig, AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
@@ -535,7 +535,7 @@ async function generateGame(
     state = result.state
     events = result.events
   } else {
-    const handlers = strategyAdapter({
+    const handlers = fullAdapter({
       strategies: strategiesMap,
       defaultStrategy: agents.defaultStrategy ?? new HeuristicStrategy(),
       wolfTeamStrategy: agents.wolfTeamStrategy,
@@ -644,7 +644,7 @@ async function generateGameAsync(
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
 
   const strategiesMap = new Map<number, Strategy>(agents.strategies)
-  const handlers = strategyAdapter({
+  const handlers = fullAdapter({
     strategies: strategiesMap,
     defaultStrategy: agents.defaultStrategy ?? new HeuristicStrategy(),
     wolfTeamStrategy: agents.wolfTeamStrategy,
@@ -910,7 +910,7 @@ export async function evaluate(
             onRolesAssigned,
             seed,
           })
-        : strategyAdapter({
+        : fullAdapter({
             strategies,
             defaultStrategy: heuristic,
             wolfTeamStrategy: lupaConfig.wolfTeamStrategy,
@@ -938,7 +938,7 @@ export async function evaluate(
       )
       state = result.state
     } else {
-      const handlers = strategyAdapter({
+      const handlers = fullAdapter({
         strategies,
         defaultStrategy: heuristic,
         wolfTeamStrategy: lupaConfig.wolfTeamStrategy,

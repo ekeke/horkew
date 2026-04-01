@@ -14,8 +14,8 @@ import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame } from '../../lupa/engine.ts'
-import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
-import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
+import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
+import { fullAdapter } from './lupaAdapters/full-adapter.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy, computeRefPlanLogits } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
@@ -35,7 +35,7 @@ import {
   DEFAULT_TRAINING_CONFIG,
   type TrainingConfig,
 } from './training.ts'
-import { existsSync, readdirSync, readFileSync, unlinkSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, unlinkSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import { spawn, execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { generatePlanTokenTrainingBatch } from './ml/execution-plan-data.ts'
@@ -191,6 +191,110 @@ Options:
 }
 
 // ============================================================
+// Progress Log (固定ファイルへの進捗書き出し)
+// ============================================================
+
+type ProgressEvalEntry = {
+  time: string
+  model: string
+  iter: number
+  winRates: Record<string, number>
+  avgLen: number
+  status: string
+}
+
+type ProgressCurriculumEntry = {
+  time: string
+  iter: number
+  mlMaxSeats: number
+  mlStartDay: number
+  event: string
+}
+
+type ProgressLog = {
+  checkpointBase: string
+  runInfo: {
+    started: string
+    git: string
+    arch: string
+    configSummary: string
+  }
+  curriculum: ProgressCurriculumEntry[]
+  evals: ProgressEvalEntry[]
+  latest: {
+    phase: string
+    model: string
+    iter: number
+    maxIter: number
+    klCoeff?: number
+    mlMaxSeats?: number
+    mlStartDay?: number
+  }
+}
+
+function fmtTime(iso: string): string {
+  return iso.slice(11, 19)
+}
+
+function fmtPct(v: number): string {
+  return (v * 100).toFixed(0)
+}
+
+function updateProgressFile(progress: ProgressLog): void {
+  const { runInfo, curriculum, evals, latest } = progress
+  const lines: string[] = []
+
+  lines.push('# Fenrir Training Progress')
+  lines.push('')
+  lines.push('## Run Info')
+  lines.push(`- Started: ${runInfo.started}`)
+  lines.push(`- Git: ${runInfo.git}`)
+  lines.push(`- Architecture: ${runInfo.arch}`)
+  lines.push(`- Config: ${runInfo.configSummary}`)
+  lines.push('')
+
+  // Curriculum
+  if (curriculum.length > 0) {
+    lines.push('## Curriculum Changes')
+    lines.push('| Time | Iter | mlMaxSeats | mlStartDay | Event |')
+    lines.push('|------|------|-----------|-----------|-------|')
+    for (const c of curriculum) {
+      lines.push(`| ${fmtTime(c.time)} | ${c.iter} | ${c.mlMaxSeats} | ${c.mlStartDay} | ${c.event} |`)
+    }
+    lines.push('')
+  }
+
+  // Eval history
+  if (evals.length > 0) {
+    lines.push('## Eval History')
+    lines.push('| Time | Model | Iter | village% | wolf% | hamster% | draw% | avgLen | Status |')
+    lines.push('|------|-------|------|----------|-------|----------|-------|--------|--------|')
+    for (const e of evals) {
+      const v = fmtPct(e.winRates['villager_won'] ?? 0)
+      const w = fmtPct(e.winRates['werewolf_won'] ?? 0)
+      const h = fmtPct(e.winRates['werehamster_won'] ?? 0)
+      const d = fmtPct(e.winRates['draw'] ?? 0)
+      lines.push(`| ${fmtTime(e.time)} | ${e.model} | ${e.iter} | ${v} | ${w} | ${h} | ${d} | ${e.avgLen.toFixed(1)} | ${e.status} |`)
+    }
+    lines.push('')
+  }
+
+  // Latest status
+  lines.push('## Latest Status')
+  lines.push(`- Phase: ${latest.phase}`)
+  lines.push(`- Current Model: ${latest.model}`)
+  lines.push(`- Iteration: ${latest.iter}/${latest.maxIter}`)
+  if (latest.klCoeff != null) lines.push(`- KL coeff (beta): ${latest.klCoeff.toFixed(3)}`)
+  if (latest.mlMaxSeats != null) lines.push(`- mlMaxSeats: ${latest.mlMaxSeats}`)
+  if (latest.mlStartDay != null) lines.push(`- mlStartDay: ${latest.mlStartDay}`)
+  lines.push(`- Updated: ${new Date().toISOString()}`)
+  lines.push('')
+
+  mkdirSync(progress.checkpointBase, { recursive: true })
+  writeFileSync(`${progress.checkpointBase}/progress.md`, lines.join('\n'))
+}
+
+// ============================================================
 // PPO Update (training.ts から借用)
 // ============================================================
 
@@ -337,7 +441,7 @@ async function generateGame(
     state = result.state
     events = result.events
   } else {
-    const handlers = strategyAdapter({
+    const handlers = fullAdapter({
       strategies: strategiesMap,
       defaultStrategy: heuristic,
       wolfTeamStrategy: wolfTeamStrategy ?? new WolfTeamHeuristic(),
@@ -572,6 +676,21 @@ async function main(): Promise<void> {
   log(`Git: ${gitSha}${gitDirty ? ' (dirty)' : ''} | ${new Date().toISOString()}`)
   log(`Architecture: ${config.transformer ? 'Transformer' : 'MLP'}${config.strategyOnly ? ' (strategy-only)' : ''}`)
   log(`Iterations: ${config.iterations}/model, Chunk: ${config.chunkSize}, Batch: ${config.batch}`)
+
+  // === Progress Log ===
+  const progress: ProgressLog = {
+    checkpointBase: config.checkpointBase,
+    runInfo: {
+      started: new Date().toISOString(),
+      git: `${gitSha}${gitDirty ? ' (dirty)' : ''}`,
+      arch: `${config.transformer ? 'Transformer' : 'MLP'}${config.strategyOnly ? ' (strategy-only)' : ''}`,
+      configSummary: `batch=${config.batch}, lr=${config.learningRate}, evalInterval=${config.evalInterval}, chunkSize=${config.chunkSize}, workers=${config.workers}`,
+    },
+    curriculum: [],
+    evals: [],
+    latest: { phase: 'init', model: '-', iter: 0, maxIter: config.iterations },
+  }
+  updateProgressFile(progress)
 
   const trainingConfig: TrainingConfig = {
     ...DEFAULT_TRAINING_CONFIG,
@@ -808,10 +927,10 @@ async function main(): Promise<void> {
 
     const graduated = new Set<ModelName>()
     // カリキュラム: NN 席数を徐々に増やす (village のみ)
-    let mlMaxSeats = 2
+    let mlMaxSeats = 1
     const ML_MAX_SEATS_CAP = 6  // 村役職の最大席数 (村2+占1+霊1+狩1+猫1、共有は集団NNなので除外)
     // カリキュラム: ML/Retar開始Dayを徐々に前に (序盤Retarコスト回避)
-    let mlStartDay = 4
+    let mlStartDay = 3
     const ML_START_DAY_MIN = 1  // 全日ML
     log(`  Initial mlMaxSeats=${mlMaxSeats} mlStartDay=${mlStartDay}`)
 
@@ -1057,14 +1176,26 @@ async function main(): Promise<void> {
               `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
             )
 
+            // Progress log: eval
+            const evalStatus = factionRate >= targetRate ? 'GRADUATED' : ''
+            progress.evals.push({
+              time: new Date().toISOString(), model: name, iter,
+              winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: evalStatus,
+            })
+            progress.latest = { phase: '1', model: name, iter, maxIter: config.iterations, klCoeff: ppoConfig.klCoeff, mlMaxSeats, mlStartDay }
+
             // カリキュラム: 勝率がベースラインの90%に達したら NN 席数を増やす / 開始Dayを前に
             if (name === 'village' && mlMaxSeats < ML_MAX_SEATS_CAP && factionRate >= targetRate * 0.9) {
+              const prevSeats = mlMaxSeats
               mlMaxSeats = Math.min(mlMaxSeats + 1, ML_MAX_SEATS_CAP)
               log(`${prefix} Curriculum: mlMaxSeats → ${mlMaxSeats}`)
+              progress.curriculum.push({ time: new Date().toISOString(), iter, mlMaxSeats, mlStartDay, event: `mlMaxSeats ${prevSeats}→${mlMaxSeats}` })
             }
             if (name === 'village' && mlStartDay > ML_START_DAY_MIN && factionRate >= targetRate * 0.9) {
+              const prevDay = mlStartDay
               mlStartDay = Math.max(mlStartDay - 1, ML_START_DAY_MIN)
               log(`${prefix} Curriculum: mlStartDay → ${mlStartDay}`)
+              progress.curriculum.push({ time: new Date().toISOString(), iter, mlMaxSeats, mlStartDay, event: `mlStartDay ${prevDay}→${mlStartDay}` })
               // Seed Bank: 新しい Day のスナップショット数を確認
               snapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay - 1, villageRoles, mlMaxSeats) : 0
               if (mlStartDay > ML_START_DAY_MIN && snapshotCount === 0) {
@@ -1073,6 +1204,8 @@ async function main(): Promise<void> {
                 log(`${prefix} Seed bank: ${snapshotCount} snapshots at Day ${mlStartDay}`)
               }
             }
+
+            updateProgressFile(progress)
 
             if (factionRate >= targetRate) {
               log(`${prefix} ${BOLD}GRADUATED${RESET} (${group.faction}=${(factionRate * 100).toFixed(0)}% >= ${(targetRate * 100).toFixed(0)}%)`)
@@ -1132,11 +1265,15 @@ async function main(): Promise<void> {
     }
 
     log(`${BOLD}=== Phase 1 Complete ===${RESET}`)
+    progress.latest = { phase: '1 (complete)', model: '-', iter: config.iterations, maxIter: config.iterations }
+    updateProgressFile(progress)
   }
 
   // === Phase 1': 集団NN + 狂信者 + 第三勢力の学習 (frozen村NN注入) ===
   if (!config.phase2Only) {
     log(`${BOLD}=== Phase 1': Collective + Non-Village Training ===${RESET}`)
+    progress.latest = { phase: "1'", model: '-', iter: 0, maxIter: config.iterations }
+    updateProgressFile(progress)
 
     // 集団NN用の推論/学習ネットワーク (config が異なるため専用インスタンスが必要)
     const wolfCollectiveNet = createWolfCollectiveNetwork()
@@ -1346,6 +1483,16 @@ async function main(): Promise<void> {
               `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
               `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
             )
+
+            // Progress log: Phase 1' eval
+            const evalStatus = factionRate >= targetRate ? 'GRADUATED' : ''
+            progress.evals.push({
+              time: new Date().toISOString(), model: name, iter,
+              winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: evalStatus,
+            })
+            progress.latest = { phase: "1'", model: name, iter, maxIter: config.iterations }
+            updateProgressFile(progress)
+
             if (factionRate >= targetRate) {
               log(`${prefix} ${BOLD}GRADUATED${RESET} (${group.faction}=${(factionRate * 100).toFixed(0)}% >= ${(targetRate * 100).toFixed(0)}%)`)
               phase1PrimeGraduated.add(name)
@@ -1383,6 +1530,8 @@ async function main(): Promise<void> {
     fanaticTf.dispose()
 
     log(`${BOLD}=== Phase 1' Complete ===${RESET}`)
+    progress.latest = { phase: "1' (complete)", model: '-', iter: config.iterations, maxIter: config.iterations }
+    updateProgressFile(progress)
   }
 
   // === Cleanup GPU ===
@@ -1394,6 +1543,8 @@ async function main(): Promise<void> {
   // === Phase 2 (子プロセスで起動) ===
   if (!config.phase1Only) {
     log(`${BOLD}=== Phase 2: Self-Play ===${RESET}`)
+    progress.latest = { phase: '2', model: 'self-play', iter: 0, maxIter: config.phase2Iterations }
+    updateProgressFile(progress)
     const dirs = MODEL_NAMES.map(name => `${config.checkpointBase}/ckpt-${name}`).join(',')
     const args = [
       '--experimental-strip-types', 'src/fenrir/src/cli.ts',

@@ -12,8 +12,8 @@ import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame } from '../../lupa/engine.ts'
-import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
-import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
+import { fullAdapter } from './lupaAdapters/full-adapter.ts'
+import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import {
@@ -242,7 +242,7 @@ if (mldir) {
         roles,
         rules: DEFAULT_TRAINING_CONFIG.rules,
       })
-    : strategyAdapter({
+    : fullAdapter({
         strategies: strategiesMap,
         defaultStrategy: heuristic,
         wolfTeamStrategy,
@@ -290,7 +290,7 @@ if (mldir) {
   }
 
   const gameSeed = seed ?? Math.floor(Math.random() * 100000)
-  const handlers = strategyAdapter({
+  const handlers = fullAdapter({
     strategies,
     defaultStrategy: heuristic,
     enableRetar: true,
