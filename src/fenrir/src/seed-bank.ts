@@ -215,7 +215,8 @@ function countAliveRoles(snap: GameSnapshot, targetRoles: string[]): number {
 }
 
 export async function generateSnapshotsToDir(opts: {
-  snapshotDay: number
+  /** スナップショットを取得する Day（複数指定で1ゲームから複数 Day 分を同時取得） */
+  snapshotDays: number[]
   count: number
   trainingConfig: TrainingConfig
   startSeed: number
@@ -223,25 +224,32 @@ export async function generateSnapshotsToDir(opts: {
   aliveRoles?: string[]
   /** 最低生存席数 (デフォルト: 1) */
   minAlive?: number
-}): Promise<{ generated: number, skipped: number, timeMs: number }> {
-  const { snapshotDay, count, trainingConfig, startSeed, aliveRoles, minAlive = 1 } = opts
+}): Promise<{ generated: Map<number, number>, skipped: number, timeMs: number }> {
+  const { snapshotDays, count, trainingConfig, startSeed, aliveRoles, minAlive = 1 } = opts
   const roles = new Map(Object.entries(trainingConfig.roles) as [SystemRole, number][])
-  const dir = snapshotDir(snapshotDay, aliveRoles, minAlive)
-  const existingCount = countSnapshots(snapshotDay, aliveRoles, minAlive)
   const t0 = performance.now()
 
-  let generated = 0
+  // Day ごとの既存数と生成数を追跡
+  const existing = new Map<number, number>()
+  const generated = new Map<number, number>()
+  for (const day of snapshotDays) {
+    existing.set(day, countSnapshots(day, aliveRoles, minAlive))
+    generated.set(day, 0)
+  }
+
   let skipped = 0
   let seed = startSeed
+  let totalGames = 0
 
-  while (generated < count) {
+  // 全 Day が count に達するまで
+  while (snapshotDays.some(d => generated.get(d)! < count)) {
     const config: GameConfig = {
       roles,
       seed: seed++,
       hasFirstGhost: trainingConfig.hasFirstGhost,
       revoteConfig: trainingConfig.revoteConfig,
       rules: trainingConfig.rules,
-      captureSnapshotDays: [snapshotDay],
+      captureSnapshotDays: snapshotDays,
     }
 
     const handlers = strategyAdapter({
@@ -255,25 +263,31 @@ export async function generateSnapshotsToDir(opts: {
     })
 
     const result = await runGame(config, handlers)
-    const snapshot = result.snapshots?.get(snapshotDay)
+    totalGames++
 
-    if (snapshot) {
-      // 生存役職フィルタ
-      if (aliveRoles && aliveRoles.length > 0 && countAliveRoles(snapshot, aliveRoles) < minAlive) {
-        skipped++
-        continue
-      }
-      saveSnapshot(snapshot, dir, existingCount + generated)
-      generated++
-      if (generated % 100 === 0) {
-        process.stderr.write(`\r  ${generated}/${count} generated (${skipped} skipped)`)
-      }
-    } else {
-      skipped++
+    let savedAny = false
+    for (const day of snapshotDays) {
+      if (generated.get(day)! >= count) continue
+      const snapshot = result.snapshots?.get(day)
+      if (!snapshot) continue
+      if (aliveRoles && aliveRoles.length > 0 && countAliveRoles(snapshot, aliveRoles) < minAlive) continue
+
+      const dir = snapshotDir(day, aliveRoles, minAlive)
+      saveSnapshot(snapshot, dir, existing.get(day)! + generated.get(day)!)
+      generated.set(day, generated.get(day)! + 1)
+      savedAny = true
+    }
+    if (!savedAny) skipped++
+
+    const totalGenerated = [...generated.values()].reduce((a, b) => a + b, 0)
+    if (totalGenerated % 100 === 0 && totalGenerated > 0) {
+      const progress = snapshotDays.map(d => `day${d}:${generated.get(d)}/${count}`).join(' ')
+      process.stderr.write(`\r  ${progress} (${skipped} skipped)`)
     }
   }
 
-  if (count >= 100) process.stderr.write('\r\x1b[K')
+  const totalGenerated = [...generated.values()].reduce((a, b) => a + b, 0)
+  if (totalGenerated >= 100) process.stderr.write('\r\x1b[K')
 
   return { generated, skipped, timeMs: performance.now() - t0 }
 }

@@ -3,18 +3,18 @@
  * スナップショット事前生成 CLI
  *
  * Usage:
- *   npm run generate-snapshots -- --day 3 --count 1000
- *   npm run generate-snapshots -- --day 3 --count 1000 --alive village --min-alive 5
+ *   npm run generate-snapshots -- --day 1-3 --count 1000 --alive village --min-alive 3
+ *   npm run generate-snapshots -- --day 3 --count 500
  *
  * Options:
- *   --day <n>          スナップショットを取得する Day (デフォルト: 3)
- *   --count <n>        生成数 (デフォルト: 1000)
+ *   --day <range>      Day 範囲: "3" or "1-3" (デフォルト: 1-3)
+ *   --count <n>        各 Day の生成数 (デフォルト: 1000)
  *   --seed <n>         開始シード (デフォルト: 0)
  *   --alive <group>    生存必須の役職グループ: village, wolf, all (デフォルト: village)
  *   --min-alive <n>    最低生存席数 (デフォルト: 3)
  */
 
-import { generateSnapshotsToDir, countSnapshots } from './seed-bank.ts'
+import { generateSnapshotsToDir, countSnapshots, filterDirName } from './seed-bank.ts'
 import { DEFAULT_TRAINING_CONFIG } from './training.ts'
 
 const args = process.argv.slice(2)
@@ -29,28 +29,38 @@ function argStr(name: string, def: string): string {
   return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : def
 }
 
+function parseDayRange(s: string): number[] {
+  const m = s.match(/^(\d+)-(\d+)$/)
+  if (m) {
+    const from = parseInt(m[1]), to = parseInt(m[2])
+    return Array.from({ length: to - from + 1 }, (_, i) => from + i)
+  }
+  return [parseInt(s)]
+}
+
 const ROLE_GROUPS: Record<string, string[]> = {
   village: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata'],
   wolf: ['werewolf'],
   all: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata', 'werewolf', 'mason', 'fanatic', 'werehamster', 'immoralist'],
 }
 
-const day = argVal('day', 3)
+const days = parseDayRange(argStr('day', '1-3'))
 const count = argVal('count', 1000)
 const startSeed = argVal('seed', 0)
 const aliveGroup = argStr('alive', 'village')
 const minAlive = argVal('min-alive', 3)
 const aliveRoles = ROLE_GROUPS[aliveGroup] ?? aliveGroup.split(',')
+const filterDir = filterDirName(aliveRoles, minAlive)
 
-import { filterDirName } from './seed-bank.ts'
-const existing = countSnapshots(day, aliveRoles, minAlive)
-console.log(`Generating ${count} snapshots at Day ${day}`)
-console.log(`  Filter: ${aliveGroup} roles (${aliveRoles.join(', ')}) >= ${minAlive} alive`)
-console.log(`  Dir: tmp/snapshots/day${day}/${filterDirName(aliveRoles, minAlive)}/`)
-console.log(`  Existing: ${existing}, seed: ${startSeed}`)
+console.log(`Generating ${count} snapshots × Day ${days.join(',')}`)
+console.log(`  Filter: ${aliveGroup} (${aliveRoles.join(', ')}) >= ${minAlive} alive`)
+for (const day of days) {
+  const existing = countSnapshots(day, aliveRoles, minAlive)
+  console.log(`  Day ${day}: ${existing} existing → tmp/snapshots/day${day}/${filterDir}/`)
+}
 
 const result = await generateSnapshotsToDir({
-  snapshotDay: day,
+  snapshotDays: days,
   count,
   trainingConfig: DEFAULT_TRAINING_CONFIG,
   startSeed,
@@ -58,7 +68,8 @@ const result = await generateSnapshotsToDir({
   minAlive,
 })
 
-const total = existing + result.generated
-console.log(`Done: ${result.generated} generated, ${result.skipped} skipped, ${(result.timeMs / 1000).toFixed(1)}s`)
-console.log(`Total: ${total}`)
-console.log(`Directory: tmp/snapshots/day${day}/`)
+console.log(`Done in ${(result.timeMs / 1000).toFixed(1)}s (${result.skipped} games skipped)`)
+for (const day of days) {
+  const total = countSnapshots(day, aliveRoles, minAlive)
+  console.log(`  Day ${day}: +${result.generated.get(day)} → ${total} total`)
+}
