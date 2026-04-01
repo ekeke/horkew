@@ -2,12 +2,12 @@ import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { AnalyzeOptions, AnalyzeResult } from '../retar/index.ts'
 import { VillageRetar } from '../retar/index.ts'
 import { Possibilities, possibilityFromRoles } from '../retar/possibilities.ts'
-import type { TsumiResult, TsumiJudgment, ThreatProfile, SearchOptions, SimState, World } from './types.ts'
+import type { TsumiResult, TsumiJudgment, ThreatProfile, SearchOptions, SimState, World, StrategyNode } from './types.ts'
 import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
 import { collectWorlds } from './worlds.ts'
 import { searchTsumi as runSearch } from './search.ts'
 import { simulateFoxElimination } from './foxResolver.ts'
-import { RoleBitIndex, RoleSignatureBits } from '../retar/possibilities.ts'
+import { RoleBitIndex } from '../retar/possibilities.ts'
 
 export type { TsumiResult, TsumiJudgment, ThreatProfile, SearchOptions } from './types.ts'
 export type { StrategyNode, World, VillageAction } from './types.ts'
@@ -393,15 +393,13 @@ type StrategySearchResult = {
 
 /**
  * 戦略探索: ワールド列挙 → 実行可能性判定 → AND-OR木探索。
- * judgeTsumi で impossible=false の場合に呼ぶ。
+ * searchTsumi で isTsumi=true の場合に呼ぶ。TsumiResult を丸ごと渡す。
  */
 export function searchTsumiStrategy(
-  conclusions: Possibilities,
-  judgment: TsumiJudgment,
-  setup: Map<SystemRole, number>,
-  day: number,
+  tsumiResult: TsumiResult,
   searchOptions: SearchOptions = DEFAULT_SEARCH_OPTIONS,
 ): StrategySearchResult {
+  const { conclusions, judgment, setup, day } = tsumiResult
   const { alive, profile: { nawaInt, possibleSurvivingHamster } } = judgment
 
   // ワールド列挙
@@ -454,90 +452,44 @@ export function searchTsumiStrategy(
 // ---------------------------------------------------------------------------
 
 /**
- * 詰み進行探索のメインエントリポイント。
+ * 詰み判定のメインエントリポイント。
  *
  * VillageStatus（現在のゲーム状態）と配役セットアップを受け取り、
- * 村が必ず勝てる戦略が存在するかを探索する。
+ * 詰み（村の必勝状態）かどうかを判定する。探索は行わない。
+ * 手順構築が必要な場合は searchTsumiStrategy を別途呼ぶ。
  */
 export function searchTsumi(
   vs: VillageStatus,
   setup: Map<SystemRole, number>,
   analyzeOptions: AnalyzeOptions,
-  searchOptions: SearchOptions = DEFAULT_SEARCH_OPTIONS,
   runRetar: RunRetar = defaultRunRetar,
 ): TsumiResult {
-  const dbg = searchOptions.debug
   const t0 = performance.now()
 
   // 1. Retar解析（事前計算済みならスキップ）
   const conclusions = searchOptions.retarConclusions ?? runRetar(vs, setup, analyzeOptions)
   const t1 = performance.now()
 
-  if (dbg) {
-    const aliveSeats: string[] = []
-    for (const [seat, status] of vs.statuses) {
-      if (!status.surviving) continue
-      const mask = conclusions.possibilities[seat]
-      const roles: string[] = []
-      for (const [role, bit] of Object.entries(RoleSignatureBits)) {
-        if (mask & (bit as number)) roles.push(role)
-      }
-      aliveSeats.push(`${status.name ?? seat}(${seat})=[${roles}]`)
-    }
-    console.log(`[hati:debug] day=${vs.day} retar=${(t1 - t0).toFixed(1)}ms maxSurvNV=${conclusions.maxSurvivingNV}`)
-    console.log(`[hati:debug]   alive: ${aliveSeats.join(' ')}`)
-  }
-
   // 2. 判定フェーズ
   const judgment = judgeTsumi(conclusions, vs, setup)
   const isTsumi = !judgment.impossible
   const t2 = performance.now()
 
-  if (dbg) {
-    const p = judgment.profile
-    console.log(`[hati:debug]   judgment: impossible=${judgment.impossible} nawa=${p.nawa} effNawa=${p.effectiveNawa} nawaInt=${p.nawaInt}`)
-    console.log(`[hati:debug]   wolf=${p.wolfCandidates}(conf=${p.wolfConfirmedCount}) fox=${p.foxCandidates} foxWolf=${p.foxWolfCandidates} whiteNV=${p.whiteNVCandidates}(threat=${p.whiteNVThreat})`)
-    console.log(`[hati:debug]   requiredExecs=${p.requiredExecs} hamster=${p.possibleSurvivingHamster} neko=${p.possibleSurvivingNekomata} nekoShift=${p.nekoParityShift} nekoWolfOverlap=${p.nekoWolfCandidates} nekoExecRisk=${p.nekoExecRisk}`)
-    console.log(`[hati:debug]   isThreatExceeded: foxWolf+wolf(${p.foxWolfCandidates + p.wolfCandidates})>nawaInt(${p.nawaInt})=${p.foxWolfCandidates + p.wolfCandidates > p.nawaInt} || reqExecs(${p.requiredExecs})>nawaInt=${p.requiredExecs > p.nawaInt} || nekoShift&&req==nawa=${p.nekoParityShift && p.requiredExecs === p.nawaInt}`)
-
-    if (p.possibleSurvivingHamster) {
-      const fr = computeFoxResolvability(vs, setup, conclusions, judgment.alive)
-      console.log(`[hati:debug]   foxResolvability: setupSeers=${fr.setupSeerCount} deadSeerCand=${fr.deadSeerCandidates} aliveSeerCand=${fr.aliveSeerCandidates} coverable=${fr.coverableAlive} foxCand=${fr.aliveFoxCandidates} divinable=${fr.divinableFoxCandidates} resolvable=${fr.resolvable}`)
-    }
-  }
-
-  // 戦略構築が不要、または詰み不可能なら探索をスキップ
-  if (!isTsumi || searchOptions.buildStrategy === false) {
-    if (dbg) console.log(`[hati:debug]   → skip search (isTsumi=${isTsumi} buildStrategy=${searchOptions.buildStrategy})`)
-    return {
-      isTsumi, strategy: null, judgment,
-      stats: {
-        worldsTotal: 0, nodesVisited: 0, maxDepth: 0,
-        elapsed: t2 - t0, retarElapsed: t1 - t0, enumerateElapsed: 0, searchElapsed: 0,
-      },
-    }
-  }
-
-  // 3. 戦略探索（手順の構築）
-  const sr = searchTsumiStrategy(conclusions, judgment, setup, vs.day, searchOptions)
-  const elapsed = performance.now() - t0
-
-  if (dbg) {
-    console.log(`[hati:debug]   → search: isTsumi=${sr.isTsumi} worlds=${sr.worldsTotal} nodes=${sr.nodesVisited} maxDepth=${sr.maxDepth} search=${sr.searchElapsed.toFixed(1)}ms`)
-    console.log(`[hati:debug]   → final: isTsumi=true (hardcoded) strategy=${sr.strategy ? 'yes' : 'null'} total=${elapsed.toFixed(1)}ms`)
-  }
-
-  // !! 変更不可: 詰みの可否は判定フェーズ (judgeTsumi) が決定する。
-  // !! 探索 (searchTsumiStrategy) は手順構築のみ。探索結果で isTsumi を変えてはならない。
   return {
-    isTsumi: true, // This must be true, since searchTsumi() never use deep tree search. THIS IS BY DESIGN.
-    strategy: sr.strategy, judgment,
+    isTsumi, judgment, conclusions, setup, day: vs.day,
     stats: {
-      worldsTotal: sr.worldsTotal, nodesVisited: sr.nodesVisited, maxDepth: sr.maxDepth,
-      elapsed, retarElapsed: t1 - t0,
-      enumerateElapsed: sr.enumerateElapsed, searchElapsed: sr.searchElapsed,
+      worldsTotal: 0, nodesVisited: 0, maxDepth: 0,
+      elapsed: t2 - t0, retarElapsed: t1 - t0, enumerateElapsed: 0, searchElapsed: 0,
     },
   }
+}
+
+/** searchTsumiDirect の戻り値型（テスト・デバッグ用、strategy を含む） */
+export type DirectTsumiResult = {
+  isTsumi: boolean
+  strategy: StrategyNode | null
+  judgment: TsumiJudgment
+  stats: import('./types.ts').SearchStats
 }
 
 /**
@@ -548,7 +500,7 @@ export function searchTsumiDirect(
   worlds: World[],
   alive: number | Set<Seat>,
   searchOptions: SearchOptions = DEFAULT_SEARCH_OPTIONS,
-): TsumiResult {
+): DirectTsumiResult {
   const t0 = performance.now()
   const aliveMask = typeof alive === 'number' ? alive : (() => { let m = 0; for (const s of alive) m |= (1 << s); return m })()
   const initialState: SimState = { alive: aliveMask, day: 1 }

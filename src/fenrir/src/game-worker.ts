@@ -337,7 +337,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         const { meta, statements } = parse(truncated)
         const { vs, setup } = buildVillageStatus(statements, meta)
         tsumiCallCount++
-        const result = searchTsumi(vs, setup, hatiOptions, { buildStrategy: false })
+        const result = searchTsumi(vs, setup, hatiOptions)
         if (result.isTsumi) {
           firstTsumiDay = i + 1
           break

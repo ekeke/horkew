@@ -64,7 +64,11 @@ function formatObservationKey(key: string): string {
 /**
  * 詰み結果のサマリーを日本語で出力
  */
-export function formatTsumiResult(result: import('./types.ts').TsumiResult): string {
+export function formatTsumiResult(result: {
+  isTsumi: boolean
+  strategy?: import('./types.ts').StrategyNode | null
+  stats: import('./types.ts').SearchStats
+}): string {
   const lines: string[] = []
 
   if (result.isTsumi) {

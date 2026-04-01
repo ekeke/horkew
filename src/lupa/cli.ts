@@ -7,7 +7,7 @@ import { strategyAdapter } from './adapters/strategy-adapter.ts'
 import { formatHowl } from './format.ts'
 import { parse } from '../howl/index.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
-import { searchTsumi } from '../hati/index.ts'
+import { searchTsumi, searchTsumiStrategy } from '../hati/index.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
 import { RandomStrategy } from './random-strategy.ts'
 import { findScenario, scenarioToRoles, scenarios } from './scenarios.ts'
@@ -184,13 +184,19 @@ function runTsumiCheck(howl: string, execLine: number, _day: number): {
     const { meta, statements } = parse(truncated)
     const { vs, setup } = buildVillageStatus(statements, meta)
     const result = searchTsumi(vs, setup, ANALYZE_OPTIONS)
-    const summary = result.isTsumi && result.strategy
-      ? strategyOneLiner(result.strategy)
-      : ''
+    let summary = ''
+    let worlds = 0
+    let elapsed = result.stats.elapsed
+    if (result.isTsumi) {
+      const sr = searchTsumiStrategy(result)
+      worlds = sr.worldsTotal
+      elapsed += sr.enumerateElapsed + sr.searchElapsed
+      if (sr.strategy) summary = strategyOneLiner(sr.strategy)
+    }
     return {
       found: result.isTsumi,
-      worlds: result.stats.worldsTotal,
-      elapsed: result.stats.elapsed,
+      worlds,
+      elapsed,
       summary,
     }
   } catch {
