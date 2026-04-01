@@ -25,7 +25,7 @@ import {
   lupaRunRetar,
   type RetarResult,
 } from '../retar-bridge.ts'
-import { searchTsumi } from '../../hati/index.ts'
+import { searchTsumi, searchTsumiStrategy } from '../../hati/index.ts'
 
 export type StrategyAdapterConfig = {
   strategies?: Map<number, Strategy>
@@ -165,11 +165,13 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
     try {
       const result = searchTsumi(
         lastRetarArtifacts.vs, lastRetarArtifacts.setup, lastRetarArtifacts.options,
-        { maxDepth: 4, buildStrategy: true, retarConclusions: conclusions },
-        lupaRunRetar,
+        lupaRunRetar, conclusions,
       )
-      if (result.isTsumi && result.strategy?.type === 'action') {
-        tsumiTarget = result.strategy.action.execute
+      if (result.isTsumi) {
+        const sr = searchTsumiStrategy(result, { maxDepth: 4 })
+        if (sr.strategy?.type === 'action') {
+          tsumiTarget = sr.strategy.action.execute
+        }
       }
     } catch { /* skip */ }
   }

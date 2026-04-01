@@ -463,11 +463,12 @@ export function searchTsumi(
   setup: Map<SystemRole, number>,
   analyzeOptions: AnalyzeOptions,
   runRetar: RunRetar = defaultRunRetar,
+  retarConclusions?: Possibilities,
 ): TsumiResult {
   const t0 = performance.now()
 
   // 1. Retar解析（事前計算済みならスキップ）
-  const conclusions = searchOptions.retarConclusions ?? runRetar(vs, setup, analyzeOptions)
+  const conclusions = retarConclusions ?? runRetar(vs, setup, analyzeOptions)
   const t1 = performance.now()
 
   // 2. 判定フェーズ
