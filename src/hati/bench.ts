@@ -10,7 +10,7 @@ import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../lup
 import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
-import { searchTsumi } from './index.ts'
+import { searchTsumi, searchTsumiStrategy } from './index.ts'
 import { resetEndgameStats, getEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 
@@ -88,16 +88,23 @@ async function benchConfig(cfg: Config) {
         const { vs, setup } = buildVillageStatus(statements, meta)
         const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
         const r = searchTsumi(vs, setup, opts)
-        totalMs += r.stats.searchElapsed
-        if (r.stats.searchElapsed > maxMs) maxMs = r.stats.searchElapsed
+        let searchElapsed = 0
+        let nodesVisited = 0
+        if (r.isTsumi) {
+          const sr = searchTsumiStrategy(r)
+          searchElapsed = sr.searchElapsed
+          nodesVisited = sr.nodesVisited
+        }
+        totalMs += searchElapsed
+        if (searchElapsed > maxMs) maxMs = searchElapsed
         count++
 
         const d = perDay.get(cp.day) ?? { totalMs: 0, count: 0, maxMs: 0, maxNodes: 0, times: [] }
-        d.totalMs += r.stats.searchElapsed
+        d.totalMs += searchElapsed
         d.count++
-        d.times.push(r.stats.searchElapsed)
-        if (r.stats.searchElapsed > d.maxMs) d.maxMs = r.stats.searchElapsed
-        if (r.stats.nodesVisited > d.maxNodes) d.maxNodes = r.stats.nodesVisited
+        d.times.push(searchElapsed)
+        if (searchElapsed > d.maxMs) d.maxMs = searchElapsed
+        if (nodesVisited > d.maxNodes) d.maxNodes = nodesVisited
         perDay.set(cp.day, d)
       } catch (e) { console.error('  parse error:', e); continue }
     }

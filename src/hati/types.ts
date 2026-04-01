@@ -1,4 +1,5 @@
 import type { Seat, SystemRole } from '../types/index.ts'
+import type { Possibilities } from '../retar/possibilities.ts'
 
 // --- ビットマスクユーティリティ ---
 
@@ -129,12 +130,17 @@ export type TsumiJudgment = {
   impossible: boolean
 }
 
-/** 探索結果 */
+/** 判定結果（searchTsumi の戻り値） */
 export type TsumiResult = {
   isTsumi: boolean
-  strategy: StrategyNode | null
   /** 詰み判定の中間結果（ThreatProfile含む） */
   judgment: TsumiJudgment
+  /** Retarの可能性（searchTsumiStrategy に渡す用） */
+  conclusions: Possibilities
+  /** 配役セットアップ（searchTsumiStrategy に渡す用） */
+  setup: Map<SystemRole, number>
+  /** 日数（searchTsumiStrategy に渡す用） */
+  day: number
   stats: SearchStats
 }
 

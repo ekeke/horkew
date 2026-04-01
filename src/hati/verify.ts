@@ -23,7 +23,7 @@ import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../lup
 import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
-import { searchTsumi } from './index.ts'
+import { searchTsumi, searchTsumiStrategy } from './index.ts'
 import { getEndgameStats, resetEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { VillageRetar } from '../retar/index.ts'
@@ -478,15 +478,26 @@ async function runVerify(args: Args): Promise<void> {
         checkpointCount++
         const truncated = howl.split('\n').slice(0, cp.line - 1).join('\n')
 
-        let tsumiResult
+        let tsumiResult: import('./types.ts').TsumiResult
+        let strategy: import('./types.ts').StrategyNode | null = null
         let alive: number
         const cpStart = performance.now()
         try {
           const { meta, statements } = parse(truncated)
           const { vs, setup } = buildVillageStatus(statements, meta)
           const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
-          const searchOpts = args.noStrategy ? { maxDepth: 5, buildStrategy: false as const } : undefined
-          tsumiResult = searchTsumi(vs, setup, opts, searchOpts)
+          tsumiResult = searchTsumi(vs, setup, opts)
+          strategy = null
+          if (tsumiResult.isTsumi && !args.noStrategy) {
+            const sr = searchTsumiStrategy(tsumiResult)
+            strategy = sr.strategy
+            tsumiResult.stats = {
+              ...tsumiResult.stats,
+              worldsTotal: sr.worldsTotal, nodesVisited: sr.nodesVisited, maxDepth: sr.maxDepth,
+              elapsed: tsumiResult.stats.elapsed + sr.enumerateElapsed + sr.searchElapsed,
+              enumerateElapsed: sr.enumerateElapsed, searchElapsed: sr.searchElapsed,
+            }
+          }
           alive = 0
           for (const [seat, status] of vs.statuses) {
             if (status.surviving) alive |= (1 << seat)
@@ -529,10 +540,11 @@ async function runVerify(args: Args): Promise<void> {
               const { meta, statements } = parse(prevCp.truncated)
               const { vs, setup } = buildVillageStatus(statements, meta)
               const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
-              const deepResult = searchTsumi(vs, setup, opts, { maxDepth: prevCp.aliveCount })
+              const deepResult = searchTsumi(vs, setup, opts)
               if (deepResult.isTsumi) {
+                const deepSr = searchTsumiStrategy(deepResult, { maxDepth: prevCp.aliveCount })
                 fnFound++
-                console.log(`    [偽陰性発見] seed=${seed} Day${prevCp.day} alive=${prevCp.aliveCount} worlds=${deepResult.stats.worldsTotal} nodes=${deepResult.stats.nodesVisited} search=${deepResult.stats.searchElapsed.toFixed(1)}ms`)
+                console.log(`    [偽陰性発見] seed=${seed} Day${prevCp.day} alive=${prevCp.aliveCount} worlds=${deepSr.worldsTotal} nodes=${deepSr.nodesVisited} search=${deepSr.searchElapsed.toFixed(1)}ms`)
                 const failure: Failure = {
                   config: cfg.name,
                   seed,
@@ -540,7 +552,7 @@ async function runVerify(args: Args): Promise<void> {
                   message: `偽陰性: Day${prevCp.day}(${prevCp.aliveCount}人)で詰みあり、通常探索(maxDepth=5)では見逃し`,
                   trace: [
                     `通常探索(maxDepth=5): 詰みなし`,
-                    `深い探索(maxDepth=${prevCp.aliveCount}): 詰みあり (worlds=${deepResult.stats.worldsTotal}, nodes=${deepResult.stats.nodesVisited}, ${deepResult.stats.searchElapsed.toFixed(1)}ms)`,
+                    `深い探索(maxDepth=${prevCp.aliveCount}): 詰みあり (worlds=${deepSr.worldsTotal}, nodes=${deepSr.nodesVisited}, ${deepSr.searchElapsed.toFixed(1)}ms)`,
                     `翌日Day${cp.day}(${currentAliveCount}人)では通常探索で詰み発見済み`,
                   ],
                   howl: prevCp.truncated,
@@ -552,7 +564,7 @@ async function runVerify(args: Args): Promise<void> {
                     + `# [偽陰性: 通常探索で詰み見逃し]\n`
                     + `# 通常探索(maxDepth=5): 詰みなし\n`
                     + `# 深い探索(maxDepth=${prevCp.aliveCount}): 詰みあり\n`
-                    + `# worlds=${deepResult.stats.worldsTotal}, nodes=${deepResult.stats.nodesVisited}, ${deepResult.stats.searchElapsed.toFixed(1)}ms\n`
+                    + `# worlds=${deepSr.worldsTotal}, nodes=${deepSr.nodesVisited}, ${deepSr.searchElapsed.toFixed(1)}ms\n`
                     + `# 翌日Day${cp.day}(${currentAliveCount}人)では通常探索で詰み発見\n`
                   writeFileSync(join(args.outdir, filename), content)
                 }
@@ -574,28 +586,31 @@ async function runVerify(args: Args): Promise<void> {
               const { meta, statements } = parse(truncated)
               const { vs, setup } = buildVillageStatus(statements, meta)
               const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
-              const noPruneResult = searchTsumi(vs, setup, opts, { maxDepth: 5, disableHamsterPruning: true })
+              const noPruneResult = searchTsumi(vs, setup, opts)
               if (noPruneResult.isTsumi) {
-                falseNegatives++
-                const failure: Failure = {
-                  config: cfg.name,
-                  seed,
-                  day: cp.day,
-                  message: `偽陰性: 狐枝刈りで詰みを見逃し (worlds=${noPruneResult.stats.worldsTotal})`,
-                  trace: [`枝刈りあり: 詰みなし`, `枝刈りなし: 詰みあり (worlds=${noPruneResult.stats.worldsTotal}, ${noPruneResult.stats.searchElapsed.toFixed(1)}ms)`],
-                  howl: truncated,
-                }
-                failures.push(failure)
-                if (args.outdir) {
-                  const filename = `${cfg.name}_s${seed}_day${cp.day}_false_negative.howl`
-                  const content = truncated + '\n\n'
-                    + `# [偽陰性: 狐枝刈りで詰みを見逃し]\n`
-                    + `# 枝刈りなし: worlds=${noPruneResult.stats.worldsTotal}, ${noPruneResult.stats.searchElapsed.toFixed(1)}ms\n`
-                  writeFileSync(join(args.outdir, filename), content)
-                }
-                if (args.stopOnFirst) {
-                  dumpHowlOnStop(args, truncated, cfg, seed, cp.day)
-                  break seedLoop
+                const noPruneSr = searchTsumiStrategy(noPruneResult, { maxDepth: 5, disableHamsterPruning: true })
+                if (noPruneSr.isTsumi) {
+                  falseNegatives++
+                  const failure: Failure = {
+                    config: cfg.name,
+                    seed,
+                    day: cp.day,
+                    message: `偽陰性: 狐枝刈りで詰みを見逃し (worlds=${noPruneSr.worldsTotal})`,
+                    trace: [`枝刈りあり: 詰みなし`, `枝刈りなし: 詰みあり (worlds=${noPruneSr.worldsTotal}, ${noPruneSr.searchElapsed.toFixed(1)}ms)`],
+                    howl: truncated,
+                  }
+                  failures.push(failure)
+                  if (args.outdir) {
+                    const filename = `${cfg.name}_s${seed}_day${cp.day}_false_negative.howl`
+                    const content = truncated + '\n\n'
+                      + `# [偽陰性: 狐枝刈りで詰みを見逃し]\n`
+                      + `# 枝刈りなし: worlds=${noPruneSr.worldsTotal}, ${noPruneSr.searchElapsed.toFixed(1)}ms\n`
+                    writeFileSync(join(args.outdir, filename), content)
+                  }
+                  if (args.stopOnFirst) {
+                    dumpHowlOnStop(args, truncated, cfg, seed, cp.day)
+                    break seedLoop
+                  }
                 }
               }
             } catch {
@@ -607,17 +622,16 @@ async function runVerify(args: Args): Promise<void> {
               const { meta: m2, statements: s2 } = parse(truncated)
               const { vs: vs2, setup: setup2 } = buildVillageStatus(s2, m2)
               const opts2 = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
-              const deepResult = searchTsumi(vs2, setup2, opts2, { maxDepth: currentAliveCount, buildStrategy: false })
+              const deepResult = searchTsumi(vs2, setup2, opts2)
               if (deepResult.isTsumi) {
                 deepCheckFound++
-                console.log(`    [深探索で詰み発見] seed=${seed} Day${cp.day} alive=${currentAliveCount} worlds=${deepResult.stats.worldsTotal} nodes=${deepResult.stats.nodesVisited} search=${deepResult.stats.searchElapsed.toFixed(1)}ms`)
+                console.log(`    [深探索で詰み発見] seed=${seed} Day${cp.day} alive=${currentAliveCount}`)
                 if (args.outdir) {
                   const filename = `${cfg.name}_s${seed}_day${cp.day}_deep.howl`
                   const content = truncated + '\n\n'
                     + `# [深探索偽陰性: 通常探索で詰み見逃し]\n`
                     + `# 通常探索(maxDepth=5): 詰みなし\n`
-                    + `# 深い探索(maxDepth=${currentAliveCount}): 詰みあり\n`
-                    + `# worlds=${deepResult.stats.worldsTotal}, nodes=${deepResult.stats.nodesVisited}, ${deepResult.stats.searchElapsed.toFixed(1)}ms\n`
+                    + `# 深い判定(maxDepth=${currentAliveCount}): 詰みあり\n`
                   writeFileSync(join(args.outdir, filename), content)
                 }
                 if (args.stopOnFirst) {
@@ -659,7 +673,7 @@ async function runVerify(args: Args): Promise<void> {
         }
 
         // 判定は詰みだが戦略が構築できなかった → 偽陽性
-        if (!tsumiResult.strategy) {
+        if (!strategy) {
           judgmentFalsePositives++
           const failure: Failure = {
             config: cfg.name,
@@ -691,7 +705,7 @@ async function runVerify(args: Args): Promise<void> {
         const trueWorld = buildTrueWorld(state)
 
         // 戦略検証
-        const verification = verifyStrategy(tsumiResult.strategy, trueWorld, alive)
+        const verification = verifyStrategy(strategy!, trueWorld, alive)
         verifiedCount++
 
         if (!verification.valid) {
@@ -739,7 +753,7 @@ async function runVerify(args: Args): Promise<void> {
               + (retarLines.length > 0 ? retarLines.join('\n') + '\n' : '')
               + `# 真の配役: ${trueRoles}\n`
               + `# worlds=${tsumiResult.stats.worldsTotal}\n\n`
-              + formatStrategy(tsumiResult.strategy!) + '\n'
+              + formatStrategy(strategy!) + '\n'
             writeFileSync(join(args.outdir, filename), content)
           }
           if (args.stopOnFirst) {
@@ -983,12 +997,12 @@ async function runFalseNegativeFromDb(args: Args): Promise<void> {
         if (aliveCount > args.maxAliveForFN) { skippedAlive++; continue }
 
         checked++
-        const deepResult = searchTsumi(vs, setup, opts, { maxDepth: aliveCount, buildStrategy: false })
+        const deepResult = searchTsumi(vs, setup, opts)
 
         if (deepResult.isTsumi) {
           found++
           scenarioFound++
-          console.log(`  [偽陰性] ${scenarioName} seed=${entry.seed} Day${prevCp.day} alive=${aliveCount} worlds=${deepResult.stats.worldsTotal} nodes=${deepResult.stats.nodesVisited} search=${deepResult.stats.searchElapsed.toFixed(1)}ms`)
+          console.log(`  [偽陰性] ${scenarioName} seed=${entry.seed} Day${prevCp.day} alive=${aliveCount}`)
           console.log(`    → Day${entry.day}(${entry.alive}人)で通常探索は詰み発見済み`)
 
           if (args.outdir) {

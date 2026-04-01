@@ -1,23 +1,39 @@
 # Hati — 詰み探索エンジン
 
-## 最重要: 判定と探索は別物
+## 最重要: 判定と探索は別API
 
 ```
-判定 (judgeTsumi)    ← Retarの可能性ビットだけで完結。ワールド列挙しない。
-探索 (searchTsumiStrategy) ← 詰み手順の構築。ワールド列挙が必要。オプショナル。
+searchTsumi(vs, setup, opts)          → TsumiResult   判定のみ。探索しない。
+searchTsumiStrategy(tsumiResult, opts) → strategy      手順構築。ユーザーが明示的に呼ぶ。
 ```
 
-### 判定フェーズ
+### 呼び出しパターン
+
+```typescript
+// 判定のみ（fenrir training など高速パス）
+const result = searchTsumi(vs, setup, analyzeOptions)
+if (result.isTsumi) { /* 詰みあり */ }
+
+// 判定 + 手順構築（verify, bench, CLI）
+const result = searchTsumi(vs, setup, analyzeOptions)
+if (result.isTsumi) {
+  const sr = searchTsumiStrategy(result, { maxDepth: 5 })
+  // sr.strategy を使う
+}
+```
+
+### 判定フェーズ (`searchTsumi` → `judgeTsumi`)
 
 - **計算だけで詰みの可否を決定する。**
 - 入力: Retarの `Possibilities`（各席の役職可能性ビットマスク）
-- 出力: `TsumiJudgment`（nawa, threat, impossible）
+- 出力: `TsumiResult`（`isTsumi`, `judgment`, `conclusions`, `setup`, `day`）
 - ワールド列挙もAND-OR探索も行わない
 - `isThreatExceeded` が判定ロジックを担当
 
-### 探索フェーズ
+### 探索フェーズ (`searchTsumiStrategy`)
 
-- **判定で「詰みあり」かつ手順構築が要求された場合のみ**実行される
+- **判定で `isTsumi=true` の場合にユーザーが明示的に呼ぶ**
+- `TsumiResult` を丸ごと受け取る（conclusions, setup, day を内包）
 - ワールド列挙 → 枝刈り → AND-OR木探索
 - `isExecInsufficient`, `simulateFoxElimination` は探索の枝刈り（探索高速化のため）
 - これらは判定には使わない
@@ -27,7 +43,8 @@
 Hatiは当初、AND-OR全探索で詰みを判定する設計だった。
 途中で「計算だけで判定が出せる」というピボットが起き、
 探索は手順構築のためだけに残った。
-この経緯を知らないと、枝刈り関数を判定条件と混同しやすい。
+判定と探索を別APIに分離し、探索が不要な呼び出し元（fenrir等）が
+`SearchOptions` に依存しなくて済むようにした。
 
 ## ファイル構成
 

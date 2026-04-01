@@ -16,9 +16,9 @@ import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { serializeVillageStatus, serializeOptions, parseWasmResult, resultToPossibilities } from '../retar/wasm-helpers.ts'
 import { Possibilities, RoleBitIndex, possibilityFromRoles } from '../retar/possibilities.ts'
-import { searchTsumi } from '../hati/index.ts'
+import { searchTsumi, searchTsumiStrategy } from '../hati/index.ts'
 import type { RunRetar } from '../hati/index.ts'
-import type { TsumiResult } from '../hati/index.ts'
+import type { TsumiResult, StrategyNode } from '../hati/index.ts'
 
 // ============================================================
 // WASM ロード (利用可能ならWASM、なければJS版にフォールバック)
@@ -343,15 +343,18 @@ export function checkRetarConsistency(
   return true
 }
 
+/** searchTsumiFromEvents の戻り値（判定 + 手順構築） */
+export type TsumiFromEventsResult = TsumiResult & { strategy: StrategyNode | null }
+
 /**
- * Hati詰み探索をイベント列から実行
+ * Hati詰み探索をイベント列から実行（判定 + 手順構築）
  */
 export function searchTsumiFromEvents(
   events: GameEvent[],
   state: GameState,
   config: LupaConfig,
   maxDepth: number = 4,
-): TsumiResult | null {
+): TsumiFromEventsResult | null {
   const howl = formatHowl(events, state, config)
   const { meta, statements } = parse(howl)
   const unknowns = statements.filter(s => s.type === 'unknown')
@@ -361,7 +364,13 @@ export function searchTsumiFromEvents(
   const options: AnalyzeOptions = buildRetarOptions(config)
 
   try {
-    return searchTsumi(vs, setup, options, { maxDepth }, lupaRunRetar)
+    const result = searchTsumi(vs, setup, options, lupaRunRetar)
+    let strategy: StrategyNode | null = null
+    if (result.isTsumi) {
+      const sr = searchTsumiStrategy(result, { maxDepth })
+      strategy = sr.strategy
+    }
+    return { ...result, strategy }
   } catch {
     return null
   }
