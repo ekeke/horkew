@@ -4,6 +4,9 @@ import { LayerNorm, MultiHeadAttention, FeedForward, TransformerBlock, Transform
 import { TransformerNetwork } from './transformer-network.ts'
 import { tokenize, OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE, SEATS, NUM_ROLES,
          CLS_FEATURES, TEAM_CLS_FEATURES, SEAT_TOKEN_FEATURES, TEAM_SEAT_TOKEN_FEATURES,
+         WOLF_COLLECTIVE_OBSERVATION_SIZE, WOLF_COLLECTIVE_SEAT_FEATURES, WOLF_COLLECTIVE_CLS_FEATURES,
+         MASON_COLLECTIVE_OBSERVATION_SIZE, MASON_COLLECTIVE_SEAT_FEATURES, MASON_COLLECTIVE_CLS_FEATURES,
+         FANATIC_OBSERVATION_SIZE, FANATIC_SEAT_FEATURES, FANATIC_CLS_FEATURES,
          ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS } from '../observation.ts'
 import type { NetworkConfig } from './nn.ts'
 
@@ -347,6 +350,246 @@ describe('TransformerNetwork', () => {
     assert.ok(params > 100_000, `too few params: ${params}`)
     assert.ok(params < 2_000_000, `too many params: ${params}`)
     console.log(`  TransformerNetwork totalParams: ${params}`)
+  })
+})
+
+// ============================================================
+// Collective / Fanatic Network Tests
+// ============================================================
+
+function makeWolfCollectiveConfig(): NetworkConfig {
+  return {
+    inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
+    hiddenSizes: [],
+    heads: {
+      attack_target: SEATS,
+      attacker: 3,
+      claim: 10,
+      vote: SEATS,
+      comm: SEATS * 8 + 7,
+      leader: 3,
+      target: SEATS,
+      co_policy: 8,
+    },
+    sigmoidHeads: {
+      propose: SEATS,
+      predict: SEATS * NUM_ROLES,
+    },
+    transformer: {
+      dModel: D_MODEL,
+      numHeads: NUM_HEADS,
+      dFf: D_FF,
+      seatFeatures: WOLF_COLLECTIVE_SEAT_FEATURES,
+      clsFeatures: WOLF_COLLECTIVE_CLS_FEATURES,
+      planFeatures: 20,
+      maxPlanTokens: MAX_PLAN_TOKENS,
+      roleFeatures: ROLE_TOKEN_FEATURES,
+      numRoleTokens: NUM_ROLE_TOKENS,
+      seatLayers: NUM_LAYERS,
+      strategyLayers: 2,
+      numForwardTokens: 8,
+      numEndgameTokens: 4,
+      planVocabSize: 22,
+      perSeatHeads: ['vote', 'target', 'attack_target', 'co_policy'],
+      perSeatSigmoidHeads: ['propose', 'predict'],
+    },
+  }
+}
+
+function makeMasonCollectiveConfig(): NetworkConfig {
+  return {
+    inputSize: MASON_COLLECTIVE_OBSERVATION_SIZE,
+    hiddenSizes: [],
+    heads: {
+      claim: 10,
+      vote: SEATS,
+      comm: SEATS * 8 + 7,
+      leader: 3,
+      target: SEATS,
+      co_policy: 8,
+    },
+    sigmoidHeads: {
+      propose: SEATS,
+      predict: SEATS * NUM_ROLES,
+    },
+    transformer: {
+      dModel: D_MODEL,
+      numHeads: NUM_HEADS,
+      dFf: D_FF,
+      seatFeatures: MASON_COLLECTIVE_SEAT_FEATURES,
+      clsFeatures: MASON_COLLECTIVE_CLS_FEATURES,
+      planFeatures: 20,
+      maxPlanTokens: MAX_PLAN_TOKENS,
+      roleFeatures: ROLE_TOKEN_FEATURES,
+      numRoleTokens: NUM_ROLE_TOKENS,
+      seatLayers: NUM_LAYERS,
+      strategyLayers: 2,
+      numForwardTokens: 8,
+      numEndgameTokens: 4,
+      planVocabSize: 22,
+      perSeatHeads: ['vote', 'target', 'co_policy'],
+      perSeatSigmoidHeads: ['propose', 'predict'],
+    },
+  }
+}
+
+function makeFanaticConfig(): NetworkConfig {
+  return {
+    inputSize: FANATIC_OBSERVATION_SIZE,
+    hiddenSizes: [],
+    heads: {
+      night: SEATS + 1,
+      claim: 10,
+      vote: SEATS,
+      comm: SEATS * 8 + 7,
+      leader: 3,
+      target: SEATS,
+    },
+    sigmoidHeads: {
+      propose: SEATS,
+      predict: SEATS * NUM_ROLES,
+    },
+    transformer: {
+      dModel: D_MODEL,
+      numHeads: NUM_HEADS,
+      dFf: D_FF,
+      seatFeatures: FANATIC_SEAT_FEATURES,
+      clsFeatures: FANATIC_CLS_FEATURES,
+      planFeatures: 20,
+      maxPlanTokens: MAX_PLAN_TOKENS,
+      roleFeatures: ROLE_TOKEN_FEATURES,
+      numRoleTokens: NUM_ROLE_TOKENS,
+      seatLayers: NUM_LAYERS,
+      strategyLayers: 2,
+      numForwardTokens: 8,
+      numEndgameTokens: 4,
+      planVocabSize: 22,
+      perSeatHeads: ['vote', 'target'],
+      perSeatSigmoidHeads: ['propose', 'predict'],
+    },
+  }
+}
+
+describe('Wolf Collective Network', () => {
+  it('forward produces correct head shapes', () => {
+    const config = makeWolfCollectiveConfig()
+    const net = new TransformerNetwork(config, 'wolf_collective')
+
+    const obs = new Float32Array(WOLF_COLLECTIVE_OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
+    const result = net.forward(obs)
+
+    assert.equal(result.policies.get('vote')!.length, SEATS)
+    assert.equal(result.policies.get('target')!.length, SEATS)
+    assert.equal(result.policies.get('attack_target')!.length, SEATS)
+    assert.equal(result.policies.get('attacker')!.length, 3)
+    assert.equal(result.policies.get('co_policy')!.length, SEATS)  // per-seat head: 1 output per seat
+    assert.equal(result.policies.get('propose')!.length, SEATS)
+    assert.equal(result.policies.get('predict')!.length, SEATS * NUM_ROLES)
+    assert.ok(result.value >= -1 && result.value <= 1, `value ${result.value} out of range`)
+  })
+
+  it('cloneWeights roundtrip', () => {
+    const config = makeWolfCollectiveConfig()
+    const net1 = new TransformerNetwork(config, 'wolf_collective')
+    const weights = net1.cloneWeights()
+
+    const net2 = new TransformerNetwork(config, 'wolf_collective')
+    net2.loadWeights(weights)
+
+    const obs = new Float32Array(WOLF_COLLECTIVE_OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
+    const r1 = net1.forward(obs)
+    const r2 = net2.forward(obs)
+
+    assert.ok(Math.abs(r1.value - r2.value) < 1e-4)
+    for (const [name, logits1] of r1.policies) {
+      const logits2 = r2.policies.get(name)!
+      for (let i = 0; i < logits1.length; i++) {
+        assert.ok(Math.abs(logits1[i] - logits2[i]) < 1e-4,
+          `head ${name}[${i}] mismatch: ${logits1[i]} vs ${logits2[i]}`)
+      }
+    }
+  })
+})
+
+describe('Mason Collective Network', () => {
+  it('forward produces correct head shapes', () => {
+    const config = makeMasonCollectiveConfig()
+    const net = new TransformerNetwork(config, 'mason_collective')
+
+    const obs = new Float32Array(MASON_COLLECTIVE_OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
+    const result = net.forward(obs)
+
+    assert.equal(result.policies.get('vote')!.length, SEATS)
+    assert.equal(result.policies.get('target')!.length, SEATS)
+    assert.equal(result.policies.get('co_policy')!.length, SEATS)  // per-seat head: 1 output per seat
+    assert.equal(result.policies.get('propose')!.length, SEATS)
+    assert.equal(result.policies.get('predict')!.length, SEATS * NUM_ROLES)
+    assert.ok(result.value >= -1 && result.value <= 1, `value ${result.value} out of range`)
+  })
+})
+
+describe('Fanatic Network', () => {
+  it('forward produces correct head shapes', () => {
+    const config = makeFanaticConfig()
+    const net = new TransformerNetwork(config, 'fanatic')
+
+    const obs = new Float32Array(FANATIC_OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
+    const result = net.forward(obs)
+
+    assert.equal(result.policies.get('vote')!.length, SEATS)
+    assert.equal(result.policies.get('target')!.length, SEATS)
+    assert.equal(result.policies.get('night')!.length, SEATS + 1)
+    assert.equal(result.policies.get('claim')!.length, 10)
+    assert.equal(result.policies.get('propose')!.length, SEATS)
+    assert.equal(result.policies.get('predict')!.length, SEATS * NUM_ROLES)
+    assert.ok(result.value >= -1 && result.value <= 1, `value ${result.value} out of range`)
+  })
+
+  it('cloneWeights roundtrip', () => {
+    const config = makeFanaticConfig()
+    const net1 = new TransformerNetwork(config, 'fanatic')
+    const weights = net1.cloneWeights()
+
+    const net2 = new TransformerNetwork(config, 'fanatic')
+    net2.loadWeights(weights)
+
+    const obs = new Float32Array(FANATIC_OBSERVATION_SIZE)
+    for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
+    const r1 = net1.forward(obs)
+    const r2 = net2.forward(obs)
+
+    assert.ok(Math.abs(r1.value - r2.value) < 1e-4)
+    for (const [name, logits1] of r1.policies) {
+      const logits2 = r2.policies.get(name)!
+      for (let i = 0; i < logits1.length; i++) {
+        assert.ok(Math.abs(logits1[i] - logits2[i]) < 1e-4,
+          `head ${name}[${i}] mismatch: ${logits1[i]} vs ${logits2[i]}`)
+      }
+    }
+  })
+})
+
+describe('Collective tokenize', () => {
+  it('wolf_collective produces correct dimensions', () => {
+    const obs = new Float32Array(WOLF_COLLECTIVE_OBSERVATION_SIZE)
+    const tok = tokenize(obs, 'wolf_collective')
+    assert.equal(tok.seatFeatures, WOLF_COLLECTIVE_SEAT_FEATURES, 'seatFeatures')
+    assert.equal(tok.clsFeatures, WOLF_COLLECTIVE_CLS_FEATURES, 'clsFeatures')
+    assert.equal(tok.seats.length, SEATS * WOLF_COLLECTIVE_SEAT_FEATURES, 'seats array')
+    assert.equal(tok.cls.length, WOLF_COLLECTIVE_CLS_FEATURES, 'cls array')
+  })
+
+  it('mason_collective produces correct dimensions', () => {
+    const obs = new Float32Array(MASON_COLLECTIVE_OBSERVATION_SIZE)
+    const tok = tokenize(obs, 'mason_collective')
+    assert.equal(tok.seatFeatures, MASON_COLLECTIVE_SEAT_FEATURES, 'seatFeatures')
+    assert.equal(tok.clsFeatures, MASON_COLLECTIVE_CLS_FEATURES, 'clsFeatures')
+    assert.equal(tok.seats.length, SEATS * MASON_COLLECTIVE_SEAT_FEATURES, 'seats array')
+    assert.equal(tok.cls.length, MASON_COLLECTIVE_CLS_FEATURES, 'cls array')
   })
 })
 

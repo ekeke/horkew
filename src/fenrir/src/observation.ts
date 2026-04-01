@@ -154,7 +154,7 @@ export type TokenizedObservation = {
 }
 
 /** 観測モード */
-export type ObservationMode = 'individual' | 'team' | 'wolf_collective' | 'mason_collective'
+export type ObservationMode = 'individual' | 'team' | 'wolf_collective' | 'mason_collective' | 'fanatic'
 
 /**
  * フラットobservationをTransformer用トークンに分割
@@ -166,10 +166,12 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
   if (typeof mode === 'boolean') mode = mode ? 'team' : 'individual'
   const sf = mode === 'wolf_collective' ? WOLF_COLLECTIVE_SEAT_FEATURES
     : mode === 'mason_collective' ? MASON_COLLECTIVE_SEAT_FEATURES
+    : mode === 'fanatic' ? FANATIC_SEAT_FEATURES
     : mode === 'team' ? TEAM_SEAT_TOKEN_FEATURES
     : SEAT_TOKEN_FEATURES
   const cf = mode === 'wolf_collective' ? WOLF_COLLECTIVE_CLS_FEATURES
     : mode === 'mason_collective' ? MASON_COLLECTIVE_CLS_FEATURES
+    : mode === 'fanatic' ? FANATIC_CLS_FEATURES
     : mode === 'team' ? TEAM_CLS_FEATURES
     : CLS_FEATURES
   const isTeam = mode === 'team'
@@ -250,6 +252,13 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
       for (let i = 0; i < NUM_ROLES; i++) seats[so++] = obs[vpOff + i]
       seats[so++] = obs[WOLF_VILLAGE_TRUST_START + s]
       seats[so++] = obs[WOLF_FAKE_DIVINE_START + s]
+    }
+
+    // fanatic extension per-seat (+12: village_predict(11) + village_trust(1))
+    if (mode === 'fanatic') {
+      const vpOff = FANATIC_VILLAGE_PREDICT_START + s * NUM_ROLES
+      for (let i = 0; i < NUM_ROLES; i++) seats[so++] = obs[vpOff + i]
+      seats[so++] = obs[FANATIC_VILLAGE_TRUST_START + s]
     }
   }
 
@@ -740,6 +749,21 @@ export const MASON_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES  // 73
 /** 共有集団 CLS token特徴量次元: individual(25) + team_size(1) */
 export const MASON_COLLECTIVE_CLS_FEATURES = CLS_FEATURES + 1  // 26
 
+// 狂信者拡張: village_predict(14×11=154) + village_trust(14) = 168
+const FANATIC_VILLAGE_PREDICT_SIZE = SEATS * NUM_ROLES  // 154
+const FANATIC_VILLAGE_TRUST_SIZE = SEATS               // 14
+const FANATIC_EXTRA = FANATIC_VILLAGE_PREDICT_SIZE + FANATIC_VILLAGE_TRUST_SIZE  // 168
+export const FANATIC_OBSERVATION_SIZE = OBSERVATION_SIZE + FANATIC_EXTRA
+
+// 狂信者オフセット (OBSERVATION_SIZE基準)
+const FANATIC_VILLAGE_PREDICT_START = OBSERVATION_SIZE
+const FANATIC_VILLAGE_TRUST_START = FANATIC_VILLAGE_PREDICT_START + FANATIC_VILLAGE_PREDICT_SIZE
+
+/** 狂信者 Seat token特徴量次元: individual(73) + village_predict(11) + village_trust(1) */
+export const FANATIC_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1  // 85
+/** 狂信者 CLS token特徴量次元: individual(25) — team_sizeなし */
+export const FANATIC_CLS_FEATURES = CLS_FEATURES  // 25
+
 /** 村NN出力の注入データ */
 export type VillageNNOutput = {
   /** predict: 14席×11役職のsoftmax出力 (flat) */
@@ -898,6 +922,33 @@ export function encodeCollectiveMasonObservation(ctx: TeamDecisionContext): Floa
 
   // team_size
   obs[COLLECTIVE_TEAM_SIZE_START] = ctx.teamSeats.length / SEATS
+
+  return obs
+}
+
+/**
+ * 狂信者エージェント用の観測エンコード
+ *
+ * 個人観測ベース + 村NN出力注入:
+ * 1. village_predict per seat (154)
+ * 2. village_trust per seat (14)
+ *
+ * 集団overrideなし（my_role維持、is_me維持、team_sizeなし）
+ */
+export function encodeFanaticObservation(
+  ctx: DecisionContext,
+  villageNNOutput?: VillageNNOutput,
+): Float32Array {
+  const obs = new Float32Array(FANATIC_OBSERVATION_SIZE)
+
+  const base = encodeObservation(ctx)
+  obs.set(base)
+
+  // village NN output injection
+  if (villageNNOutput) {
+    obs.set(villageNNOutput.predict, FANATIC_VILLAGE_PREDICT_START)
+    obs.set(villageNNOutput.trust, FANATIC_VILLAGE_TRUST_START)
+  }
 
   return obs
 }

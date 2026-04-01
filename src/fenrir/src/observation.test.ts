@@ -1,7 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { OBSERVATION_SIZE, SEATS, NUM_ROLES, encodeObservation, tokenize,
-  PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS } from './observation.ts'
+  PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS,
+  FANATIC_OBSERVATION_SIZE, FANATIC_SEAT_FEATURES, FANATIC_CLS_FEATURES,
+  encodeFanaticObservation, type VillageNNOutput } from './observation.ts'
 import type { DecisionContext, ExecutionPlan } from '../../lupa/strategy.ts'
 import { Rng } from '../../lupa/random.ts'
 import { resolveRules } from '../../howl/ruleset.ts'
@@ -211,5 +213,90 @@ describe('tokenize with plan tokens', () => {
     const tok = tokenize(obs, false)
     assert.equal(tok.planCount, 0)
     assert.equal(tok.plans.length, 0)
+  })
+})
+
+// ============================================================
+// encodeFanaticObservation
+// ============================================================
+
+describe('encodeFanaticObservation', () => {
+  it('produces correct size', () => {
+    const ctx = makeCtx({ myRole: 'fanatic' })
+    const obs = encodeFanaticObservation(ctx)
+    assert.equal(obs.length, FANATIC_OBSERVATION_SIZE)
+  })
+
+  it('base observation matches individual encoding', () => {
+    const ctx = makeCtx({ myRole: 'fanatic' })
+    const individual = encodeObservation(ctx)
+    const fanatic = encodeFanaticObservation(ctx)
+    // First OBSERVATION_SIZE elements should be identical
+    for (let i = 0; i < OBSERVATION_SIZE; i++) {
+      assert.equal(fanatic[i], individual[i], `mismatch at offset ${i}`)
+    }
+  })
+
+  it('injects village NN output at correct offsets', () => {
+    const ctx = makeCtx({ myRole: 'fanatic' })
+    const villageOutput: VillageNNOutput = {
+      predict: new Float32Array(SEATS * NUM_ROLES),
+      trust: new Float32Array(SEATS),
+    }
+    // Set some distinctive values
+    villageOutput.predict[0] = 0.9   // seat 1, role 0
+    villageOutput.predict[11] = 0.7  // seat 2, role 0
+    villageOutput.trust[0] = 0.8     // seat 1
+    villageOutput.trust[1] = 0.6     // seat 2
+
+    const obs = encodeFanaticObservation(ctx, villageOutput)
+    assert.equal(obs.length, FANATIC_OBSERVATION_SIZE)
+
+    // village_predict starts at OBSERVATION_SIZE
+    assert.ok(Math.abs(obs[OBSERVATION_SIZE] - 0.9) < 1e-6, 'village_predict seat1 role0')
+    assert.ok(Math.abs(obs[OBSERVATION_SIZE + 11] - 0.7) < 1e-6, 'village_predict seat2 role0')
+
+    // village_trust starts at OBSERVATION_SIZE + SEATS * NUM_ROLES
+    const trustStart = OBSERVATION_SIZE + SEATS * NUM_ROLES
+    assert.ok(Math.abs(obs[trustStart] - 0.8) < 1e-6, 'village_trust seat1')
+    assert.ok(Math.abs(obs[trustStart + 1] - 0.6) < 1e-6, 'village_trust seat2')
+  })
+
+  it('without village NN output, extension is zeros', () => {
+    const ctx = makeCtx({ myRole: 'fanatic' })
+    const obs = encodeFanaticObservation(ctx)
+    for (let i = OBSERVATION_SIZE; i < FANATIC_OBSERVATION_SIZE; i++) {
+      assert.equal(obs[i], 0, `non-zero at offset ${i}`)
+    }
+  })
+})
+
+// ============================================================
+// tokenize('fanatic')
+// ============================================================
+
+describe('tokenize fanatic mode', () => {
+  it('produces correct dimensions', () => {
+    const obs = new Float32Array(FANATIC_OBSERVATION_SIZE)
+    const tok = tokenize(obs, 'fanatic')
+    assert.equal(tok.seatFeatures, FANATIC_SEAT_FEATURES, 'seatFeatures')
+    assert.equal(tok.clsFeatures, FANATIC_CLS_FEATURES, 'clsFeatures')
+    assert.equal(tok.seats.length, SEATS * FANATIC_SEAT_FEATURES, 'seats array length')
+    assert.equal(tok.cls.length, FANATIC_CLS_FEATURES, 'cls array length')
+  })
+
+  it('includes village_predict and village_trust in seat tokens', () => {
+    const obs = new Float32Array(FANATIC_OBSERVATION_SIZE)
+    // Set village_predict for seat 1, role 0
+    obs[OBSERVATION_SIZE] = 0.5
+    // Set village_trust for seat 1
+    obs[OBSERVATION_SIZE + SEATS * NUM_ROLES] = 0.3
+
+    const tok = tokenize(obs, 'fanatic')
+    // Last 12 features of seat 1 token: village_predict(11) + village_trust(1)
+    const sf = FANATIC_SEAT_FEATURES
+    const baseSf = sf - NUM_ROLES - 1  // individual base features
+    assert.ok(Math.abs(tok.seats[baseSf] - 0.5) < 1e-6, 'village_predict[0] in seat 1 token')
+    assert.ok(Math.abs(tok.seats[baseSf + NUM_ROLES] - 0.3) < 1e-6, 'village_trust in seat 1 token')
   })
 })

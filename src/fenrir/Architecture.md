@@ -414,13 +414,13 @@ Day N 開始
 
 ## モデル構成
 
-| モデル | 種別 | 役職 | 勝利条件 |
-|--------|------|------|----------|
-| **村個人** | 個人NN | villager, seer, medium, bodyguard, nekomata | villageWin |
-| **狼集団** | 集団NN | werewolf | wolfWin |
-| **共有集団** | 集団NN | mason | villageWin |
-| **狂信者個人** | 個人NN | fanatic | wolfWin |
-| **第三個人** | 個人NN | werehamster, immoralist | hamsterWin |
+| モデル | 種別 | 役職 | 勝利条件 | 村NN注入 |
+|--------|------|------|----------|---------|
+| **村個人** | 個人NN | villager, seer, medium, bodyguard, nekomata | villageWin | - |
+| **狼集団** | 集団NN | werewolf | wolfWin | あり |
+| **共有集団** | 集団NN | mason | villageWin | なし |
+| **狂信者個人** | 個人NN（専用config） | fanatic | wolfWin | あり |
+| **第三個人** | 個人NN | werehamster, immoralist | hamsterWin | - |
 
 ### 個人NN vs 集団NN
 
@@ -442,7 +442,14 @@ Day N 開始
 
 狂信者は狼勝利が目的だが、狼と通信できない（狼は狂信者が誰か知らない）。
 集団NNに入れると情報隔壁が壊れる。狂信者は独立した個人NNで、
-knownWolves を入力に持ちつつ単独で狼を援護する。村NN出力注入も適用可能。
+knownWolves を入力に持ちつつ単独で狼を援護する。
+
+狂信者は**専用のネットワーク config** を持つ（村個人NNとは異なる）:
+- 観測サイズ: `FANATIC_OBSERVATION_SIZE = OBSERVATION_SIZE + 168`（village_predict 154 + village_trust 14）
+- Seat token: 85次元（individual 73 + village_predict 11 + village_trust 1）
+- CLS token: 25次元（individual と同じ、team_size なし）
+- 集団オーバーライドなし（my_role 維持、is_me 維持）
+- `FanaticStrategy` が `FenrirStrategy` を拡張し、infer 時に frozen 村NN forward → 注入
 
 ### 完全統一（1モデル）を採用しない理由
 
@@ -504,8 +511,11 @@ entropy_coeff = 0.01
 
 ### 学習フロー
 
-1. **Phase 1**: 村NNを vs ヒューリスティックで育てる → frozen
-2. **Phase 1'**: frozen村NNを注入しつつ、狼集団 / 狂信者を学習
+1. **Phase 1**: 村NNを vs ヒューリスティックで育てる → frozen化 → eval-based graduation
+2. **Phase 1'**: frozen村NNを注入しつつ、狼集団 / 共有集団 / 狂信者 / 第三を学習
+   - 全5モデル同時評価（evaluate()が collective/fanatic strategy を自動構築）
+   - 陣営勝率が baseline を超えたら graduation
+   - チェックポイントからの resume 対応（collective は `collective_` prefix、fanatic/third は `checkpoint_` prefix）
 3. **Phase 2**: 全モデル自己対戦
 
 ---

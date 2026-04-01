@@ -13,7 +13,7 @@ import { runGame } from '../../lupa/engine.ts'
 import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import type { AnyNetwork } from './ml/nn.ts'
-import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
+import { FenrirStrategy, FanaticStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import { terminalReward, intermediateReward, tsumiReward, predictAccuracyReward, buildKnownSeats, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { formatHowl } from '../../lupa/format.ts'
@@ -69,6 +69,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
   const GROUP_MODE: Record<string, import('./observation.ts').ObservationMode> = {
     wolf_collective: 'wolf_collective',
     mason_collective: 'mason_collective',
+    fanatic: 'fanatic',
   }
   const groupNets = new Map<string, AnyNetwork>()
   if (multiModel) {
@@ -158,7 +159,13 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
           if (groupName === 'wolf_collective' || groupName === 'mason_collective') continue
           const net = groupName ? groupNets.get(groupName) : undefined
           if (net) {
-            strategies.set(seat, new FenrirStrategy(net, { explore: true, strategyOnly: config.strategyOnly }))
+            if (groupName === 'fanatic') {
+              const fs = new FanaticStrategy(net, { explore: true, strategyOnly: config.strategyOnly })
+              if (frozenVillageNet) fs.frozenVillageNetwork = frozenVillageNet
+              strategies.set(seat, fs)
+            } else {
+              strategies.set(seat, new FenrirStrategy(net, { explore: true, strategyOnly: config.strategyOnly }))
+            }
           }
           // groupName が無い (possessed等) → defaultStrategy にフォールバック
         }
