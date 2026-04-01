@@ -1,9 +1,13 @@
 export class Rng {
   private state: number
 
-  constructor(seed?: number) {
-    this.state = seed ?? (Date.now() | 0)
-    if (this.state === 0) this.state = 1
+  constructor(seed?: number, _restoreState?: number) {
+    if (_restoreState !== undefined) {
+      this.state = _restoreState
+    } else {
+      this.state = seed ?? (Date.now() | 0)
+      if (this.state === 0) this.state = 1
+    }
   }
 
   // mulberry32
@@ -30,5 +34,13 @@ export class Rng {
       ;[result[i], result[j]] = [result[j], result[i]]
     }
     return result
+  }
+
+  getState(): number {
+    return this.state
+  }
+
+  static fromState(state: number): Rng {
+    return new Rng(undefined, state)
   }
 }

@@ -6,7 +6,7 @@
  */
 
 import type { SystemRole, ResolvedRules } from '../types/index.ts'
-import type { GameState, GameEvent, NightAction, DayClaim, RevoteConfig } from './types.ts'
+import type { GameState, GameEvent, GameSnapshot, NightAction, DayClaim, RevoteConfig } from './types.ts'
 
 // ============================================================
 // MaybePromise: sync/async 両対応
@@ -24,6 +24,8 @@ export type GameConfig = {
   hasFirstGhost?: boolean
   revoteConfig?: RevoteConfig
   rules?: Partial<ResolvedRules>
+  /** スナップショットを取得する Day 一覧（Seed Bank 用） */
+  captureSnapshotDays?: number[]
 }
 
 // ============================================================
@@ -102,6 +104,8 @@ export type GameResult = {
   config: GameConfig
   /** ハンドラーが報告した計測値 */
   timing?: GameTiming
+  /** captureSnapshotDays で取得されたスナップショット */
+  snapshots?: Map<number, GameSnapshot>
 }
 
 /** ハンドラーからエンジンに報告する計測値 */

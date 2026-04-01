@@ -9,7 +9,7 @@ import { parentPort } from 'node:worker_threads'
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
-import { runGame } from '../../lupa/engine.ts'
+import { runGame, resumeGame } from '../../lupa/engine.ts'
 import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import type { AnyNetwork } from './ml/nn.ts'
@@ -88,7 +88,9 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
   const results: SerializedGameResult[] = []
 
-  for (const seed of req.seeds) {
+  for (let seedIdx = 0; seedIdx < req.seeds.length; seedIdx++) {
+    const seed = req.seeds[seedIdx]
+    const snapshot = req.snapshots?.[seedIdx]
     const strategies = new Map<number, FenrirStrategy>()
     // seat → role マッピング (role フィールド出力用)
     let seatRoleMap: Map<number, SystemRole> | undefined
@@ -211,7 +213,40 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     let tsumiCacheGetter: (() => Map<number, boolean>) | undefined
 
-    if (config.strategyOnly) {
+    if (snapshot) {
+      // Seed Bank リプレイ: スナップショットから resumeGame
+      const handlers = config.strategyOnly
+        ? minimalAdapter({
+            strategies: strategiesMap,
+            defaultStrategy,
+            wolfTeamStrategy,
+            masonTeamStrategy,
+            onRolesAssigned: onRolesAssignedWrapped,
+            seed,
+            enableRetar: config.enableRetar,
+            enableTsumi: true,
+            roles,
+            rules: config.rules,
+          })
+        : strategyAdapter({
+            strategies: strategiesMap,
+            defaultStrategy: defaultStrategy ?? new HeuristicStrategy(),
+            wolfTeamStrategy,
+            masonTeamStrategy,
+            enableRetar: config.enableRetar,
+            enableTsumi: true,
+            onRolesAssigned: onRolesAssignedWrapped,
+            seed,
+            roles,
+            rules: config.rules,
+          })
+      tsumiCacheGetter = () => handlers.getTsumiCache()
+      const result = await resumeGame(snapshot, handlers)
+      state = result.state
+      events = result.events
+      gameRetarMs = result.timing?.retarMs ?? 0
+      gameRetarCount = result.timing?.retarCount ?? 0
+    } else if (config.strategyOnly) {
       // minimal-adapter: 議論フェーズ全スキップで高速化
       const handlers = minimalAdapter({
         strategies: strategiesMap,

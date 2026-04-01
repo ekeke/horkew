@@ -129,6 +129,8 @@ export type WorkerRequest = {
   mlStartDay?: number
   /** frozen村NNの重み (集団NN/狂信者の村NN出力注入用) */
   villageFrozenWeights?: SharedWeights
+  /** Seed Bank スナップショットからリプレイ（seeds と同じ長さ、各ゲームに1つ） */
+  snapshots?: import('../../lupa/types.ts').GameSnapshot[]
 }
 
 /** 1ゲーム分のタイミング情報 */

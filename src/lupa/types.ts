@@ -123,3 +123,12 @@ export type GameEvent =
   | { type: 'commander_appointed', seat: number }
   | { type: 'proposal', actor: number, proposal: import('./leadership.ts').Proposal }
   | { type: 'leadership_response', actor: number, response: import('./leadership.ts').LeadershipResponse }
+
+/** 中盤スナップショット（Seed Bank 用） */
+export type GameSnapshot = {
+  state: GameState
+  events: GameEvent[]
+  rngState: number
+  config: import('./handlers.ts').GameConfig
+  seatRoles: Map<number, SystemRole>
+}

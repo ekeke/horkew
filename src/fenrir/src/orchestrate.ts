@@ -45,6 +45,7 @@ import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
   generateGamesParallel, deserializeStep,
 } from './parallel.ts'
+import { generateSeedBank, type SeedBank } from './seed-bank.ts'
 
 // ============================================================
 // Model Group Definitions
@@ -822,6 +823,19 @@ async function main(): Promise<void> {
       klCoeff: refNetwork ? 0.2 : 0,
     }
 
+    // Seed Bank: 中盤スナップショットの事前生成
+    let seedBank: SeedBank | null = null
+    if (mlStartDay > ML_START_DAY_MIN) {
+      log(`  Generating seed bank at Day ${mlStartDay}...`)
+      seedBank = await generateSeedBank({
+        snapshotDay: mlStartDay,
+        bankSize: 256,
+        trainingConfig,
+        startSeed: 0,
+      })
+      log(`  Seed bank: ${seedBank.snapshots.length} snapshots (${(seedBank.generationTimeMs / 1000).toFixed(1)}s)`)
+    }
+
     // Phase 1: village のみ学習（wolf/third は strategy-only 未対応）
     const phase1Models: ModelName[] = ['village']
     // wolf/third は即 graduated 扱い
@@ -866,6 +880,11 @@ async function main(): Promise<void> {
             const sharedWolfWeights = group.teamType === 'wolf_team' ? packWeights(wolfTeamNet) : undefined
             const sharedMasonWeights = group.teamType === 'mason_team' ? packWeights(masonTeamNet) : undefined
 
+            // Seed Bank: スナップショットからリプレイ
+            const batchSnapshots = (seedBank && name === 'village')
+              ? seeds.map((_, i) => seedBank!.snapshots[(iter * config.batch + i) % seedBank!.snapshots.length])
+              : undefined
+
             const serializedResults = await generateGamesParallel({
               weights: sharedWeights,
               wolfTeamWeights: sharedWolfWeights,
@@ -875,7 +894,8 @@ async function main(): Promise<void> {
               phase: 1,
               mlRoles: group.roles,
               mlMaxSeats: name === 'village' ? mlMaxSeats : undefined,
-              mlStartDay: name === 'village' ? mlStartDay : undefined,
+              mlStartDay: (!batchSnapshots && name === 'village') ? mlStartDay : undefined,
+              snapshots: batchSnapshots,
             }, seeds)
 
             for (const game of serializedResults) {
@@ -1033,6 +1053,19 @@ async function main(): Promise<void> {
             if (name === 'village' && mlStartDay > ML_START_DAY_MIN && factionRate >= targetRate * 0.9) {
               mlStartDay = Math.max(mlStartDay - 1, ML_START_DAY_MIN)
               log(`${prefix} Curriculum: mlStartDay → ${mlStartDay}`)
+              // Seed Bank 再生成
+              if (mlStartDay > ML_START_DAY_MIN) {
+                log(`${prefix} Regenerating seed bank at Day ${mlStartDay}...`)
+                seedBank = await generateSeedBank({
+                  snapshotDay: mlStartDay,
+                  bankSize: 256,
+                  trainingConfig,
+                  startSeed: iter * config.batch,
+                })
+                log(`${prefix} Seed bank: ${seedBank.snapshots.length} snapshots (${(seedBank.generationTimeMs / 1000).toFixed(1)}s)`)
+              } else {
+                seedBank = null  // mlStartDay=1: 全ゲーム生成に切り替え
+              }
             }
 
             if (factionRate >= targetRate) {

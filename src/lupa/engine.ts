@@ -11,7 +11,7 @@
 
 import type { SystemRole, ResolvedRules } from '../types/index.ts'
 import { resolveRules } from '../howl/ruleset.ts'
-import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from './types.ts'
+import type { GameState, GameEvent, GameSnapshot, NightAction, DayClaim, PlayerState } from './types.ts'
 import type { GameConfig, GameHandlers, GameResult, PhaseContext, VoteContext } from './handlers.ts'
 import { Rng } from './random.ts'
 import { generateRoleNames } from './names.ts'
@@ -109,12 +109,75 @@ export async function runGame(config: GameConfig, handlers: GameHandlers): Promi
   // メインループ
   // ============================================================
 
-  let lastExecutedSeat: number | null = null
+  const snapshots = config.captureSnapshotDays ? new Map<number, GameSnapshot>() : undefined
+  const loopResult = await runGameLoop(state, events, emit, rng, rules, handlers, config, 1, null, snapshots, seatRoles)
 
-  for (let day = 1; day <= MAX_DAYS && !state.finished; day++) {
+  // 役職公開
+  for (const player of players) {
+    emit({ type: 'reveal', seat: player.seat, role: player.role })
+  }
+
+  const timing = handlers.getTiming?.()
+  return { events, state, config, timing, ...(snapshots?.size ? { snapshots } : {}) }
+}
+
+/**
+ * スナップショットからゲームを再開する
+ * snapshot.state.day の次の Night から開始。
+ * handlers.onSetup が呼ばれるので、戦略の初期化はそこで行う。
+ */
+export async function resumeGame(snapshot: GameSnapshot, handlers: GameHandlers): Promise<GameResult> {
+  const state = structuredClone(snapshot.state)
+  const events: GameEvent[] = [...snapshot.events]
+  const rng = Rng.fromState(snapshot.rngState)
+  const rules = resolveRules(snapshot.config.rules)
+  const config = snapshot.config
+
+  const emit = (event: GameEvent) => {
+    events.push(event)
+    handlers.onEvent?.(event)
+  }
+
+  // onSetup: 役職割当を通知（戦略初期化用）
+  if (handlers.onSetup) await handlers.onSetup(snapshot.seatRoles)
+
+  const lastExecutedSeat = state.executionHistory.get(state.day) ?? null
+  const startDay = state.day + 1
+
+  await runGameLoop(state, events, emit, rng, rules, handlers, config, startDay, lastExecutedSeat)
+
+  // 役職公開
+  for (const player of state.players) {
+    emit({ type: 'reveal', seat: player.seat, role: player.role })
+  }
+
+  const timing = handlers.getTiming?.()
+  return { events, state, config, timing }
+}
+
+// ============================================================
+// メインゲームループ（runGame / resumeGame 共用）
+// ============================================================
+
+async function runGameLoop(
+  state: GameState,
+  events: GameEvent[],
+  emit: (event: GameEvent) => void,
+  rng: Rng,
+  rules: ResolvedRules,
+  handlers: GameHandlers,
+  config: GameConfig,
+  startDay: number,
+  lastExecutedSeat: number | null,
+  snapshots?: Map<number, GameSnapshot>,
+  seatRoles?: Map<number, SystemRole>,
+): Promise<void> {
+  const players = state.players
+
+  for (let day = startDay; day <= MAX_DAYS && !state.finished; day++) {
     state.day = day
 
-    // ==== 夜フェーズ (day 2+) ====
+    // ==== 夜フェーズ (day 2+、またはresumeの初日) ====
     if (day > 1) {
       state.phase = 'night'
       const night = day - 1
@@ -290,15 +353,18 @@ export async function runGame(config: GameConfig, handlers: GameHandlers): Promi
       emit({ type: 'game_over', result: state.result! })
       break
     }
-  }
 
-  // 役職公開
-  for (const player of players) {
-    emit({ type: 'reveal', seat: player.seat, role: player.role })
+    // スナップショット取得（ゲーム継続中、処刑後）
+    if (snapshots && config.captureSnapshotDays?.includes(day) && seatRoles) {
+      snapshots.set(day, {
+        state: structuredClone(state),
+        events: [...events],
+        rngState: rng.getState(),
+        config,
+        seatRoles,
+      })
+    }
   }
-
-  const timing = handlers.getTiming?.()
-  return { events, state, config, timing }
 }
 
 // ============================================================
