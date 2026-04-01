@@ -69,7 +69,8 @@
         }
         result = searchTsumi(vs!, setup, options, undefined, wasmReady ? wasmRunRetar : undefined)
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e)
+        console.error('[HatiPane]', e)
+        error = e instanceof Error ? `${e.message}\n${e.stack}` : String(e)
       } finally {
         running = false
       }
