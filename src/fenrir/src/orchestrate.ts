@@ -1038,7 +1038,7 @@ async function main(): Promise<void> {
             const evalConfig = { ...trainingConfig, mlRoles: group.roles }
             const evalMlMax = name === 'village' ? mlMaxSeats : undefined
             const evalSnapshots = (snapshotCount > 0 && name === 'village')
-              ? loadRandomSnapshots(mlStartDay - 1, config.evalGames, new Rng(iter + 999999), {
+              ? loadRandomSnapshots(mlStartDay - 1, config.evalGames, new Rng(42), {
                   aliveRoles: group.roles,
                   minAlive: mlMaxSeats,
                 })
