@@ -153,11 +153,45 @@ export function filterDirName(aliveRoles: string[], minAlive: number): string {
   return `${sorted.join('+')}-${minAlive}`
 }
 
-function snapshotDir(day: number, aliveRoles?: string[], minAlive?: number): string {
+/** 保存用: 条件に対応する単一ディレクトリ */
+function snapshotDirExact(day: number, aliveRoles?: string[], minAlive?: number): string {
   if (aliveRoles && aliveRoles.length > 0 && minAlive && minAlive > 0) {
     return `tmp/snapshots/day${day}/${filterDirName(aliveRoles, minAlive)}`
   }
   return `tmp/snapshots/day${day}/any`
+}
+
+/** 読み込み用: minAlive 以上の条件を満たすディレクトリを全て返す */
+function snapshotDirsCompatible(day: number, aliveRoles?: string[], minAlive?: number): string[] {
+  const base = `tmp/snapshots/day${day}`
+  if (!existsSync(base)) return []
+  if (!aliveRoles || aliveRoles.length === 0) {
+    // フィルタなし → 全サブディレクトリ
+    return readdirSync(base).map(d => `${base}/${d}`).filter(d => existsSync(d))
+  }
+  const sorted = [...aliveRoles].sort()
+  // 既知グループ名を検出
+  const KNOWN_GROUPS: Record<string, string[]> = {
+    village: ['bodyguard', 'medium', 'nekomata', 'seer', 'villager'],
+    wolf: ['werewolf'],
+  }
+  let prefix = sorted.join('+')
+  for (const [name, roles] of Object.entries(KNOWN_GROUPS)) {
+    if (sorted.length === roles.length && sorted.every((r, i) => r === roles[i])) {
+      prefix = name
+      break
+    }
+  }
+  // prefix-N のうち N >= minAlive のディレクトリを返す
+  const target = minAlive ?? 1
+  const dirs: string[] = []
+  for (const d of readdirSync(base)) {
+    const m = d.match(new RegExp(`^${prefix}-(\\d+)$`))
+    if (m && parseInt(m[1]) >= target) {
+      dirs.push(`${base}/${d}`)
+    }
+  }
+  return dirs
 }
 
 // ============================================================
@@ -181,28 +215,38 @@ export type SnapshotFilter = {
   minAlive?: number
 }
 
-/** ディレクトリからランダムに count 個のスナップショットを読み込む（フィルタ不要、ディレクトリで条件確定済み） */
+/** ディレクトリからランダムに count 個のスナップショットを読み込む */
 export function loadRandomSnapshots(day: number, count: number, rng?: Rng, filter?: SnapshotFilter): GameSnapshot[] {
-  const dir = snapshotDir(day, filter?.aliveRoles, filter?.minAlive)
-  if (!existsSync(dir)) throw new Error(`Snapshot directory not found: ${dir}`)
+  const dirs = snapshotDirsCompatible(day, filter?.aliveRoles, filter?.minAlive)
 
-  const files = readdirSync(dir).filter(f => f.endsWith('.json'))
-  if (files.length === 0) throw new Error(`No snapshots found in ${dir}`)
+  // 全互換ディレクトリのファイルを集める
+  const allFiles: string[] = []
+  for (const dir of dirs) {
+    for (const f of readdirSync(dir)) {
+      if (f.endsWith('.json')) allFiles.push(`${dir}/${f}`)
+    }
+  }
+  if (allFiles.length === 0) {
+    const dirName = filter?.aliveRoles ? filterDirName(filter.aliveRoles, filter.minAlive ?? 1) : 'any'
+    throw new Error(`No snapshots found for day${day}/${dirName}`)
+  }
 
   const r = rng ?? new Rng()
   const result: GameSnapshot[] = []
   for (let i = 0; i < count; i++) {
-    const file = files[r.nextInt(files.length)]
-    result.push(loadSnapshot(`${dir}/${file}`))
+    result.push(loadSnapshot(allFiles[r.nextInt(allFiles.length)]))
   }
   return result
 }
 
-/** ディレクトリ内のスナップショット数を返す */
+/** 互換ディレクトリ内の合計スナップショット数を返す */
 export function countSnapshots(day: number, aliveRoles?: string[], minAlive?: number): number {
-  const dir = snapshotDir(day, aliveRoles, minAlive)
-  if (!existsSync(dir)) return 0
-  return readdirSync(dir).filter(f => f.endsWith('.json')).length
+  const dirs = snapshotDirsCompatible(day, aliveRoles, minAlive)
+  let total = 0
+  for (const dir of dirs) {
+    total += readdirSync(dir).filter(f => f.endsWith('.json')).length
+  }
+  return total
 }
 
 // ============================================================
@@ -272,7 +316,7 @@ export async function generateSnapshotsToDir(opts: {
       if (!snapshot) continue
       if (aliveRoles && aliveRoles.length > 0 && countAliveRoles(snapshot, aliveRoles) < minAlive) continue
 
-      const dir = snapshotDir(day, aliveRoles, minAlive)
+      const dir = snapshotDirExact(day, aliveRoles, minAlive)
       saveSnapshot(snapshot, dir, existing.get(day)! + generated.get(day)!)
       generated.set(day, generated.get(day)! + 1)
       savedAny = true
