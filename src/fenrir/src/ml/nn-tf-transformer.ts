@@ -744,9 +744,15 @@ export class TfTransformerNetwork {
     entropyCoeff: number
     /** plan head の PPO 更新を凍結 (pretrain 後の知識保持用) */
     freezePlan?: boolean
-  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number } {
+    /** Reference policy logits for plan forward tokens [numFwd * vocabSize] per step */
+    refPlanForwardLogits?: (Float32Array | undefined)[]
+    /** Reference policy logits for plan endgame tokens [numEg * vocabSize] per step */
+    refPlanEndgameLogits?: (Float32Array | undefined)[]
+    /** KL penalty coefficient (β). >0 で KL(π_new || π_ref) を loss に加算 */
+    klCoeff?: number
+  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number } {
     const n = batch.observations.length
-    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
+    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
 
     const inputSize = this.config.inputSize
     const sigmoidHeadNames = new Set(Object.keys(this.config.sigmoidHeads ?? {}))
@@ -757,7 +763,7 @@ export class TfTransformerNetwork {
       obsData.set(batch.observations[i], i * inputSize)
     }
 
-    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
+    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
 
     // ヘッド別グループ化
     const headGroups = new Map<string, number[]>()
@@ -803,7 +809,8 @@ export class TfTransformerNetwork {
           numTokens: number,
           getActions: (i: number) => number[] | undefined,
           getLogProbs: (i: number) => number[] | undefined,
-        ): { loss: tf.Scalar, entropy: tf.Scalar } => {
+          getRefLogits?: (i: number) => Float32Array | undefined,
+        ): { loss: tf.Scalar, entropy: tf.Scalar, kl: tf.Scalar } => {
           const planLogits = tf.gather(logitsTensor, si)  // [m, numTokens * vocabSize]
           const reshaped = planLogits.reshape([m, numTokens, vocabSize])
           const probs = tf.softmax(reshaped, 2)
@@ -836,16 +843,46 @@ export class TfTransformerNetwork {
             tf.clipByValue(ratio, 1 - batch.clipEpsilon, 1 + batch.clipEpsilon), advTensor,
           )
           const loss = tf.neg(tf.mean(tf.minimum(surr1, surr2))) as tf.Scalar
-          const logProbs2d = tf.log(tf.add(probs, tf.scalar(1e-8)))
-          const ent = tf.neg(tf.mean(tf.sum(tf.mul(probs, logProbs2d), 2))) as tf.Scalar
-          return { loss, entropy: ent }
+          const logNewProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
+          const ent = tf.neg(tf.mean(tf.sum(tf.mul(probs, logNewProbs), 2))) as tf.Scalar
+
+          // Full categorical KL(π_new || π_ref) = Σ_v π_new(v) * [log π_new(v) - log π_ref(v)]
+          // 常に非負。TF.js 内で完結するため数値誤差なし。
+          let kl = tf.scalar(0) as tf.Scalar
+          if (getRefLogits) {
+            const refLogitsData = new Float32Array(m * numTokens * vocabSize)
+            let hasRef = false
+            for (let j = 0; j < m; j++) {
+              const rl = getRefLogits(si[j])
+              if (rl) {
+                refLogitsData.set(rl, j * numTokens * vocabSize)
+                hasRef = true
+              }
+            }
+            if (hasRef) {
+              const refReshaped = tf.tensor3d(refLogitsData, [m, numTokens, vocabSize])
+              const refProbs = tf.softmax(refReshaped, 2)
+              const logRefProbs = tf.log(tf.add(refProbs, tf.scalar(1e-8)))
+              // KL per token = Σ_v π_new(v) * (log π_new(v) - log π_ref(v))
+              const klPerToken = tf.sum(tf.mul(probs, tf.sub(logNewProbs, logRefProbs)), 2) // [m, numTokens]
+              // mean over tokens and batch
+              kl = tf.mean(klPerToken) as tf.Scalar
+            }
+          }
+
+          return { loss, entropy: ent, kl }
         }
 
         // Plan PPO loss (forward + endgame)
+        const klCoeff = batch.klCoeff ?? 0
+        const getRefFwdLogits = klCoeff > 0 ? (i: number) => batch.refPlanForwardLogits?.[i] : undefined
+        const getRefEgLogits = klCoeff > 0 ? (i: number) => batch.refPlanEndgameLogits?.[i] : undefined
+
         const fwdResult = computePlanLoss(
           planForwardLogits, numFwd,
           i => batch.planForwardActions?.[i],
           i => batch.planForwardLogProbs?.[i],
+          getRefFwdLogits,
         )
         totalPolicyLoss = tf.add(totalPolicyLoss, fwdResult.loss)
         totalEntropy = tf.add(totalEntropy, fwdResult.entropy)
@@ -854,9 +891,17 @@ export class TfTransformerNetwork {
           planEndgameLogits, numEg,
           i => batch.planEndgameActions?.[i],
           i => batch.planEndgameLogProbs?.[i],
+          getRefEgLogits,
         )
         totalPolicyLoss = tf.add(totalPolicyLoss, egResult.loss)
         totalEntropy = tf.add(totalEntropy, egResult.entropy)
+
+        // KL penalty: β * (KL_fwd + KL_eg)
+        if (klCoeff > 0) {
+          const klTotal = tf.add(fwdResult.kl, egResult.kl) as tf.Scalar
+          totalPolicyLoss = tf.add(totalPolicyLoss, tf.mul(tf.scalar(klCoeff), klTotal))
+          result.klLoss = klTotal.dataSync()[0]
+        }
 
         headGroups.delete('strategy')  // 通常ヘッドループでは処理しない
       } else if (strategyIndices && strategyIndices.length > 0) {

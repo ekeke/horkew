@@ -139,9 +139,12 @@ export class TfNeuralNetwork {
     valueLossCoeff: number
     entropyCoeff: number
     freezePlan?: boolean  // unused in MLP
-  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number } {
+    refPlanForwardLogits?: (Float32Array | undefined)[]  // unused in MLP
+    refPlanEndgameLogits?: (Float32Array | undefined)[]  // unused in MLP
+    klCoeff?: number  // unused in MLP
+  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number } {
     const n = batch.observations.length
-    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
+    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
 
     const inputSize = this.config.inputSize
     const sigmoidHeadNames = new Set(Object.keys(this.config.sigmoidHeads ?? {}))
@@ -153,7 +156,7 @@ export class TfNeuralNetwork {
       obsData.set(batch.observations[i], i * inputSize)
     }
 
-    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
+    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
 
     // ヘッド別にグループ化してバッチ処理
     const headGroups = new Map<string, number[]>()

@@ -17,7 +17,7 @@ import { runGame } from '../../lupa/engine.ts'
 import { minimalAdapter } from '../../lupa/adapters/minimal-adapter.ts'
 import { strategyAdapter } from '../../lupa/adapters/strategy-adapter.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
-import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
+import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy, computeRefPlanLogits } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import { terminalReward, intermediateReward, predictAccuracyReward, buildKnownSeats, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { encodeTrueRoles } from './observation.ts'
@@ -195,12 +195,18 @@ Options:
 function ppoUpdate(
   tfNetwork: AnyTfNetwork,
   batch: ProcessedStep[],
-  config: { miniBatchSize: number, clipEpsilon: number, valueLossCoeff: number, entropyCoeff: number, predictLossCoeff?: number, freezePlan?: boolean },
-): { policyLoss: number, predictLoss: number } {
-  if (batch.length === 0) return { policyLoss: 0, predictLoss: 0 }
+  config: {
+    miniBatchSize: number, clipEpsilon: number, valueLossCoeff: number, entropyCoeff: number,
+    predictLossCoeff?: number, freezePlan?: boolean,
+    klCoeff?: number,
+  },
+  precomputedRefLogits?: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }>,
+): { policyLoss: number, predictLoss: number, klLoss: number } {
+  if (batch.length === 0) return { policyLoss: 0, predictLoss: 0, klLoss: 0 }
 
   let totalPolicyLoss = 0
   let totalPredictLoss = 0
+  let totalKlLoss = 0
   let batchCount = 0
 
   for (let i = batch.length - 1; i > 0; i--) {
@@ -211,6 +217,15 @@ function ppoUpdate(
   for (let start = 0; start < batch.length; start += config.miniBatchSize) {
     const end = Math.min(start + config.miniBatchSize, batch.length)
     const miniBatch = batch.slice(start, end)
+
+    // Reference logits lookup (precomputed per iteration, not per minibatch)
+    let refFwdLogits: (Float32Array | undefined)[] | undefined
+    let refEgLogits: (Float32Array | undefined)[] | undefined
+    if (precomputedRefLogits && config.klCoeff && config.klCoeff > 0) {
+      refFwdLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.fwd)
+      refEgLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.eg)
+    }
+
     const result = tfNetwork.trainBatch({
       observations: miniBatch.map(s => s.observation),
       actionHeads: miniBatch.map(s => s.actionHead),
@@ -220,20 +235,29 @@ function ppoUpdate(
       returns: miniBatch.map(s => s.returnValue),
       sigmoidActions: miniBatch.map(s => s.sigmoidActions),
       trueRoles: miniBatch.map(s => s.trueRoles),
+      planForwardActions: miniBatch.map(s => s.planForwardActions),
+      planForwardLogProbs: miniBatch.map(s => s.planForwardLogProbs),
+      planEndgameActions: miniBatch.map(s => s.planEndgameActions),
+      planEndgameLogProbs: miniBatch.map(s => s.planEndgameLogProbs),
       predictLossCoeff: config.predictLossCoeff ?? 0.1,
       clipEpsilon: config.clipEpsilon,
       valueLossCoeff: config.valueLossCoeff,
       entropyCoeff: config.entropyCoeff,
       freezePlan: config.freezePlan,
+      refPlanForwardLogits: refFwdLogits,
+      refPlanEndgameLogits: refEgLogits,
+      klCoeff: config.klCoeff,
     })
     totalPolicyLoss += result.policyLoss
     totalPredictLoss += result.predictLoss
+    totalKlLoss += result.klLoss
     batchCount++
   }
 
   return {
     policyLoss: totalPolicyLoss / Math.max(batchCount, 1),
     predictLoss: totalPredictLoss / Math.max(batchCount, 1),
+    klLoss: totalKlLoss / Math.max(batchCount, 1),
   }
 }
 
@@ -747,6 +771,19 @@ async function main(): Promise<void> {
     log(`  PPO learning rate: ${ppoLr.toExponential(1)} (${config.learningRate.toExponential(1)} × 0.2)`)
   }
 
+  // === Reference network for KL penalty ===
+  // 常に現在の village 重みからスナップショット。
+  // checkpoint_0 (pretrain) ではなく現在重みを使う理由:
+  // frozen-plan PPO で trunk が変わっているため、pretrain trunk と現在 trunk で
+  // plan logits が大きく異なり、KL が最初から巨大になる。
+  let refNetwork: AnyNetwork | undefined
+  if (config.transformer) {
+    refNetwork = createTransformerNetwork()
+    const villageNet = networks.get('village' as ModelName)
+    if (villageNet) refNetwork.loadWeights(villageNet.cloneWeights())
+    log(`Reference network created from current village weights (KL anchor)`)
+  }
+
   // === Baseline (14D猫 heuristic vs heuristic, ハードコード) ===
   // 100ゲーム × 複数回の測定結果から: village≈55%, hamster≈27%, wolf≈15%, draw≈3%
   const baselineRates: Record<string, number> = {
@@ -772,7 +809,8 @@ async function main(): Promise<void> {
       clipEpsilon: trainingConfig.clipEpsilon,
       valueLossCoeff: trainingConfig.valueLossCoeff,
       entropyCoeff: trainingConfig.entropyCoeff,
-      freezePlan: config.transformer,  // pretrain 済み plan head を PPO で壊さない
+      freezePlan: false,  // plan 解凍 + KL penalty で pretrain 知識を保護
+      klCoeff: refNetwork ? 0.2 : 0,
     }
 
     // Phase 1: village のみ学習（wolf/third は strategy-only 未対応）
@@ -867,11 +905,25 @@ async function main(): Promise<void> {
           const tPpoStart = performance.now()
 
           // PPO update (shared TfNN に重みをスワップ)
+          let lastPpoResult = { policyLoss: 0, predictLoss: 0, klLoss: 0 }
           if (allIndividual.length > 0) {
             normalizeAdvantages(allIndividual)
+
+            // Reference logits を iteration あたり1回だけ計算（epoch/minibatch をまたいで再利用）
+            let precomputedRefLogits: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }> | undefined
+            if (refNetwork && ppoConfig.klCoeff && ppoConfig.klCoeff > 0) {
+              precomputedRefLogits = new Map()
+              for (const step of allIndividual) {
+                if (step.actionHead === 'strategy') {
+                  const { refFwdLogits, refEgLogits } = computeRefPlanLogits(refNetwork, step.observation)
+                  precomputedRefLogits.set(step, { fwd: refFwdLogits, eg: refEgLogits })
+                }
+              }
+            }
+
             tfNetwork.loadWeights(network.cloneWeights())
             for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
-              ppoUpdate(tfNetwork, allIndividual, ppoConfig)
+              lastPpoResult = ppoUpdate(tfNetwork, allIndividual, ppoConfig, precomputedRefLogits)
             }
             network.loadWeights(tfNetwork.cloneWeights())
           }
@@ -892,6 +944,18 @@ async function main(): Promise<void> {
               ppoUpdate(masonTeamTf, allMasonTeam, ppoConfig)
             }
             masonTeamNet.loadWeights(masonTeamTf.cloneWeights())
+          }
+
+          // Adaptive KL: β を自動調整して KL を目標付近に維持
+          if (ppoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
+            const klTarget = 0.01  // 目標 KL divergence
+            if (lastPpoResult.klLoss > klTarget * 1.5) {
+              ppoConfig.klCoeff *= 1.5  // KL 高すぎ → β 増
+            } else if (lastPpoResult.klLoss < klTarget / 1.5) {
+              ppoConfig.klCoeff /= 1.5  // KL 低すぎ → β 減
+            }
+            // β の上下限
+            ppoConfig.klCoeff = Math.max(0.01, Math.min(10, ppoConfig.klCoeff))
           }
 
           const tPpoEnd = performance.now()
@@ -929,10 +993,12 @@ async function main(): Promise<void> {
             timingStr = `${avgGame.toFixed(0)}ms/game (infer ${fmtBreakdown(avgInfer, avgInferCount)} retar ${fmtBreakdown(avgRetar, avgRetarCount)} tsumi ${fmtBreakdown(avgTsumi, avgTsumiCount)}) `
           }
           const mlInfo = name === 'village' ? ` ml=${mlMaxSeats}/${ML_MAX_SEATS_CAP}` : ''
+          const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
+          const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${ppoConfig.klCoeff.toFixed(3)})` : ''
           process.stderr.write(
             `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
             `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
-            `steps=${totalSteps}${mlInfo} ${avgIterMs}s/iter ETA ${remaining}s`
+            `steps=${totalSteps}${mlInfo}${lossStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
           )
 
           // Eval

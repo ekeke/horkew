@@ -469,8 +469,8 @@ export function searchTsumi(
   const dbg = searchOptions.debug
   const t0 = performance.now()
 
-  // 1. Retar解析
-  const conclusions = runRetar(vs, setup, analyzeOptions)
+  // 1. Retar解析（事前計算済みならスキップ）
+  const conclusions = searchOptions.retarConclusions ?? runRetar(vs, setup, analyzeOptions)
   const t1 = performance.now()
 
   if (dbg) {

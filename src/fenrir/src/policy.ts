@@ -9,7 +9,7 @@ import type { CommunicationAction } from '../../lupa/communication.ts'
 import type { Proposal, LeadershipResponse } from '../../lupa/leadership.ts'
 import type { AnyNetwork, ForwardResult } from './ml/nn.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
-import { encodeObservation, encodeTeamObservation, encodeCollectiveWolfObservation, encodeCollectiveMasonObservation, type VillageNNOutput } from './observation.ts'
+import { encodeObservation, encodeTeamObservation, encodeCollectiveWolfObservation, encodeCollectiveMasonObservation, encodeFanaticObservation, type VillageNNOutput } from './observation.ts'
 import {
   maskNightAction, maskClaim, maskVote, maskComm, maskPropose, maskPredict, maskLeader, maskTarget,
   maskAttackTarget, maskAttacker, decodeWolfNightAction,
@@ -47,9 +47,9 @@ export class FenrirStrategy implements Strategy {
     this.config = { explore: true, ...config }
   }
 
-  private lastObs: Float32Array | null = null
+  protected lastObs: Float32Array | null = null
 
-  private infer(ctx: DecisionContext): ForwardResult {
+  protected infer(ctx: DecisionContext): ForwardResult {
     const t = performance.now()
     const obs = encodeObservation(ctx)
     this.lastObs = obs
@@ -852,6 +852,34 @@ export class WolfCollectiveStrategy extends CollectiveStrategyBase implements Te
 // 共有集団MLエージェント
 // ============================================================
 
+// ============================================================
+// Fanatic Strategy (個人NN + 村NN注入)
+// ============================================================
+
+export class FanaticStrategy extends FenrirStrategy {
+  /** frozen村NN（セットされていれば infer 時に自動で forward して村NN出力を注入） */
+  frozenVillageNetwork: AnyNetwork | undefined = undefined
+
+  protected override infer(ctx: DecisionContext): ForwardResult {
+    const t = performance.now()
+    let villageNNOutput: VillageNNOutput | undefined
+    if (this.frozenVillageNetwork) {
+      const villageObs = encodeObservation(ctx)
+      const villageResult = this.frozenVillageNetwork.forward(villageObs)
+      villageNNOutput = {
+        predict: villageResult.policies.get('predict')!,
+        trust: villageResult.policies.get('trust')!,
+      }
+    }
+    const obs = encodeFanaticObservation(ctx, villageNNOutput)
+    this.lastObs = obs
+    const result = this.network.forward(obs)
+    this.inferMs += performance.now() - t
+    this.inferCount++
+    return result
+  }
+}
+
 export class MasonCollectiveStrategy extends CollectiveStrategyBase implements TeamStrategy {
   protected override infer(ctx: TeamDecisionContext): ForwardResult {
     const t = performance.now()
@@ -893,5 +921,25 @@ export class MasonCollectiveStrategy extends CollectiveStrategyBase implements T
 
   decideDefensiveClaim(_ctx: TeamDecisionContext): DayClaim {
     return { type: 'none' }
+  }
+}
+
+// ============================================================
+// Reference logits computation for KL penalty
+// ============================================================
+
+/**
+ * Reference network の plan logits を取得（KL penalty 用）。
+ * trainBatch 内で TF.js の softmax → full categorical KL を計算するため、
+ * 生の logits をそのまま返す。
+ */
+export function computeRefPlanLogits(
+  refNetwork: AnyNetwork,
+  observation: Float32Array,
+): { refFwdLogits: Float32Array | undefined, refEgLogits: Float32Array | undefined } {
+  const result = refNetwork.forward(observation)
+  return {
+    refFwdLogits: result.policies.get('plan_forward'),
+    refEgLogits: result.policies.get('plan_endgame'),
   }
 }

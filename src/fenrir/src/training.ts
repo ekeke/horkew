@@ -27,7 +27,7 @@ import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
   ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS } from './observation.ts'
 import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
 import { encodeTrueRoles } from './observation.ts'
-import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
+import { FenrirStrategy, FanaticStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
 import { terminalReward, intermediateReward, predictAccuracyReward, buildKnownSeats, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
@@ -125,6 +125,10 @@ export type TrainingConfig = {
   targetWinRate?: number
   /** チェックする陣営 ('villageWin' | 'wolfWin' | 'hamsterWin') */
   targetFaction?: string
+  /** KL penalty coefficient (β). >0 で plan token の KL(π_new || π_ref) を loss に加算 */
+  klCoeff?: number
+  /** Frozen reference network for KL penalty */
+  refNetwork?: AnyNetwork
 }
 
 export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
@@ -708,13 +712,15 @@ function ppoUpdate(
   tfNetwork: AnyTfNetwork,
   batch: ProcessedStep[],
   config: TrainingConfig,
-): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number } {
-  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0 }
+  precomputedRefLogits?: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }>,
+): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number } {
+  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
 
   let totalPolicyLoss = 0
   let totalValueLoss = 0
   let totalEntropy = 0
   let totalPredictLoss = 0
+  let totalKlLoss = 0
   let batchCount = 0
 
   // Shuffle batch
@@ -727,6 +733,14 @@ function ppoUpdate(
   for (let start = 0; start < batch.length; start += config.miniBatchSize) {
     const end = Math.min(start + config.miniBatchSize, batch.length)
     const miniBatch = batch.slice(start, end)
+
+    // Reference logits lookup (precomputed per iteration)
+    let refFwdLogits: (Float32Array | undefined)[] | undefined
+    let refEgLogits: (Float32Array | undefined)[] | undefined
+    if (precomputedRefLogits && config.klCoeff && config.klCoeff > 0) {
+      refFwdLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.fwd)
+      refEgLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.eg)
+    }
 
     const result = tfNetwork.trainBatch({
       observations: miniBatch.map(s => s.observation),
@@ -745,12 +759,16 @@ function ppoUpdate(
       clipEpsilon: config.clipEpsilon,
       valueLossCoeff: config.valueLossCoeff,
       entropyCoeff: config.entropyCoeff,
+      refPlanForwardLogits: refFwdLogits,
+      refPlanEndgameLogits: refEgLogits,
+      klCoeff: config.klCoeff,
     })
 
     totalPolicyLoss += result.policyLoss
     totalValueLoss += result.valueLoss
     totalEntropy += result.entropy
     totalPredictLoss += result.predictLoss
+    totalKlLoss += result.klLoss
     batchCount++
   }
 
@@ -759,12 +777,22 @@ function ppoUpdate(
     valueLoss: totalValueLoss / Math.max(batchCount, 1),
     entropy: totalEntropy / Math.max(batchCount, 1),
     predictLoss: totalPredictLoss / Math.max(batchCount, 1),
+    klLoss: totalKlLoss / Math.max(batchCount, 1),
   }
 }
 
 // ============================================================
 // Evaluation
 // ============================================================
+
+export type EvaluateOptions = {
+  wolfCollectiveNet?: AnyNetwork
+  masonCollectiveNet?: AnyNetwork
+  fanaticNet?: AnyNetwork
+  frozenVillageNet?: AnyNetwork
+  /** role → network の個別マッピング（Phase 1' で全5モデル同時評価用） */
+  individualNets?: Map<string, AnyNetwork>
+}
 
 export async function evaluate(
   network: AnyNetwork,
@@ -773,6 +801,7 @@ export async function evaluate(
   wolfTeamNet?: AnyNetwork,
   masonTeamNet?: AnyNetwork,
   mlMaxSeats?: number,
+  options?: EvaluateOptions,
 ): Promise<{ winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number }> {
   const heuristic = new HeuristicStrategy()
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
@@ -809,10 +838,48 @@ export async function evaluate(
         }
         candidates.length = mlMaxSeats
       }
-      for (const [seat] of candidates) {
-        strategies.set(seat, new FenrirStrategy(network, { explore: false, strategyOnly: config.strategyOnly }))
+      for (const [seat, role] of candidates) {
+        // individualNets があれば role 別にネットワークを解決
+        if (options?.individualNets?.has(role)) {
+          const roleNet = options.individualNets.get(role)!
+          if (role === 'fanatic' && options?.fanaticNet) {
+            const fs = new FanaticStrategy(options.fanaticNet, { explore: false, strategyOnly: config.strategyOnly })
+            if (options?.frozenVillageNet) fs.frozenVillageNetwork = options.frozenVillageNet
+            strategies.set(seat, fs)
+          } else {
+            strategies.set(seat, new FenrirStrategy(roleNet, { explore: false, strategyOnly: config.strategyOnly }))
+          }
+        } else if (role === 'fanatic' && options?.fanaticNet) {
+          const fs = new FanaticStrategy(options.fanaticNet, { explore: false, strategyOnly: config.strategyOnly })
+          if (options?.frozenVillageNet) fs.frozenVillageNetwork = options.frozenVillageNet
+          strategies.set(seat, fs)
+        } else {
+          strategies.set(seat, new FenrirStrategy(network, { explore: false, strategyOnly: config.strategyOnly }))
+        }
       }
     } : undefined
+
+    // Wolf team strategy: collective > legacy team > heuristic
+    let wolfTeamStrategy: any
+    if (options?.wolfCollectiveNet) {
+      const ws = new WolfCollectiveStrategy(options.wolfCollectiveNet, { explore: false })
+      if (options?.frozenVillageNet) ws.frozenVillageNetwork = options.frozenVillageNet
+      wolfTeamStrategy = ws
+    } else if (wolfTeamNet) {
+      wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: false })
+    } else {
+      wolfTeamStrategy = new WolfTeamHeuristic()
+    }
+
+    // Mason team strategy: collective > legacy team > heuristic
+    let masonTeamStrategy: any
+    if (options?.masonCollectiveNet) {
+      masonTeamStrategy = new MasonCollectiveStrategy(options.masonCollectiveNet, { explore: false })
+    } else if (masonTeamNet) {
+      masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: false })
+    } else {
+      masonTeamStrategy = new MasonTeamHeuristic()
+    }
 
     const lupaConfig: LupaConfig = {
       roles,
@@ -824,12 +891,8 @@ export async function evaluate(
       hasFirstGhost: config.hasFirstGhost,
       revoteConfig: config.revoteConfig,
       rules: config.rules,
-      wolfTeamStrategy: wolfTeamNet
-        ? new WolfTeamStrategy(wolfTeamNet, { explore: false })
-        : new WolfTeamHeuristic(),
-      masonTeamStrategy: masonTeamNet
-        ? new MasonTeamStrategy(masonTeamNet, { explore: false })
-        : new MasonTeamHeuristic(),
+      wolfTeamStrategy,
+      masonTeamStrategy,
     }
     const t0 = performance.now()
     let state: import('../../lupa/types.ts').GameState

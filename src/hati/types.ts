@@ -1,4 +1,5 @@
 import type { Seat, SystemRole } from '../types/index.ts'
+import type { Possibilities } from '../retar/possibilities.ts'
 
 // --- ビットマスクユーティリティ ---
 
@@ -161,6 +162,8 @@ export type SearchOptions = {
   disableHamsterPruning?: boolean
   /** 戦略木を構築する（デフォルト: true）。falseなら詰み判定のみ高速実行 */
   buildStrategy?: boolean
+  /** 事前計算済み Retar 解析結果。指定時は内部の runRetar をスキップ */
+  retarConclusions?: Possibilities
   /** デバッグ出力（各段階の数値を console.log） */
   debug?: boolean
 }
