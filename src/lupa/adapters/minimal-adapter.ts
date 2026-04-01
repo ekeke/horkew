@@ -33,6 +33,8 @@ export type MinimalAdapterConfig = {
   enableRetar?: boolean
   /** 詰み探索を有効化（デフォルトfalse） */
   enableTsumi?: boolean
+  /** Retarを有効にする開始Day（このDay以降にretarを走らせる、カリキュラム用） */
+  retarStartDay?: number
   /** enableRetar時に必要 */
   roles?: Map<SystemRole, number>
   /** enableRetar時に必要 */
@@ -59,6 +61,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
 
   function runRetar(pctx: PhaseContext): void {
     if (!config.enableRetar) return
+    if (config.retarStartDay && pctx.day < config.retarStartDay) return
     const t0 = performance.now()
     const state = pctx.state as GameState
     const events = [...pctx.events] as GameEvent[]

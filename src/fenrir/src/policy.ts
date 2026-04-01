@@ -20,17 +20,21 @@ import { endgameVoteReward } from './reward.ts'
 import { sigmoid } from './ml/nn.ts'
 import * as ruleAction from './rule-action.ts'
 import { isVillagerAligned } from '../../lupa/roles.ts'
+import { HeuristicStrategy } from '../../lupa/heuristic.ts'
 
 export type FenrirStrategyConfig = {
   /** trueなら探索ノイズあり（学習時）、falseなら貪欲（評価時） */
   explore: boolean
   /** trueなら戦略NNのみ使用、行動はルールベース (Step 1 bootstrap) */
   strategyOnly?: boolean
+  /** このDay以降でML動作、それ以前はheuristicフォールバック（カリキュラム用） */
+  activeFromDay?: number
 }
 
 export class FenrirStrategy implements Strategy {
   readonly network: AnyNetwork
   readonly config: FenrirStrategyConfig
+  private heuristicFallback?: HeuristicStrategy
 
   /** 学習時にトラジェクトリを収集するバッファ */
   trajectory: TrajectoryStep[] = []
@@ -45,6 +49,13 @@ export class FenrirStrategy implements Strategy {
   constructor(network: AnyNetwork, config?: Partial<FenrirStrategyConfig>) {
     this.network = network
     this.config = { explore: true, ...config }
+    if (this.config.activeFromDay && this.config.activeFromDay > 1) {
+      this.heuristicFallback = new HeuristicStrategy()
+    }
+  }
+
+  private isActive(day: number): boolean {
+    return !this.config.activeFromDay || day >= this.config.activeFromDay
   }
 
   protected lastObs: Float32Array | null = null
@@ -251,6 +262,7 @@ export class FenrirStrategy implements Strategy {
   // ============================================================
 
   decideNightAction(ctx: DecisionContext): NightAction {
+    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideNightAction(ctx)
     if (this.config.strategyOnly) return ruleAction.nightAction(ctx)
 
     const result = this.infer(ctx)
@@ -264,6 +276,7 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideDayClaim(ctx: DecisionContext): DayClaim {
+    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideDayClaim(ctx)
     if (this.config.strategyOnly) return ruleAction.dayClaim(ctx)
 
     const result = this.infer(ctx)
@@ -282,6 +295,7 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideForecast(ctx: DecisionContext): DayClaim {
+    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideForecast?.(ctx) ?? { type: 'none' }
     if (this.config.strategyOnly) return { type: 'none' }
 
     const result = this.infer(ctx)
@@ -296,6 +310,7 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideVote(ctx: DecisionContext): number {
+    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideVote(ctx)
     if (this.config.strategyOnly) {
       // 戦略NNの推論（キャッシュ or 新規）+ plan logitsで投票
       const result = this.getStrategyResult(ctx)
@@ -376,6 +391,7 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideCommunication(ctx: DecisionContext): CommunicationAction {
+    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideCommunication(ctx)
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
       const forwardLogits = result.policies.get('plan_forward') ?? null
@@ -412,6 +428,7 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideProposal(ctx: DecisionContext): Proposal | null {
+    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideProposal?.(ctx) ?? null
     if (ctx.commander !== ctx.mySeat) return null
 
     if (this.config.strategyOnly) {
@@ -430,6 +447,7 @@ export class FenrirStrategy implements Strategy {
   }
 
   decideLeadershipResponse(ctx: DecisionContext, _proposal: Proposal): LeadershipResponse {
+    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideLeadershipResponse?.(ctx, _proposal) ?? { type: 'follow' }
     if (this.config.strategyOnly) return ruleAction.leadershipResponse()
 
     const result = this.infer(ctx)
@@ -442,7 +460,8 @@ export class FenrirStrategy implements Strategy {
     return decodeLeader(action)
   }
 
-  decideDefensiveClaim(_ctx: DecisionContext): DayClaim {
+  decideDefensiveClaim(ctx: DecisionContext): DayClaim {
+    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideDefensiveClaim?.(ctx) ?? { type: 'none' }
     return { type: 'none' }
   }
 

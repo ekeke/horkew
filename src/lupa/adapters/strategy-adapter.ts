@@ -35,6 +35,8 @@ export type StrategyAdapterConfig = {
   enableRetar?: boolean
   /** 詰み探索を有効化（pretrain用、デフォルトfalse） */
   enableTsumi?: boolean
+  /** Retarを有効にする開始Day（このDay以降にretarを走らせる、カリキュラム用） */
+  retarStartDay?: number
   /** 役職割当後にstrategy差し替え用コールバック */
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   seed?: number
@@ -136,6 +138,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
 
   function runRetar(pctx: PhaseContext): void {
     if (adapterConfig.enableRetar === false) return
+    if (adapterConfig.retarStartDay && pctx.day < adapterConfig.retarStartDay) return
     const t0 = performance.now()
     const state = pctx.state as GameState
     const events = [...pctx.events] as GameEvent[]

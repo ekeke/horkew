@@ -125,6 +125,8 @@ export type WorkerRequest = {
   useTeamStrategy?: 'wolf_team' | 'mason_team'
   /** MLにする最大席数 (カリキュラム学習用、未指定=制限なし) */
   mlMaxSeats?: number
+  /** ML/Retarを有効にする開始Day (カリキュラム用、未指定=Day1=全日) */
+  mlStartDay?: number
   /** frozen村NNの重み (集団NN/狂信者の村NN出力注入用) */
   villageFrozenWeights?: SharedWeights
 }

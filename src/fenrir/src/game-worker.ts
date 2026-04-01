@@ -101,9 +101,9 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
         if (usePool && poolNets.length > 0 && seat % 3 === 0) {
           const pastNet = poolNets[Math.floor(Math.random() * poolNets.length)]
-          strategies.set(seat, new FenrirStrategy(pastNet, { explore: true, strategyOnly: config.strategyOnly }))
+          strategies.set(seat, new FenrirStrategy(pastNet, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
         } else {
-          strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
+          strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
         }
       }
     }
@@ -164,7 +164,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
               if (frozenVillageNet) fs.frozenVillageNetwork = frozenVillageNet
               strategies.set(seat, fs)
             } else {
-              strategies.set(seat, new FenrirStrategy(net, { explore: true, strategyOnly: config.strategyOnly }))
+              strategies.set(seat, new FenrirStrategy(net, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
             }
           }
           // groupName が無い (possessed等) → defaultStrategy にフォールバック
@@ -182,7 +182,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         }
         const limit = req.mlMaxSeats ?? candidates.length
         for (let i = 0; i < Math.min(limit, candidates.length); i++) {
-          strategies.set(candidates[i][0], new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
+          strategies.set(candidates[i][0], new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
         }
       }
     }
@@ -222,6 +222,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         seed,
         enableRetar: config.enableRetar,
         enableTsumi: true,
+        retarStartDay: req.mlStartDay,
         roles,
         rules: config.rules,
       })
@@ -243,6 +244,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         masonTeamStrategy,
         enableRetar: config.enableRetar,
         enableTsumi: true,
+        retarStartDay: req.mlStartDay,
         onRolesAssigned: onRolesAssignedWrapped,
         seed,
         roles,
