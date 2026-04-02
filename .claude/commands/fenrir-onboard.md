@@ -35,7 +35,7 @@ description: Fenrir 学習セッション開始時のオンボーディング。
 ## Step 3: 前セッションの引き継ぎ
 
 1. `tasks/` ディレクトリにハンドオフ文書があるか確認:
-   - `tasks/training-handoff-*.md` — 前セッションの作業記録
+   - `tasks/training-handoff-*.md` — 前セッションの作業記録（ファイル名: `training-handoff-{YYYYMMDD-HHmmss}.md`、最新のものを読む）
    - `tasks/todo.md` — 未完了タスク
    - `tasks/lessons.md` — 過去の教訓
 

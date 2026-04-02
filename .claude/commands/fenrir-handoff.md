@@ -18,7 +18,7 @@ description: Fenrir 学習セッション終了時のハンドオフ文書生成
 
 ## Step 2: ハンドオフ文書の作成
 
-`tasks/training-handoff-{YYYY-MM-DD}.md` に以下の構成で書き出す:
+`tasks/training-handoff-{YYYYMMDD-HHmmss}.md` に以下の構成で書き出す:
 
 ```markdown
 # Fenrir 学習セッション引き継ぎ ({日付})
