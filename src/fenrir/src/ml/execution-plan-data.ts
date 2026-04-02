@@ -192,19 +192,22 @@ function shuffleArray<T>(arr: T[], rng: Rng): T[] {
   return a
 }
 
+const ALL_ROLES: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'werewolf', 'fanatic', 'werehamster', 'immoralist']
+const VILLAGE_ONLY: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+const WOLF_NO_FOX: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'werewolf', 'fanatic']
+const FOX_NO_WOLF: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'werehamster', 'immoralist']
+
 /**
  * 合成 Retar possibilities を生成
- * 数席を「狼不可能（確定白）」に、残りを「狼可能」にする。
- * 狼可能席のうちランダムに選んだ席を suspectSeats として返す。
+ * 席を4種に分類: 確定白 / 狐可能(狼不可) / 狼可能(狐不可) / 両方可能
+ * foxSeats: 狐可能席、wolfSeats: 狼可能席（狐含まない）
  */
 function generateSyntheticRetar(
   aliveSeats: number[],
   mySeat: number,
   claims: Map<number, SystemRole>,
   rng: Rng,
-): { possibilities: Map<number, Set<SystemRole>>, suspectSeats: number[] } {
-  const ALL_ROLES: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'werewolf', 'fanatic', 'werehamster', 'immoralist']
-  const VILLAGE_ONLY: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+): { possibilities: Map<number, Set<SystemRole>>, foxSeats: number[], wolfSeats: number[] } {
   const possibilities = new Map<number, Set<SystemRole>>()
 
   // 自分は村側確定
@@ -219,20 +222,44 @@ function generateSyntheticRetar(
     confirmedWhites.add(confirmed)
   }
 
-  // 残りの席: 全役職可能（狼含む）
-  const wolfPossibleSeats: number[] = []
-  for (const seat of aliveSeats) {
-    if (confirmedWhites.has(seat)) continue
-    possibilities.set(seat, new Set(ALL_ROLES))
-    wolfPossibleSeats.push(seat)
+  // 残りの席を分類
+  const foxSeats: number[] = []
+  const wolfSeats: number[] = []
+  const remaining = aliveSeats.filter(s => !confirmedWhites.has(s))
+  const shuffled = shuffleArray(remaining, rng)
+
+  // 30% の確率で狐/狼分離あり、70% は全員 ALL_ROLES
+  const hasFoxWolfSplit = rng.next() < 0.3 && shuffled.length >= 3
+
+  if (hasFoxWolfSplit) {
+    // 1〜2 席を狐可能(狼不可)に
+    const numFoxOnly = 1 + Math.floor(rng.next() * Math.min(2, shuffled.length - 1))
+    for (let i = 0; i < shuffled.length; i++) {
+      const seat = shuffled[i]
+      if (i < numFoxOnly) {
+        possibilities.set(seat, new Set(FOX_NO_WOLF))
+        foxSeats.push(seat)
+      } else if (rng.next() < 0.3) {
+        // 一部を狼可能(狐不可)に
+        possibilities.set(seat, new Set(WOLF_NO_FOX))
+        wolfSeats.push(seat)
+      } else {
+        // 両方可能
+        possibilities.set(seat, new Set(ALL_ROLES))
+        foxSeats.push(seat)
+        wolfSeats.push(seat)
+      }
+    }
+  } else {
+    // 全員 ALL_ROLES（狐も狼も可能）
+    for (const seat of shuffled) {
+      possibilities.set(seat, new Set(ALL_ROLES))
+      foxSeats.push(seat)
+      wolfSeats.push(seat)
+    }
   }
 
-  // suspect: 狼可能席からランダムに 1〜3 席
-  const shuffled = shuffleArray(wolfPossibleSeats, rng)
-  const numSuspects = Math.min(1 + Math.floor(rng.next() * 3), shuffled.length)
-  const suspectSeats = shuffled.slice(0, numSuspects)
-
-  return { possibilities, suspectSeats }
+  return { possibilities, foxSeats, wolfSeats }
 }
 
 const PATTERNS: PatternType[] = [
@@ -518,16 +545,29 @@ function patternToForwardLabels(
   }
 }
 
-/** 狼可能席を NEXT 区切りで列挙する plan token 列を生成 */
+/**
+ * 人外候補を NEXT 区切りで列挙する plan token 列を生成。
+ * 狐候補を先に、狼候補を後に配置（狐→狼の処刑順序を教える）。
+ */
 function buildSuspectLabels(
-  wolfPossible: number[],
+  foxSeats: number[],
+  wolfSeats: number[],
   numTokens: number,
   rng: Rng,
 ): { labels: number[], mask: boolean[] } {
+  // 狐候補 → 狼候補（狐にいない席のみ）の順で連結
+  const foxSet = new Set(foxSeats)
+  const wolfOnly = wolfSeats.filter(s => !foxSet.has(s))
+  const ordered = [...shuffleArray(foxSeats, rng), ...shuffleArray(wolfOnly, rng)]
+
+  if (ordered.length === 0) {
+    return { labels: new Array(numTokens).fill(PLAN_VOCAB.STOP), mask: new Array(numTokens).fill(false) }
+  }
+
   // n席 = n + (n-1) + 1 = 2n トークン → 最大 n = floor(numTokens / 2)
-  const maxTargets = Math.min(wolfPossible.length, Math.floor(numTokens / 2))
+  const maxTargets = Math.min(ordered.length, Math.floor(numTokens / 2))
   const numTargets = Math.max(1, Math.ceil(rng.next() * maxTargets))
-  const targets = wolfPossible.slice(0, numTargets)
+  const targets = ordered.slice(0, numTargets)
 
   const labels = new Array(numTokens).fill(PLAN_VOCAB.STOP)
   const mask = new Array(numTokens).fill(false)
@@ -569,13 +609,11 @@ export function generatePlanTokenTrainingBatch(count: number, seed: number = 42)
     const fwdMyRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
     const fwdCO = generateCOSituation(fwdAliveSeats, rng)
     const fwdRetar = generateSyntheticRetar(fwdAliveSeats, fwdMySeat, fwdCO.claims, rng)
-    const fwdWolfPossible = shuffleArray(
-      fwdAliveSeats.filter(s => s !== fwdMySeat && fwdRetar.possibilities.get(s)?.has('werewolf')),
-      rng,
-    )
-    if (fwdWolfPossible.length === 0) continue
+    const fwdFox = fwdRetar.foxSeats.filter(s => s !== fwdMySeat)
+    const fwdWolf = fwdRetar.wolfSeats.filter(s => s !== fwdMySeat)
+    if (fwdFox.length === 0 && fwdWolf.length === 0) continue
 
-    const fwd = buildSuspectLabels(fwdWolfPossible, NUM_FORWARD_TOKENS, rng)
+    const fwd = buildSuspectLabels(fwdFox, fwdWolf, NUM_FORWARD_TOKENS, rng)
 
     // Endgame 盤面（別の盤面で生成）
     const egAliveSeats = shuffleArray(allSeats, rng).slice(0, egAliveCount)
@@ -583,13 +621,10 @@ export function generatePlanTokenTrainingBatch(count: number, seed: number = 42)
     const egMyRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
     const egCO = generateCOSituation(egAliveSeats, rng)
     const egRetar = generateSyntheticRetar(egAliveSeats, egMySeat, egCO.claims, rng)
-    const egWolfPossible = shuffleArray(
-      egAliveSeats.filter(s => s !== egMySeat && egRetar.possibilities.get(s)?.has('werewolf')),
-      rng,
-    )
-    // endgame で候補0なら forward のみ（endgame は空ラベル）
-    const eg = egWolfPossible.length > 0
-      ? buildSuspectLabels(egWolfPossible, NUM_ENDGAME_TOKENS, rng)
+    const egFox = egRetar.foxSeats.filter(s => s !== egMySeat)
+    const egWolf = egRetar.wolfSeats.filter(s => s !== egMySeat)
+    const eg = (egFox.length > 0 || egWolf.length > 0)
+      ? buildSuspectLabels(egFox, egWolf, NUM_ENDGAME_TOKENS, rng)
       : { labels: new Array(NUM_ENDGAME_TOKENS).fill(PLAN_VOCAB.STOP), mask: new Array(NUM_ENDGAME_TOKENS).fill(false) }
 
     // observation は forward 盤面から生成
