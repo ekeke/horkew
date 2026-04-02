@@ -108,11 +108,25 @@
 
   let selectedStep = $derived(game && selectedStepIdx >= 0 ? game.timeline[selectedStepIdx] : null)
   let selectedAllPlayerSeat = $state<number | null>(null)
+  let selectedAllPlayerDay = $state<number | null>(null)
 
-  // 選択中の day の全プレイヤー observation
+  // allPlayerSteps を day でグループ化（timeline が空の場合のフォールバック表示用）
+  let groupedAllPlayers = $derived.by(() => {
+    if (!game?.allPlayerSteps) return []
+    const map = new Map<number, Array<{ seat: number, role: string, day: number, observation: any }>>()
+    for (const s of game.allPlayerSteps) {
+      let arr = map.get(s.day)
+      if (!arr) { arr = []; map.set(s.day, arr) }
+      arr.push(s)
+    }
+    return [...map.entries()].sort((a, b) => a[0] - b[0]).map(([day, steps]) => ({ day, steps: steps.sort((a, b) => a.seat - b.seat) }))
+  })
+
+  // 選択中の day の全プレイヤー observation (timeline のステップか allPlayerDay から)
+  let activeDay = $derived(selectedStep?.day ?? selectedAllPlayerDay)
   let allPlayerForDay = $derived.by(() => {
-    if (!game?.allPlayerSteps || !selectedStep) return []
-    return game.allPlayerSteps.filter(s => s.day === selectedStep!.day).sort((a, b) => a.seat - b.seat)
+    if (!game?.allPlayerSteps || activeDay == null) return []
+    return game.allPlayerSteps.filter(s => s.day === activeDay).sort((a, b) => a.seat - b.seat)
   })
 
   // 全プレイヤー表示用の observation (selectedAllPlayerSeat に対応)
@@ -243,7 +257,7 @@
           </div>
           {/if}
 
-          <!-- Timeline steps -->
+          <!-- Timeline steps (ML players) -->
           {#each groupedTimeline as group}
             <div class="inspect-day-header">Day {group.day} - {group.phase}</div>
             <div class="inspect-day-steps">
@@ -258,7 +272,7 @@
                 <button
                   class="inspect-step-row"
                   class:active={step._idx === selectedStepIdx}
-                  onclick={() => selectedStepIdx = step._idx}
+                  onclick={() => { selectedStepIdx = step._idx; selectedAllPlayerDay = null; selectedAllPlayerSeat = null }}
                 >
                   <span class="col-seat">
                     <span class="seat-badge" style="background:color-mix(in srgb, {ROLE_COLORS[step.role] || 'var(--ctp-overlay0)'} 25%, transparent);color:{ROLE_COLORS[step.role]}">{step.seat}</span>
@@ -274,6 +288,28 @@
               {/each}
             </div>
           {/each}
+
+          <!-- All player observations (per day) -->
+          {#if groupedAllPlayers.length > 0}
+            {#each groupedAllPlayers as dayGroup}
+              <div class="inspect-day-header">Day {dayGroup.day} - all players</div>
+              <div class="inspect-day-steps">
+                {#each dayGroup.steps as ap}
+                  <button
+                    class="inspect-step-row"
+                    class:active={selectedAllPlayerDay === ap.day && selectedAllPlayerSeat === ap.seat}
+                    onclick={() => { selectedAllPlayerDay = ap.day; selectedAllPlayerSeat = ap.seat; selectedStepIdx = -1 }}
+                  >
+                    <span class="col-seat">
+                      <span class="seat-badge" style="background:color-mix(in srgb, {ROLE_COLORS[ap.role] || 'var(--ctp-overlay0)'} 25%, transparent);color:{ROLE_COLORS[ap.role]}">{ap.seat}</span>
+                      {ROLE_SHORT[ap.role] || '?'}
+                    </span>
+                    <span class="col-action" style="grid-column: span 4; color:var(--ctp-subtext0)">observation</span>
+                  </button>
+                {/each}
+              </div>
+            {/each}
+          {/if}
         {:else}
           <div class="inspect-msg">ゲームを選択してください</div>
         {/if}
@@ -505,6 +541,82 @@
                   </div>
                 </div>
               {/if}
+            </div>
+          {/if}
+        {:else if allPlayerObs}
+          {@const aobs = allPlayerObs.observation}
+          <div class="detail-title">Seat {allPlayerObs.seat} ({allPlayerObs.role}) - Day {allPlayerObs.day}</div>
+
+          <div class="section-divider">OBSERVATION</div>
+
+          <div class="detail-section">
+            <div class="detail-label">Global</div>
+            <div class="detail-kv">
+              <span class="kv-k">Day</span><span>{aobs.global.day}</span>
+              <span class="kv-k">Phase</span><span>{aobs.global.phase}</span>
+              <span class="kv-k">My Role</span><span style="color:{ROLE_COLORS[aobs.global.myRole]}">{aobs.global.myRole} ({ROLE_SHORT[aobs.global.myRole] || '?'})</span>
+              <span class="kv-k">Alive</span><span>{(aobs.global.aliveRatio * 14).toFixed(0)} / 14</span>
+              <span class="kv-k">Rope</span><span>{aobs.global.ropeMargin.toFixed(1)}</span>
+              <span class="kv-k">Parity</span><span>{aobs.global.aliveParity ? 'odd' : 'even'}</span>
+              <span class="kv-k">Commander</span><span>{aobs.global.commander ? `seat${aobs.global.commander}` : 'なし'}</span>
+              <span class="kv-k">Tsumi</span><span>{aobs.tsumi ? `seat${aobs.tsumi}` : 'なし'}</span>
+              <span class="kv-k">狼CO要求</span><span>{aobs.global.demandWolfCoCount}</span>
+              <span class="kv-k">Revote</span><span>{aobs.revote.round > 0 ? `R${aobs.revote.round.toFixed(0)} [${aobs.revote.candidates.map((s: number) => s).join(',')}]` : 'なし'}</span>
+              <span class="kv-k">Plan</span><span class="exec-plan">{#each [aobs.seats.filter((s: any) => s.planIncluded).sort((a: any, b: any) => a.planPosition - b.planPosition)] as planSeats}{#if planSeats.length > 0}{#each planSeats as ps, i}{#if i > 0} → {/if}<span class="plan-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === ps.seat)?.role ?? ''] || 'var(--ctp-text)'}">{ps.seat}</span>{/each}{:else}<span class="no-plan">なし</span>{/if}{/each}</span>
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-label">Private</div>
+            <div class="detail-private">
+              {#if aobs.private.divineResults.length > 0}
+                <div>Divine: {#each aobs.private.divineResults as d}<span class={d.result === 'wolf' ? 'priv-wolf' : 'priv-human'}>seat{d.seat}={d.result}</span> {/each}</div>
+              {/if}
+              {#if aobs.private.wolfTeammates.length > 0}
+                <div class="priv-wolf">Wolf: {aobs.private.wolfTeammates.map((s: number) => 'seat' + s).join(', ')}</div>
+              {/if}
+              {#if aobs.private.masonPartner}
+                <div class="priv-human">Mason: seat{aobs.private.masonPartner}</div>
+              {/if}
+              {#if aobs.private.guardHistory.length > 0}
+                <div>Guard: {aobs.private.guardHistory.map((s: number) => 'seat' + s).join(', ')}</div>
+              {/if}
+              {#if aobs.private.knownHamster}
+                <div style="color:var(--color-fox)">Hamster: seat{aobs.private.knownHamster}</div>
+              {/if}
+              {#if !aobs.private.divineResults.length && !aobs.private.wolfTeammates.length && !aobs.private.masonPartner && !aobs.private.guardHistory.length && !aobs.private.knownHamster}
+                <div class="no-plan">なし</div>
+              {/if}
+            </div>
+          </div>
+
+          <div class="detail-section">
+            <div class="detail-label">Retar (Self)</div>
+            <div class="heatmap" style="grid-template-columns: 2.5rem repeat({ROLES.length}, 1fr)">
+              <span></span>
+              {#each ROLES as r}
+                <span class="hm-header" style="color:{ROLE_COLORS[r]}">{ROLE_SHORT[r]}</span>
+              {/each}
+              {#each aobs.seats as s}
+                <span class="hm-seat" class:dead={!s.alive}>{s.seat}</span>
+                {#each ROLES as r}
+                  {@const has = s.retarPossibilities.includes(r)}
+                  <span class="hm-cell" class:hm-on={has} class:hm-me={s.isMe}>{has ? 'O' : ''}</span>
+                {/each}
+              {/each}
+            </div>
+          </div>
+
+          {#if aobs.planTokens.count > 0}
+            <div class="detail-section">
+              <div class="detail-label">Plan Tokens ({aobs.planTokens.count})</div>
+              {#each aobs.planTokens.tokens as pt, i}
+                <div class="plan-token-input">
+                  <span class="plan-token-idx">#{i + 1}</span>
+                  <span class="plan-token-targets">targets: [{pt.targetMask.map((v: number, j: number) => v > 0.5 ? j + 1 : null).filter((v: any) => v).join(',')}]</span>
+                  <span class="plan-token-type">{['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? '?'}</span>
+                </div>
+              {/each}
             </div>
           {/if}
         {:else}
