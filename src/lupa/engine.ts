@@ -19,7 +19,7 @@ import {
   assignRoles, alivePlayers, getSeerResult,
   killPlayer, checkWinCondition,
 } from './roles.ts'
-import { forceTrueRoleCO, resolveVotes } from './heuristic.ts'
+import { forceTrueRoleCO, resolveVotes } from './engine-utils.ts'
 
 const MAX_DAYS = 50
 
