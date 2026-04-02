@@ -338,6 +338,15 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { g
         }
       }
 
+      // mason の decideProposal が cachedStrategyResult/lastObs をキャッシュ済みだが、
+      // その時点では currentExecutionPlans が未更新だった。
+      // キャッシュを無効化して decideVote 時に plan 入りの observation で再推論させる。
+      for (const mason of aliveMasons) {
+        const s = getStrategy(mason.seat) as any
+        s.cachedDay = -1
+        s.lastObs = null
+      }
+
       for (const player of alivePlayers(state)) {
         const view = buildPlayerView(state, player.seat)
         const ctx = buildCtx(vctx as PhaseContext, player, view, {
