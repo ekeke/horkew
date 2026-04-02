@@ -110,16 +110,33 @@
   let selectedAllPlayerSeat = $state<number | null>(null)
   let selectedAllPlayerDay = $state<number | null>(null)
 
-  // allPlayerSteps を day でグループ化（timeline が空の場合のフォールバック表示用）
-  let groupedAllPlayers = $derived.by(() => {
-    if (!game?.allPlayerSteps) return []
-    const map = new Map<number, Array<{ seat: number, role: string, day: number, observation: any }>>()
-    for (const s of game.allPlayerSteps) {
-      let arr = map.get(s.day)
-      if (!arr) { arr = []; map.set(s.day, arr) }
-      arr.push(s)
+  // 全 day を統合: allPlayerSteps + timeline を day でマージ
+  type DayGroup = {
+    day: number
+    allPlayers: Array<{ seat: number, role: string, day: number, observation: any }>
+    mlSteps: Array<TimelineStep & { _idx: number }>
+  }
+  let mergedDays = $derived.by((): DayGroup[] => {
+    if (!game) return []
+    const map = new Map<number, DayGroup>()
+    const getGroup = (day: number) => {
+      let g = map.get(day)
+      if (!g) { g = { day, allPlayers: [], mlSteps: [] }; map.set(day, g) }
+      return g
     }
-    return [...map.entries()].sort((a, b) => a[0] - b[0]).map(([day, steps]) => ({ day, steps: steps.sort((a, b) => a.seat - b.seat) }))
+    if (game.allPlayerSteps) {
+      for (const s of game.allPlayerSteps) {
+        getGroup(s.day).allPlayers.push(s)
+      }
+    }
+    for (let i = 0; i < game.timeline.length; i++) {
+      const step = game.timeline[i]
+      getGroup(step.day).mlSteps.push({ ...step, _idx: i })
+    }
+    for (const g of map.values()) {
+      g.allPlayers.sort((a, b) => a.seat - b.seat)
+    }
+    return [...map.values()].sort((a, b) => a.day - b.day)
   })
 
   // 選択中の day の全プレイヤー observation (timeline のステップか allPlayerDay から)
@@ -257,59 +274,54 @@
           </div>
           {/if}
 
-          <!-- Timeline steps (ML players) -->
-          {#each groupedTimeline as group}
-            <div class="inspect-day-header">Day {group.day} - {group.phase}</div>
+          <!-- Day sections: allPlayers icons + ML steps -->
+          {#each mergedDays as dayGroup}
+            <div class="inspect-day-header">Day {dayGroup.day}</div>
             <div class="inspect-day-steps">
-              <div class="inspect-step-header">
-                <span class="col-seat">Seat</span>
-                <span class="col-action">Action</span>
-                <span class="col-desc">Description</span>
-                <span class="col-num">Reward</span>
-                <span class="col-num">Value</span>
-              </div>
-              {#each group.steps as step}
-                <button
-                  class="inspect-step-row"
-                  class:active={step._idx === selectedStepIdx}
-                  onclick={() => { selectedStepIdx = step._idx; selectedAllPlayerDay = null; selectedAllPlayerSeat = null }}
-                >
-                  <span class="col-seat">
-                    <span class="seat-badge" style="background:color-mix(in srgb, {ROLE_COLORS[step.role] || 'var(--ctp-overlay0)'} 25%, transparent);color:{ROLE_COLORS[step.role]}">{step.seat}</span>
-                    {ROLE_SHORT[step.role] || '?'}
-                  </span>
-                  <span class="col-action">{step.actionHead}</span>
-                  <span class="col-desc">{step.actionDescription}</span>
-                  <span class="col-num" class:positive={step.reward > 0} class:negative={step.reward < 0}>
-                    {step.reward !== 0 ? step.reward.toFixed(3) : '-'}
-                  </span>
-                  <span class="col-num val">{step.value.toFixed(3)}</span>
-                </button>
-              {/each}
-            </div>
-          {/each}
-
-          <!-- All player observations (per day) -->
-          {#if groupedAllPlayers.length > 0}
-            {#each groupedAllPlayers as dayGroup}
-              <div class="inspect-day-header">Day {dayGroup.day} - all players</div>
-              <div class="inspect-day-steps">
-                {#each dayGroup.steps as ap}
+              <!-- All player icons -->
+              {#if dayGroup.allPlayers.length > 0}
+                <div class="ap-icon-row">
+                  {#each dayGroup.allPlayers as ap}
+                    <button
+                      class="ap-icon"
+                      class:active={selectedAllPlayerDay === ap.day && selectedAllPlayerSeat === ap.seat}
+                      onclick={() => { selectedAllPlayerDay = ap.day; selectedAllPlayerSeat = ap.seat; selectedStepIdx = -1 }}
+                      title="seat{ap.seat} {ap.role}"
+                      style="background:color-mix(in srgb, {ROLE_COLORS[ap.role] || 'var(--ctp-overlay0)'} 25%, transparent);color:{ROLE_COLORS[ap.role]}"
+                    >{ap.seat}</button>
+                  {/each}
+                </div>
+              {/if}
+              <!-- ML steps -->
+              {#if dayGroup.mlSteps.length > 0}
+                <div class="inspect-step-header">
+                  <span class="col-seat">Seat</span>
+                  <span class="col-action">Action</span>
+                  <span class="col-desc">Description</span>
+                  <span class="col-num">Reward</span>
+                  <span class="col-num">Value</span>
+                </div>
+                {#each dayGroup.mlSteps as step}
                   <button
                     class="inspect-step-row"
-                    class:active={selectedAllPlayerDay === ap.day && selectedAllPlayerSeat === ap.seat}
-                    onclick={() => { selectedAllPlayerDay = ap.day; selectedAllPlayerSeat = ap.seat; selectedStepIdx = -1 }}
+                    class:active={step._idx === selectedStepIdx}
+                    onclick={() => { selectedStepIdx = step._idx; selectedAllPlayerDay = null; selectedAllPlayerSeat = null }}
                   >
                     <span class="col-seat">
-                      <span class="seat-badge" style="background:color-mix(in srgb, {ROLE_COLORS[ap.role] || 'var(--ctp-overlay0)'} 25%, transparent);color:{ROLE_COLORS[ap.role]}">{ap.seat}</span>
-                      {ROLE_SHORT[ap.role] || '?'}
+                      <span class="seat-badge" style="background:color-mix(in srgb, {ROLE_COLORS[step.role] || 'var(--ctp-overlay0)'} 25%, transparent);color:{ROLE_COLORS[step.role]}">{step.seat}</span>
+                      {ROLE_SHORT[step.role] || '?'}
                     </span>
-                    <span class="col-action" style="grid-column: span 4; color:var(--ctp-subtext0)">observation</span>
+                    <span class="col-action">{step.actionHead}</span>
+                    <span class="col-desc">{step.actionDescription}</span>
+                    <span class="col-num" class:positive={step.reward > 0} class:negative={step.reward < 0}>
+                      {step.reward !== 0 ? step.reward.toFixed(3) : '-'}
+                    </span>
+                    <span class="col-num val">{step.value.toFixed(3)}</span>
                   </button>
                 {/each}
-              </div>
-            {/each}
-          {/if}
+              {/if}
+            </div>
+          {/each}
         {:else}
           <div class="inspect-msg">ゲームを選択してください</div>
         {/if}
@@ -781,6 +793,29 @@
   .reward-table td:nth-child(2), .reward-table th:nth-child(2) { text-align: left; }
   .rt-seat { font-weight: bold; color: var(--ctp-subtext0); }
   .rt-total { font-weight: bold; }
+
+  .ap-icon-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 3px 6px;
+    border-bottom: 1px solid var(--ctp-mantle);
+  }
+  .ap-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px solid transparent;
+    font-size: 0.6rem;
+    font-weight: bold;
+    font-family: inherit;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ap-icon:hover { border-color: var(--ctp-surface2); }
+  .ap-icon.active { border-color: var(--ctp-text); outline: 1px solid var(--ctp-text); }
 
   .inspect-day-header {
     padding: 0.3rem 0.5rem;
