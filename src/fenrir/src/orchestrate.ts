@@ -847,12 +847,11 @@ async function main(): Promise<void> {
       masonRefNetwork.loadWeights(masonNet.cloneWeights())
 
       const masonMlRoles = ['mason'] as SystemRole[]
-      let masonMlStartDay = 4  // Day 3 スナップショットからリプレイ → 3 → 2 → 1
+      let masonMlStartDay = 1  // Day 1 からフルゲーム（snapshot に mason 生存保証がないため）
       const ML_START_DAY_MIN_MASON = 1
 
       function refreshMasonSnapshotCount() {
         if (masonMlStartDay <= ML_START_DAY_MIN_MASON) return 0
-        // mason は village roles のスナップショットを使える
         let count = countSnapshots(masonMlStartDay - 1, MODEL_GROUPS.village.roles as string[], 1)
         if (count > 0) {
           log(`  Seed bank: ${count} snapshots at Day ${masonMlStartDay - 1}`)
