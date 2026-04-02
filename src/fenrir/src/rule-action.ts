@@ -278,12 +278,45 @@ export function leadershipResponse(): LeadershipResponse {
  * PlanDayGroup から投票先 seat を解決（mason死亡後のキャッシュ解決用）
  * @param group 1日分のplan group
  * @param aliveSeats 生存席一覧
+ * @param events ゲームイベント（role解決・CO者除外用、省略時は簡易解決）
  * @returns 投票先seat (1-indexed) or null
  */
-export function resolvePlanGroupSimple(group: PlanDayGroup, aliveSeats: number[]): number | null {
+export function resolvePlanGroupSimple(group: PlanDayGroup, aliveSeats: number[], events?: readonly any[]): number | null {
+  const aliveSet = new Set(aliveSeats)
+  // CO者を収集（grayran・role解決用）
+  const coClaimed = new Map<string, number[]>()  // claimType → seats
+  if (events) {
+    for (const e of events) {
+      if ('actor' in e && typeof e.type === 'string') {
+        for (const prefix of ['seer_claim', 'medium_claim', 'bodyguard_claim', 'mason_claim', 'nekomata_claim']) {
+          if (e.type.startsWith(prefix)) {
+            const role = prefix.replace('_claim', '')
+            if (!coClaimed.has(role)) coClaimed.set(role, [])
+            coClaimed.get(role)!.push(e.actor)
+          }
+        }
+      }
+    }
+  }
+  const allCOSeats = new Set<number>()
+  for (const seats of coClaimed.values()) for (const s of seats) allCOSeats.add(s)
+
   for (const target of group.targets) {
-    if (target.type === 'seat' && aliveSeats.includes(target.seat)) return target.seat
-    if (target.type === 'grayran' && aliveSeats.length > 0) return aliveSeats[0]
+    if (target.type === 'seat') {
+      if (aliveSet.has(target.seat)) return target.seat
+    } else if (target.type === 'role') {
+      // role CO している生存席を探す
+      const claimers = coClaimed.get(target.role) ?? []
+      for (const seat of claimers) {
+        if (aliveSet.has(seat)) return seat
+      }
+    } else if (target.type === 'grayran') {
+      // CO していない生存者
+      const grays = aliveSeats.filter(s => !allCOSeats.has(s))
+      if (grays.length > 0) return grays[0]
+      // グレーがいなければ全生存者から
+      if (aliveSeats.length > 0) return aliveSeats[0]
+    }
   }
   return null
 }

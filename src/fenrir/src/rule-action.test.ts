@@ -60,9 +60,50 @@ describe('resolvePlanGroupSimple', () => {
     assert.equal(resolvePlanGroupSimple(group, [1, 5, 7]), 7)
   })
 
-  it('grayran picks first alive', () => {
+  it('grayran picks first alive (no events)', () => {
     const group: PlanDayGroup = { targets: [{ type: 'grayran' }] }
     assert.equal(resolvePlanGroupSimple(group, [5, 9, 12]), 5)
+  })
+
+  it('grayran excludes CO claimers when events provided', () => {
+    const group: PlanDayGroup = { targets: [{ type: 'grayran' }] }
+    const events = [
+      { type: 'seer_claim', actor: 5 },
+      { type: 'medium_claim', actor: 9 },
+    ]
+    // seat 5, 9 are CO → gray = [12]
+    assert.equal(resolvePlanGroupSimple(group, [5, 9, 12], events), 12)
+  })
+
+  it('grayran falls back to all alive when everyone has CO', () => {
+    const group: PlanDayGroup = { targets: [{ type: 'grayran' }] }
+    const events = [
+      { type: 'seer_claim', actor: 5 },
+      { type: 'medium_claim', actor: 9 },
+    ]
+    assert.equal(resolvePlanGroupSimple(group, [5, 9], events), 5)
+  })
+
+  it('role resolves to CO claimer', () => {
+    const group: PlanDayGroup = { targets: [{ type: 'role', role: 'seer' as any }] }
+    const events = [
+      { type: 'seer_claim', actor: 7 },
+    ]
+    assert.equal(resolvePlanGroupSimple(group, [3, 7, 10], events), 7)
+  })
+
+  it('role skips dead CO claimer', () => {
+    const group: PlanDayGroup = { targets: [{ type: 'role', role: 'seer' as any }] }
+    const events = [
+      { type: 'seer_claim', actor: 7 },
+    ]
+    // seat 7 is dead
+    assert.equal(resolvePlanGroupSimple(group, [3, 10], events), null)
+  })
+
+  it('role returns null without events', () => {
+    const group: PlanDayGroup = { targets: [{ type: 'role', role: 'seer' as any }] }
+    assert.equal(resolvePlanGroupSimple(group, [3, 7, 10]), null)
   })
 
   it('returns null when no target resolves', () => {

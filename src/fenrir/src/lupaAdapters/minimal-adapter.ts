@@ -263,7 +263,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
         // mason全滅: キャッシュされたplanの次グループを使用
         const group = cachedPlanGroups[cachedPlanGroupIndex++]
         const aliveSeats = alivePlayers(state).map(p => p.seat)
-        const target = resolvePlanGroupSimple(group, aliveSeats)
+        const target = resolvePlanGroupSimple(group, aliveSeats, vctx.events)
         if (target) {
           dayProposals.push({ type: 'execute_order', target })
         }
