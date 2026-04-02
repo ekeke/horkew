@@ -70,7 +70,7 @@ type Checkpoint = {
   type: CheckpointType
 }
 
-function findCheckpoints(events: GameEvent[]): Checkpoint[] {
+function findCheckpoints(events: readonly any[]): Checkpoint[] {
   const checkpoints: Checkpoint[] = []
   const seen = new Set<number>()
 

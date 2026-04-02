@@ -356,7 +356,7 @@ export type TsumiFromEventsResult = TsumiResult & { strategy: StrategyNode | nul
  * Hati詰み探索をイベント列から実行（判定 + 手順構築）
  */
 export function searchTsumiFromEvents(
-  events: GameEvent[],
+  events: readonly any[],
   state: GameState,
   config: LupaConfig,
   maxDepth: number = 4,

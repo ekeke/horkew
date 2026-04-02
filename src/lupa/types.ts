@@ -1,6 +1,5 @@
 import type { SystemRole, EnumSpecies, ResolvedRules } from '../types/index.ts'
 import type { Strategy, TeamStrategy, AsyncStrategy, AsyncTeamStrategy } from './strategy.ts'
-import type { Signal, RolePrediction } from './communication.ts'
 
 export type LupaConfig = {
   roles: Map<SystemRole, number>
@@ -116,18 +115,11 @@ export type GameEvent =
   | { type: 'comment', text: string }
   | { type: 'game_over', result: 'villager_won' | 'werewolf_won' | 'werehamster_won' | 'draw' }
   | { type: 'reveal', seat: number, role: SystemRole }
-  | { type: 'signal', actor: number, signal: Signal }
-  | { type: 'wolf_claim', actor: number, claimedRole: SystemRole }
-  | { type: 'execute_proposals', actor: number, targets: number[] }
-  | { type: 'prediction', actor: number, predictions: RolePrediction }
-  | { type: 'commander_appointed', seat: number }
-  | { type: 'proposal', actor: number, proposal: import('./leadership.ts').Proposal }
-  | { type: 'leadership_response', actor: number, response: import('./leadership.ts').LeadershipResponse }
 
 /** 中盤スナップショット（Seed Bank 用） */
-export type GameSnapshot = {
+export type GameSnapshot<E = never> = {
   state: GameState
-  events: GameEvent[]
+  events: (GameEvent | E)[]
   rngState: number
   config: import('./handlers.ts').GameConfig
   seatRoles: Map<number, SystemRole>

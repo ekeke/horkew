@@ -513,7 +513,7 @@ async function generateGame(
   agents.masonTeamStrategy?.resetTrajectory()
 
   let state: import('../../lupa/types.ts').GameState
-  let events: import('../../lupa/types.ts').GameEvent[]
+  let events: (import('../../lupa/types.ts').GameEvent | import('./events.ts').FenrirExtEvent)[]
 
   if (config.strategyOnly) {
     const handlers = minimalAdapter({
@@ -593,7 +593,7 @@ async function generateGame(
 
   // Add intermediate rewards
   for (const event of events) {
-    const rewards = intermediateReward(event, state, config.rewardConfig)
+    const rewards = intermediateReward(event as import('../../lupa/types.ts').GameEvent, state, config.rewardConfig)
     for (const [seat, reward] of rewards) {
       // Individual agents
       const steps = allSteps.get(seat)
@@ -693,7 +693,7 @@ async function generateGameAsync(
     masonTeamSteps[masonTeamSteps.length - 1].reward += terminalReward('mason', state.result ?? '', config.rewardConfig)
   }
   for (const event of events) {
-    const rewards = intermediateReward(event, state, config.rewardConfig)
+    const rewards = intermediateReward(event as import('../../lupa/types.ts').GameEvent, state, config.rewardConfig)
     for (const [seat, reward] of rewards) {
       const steps = allSteps.get(seat)
       if (steps && steps.length > 0) steps[steps.length - 1].reward += reward
@@ -921,7 +921,7 @@ export async function evaluate(
     const snapshot = options?.snapshots?.[i]
     const t0 = performance.now()
     let state: import('../../lupa/types.ts').GameState
-    let events: import('../../lupa/types.ts').GameEvent[] | undefined
+    let events: (import('../../lupa/types.ts').GameEvent | import('./events.ts').FenrirExtEvent)[] | undefined
     if (snapshot) {
       // Seed Bank リプレイ
       const handlers = config.strategyOnly
@@ -987,7 +987,7 @@ export async function evaluate(
     resultCounts[result] = (resultCounts[result] ?? 0) + 1
     totalLength += state.day
     if (events) {
-      howlGames.push({ seed, howl: formatHowl(events, state, lupaConfig), result, gameLength: state.day })
+      howlGames.push({ seed, howl: formatHowl(events as import('../../lupa/types.ts').GameEvent[], state, lupaConfig), result, gameLength: state.day })
     }
     totalGames++
   }

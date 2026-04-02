@@ -57,7 +57,7 @@ type SerializedPlayerState = {
   forecastTarget: number | null
 }
 
-function serializeSnapshot(snap: GameSnapshot): SerializedSnapshot {
+function serializeSnapshot(snap: GameSnapshot<any>): SerializedSnapshot {
   return {
     state: {
       players: snap.state.players.map(p => ({
@@ -201,7 +201,7 @@ function snapshotDirsCompatible(day: number, aliveRoles?: string[], minAlive?: n
 // ディスク I/O
 // ============================================================
 
-export function saveSnapshot(snap: GameSnapshot, dir: string, index: number): void {
+export function saveSnapshot(snap: GameSnapshot<any>, dir: string, index: number): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const path = `${dir}/${String(index).padStart(4, '0')}.json`
   writeFileSync(path, JSON.stringify(serializeSnapshot(snap)))
@@ -291,7 +291,7 @@ export function retireSnapshots(day: number, n: number, aliveRoles?: string[], m
 // 生成
 // ============================================================
 
-function countAliveRoles(snap: GameSnapshot, targetRoles: string[]): number {
+function countAliveRoles(snap: GameSnapshot<any>, targetRoles: string[]): number {
   const targetSet = new Set(targetRoles)
   return snap.state.players.filter(p => p.alive && targetSet.has(p.role)).length
 }

@@ -136,7 +136,7 @@ export function displayRetarSummary(ctx: DecisionContext, state: GameState): voi
   }
 }
 
-function formatSignal(signal: Signal, state: GameState): string {
+function formatSignal(signal: any, state: GameState): string | undefined {
   const pName = (seat: number) => state.players.find(p => p.seat === seat)?.name ?? `???`
   switch (signal.type) {
     case 'suspicion': return `疑い→${pName(signal.target)}`
@@ -157,7 +157,7 @@ function formatSignal(signal: Signal, state: GameState): string {
   }
 }
 
-export function displayNewEvents(events: GameEvent[], fromIndex: number, state: GameState): number {
+export function displayNewEvents(events: any[], fromIndex: number, state: GameState): number {
   if (fromIndex >= events.length) return fromIndex
   const pName = (seat: number) => state.players.find(p => p.seat === seat)?.name ?? `???`
 
@@ -175,7 +175,7 @@ export function displayNewEvents(events: GameEvent[], fromIndex: number, state: 
         console.log(`  ${C.green}平和な朝を迎えた${C.reset}`)
         break
       case 'seer_claim':
-        console.log(`  ${pName(e.actor)} が${C.cyan}占い師CO${C.reset}: ${e.results.map(r => `${pName(r.target)}=${r.result === 'human' ? '○' : '●'}`).join(', ')}`)
+        console.log(`  ${pName(e.actor)} が${C.cyan}占い師CO${C.reset}: ${e.results.map((r: any) => `${pName(r.target)}=${r.result === 'human' ? '○' : '●'}`).join(', ')}`)
         break
       case 'seer_result':
         console.log(`  ${pName(e.actor)} 占い結果: ${pName(e.target)}=${e.result === 'human' ? '○' : '●'}`)
@@ -202,7 +202,7 @@ export function displayNewEvents(events: GameEvent[], fromIndex: number, state: 
         console.log(`  ${C.dim}${pName(e.voter)} → ${pName(e.target)}${C.reset}`)
         break
       case 'revote':
-        console.log(`  ${C.yellow}再投票! 候補: ${e.targets.map(s => pName(s)).join(', ')}${C.reset}`)
+        console.log(`  ${C.yellow}再投票! 候補: ${e.targets.map((s: any) => pName(s)).join(', ')}${C.reset}`)
         break
       case 'execution':
         console.log(`  ${C.red}${C.bold}${pName(e.target)} が処刑された${C.reset}`)

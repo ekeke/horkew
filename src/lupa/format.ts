@@ -37,7 +37,8 @@ const RESULT_DISPLAY = {
   draw: '引き分け',
 } as const
 
-export function formatHowl(events: GameEvent[], state: GameState, config: LupaConfig): string {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- accepts GameEvent | FenrirExtEvent; full typing deferred to Phase 2
+export function formatHowl(events: readonly any[], state: GameState, config: LupaConfig): string {
   const lines: string[] = []
   const playerName = (seat: number) => state.players.find(p => p.seat === seat)!.name
 
@@ -87,7 +88,7 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
           lines.push('')
         }
         const resultsStr = event.results
-          .map(r => `${playerName(r.target)}${r.result === 'human' ? '○' : '●'}`)
+          .map((r: any) => `${playerName(r.target)}${r.result === 'human' ? '○' : '●'}`)
           .join(' ')
         lines.push(`${playerName(event.actor)} 占いCO ${resultsStr}`)
         break
@@ -104,7 +105,7 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
           lines.push('')
         }
         const pastStr = event.pastResults && event.pastResults.length > 0
-          ? ' ' + event.pastResults.map(r => r === 'human' ? '○' : '●').join(' ')
+          ? ' ' + event.pastResults.map((r: any) => r === 'human' ? '○' : '●').join(' ')
           : ''
         lines.push(`${playerName(event.actor)} 霊能CO${pastStr}`)
         break
@@ -120,7 +121,7 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
         if (lastType === 'night_kill' || lastType === 'fox_kill' || lastType === 'peace') {
           lines.push('')
         }
-        const guardsStr = event.targets.map(t => `${playerName(t)}護衛`).join(' ')
+        const guardsStr = event.targets.map((t: any) => `${playerName(t)}護衛`).join(' ')
         lines.push(`${playerName(event.actor)} 狩りCO${guardsStr ? ' ' + guardsStr : ''}`)
         break
       }
@@ -164,7 +165,7 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
       }
       case 'revote': {
         lines.push('')
-        const targetNames = event.targets.map(t => playerName(t)).join('、')
+        const targetNames = event.targets.map((t: any) => playerName(t)).join('、')
         lines.push(`再投票 ${targetNames}`)
         break
       }
@@ -175,14 +176,14 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
       }
       case 'game_over': {
         lines.push('')
-        lines.push(RESULT_DISPLAY[event.result])
+        lines.push(RESULT_DISPLAY[event.result as keyof typeof RESULT_DISPLAY])
         break
       }
       case 'reveal': {
         if (lastType === 'game_over') {
           lines.push('')
         }
-        lines.push(`${playerName(event.seat)}＝${ROLE_DISPLAY[event.role]}`)
+        lines.push(`${playerName(event.seat)}＝${ROLE_DISPLAY[event.role as SystemRole]}`)
         break
       }
       case 'signal': {
@@ -209,18 +210,18 @@ export function formatHowl(events: GameEvent[], state: GameState, config: LupaCo
         break
       }
       case 'wolf_claim': {
-        lines.push(`${playerName(event.actor)} ${ROLE_DISPLAY[event.claimedRole]}CO`)
+        lines.push(`${playerName(event.actor)} ${ROLE_DISPLAY[event.claimedRole as SystemRole]}CO`)
         break
       }
       case 'execute_proposals': {
-        const targets = event.targets.map(t => playerName(t)).join(', ')
+        const targets = event.targets.map((t: any) => playerName(t)).join(', ')
         lines.push(`# [提案] ${playerName(event.actor)} → ${targets} 処刑提案`)
         break
       }
       case 'prediction': {
         const parts: string[] = []
         for (const [seat, roles] of event.predictions) {
-          parts.push(`${playerName(seat)}=${roles.map(r => ROLE_DISPLAY[r]).join('/')}`)
+          parts.push(`${playerName(seat)}=${roles.map((r: any) => ROLE_DISPLAY[r as SystemRole]).join('/')}`)
         }
         lines.push(`# [予想] ${playerName(event.actor)}: ${parts.join(', ')}`)
         break

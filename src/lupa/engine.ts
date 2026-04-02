@@ -27,7 +27,7 @@ const MAX_DAYS = 50
 // 公開API
 // ============================================================
 
-export async function runGame(config: GameConfig, handlers: GameHandlers): Promise<GameResult> {
+export async function runGame<E = never>(config: GameConfig, handlers: GameHandlers<E>): Promise<GameResult<E>> {
   const rules = resolveRules(config.rules)
   const rng = new Rng(config.seed)
   const totalPlayers = Array.from(config.roles.values()).reduce((a, b) => a + b, 0)
@@ -57,8 +57,8 @@ export async function runGame(config: GameConfig, handlers: GameHandlers): Promi
     masonPartners: new Map(),
   }
 
-  const events: GameEvent[] = []
-  const emit = (event: GameEvent) => {
+  const events: (GameEvent | E)[] = []
+  const emit = (event: GameEvent | E) => {
     events.push(event)
     handlers.onEvent?.(event)
   }
@@ -110,7 +110,7 @@ export async function runGame(config: GameConfig, handlers: GameHandlers): Promi
   // メインループ
   // ============================================================
 
-  const snapshots = config.captureSnapshotDays ? new Map<number, GameSnapshot>() : undefined
+  const snapshots = config.captureSnapshotDays ? new Map<number, GameSnapshot<E>>() : undefined
   const loopResult = await runGameLoop(state, events, emit, rng, rules, handlers, config, 1, null, snapshots, seatRoles)
 
   // 役職公開
@@ -127,14 +127,14 @@ export async function runGame(config: GameConfig, handlers: GameHandlers): Promi
  * snapshot.state.day の次の Night から開始。
  * handlers.onSetup が呼ばれるので、戦略の初期化はそこで行う。
  */
-export async function resumeGame(snapshot: GameSnapshot, handlers: GameHandlers): Promise<GameResult> {
+export async function resumeGame<E = never>(snapshot: GameSnapshot<E>, handlers: GameHandlers<E>): Promise<GameResult<E>> {
   const state = structuredClone(snapshot.state)
-  const events: GameEvent[] = [...snapshot.events]
+  const events: (GameEvent | E)[] = [...snapshot.events]
   const rng = Rng.fromState(snapshot.rngState)
   const rules = resolveRules(snapshot.config.rules)
   const config = snapshot.config
 
-  const emit = (event: GameEvent) => {
+  const emit = (event: GameEvent | E) => {
     events.push(event)
     handlers.onEvent?.(event)
   }
@@ -160,17 +160,17 @@ export async function resumeGame(snapshot: GameSnapshot, handlers: GameHandlers)
 // メインゲームループ（runGame / resumeGame 共用）
 // ============================================================
 
-async function runGameLoop(
+async function runGameLoop<E = never>(
   state: GameState,
-  events: GameEvent[],
-  emit: (event: GameEvent) => void,
+  events: (GameEvent | E)[],
+  emit: (event: GameEvent | E) => void,
   rng: Rng,
   rules: ResolvedRules,
-  handlers: GameHandlers,
+  handlers: GameHandlers<E>,
   config: GameConfig,
   startDay: number,
   lastExecutedSeat: number | null,
-  snapshots?: Map<number, GameSnapshot>,
+  snapshots?: Map<number, GameSnapshot<E>>,
   seatRoles?: Map<number, SystemRole>,
 ): Promise<void> {
   const players = state.players
@@ -270,7 +270,7 @@ async function runGameLoop(
       }
 
       // 通常投票 or full_revote: ハンドラーに委任
-      const voteCtx: VoteContext = {
+      const voteCtx: VoteContext<E> = {
         ...makePhaseContext(state, events, rules),
         revoteRound: revoteCount,
         candidates: revoteCandidates,
@@ -372,7 +372,7 @@ async function runGameLoop(
 // 内部ヘルパー
 // ============================================================
 
-function makePhaseContext(state: GameState, events: GameEvent[], rules: ResolvedRules): PhaseContext {
+function makePhaseContext<E = never>(state: GameState, events: (GameEvent | E)[], rules: ResolvedRules): PhaseContext<E> {
   return {
     day: state.day,
     state,
@@ -408,7 +408,7 @@ type EmitFn = (event: GameEvent) => void
 function resolveNight(
   state: GameState,
   actions: Array<{ player: PlayerState, action: NightAction }>,
-  _events: GameEvent[],
+  _events: unknown[],
   emit: EmitFn,
   _rng: Rng,
 ): void {

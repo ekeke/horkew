@@ -12,7 +12,8 @@ export type DecisionContext = {
   day: number
   phase: 'night' | 'day'
   alivePlayers: number[]
-  publicEvents: GameEvent[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- GameEvent | FenrirExtEvent; typed properly after Phase 2
+  publicEvents: readonly any[]
   signals: SignalRecord[]
   commander: number | null
   proposals: Proposal[]

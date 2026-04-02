@@ -10,6 +10,7 @@
 import type { DecisionContext, TeamDecisionContext, PlanType } from '../../lupa/strategy.ts'
 import type { ForwardResult } from './ml/nn.ts'
 import type { SystemRole } from '../../types/index.ts'
+import type { FenrirEvent } from './events.ts'
 
 // プラン種別インデックス
 const PLAN_TYPES: PlanType[] = ['roller', 'decision', 'designated', 'grayran', 'endgame']
@@ -336,7 +337,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
 
   // demand_wolf_co_count: 当日のdemand_wolf_coシグナル数
   let demandWolfCoCount = 0
-  for (const event of ctx.publicEvents) {
+  for (const event of ctx.publicEvents as readonly FenrirEvent[]) {
     if (event.type === 'signal' && event.signal.type === 'demand_wolf_co') {
       demandWolfCoCount++
     }
@@ -374,7 +375,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   const voteIntentCounts = new Map<number, number>()
   const nominateCommanderCounts = new Map<number, number>()
 
-  for (const event of ctx.publicEvents) {
+  for (const event of ctx.publicEvents as readonly FenrirEvent[]) {
     switch (event.type) {
       case 'seer_claim':
         claimedRoles.set(event.actor, 'seer')
@@ -533,7 +534,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
     const dayBase = offset + w * HISTORY_DAY_SIZE
 
     // Collect events for this day
-    for (const event of ctx.publicEvents) {
+    for (const event of ctx.publicEvents as readonly FenrirEvent[]) {
       switch (event.type) {
         case 'vote': {
           // Record who voted for whom as one-hot-ish per seat
@@ -639,7 +640,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   {
     const agreeCounts = new Map<number, number>()
     const disagreeCounts = new Map<number, number>()
-    for (const event of ctx.publicEvents) {
+    for (const event of ctx.publicEvents as readonly FenrirEvent[]) {
       if (event.type === 'signal' && 'target' in event.signal) {
         if (event.signal.type === 'agree') {
           agreeCounts.set(event.signal.target, (agreeCounts.get(event.signal.target) ?? 0) + 1)
@@ -661,7 +662,7 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
     const confirmWolfCounts = new Map<number, number>()
     const voteForCounts = new Map<number, number>()
     const voteAgainstCounts = new Map<number, number>()
-    for (const event of ctx.publicEvents) {
+    for (const event of ctx.publicEvents as readonly FenrirEvent[]) {
       if (event.type === 'signal' && 'target' in event.signal) {
         const t = event.signal.target
         switch (event.signal.type) {

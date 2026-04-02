@@ -56,7 +56,7 @@ function parseRoles(spec: string): Map<SystemRole, number> {
   return roles
 }
 
-function buildHumanCtx(pctx: PhaseContext, seat: number): DecisionContext {
+function buildHumanCtx(pctx: PhaseContext<any>, seat: number): DecisionContext {
   const state = pctx.state as GameState
   const player = state.players.find(p => p.seat === seat)!
   return {
@@ -206,7 +206,7 @@ async function main() {
   })
 
   // Wrap base handlers to intercept human player's async decisions
-  const handlers: GameHandlers = {
+  const handlers: GameHandlers<any> = {
     onSetup: baseHandlers.onSetup,
 
     async onNight(ctx) {

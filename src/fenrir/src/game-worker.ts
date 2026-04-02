@@ -209,7 +209,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     const tGameStart = performance.now()
     let state: import('../../lupa/types.ts').GameState
-    let events: import('../../lupa/types.ts').GameEvent[]
+    let events: (import('../../lupa/types.ts').GameEvent | import('./events.ts').FenrirExtEvent)[]
     let gameRetarMs = 0
     let gameRetarCount = 0
 
@@ -351,7 +351,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     // Intermediate rewards
     for (const event of events) {
-      const rewards = intermediateReward(event, state, config.rewardConfig)
+      const rewards = intermediateReward(event as import('../../lupa/types.ts').GameEvent, state, config.rewardConfig)
       for (const [seat, reward] of rewards) {
         const entry = individualSteps.find(e => e.seat === seat)
         if (entry && entry.steps.length > 0) {
@@ -400,7 +400,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       }
     } else {
       // キャッシュなし: フォールバック（howl再パース）
-      const howl = formatHowl(events, state, lupaConfig)
+      const howl = formatHowl(events as import('../../lupa/types.ts').GameEvent[], state, lupaConfig)
       const howlLines = howl.split('\n')
       const execLines: number[] = []
       for (let li = 0; li < howlLines.length; li++) {
@@ -486,7 +486,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     if (isInspectGame) {
       gameResult.seed = seed
       gameResult.gameLength = state.day
-      gameResult.howl = formatHowl(events, state, lupaConfig)
+      gameResult.howl = formatHowl(events as import('../../lupa/types.ts').GameEvent[], state, lupaConfig)
       gameResult.players = state.players.map(p => ({ seat: p.seat, role: p.role, alive: p.alive }))
       if (observationGetter) {
         gameResult.allObservations = observationGetter().map(o => ({

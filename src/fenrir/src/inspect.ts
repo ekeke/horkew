@@ -302,7 +302,7 @@ for (let g = 0; g < count; g++) {
   )
 
   // Howl テキスト
-  const howl = formatHowl(events, state, gameConfig as unknown as LupaConfig)
+  const howl = formatHowl(events as import('../../lupa/types.ts').GameEvent[], state, gameConfig as unknown as LupaConfig)
 
   // ゲーム結果
   const gameOverEvent = events.find(e => e.type === 'game_over')

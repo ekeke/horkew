@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { SystemRole } from '../types/index.ts'
-import type { LupaConfig } from './types.ts'
+import type { LupaConfig, GameEvent } from './types.ts'
 import type { GameConfig } from './handlers.ts'
 import { runGame } from './engine.ts'
 import { strategyAdapter } from './adapters/strategy-adapter.ts'
@@ -38,7 +38,7 @@ describe('lupa engine', () => {
     const roles = { werewolf: 2, villager: 5, seer: 1, medium: 1, bodyguard: 1 }
     const seed = 42
     const { events, state } = await runGame(makeGameConfig(roles, seed), makeHandlers(roles, seed))
-    const howl = formatHowl(events, state, makeLupaConfig(roles, seed))
+    const howl = formatHowl(events as GameEvent[], state, makeLupaConfig(roles, seed))
     const result = parse(howl)
     assert.ok(result.statements.length > 0, 'パース結果にstatementがあること')
     // unknownタイプのstatementがないことを確認
@@ -52,8 +52,8 @@ describe('lupa engine', () => {
     const lupaConfig = makeLupaConfig(roles, seed)
     const r1 = await runGame(makeGameConfig(roles, seed), makeHandlers(roles, seed))
     const r2 = await runGame(makeGameConfig(roles, seed), makeHandlers(roles, seed))
-    const h1 = formatHowl(r1.events, r1.state, lupaConfig)
-    const h2 = formatHowl(r2.events, r2.state, lupaConfig)
+    const h1 = formatHowl(r1.events as GameEvent[], r1.state, lupaConfig)
+    const h2 = formatHowl(r2.events as GameEvent[], r2.state, lupaConfig)
     assert.equal(h1, h2)
   })
 
@@ -103,7 +103,7 @@ describe('lupa engine', () => {
     const roles = { werewolf: 2, villager: 4, seer: 1, possessed: 1, medium: 1, bodyguard: 1 }
     for (let seed = 0; seed < 10; seed++) {
       const { events, state } = await runGame(makeGameConfig(roles, seed), makeHandlers(roles, seed))
-      const howl = formatHowl(events, state, makeLupaConfig(roles, seed))
+      const howl = formatHowl(events as GameEvent[], state, makeLupaConfig(roles, seed))
       const result = parse(howl)
       const unknowns = result.statements.filter(s => s.type === 'unknown')
       assert.equal(unknowns.length, 0, `seed ${seed}: unknown statements: ${unknowns.map((s: any) => s.raw).join(', ')}`)
@@ -128,7 +128,7 @@ describe('lupa engine', () => {
     for (let seed = 0; seed < 10; seed++) {
       const { state, events } = await runGame(makeGameConfig(roles, seed), makeHandlers(roles, seed))
       assert.ok(state.finished, `seed ${seed}: ゲームが終了していない`)
-      const howl = formatHowl(events, state, makeLupaConfig(roles, seed))
+      const howl = formatHowl(events as GameEvent[], state, makeLupaConfig(roles, seed))
       const result = parse(howl)
       const unknowns = result.statements.filter(s => s.type === 'unknown')
       assert.equal(unknowns.length, 0, `seed ${seed}: unknown: ${unknowns.map((s: any) => s.raw).join(', ')}`)
@@ -153,7 +153,7 @@ describe('lupa engine', () => {
     for (let seed = 0; seed < 10; seed++) {
       const { state, events } = await runGame(makeGameConfig(roles, seed), makeHandlers(roles, seed))
       assert.ok(state.finished, `seed ${seed}: ゲームが終了していない`)
-      const howl = formatHowl(events, state, makeLupaConfig(roles, seed))
+      const howl = formatHowl(events as GameEvent[], state, makeLupaConfig(roles, seed))
       const result = parse(howl)
       const unknowns = result.statements.filter(s => s.type === 'unknown')
       assert.equal(unknowns.length, 0, `seed ${seed}: unknown: ${unknowns.map((s: any) => s.raw).join(', ')}`)
@@ -169,7 +169,7 @@ describe('lupa engine', () => {
     for (let seed = 0; seed < 10; seed++) {
       const { state, events } = await runGame(makeGameConfig(roles, seed), makeHandlers(roles, seed))
       assert.ok(state.finished, `seed ${seed}: ゲームが終了していない`)
-      const howl = formatHowl(events, state, makeLupaConfig(roles, seed))
+      const howl = formatHowl(events as GameEvent[], state, makeLupaConfig(roles, seed))
       const result = parse(howl)
       const unknowns = result.statements.filter(s => s.type === 'unknown')
       assert.equal(unknowns.length, 0, `seed ${seed}: unknown: ${unknowns.map((s: any) => s.raw).join(', ')}`)

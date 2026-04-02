@@ -1,6 +1,6 @@
 import type { SystemRole } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
-import type { LupaConfig } from './types.ts'
+import type { LupaConfig, GameEvent } from './types.ts'
 import type { GameConfig } from './handlers.ts'
 import { runGame } from './engine.ts'
 import { strategyAdapter } from './adapters/strategy-adapter.ts'
@@ -233,13 +233,13 @@ if (stats) {
   // 通常モード: howl出力のみ
   const handlers = strategyAdapter(adapterConfig)
   const { events, state } = await runGame(gameConfig, handlers)
-  console.log(formatHowl(events, state, lupaConfig))
+  console.log(formatHowl(events as GameEvent[], state, lupaConfig))
 } else if (games === 1) {
   // 単発tsumi: howl出力 + 各日の詰みチェック
   const seed = gameConfig.seed ?? Date.now()
   const handlers = strategyAdapter({ ...adapterConfig, seed })
   const { events, state } = await runGame({ ...gameConfig, seed }, handlers)
-  const howl = formatHowl(events, state, { ...lupaConfig, seed })
+  const howl = formatHowl(events as GameEvent[], state, { ...lupaConfig, seed })
   const execLines = findExecutionLines(howl)
 
   console.log(howl)
@@ -264,7 +264,7 @@ if (stats) {
     try {
       const handlers = strategyAdapter({ ...adapterConfig, seed })
       const { events, state } = await runGame({ ...gameConfig, seed }, handlers)
-      const howl = formatHowl(events, state, { ...lupaConfig, seed })
+      const howl = formatHowl(events as GameEvent[], state, { ...lupaConfig, seed })
       const execLines = findExecutionLines(howl)
 
       let found = false

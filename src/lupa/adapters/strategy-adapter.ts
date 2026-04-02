@@ -14,6 +14,7 @@ import type {
 import type { SignalRecord } from '../communication.ts'
 import type { Proposal } from '../leadership.ts'
 import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../handlers.ts'
+import type { FenrirExtEvent } from '../../fenrir/src/events.ts'
 import { buildPlayerView } from '../player-view.ts'
 import { alivePlayers } from '../roles.ts'
 import { detectCommander } from '../leadership.ts'
@@ -44,7 +45,7 @@ export type StrategyAdapterConfig = {
   rules?: Partial<ResolvedRules>
 }
 
-export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandlers {
+export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandlers<FenrirExtEvent> {
   const rng = new Rng(adapterConfig.seed)
   let retarPossibilities: Map<number, Set<SystemRole>> | null = null
   let maxSurvivingNV: number | null = null
@@ -66,7 +67,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
   }
 
   function buildCtx(
-    pctx: PhaseContext, player: PlayerState, view: PlayerView,
+    pctx: PhaseContext<FenrirExtEvent>, player: PlayerState, view: PlayerView,
     extra?: Partial<DecisionContext>,
   ): DecisionContext {
     const playerRetarResult = perPlayerRetar?.get(player.seat)
@@ -117,7 +118,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
   }
 
   function decideForPlayer<T>(
-    pctx: PhaseContext, player: PlayerState,
+    pctx: PhaseContext<FenrirExtEvent>, player: PlayerState,
     individualFn: (s: Strategy, c: DecisionContext) => T,
     teamFn: (s: TeamStrategy, c: TeamDecisionContext) => T,
   ): T {
@@ -136,7 +137,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
     return individualFn(getStrategy(player.seat), ctx)
   }
 
-  function runRetar(pctx: PhaseContext): void {
+  function runRetar(pctx: PhaseContext<FenrirExtEvent>): void {
     if (adapterConfig.enableRetar === false) return
     if (adapterConfig.retarStartDay && pctx.day < adapterConfig.retarStartDay) return
     const t0 = performance.now()
@@ -240,7 +241,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
     onPreVote(pctx) {
       const state = pctx.state as GameState
       const additionalClaims = new Map<number, DayClaim>()
-      const preVoteEvents: GameEvent[] = []
+      const preVoteEvents: (GameEvent | FenrirExtEvent)[] = []
 
       // Post-CO Retar + 詰み探索
       runRetar(pctx)

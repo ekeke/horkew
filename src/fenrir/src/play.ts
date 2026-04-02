@@ -263,7 +263,7 @@ if (mldir) {
     },
     handlers,
   )
-  console.log(formatHowl(events, state, config as unknown as LupaConfig))
+  console.log(formatHowl(events as import('../../lupa/types.ts').GameEvent[], state, config as unknown as LupaConfig))
 
 } else {
   // === --checkpoint モード (レガシー) ===
@@ -308,5 +308,5 @@ if (mldir) {
     },
     handlers,
   )
-  console.log(formatHowl(events, state, config as unknown as LupaConfig))
+  console.log(formatHowl(events as import('../../lupa/types.ts').GameEvent[], state, config as unknown as LupaConfig))
 }

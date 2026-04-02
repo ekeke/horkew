@@ -11,12 +11,13 @@ import type {
   DecisionContext, TeamDecisionContext,
   Strategy, TeamStrategy, WolfNightAction,
 } from '../../../lupa/strategy.ts'
-import type { SignalRecord } from '../../../lupa/communication.ts'
-import type { Proposal } from '../../../lupa/leadership.ts'
+import type { SignalRecord } from '../communication.ts'
+import type { Proposal } from '../leadership.ts'
 import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../../../lupa/handlers.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
 import { alivePlayers } from '../../../lupa/roles.ts'
-import { detectCommander } from '../../../lupa/leadership.ts'
+import { detectCommander } from '../leadership.ts'
+import type { FenrirExtEvent } from '../events.ts'
 import { Rng } from '../../../lupa/random.ts'
 import { forceTrueRoleCO, isVillagePowerRole } from '../../../lupa/heuristic.ts'
 import {
@@ -44,7 +45,7 @@ export type FullAdapterConfig = {
   rules?: Partial<ResolvedRules>
 }
 
-export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers {
+export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers<FenrirExtEvent> {
   const rng = new Rng(adapterConfig.seed)
   let retarPossibilities: Map<number, Set<SystemRole>> | null = null
   let maxSurvivingNV: number | null = null
@@ -65,7 +66,7 @@ export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers {
   }
 
   function buildCtx(
-    pctx: PhaseContext, player: PlayerState, view: PlayerView,
+    pctx: PhaseContext<FenrirExtEvent>, player: PlayerState, view: PlayerView,
     extra?: Partial<DecisionContext>,
   ): DecisionContext {
     const playerRetarResult = perPlayerRetar?.get(player.seat)
@@ -116,7 +117,7 @@ export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers {
   }
 
   function decideForPlayer<T>(
-    pctx: PhaseContext, player: PlayerState,
+    pctx: PhaseContext<FenrirExtEvent>, player: PlayerState,
     individualFn: (s: Strategy, c: DecisionContext) => T,
     teamFn: (s: TeamStrategy, c: TeamDecisionContext) => T,
   ): T {
@@ -135,7 +136,7 @@ export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers {
     return individualFn(getStrategy(player.seat), ctx)
   }
 
-  function runRetar(pctx: PhaseContext): void {
+  function runRetar(pctx: PhaseContext<FenrirExtEvent>): void {
     if (adapterConfig.enableRetar === false) return
     if (adapterConfig.retarStartDay && pctx.day < adapterConfig.retarStartDay) return
     const t0 = performance.now()
@@ -238,7 +239,7 @@ export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers {
     onPreVote(pctx) {
       const state = pctx.state as GameState
       const additionalClaims = new Map<number, DayClaim>()
-      const preVoteEvents: GameEvent[] = []
+      const preVoteEvents: (GameEvent | FenrirExtEvent)[] = []
 
       // Post-CO Retar + 詰み探索
       runRetar(pctx)

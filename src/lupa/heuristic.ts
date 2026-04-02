@@ -58,7 +58,7 @@ const CO_EXECUTION_SCORE: Record<string, number> = {
 // ユーティリティ: 公開情報抽出
 // ============================================================
 
-function collectClaimsFromEvents(events: GameEvent[]): Map<number, SystemRole> {
+function collectClaimsFromEvents(events: readonly any[]): Map<number, SystemRole> {
   const claims = new Map<number, SystemRole>()
   for (const e of events) {
     switch (e.type) {
@@ -73,7 +73,7 @@ function collectClaimsFromEvents(events: GameEvent[]): Map<number, SystemRole> {
   return claims
 }
 
-function collectBlackTargets(events: GameEvent[]): Set<number> {
+function collectBlackTargets(events: readonly any[]): Set<number> {
   const targets = new Set<number>()
   for (const e of events) {
     if (e.type === 'seer_claim') {
@@ -85,7 +85,7 @@ function collectBlackTargets(events: GameEvent[]): Set<number> {
   return targets
 }
 
-function collectWhiteTargets(events: GameEvent[]): Set<number> {
+function collectWhiteTargets(events: readonly any[]): Set<number> {
   const targets = new Set<number>()
   for (const e of events) {
     if (e.type === 'seer_claim') {
@@ -97,7 +97,7 @@ function collectWhiteTargets(events: GameEvent[]): Set<number> {
   return targets
 }
 
-function countRoleClaimers(events: GameEvent[], role: SystemRole, aliveSeats: Set<number>): number {
+function countRoleClaimers(events: readonly any[], role: SystemRole, aliveSeats: Set<number>): number {
   const claims = collectClaimsFromEvents(events)
   let count = 0
   for (const [seat, r] of claims) {
@@ -106,7 +106,7 @@ function countRoleClaimers(events: GameEvent[], role: SystemRole, aliveSeats: Se
   return count
 }
 
-function isRollerSituation(events: GameEvent[], role: SystemRole, aliveSeats: Set<number>): boolean {
+function isRollerSituation(events: readonly any[], role: SystemRole, aliveSeats: Set<number>): boolean {
   return countRoleClaimers(events, role, aliveSeats) >= 2
 }
 
@@ -215,7 +215,7 @@ function gradualCORate(ctx: DecisionContext): number {
 // ============================================================
 
 function buildSuspicionScore(
-  events: GameEvent[],
+  events: readonly any[],
   retarPossibilities: Map<number, Set<SystemRole>> | null,
   aliveSeatList: number[],
   mySeat: number,
@@ -337,7 +337,7 @@ function tryTsumiAction(ctx: DecisionContext): VillageAction | null {
   return null
 }
 
-function tryTsumiWithEvents(events: GameEvent[], ctx: DecisionContext): number | null {
+function tryTsumiWithEvents(events: readonly any[], ctx: DecisionContext): number | null {
   const state = ctx.gameState
   const roleCount = new Map<SystemRole, number>()
   for (const p of state.players) {
@@ -763,7 +763,7 @@ function decideBodyguardClaim(ctx: DecisionContext): DayClaim {
       .map(([, seat]) => seat)
 
     // 狩人COイベントを仮追加した盤面でHati判定
-    const simEvents: GameEvent[] = [...ctx.publicEvents, {
+    const simEvents: any[] = [...ctx.publicEvents, {
       type: 'bodyguard_claim' as const,
       actor: ctx.mySeat,
       targets,
@@ -848,7 +848,7 @@ function decideNekomataClam(ctx: DecisionContext): DayClaim {
 
   // Hati詰み: COした後の盤面で詰むならCO（8人以下）
   if (ctx.alivePlayers.length <= 8) {
-    const simEvents: GameEvent[] = [...ctx.publicEvents, {
+    const simEvents: any[] = [...ctx.publicEvents, {
       type: 'nekomata_claim' as const,
       actor: ctx.mySeat,
     }]
@@ -1195,7 +1195,7 @@ function trySetFakeResult(
   }
 
   // 未公開の過去偽結果 + 今回の結果をsimEventsに追加
-  const simEvents: GameEvent[] = [...ctx.publicEvents]
+  const simEvents: any[] = [...ctx.publicEvents]
   for (const [, d] of player.fakeDivineHistory) {
     if (!publishedTargets.has(d.target)) {
       simEvents.push({ type: 'seer_result' as const, actor: ctx.mySeat, target: d.target, result: d.result })
@@ -1319,7 +1319,7 @@ function reportFakeMediumResult(lastExecutedSeat: number | null, rng: Rng, ctx: 
     roleCount.set(p.role, (roleCount.get(p.role) ?? 0) + 1)
   }
   const minimalConfig = { roles: roleCount, hasFirstGhost: state.players.some(p => !p.alive && p.seat > 0) }
-  const simEvents: GameEvent[] = [...ctx.publicEvents, {
+  const simEvents: any[] = [...ctx.publicEvents, {
     type: 'medium_result' as const,
     actor: ctx.mySeat,
     result: preferred,

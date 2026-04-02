@@ -5,8 +5,8 @@
 
 import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from '../../lupa/strategy.ts'
 import type { NightAction, DayClaim } from '../../lupa/types.ts'
-import type { CommunicationAction } from '../../lupa/communication.ts'
-import type { Proposal, LeadershipResponse } from '../../lupa/leadership.ts'
+import type { CommunicationAction } from './communication.ts'
+import type { Proposal, LeadershipResponse } from './leadership.ts'
 import type { AnyNetwork, ForwardResult } from './ml/nn.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
 import { encodeObservation, encodeTeamObservation, encodeCollectiveWolfObservation, encodeCollectiveMasonObservation, encodeFanaticObservation, type VillageNNOutput } from './observation.ts'

@@ -440,7 +440,7 @@ async function runVerify(args: Args): Promise<void> {
       }
       const seedStart = throttle ? performance.now() : 0
       resetEndgameStats()
-      let events: GameEvent[]
+      let events: (GameEvent | { type: string })[]
       let state: GameState
       try {
         const gameConfig = {
@@ -469,7 +469,7 @@ async function runVerify(args: Args): Promise<void> {
         hasFirstGhost: cfg.hasFirstGhost,
         revoteConfig: cfg.revoteConfig,
       }
-      const howl = formatHowl(events, state, lupaConfigForFormat)
+      const howl = formatHowl(events as GameEvent[], state, lupaConfigForFormat)
       const checkpoints = findExecutionCheckpoints(howl)
 
       let prevCp: { truncated: string, day: number, aliveCount: number, wasTsumi: boolean } | null = null
@@ -972,7 +972,7 @@ async function runFalseNegativeFromDb(args: Args): Promise<void> {
           hasFirstGhost: cfg.hasFirstGhost,
           revoteConfig: cfg.revoteConfig,
         }
-        howl = formatHowl(result.events, result.state, formatConfig)
+        howl = formatHowl(result.events as GameEvent[], result.state, formatConfig)
       } catch { continue }
 
       const checkpoints = findExecutionCheckpoints(howl)

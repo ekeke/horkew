@@ -9,8 +9,8 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { NightAction, DayClaim } from '../../lupa/types.ts'
-import type { CommunicationAction } from '../../lupa/communication.ts'
-import type { Proposal, LeadershipResponse } from '../../lupa/leadership.ts'
+import type { CommunicationAction } from './communication.ts'
+import type { Proposal, LeadershipResponse } from './leadership.ts'
 import type { DecisionContext } from '../../lupa/strategy.ts'
 import { SEATS, NUM_ROLE_TOKENS, CO_ROLES } from './observation.ts'
 
