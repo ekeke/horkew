@@ -691,6 +691,7 @@ function validateConfig(config: OrchestratorConfig): void {
 async function main(): Promise<void> {
   const config = parseArgs()
   validateConfig(config)
+  process.title = `fenrir-orch [${config.checkpointBase}]`
   await checkExistingCheckpoints(config)
 
   // Git情報
