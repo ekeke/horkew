@@ -247,7 +247,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       gameRetarMs = result.timing?.retarMs ?? 0
       gameRetarCount = result.timing?.retarCount ?? 0
     } else if (config.strategyOnly) {
-      // minimal-adapter: 議論フェーズ全スキップで高速化
+      // minimal-adapter: 議論フェーズ全スキ��プで高速化
       const handlers = minimalAdapter({
         strategies: strategiesMap,
         defaultStrategy,

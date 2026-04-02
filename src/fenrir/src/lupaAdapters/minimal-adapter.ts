@@ -22,6 +22,7 @@ import {
   type RetarResult,
 } from '../../../lupa/retar-bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
+import { argmaxPlanTokens, parsePlanIndices, resolvePlanGroupSimple, type PlanDayGroup } from '../rule-action.ts'
 
 export type MinimalAdapterConfig = {
   strategies: Map<number, Strategy>
@@ -56,6 +57,9 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
   let tsumiTarget: number | null = null
   let lastRetarArtifacts: { vs: any, setup: Map<SystemRole, number>, options: any } | null = null
   const tsumiCache = new Map<number, boolean>()  // day → isTsumi
+  // mason死亡後のplan継続用キャッシュ
+  let cachedPlanGroups: PlanDayGroup[] | undefined
+  let cachedPlanGroupIndex = 0
 
   function getStrategy(seat: number): Strategy {
     return config.strategies.get(seat) ?? config.defaultStrategy!
@@ -231,8 +235,10 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       const votes = new Map<number, number>()
 
       // 共有者の提案を executionPlans に注入（指揮者選出をスキップ）
+      // mason死亡後はキャッシュされたplanの次グループを使い続ける（再推論なし）
       const executionPlans: import('../../../lupa/strategy.ts').ExecutionPlan[] = []
-      const aliveMasons = alivePlayers(state).filter(p => p.role === 'mason')
+      const allMasons = state.players.filter(p => p.role === 'mason')
+      const aliveMasons = allMasons.filter(p => p.alive)
       if (aliveMasons.length > 0) {
         const mason = aliveMasons[0]
         const masonView = buildPlayerView(state, mason.seat)
@@ -241,6 +247,25 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
         const proposal = getStrategy(mason.seat).decideProposal(masonCtx)
         if (proposal && proposal.type === 'execute_order') {
           executionPlans.push({ targets: [proposal.target], type: 'designated' })
+        }
+        // planグループをキャッシュ（死亡後の継続用）
+        const s = getStrategy(mason.seat) as any
+        const result = s.cachedStrategyResult ?? s.lastResult
+        if (result) {
+          const fwdLogits = result.policies?.get('plan_forward')
+          if (fwdLogits) {
+            const indices = argmaxPlanTokens(fwdLogits, s.numForwardTokens ?? 8)
+            cachedPlanGroups = parsePlanIndices(indices)
+            cachedPlanGroupIndex = 1  // groups[0]は今日使った、次回はgroups[1]から
+          }
+        }
+      } else if (allMasons.length > 0 && cachedPlanGroups && cachedPlanGroupIndex < cachedPlanGroups.length) {
+        // mason全滅: キャッシュされたplanの次グループを使用
+        const group = cachedPlanGroups[cachedPlanGroupIndex++]
+        const aliveSeats = alivePlayers(state).map(p => p.seat)
+        const target = resolvePlanGroupSimple(group, aliveSeats)
+        if (target) {
+          executionPlans.push({ targets: [target], type: 'designated' })
         }
       }
 

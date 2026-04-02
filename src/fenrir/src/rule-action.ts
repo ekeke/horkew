@@ -273,3 +273,17 @@ export function proposal(
 export function leadershipResponse(): LeadershipResponse {
   return 'follow'
 }
+
+/**
+ * PlanDayGroup から投票先 seat を解決（mason死亡後のキャッシュ解決用）
+ * @param group 1日分のplan group
+ * @param aliveSeats 生存席一覧
+ * @returns 投票先seat (1-indexed) or null
+ */
+export function resolvePlanGroupSimple(group: PlanDayGroup, aliveSeats: number[]): number | null {
+  for (const target of group.targets) {
+    if (target.type === 'seat' && aliveSeats.includes(target.seat)) return target.seat
+    if (target.type === 'grayran' && aliveSeats.length > 0) return aliveSeats[0]
+  }
+  return null
+}

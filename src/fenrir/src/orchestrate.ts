@@ -994,7 +994,8 @@ async function main(): Promise<void> {
           progress.latest = { phase: '0', model: 'mason_individual', iter, maxIter: config.iterations, klCoeff: masonPpoConfig.klCoeff }
           updateProgressFile(progress)
 
-          if (factionRate >= masonTargetRate) {
+          const MASON_MIN_ITER = 1000
+          if (iter >= MASON_MIN_ITER && factionRate >= masonTargetRate) {
             log(`${prefix} ${BOLD}GRADUATED${RESET} (villager_won=${(factionRate * 100).toFixed(0)}% >= ${(masonTargetRate * 100).toFixed(0)}%)`)
             graduated = true
           }
