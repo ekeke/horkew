@@ -8,6 +8,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
 import type { Strategy } from '../../lupa/strategy.ts'
 import { runGame, resumeGame } from '../../lupa/engine.ts'
+import { formatHowl } from '../../lupa/format.ts'
 import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
 import { fullAdapter } from './lupaAdapters/full-adapter.ts'
 import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from '../../lupa/retar-node-bridge.ts'
@@ -800,6 +801,8 @@ export type EvaluateOptions = {
   evalIter?: number
   /** frozen mason 個人NN（Phase 1: mason席にfrozen戦略を注入） */
   frozenMasonNet?: AnyNetwork
+  /** eval ゲームの howl テキストを返す */
+  saveHowl?: boolean
 }
 
 export async function evaluate(
@@ -810,7 +813,7 @@ export async function evaluate(
   masonTeamNet?: AnyNetwork,
   mlMaxSeats?: number,
   options?: EvaluateOptions,
-): Promise<{ winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number }> {
+): Promise<{ winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number, howlGames?: Array<{ seed: number, howl: string, result: string, gameLength: number }> }> {
   const heuristic = new HeuristicStrategy()
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
   const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
@@ -819,6 +822,7 @@ export async function evaluate(
   let totalLength = 0
   let totalElapsed = 0
   const resultCounts: Record<string, number> = {}
+  const howlGames: Array<{ seed: number, howl: string, result: string, gameLength: number }> = []
 
   const mlRolesSet = config.mlRoles ? new Set(config.mlRoles) : null
 
@@ -917,6 +921,7 @@ export async function evaluate(
     const snapshot = options?.snapshots?.[i]
     const t0 = performance.now()
     let state: import('../../lupa/types.ts').GameState
+    let events: import('../../lupa/types.ts').GameEvent[] | undefined
     if (snapshot) {
       // Seed Bank リプレイ
       const handlers = config.strategyOnly
@@ -939,8 +944,9 @@ export async function evaluate(
             roles,
             rules: config.rules,
           })
-      const result = await resumeGame(snapshot, handlers)
-      state = result.state
+      const gameResult = await resumeGame(snapshot, handlers)
+      state = gameResult.state
+      if (options?.saveHowl) events = gameResult.events
     } else if (config.strategyOnly) {
       const handlers = minimalAdapter({
         strategies,
@@ -950,11 +956,12 @@ export async function evaluate(
         onRolesAssigned,
         seed,
       })
-      const result = await runGame(
+      const gameResult = await runGame(
         { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
         handlers,
       )
-      state = result.state
+      state = gameResult.state
+      if (options?.saveHowl) events = gameResult.events
     } else {
       const handlers = fullAdapter({
         strategies,
@@ -967,17 +974,21 @@ export async function evaluate(
         roles,
         rules: config.rules,
       })
-      const result = await runGame(
+      const gameResult = await runGame(
         { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
         handlers,
       )
-      state = result.state
+      state = gameResult.state
+      if (options?.saveHowl) events = gameResult.events
     }
     totalElapsed += performance.now() - t0
 
     const result = state.result ?? 'unknown'
     resultCounts[result] = (resultCounts[result] ?? 0) + 1
     totalLength += state.day
+    if (events) {
+      howlGames.push({ seed, howl: formatHowl(events, state, lupaConfig), result, gameLength: state.day })
+    }
     totalGames++
   }
 
@@ -987,6 +998,7 @@ export async function evaluate(
     ),
     avgGameLength: totalLength / totalGames,
     avgElapsedMs: totalElapsed / totalGames,
+    ...(howlGames.length > 0 ? { howlGames } : {}),
   }
 }
 

@@ -329,6 +329,18 @@ function describeAction(actionHead: string, actionIdx: number): string {
   }
 }
 
+function saveEvalHowl(
+  checkpointBase: string,
+  iter: number,
+  howlGames: Array<{ seed: number, howl: string, result: string, gameLength: number }>,
+): void {
+  const dir = `${checkpointBase}/eval-howl/iter_${iter}`
+  mkdirSync(dir, { recursive: true })
+  for (const game of howlGames) {
+    writeFileSync(`${dir}/seed_${game.seed}.howl`, game.howl)
+  }
+}
+
 // ============================================================
 // Progress Log (固定ファイルへの進捗書き出し)
 // ============================================================
@@ -1425,8 +1437,9 @@ async function main(): Promise<void> {
                   forEval: true,
                 })
               : undefined
-            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), evalIter: iter, frozenMasonNet: name === 'village' ? frozenMasonNet : undefined })
+            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), evalIter: iter, frozenMasonNet: name === 'village' ? frozenMasonNet : undefined, saveHowl: true })
             process.stderr.write('\r\x1b[K')
+            if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
             appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
             const factionRate = evalResult.winRates[group.faction] ?? 0
             log(
