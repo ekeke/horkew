@@ -3,17 +3,17 @@ import { systemRoles } from '../types/index.ts'
 import type { LupaConfig, GameEvent } from './types.ts'
 import type { GameConfig } from './handlers.ts'
 import { runGame } from './engine.ts'
-import { strategyAdapter } from './adapters/strategy-adapter.ts'
+import { strategyAdapter } from '../verify/strategy-adapter.ts'
 import { formatHowl } from './format.ts'
 import { parse } from '../howl/index.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../hati/index.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
-import { RandomStrategy } from './random-strategy.ts'
+import { RandomStrategy } from '../verify/random-strategy.ts'
 import { findScenario, scenarioToRoles, scenarios } from './scenarios.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 
-import type { StrategyAdapterConfig } from './adapters/strategy-adapter.ts'
+import type { StrategyAdapterConfig } from '../verify/strategy-adapter.ts'
 
 type CliOptions = {
   gameConfig: GameConfig

@@ -7,7 +7,7 @@
 import type { SystemRole } from '../types/index.ts'
 import type { GameEvent, GameState } from '../lupa/types.ts'
 import { runGame } from '../lupa/engine.ts'
-import { strategyAdapter } from '../lupa/adapters/strategy-adapter.ts'
+import { strategyAdapter } from '../verify/strategy-adapter.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../lupa/heuristic.ts'
 import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'

@@ -6,20 +6,20 @@
  * Retar計算はオプション（enableRetar時のみ）。
  */
 
-import type { SystemRole, ResolvedRules } from '../../types/index.ts'
-import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../types.ts'
-import type { DecisionContext, TeamDecisionContext, Strategy, TeamStrategy, WolfNightAction } from '../strategy.ts'
-import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../handlers.ts'
-import { buildPlayerView } from '../player-view.ts'
-import { alivePlayers } from '../roles.ts'
-import { Rng } from '../random.ts'
+import type { SystemRole, ResolvedRules } from '../types/index.ts'
+import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../lupa/types.ts'
+import type { DecisionContext, TeamDecisionContext, Strategy, TeamStrategy, WolfNightAction } from '../fenrir/src/strategy.ts'
+import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../lupa/handlers.ts'
+import { buildPlayerView } from '../lupa/player-view.ts'
+import { alivePlayers } from '../lupa/roles.ts'
+import { Rng } from '../lupa/random.ts'
 import {
   analyzePerPlayer as retarAnalyzePerPlayer,
   retarResultToPossibilities,
   lupaRunRetar,
   type RetarResult,
-} from '../retar-bridge.ts'
-import { searchTsumi, searchTsumiStrategy } from '../../hati/index.ts'
+} from '../fenrir/src/retar-bridge.ts'
+import { searchTsumi, searchTsumiStrategy } from '../hati/index.ts'
 
 export type MinimalAdapterConfig = {
   strategies: Map<number, Strategy>
@@ -230,7 +230,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       const votes = new Map<number, number>()
 
       // 共有者の提案を executionPlans に注入（指揮者選出をスキップ）
-      const executionPlans: import('../strategy.ts').ExecutionPlan[] = []
+      const executionPlans: import('../fenrir/src/strategy.ts').ExecutionPlan[] = []
       const aliveMasons = alivePlayers(state).filter(p => p.role === 'mason')
       if (aliveMasons.length > 0) {
         const mason = aliveMasons[0]

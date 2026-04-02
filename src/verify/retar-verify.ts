@@ -22,18 +22,18 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { deepStrictEqual } from 'node:assert'
 import { join } from 'node:path'
 import type { SystemRole } from '../types/index.ts'
-import type { LupaConfig, GameEvent, GameState } from './types.ts'
-import type { GameConfig as EngineGameConfig } from './handlers.ts'
-import { runGame } from './engine.ts'
-import { strategyAdapter } from './adapters/strategy-adapter.ts'
+import type { LupaConfig, GameEvent, GameState } from '../lupa/types.ts'
+import type { GameConfig as EngineGameConfig } from '../lupa/handlers.ts'
+import { runGame } from '../lupa/engine.ts'
+import { strategyAdapter } from './strategy-adapter.ts'
 import { RandomStrategy } from './random-strategy.ts'
-import { formatHowl } from './format.ts'
+import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions, AnalyzedPossibilities, AnalyzeResult } from '../retar/index.ts'
 import { serializeVillageStatus, serializeOptions, parseWasmResult } from '../retar/wasm-helpers.ts'
-import { buildAssumptions } from './retar-bridge.ts'
+import { buildAssumptions } from '../fenrir/src/retar-bridge.ts'
 import { enableDump, disableDump, resetDump, getDump } from '../retar/dump.ts'
 
 // WASM ロード（--compat 時のみ使用）
@@ -685,7 +685,7 @@ type VerifyGameConfig = {
   roles: Record<string, number>
   seeds: [number, number]
   hasFirstGhost?: boolean
-  revoteConfig?: import('./types.ts').RevoteConfig
+  revoteConfig?: import('../lupa/types.ts').RevoteConfig
 }
 
 const configs: VerifyGameConfig[] = [

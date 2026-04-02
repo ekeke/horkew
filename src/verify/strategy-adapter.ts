@@ -5,28 +5,28 @@
  * Retar統合はオプション。旧エンジンとの互換性を保つ。
  */
 
-import type { SystemRole, ResolvedRules } from '../../types/index.ts'
-import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../types.ts'
+import type { SystemRole, ResolvedRules } from '../types/index.ts'
+import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../lupa/types.ts'
 import type {
   DecisionContext, TeamDecisionContext,
   Strategy, TeamStrategy, WolfNightAction,
-} from '../strategy.ts'
-import type { SignalRecord } from '../communication.ts'
-import type { Proposal } from '../leadership.ts'
-import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../handlers.ts'
-import type { FenrirExtEvent } from '../../fenrir/src/events.ts'
-import { buildPlayerView } from '../player-view.ts'
-import { alivePlayers } from '../roles.ts'
-import { detectCommander } from '../leadership.ts'
-import { Rng } from '../random.ts'
-import { forceTrueRoleCO, isVillagePowerRole } from '../heuristic.ts'
+} from '../fenrir/src/strategy.ts'
+import type { SignalRecord } from '../fenrir/src/communication.ts'
+import type { Proposal } from '../fenrir/src/leadership.ts'
+import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../lupa/handlers.ts'
+import type { FenrirExtEvent } from '../fenrir/src/events.ts'
+import { buildPlayerView } from '../lupa/player-view.ts'
+import { alivePlayers } from '../lupa/roles.ts'
+import { detectCommander } from '../fenrir/src/leadership.ts'
+import { Rng } from '../lupa/random.ts'
+import { forceTrueRoleCO, isVillagePowerRole } from '../fenrir/src/heuristic.ts'
 import {
   analyzePerPlayer as retarAnalyzePerPlayer,
   retarResultToPossibilities,
   lupaRunRetar,
   type RetarResult,
-} from '../retar-bridge.ts'
-import { searchTsumi, searchTsumiStrategy } from '../../hati/index.ts'
+} from '../fenrir/src/retar-bridge.ts'
+import { searchTsumi, searchTsumiStrategy } from '../hati/index.ts'
 
 export type StrategyAdapterConfig = {
   strategies?: Map<number, Strategy>

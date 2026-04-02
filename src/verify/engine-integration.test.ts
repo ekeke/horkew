@@ -1,12 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { SystemRole } from '../types/index.ts'
-import { runGame } from './engine.ts'
-import type { GameConfig } from './handlers.ts'
-import { minimalAdapter } from './adapters/minimal-adapter.ts'
-import { strategyAdapter } from './adapters/strategy-adapter.ts'
+import { runGame } from '../lupa/engine.ts'
+import type { GameConfig } from '../lupa/handlers.ts'
+import { minimalAdapter } from './minimal-adapter.ts'
+import { strategyAdapter } from './strategy-adapter.ts'
 import { RandomStrategy } from './random-strategy.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
+import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../fenrir/src/heuristic.ts'
 
 // 14D猫の標準構成
 const STANDARD_ROLES: Map<SystemRole, number> = new Map([
