@@ -865,7 +865,10 @@ async function main(): Promise<void> {
         observations: samples.map(s => s.observation),
         forwardLabels: samples.map(s => s.forwardLabels),
         forwardMasks: samples.map(s => s.forwardMask),
+        endgameLabels: samples.map(s => s.endgameLabels),
+        endgameMasks: samples.map(s => s.endgameMask),
         numTokens: samples[0].forwardLabels.length,
+        numEndgameTokens: samples[0].endgameLabels.length,
         vocabSize: PLAN_VOCAB.SIZE,
       })
       if (accuracy > bestAcc) bestAcc = accuracy

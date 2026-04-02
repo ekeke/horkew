@@ -1253,7 +1253,10 @@ export class TfTransformerNetwork {
     observations: Float32Array[]
     forwardLabels: number[][]      // [n, numTokens] vocab indices
     forwardMasks: boolean[][]      // [n, numTokens] which tokens to train on
+    endgameLabels?: number[][]     // [n, numEgTokens] vocab indices
+    endgameMasks?: boolean[][]     // [n, numEgTokens] which tokens to train on
     numTokens: number
+    numEndgameTokens?: number
     vocabSize: number
   }): { loss: number, accuracy: number } {
     const n = batch.observations.length
@@ -1265,51 +1268,57 @@ export class TfTransformerNetwork {
 
     const result = { loss: 0, accuracy: 0 }
     const numTokens = batch.numTokens
-    const _vocabSize = batch.vocabSize
 
     const lossFunc = () => {
       const obsTensor = tf.tensor2d(obsData, [n, inputSize])
-      const { planForwardLogits } = this.forwardTrunk(obsTensor)
-      // planForwardLogits: [n, numTokens * vocabActual]
-      // vocabActual may differ from vocabSize if pointer targets != vocabSize
-      // Reshape to [n, numTokens, vocabActual]
-      const vocabActual = planForwardLogits.shape[1]! / numTokens
-      const logits3d = planForwardLogits.reshape([n, numTokens, vocabActual])
+      const { planForwardLogits, planEndgameLogits } = this.forwardTrunk(obsTensor)
 
-      // Build labels and mask
       let totalLoss = tf.scalar(0)
       let correct = 0
       let totalMasked = 0
 
-      for (let t = 0; t < numTokens; t++) {
-        // Gather valid samples for this token position
-        const validIndices: number[] = []
-        const validLabels: number[] = []
-        for (let i = 0; i < n; i++) {
-          if (batch.forwardMasks[i][t]) {
-            validIndices.push(i)
-            validLabels.push(batch.forwardLabels[i][t])
+      // Helper: compute CE loss for a plan logits tensor
+      const computeCE = (
+        logitsTensor: tf.Tensor2D, numToks: number,
+        labels: number[][], masks: boolean[][],
+      ) => {
+        const vocabActual = logitsTensor.shape[1]! / numToks
+        const logits3d = logitsTensor.reshape([n, numToks, vocabActual])
+
+        for (let t = 0; t < numToks; t++) {
+          const validIndices: number[] = []
+          const validLabels: number[] = []
+          for (let i = 0; i < n; i++) {
+            if (masks[i][t]) {
+              validIndices.push(i)
+              validLabels.push(labels[i][t])
+            }
+          }
+          if (validIndices.length === 0) continue
+          totalMasked += validIndices.length
+
+          const tokenLogits = logits3d.slice([0, t, 0], [n, 1, vocabActual]).squeeze([1])
+          const validLogits = tf.gather(tokenLogits, validIndices)
+          const probs = tf.softmax(validLogits)
+
+          const oneHot = tf.oneHot(validLabels, vocabActual)
+          const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
+          const ce = tf.neg(tf.sum(tf.mul(oneHot, logProbs), 1))
+          totalLoss = tf.add(totalLoss, tf.sum(ce))
+
+          const predIdx = tf.argMax(probs, 1).dataSync()
+          for (let j = 0; j < validIndices.length; j++) {
+            if (predIdx[j] === validLabels[j]) correct++
           }
         }
-        if (validIndices.length === 0) continue
-        totalMasked += validIndices.length
+      }
 
-        // Extract logits for this token: [valid, vocabActual]
-        const tokenLogits = logits3d.slice([0, t, 0], [n, 1, vocabActual]).squeeze([1])  // [n, vocab]
-        const validLogits = tf.gather(tokenLogits, validIndices)  // [valid, vocab]
-        const probs = tf.softmax(validLogits)
+      // Forward plan
+      computeCE(planForwardLogits, numTokens, batch.forwardLabels, batch.forwardMasks)
 
-        // Cross-entropy
-        const oneHot = tf.oneHot(validLabels, vocabActual)
-        const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
-        const ce = tf.neg(tf.sum(tf.mul(oneHot, logProbs), 1))  // [valid]
-        totalLoss = tf.add(totalLoss, tf.sum(ce))
-
-        // Accuracy
-        const predIdx = tf.argMax(probs, 1).dataSync()
-        for (let j = 0; j < validIndices.length; j++) {
-          if (predIdx[j] === validLabels[j]) correct++
-        }
+      // Endgame plan
+      if (batch.endgameLabels && batch.endgameMasks && batch.numEndgameTokens) {
+        computeCE(planEndgameLogits, batch.numEndgameTokens, batch.endgameLabels, batch.endgameMasks)
       }
 
       if (totalMasked > 0) {

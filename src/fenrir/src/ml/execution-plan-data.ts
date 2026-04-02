@@ -321,9 +321,14 @@ export type PlanTokenTrainingSample = {
   forwardLabels: number[]    // [numForwardTokens]
   /** 各トークンが有効か (学習対象か) */
   forwardMask: boolean[]     // [numForwardTokens]
+  /** Endgame plan token labels: vocab index per token */
+  endgameLabels: number[]    // [numEndgameTokens]
+  /** 各トークンが有効か (学習対象か) */
+  endgameMask: boolean[]     // [numEndgameTokens]
 }
 
 const NUM_FORWARD_TOKENS = 8
+const NUM_ENDGAME_TOKENS = 4
 
 /**
  * 最初の STOP の直後 1 トークンだけ mask=true + label=STOP に設定。
@@ -513,13 +518,39 @@ function patternToForwardLabels(
   }
 }
 
+/** 狼可能席を NEXT 区切りで列挙する plan token 列を生成 */
+function buildSuspectLabels(
+  wolfPossible: number[],
+  numTokens: number,
+  rng: Rng,
+): { labels: number[], mask: boolean[] } {
+  // n席 = n + (n-1) + 1 = 2n トークン → 最大 n = floor(numTokens / 2)
+  const maxTargets = Math.min(wolfPossible.length, Math.floor(numTokens / 2))
+  const numTargets = Math.max(1, Math.ceil(rng.next() * maxTargets))
+  const targets = wolfPossible.slice(0, numTargets)
+
+  const labels = new Array(numTokens).fill(PLAN_VOCAB.STOP)
+  const mask = new Array(numTokens).fill(false)
+  let pos = 0
+  for (let i = 0; i < targets.length && pos < numTokens - 1; i++) {
+    labels[pos] = targets[i] - 1; mask[pos++] = true
+    if (i < targets.length - 1 && pos < numTokens - 1) {
+      labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
+    }
+  }
+  if (pos < numTokens) {
+    labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+  }
+  fillStopPadding(labels, mask)
+  return { labels, mask }
+}
+
 /**
  * 人外候補列挙 pretrain: Retar の狼可能席をなるべく多く plan token で指定する。
  * observation 内の Retar 情報を読んで人外候補を列挙する能力を教える。
  *
- * ラベル: 狼可能席を NEXT 区切りで列挙し、STOP で終了。
- * 例: 狼可能=[seat3,seat7,seat11,seat2] → [seat3, NEXT, seat7, NEXT, seat11, NEXT, seat2, STOP]
- * 8トークンに収まる最大4席。残りが多ければランダムに選択。
+ * forward (8トークン): 通常盤面 (7〜13人生存)、最大4席
+ * endgame (4トークン): 終盤盤面 (4〜6人生存)、最大2席
  */
 export function generatePlanTokenTrainingBatch(count: number, seed: number = 42): PlanTokenTrainingSample[] {
   const rng = new Rng(seed)
@@ -527,56 +558,55 @@ export function generatePlanTokenTrainingBatch(count: number, seed: number = 42)
 
   while (samples.length < count) {
     const day = 2 + Math.floor(rng.next() * 4)
-    const aliveCount = 7 + Math.floor(rng.next() * 7)
+    // forward 用は通常盤面、endgame 用は終盤盤面を別々に生成
+    const fwdAliveCount = 7 + Math.floor(rng.next() * 7)  // 7-13人
+    const egAliveCount = 4 + Math.floor(rng.next() * 3)   // 4-6人
     const allSeats = Array.from({ length: SEATS }, (_, i) => i + 1)
-    const aliveSeats = shuffleArray(allSeats, rng).slice(0, aliveCount)
-    const mySeat = aliveSeats[Math.floor(rng.next() * aliveSeats.length)]
-    const myRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
 
-    const { claims, events } = generateCOSituation(aliveSeats, rng)
-
-    // 必ず Retar 合成データを生成
-    const retar = generateSyntheticRetar(aliveSeats, mySeat, claims, rng)
-    // 狼可能な全席を候補にする（suspectSeats ではなく possibilities から直接）
-    const wolfPossible = shuffleArray(
-      aliveSeats.filter(s => s !== mySeat && retar.possibilities.get(s)?.has('werewolf')),
+    // Forward 盤面
+    const fwdAliveSeats = shuffleArray(allSeats, rng).slice(0, fwdAliveCount)
+    const fwdMySeat = fwdAliveSeats[Math.floor(rng.next() * fwdAliveSeats.length)]
+    const fwdMyRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
+    const fwdCO = generateCOSituation(fwdAliveSeats, rng)
+    const fwdRetar = generateSyntheticRetar(fwdAliveSeats, fwdMySeat, fwdCO.claims, rng)
+    const fwdWolfPossible = shuffleArray(
+      fwdAliveSeats.filter(s => s !== fwdMySeat && fwdRetar.possibilities.get(s)?.has('werewolf')),
       rng,
     )
-    if (wolfPossible.length === 0) continue
+    if (fwdWolfPossible.length === 0) continue
 
-    // 8トークンに収まる最大数: seat, NEXT, seat, NEXT, ..., STOP
-    // n席 = n + (n-1) + 1 = 2n トークン → 最大 n = 4
-    const maxTargets = Math.min(wolfPossible.length, 4)
-    // 多い方に偏らせる: ceil(random * max) で 1〜max を均等→上寄り
-    const numTargets = Math.max(1, Math.ceil(rng.next() * maxTargets))
-    const targets = wolfPossible.slice(0, numTargets)
+    const fwd = buildSuspectLabels(fwdWolfPossible, NUM_FORWARD_TOKENS, rng)
 
-    const labels = new Array(NUM_FORWARD_TOKENS).fill(PLAN_VOCAB.STOP)
-    const mask = new Array(NUM_FORWARD_TOKENS).fill(false)
-    let pos = 0
-    for (let i = 0; i < targets.length && pos < NUM_FORWARD_TOKENS - 1; i++) {
-      labels[pos] = targets[i] - 1; mask[pos++] = true
-      if (i < targets.length - 1 && pos < NUM_FORWARD_TOKENS - 1) {
-        labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
-      }
-    }
-    if (pos < NUM_FORWARD_TOKENS) {
-      labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
-    }
-    fillStopPadding(labels, mask)
+    // Endgame 盤面（別の盤面で生成）
+    const egAliveSeats = shuffleArray(allSeats, rng).slice(0, egAliveCount)
+    const egMySeat = egAliveSeats[Math.floor(rng.next() * egAliveSeats.length)]
+    const egMyRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
+    const egCO = generateCOSituation(egAliveSeats, rng)
+    const egRetar = generateSyntheticRetar(egAliveSeats, egMySeat, egCO.claims, rng)
+    const egWolfPossible = shuffleArray(
+      egAliveSeats.filter(s => s !== egMySeat && egRetar.possibilities.get(s)?.has('werewolf')),
+      rng,
+    )
+    // endgame で候補0なら forward のみ（endgame は空ラベル）
+    const eg = egWolfPossible.length > 0
+      ? buildSuspectLabels(egWolfPossible, NUM_ENDGAME_TOKENS, rng)
+      : { labels: new Array(NUM_ENDGAME_TOKENS).fill(PLAN_VOCAB.STOP), mask: new Array(NUM_ENDGAME_TOKENS).fill(false) }
 
-    // observation 生成（executionPlans は空、Retar あり）
+    // observation は forward 盤面から生成
     const plan: ExecutionPlan = { targets: [], type: 'grayran' }
     const ctx = buildSyntheticContext({
-      day, mySeat, myRole, aliveSeats, events, plan, rng,
-      retarPossibilities: retar.possibilities,
+      day, mySeat: fwdMySeat, myRole: fwdMyRole, aliveSeats: fwdAliveSeats,
+      events: fwdCO.events, plan, rng,
+      retarPossibilities: fwdRetar.possibilities,
     })
     const observation = encodeObservation(ctx)
 
     samples.push({
       observation,
-      forwardLabels: labels,
-      forwardMask: mask,
+      forwardLabels: fwd.labels,
+      forwardMask: fwd.mask,
+      endgameLabels: eg.labels,
+      endgameMask: eg.mask,
     })
   }
 
