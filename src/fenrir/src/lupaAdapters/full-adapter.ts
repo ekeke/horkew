@@ -19,7 +19,7 @@ import { alivePlayers } from '../../../lupa/roles.ts'
 import { detectCommander } from '../leadership.ts'
 import type { FenrirExtEvent } from '../events.ts'
 import { Rng } from '../../../lupa/random.ts'
-import { forceTrueRoleCO, isVillagePowerRole } from '../../../lupa/heuristic.ts'
+import { forceTrueRoleCO, isVillagePowerRole } from '../heuristic.ts'
 import {
   analyzePerPlayer as retarAnalyzePerPlayer,
   retarResultToPossibilities,

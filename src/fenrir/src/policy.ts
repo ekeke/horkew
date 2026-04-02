@@ -20,7 +20,7 @@ import { endgameVoteReward } from './reward.ts'
 import { sigmoid } from './ml/nn.ts'
 import * as ruleAction from './rule-action.ts'
 import { isVillagerAligned } from '../../lupa/roles.ts'
-import { HeuristicStrategy } from '../../lupa/heuristic.ts'
+import { HeuristicStrategy } from './heuristic.ts'
 
 export type FenrirStrategyConfig = {
   /** trueなら探索ノイズあり（学習時）、falseなら貪欲（評価時） */

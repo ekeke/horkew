@@ -17,7 +17,7 @@ import type { GameSnapshot, GameState, GameEvent } from '../../lupa/types.ts'
 import type { GameConfig } from '../../lupa/handlers.ts'
 import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from './lupaAdapters/full-adapter.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
+import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
 import type { TrainingConfig } from './training.ts'
 import { Rng } from '../../lupa/random.ts'
 

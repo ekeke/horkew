@@ -29,7 +29,7 @@ import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
 import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
 import { encodeTrueRoles } from './observation.ts'
 import { FenrirStrategy, FanaticStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
+import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
 import { terminalReward, intermediateReward, predictAccuracyReward, buildKnownSeats, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'

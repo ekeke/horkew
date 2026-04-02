@@ -14,7 +14,7 @@ import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from './lupaAdapters/full-adapter.ts'
 import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
 import { formatHowl } from '../../lupa/format.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../lupa/heuristic.ts'
+import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
 import {
   createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
   createTransformerNetwork, createWolfTeamTransformerNetwork, createMasonTeamTransformerNetwork,
