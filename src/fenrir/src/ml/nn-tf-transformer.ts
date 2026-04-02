@@ -756,9 +756,9 @@ export class TfTransformerNetwork {
     refPlanEndgameLogits?: (Float32Array | undefined)[]
     /** KL penalty coefficient (β). >0 で KL(π_new || π_ref) を loss に加算 */
     klCoeff?: number
-  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number } {
+  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, grammarLoss: number } {
     const n = batch.observations.length
-    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, grammarLoss: 0 }
 
     const inputSize = this.config.inputSize
     const sigmoidHeadNames = new Set(Object.keys(this.config.sigmoidHeads ?? {}))
@@ -769,7 +769,7 @@ export class TfTransformerNetwork {
       obsData.set(batch.observations[i], i * inputSize)
     }
 
-    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, grammarLoss: 0 }
 
     // ヘッド別グループ化
     const headGroups = new Map<string, number[]>()
@@ -816,7 +816,7 @@ export class TfTransformerNetwork {
           getActions: (i: number) => number[] | undefined,
           getLogProbs: (i: number) => number[] | undefined,
           getRefLogits?: (i: number) => Float32Array | undefined,
-        ): { loss: tf.Scalar, entropy: tf.Scalar, kl: tf.Scalar } => {
+        ): { loss: tf.Scalar, entropy: tf.Scalar, kl: tf.Scalar, grammarLoss: tf.Scalar } => {
           const planLogits = tf.gather(logitsTensor, si)  // [m, numTokens * vocabSize]
           const reshaped = planLogits.reshape([m, numTokens, vocabSize])
           const probs = tf.softmax(reshaped, 2)
@@ -876,7 +876,63 @@ export class TfTransformerNetwork {
             }
           }
 
-          return { loss, entropy: ent, kl }
+          // Grammar auxiliary loss: 違反トークン位置に CE(target=STOP) を適用
+          // 違反1: STOP 後の非 STOP トークン
+          // 違反3: 同一グループ内の重複トークン
+          const STOP_IDX = vocabSize - 1
+          const NEXT_IDX = vocabSize - 2
+          const grammarMaskData = new Float32Array(m * numTokens)
+          let grammarCount = 0
+
+          for (let j = 0; j < m; j++) {
+            let seenStop = false
+            let groupStart = 0
+
+            for (let k = 0; k < numTokens; k++) {
+              const idx = j * numTokens + k
+              const action = actionData[idx]
+
+              // 違反1: STOP 後に非 STOP
+              if (seenStop) {
+                if (action !== STOP_IDX) {
+                  grammarMaskData[idx] = 1
+                  grammarCount++
+                }
+                continue
+              }
+
+              if (action === STOP_IDX) {
+                seenStop = true
+                continue
+              }
+
+              if (action === NEXT_IDX) {
+                groupStart = k + 1
+                continue
+              }
+
+              // 違反3: 同一グループ内で同じトークンが既出
+              for (let p = groupStart; p < k; p++) {
+                const prev = actionData[j * numTokens + p]
+                if (prev === action && prev !== NEXT_IDX && prev !== STOP_IDX) {
+                  grammarMaskData[idx] = 1
+                  grammarCount++
+                  break
+                }
+              }
+            }
+          }
+
+          let grammarLoss = tf.scalar(0) as tf.Scalar
+          if (grammarCount > 0) {
+            // probs[:, :, STOP_IDX] = 各位置で STOP を出す確率
+            const stopProbs = probs.slice([0, 0, STOP_IDX], [m, numTokens, 1]).squeeze([2])
+            const stopCE = tf.neg(tf.log(tf.add(stopProbs, tf.scalar(1e-8))))
+            const grammarMask = tf.tensor2d(grammarMaskData, [m, numTokens])
+            grammarLoss = tf.div(tf.sum(tf.mul(stopCE, grammarMask)), tf.scalar(grammarCount)) as tf.Scalar
+          }
+
+          return { loss, entropy: ent, kl, grammarLoss }
         }
 
         // Plan PPO loss (forward + endgame)
@@ -901,6 +957,12 @@ export class TfTransformerNetwork {
         )
         totalPolicyLoss = tf.add(totalPolicyLoss, egResult.loss)
         totalEntropy = tf.add(totalEntropy, egResult.entropy)
+
+        // Grammar auxiliary loss: 文法違反トークンに CE(STOP) ペナルティ
+        const GRAMMAR_LOSS_COEFF = 0.1
+        const grammarTotal = tf.add(fwdResult.grammarLoss, egResult.grammarLoss) as tf.Scalar
+        totalPolicyLoss = tf.add(totalPolicyLoss, tf.mul(tf.scalar(GRAMMAR_LOSS_COEFF), grammarTotal))
+        result.grammarLoss = grammarTotal.dataSync()[0]
 
         // KL penalty: β * (KL_fwd + KL_eg)
         if (klCoeff > 0) {

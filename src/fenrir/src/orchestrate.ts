@@ -367,7 +367,7 @@ type ProgressEvalEntry = {
   winRates: Record<string, number>
   avgLen: number
   status: string
-  ppoMetrics?: { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number }
+  ppoMetrics?: { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, grammarLoss: number }
   baseline?: number
   target?: number
   timing?: { gameMs: number, ppoMs: number, iterMs: number }
@@ -437,8 +437,8 @@ function updateProgressFile(progress: ProgressLog): void {
   // Eval history
   if (evals.length > 0) {
     lines.push('## Eval History')
-    lines.push('| Time | Model | Iter | village% | wolf% | hamster% | draw% | avgLen | base% | target% | pLoss | vLoss | ent | kl | game% | ppo% | Status |')
-    lines.push('|------|-------|------|----------|-------|----------|-------|--------|-------|---------|-------|-------|-----|-----|-------|------|--------|')
+    lines.push('| Time | Model | Iter | village% | wolf% | hamster% | draw% | avgLen | base% | target% | pLoss | vLoss | ent | kl | gram | game% | ppo% | Status |')
+    lines.push('|------|-------|------|----------|-------|----------|-------|--------|-------|---------|-------|-------|-----|-----|------|-------|------|--------|')
     for (const e of evals) {
       const v = fmtPct(e.winRates['villager_won'] ?? 0)
       const w = fmtPct(e.winRates['werewolf_won'] ?? 0)
@@ -451,9 +451,10 @@ function updateProgressFile(progress: ProgressLog): void {
       const vL = ppo ? ppo.valueLoss.toFixed(4) : '-'
       const ent = ppo ? ppo.entropy.toFixed(4) : '-'
       const kl = ppo ? ppo.klLoss.toFixed(4) : '-'
+      const gram = ppo ? ppo.grammarLoss.toFixed(4) : '-'
       const gPct = e.timing ? (e.timing.gameMs / e.timing.iterMs * 100).toFixed(0) : '-'
       const pPct = e.timing ? (e.timing.ppoMs / e.timing.iterMs * 100).toFixed(0) : '-'
-      lines.push(`| ${fmtTime(e.time)} | ${e.model} | ${e.iter} | ${v} | ${w} | ${h} | ${d} | ${e.avgLen.toFixed(1)} | ${base} | ${tgt} | ${pL} | ${vL} | ${ent} | ${kl} | ${gPct} | ${pPct} | ${e.status} |`)
+      lines.push(`| ${fmtTime(e.time)} | ${e.model} | ${e.iter} | ${v} | ${w} | ${h} | ${d} | ${e.avgLen.toFixed(1)} | ${base} | ${tgt} | ${pL} | ${vL} | ${ent} | ${kl} | ${gram} | ${gPct} | ${pPct} | ${e.status} |`)
     }
     lines.push('')
   }
@@ -486,14 +487,15 @@ function ppoUpdate(
     klCoeff?: number,
   },
   precomputedRefLogits?: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }>,
-): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number } {
-  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, grammarLoss: number } {
+  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, grammarLoss: 0 }
 
   let totalPolicyLoss = 0
   let totalValueLoss = 0
   let totalEntropy = 0
   let totalPredictLoss = 0
   let totalKlLoss = 0
+  let totalGrammarLoss = 0
   let batchCount = 0
 
   for (let i = batch.length - 1; i > 0; i--) {
@@ -540,6 +542,7 @@ function ppoUpdate(
     totalEntropy += result.entropy
     totalPredictLoss += result.predictLoss
     totalKlLoss += result.klLoss
+    totalGrammarLoss += result.grammarLoss
     batchCount++
   }
 
@@ -550,6 +553,7 @@ function ppoUpdate(
     entropy: totalEntropy / n,
     predictLoss: totalPredictLoss / n,
     klLoss: totalKlLoss / n,
+    grammarLoss: totalGrammarLoss / n,
   }
 }
 
@@ -1106,7 +1110,7 @@ async function main(): Promise<void> {
         const tPpoStart = performance.now()
 
         // PPO update
-        let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+        let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, grammarLoss: 0 }
         if (allSteps.length > 0) {
           normalizeAdvantages(allSteps)
 
@@ -1151,6 +1155,7 @@ async function main(): Promise<void> {
         const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
         const entStr = lastPpoResult.entropy ? ` ent=${lastPpoResult.entropy.toFixed(4)}` : ''
         const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${masonPpoConfig.klCoeff.toFixed(3)})` : ''
+        const gramStr = lastPpoResult.grammarLoss ? ` gram=${lastPpoResult.grammarLoss.toFixed(4)}` : ''
         const avgIterMs = (iterElapsed / iterCount / 1000).toFixed(1)
         const remaining = ((config.iterations - iter) * iterElapsed / iterCount / 1000).toFixed(0)
 
@@ -1160,7 +1165,7 @@ async function main(): Promise<void> {
         process.stderr.write(
           `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
           `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
-          `steps=${allSteps.length} day=${masonMlStartDay}${lossStr}${entStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
+          `steps=${allSteps.length} day=${masonMlStartDay}${lossStr}${entStr}${klStr}${gramStr} ${avgIterMs}s/iter ETA ${remaining}s`
         )
 
         // Eval
@@ -1361,7 +1366,7 @@ async function main(): Promise<void> {
           const tPpoStart = performance.now()
 
           // PPO update (shared TfNN に重みをスワップ)
-          let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+          let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, grammarLoss: 0 }
           if (allIndividual.length > 0) {
             normalizeAdvantages(allIndividual)
 
@@ -1436,10 +1441,11 @@ async function main(): Promise<void> {
           const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
           const entStr = lastPpoResult.entropy ? ` ent=${lastPpoResult.entropy.toFixed(4)}` : ''
           const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${ppoConfig.klCoeff.toFixed(3)})` : ''
+          const gramStr = lastPpoResult.grammarLoss ? ` gram=${lastPpoResult.grammarLoss.toFixed(4)}` : ''
           process.stderr.write(
             `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
             `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
-            `steps=${totalSteps}${mlInfo}${lossStr}${entStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
+            `steps=${totalSteps}${mlInfo}${lossStr}${entStr}${klStr}${gramStr} ${avgIterMs}s/iter ETA ${remaining}s`
           )
 
           // Eval
@@ -1651,7 +1657,7 @@ async function main(): Promise<void> {
         const targetIter = Math.min(currentIter + config.chunkSize, config.iterations)
         const prefix = `${COLORS[name]}[${name.padEnd(16)}]${RESET}`
 
-        let lastPpoResult1p = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+        let lastPpoResult1p = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, grammarLoss: 0 }
         for (let iter = currentIter + 1; iter <= targetIter; iter++) {
           const iterStart = performance.now()
           const seeds = Array.from({ length: config.batch }, (_, g) => (10000 + iter) * config.batch + g)

@@ -67,6 +67,7 @@ function generateCOSituation(
 }
 
 type PatternType = 'tsumi' | 'roller' | 'decision' | 'designated' | 'grayran' | 'retar_suspect'
+  | 'multi_day_seats' | 'multi_day_mixed' | 'roller_then_seat'
 
 /** パターンに応じてプランと正解ラベルを生成 */
 function generatePlanAndLabel(
@@ -129,7 +130,10 @@ function generatePlanAndLabel(
       return { plan, label }
     }
     case 'retar_suspect':
-      // この関数には来ない（呼び出し元で 'designated' に変換済み）
+    case 'multi_day_seats':
+    case 'multi_day_mixed':
+    case 'roller_then_seat':
+      // これらは patternToForwardLabels 専用。旧形式では生成しない
       return null
   }
 }
@@ -231,8 +235,14 @@ function generateSyntheticRetar(
   return { possibilities, suspectSeats }
 }
 
-const PATTERNS: PatternType[] = ['tsumi', 'roller', 'decision', 'designated', 'grayran', 'retar_suspect']
-const PATTERN_WEIGHTS = [0.12, 0.18, 0.14, 0.14, 0.18, 0.24]
+const PATTERNS: PatternType[] = [
+  'tsumi', 'roller', 'decision', 'designated', 'grayran', 'retar_suspect',
+  'multi_day_seats', 'multi_day_mixed', 'roller_then_seat',
+]
+const PATTERN_WEIGHTS = [
+  0.08, 0.10, 0.08, 0.08, 0.10, 0.16,
+  0.15, 0.15, 0.10,
+]
 
 function pickPattern(rng: Rng): PatternType {
   const r = rng.next()
@@ -265,8 +275,11 @@ export function generatePlanTrainingBatch(count: number, seed: number = 42): Pla
     // CO状況を生成
     const { claims, events } = generateCOSituation(aliveSeats, rng)
 
-    // パターン選択
-    const pattern = pickPattern(rng)
+    // パターン選択（旧形式は vote label 対応パターンのみ）
+    let pattern = pickPattern(rng)
+    while (pattern === 'multi_day_seats' || pattern === 'multi_day_mixed' || pattern === 'roller_then_seat') {
+      pattern = pickPattern(rng)
+    }
 
     // プランとラベルを生成
     const result = generatePlanAndLabel(pattern, claims, aliveSeats, mySeat, rng)
@@ -312,6 +325,18 @@ export type PlanTokenTrainingSample = {
 
 const NUM_FORWARD_TOKENS = 8
 
+/** STOP 以降の全位置を STOP + mask=true に強制。「STOP後はSTOP」を教える */
+function fillStopPadding(labels: number[], mask: boolean[]): void {
+  let seenStop = false
+  for (let i = 0; i < labels.length; i++) {
+    if (seenStop) {
+      labels[i] = PLAN_VOCAB.STOP
+      mask[i] = true
+    }
+    if (labels[i] === PLAN_VOCAB.STOP) seenStop = true
+  }
+}
+
 /**
  * パターンからForward plan tokenの教師ラベル列を生成
  * 語彙: 14 seats + 5 roles + grayran + next + stop = 22
@@ -341,6 +366,7 @@ function patternToForwardLabels(
       let pos = 0
       labels[pos] = target - 1; mask[pos++] = true  // seat idx = seat - 1
       labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      fillStopPadding(labels, mask)
       return { labels, mask, tsumiTarget: target }
     }
     case 'roller': {
@@ -351,6 +377,7 @@ function patternToForwardLabels(
       labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
       labels[pos] = roleVocabIdx; mask[pos++] = true
       labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      fillStopPadding(labels, mask)
       return { labels, mask }
     }
     case 'decision': {
@@ -359,6 +386,7 @@ function patternToForwardLabels(
       let pos = 0
       labels[pos] = roleVocabIdx; mask[pos++] = true
       labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      fillStopPadding(labels, mask)
       return { labels, mask }
     }
     case 'designated': {
@@ -369,6 +397,7 @@ function patternToForwardLabels(
       let pos = 0
       labels[pos] = target - 1; mask[pos++] = true  // seat idx = seat - 1
       labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      fillStopPadding(labels, mask)
       return { labels, mask }
     }
     case 'grayran': {
@@ -376,6 +405,7 @@ function patternToForwardLabels(
       let pos = 0
       labels[pos] = PLAN_VOCAB.GRAYRAN; mask[pos++] = true
       labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      fillStopPadding(labels, mask)
       return { labels, mask }
     }
     case 'retar_suspect': {
@@ -386,6 +416,92 @@ function patternToForwardLabels(
       let pos = 0
       labels[pos] = target - 1; mask[pos++] = true
       labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      fillStopPadding(labels, mask)
+      return { labels, mask }
+    }
+    case 'multi_day_seats': {
+      // 複数日の異なる席指定: [seat_a, NEXT, seat_b, NEXT, seat_c, STOP, ...]
+      const candidates = aliveSeats.filter((s: number) => s !== mySeat)
+      if (candidates.length < 2) return null
+      const shuffled = shuffleArray(candidates, rng)
+      const numDays = 2 + Math.floor(rng.next() * 2) // 2〜3日
+      let pos = 0
+      for (let d = 0; d < numDays && pos < NUM_FORWARD_TOKENS - 1; d++) {
+        const target = shuffled[d % shuffled.length]
+        labels[pos] = target - 1; mask[pos++] = true
+        if (d < numDays - 1 && pos < NUM_FORWARD_TOKENS - 1) {
+          labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
+        }
+      }
+      if (pos < NUM_FORWARD_TOKENS) {
+        labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      }
+      fillStopPadding(labels, mask)
+      return { labels, mask }
+    }
+    case 'multi_day_mixed': {
+      // 席+役職+グレランの混合: [seat, NEXT, ROLE, NEXT, GRAYRAN, STOP, ...]
+      const candidates = aliveSeats.filter((s: number) => s !== mySeat)
+      if (candidates.length === 0) return null
+      const grays = aliveSeats.filter(s => s !== mySeat && !claims.has(s))
+
+      // 2〜3日分のターゲットをランダムに種別混合で生成
+      type TokenGen = () => number
+      const generators: TokenGen[] = []
+      // seat
+      generators.push(() => candidates[Math.floor(rng.next() * candidates.length)] - 1)
+      // grayran
+      if (grays.length > 0) generators.push(() => PLAN_VOCAB.GRAYRAN)
+      // role (CO者がいれば)
+      if (roleVocabIdx >= 0 && claimants.length > 0) generators.push(() => roleVocabIdx)
+
+      const numDays = 2 + Math.floor(rng.next() * 2) // 2〜3日
+      let pos = 0
+      const usedTokens = new Set<number>()
+      for (let d = 0; d < numDays && pos < NUM_FORWARD_TOKENS - 1; d++) {
+        // ランダムに種別を選択（できれば重複を避ける）
+        let token: number
+        let attempts = 0
+        do {
+          const gen = generators[Math.floor(rng.next() * generators.length)]
+          token = gen()
+          attempts++
+        } while (usedTokens.has(token) && attempts < 5)
+        usedTokens.add(token)
+
+        labels[pos] = token; mask[pos++] = true
+        if (d < numDays - 1 && pos < NUM_FORWARD_TOKENS - 1) {
+          labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
+        }
+      }
+      if (pos < NUM_FORWARD_TOKENS) {
+        labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      }
+      fillStopPadding(labels, mask)
+      return { labels, mask }
+    }
+    case 'roller_then_seat': {
+      // ローラー後に席指定: [ROLE, NEXT, ROLE, NEXT, seat, STOP, ...]
+      if (claimants.length < 2 || roleVocabIdx < 0) return null
+      const grays = aliveSeats.filter(s => s !== mySeat && !claims.has(s))
+      const afterRollerCandidates = grays.length > 0 ? grays : aliveSeats.filter(s => s !== mySeat)
+      if (afterRollerCandidates.length === 0) return null
+
+      let pos = 0
+      // ローラー 2日分
+      labels[pos] = roleVocabIdx; mask[pos++] = true
+      labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
+      labels[pos] = roleVocabIdx; mask[pos++] = true
+      labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
+      // 3日目: 席指定 or グレラン
+      if (rng.next() < 0.3 && grays.length > 0) {
+        labels[pos] = PLAN_VOCAB.GRAYRAN; mask[pos++] = true
+      } else {
+        const target = afterRollerCandidates[Math.floor(rng.next() * afterRollerCandidates.length)]
+        labels[pos] = target - 1; mask[pos++] = true
+      }
+      labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+      fillStopPadding(labels, mask)
       return { labels, mask }
     }
   }
