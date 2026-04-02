@@ -356,7 +356,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { g
         })
 
         // inspect 用: 全プレイヤーの observation をキャプチャ
-        if (config.captureObservations) {
+        if (config.captureObservations && (vctx.revoteRound === 0 || vctx.revoteRound == null)) {
           capturedObservations.push({
             seat: player.seat,
             role: player.role,
