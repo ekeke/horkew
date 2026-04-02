@@ -23,6 +23,23 @@ import {
 } from '../../../lupa/retar-bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
 import { argmaxPlanTokens, parsePlanIndices, resolvePlanGroupSimple, type PlanDayGroup } from '../rule-action.ts'
+
+/** PlanDayGroup[] → ExecutionPlan[] に変換（observation 注入用） */
+function planGroupsToExecutionPlans(
+  groups: PlanDayGroup[],
+  aliveSeats: number[],
+  events: readonly any[],
+  type: 'designated' | 'endgame',
+): ExecutionPlan[] {
+  const plans: ExecutionPlan[] = []
+  for (const group of groups) {
+    const seat = resolvePlanGroupSimple(group, aliveSeats, events)
+    if (seat != null) {
+      plans.push({ targets: [seat], type })
+    }
+  }
+  return plans
+}
 import { encodeObservation } from '../observation.ts'
 
 /** onVote 時にキャプチャされた全プレイヤーの observation */
@@ -306,11 +323,20 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { g
         }
       }
 
-      // dayProposals → executionPlans に変換して永続化
-      const dayPlans: ExecutionPlan[] = dayProposals
-        .filter(p => p.type === 'execute_order')
-        .map(p => ({ targets: [p.target], type: 'designated' as const }))
-      if (dayPlans.length > 0) currentExecutionPlans = dayPlans
+      // cachedPlanGroups / cachedEndgameGroups → ExecutionPlan[] に変換して永続化
+      // 全プレイヤーの observation に forward plan + endgame plan を注入する
+      {
+        const aliveSeats = alivePlayers(state).map(p => p.seat)
+        const fwdPlans = cachedPlanGroups
+          ? planGroupsToExecutionPlans(cachedPlanGroups, aliveSeats, vctx.events, 'designated')
+          : []
+        const egPlans = cachedEndgameGroups
+          ? planGroupsToExecutionPlans(cachedEndgameGroups, aliveSeats, vctx.events, 'endgame')
+          : []
+        if (fwdPlans.length > 0 || egPlans.length > 0) {
+          currentExecutionPlans = [...fwdPlans, ...egPlans]
+        }
+      }
 
       for (const player of alivePlayers(state)) {
         const view = buildPlayerView(state, player.seat)
