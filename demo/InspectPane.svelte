@@ -307,6 +307,10 @@
               <span class="kv-k">Alive</span><span>{(obs.global.aliveRatio * 14).toFixed(0)} / 14</span>
               <span class="kv-k">Rope</span><span>{obs.global.ropeMargin.toFixed(1)}</span>
               <span class="kv-k">Parity</span><span>{obs.global.aliveParity ? 'odd' : 'even'}</span>
+              <span class="kv-k">Commander</span><span>{obs.global.commander ? `seat${obs.global.commander}` : 'なし'}</span>
+              <span class="kv-k">Tsumi</span><span>{obs.tsumi ? `seat${obs.tsumi}` : 'なし'}</span>
+              <span class="kv-k">狼CO要求</span><span>{obs.global.demandWolfCoCount}</span>
+              <span class="kv-k">Revote</span><span>{obs.revote.round > 0 ? `R${obs.revote.round.toFixed(0)} [${obs.revote.candidates.map((s: number) => s).join(',')}]` : 'なし'}</span>
               <span class="kv-k">Plan</span><span class="exec-plan">{#each [obs.seats.filter((s: any) => s.planIncluded).sort((a: any, b: any) => a.planPosition - b.planPosition)] as planSeats}{#if planSeats.length > 0}{#each planSeats as ps, i}{#if i > 0} → {/if}<span class="plan-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === ps.seat)?.role ?? ''] || 'var(--ctp-text)'}">{ps.seat}</span>{/each}{:else}<span class="no-plan">なし</span>{/if}{/each}</span>
             </div>
           </div>
