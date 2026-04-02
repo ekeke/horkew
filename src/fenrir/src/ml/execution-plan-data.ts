@@ -514,7 +514,12 @@ function patternToForwardLabels(
 }
 
 /**
- * Pointer token 教師データを一括生成
+ * 人外候補列挙 pretrain: Retar の狼可能席をなるべく多く plan token で指定する。
+ * observation 内の Retar 情報を読んで人外候補を列挙する能力を教える。
+ *
+ * ラベル: 狼可能席を NEXT 区切りで列挙し、STOP で終了。
+ * 例: 狼可能=[seat3,seat7,seat11,seat2] → [seat3, NEXT, seat7, NEXT, seat11, NEXT, seat2, STOP]
+ * 8トークンに収まる最大4席。残りが多ければランダムに選択。
  */
 export function generatePlanTokenTrainingBatch(count: number, seed: number = 42): PlanTokenTrainingSample[] {
   const rng = new Rng(seed)
@@ -529,33 +534,49 @@ export function generatePlanTokenTrainingBatch(count: number, seed: number = 42)
     const myRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
 
     const { claims, events } = generateCOSituation(aliveSeats, rng)
-    const pattern = pickPattern(rng)
 
-    // Retar 合成データ (retar_suspect パターン時は必須、他でも50%の確率で付与)
-    const needsRetar = pattern === 'retar_suspect' || rng.next() < 0.5
-    const retar = needsRetar ? generateSyntheticRetar(aliveSeats, mySeat, claims, rng) : null
-
-    const result = patternToForwardLabels(pattern, claims, aliveSeats, mySeat, rng, retar?.suspectSeats)
-    if (!result) continue
-
-    // 旧形式のプランも生成（observation encodingで使用）
-    const planResult = generatePlanAndLabel(
-      pattern === 'retar_suspect' ? 'designated' : pattern,
-      claims, aliveSeats, mySeat, rng,
+    // 必ず Retar 合成データを生成
+    const retar = generateSyntheticRetar(aliveSeats, mySeat, claims, rng)
+    // 狼可能な全席を候補にする（suspectSeats ではなく possibilities から直接）
+    const wolfPossible = shuffleArray(
+      aliveSeats.filter(s => s !== mySeat && retar.possibilities.get(s)?.has('werewolf')),
+      rng,
     )
-    const plan: ExecutionPlan = planResult?.plan ?? { targets: [], type: 'grayran' }
+    if (wolfPossible.length === 0) continue
 
+    // 8トークンに収まる最大数: seat, NEXT, seat, NEXT, ..., STOP
+    // n席 = n + (n-1) + 1 = 2n トークン → 最大 n = 4
+    const maxTargets = Math.min(wolfPossible.length, 4)
+    // 多い方に偏らせる: ceil(random * max) で 1〜max を均等→上寄り
+    const numTargets = Math.max(1, Math.ceil(rng.next() * maxTargets))
+    const targets = wolfPossible.slice(0, numTargets)
+
+    const labels = new Array(NUM_FORWARD_TOKENS).fill(PLAN_VOCAB.STOP)
+    const mask = new Array(NUM_FORWARD_TOKENS).fill(false)
+    let pos = 0
+    for (let i = 0; i < targets.length && pos < NUM_FORWARD_TOKENS - 1; i++) {
+      labels[pos] = targets[i] - 1; mask[pos++] = true
+      if (i < targets.length - 1 && pos < NUM_FORWARD_TOKENS - 1) {
+        labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
+      }
+    }
+    if (pos < NUM_FORWARD_TOKENS) {
+      labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+    }
+    fillStopPadding(labels, mask)
+
+    // observation 生成（executionPlans は空、Retar あり）
+    const plan: ExecutionPlan = { targets: [], type: 'grayran' }
     const ctx = buildSyntheticContext({
       day, mySeat, myRole, aliveSeats, events, plan, rng,
-      retarPossibilities: retar?.possibilities,
-      tsumiTarget: result.tsumiTarget,
+      retarPossibilities: retar.possibilities,
     })
     const observation = encodeObservation(ctx)
 
     samples.push({
       observation,
-      forwardLabels: result.labels,
-      forwardMask: result.mask,
+      forwardLabels: labels,
+      forwardMask: mask,
     })
   }
 
