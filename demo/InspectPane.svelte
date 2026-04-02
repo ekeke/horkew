@@ -425,7 +425,7 @@
               {#each obs.planTokens.tokens as pt, i}
                 <div class="plan-token-input">
                   <span class="plan-token-type-badge {['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? ''}">{['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? '?'}</span>
-                  <span class="plan-token-seats">{#each pt.targetMask as v, j}{#if v > 0.5}<span class="plan-token-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === j + 1)?.role ?? ''] || 'var(--ctp-text)'}">{j + 1}</span>{/if}{/each}</span>
+                  <span class="plan-token-seats">{#each pt.targetMask as v, j}{#if v > 0.5}<span class="plan-token-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === j + 1)?.role ?? ''] || 'var(--ctp-text)'}">seat{j + 1}</span>{/if}{/each}</span>
                   {#if pt.priority > 0}<span class="plan-token-pri">pri:{pt.priority.toFixed(1)}</span>{/if}
                 </div>
               {/each}
@@ -625,7 +625,7 @@
               {#each aobs.planTokens.tokens as pt, i}
                 <div class="plan-token-input">
                   <span class="plan-token-type-badge {['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? ''}">{['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? '?'}</span>
-                  <span class="plan-token-seats">{#each pt.targetMask as v, j}{#if v > 0.5}<span class="plan-token-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === j + 1)?.role ?? ''] || 'var(--ctp-text)'}">{j + 1}</span>{/if}{/each}</span>
+                  <span class="plan-token-seats">{#each pt.targetMask as v, j}{#if v > 0.5}<span class="plan-token-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === j + 1)?.role ?? ''] || 'var(--ctp-text)'}">seat{j + 1}</span>{/if}{/each}</span>
                   {#if pt.priority > 0}<span class="plan-token-pri">pri:{pt.priority.toFixed(1)}</span>{/if}
                 </div>
               {/each}
