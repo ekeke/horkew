@@ -782,6 +782,8 @@ async function main(): Promise<void> {
   // === Phase 0: Mason Individual (backbone pre-training) ===
   // 確定白の共有者を個人モデルとして学習。1 ML席で村全体の投票を制御できるため学習シグナルが強い。
   // 卒業後に全重みを village モデルに転送して Phase 1 を warm start する。
+  let frozenMasonWeights: import('./parallel.ts').SharedWeights | undefined
+  let frozenMasonNet: AnyNetwork | undefined
   if (!config.phase2Only) {
     const masonDir = `${config.checkpointBase}/ckpt-mason_individual`
     const masonFinalPath = `${masonDir}/final.json`
@@ -794,6 +796,8 @@ async function main(): Promise<void> {
       const masonNet = makeNetwork()
       loadCheckpoint(masonNet, masonFinalPath)
       villageNet.loadWeights(masonNet.cloneWeights())
+      frozenMasonWeights = packWeights(masonNet)
+      frozenMasonNet = masonNet
       log(`  Mason backbone transferred to village network`)
       if (refNetwork) {
         refNetwork.loadWeights(masonNet.cloneWeights())
@@ -843,23 +847,22 @@ async function main(): Promise<void> {
       masonRefNetwork.loadWeights(masonNet.cloneWeights())
 
       const masonMlRoles = ['mason'] as SystemRole[]
-      const masonMlStartDay = 4  // Day 3 スナップショットからリプレイ
+      let masonMlStartDay = 4  // Day 3 スナップショットからリプレイ → 3 → 2 → 1
       const ML_START_DAY_MIN_MASON = 1
-      let masonSnapshotCount = masonMlStartDay > ML_START_DAY_MIN_MASON
-        ? countSnapshots(masonMlStartDay - 1, masonMlRoles, 1) : 0
-      const masonEvalSnapshotCount = masonMlStartDay > ML_START_DAY_MIN_MASON
-        ? countSnapshots(masonMlStartDay - 1, masonMlRoles, 1, true) : 0
-      if (masonSnapshotCount === 0 && masonMlStartDay > ML_START_DAY_MIN_MASON) {
-        // mason は village roles のスナップショットを使える（mason が生存していれば）
-        masonSnapshotCount = countSnapshots(masonMlStartDay - 1, MODEL_GROUPS.village.roles as string[], 1)
-        if (masonSnapshotCount > 0) {
-          log(`  Using village snapshots for mason (${masonSnapshotCount} at Day ${masonMlStartDay - 1})`)
+
+      function refreshMasonSnapshotCount() {
+        if (masonMlStartDay <= ML_START_DAY_MIN_MASON) return 0
+        // mason は village roles のスナップショットを使える
+        let count = countSnapshots(masonMlStartDay - 1, MODEL_GROUPS.village.roles as string[], 1)
+        if (count > 0) {
+          log(`  Seed bank: ${count} snapshots at Day ${masonMlStartDay - 1}`)
         } else {
           log(`  ⚠ No snapshots at Day ${masonMlStartDay - 1}. Falling back to full games.`)
         }
-      } else if (masonSnapshotCount > 0) {
-        log(`  Seed bank: ${masonSnapshotCount} train + ${masonEvalSnapshotCount} eval snapshots at Day ${masonMlStartDay - 1}`)
+        return count
       }
+      let masonSnapshotCount = refreshMasonSnapshotCount()
+      log(`  Initial masonMlStartDay=${masonMlStartDay}`)
 
       const masonTargetRate = baselineRates['villager_won'] ?? 0.55
       const prefix = `\x1b[36m[mason_ind ]${RESET}`
@@ -959,7 +962,7 @@ async function main(): Promise<void> {
         process.stderr.write(
           `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
           `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
-          `steps=${allSteps.length}${lossStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
+          `steps=${allSteps.length} day=${masonMlStartDay}${lossStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
         )
 
         // Eval
@@ -991,13 +994,23 @@ async function main(): Promise<void> {
             time: new Date().toISOString(), model: 'mason_individual' as any, iter,
             winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: factionRate >= masonTargetRate ? 'GRADUATED' : '',
           })
-          progress.latest = { phase: '0', model: 'mason_individual', iter, maxIter: config.iterations, klCoeff: masonPpoConfig.klCoeff }
+          progress.latest = { phase: '0', model: 'mason_individual', iter, maxIter: config.iterations, klCoeff: masonPpoConfig.klCoeff, mlStartDay: masonMlStartDay }
           updateProgressFile(progress)
 
           const MASON_MIN_ITER = 1000
-          if (iter >= MASON_MIN_ITER && factionRate >= masonTargetRate) {
-            log(`${prefix} ${BOLD}GRADUATED${RESET} (villager_won=${(factionRate * 100).toFixed(0)}% >= ${(masonTargetRate * 100).toFixed(0)}%)`)
-            graduated = true
+          // Day カリキュラム: 勝率達成で Day をデクリメント
+          if (iter >= MASON_MIN_ITER && factionRate >= masonTargetRate * 0.9) {
+            if (masonMlStartDay > ML_START_DAY_MIN_MASON) {
+              const prevDay = masonMlStartDay
+              masonMlStartDay--
+              log(`${prefix} Curriculum: masonMlStartDay ${prevDay} → ${masonMlStartDay}`)
+              progress.curriculum.push({ time: new Date().toISOString(), iter, mlMaxSeats: 1, mlStartDay: masonMlStartDay, event: `mason day ${prevDay}→${masonMlStartDay}` })
+              masonSnapshotCount = refreshMasonSnapshotCount()
+            }
+            if (masonMlStartDay <= ML_START_DAY_MIN_MASON && factionRate >= masonTargetRate) {
+              log(`${prefix} ${BOLD}GRADUATED${RESET} (villager_won=${(factionRate * 100).toFixed(0)}% >= ${(masonTargetRate * 100).toFixed(0)}%, day=${masonMlStartDay})`)
+              graduated = true
+            }
           }
         }
 
@@ -1016,6 +1029,8 @@ async function main(): Promise<void> {
       // Backbone transfer: mason → village
       const villageNet = networks.get('village' as ModelName)!
       villageNet.loadWeights(masonNet.cloneWeights())
+      frozenMasonWeights = packWeights(masonNet)
+      frozenMasonNet = masonNet
       log(`Mason backbone transferred to village network (all weights)`)
       if (refNetwork) {
         refNetwork.loadWeights(masonNet.cloneWeights())
@@ -1120,6 +1135,7 @@ async function main(): Promise<void> {
             mlMaxSeats: name === 'village' ? mlMaxSeats : undefined,
             mlStartDay: (!batchSnapshots && name === 'village') ? mlStartDay : undefined,
             snapshots: batchSnapshots,
+            frozenMasonWeights: name === 'village' ? frozenMasonWeights : undefined,
           }, seeds)
 
           for (const game of serializedResults) {
@@ -1233,7 +1249,7 @@ async function main(): Promise<void> {
                   forEval: true,
                 })
               : undefined
-            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), evalIter: iter })
+            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), evalIter: iter, frozenMasonNet: name === 'village' ? frozenMasonNet : undefined })
             process.stderr.write('\r\x1b[K')
             appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
             const factionRate = evalResult.winRates[group.faction] ?? 0

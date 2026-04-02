@@ -59,6 +59,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
   const wolfTeamNet = req.wolfTeamWeights ? buildNetwork(req.wolfTeamWeights, true) : undefined
   const masonTeamNet = req.masonTeamWeights ? buildNetwork(req.masonTeamWeights, true) : undefined
   const frozenVillageNet = req.villageFrozenWeights ? buildNetwork(req.villageFrozenWeights) : undefined
+  const frozenMasonNet = req.frozenMasonWeights ? buildNetwork(req.frozenMasonWeights) : undefined
   const mlRolesSet = req.mlRoles ? new Set(req.mlRoles) : null
   const useHeuristic = req.phase === 1
   const usePool = req.phase === 3
@@ -175,6 +176,14 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     } else if (useHeuristic && mlRolesSet) {
       onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
         seatRoleMap = seatRoles
+        // frozen mason NN: mason 席に frozen 戦略を注入（trajectory は記録しない）
+        if (frozenMasonNet) {
+          for (const [seat, role] of seatRoles) {
+            if (role === 'mason') {
+              strategies.set(seat, new FenrirStrategy(frozenMasonNet, { explore: false, strategyOnly: config.strategyOnly }))
+            }
+          }
+        }
         // mlMaxSeats で NN 席数を制限（カリキュラム学習）
         const candidates = [...seatRoles].filter(([_, role]) => mlRolesSet.has(role))
         // seed ベースでシャッフル（再現性）

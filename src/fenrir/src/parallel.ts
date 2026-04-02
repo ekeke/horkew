@@ -131,6 +131,8 @@ export type WorkerRequest = {
   villageFrozenWeights?: SharedWeights
   /** Seed Bank スナップショットからリプレイ（seeds と同じ長さ、各ゲームに1つ） */
   snapshots?: import('../../lupa/types.ts').GameSnapshot[]
+  /** frozen mason 個人NNの重み（Phase 1: mason席にfrozen戦略を注入） */
+  frozenMasonWeights?: SharedWeights
 }
 
 /** 1ゲーム分のタイミング情報 */

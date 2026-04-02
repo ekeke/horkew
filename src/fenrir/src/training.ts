@@ -798,6 +798,8 @@ export type EvaluateOptions = {
   masonAsIndividual?: boolean
   /** eval シードの変動用 iteration 番号（後半ゲームのシードを iter 依存にする） */
   evalIter?: number
+  /** frozen mason 個人NN（Phase 1: mason席にfrozen戦略を注入） */
+  frozenMasonNet?: AnyNetwork
 }
 
 export async function evaluate(
@@ -838,6 +840,14 @@ export async function evaluate(
     const halfN = Math.floor(numGames / 2)
     const seed = i < halfN ? 10000 + i : (options?.evalIter ?? 0) * 10000 + 50000 + i
     const onRolesAssigned = mlRolesSet ? (seatRoles: Map<number, SystemRole>) => {
+      // frozen mason NN: mason 席に frozen 戦略を注入
+      if (options?.frozenMasonNet) {
+        for (const [seat, role] of seatRoles) {
+          if (role === 'mason') {
+            strategies.set(seat, new FenrirStrategy(options.frozenMasonNet, { explore: false, strategyOnly: config.strategyOnly }))
+          }
+        }
+      }
       const candidates = [...seatRoles].filter(([_, role]) => mlRolesSet.has(role))
       if (mlMaxSeats !== undefined && mlMaxSeats < candidates.length) {
         for (let j = candidates.length - 1; j > 0; j--) {
@@ -879,9 +889,9 @@ export async function evaluate(
       wolfTeamStrategy = new WolfTeamHeuristic()
     }
 
-    // Mason team strategy: individual(Phase0) > collective > legacy team > heuristic
+    // Mason team strategy: frozenMason > individual(Phase0) > collective > legacy team > heuristic
     let masonTeamStrategy: any
-    if (options?.masonAsIndividual) {
+    if (options?.frozenMasonNet || options?.masonAsIndividual) {
       masonTeamStrategy = undefined  // 個人戦略にフォールバック
     } else if (options?.masonCollectiveNet) {
       masonTeamStrategy = new MasonCollectiveStrategy(options.masonCollectiveNet, { explore: false })
