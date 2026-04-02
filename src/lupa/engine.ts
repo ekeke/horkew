@@ -14,7 +14,7 @@ import { resolveRules } from '../howl/ruleset.ts'
 import type { GameState, GameEvent, GameSnapshot, NightAction, DayClaim, PlayerState } from './types.ts'
 import type { GameConfig, GameHandlers, GameResult, PhaseContext, VoteContext } from './handlers.ts'
 import { Rng } from './random.ts'
-import { generateRoleNames } from './names.ts'
+import { generateRoleNames, generateRoleSeatNames } from './names.ts'
 import {
   assignRoles, alivePlayers, getSeerResult,
   killPlayer, checkWinCondition,
@@ -34,15 +34,16 @@ export async function runGame(config: GameConfig, handlers: GameHandlers): Promi
 
   // 役職割当
   const shuffledIndices = rng.shuffle(Array.from({ length: totalPlayers }, (_, i) => i))
-  const names = generateRoleNames(
-    shuffledIndices.map(i => {
-      const roleArray: SystemRole[] = []
-      for (const [role, count] of config.roles) {
-        for (let j = 0; j < count; j++) roleArray.push(role)
-      }
-      return roleArray[i]
-    }),
-  )
+  const assignedRoles = shuffledIndices.map(i => {
+    const roleArray: SystemRole[] = []
+    for (const [role, count] of config.roles) {
+      for (let j = 0; j < count; j++) roleArray.push(role)
+    }
+    return roleArray[i]
+  })
+  const names = config.nameStyle === 'seat'
+    ? generateRoleSeatNames(assignedRoles, shuffledIndices)
+    : generateRoleNames(assignedRoles)
   const players = assignRoles(config.roles, names, shuffledIndices)
 
   const state: GameState = {

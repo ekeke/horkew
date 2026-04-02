@@ -278,7 +278,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       tsumiCacheGetter = () => handlers.getTsumiCache()
       if (isInspectGame && handlers.getCapturedObservations) observationGetter = () => handlers.getCapturedObservations!()
       const result = await runGame(
-        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: isInspectGame ? 'seat' as const : undefined },
         handlers,
       )
       state = result.state
@@ -302,7 +302,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       })
       tsumiCacheGetter = () => handlers.getTsumiCache()
       const result = await runGame(
-        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
+        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: isInspectGame ? 'seat' as const : undefined },
         handlers,
       )
       state = result.state

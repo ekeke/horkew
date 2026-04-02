@@ -52,6 +52,20 @@ export function generateRoleNames(
   })
 }
 
+/**
+ * 役職短縮名+席番号の名前を生成する。
+ * 例: 占13, 狼4, 村10
+ */
+export function generateRoleSeatNames(
+  assignedRoles: SystemRole[],
+  shuffledIndices: number[],
+): string[] {
+  return assignedRoles.map((role, i) => {
+    const shortName = systemRoles.get(role)!.shortName
+    return `${shortName}${shuffledIndices[i] + 1}`
+  })
+}
+
 function toFullWidth(n: number): string {
   return String(n).replace(/[0-9]/g, c =>
     String.fromCharCode(c.charCodeAt(0) + 0xFEE0)

@@ -296,6 +296,7 @@ for (let g = 0; g < count; g++) {
       hasFirstGhost: DEFAULT_TRAINING_CONFIG.hasFirstGhost,
       revoteConfig: DEFAULT_TRAINING_CONFIG.revoteConfig,
       rules: DEFAULT_TRAINING_CONFIG.rules,
+      nameStyle: 'seat' as const,
     },
     handlers,
   )
