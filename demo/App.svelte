@@ -16,6 +16,7 @@
   import HelpPanel from './HelpPanel.svelte'
   import ColorSwatchPane from './ColorSwatchPane.svelte'
   import HatiPane from './HatiPane.svelte'
+  import GmorkDebugPane from './GmorkDebugPane.svelte'
   import './theme.css'
   import { runGame } from '../src/lupa/engine.ts'
   import { strategyAdapter } from '../src/lupa/adapters/strategy-adapter.ts'
@@ -86,6 +87,7 @@
     { id: 'analysis', label: 'Analysis' },
     { id: 'colorSwatch', label: 'Color Swatch' },
     { id: 'hati', label: 'Hati (詰み)' },
+    { id: 'gmorkDebug', label: 'Gmork Debug' },
   ] as const
 
   type PaneId = typeof paneEntries[number]['id']
@@ -98,7 +100,7 @@
     panes: Record<PaneId, boolean>
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true }
+  const defaultPanes: Record<PaneId, boolean> = { rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, gmorkDebug: false }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: false, panes: { ...defaultPanes } }
@@ -195,6 +197,7 @@
   let gmorkResult = $state('')
   let wolfPairSuggestions: WolfPairSuggestion[] = $state([])
   let baseAnalysisSeats: SeatResult[] = []
+  let pendingGmorkEntry: { seat: number, role: SystemRole } | null = null
   let allRolesDetermined = $derived(
     analysisSeats.length > 0
     && players.size > 0
@@ -893,6 +896,12 @@
         analysisCached = true
         analysisTotalElapsed = Math.round(performance.now() - runStart)
         if (assumptions.size === 0) baseAnalysisSeats = cached.cached
+        if (pendingGmorkEntry && assumptions.size === 0) {
+          const pe = pendingGmorkEntry
+          pendingGmorkEntry = null
+          assumptions = new Map([[pe.seat, pe.role]])
+          gmorkResult = runGmork()
+        }
         analyzing = false
         return
       }
@@ -909,6 +918,13 @@
           analysisError = ''
           analysisStatsInfo = data.stats
           if (assumptions.size === 0) baseAnalysisSeats = data.seats
+          // Gmork Debug ペインからの pending entry を処理
+          if (pendingGmorkEntry && assumptions.size === 0) {
+            const pe = pendingGmorkEntry
+            pendingGmorkEntry = null
+            assumptions = new Map([[pe.seat, pe.role]])
+            gmorkResult = runGmork()
+          }
           // Retar結果から狼候補を抽出し提案を更新
           const wolfCandidates = new Set(data.seats.filter(s => s.roles.includes('werewolf')).map(s => s.seat))
           if (villageStatus && (currentSetup.get('werewolf') ?? 0) >= 2) {
@@ -1183,6 +1199,28 @@
       <div class="pane-header">Hati (詰み探索)</div>
       <div class="pane-body">
         <HatiPane vs={villageStatus} setup={currentSetup} {players} />
+      </div>
+    </section>
+    {/if}
+
+    {#if paneVisible.gmorkDebug}
+    <section class="pane">
+      <div class="pane-header">Gmork Debug</div>
+      <div class="pane-body">
+        <GmorkDebugPane onLoadEntry={(entry, text) => {
+          input = text
+          if (editorView) {
+            editorView.dispatch({
+              changes: { from: 0, to: editorView.state.doc.length, insert: text },
+              selection: { anchor: text.length },
+              scrollIntoView: true,
+            })
+            editorView.focus()
+          }
+          // Retar 解析完了後に assumption をセットして Gmork を連動させる
+          assumptions = new Map()
+          pendingGmorkEntry = { seat: entry.seat, role: entry.role }
+        }} />
       </div>
     </section>
     {/if}

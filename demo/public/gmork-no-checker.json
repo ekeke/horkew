@@ -1,0 +1,4052 @@
+[
+  {
+    "file": "11682.howl",
+    "title": "11682.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "霊",
+    "seat": 10,
+    "role": "werewolf"
+  },
+  {
+    "file": "11682.howl",
+    "title": "11682.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "霊",
+    "seat": 10,
+    "role": "werehamster"
+  },
+  {
+    "file": "11682.howl",
+    "title": "11682.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "狼３",
+    "seat": 11,
+    "role": "seer"
+  },
+  {
+    "file": "11682.howl",
+    "title": "11682.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "信",
+    "seat": 12,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "村１",
+    "seat": 1,
+    "role": "werewolf"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "村１",
+    "seat": 1,
+    "role": "fanatic"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 3,
+    "role": "werewolf"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 3,
+    "role": "villager"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 3,
+    "role": "fanatic"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 3,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "狼１",
+    "seat": 4,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "狼２",
+    "seat": 6,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "村２",
+    "seat": 11,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "信",
+    "seat": 12,
+    "role": "seer"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "信",
+    "seat": 12,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "狼３",
+    "seat": 13,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": 90,
+    "label": "checkpoint 1 (line 90)",
+    "kind": "deny",
+    "player": "霊",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "村１",
+    "seat": 1,
+    "role": "werewolf"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "村１",
+    "seat": 1,
+    "role": "fanatic"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 3,
+    "role": "werewolf"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 3,
+    "role": "villager"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 3,
+    "role": "fanatic"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 3,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "狼１",
+    "seat": 4,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "狼２",
+    "seat": 6,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "村２",
+    "seat": 11,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "信",
+    "seat": 12,
+    "role": "seer"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "信",
+    "seat": 12,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "狼３",
+    "seat": 13,
+    "role": "werehamster"
+  },
+  {
+    "file": "13597.howl",
+    "title": "13597.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "霊",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "狩",
+    "seat": 1,
+    "role": "werewolf"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "狩",
+    "seat": 1,
+    "role": "fanatic"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "狩",
+    "seat": 1,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "狩",
+    "seat": 1,
+    "role": "immoralist"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "共１",
+    "seat": 2,
+    "role": "fanatic"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "共１",
+    "seat": 2,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "共１",
+    "seat": 2,
+    "role": "immoralist"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "村１",
+    "seat": 4,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "占",
+    "seat": 6,
+    "role": "werewolf"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "占",
+    "seat": 6,
+    "role": "fanatic"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "占",
+    "seat": 6,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "占",
+    "seat": 6,
+    "role": "immoralist"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 10,
+    "role": "werewolf"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 10,
+    "role": "fanatic"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 10,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 10,
+    "role": "immoralist"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "信",
+    "seat": 13,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "deny",
+    "player": "村２",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "confirm",
+    "player": "狩",
+    "seat": 1,
+    "role": "bodyguard"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "confirm",
+    "player": "共１",
+    "seat": 2,
+    "role": "mason"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "confirm",
+    "player": "占",
+    "seat": 6,
+    "role": "seer"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": 200,
+    "label": "checkpoint 1 (line 200)",
+    "kind": "confirm",
+    "player": "猫",
+    "seat": 10,
+    "role": "nekomata"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "狩",
+    "seat": 1,
+    "role": "werewolf"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "狩",
+    "seat": 1,
+    "role": "fanatic"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "狩",
+    "seat": 1,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "狩",
+    "seat": 1,
+    "role": "immoralist"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "共１",
+    "seat": 2,
+    "role": "fanatic"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "共１",
+    "seat": 2,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "共１",
+    "seat": 2,
+    "role": "immoralist"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "村１",
+    "seat": 4,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "占",
+    "seat": 6,
+    "role": "werewolf"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "占",
+    "seat": 6,
+    "role": "fanatic"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "占",
+    "seat": 6,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "占",
+    "seat": 6,
+    "role": "immoralist"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 10,
+    "role": "werewolf"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 10,
+    "role": "fanatic"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 10,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 10,
+    "role": "immoralist"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "信",
+    "seat": 13,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "村２",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "狩",
+    "seat": 1,
+    "role": "bodyguard"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "共１",
+    "seat": 2,
+    "role": "mason"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "占",
+    "seat": 6,
+    "role": "seer"
+  },
+  {
+    "file": "772.howl",
+    "title": "772.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "猫",
+    "seat": 10,
+    "role": "nekomata"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 14,
+    "label": "checkpoint 1 (line 14)",
+    "kind": "deny",
+    "player": "エーカゲン２世",
+    "seat": 1,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "エーカゲン２世",
+    "seat": 1,
+    "role": "seer"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "エーカゲン２世",
+    "seat": 1,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "ボムへい",
+    "seat": 3,
+    "role": "nekomata"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "ボムへい",
+    "seat": 3,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "考える人",
+    "seat": 4,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "おわんくん",
+    "seat": 5,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "羽根帚",
+    "seat": 6,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "今川義元",
+    "seat": 7,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "アンゴラウサギ",
+    "seat": 8,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "アネモネ",
+    "seat": 9,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "ちせ",
+    "seat": 10,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "サターニャ",
+    "seat": 11,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "マーマイト",
+    "seat": 12,
+    "role": "nekomata"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 32,
+    "label": "checkpoint 2 (line 32)",
+    "kind": "deny",
+    "player": "マーマイト",
+    "seat": 12,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 38,
+    "label": "checkpoint 3 (line 38)",
+    "kind": "deny",
+    "player": "エーカゲン２世",
+    "seat": 1,
+    "role": "seer"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 38,
+    "label": "checkpoint 3 (line 38)",
+    "kind": "deny",
+    "player": "マーマイト",
+    "seat": 12,
+    "role": "nekomata"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 38,
+    "label": "checkpoint 3 (line 38)",
+    "kind": "deny",
+    "player": "マーマイト",
+    "seat": 12,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 80,
+    "label": "checkpoint 4 (line 80)",
+    "kind": "deny",
+    "player": "考える人",
+    "seat": 4,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 80,
+    "label": "checkpoint 4 (line 80)",
+    "kind": "deny",
+    "player": "考える人",
+    "seat": 4,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 80,
+    "label": "checkpoint 4 (line 80)",
+    "kind": "deny",
+    "player": "アネモネ",
+    "seat": 9,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 80,
+    "label": "checkpoint 4 (line 80)",
+    "kind": "deny",
+    "player": "アネモネ",
+    "seat": 9,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 80,
+    "label": "checkpoint 4 (line 80)",
+    "kind": "deny",
+    "player": "マーマイト",
+    "seat": 12,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 85,
+    "label": "checkpoint 5 (line 85)",
+    "kind": "deny",
+    "player": "考える人",
+    "seat": 4,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 85,
+    "label": "checkpoint 5 (line 85)",
+    "kind": "deny",
+    "player": "考える人",
+    "seat": 4,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 85,
+    "label": "checkpoint 5 (line 85)",
+    "kind": "deny",
+    "player": "アネモネ",
+    "seat": 9,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 85,
+    "label": "checkpoint 5 (line 85)",
+    "kind": "deny",
+    "player": "アネモネ",
+    "seat": 9,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 85,
+    "label": "checkpoint 5 (line 85)",
+    "kind": "deny",
+    "player": "マーマイト",
+    "seat": 12,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 99,
+    "label": "checkpoint 6 (line 99)",
+    "kind": "deny",
+    "player": "エーカゲン２世",
+    "seat": 1,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 99,
+    "label": "checkpoint 6 (line 99)",
+    "kind": "deny",
+    "player": "考える人",
+    "seat": 4,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 99,
+    "label": "checkpoint 6 (line 99)",
+    "kind": "deny",
+    "player": "考える人",
+    "seat": 4,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 99,
+    "label": "checkpoint 6 (line 99)",
+    "kind": "deny",
+    "player": "おわんくん",
+    "seat": 5,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 99,
+    "label": "checkpoint 6 (line 99)",
+    "kind": "deny",
+    "player": "羽根帚",
+    "seat": 6,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 99,
+    "label": "checkpoint 6 (line 99)",
+    "kind": "deny",
+    "player": "アンゴラウサギ",
+    "seat": 8,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 99,
+    "label": "checkpoint 6 (line 99)",
+    "kind": "deny",
+    "player": "アネモネ",
+    "seat": 9,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 99,
+    "label": "checkpoint 6 (line 99)",
+    "kind": "deny",
+    "player": "アネモネ",
+    "seat": 9,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 99,
+    "label": "checkpoint 6 (line 99)",
+    "kind": "deny",
+    "player": "マーマイト",
+    "seat": 12,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada4.howl",
+    "title": "まだｘ４名前のない人狼",
+    "line": 99,
+    "label": "checkpoint 6 (line 99)",
+    "kind": "deny",
+    "player": "マーマイト",
+    "seat": 12,
+    "role": "werewolf"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": 37,
+    "label": "checkpoint 1 (line 37)",
+    "kind": "deny",
+    "player": "便ールガンカ",
+    "seat": 1,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": 37,
+    "label": "checkpoint 1 (line 37)",
+    "kind": "deny",
+    "player": "グロ中尉",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": 55,
+    "label": "checkpoint 2 (line 55)",
+    "kind": "deny",
+    "player": "便ールガンカ",
+    "seat": 1,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": 55,
+    "label": "checkpoint 2 (line 55)",
+    "kind": "deny",
+    "player": "グロ中尉",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "便ールガンカ",
+    "seat": 1,
+    "role": "villager"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "便ールガンカ",
+    "seat": 1,
+    "role": "seer"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "便ールガンカ",
+    "seat": 1,
+    "role": "immoralist"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "便ールガンカ",
+    "seat": 1,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "便ールガンカ",
+    "seat": 1,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "小梅ちゃん",
+    "seat": 3,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ウルガー",
+    "seat": 5,
+    "role": "immoralist"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ウルガー",
+    "seat": 5,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ウルガー",
+    "seat": 5,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "星刻",
+    "seat": 7,
+    "role": "immoralist"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "星刻",
+    "seat": 7,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "星刻",
+    "seat": 7,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "百面ダイス",
+    "seat": 8,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ブルファンゴ",
+    "seat": 9,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ビスマス結晶",
+    "seat": 11,
+    "role": "immoralist"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "スレッタ",
+    "seat": 12,
+    "role": "immoralist"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "スレッタ",
+    "seat": 12,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "スレッタ",
+    "seat": 12,
+    "role": "fanatic"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "グロ中尉",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "便ールガンカ",
+    "seat": 1,
+    "role": "bodyguard"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "ウルガー",
+    "seat": 5,
+    "role": "nekomata"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "星刻",
+    "seat": 7,
+    "role": "medium"
+  },
+  {
+    "file": "mada5.howl",
+    "title": "まだｘ５名前のない人狼",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "スレッタ",
+    "seat": 12,
+    "role": "werewolf"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": 122,
+    "label": "checkpoint 1 (line 122)",
+    "kind": "deny",
+    "player": "牧野慶",
+    "seat": 3,
+    "role": "seer"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": 122,
+    "label": "checkpoint 1 (line 122)",
+    "kind": "deny",
+    "player": "恩田理沙",
+    "seat": 5,
+    "role": "seer"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": 122,
+    "label": "checkpoint 1 (line 122)",
+    "kind": "deny",
+    "player": "恩田理沙",
+    "seat": 5,
+    "role": "werehamster"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": 122,
+    "label": "checkpoint 1 (line 122)",
+    "kind": "deny",
+    "player": "志村晃",
+    "seat": 7,
+    "role": "medium"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": 122,
+    "label": "checkpoint 1 (line 122)",
+    "kind": "deny",
+    "player": "三沢岳明",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": 122,
+    "label": "checkpoint 1 (line 122)",
+    "kind": "deny",
+    "player": "犀賀省吾",
+    "seat": 19,
+    "role": "fanatic"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "牧野慶",
+    "seat": 3,
+    "role": "seer"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "恩田理沙",
+    "seat": 5,
+    "role": "seer"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "恩田理沙",
+    "seat": 5,
+    "role": "werehamster"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "志村晃",
+    "seat": 7,
+    "role": "medium"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "三沢岳明",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "makino.howl",
+    "title": "makino.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "犀賀省吾",
+    "seat": 19,
+    "role": "fanatic"
+  },
+  {
+    "file": "nekomata-night-curse-no-claim.howl",
+    "title": "nekomata-night-curse-no-claim.howl",
+    "line": 23,
+    "label": "checkpoint 1 (line 23)",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 5,
+    "role": "villager"
+  },
+  {
+    "file": "nekomata-night-curse-no-claim.howl",
+    "title": "nekomata-night-curse-no-claim.howl",
+    "line": 23,
+    "label": "checkpoint 1 (line 23)",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 5,
+    "role": "seer"
+  },
+  {
+    "file": "nekomata-night-curse-no-claim.howl",
+    "title": "nekomata-night-curse-no-claim.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 5,
+    "role": "villager"
+  },
+  {
+    "file": "nekomata-night-curse-no-claim.howl",
+    "title": "nekomata-night-curse-no-claim.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "猫",
+    "seat": 5,
+    "role": "seer"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": 121,
+    "label": "checkpoint 1 (line 121)",
+    "kind": "deny",
+    "player": "牧野慶",
+    "seat": 3,
+    "role": "seer"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": 121,
+    "label": "checkpoint 1 (line 121)",
+    "kind": "deny",
+    "player": "恩田理沙",
+    "seat": 5,
+    "role": "seer"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": 121,
+    "label": "checkpoint 1 (line 121)",
+    "kind": "deny",
+    "player": "恩田理沙",
+    "seat": 5,
+    "role": "werehamster"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": 121,
+    "label": "checkpoint 1 (line 121)",
+    "kind": "deny",
+    "player": "志村晃",
+    "seat": 7,
+    "role": "medium"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": 121,
+    "label": "checkpoint 1 (line 121)",
+    "kind": "deny",
+    "player": "三沢岳明",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": 121,
+    "label": "checkpoint 1 (line 121)",
+    "kind": "deny",
+    "player": "犀賀省吾",
+    "seat": 19,
+    "role": "fanatic"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "竹内多聞",
+    "seat": 2,
+    "role": "werehamster"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "牧野慶",
+    "seat": 3,
+    "role": "seer"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "牧野慶",
+    "seat": 3,
+    "role": "fanatic"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "恩田理沙",
+    "seat": 5,
+    "role": "seer"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "恩田理沙",
+    "seat": 5,
+    "role": "werehamster"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "志村晃",
+    "seat": 7,
+    "role": "medium"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "美浜奈保子",
+    "seat": 8,
+    "role": "fanatic"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "美浜奈保子",
+    "seat": 8,
+    "role": "werehamster"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "木船郁子",
+    "seat": 12,
+    "role": "fanatic"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "木船郁子",
+    "seat": 12,
+    "role": "werehamster"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "永井頼人",
+    "seat": 13,
+    "role": "werehamster"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "三沢岳明",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "阿部倉司",
+    "seat": 15,
+    "role": "werewolf"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "阿部倉司",
+    "seat": 15,
+    "role": "werehamster"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "藤田茂",
+    "seat": 16,
+    "role": "werehamster"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "犀賀省吾",
+    "seat": 19,
+    "role": "fanatic"
+  },
+  {
+    "file": "siren3.howl",
+    "title": "siren3.howl",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "矢倉市子",
+    "seat": 20,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 16,
+    "label": "checkpoint 1 (line 16)",
+    "kind": "deny",
+    "player": "ゲムヲ",
+    "seat": 12,
+    "role": "possessed"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 16,
+    "label": "checkpoint 1 (line 16)",
+    "kind": "deny",
+    "player": "ゲムヲ",
+    "seat": 12,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 33,
+    "label": "checkpoint 2 (line 33)",
+    "kind": "deny",
+    "player": "ピーチ",
+    "seat": 2,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "villager"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "possessed"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "ピーチ",
+    "seat": 2,
+    "role": "possessed"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "ピーチ",
+    "seat": 2,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "アイスクライマー",
+    "seat": 4,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "アイスクライマー",
+    "seat": 4,
+    "role": "possessed"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "アイスクライマー",
+    "seat": 4,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "ピチュー",
+    "seat": 5,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "こどもリンク",
+    "seat": 8,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "こどもリンク",
+    "seat": 8,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "ゼルダ",
+    "seat": 13,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "ゼルダ",
+    "seat": 13,
+    "role": "possessed"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "ゼルダ",
+    "seat": 13,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "シーク",
+    "seat": 14,
+    "role": "possessed"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "deny",
+    "player": "シーク",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "confirm",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "seer"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": 77,
+    "label": "checkpoint 3 (line 77)",
+    "kind": "confirm",
+    "player": "ピーチ",
+    "seat": 2,
+    "role": "seer"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "villager"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "medium"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "possessed"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ピーチ",
+    "seat": 2,
+    "role": "possessed"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ピーチ",
+    "seat": 2,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "アイスクライマー",
+    "seat": 4,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "アイスクライマー",
+    "seat": 4,
+    "role": "possessed"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "アイスクライマー",
+    "seat": 4,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ピチュー",
+    "seat": 5,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "こどもリンク",
+    "seat": 8,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "こどもリンク",
+    "seat": 8,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ミュウツー",
+    "seat": 10,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ゼルダ",
+    "seat": 13,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ゼルダ",
+    "seat": 13,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "シーク",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "Dr.マリオ",
+    "seat": 1,
+    "role": "seer"
+  },
+  {
+    "file": "smabro2.howl",
+    "title": "スマブラ人狼２村目",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "ピーチ",
+    "seat": 2,
+    "role": "seer"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 8,
+    "label": "checkpoint 1 (line 8)",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 8,
+    "label": "checkpoint 1 (line 8)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 8,
+    "label": "checkpoint 1 (line 8)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 8,
+    "label": "checkpoint 1 (line 8)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 8,
+    "label": "checkpoint 1 (line 8)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 8,
+    "label": "checkpoint 1 (line 8)",
+    "kind": "confirm",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "mason"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 10,
+    "label": "checkpoint 2 (line 10)",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 10,
+    "label": "checkpoint 2 (line 10)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 10,
+    "label": "checkpoint 2 (line 10)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 10,
+    "label": "checkpoint 2 (line 10)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 10,
+    "label": "checkpoint 2 (line 10)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 10,
+    "label": "checkpoint 2 (line 10)",
+    "kind": "confirm",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "mason"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 13,
+    "label": "checkpoint 3 (line 13)",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 13,
+    "label": "checkpoint 3 (line 13)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 13,
+    "label": "checkpoint 3 (line 13)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 13,
+    "label": "checkpoint 3 (line 13)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 13,
+    "label": "checkpoint 3 (line 13)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 13,
+    "label": "checkpoint 3 (line 13)",
+    "kind": "confirm",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "mason"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 28,
+    "label": "checkpoint 4 (line 28)",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "werehamster"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ブラックピット",
+    "seat": 1,
+    "role": "seer"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "むらびと",
+    "seat": 2,
+    "role": "nekomata"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ロックマン",
+    "seat": 3,
+    "role": "seer"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "フィットレ",
+    "seat": 4,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "フィットレ",
+    "seat": 4,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ロゼッタ",
+    "seat": 5,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ロゼッタ",
+    "seat": 5,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ゲッコウガ",
+    "seat": 7,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ゲッコウガ",
+    "seat": 7,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "seer"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "mason"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "パルテナ",
+    "seat": 9,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "パルテナ",
+    "seat": 9,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "パックマン",
+    "seat": 10,
+    "role": "nekomata"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ルフレ",
+    "seat": 11,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ルフレ",
+    "seat": 11,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "シュルク",
+    "seat": 12,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "シュルク",
+    "seat": 12,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ルキナ",
+    "seat": 13,
+    "role": "seer"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "クッパJr.",
+    "seat": 14,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "クッパJr.",
+    "seat": 14,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ダックハント",
+    "seat": 15,
+    "role": "mason"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "リュウ",
+    "seat": 16,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "リュウ",
+    "seat": 16,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "カムイ",
+    "seat": 18,
+    "role": "mason"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 64,
+    "label": "checkpoint 5 (line 64)",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 69,
+    "label": "checkpoint 6 (line 69)",
+    "kind": "deny",
+    "player": "むらびと",
+    "seat": 2,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 69,
+    "label": "checkpoint 6 (line 69)",
+    "kind": "deny",
+    "player": "むらびと",
+    "seat": 2,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 69,
+    "label": "checkpoint 6 (line 69)",
+    "kind": "deny",
+    "player": "むらびと",
+    "seat": 2,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 69,
+    "label": "checkpoint 6 (line 69)",
+    "kind": "deny",
+    "player": "ロゼッタ",
+    "seat": 5,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 69,
+    "label": "checkpoint 6 (line 69)",
+    "kind": "deny",
+    "player": "パックマン",
+    "seat": 10,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 69,
+    "label": "checkpoint 6 (line 69)",
+    "kind": "deny",
+    "player": "パックマン",
+    "seat": 10,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 69,
+    "label": "checkpoint 6 (line 69)",
+    "kind": "deny",
+    "player": "パックマン",
+    "seat": 10,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 69,
+    "label": "checkpoint 6 (line 69)",
+    "kind": "deny",
+    "player": "シュルク",
+    "seat": 12,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 69,
+    "label": "checkpoint 6 (line 69)",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 69,
+    "label": "checkpoint 6 (line 69)",
+    "kind": "confirm",
+    "player": "パックマン",
+    "seat": 10,
+    "role": "nekomata"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "むらびと",
+    "seat": 2,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "むらびと",
+    "seat": 2,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "ロゼッタ",
+    "seat": 5,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "ロゼッタ",
+    "seat": 5,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "リトルマック",
+    "seat": 6,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "リトルマック",
+    "seat": 6,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "ゲッコウガ",
+    "seat": 7,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "ゲッコウガ",
+    "seat": 7,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "パックマン",
+    "seat": 10,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "パックマン",
+    "seat": 10,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "シュルク",
+    "seat": 12,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "シュルク",
+    "seat": 12,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "クッパJr.",
+    "seat": 14,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "クッパJr.",
+    "seat": 14,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "リュウ",
+    "seat": 16,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "リュウ",
+    "seat": 16,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "クラウド",
+    "seat": 17,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "クラウド",
+    "seat": 17,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "villager"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": 87,
+    "label": "checkpoint 7 (line 87)",
+    "kind": "confirm",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "werewolf"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "むらびと",
+    "seat": 2,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "むらびと",
+    "seat": 2,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ロゼッタ",
+    "seat": 5,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ロゼッタ",
+    "seat": 5,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "リトルマック",
+    "seat": 6,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "リトルマック",
+    "seat": 6,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ゲッコウガ",
+    "seat": 7,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ゲッコウガ",
+    "seat": 7,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "Miiファイター",
+    "seat": 8,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "パックマン",
+    "seat": 10,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "パックマン",
+    "seat": 10,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "シュルク",
+    "seat": 12,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "シュルク",
+    "seat": 12,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "クッパJr.",
+    "seat": 14,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "クッパJr.",
+    "seat": 14,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "リュウ",
+    "seat": 16,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "リュウ",
+    "seat": 16,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "クラウド",
+    "seat": 17,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "クラウド",
+    "seat": 17,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "villager"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "medium"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "bodyguard"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "fanatic"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "immoralist"
+  },
+  {
+    "file": "smabro4.howl",
+    "title": "スマブラ４",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "ベヨネッタ",
+    "seat": 19,
+    "role": "werewolf"
+  },
+  {
+    "file": "ultimate.5.3.howl",
+    "title": "アルティメット人狼 5-3",
+    "line": 105,
+    "label": "checkpoint 1 (line 105)",
+    "kind": "deny",
+    "player": "デイジー",
+    "seat": 3,
+    "role": "possessed"
+  },
+  {
+    "file": "ultimate.5.3.howl",
+    "title": "アルティメット人狼 5-3",
+    "line": 105,
+    "label": "checkpoint 1 (line 105)",
+    "kind": "deny",
+    "player": "メイソン",
+    "seat": 4,
+    "role": "possessed"
+  },
+  {
+    "file": "ultimate.5.3.howl",
+    "title": "アルティメット人狼 5-3",
+    "line": 105,
+    "label": "checkpoint 1 (line 105)",
+    "kind": "deny",
+    "player": "結",
+    "seat": 5,
+    "role": "possessed"
+  },
+  {
+    "file": "ultimate.5.3.howl",
+    "title": "アルティメット人狼 5-3",
+    "line": 105,
+    "label": "checkpoint 1 (line 105)",
+    "kind": "deny",
+    "player": "藤澤 仁",
+    "seat": 6,
+    "role": "possessed"
+  },
+  {
+    "file": "ultimate.5.3.howl",
+    "title": "アルティメット人狼 5-3",
+    "line": 105,
+    "label": "checkpoint 1 (line 105)",
+    "kind": "deny",
+    "player": "森本　茂樹",
+    "seat": 8,
+    "role": "possessed"
+  },
+  {
+    "file": "ultimate.5.3.howl",
+    "title": "アルティメット人狼 5-3",
+    "line": 105,
+    "label": "checkpoint 1 (line 105)",
+    "kind": "deny",
+    "player": "大野　聡",
+    "seat": 9,
+    "role": "possessed"
+  },
+  {
+    "file": "ultimate.5.3.howl",
+    "title": "アルティメット人狼 5-3",
+    "line": 105,
+    "label": "checkpoint 1 (line 105)",
+    "kind": "deny",
+    "player": "伊藤　真吾",
+    "seat": 10,
+    "role": "possessed"
+  },
+  {
+    "file": "ultimate.5.3.howl",
+    "title": "アルティメット人狼 5-3",
+    "line": 105,
+    "label": "checkpoint 1 (line 105)",
+    "kind": "deny",
+    "player": "村中　秀史",
+    "seat": 12,
+    "role": "possessed"
+  },
+  {
+    "file": "ultimate.5.3.howl",
+    "title": "アルティメット人狼 5-3",
+    "line": 105,
+    "label": "checkpoint 1 (line 105)",
+    "kind": "deny",
+    "player": "中田　功",
+    "seat": 13,
+    "role": "possessed"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "deny",
+    "player": "聴覚だけはいい奴",
+    "seat": 3,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "deny",
+    "player": "初日犠牲者",
+    "seat": 4,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "deny",
+    "player": "ビッキィ",
+    "seat": 6,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "deny",
+    "player": "りあむ",
+    "seat": 7,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "deny",
+    "player": "引きこもり",
+    "seat": 10,
+    "role": "werewolf"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "deny",
+    "player": "引きこもり",
+    "seat": 10,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "deny",
+    "player": "シンジ",
+    "seat": 11,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "deny",
+    "player": "ジョニィ",
+    "seat": 14,
+    "role": "werewolf"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "deny",
+    "player": "ジョニィ",
+    "seat": 14,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "confirm",
+    "player": "引きこもり",
+    "seat": 10,
+    "role": "villager"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": 72,
+    "label": "checkpoint 1 (line 72)",
+    "kind": "confirm",
+    "player": "ジョニィ",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "聴覚だけはいい奴",
+    "seat": 3,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "初日犠牲者",
+    "seat": 4,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ビッキィ",
+    "seat": 6,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "りあむ",
+    "seat": 7,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "引きこもり",
+    "seat": 10,
+    "role": "werewolf"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "引きこもり",
+    "seat": 10,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "シンジ",
+    "seat": 11,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ジョニィ",
+    "seat": 14,
+    "role": "werewolf"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ジョニィ",
+    "seat": 14,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "引きこもり",
+    "seat": 10,
+    "role": "villager"
+  },
+  {
+    "file": "yatura-movie1.howl",
+    "title": "やつら劇場版１",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "ジョニィ",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 13,
+    "label": "checkpoint 1 (line 13)",
+    "kind": "deny",
+    "player": "初日犠牲者",
+    "seat": 14,
+    "role": "werehamster"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "DIO",
+    "seat": 1,
+    "role": "villager"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "DIO",
+    "seat": 1,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "DIO",
+    "seat": 1,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "ミスド常連",
+    "seat": 5,
+    "role": "werewolf"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "伯爵",
+    "seat": 6,
+    "role": "villager"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "伯爵",
+    "seat": 6,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "伯爵",
+    "seat": 6,
+    "role": "werewolf"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "伯爵",
+    "seat": 6,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "アイドル",
+    "seat": 7,
+    "role": "villager"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "アイドル",
+    "seat": 7,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "アイドル",
+    "seat": 7,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "宅配サービス",
+    "seat": 9,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "宅配サービス",
+    "seat": 9,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "屋根から滑り落ちる人",
+    "seat": 10,
+    "role": "villager"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "屋根から滑り落ちる人",
+    "seat": 10,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "屋根から滑り落ちる人",
+    "seat": 10,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "棺桶",
+    "seat": 13,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "deny",
+    "player": "棺桶",
+    "seat": 13,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "confirm",
+    "player": "DIO",
+    "seat": 1,
+    "role": "werewolf"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "confirm",
+    "player": "伯爵",
+    "seat": 6,
+    "role": "werehamster"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "confirm",
+    "player": "宅配サービス",
+    "seat": 9,
+    "role": "seer"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": 61,
+    "label": "checkpoint 2 (line 61)",
+    "kind": "confirm",
+    "player": "棺桶",
+    "seat": 13,
+    "role": "medium"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "DIO",
+    "seat": 1,
+    "role": "villager"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "DIO",
+    "seat": 1,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "DIO",
+    "seat": 1,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "ミスド常連",
+    "seat": 5,
+    "role": "werewolf"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "伯爵",
+    "seat": 6,
+    "role": "villager"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "伯爵",
+    "seat": 6,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "伯爵",
+    "seat": 6,
+    "role": "werewolf"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "伯爵",
+    "seat": 6,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "アイドル",
+    "seat": 7,
+    "role": "villager"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "アイドル",
+    "seat": 7,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "アイドル",
+    "seat": 7,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "宅配サービス",
+    "seat": 9,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "宅配サービス",
+    "seat": 9,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "屋根から滑り落ちる人",
+    "seat": 10,
+    "role": "villager"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "屋根から滑り落ちる人",
+    "seat": 10,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "屋根から滑り落ちる人",
+    "seat": 10,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "棺桶",
+    "seat": 13,
+    "role": "fanatic"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "deny",
+    "player": "棺桶",
+    "seat": 13,
+    "role": "immoralist"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "DIO",
+    "seat": 1,
+    "role": "werewolf"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "伯爵",
+    "seat": 6,
+    "role": "werehamster"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "宅配サービス",
+    "seat": 9,
+    "role": "seer"
+  },
+  {
+    "file": "yatura2.howl",
+    "title": "やつら２",
+    "line": null,
+    "label": "end of game",
+    "kind": "confirm",
+    "player": "棺桶",
+    "seat": 13,
+    "role": "medium"
+  }
+]
