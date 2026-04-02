@@ -49,7 +49,7 @@ export class FenrirStrategy implements Strategy {
   constructor(network: AnyNetwork, config?: Partial<FenrirStrategyConfig>) {
     this.network = network
     this.config = { explore: true, ...config }
-    if (this.config.activeFromDay && this.config.activeFromDay > 1) {
+    if (this.config.activeFromDay && this.config.activeFromDay >= 1) {
       this.heuristicFallback = new HeuristicStrategy()
     }
   }
