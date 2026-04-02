@@ -48,6 +48,7 @@ export type CapturedObservation = {
   role: string
   day: number
   observation: Float32Array
+  proposals?: { type: string, target: number }[]
 }
 
 export type MinimalAdapterConfig = {
@@ -70,6 +71,9 @@ export type MinimalAdapterConfig = {
   rules?: Partial<ResolvedRules>
   /** 全プレイヤーの observation をキャプチャ（inspect 用） */
   captureObservations?: boolean
+  /** Mason takeover: ML mason 死亡時に生存パートナーに strategy を移す。
+   *  callback は game-worker の strategies (FenrirStrategy) map を更新する。 */
+  onMasonTakeover?: (deadSeat: number, newSeat: number) => void
 }
 
 export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { getCapturedObservations?: () => CapturedObservation[] } {
@@ -92,6 +96,9 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { g
   let cachedEndgameGroups: PlanDayGroup[] | undefined
   // 村の公認処刑プラン（上書きされるまで永続）
   let currentExecutionPlans: ExecutionPlan[] = []
+  // mason takeover 用トラッキング
+  let mlMasonSeat: number | null = null
+  let masonTakeoverDone = false
 
   function getStrategy(seat: number): Strategy {
     return config.strategies.get(seat) ?? config.defaultStrategy!
@@ -271,8 +278,41 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { g
       const dayProposals: import('../../../lupa/leadership.ts').Proposal[] = []
       const allMasons = state.players.filter(p => p.role === 'mason')
       const aliveMasons = allMasons.filter(p => p.alive)
+
+      // Mason takeover: ML mason が死亡し、パートナーが生存 → strategy を移す
+      if (config.onMasonTakeover && !masonTakeoverDone) {
+        // 初回: ML mason seat を特定（strategies map にいる mason）
+        if (mlMasonSeat === null) {
+          for (const m of allMasons) {
+            if (config.strategies.has(m.seat)) {
+              mlMasonSeat = m.seat
+              break
+            }
+          }
+        }
+        if (mlMasonSeat !== null) {
+          const mlMason = allMasons.find(p => p.seat === mlMasonSeat)
+          if (mlMason && !mlMason.alive && aliveMasons.length > 0) {
+            const newSeat = aliveMasons[0].seat
+            const strategy = config.strategies.get(mlMasonSeat)
+            if (strategy) {
+              config.strategies.delete(mlMasonSeat)
+              config.strategies.set(newSeat, strategy)
+              // strategy cache クリア（新しい seat で再推論させる）
+              const s = strategy as any
+              s.cachedDay = -1
+              s.lastObs = null
+              s.cachedStrategyResult = null
+            }
+            config.onMasonTakeover(mlMasonSeat, newSeat)
+            mlMasonSeat = newSeat
+            masonTakeoverDone = true
+          }
+        }
+      }
       if (aliveMasons.length > 0) {
-        const mason = aliveMasons[0]
+        // ML mason を優先（strategies に登録されてる方）。takeover 後も正しく追従する
+        const mason = aliveMasons.find(m => config.strategies.has(m.seat)) ?? aliveMasons[0]
         const masonView = buildPlayerView(state, mason.seat)
         const masonCtx = buildCtx(vctx as PhaseContext, mason, masonView)
         masonCtx.commander = mason.seat  // 提案を出すために指揮者扱い
@@ -280,9 +320,10 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { g
         if (proposal && proposal.type === 'execute_order') {
           dayProposals.push(proposal)
         }
+
         // planグループをキャッシュ（死亡後の継続用）
         const s = getStrategy(mason.seat) as any
-        const result = s.cachedStrategyResult ?? s.lastResult
+        const result = s.cachedStrategyResult
         if (result) {
           const fwdLogits = result.policies?.get('plan_forward')
           if (fwdLogits) {
@@ -362,6 +403,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { g
             role: player.role,
             day: ctx.day,
             observation: encodeObservation(ctx),
+            proposals: dayProposals.map(p => ({ type: p.type, target: p.target })),
           })
         }
 

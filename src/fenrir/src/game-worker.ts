@@ -224,6 +224,15 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     const isInspectGame = req.inspectSeeds != null && req.inspectSeeds.includes(seed)
     let observationGetter: (() => import('./lupaAdapters/minimal-adapter.ts').CapturedObservation[]) | undefined
 
+    // Mason takeover callback: ML mason 死亡時に strategies map を更新
+    const onMasonTakeover = req.enableMasonTakeover ? (deadSeat: number, newSeat: number) => {
+      const strategy = strategies.get(deadSeat)
+      if (strategy) {
+        strategies.delete(deadSeat)
+        strategies.set(newSeat, strategy)
+      }
+    } : undefined
+
     if (snapshot) {
       // Seed Bank リプレイ: スナップショットから resumeGame
       const handlers = config.strategyOnly
@@ -239,6 +248,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
             roles,
             rules: config.rules,
             captureObservations: isInspectGame,
+            onMasonTakeover,
           })
         : fullAdapter({
             strategies: strategiesMap,
@@ -274,6 +284,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         roles,
         rules: config.rules,
         captureObservations: isInspectGame,
+        onMasonTakeover,
       })
       tsumiCacheGetter = () => handlers.getTsumiCache()
       if (isInspectGame && handlers.getCapturedObservations) observationGetter = () => handlers.getCapturedObservations!()
@@ -481,6 +492,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         gameResult.allObservations = observationGetter().map(o => ({
           seat: o.seat, role: o.role, day: o.day,
           observation: Array.from(o.observation),
+          proposals: o.proposals,
         }))
       }
     }

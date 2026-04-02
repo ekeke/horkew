@@ -135,6 +135,8 @@ export type WorkerRequest = {
   frozenMasonWeights?: SharedWeights
   /** inspect サンプリング対象の seed リスト */
   inspectSeeds?: number[]
+  /** Mason takeover: ML mason 死亡時に生存パートナーに strategy を移す */
+  enableMasonTakeover?: boolean
 }
 
 /** 1ゲーム分のタイミング情報 */

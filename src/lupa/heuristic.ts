@@ -417,26 +417,44 @@ export class HeuristicStrategy implements Strategy {
     return target ? { type: 'forecast', target } : { type: 'none' }
   }
 
-  decideVote(ctx: DecisionContext): number {
-    const { proposals } = ctx
-
-    // 指揮者の処刑指示（再提案があれば最新を採用）
-    const executeOrder = proposals.findLast(p => p.type === 'execute_order')
-    if (executeOrder) {
-      if (ctx.myRole === 'immoralist' && executeOrder.target === ctx.knownHamster) {
-        // 背徳者: 妖狐処刑指示には従わない
-      } else if (ctx.alivePlayers.includes(executeOrder.target)) {
-        return executeOrder.target
-      }
+  /**
+   * executionPlans / proposals から処刑対象を解決。
+   * executionPlans の designated を優先し、なければ proposals の execute_order。
+   */
+  private resolveExecutionPlanTarget(ctx: DecisionContext): number | null {
+    // executionPlans の designated（mason の plan）
+    if (ctx.executionPlans.length > 0) {
+      const designated = ctx.executionPlans.find(p => p.type === 'designated')
+      const plan = designated ?? ctx.executionPlans[0]
+      const target = plan.targets.find(t => ctx.alivePlayers.includes(t))
+      if (target != null) return target
     }
+    // proposals の execute_order（指揮者指示）
+    const executeOrder = ctx.proposals.findLast(p => p.type === 'execute_order')
+    if (executeOrder && ctx.alivePlayers.includes(executeOrder.target)) {
+      return executeOrder.target
+    }
+    return null
+  }
 
-    // Hati詰み（村側、6人以下）
+  decideVote(ctx: DecisionContext): number {
+    // 1. Hati詰み（村側、最優先）
     if (!isWerewolfAligned(ctx.myRole) && ctx.myRole !== 'werehamster' && ctx.myRole !== 'immoralist') {
       const tsumiTarget = tryTsumi(ctx)
       if (tsumiTarget && ctx.alivePlayers.includes(tsumiTarget)) return tsumiTarget
     }
 
-    // 役職別投票
+    // 2. 共有者の処刑指示（executionPlans / proposals の execute_order）
+    const planTarget = this.resolveExecutionPlanTarget(ctx)
+    if (planTarget) {
+      if (ctx.myRole === 'immoralist' && planTarget === ctx.knownHamster) {
+        // 背徳者: 妖狐処刑指示には従わない
+      } else {
+        return planTarget
+      }
+    }
+
+    // 3. 役職別投票
     switch (ctx.myRole) {
       case 'werewolf': return decideWerewolfVote(ctx)
       case 'fanatic': return decideFanaticVote(ctx)

@@ -307,6 +307,7 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
           role: o.role,
           day: o.day,
           observation: decodeObservation(new Float32Array(o.observation)),
+          proposals: o.proposals,
         })
       }
     }
@@ -1089,6 +1090,7 @@ async function main(): Promise<void> {
           mlStartDay: (!batchSnapshots) ? masonMlStartDay : undefined,
           snapshots: batchSnapshots,
           inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
+          enableMasonTakeover: true,
         }, seeds)
         if (inspectSeeds.length > 0) saveInspectGames(serializedResults, 'mason_individual', masonIter)
 
