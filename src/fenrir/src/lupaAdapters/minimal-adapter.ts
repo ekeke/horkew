@@ -60,6 +60,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
   // mason死亡後のplan継続用キャッシュ
   let cachedPlanGroups: PlanDayGroup[] | undefined
   let cachedPlanGroupIndex = 0
+  let cachedEndgameGroups: PlanDayGroup[] | undefined
 
   function getStrategy(seat: number): Strategy {
     return config.strategies.get(seat) ?? config.defaultStrategy!
@@ -258,12 +259,34 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
             cachedPlanGroups = parsePlanIndices(indices)
             cachedPlanGroupIndex = 1  // groups[0]は今日使った、次回はgroups[1]から
           }
+          const egLogits = result.policies?.get('plan_endgame')
+          if (egLogits) {
+            const egIndices = argmaxPlanTokens(egLogits, s.numEndgameTokens ?? 4)
+            cachedEndgameGroups = parsePlanIndices(egIndices)
+          }
         }
-      } else if (allMasons.length > 0 && cachedPlanGroups && cachedPlanGroupIndex < cachedPlanGroups.length) {
-        // mason全滅: キャッシュされたplanの次グループを使用
-        const group = cachedPlanGroups[cachedPlanGroupIndex++]
+      } else if (allMasons.length > 0 && cachedPlanGroups) {
+        // mason全滅: キャッシュされたplanから投票先を解決
         const aliveSeats = alivePlayers(state).map(p => p.seat)
-        const target = resolvePlanGroupSimple(group, aliveSeats, vctx.events)
+        const alive = aliveSeats.length
+        let target: number | null = null
+
+        // Endgame plan 優先（≤6人）
+        if (cachedEndgameGroups && cachedEndgameGroups.length > 0) {
+          if (alive <= 4) {
+            target = resolvePlanGroupSimple(cachedEndgameGroups[0], aliveSeats, vctx.events)
+          } else if (alive <= 6) {
+            const group = cachedEndgameGroups.length >= 2 ? cachedEndgameGroups[1] : cachedEndgameGroups[0]
+            target = resolvePlanGroupSimple(group, aliveSeats, vctx.events)
+          }
+        }
+
+        // Forward plan フォールバック
+        if (!target && cachedPlanGroupIndex < cachedPlanGroups.length) {
+          const group = cachedPlanGroups[cachedPlanGroupIndex++]
+          target = resolvePlanGroupSimple(group, aliveSeats, vctx.events)
+        }
+
         if (target) {
           dayProposals.push({ type: 'execute_order', target })
         }
