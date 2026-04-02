@@ -424,9 +424,9 @@
               <div class="detail-label">Plan Tokens ({obs.planTokens.count})</div>
               {#each obs.planTokens.tokens as pt, i}
                 <div class="plan-token-input">
-                  <span class="plan-token-idx">#{i + 1}</span>
-                  <span class="plan-token-targets">targets: [{pt.targetMask.map((v: number, j: number) => v > 0.5 ? j + 1 : null).filter((v: any) => v).join(',')}]</span>
-                  <span class="plan-token-type">{['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? '?'}</span>
+                  <span class="plan-token-type-badge {['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? ''}">{['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? '?'}</span>
+                  <span class="plan-token-seats">{#each pt.targetMask as v, j}{#if v > 0.5}<span class="plan-token-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === j + 1)?.role ?? ''] || 'var(--ctp-text)'}">{j + 1}</span>{/if}{/each}</span>
+                  {#if pt.priority > 0}<span class="plan-token-pri">pri:{pt.priority.toFixed(1)}</span>{/if}
                 </div>
               {/each}
             </div>
@@ -624,9 +624,9 @@
               <div class="detail-label">Plan Tokens ({aobs.planTokens.count})</div>
               {#each aobs.planTokens.tokens as pt, i}
                 <div class="plan-token-input">
-                  <span class="plan-token-idx">#{i + 1}</span>
-                  <span class="plan-token-targets">targets: [{pt.targetMask.map((v: number, j: number) => v > 0.5 ? j + 1 : null).filter((v: any) => v).join(',')}]</span>
-                  <span class="plan-token-type">{['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? '?'}</span>
+                  <span class="plan-token-type-badge {['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? ''}">{['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? '?'}</span>
+                  <span class="plan-token-seats">{#each pt.targetMask as v, j}{#if v > 0.5}<span class="plan-token-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === j + 1)?.role ?? ''] || 'var(--ctp-text)'}">{j + 1}</span>{/if}{/each}</span>
+                  {#if pt.priority > 0}<span class="plan-token-pri">pri:{pt.priority.toFixed(1)}</span>{/if}
                 </div>
               {/each}
             </div>
@@ -960,10 +960,17 @@
   .pt-next { color: var(--ctp-overlay0); }
   .pt-stop { color: var(--color-wolf); }
   .plan-groups { font-size: 0.65rem; color: var(--ctp-subtext0); }
-  .plan-token-input { display: flex; gap: 4px; align-items: center; font-size: 0.7rem; padding: 1px 0; }
-  .plan-token-idx { color: var(--ctp-overlay0); width: 1.5em; }
-  .plan-token-targets { color: var(--ctp-sapphire); }
-  .plan-token-type { color: var(--ctp-subtext0); font-style: italic; }
+  .plan-token-input { display: flex; gap: 6px; align-items: center; font-size: 0.7rem; padding: 2px 0; }
+  .plan-token-type-badge {
+    font-size: 0.6rem; font-weight: bold; padding: 1px 5px; border-radius: 3px;
+    background: var(--ctp-surface0); color: var(--ctp-subtext0); min-width: 5em; text-align: center;
+  }
+  .plan-token-type-badge.designated { color: var(--ctp-sapphire); background: color-mix(in srgb, var(--ctp-sapphire) 15%, transparent); }
+  .plan-token-type-badge.endgame { color: var(--ctp-peach); background: color-mix(in srgb, var(--ctp-peach) 15%, transparent); }
+  .plan-token-type-badge.grayran { color: var(--color-village); background: color-mix(in srgb, var(--color-village) 15%, transparent); }
+  .plan-token-seats { display: flex; gap: 2px; }
+  .plan-token-seat { font-weight: bold; }
+  .plan-token-pri { color: var(--ctp-overlay0); font-size: 0.6rem; }
 
   /* Predict */
   .predict-list { font-size: 0.7rem; }
