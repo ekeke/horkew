@@ -3,7 +3,7 @@
  * NeuralNetworkの推論結果をLupaのアクションに変換する。
  */
 
-import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from '../../lupa/strategy.ts'
+import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from './strategy.ts'
 import type { NightAction, DayClaim } from '../../lupa/types.ts'
 import type { CommunicationAction } from './communication.ts'
 import type { Proposal, LeadershipResponse } from './leadership.ts'

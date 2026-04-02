@@ -6,7 +6,7 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
-import type { Strategy } from '../../lupa/strategy.ts'
+import type { Strategy } from './strategy.ts'
 import { runGame, resumeGame } from '../../lupa/engine.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'

@@ -7,7 +7,7 @@
  * 公開情報(publicEvents, signals)と自分の秘密情報(myPlayer)のみからエンコード。
  */
 
-import type { DecisionContext, TeamDecisionContext, PlanType } from '../../lupa/strategy.ts'
+import type { DecisionContext, TeamDecisionContext, PlanType } from './strategy.ts'
 import type { ForwardResult } from './ml/nn.ts'
 import type { SystemRole } from '../../types/index.ts'
 import type { FenrirEvent } from './events.ts'

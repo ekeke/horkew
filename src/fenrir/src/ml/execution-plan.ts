@@ -3,7 +3,7 @@
  */
 
 import type { SystemRole } from '../../../types/index.ts'
-import type { ExecutionPlan } from '../../../lupa/strategy.ts'
+import type { ExecutionPlan } from '../strategy.ts'
 
 /** 席→CO役職のマップ */
 type ClaimedRoles = Map<number, SystemRole>

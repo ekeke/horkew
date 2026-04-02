@@ -8,7 +8,7 @@
 import { parentPort } from 'node:worker_threads'
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
-import type { Strategy } from '../../lupa/strategy.ts'
+import type { Strategy } from './strategy.ts'
 import { runGame, resumeGame } from '../../lupa/engine.ts'
 import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
 import { fullAdapter } from './lupaAdapters/full-adapter.ts'

@@ -14,8 +14,8 @@
  * - target:   SEATS (対象選択: 占い先、護衛先、共有相方等)
  */
 
-import type { DecisionContext, TeamDecisionContext } from '../../lupa/strategy.ts'
-import type { WolfNightAction } from '../../lupa/strategy.ts'
+import type { DecisionContext, TeamDecisionContext } from './strategy.ts'
+import type { WolfNightAction } from './strategy.ts'
 import type { NightAction, DayClaim } from '../../lupa/types.ts'
 import type { Signal, RolePrediction } from './communication.ts'
 import type { LeadershipResponse } from './leadership.ts'

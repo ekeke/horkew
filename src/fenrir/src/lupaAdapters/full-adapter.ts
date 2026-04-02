@@ -10,7 +10,7 @@ import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '.
 import type {
   DecisionContext, TeamDecisionContext,
   Strategy, TeamStrategy, WolfNightAction,
-} from '../../../lupa/strategy.ts'
+} from '../strategy.ts'
 import type { SignalRecord } from '../communication.ts'
 import type { Proposal } from '../leadership.ts'
 import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../../../lupa/handlers.ts'

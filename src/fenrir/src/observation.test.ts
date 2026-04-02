@@ -4,7 +4,7 @@ import { OBSERVATION_SIZE, SEATS, NUM_ROLES, encodeObservation, tokenize,
   PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS,
   FANATIC_OBSERVATION_SIZE, FANATIC_SEAT_FEATURES, FANATIC_CLS_FEATURES,
   encodeFanaticObservation, type VillageNNOutput } from './observation.ts'
-import type { DecisionContext, ExecutionPlan } from '../../lupa/strategy.ts'
+import type { DecisionContext, ExecutionPlan } from './strategy.ts'
 import { Rng } from '../../lupa/random.ts'
 import { resolveRules } from '../../howl/ruleset.ts'
 

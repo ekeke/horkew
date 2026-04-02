@@ -6,7 +6,7 @@
  */
 
 import type { SystemRole } from '../../../types/index.ts'
-import type { Strategy, DecisionContext } from '../../../lupa/strategy.ts'
+import type { Strategy, DecisionContext } from '../strategy.ts'
 import { runGame } from '../../../lupa/engine.ts'
 import { minimalAdapter } from '../lupaAdapters/minimal-adapter.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../../lupa/heuristic.ts'

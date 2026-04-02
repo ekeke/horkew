@@ -5,7 +5,7 @@
  * パターン: ローラー(30%), 決め打ち(20%), 吊り先指定(20%), グレラン(30%)
  */
 
-import type { DecisionContext, ExecutionPlan } from '../../../lupa/strategy.ts'
+import type { DecisionContext, ExecutionPlan } from '../strategy.ts'
 import type { SystemRole } from '../../../types/index.ts'
 import type { GameEvent } from '../../../lupa/types.ts'
 import { resolveRules } from '../../../howl/ruleset.ts'

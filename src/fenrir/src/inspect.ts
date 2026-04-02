@@ -9,7 +9,7 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
-import type { Strategy } from '../../lupa/strategy.ts'
+import type { Strategy } from './strategy.ts'
 import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from './lupaAdapters/full-adapter.ts'
 import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
