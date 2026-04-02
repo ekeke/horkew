@@ -42,7 +42,7 @@ export async function runGame(config: GameConfig, handlers: GameHandlers): Promi
     return roleArray[i]
   })
   const names = config.nameStyle === 'seat'
-    ? generateRoleSeatNames(assignedRoles, shuffledIndices)
+    ? generateRoleSeatNames(assignedRoles)
     : generateRoleNames(assignedRoles)
   const players = assignRoles(config.roles, names, shuffledIndices)
 
