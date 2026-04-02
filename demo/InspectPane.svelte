@@ -285,17 +285,8 @@
           {@const obs = selectedStep.observation}
           <div class="detail-title">Seat {selectedStep.seat} ({selectedStep.role})</div>
 
-          <!-- Action -->
-          <div class="detail-section">
-            <div class="detail-label">Action</div>
-            <div class="detail-kv">
-              <span class="kv-k">Head</span><span>{selectedStep.actionHead}</span>
-              <span class="kv-k">Desc</span><span>{selectedStep.actionDescription}</span>
-              <span class="kv-k">logProb</span><span>{selectedStep.logProb.toFixed(4)}</span>
-              <span class="kv-k">Reward</span><span class:positive={selectedStep.reward > 0} class:negative={selectedStep.reward < 0}>{selectedStep.reward.toFixed(4)}</span>
-              <span class="kv-k">Value</span><span>{selectedStep.value.toFixed(4)}</span>
-            </div>
-          </div>
+          <!-- ==================== INPUT ==================== -->
+          <div class="section-divider">INPUT</div>
 
           <!-- Global -->
           <div class="detail-section">
@@ -316,7 +307,6 @@
           </div>
 
           <!-- Private -->
-          {#if obs.private.divineResults.length > 0 || obs.private.wolfTeammates.length > 0 || obs.private.masonPartner || obs.private.guardHistory.length > 0 || obs.private.knownHamster}
           <div class="detail-section">
             <div class="detail-label">Private</div>
             <div class="detail-private">
@@ -335,9 +325,11 @@
               {#if obs.private.knownHamster}
                 <div style="color:var(--color-fox)">Hamster: seat{obs.private.knownHamster}</div>
               {/if}
+              {#if !obs.private.divineResults.length && !obs.private.wolfTeammates.length && !obs.private.masonPartner && !obs.private.guardHistory.length && !obs.private.knownHamster}
+                <div class="no-plan">なし</div>
+              {/if}
             </div>
           </div>
-          {/if}
 
           <!-- Retar heatmap -->
           <div class="detail-section">
@@ -378,10 +370,38 @@
             </div>
           </div>
 
-          <!-- Plan tokens -->
+          <!-- Plan Tokens (input) -->
+          {#if obs.planTokens.count > 0}
+            <div class="detail-section">
+              <div class="detail-label">Plan Tokens ({obs.planTokens.count})</div>
+              {#each obs.planTokens.tokens as pt, i}
+                <div class="plan-token-input">
+                  <span class="plan-token-idx">#{i + 1}</span>
+                  <span class="plan-token-targets">targets: [{pt.targetMask.map((v: number, j: number) => v > 0.5 ? j + 1 : null).filter((v: any) => v).join(',')}]</span>
+                  <span class="plan-token-type">{['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? '?'}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          <!-- ==================== OUTPUT ==================== -->
+          <div class="section-divider">OUTPUT</div>
+
+          <!-- Action -->
+          <div class="detail-section">
+            <div class="detail-label">Action</div>
+            <div class="detail-kv">
+              <span class="kv-k">Head</span><span>{selectedStep.actionHead}</span>
+              <span class="kv-k">Desc</span><span>{selectedStep.actionDescription}</span>
+              <span class="kv-k">logProb</span><span>{selectedStep.logProb.toFixed(4)}</span>
+              <span class="kv-k">Value</span><span>{selectedStep.value.toFixed(4)}</span>
+            </div>
+          </div>
+
+          <!-- Plan tokens (output) -->
           {#if selectedStep.planForward}
             <div class="detail-section">
-              <div class="detail-label">Plan Forward</div>
+              <div class="detail-label">Plan Forward (output)</div>
               <div class="plan-tokens">
                 {#each selectedStep.planForward.indices as idx}
                   {@const pt = planTokenLabel(idx)}
@@ -393,7 +413,7 @@
           {/if}
           {#if selectedStep.planEndgame}
             <div class="detail-section">
-              <div class="detail-label">Plan Endgame</div>
+              <div class="detail-label">Plan Endgame (output)</div>
               <div class="plan-tokens">
                 {#each selectedStep.planEndgame.indices as idx}
                   {@const pt = planTokenLabel(idx)}
@@ -419,6 +439,15 @@
               </div>
             </div>
           {/if}
+
+          <!-- ==================== OTHER ==================== -->
+          <div class="section-divider">REWARD / OTHER</div>
+
+          <div class="detail-section">
+            <div class="detail-kv">
+              <span class="kv-k">Reward</span><span class:positive={selectedStep.reward > 0} class:negative={selectedStep.reward < 0}>{selectedStep.reward.toFixed(4)}</span>
+            </div>
+          </div>
 
           <!-- All player observations -->
           {#if allPlayerForDay.length > 0}
@@ -705,6 +734,16 @@
     flex-direction: column;
     gap: 0.5rem;
   }
+  .section-divider {
+    font-size: 0.6rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ctp-overlay0);
+    border-bottom: 1px solid var(--ctp-surface0);
+    padding: 0.3rem 0 0.15rem;
+    margin-top: 0.3rem;
+  }
   .detail-title {
     font-weight: bold;
     color: var(--color-accent);
@@ -774,6 +813,10 @@
   .pt-next { color: var(--ctp-overlay0); }
   .pt-stop { color: var(--color-wolf); }
   .plan-groups { font-size: 0.65rem; color: var(--ctp-subtext0); }
+  .plan-token-input { display: flex; gap: 4px; align-items: center; font-size: 0.7rem; padding: 1px 0; }
+  .plan-token-idx { color: var(--ctp-overlay0); width: 1.5em; }
+  .plan-token-targets { color: var(--ctp-sapphire); }
+  .plan-token-type { color: var(--ctp-subtext0); font-style: italic; }
 
   /* Predict */
   .predict-list { font-size: 0.7rem; }
