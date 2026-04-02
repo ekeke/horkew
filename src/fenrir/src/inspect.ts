@@ -354,7 +354,7 @@ for (let g = 0; g < count; g++) {
       }
 
       // Predict (sigmoid)
-      if (step.sigmoidActions && step.actionHead === 'predict') {
+      if (step.sigmoidActions) {
         const predictions: Array<{ seat: number, roles: Array<{ role: string, value: number }> }> = []
         for (let s = 0; s < 14; s++) {
           const seatPreds: Array<{ role: string, value: number }> = []

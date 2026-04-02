@@ -273,7 +273,7 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
             groups,
           }
         }
-        if (step.sigmoidActions && step.actionHead === 'predict') {
+        if (step.sigmoidActions) {
           const ROLES_LIST = ['villager','seer','medium','bodyguard','mason','nekomata','werewolf','possessed','fanatic','werehamster','immoralist']
           const predictions: Array<{ seat: number, roles: Array<{ role: string, value: number }> }> = []
           for (let s = 0; s < 14; s++) {
