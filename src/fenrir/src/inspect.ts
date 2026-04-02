@@ -360,9 +360,7 @@ for (let g = 0; g < count; g++) {
           const seatPreds: Array<{ role: string, value: number }> = []
           for (let r = 0; r < 11; r++) {
             const val = step.sigmoidActions[s * 11 + r]
-            if (val > 0.3) {
-              seatPreds.push({ role: ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist'][r], value: Math.round(val * 100) / 100 })
-            }
+            seatPreds.push({ role: ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'werewolf', 'possessed', 'fanatic', 'werehamster', 'immoralist'][r], value: Math.round(val * 100) / 100 })
           }
           if (seatPreds.length > 0) predictions.push({ seat: s + 1, roles: seatPreds })
         }

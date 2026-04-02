@@ -474,7 +474,7 @@
           <!-- Predict -->
           {#if selectedStep.predict && selectedStep.predict.length > 0}
             <div class="detail-section">
-              <div class="detail-label">Predictions (&gt;30%)</div>
+              <div class="detail-label">Predictions</div>
               <div class="predict-list">
                 {#each selectedStep.predict as p}
                   <div class="predict-row">

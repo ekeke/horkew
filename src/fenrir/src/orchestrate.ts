@@ -280,7 +280,7 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
             const seatPreds: Array<{ role: string, value: number }> = []
             for (let r = 0; r < 11; r++) {
               const val = step.sigmoidActions[s * 11 + r]
-              if (val > 0.3) seatPreds.push({ role: ROLES_LIST[r], value: Math.round(val * 100) / 100 })
+              seatPreds.push({ role: ROLES_LIST[r], value: Math.round(val * 100) / 100 })
             }
             if (seatPreds.length > 0) predictions.push({ seat: s + 1, roles: seatPreds })
           }
