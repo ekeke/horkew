@@ -20,7 +20,7 @@ import {
   retarResultToPossibilities,
   lupaRunRetar,
   type RetarResult,
-} from '../../../lupa/retar-bridge.ts'
+} from '../retar-bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
 import { argmaxPlanTokens, parsePlanIndices, resolvePlanGroupSimple, type PlanDayGroup } from '../rule-action.ts'
 

@@ -20,7 +20,7 @@ import { formatHowl } from '../../lupa/format.ts'
 import { parse } from '../../howl/parser.ts'
 import { buildVillageStatus } from '../../howl/bridge.ts'
 import { searchTsumi } from '../../hati/index.ts'
-import { DEFAULT_RETAR_OPTIONS } from '../../lupa/retar-bridge.ts'
+import { DEFAULT_RETAR_OPTIONS } from './retar-bridge.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
 import { encodeTrueRoles } from './observation.ts'
 import {
