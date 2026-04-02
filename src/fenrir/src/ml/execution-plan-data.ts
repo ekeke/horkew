@@ -325,15 +325,21 @@ export type PlanTokenTrainingSample = {
 
 const NUM_FORWARD_TOKENS = 8
 
-/** STOP 以降の全位置を STOP + mask=true に強制。「STOP後はSTOP」を教える */
+/**
+ * 最初の STOP の直後 1 トークンだけ mask=true + label=STOP に設定。
+ * 「STOP の次も STOP」を教えるが、全パディングを mask すると
+ * STOP が過剰になり position 0 まで STOP を出すように崩壊する。
+ */
 function fillStopPadding(labels: number[], mask: boolean[]): void {
-  let seenStop = false
   for (let i = 0; i < labels.length; i++) {
-    if (seenStop) {
-      labels[i] = PLAN_VOCAB.STOP
-      mask[i] = true
+    if (labels[i] === PLAN_VOCAB.STOP) {
+      // 次の位置だけ STOP を強制
+      if (i + 1 < labels.length) {
+        labels[i + 1] = PLAN_VOCAB.STOP
+        mask[i + 1] = true
+      }
+      break
     }
-    if (labels[i] === PLAN_VOCAB.STOP) seenStop = true
   }
 }
 
