@@ -2,9 +2,11 @@
 
 オーケストレーター (`orchestrate.ts`) が管理する学習パイプラインの各フェーズを記述する。
 
-```
-Pretrain B+D → Phase 0 → Phase 1 → Phase 1' → Phase 2
-```
+1. **Pretrain B+D** — plan token と行動ヘッドの教師あり初期化
+2. **Phase 0: Mason Individual** — 確定白の共有者で盤面読解力を事前学習（Day 4→1 カリキュラム）
+3. **Phase 1: Village** — frozen mason の指揮下で村陣営モデルを学習（Day 3→1、seats 1→6）
+4. **Phase 1': Non-Village** — frozen 村NN を注入して狼・狂信者・共有集団・第三勢力を学習
+5. **Phase 2: Self-Play** — 全5モデルによる自己対戦（未実装）
 
 ---
 
