@@ -234,9 +234,9 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       const state = vctx.state as GameState
       const votes = new Map<number, number>()
 
-      // 共有者の提案を executionPlans に注入（指揮者選出をスキップ）
+      // 共有者の plan を execute_order として proposals に注入
       // mason死亡後はキャッシュされたplanの次グループを使い続ける（再推論なし）
-      const executionPlans: import('../../../lupa/strategy.ts').ExecutionPlan[] = []
+      const dayProposals: import('../../../lupa/leadership.ts').Proposal[] = []
       const allMasons = state.players.filter(p => p.role === 'mason')
       const aliveMasons = allMasons.filter(p => p.alive)
       if (aliveMasons.length > 0) {
@@ -244,9 +244,9 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
         const masonView = buildPlayerView(state, mason.seat)
         const masonCtx = buildCtx(vctx as PhaseContext, mason, masonView)
         masonCtx.commander = mason.seat  // 提案を出すために指揮者扱い
-        const proposal = getStrategy(mason.seat).decideProposal(masonCtx)
+        const proposal = getStrategy(mason.seat).decideProposal?.(masonCtx)
         if (proposal && proposal.type === 'execute_order') {
-          executionPlans.push({ targets: [proposal.target], type: 'designated' })
+          dayProposals.push(proposal)
         }
         // planグループをキャッシュ（死亡後の継続用）
         const s = getStrategy(mason.seat) as any
@@ -265,7 +265,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
         const aliveSeats = alivePlayers(state).map(p => p.seat)
         const target = resolvePlanGroupSimple(group, aliveSeats)
         if (target) {
-          executionPlans.push({ targets: [target], type: 'designated' })
+          dayProposals.push({ type: 'execute_order', target })
         }
       }
 
@@ -274,7 +274,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
         const ctx = buildCtx(vctx as PhaseContext, player, view, {
           revoteRound: vctx.revoteRound,
           revoteCandidates: vctx.candidates,
-          executionPlans,
+          proposals: dayProposals,
         })
 
         const teamStrategy = player.role === 'werewolf' ? config.wolfTeamStrategy
