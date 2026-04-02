@@ -20,7 +20,7 @@
   import InspectPane from './InspectPane.svelte'
   import './theme.css'
   import { runGame } from '../src/lupa/engine.ts'
-  import { strategyAdapter } from '../src/lupa/adapters/strategy-adapter.ts'
+  import { strategyAdapter } from '../src/verify/strategy-adapter.ts'
   import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../src/lupa/heuristic.ts'
   import { formatHowl } from '../src/lupa/format.ts'
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
