@@ -28,7 +28,7 @@ let wasmAnalyze: ((village: string, setup: string, options: string) => string) |
 
 try {
   // @ts-ignore — WASM pkg は動的ロード
-  const wasm = await import('../retar-rs/pkg/retar.js')
+  const wasm = await import('../../retar-rs/pkg/retar.js')
   wasmAnalyze = wasm.analyze
 } catch {
   // WASM not available, fallback to JS
