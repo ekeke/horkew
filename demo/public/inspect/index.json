@@ -1,0 +1,20 @@
+[
+  {
+    "file": "game_42.json",
+    "seed": 42,
+    "result": "werehamster_won",
+    "gameLength": 4
+  },
+  {
+    "file": "game_43.json",
+    "seed": 43,
+    "result": "werewolf_won",
+    "gameLength": 7
+  },
+  {
+    "file": "game_44.json",
+    "seed": 44,
+    "result": "werehamster_won",
+    "gameLength": 4
+  }
+]

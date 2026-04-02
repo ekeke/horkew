@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fenrir Inspect Viewer</title>
+<style>
+:root {
+  --bg: #1a1a2e;
+  --bg2: #16213e;
+  --bg3: #0f3460;
+  --fg: #e0e0e0;
+  --fg2: #a0a0a0;
+  --accent: #e94560;
+  --accent2: #53a8b6;
+  --green: #4ecca3;
+  --yellow: #ffc857;
+  --orange: #ff6b35;
+  --border: #2a2a4a;
+  --font: 'Consolas', 'Menlo', monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font); background: var(--bg); color: var(--fg); font-size: 13px; height: 100vh; overflow: hidden; }
+
+.app { display: grid; grid-template-columns: 220px 1fr 380px; height: 100vh; }
+
+/* Left panel: game list */
+.panel-left { background: var(--bg2); border-right: 1px solid var(--border); overflow-y: auto; }
+.panel-left h2 { padding: 12px; font-size: 14px; color: var(--accent2); border-bottom: 1px solid var(--border); }
+.drop-zone { padding: 16px; text-align: center; color: var(--fg2); border: 2px dashed var(--border); margin: 8px; border-radius: 6px; cursor: pointer; }
+.drop-zone.active { border-color: var(--accent); color: var(--accent); }
+.game-item { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.game-item:hover { background: var(--bg3); }
+.game-item.selected { background: var(--bg3); border-left: 3px solid var(--accent); }
+.game-item .seed { color: var(--accent2); }
+.game-item .result { font-size: 11px; }
+.result-village { color: var(--green); }
+.result-wolf { color: var(--accent); }
+.result-hamster { color: var(--yellow); }
+.result-draw { color: var(--fg2); }
+
+/* Center panel: timeline */
+.panel-center { overflow-y: auto; padding: 16px; }
+.howl-section { margin-bottom: 16px; }
+.howl-section h3 { color: var(--accent2); margin-bottom: 8px; cursor: pointer; }
+.howl-text { white-space: pre-wrap; font-size: 12px; color: var(--fg2); background: var(--bg2); padding: 12px; border-radius: 4px; max-height: 300px; overflow-y: auto; }
+.howl-text.collapsed { max-height: 0; overflow: hidden; padding: 0 12px; }
+
+.day-section { margin-bottom: 12px; }
+.day-header { padding: 6px 10px; background: var(--bg3); color: var(--accent2); border-radius: 4px 4px 0 0; cursor: pointer; font-weight: bold; }
+.day-steps { border: 1px solid var(--border); border-top: none; border-radius: 0 0 4px 4px; }
+.step-row { display: grid; grid-template-columns: 60px 80px 1fr 70px 70px; padding: 4px 8px; border-bottom: 1px solid var(--border); cursor: pointer; align-items: center; font-size: 12px; }
+.step-row:hover { background: var(--bg3); }
+.step-row.selected { background: var(--bg3); border-left: 3px solid var(--accent); }
+.step-row .seat-badge { display: inline-block; width: 20px; height: 20px; border-radius: 50%; text-align: center; line-height: 20px; font-size: 10px; font-weight: bold; }
+.step-row .reward { text-align: right; }
+.step-row .reward.positive { color: var(--green); }
+.step-row .reward.negative { color: var(--accent); }
+.step-row .value { text-align: right; color: var(--fg2); }
+
+.players-bar { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; padding: 8px; background: var(--bg2); border-radius: 4px; }
+.player-chip { padding: 2px 8px; border-radius: 12px; font-size: 11px; border: 1px solid var(--border); }
+.player-chip.dead { opacity: 0.4; text-decoration: line-through; }
+
+/* Right panel: detail */
+.panel-right { background: var(--bg2); border-left: 1px solid var(--border); overflow-y: auto; padding: 12px; }
+.panel-right h3 { color: var(--accent2); margin-bottom: 8px; font-size: 13px; }
+.detail-section { margin-bottom: 16px; }
+.detail-section h4 { color: var(--fg2); font-size: 11px; text-transform: uppercase; margin-bottom: 4px; }
+
+.kv { display: grid; grid-template-columns: 100px 1fr; gap: 2px 8px; font-size: 12px; }
+.kv .label { color: var(--fg2); }
+
+/* Retar heatmap */
+.heatmap { display: grid; gap: 1px; font-size: 9px; }
+.heatmap-header { font-weight: bold; color: var(--fg2); text-align: center; padding: 2px; }
+.heatmap-cell { text-align: center; padding: 2px; border-radius: 2px; min-width: 22px; }
+.heatmap-cell.possible { background: var(--bg3); color: var(--green); }
+.heatmap-cell.impossible { background: transparent; color: #333; }
+.heatmap-cell.is-me { border: 1px solid var(--yellow); }
+.heatmap-seat-label { color: var(--fg2); text-align: right; padding: 2px 4px; font-weight: bold; }
+
+/* Plan tokens */
+.plan-tokens { display: flex; flex-wrap: wrap; gap: 4px; }
+.plan-token { padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+.plan-token.seat { background: var(--bg3); color: var(--accent2); }
+.plan-token.role { background: #2a1a3e; color: var(--yellow); }
+.plan-token.grayran { background: #1a2a1e; color: var(--green); }
+.plan-token.next { background: transparent; color: var(--fg2); }
+.plan-token.stop { background: transparent; color: var(--accent); }
+
+/* Predict */
+.predict-grid { font-size: 11px; }
+.predict-row { display: flex; gap: 4px; margin-bottom: 2px; }
+.predict-role { padding: 1px 4px; border-radius: 2px; font-size: 10px; }
+
+.empty-state { color: var(--fg2); text-align: center; padding: 40px; }
+
+/* Private knowledge */
+.private-info { font-size: 11px; padding: 4px 8px; background: var(--bg); border-radius: 4px; margin-bottom: 4px; }
+.private-info .wolf { color: var(--accent); }
+.private-info .human { color: var(--green); }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Left: Game List -->
+  <div class="panel-left">
+    <h2>Games</h2>
+    <div class="drop-zone" id="dropZone">
+      Drop JSON files here<br>or click to select
+      <input type="file" id="fileInput" multiple accept=".json" style="display:none">
+    </div>
+    <div id="gameList"></div>
+  </div>
+
+  <!-- Center: Timeline -->
+  <div class="panel-center" id="centerPanel">
+    <div class="empty-state">Load game JSON files to inspect</div>
+  </div>
+
+  <!-- Right: Detail -->
+  <div class="panel-right" id="rightPanel">
+    <div class="empty-state">Select a step to inspect</div>
+  </div>
+</div>
+
+<script>
+const ROLES = ['villager','seer','medium','bodyguard','mason','nekomata','werewolf','possessed','fanatic','werehamster','immoralist']
+const ROLE_SHORT = {villager:'村',seer:'占',medium:'霊',bodyguard:'狩',mason:'共',nekomata:'猫',werewolf:'狼',possessed:'狂',fanatic:'信',werehamster:'狐',immoralist:'背'}
+const ROLE_COLORS = {villager:'#4ecca3',seer:'#53a8b6',medium:'#7b68ee',bodyguard:'#ffa07a',mason:'#98fb98',nekomata:'#dda0dd',werewolf:'#e94560',possessed:'#ff6b35',fanatic:'#ff4500',werehamster:'#ffc857',immoralist:'#daa520'}
+
+let games = []
+let selectedGame = null
+let selectedStep = null
+
+// File handling
+const dropZone = document.getElementById('dropZone')
+const fileInput = document.getElementById('fileInput')
+
+dropZone.addEventListener('click', () => fileInput.click())
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('active') })
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('active'))
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('active'); handleFiles(e.dataTransfer.files) })
+fileInput.addEventListener('change', e => handleFiles(e.target.files))
+
+function handleFiles(files) {
+  for (const file of files) {
+    const reader = new FileReader()
+    reader.onload = e => {
+      try {
+        const data = JSON.parse(e.target.result)
+        games.push(data)
+        renderGameList()
+        if (games.length === 1) selectGame(0)
+      } catch (err) { console.error('Parse error:', err) }
+    }
+    reader.readAsText(file)
+  }
+}
+
+function resultClass(r) {
+  if (r.includes('villager')) return 'result-village'
+  if (r.includes('werewolf')) return 'result-wolf'
+  if (r.includes('hamster')) return 'result-hamster'
+  return 'result-draw'
+}
+
+function renderGameList() {
+  const list = document.getElementById('gameList')
+  list.innerHTML = games.map((g, i) =>
+    `<div class="game-item ${selectedGame === i ? 'selected' : ''}" onclick="selectGame(${i})">
+      <span class="seed">seed: ${g.seed}</span>
+      <span class="result ${resultClass(g.result)}">${g.result}</span>
+      <br><span style="color:var(--fg2);font-size:11px">${g.gameLength} days, ${g.timeline.length} steps</span>
+    </div>`
+  ).join('')
+}
+
+function selectGame(idx) {
+  selectedGame = idx
+  selectedStep = null
+  renderGameList()
+  renderTimeline()
+  document.getElementById('rightPanel').innerHTML = '<div class="empty-state">Select a step to inspect</div>'
+}
+
+function renderTimeline() {
+  const g = games[selectedGame]
+  if (!g) return
+  const panel = document.getElementById('centerPanel')
+
+  // Players bar
+  let html = '<div class="players-bar">'
+  for (const p of g.players) {
+    const color = ROLE_COLORS[p.role] || '#888'
+    const dead = !p.alive ? ' dead' : ''
+    html += `<span class="player-chip${dead}" style="border-color:${color}">
+      <span style="color:${color}">${ROLE_SHORT[p.role] || '?'}</span> ${p.seat}
+    </span>`
+  }
+  html += '</div>'
+
+  // Howl text (collapsible)
+  html += `<div class="howl-section">
+    <h3 onclick="this.nextElementSibling.classList.toggle('collapsed')">Howl Log (click to toggle)</h3>
+    <div class="howl-text collapsed">${escapeHtml(g.howl)}</div>
+  </div>`
+
+  // Group steps by day
+  const byDay = new Map()
+  for (let i = 0; i < g.timeline.length; i++) {
+    const step = g.timeline[i]
+    const key = `${step.day}-${step.phase}`
+    if (!byDay.has(key)) byDay.set(key, [])
+    byDay.get(key).push({ ...step, _idx: i })
+  }
+
+  for (const [key, steps] of byDay) {
+    const [day, phase] = key.split('-')
+    html += `<div class="day-section">
+      <div class="day-header">Day ${day} - ${phase}</div>
+      <div class="day-steps">`
+
+    // Header row
+    html += `<div class="step-row" style="color:var(--fg2);font-size:10px;cursor:default">
+      <div>Seat</div><div>Action</div><div>Description</div><div style="text-align:right">Reward</div><div style="text-align:right">Value</div>
+    </div>`
+
+    for (const step of steps) {
+      const color = ROLE_COLORS[step.role] || '#888'
+      const rwdClass = step.reward > 0 ? 'positive' : step.reward < 0 ? 'negative' : ''
+      html += `<div class="step-row ${selectedStep === step._idx ? 'selected' : ''}" onclick="selectStep(${step._idx})">
+        <div><span class="seat-badge" style="background:${color}30;color:${color}">${step.seat}</span> ${ROLE_SHORT[step.role] || '?'}</div>
+        <div>${step.actionHead}</div>
+        <div>${escapeHtml(step.actionDescription)}</div>
+        <div class="reward ${rwdClass}">${step.reward !== 0 ? step.reward.toFixed(3) : '-'}</div>
+        <div class="value">${step.value.toFixed(3)}</div>
+      </div>`
+    }
+    html += '</div></div>'
+  }
+
+  panel.innerHTML = html
+}
+
+function selectStep(idx) {
+  selectedStep = idx
+  renderTimeline()
+  renderDetail()
+}
+
+function renderDetail() {
+  const g = games[selectedGame]
+  const step = g.timeline[selectedStep]
+  if (!step) return
+  const panel = document.getElementById('rightPanel')
+  const obs = step.observation
+
+  let html = `<h3>Step Detail: Seat ${step.seat} (${step.role})</h3>`
+
+  // Action info
+  html += `<div class="detail-section">
+    <h4>Action</h4>
+    <div class="kv">
+      <span class="label">Head</span><span>${step.actionHead}</span>
+      <span class="label">Description</span><span>${escapeHtml(step.actionDescription)}</span>
+      <span class="label">logProb</span><span>${step.logProb.toFixed(4)}</span>
+      <span class="label">Reward</span><span style="color:${step.reward > 0 ? 'var(--green)' : step.reward < 0 ? 'var(--accent)' : 'var(--fg)'}">${step.reward.toFixed(4)}</span>
+      <span class="label">Value</span><span>${step.value.toFixed(4)}</span>
+    </div>
+  </div>`
+
+  // Global observation
+  html += `<div class="detail-section">
+    <h4>Global State</h4>
+    <div class="kv">
+      <span class="label">Day</span><span>${obs.global.day}</span>
+      <span class="label">Phase</span><span>${obs.global.phase}</span>
+      <span class="label">My Role</span><span style="color:${ROLE_COLORS[obs.global.myRole] || '#fff'}">${obs.global.myRole} (${ROLE_SHORT[obs.global.myRole] || '?'})</span>
+      <span class="label">Alive</span><span>${(obs.global.aliveRatio * 14).toFixed(0)} / 14 (${(obs.global.aliveRatio * 100).toFixed(0)}%)</span>
+      <span class="label">Rope Margin</span><span>${obs.global.ropeMargin.toFixed(1)}</span>
+      <span class="label">Parity</span><span>${obs.global.aliveParity ? 'odd' : 'even'}</span>
+    </div>
+  </div>`
+
+  // Private knowledge
+  const priv = obs.private
+  if (priv.divineResults.length > 0 || priv.wolfTeammates.length > 0 || priv.masonPartner || priv.guardHistory.length > 0 || priv.knownHamster) {
+    html += `<div class="detail-section"><h4>Private Knowledge</h4>`
+    if (priv.divineResults.length > 0) {
+      html += `<div class="private-info">Divine: ${priv.divineResults.map(d => `seat${d.seat}=<span class="${d.result}">${d.result}</span>`).join(', ')}</div>`
+    }
+    if (priv.wolfTeammates.length > 0) {
+      html += `<div class="private-info"><span class="wolf">Wolf teammates: ${priv.wolfTeammates.map(s => 'seat' + s).join(', ')}</span></div>`
+    }
+    if (priv.masonPartner) {
+      html += `<div class="private-info"><span class="human">Mason partner: seat${priv.masonPartner}</span></div>`
+    }
+    if (priv.guardHistory.length > 0) {
+      html += `<div class="private-info">Guard history: ${priv.guardHistory.map(s => 'seat' + s).join(', ')}</div>`
+    }
+    if (priv.knownHamster) {
+      html += `<div class="private-info"><span style="color:var(--yellow)">Known hamster: seat${priv.knownHamster}</span></div>`
+    }
+    html += '</div>'
+  }
+
+  // Retar heatmap
+  html += `<div class="detail-section">
+    <h4>Retar Possibilities (Self)</h4>
+    ${renderHeatmap(obs.seats, 'retarPossibilities', obs)}
+  </div>`
+
+  html += `<div class="detail-section">
+    <h4>Retar Possibilities (Global)</h4>
+    ${renderHeatmap(obs.seats, 'globalRetarPossibilities', obs)}
+  </div>`
+
+  // Seat summary (alive + claims)
+  html += `<div class="detail-section">
+    <h4>Seats Summary</h4>
+    <div style="font-size:11px">`
+  for (const s of obs.seats) {
+    if (!s.alive && !s.isMe) continue
+    const me = s.isMe ? ' <span style="color:var(--yellow)">[ME]</span>' : ''
+    const claim = s.claimedRole ? ` CO:${ROLE_SHORT[s.claimedRole] || s.claimedRole}` : ''
+    const flags = []
+    if (s.blackCount > 0) flags.push(`black:${s.blackCount.toFixed(0)}`)
+    if (s.whiteCount > 0) flags.push(`white:${s.whiteCount.toFixed(0)}`)
+    if (s.suspicion > 0) flags.push(`sus:${s.suspicion.toFixed(1)}`)
+    if (s.trust > 0) flags.push(`trust:${s.trust.toFixed(1)}`)
+    if (s.voteReceived > 0) flags.push(`votes:${s.voteReceived.toFixed(0)}`)
+    const extra = flags.length > 0 ? ` (${flags.join(', ')})` : ''
+    const aliveStr = s.alive ? '' : ' <span style="color:var(--accent)">[DEAD]</span>'
+    html += `<div>seat${s.seat}${me}${aliveStr}${claim}${extra}</div>`
+  }
+  html += '</div></div>'
+
+  // Plan tokens
+  if (step.planForward) {
+    html += `<div class="detail-section">
+      <h4>Plan Forward</h4>
+      <div class="plan-tokens">${renderPlanTokens(step.planForward.indices)}</div>
+      <div style="font-size:11px;color:var(--fg2);margin-top:4px">${step.planForward.groups.length} group(s)</div>
+    </div>`
+  }
+  if (step.planEndgame) {
+    html += `<div class="detail-section">
+      <h4>Plan Endgame</h4>
+      <div class="plan-tokens">${renderPlanTokens(step.planEndgame.indices)}</div>
+    </div>`
+  }
+
+  // Predict
+  if (step.predict && step.predict.length > 0) {
+    html += `<div class="detail-section">
+      <h4>Predictions (>0.3)</h4>
+      <div class="predict-grid">`
+    for (const p of step.predict) {
+      html += `<div class="predict-row"><span style="color:var(--fg2)">seat${p.seat}:</span> `
+      for (const r of p.roles) {
+        const color = ROLE_COLORS[r.role] || '#888'
+        html += `<span class="predict-role" style="background:${color}30;color:${color}">${ROLE_SHORT[r.role]} ${(r.value * 100).toFixed(0)}%</span> `
+      }
+      html += '</div>'
+    }
+    html += '</div></div>'
+  }
+
+  panel.innerHTML = html
+}
+
+function renderHeatmap(seats, field, obs) {
+  const roleShort = ROLES.map(r => ROLE_SHORT[r] || r[0])
+  let html = `<div class="heatmap" style="grid-template-columns: 40px repeat(${ROLES.length}, 1fr)">`
+  // Header
+  html += '<div></div>'
+  for (let i = 0; i < ROLES.length; i++) {
+    html += `<div class="heatmap-header" style="color:${ROLE_COLORS[ROLES[i]]}">${roleShort[i]}</div>`
+  }
+  // Rows
+  for (const s of seats) {
+    const meClass = s.isMe ? ' is-me' : ''
+    const alive = s.alive ? '' : ' style="opacity:0.3"'
+    html += `<div class="heatmap-seat-label"${alive}>${s.seat}</div>`
+    const poss = new Set(s[field])
+    for (const role of ROLES) {
+      const has = poss.has(role)
+      html += `<div class="heatmap-cell ${has ? 'possible' : 'impossible'}${meClass}">${has ? 'O' : ''}</div>`
+    }
+  }
+  html += '</div>'
+  return html
+}
+
+function renderPlanTokens(indices) {
+  return indices.map(idx => {
+    if (idx < 14) return `<span class="plan-token seat">seat${idx + 1}</span>`
+    if (idx < 19) {
+      const roles = ['seer','medium','bodyguard','mason','nekomata']
+      return `<span class="plan-token role">${ROLE_SHORT[roles[idx - 14]] || roles[idx - 14]}</span>`
+    }
+    if (idx === 19) return `<span class="plan-token grayran">grayran</span>`
+    if (idx === 20) return `<span class="plan-token next">|</span>`
+    if (idx === 21) return `<span class="plan-token stop">STOP</span>`
+    return `<span class="plan-token">?${idx}</span>`
+  }).join('')
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+</script>
+</body>
+</html>

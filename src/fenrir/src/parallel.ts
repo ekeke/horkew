@@ -133,6 +133,8 @@ export type WorkerRequest = {
   snapshots?: import('../../lupa/types.ts').GameSnapshot[]
   /** frozen mason 個人NNの重み（Phase 1: mason席にfrozen戦略を注入） */
   frozenMasonWeights?: SharedWeights
+  /** inspect サンプリング対象の seed リスト */
+  inspectSeeds?: number[]
 }
 
 /** 1ゲーム分のタイミング情報 */
@@ -159,6 +161,14 @@ export type SerializedGameResult = {
   result: string
   /** タイミング計測 */
   timing?: GameTiming
+  /** inspect サンプリング: Howl テキスト */
+  howl?: string
+  /** inspect サンプリング: プレイヤー情報 */
+  players?: Array<{ seat: number, role: string, alive: boolean }>
+  /** inspect サンプリング: ゲーム seed */
+  seed?: number
+  /** inspect サンプリング: ゲーム長（日数） */
+  gameLength?: number
 }
 
 /** Worker → メインスレッド */

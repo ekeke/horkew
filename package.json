@@ -22,6 +22,7 @@
     "play": "node --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/play.ts",
     "train:orchestrate": "node --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/orchestrate.ts",
     "generate-snapshots": "node --experimental-strip-types src/fenrir/src/generate-snapshots.ts",
+    "inspect": "node --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/inspect.ts",
     "dev": "vite",
     "build:demo": "vite build",
     "preview": "vite preview"

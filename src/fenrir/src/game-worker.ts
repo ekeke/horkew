@@ -448,7 +448,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       totalInferCount += (masonTeamStrategy as any).inferCount ?? 0
     }
 
-    results.push({
+    const gameResult: SerializedGameResult = {
       individualSteps,
       wolfTeamSteps: wSteps.map(serializeStep),
       masonTeamSteps: mSteps.map(serializeStep),
@@ -463,7 +463,17 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         tsumiMs: tTsumiEnd - tTsumiStart,
         tsumiCount: tsumiCallCount,
       },
-    })
+    }
+
+    // inspect サンプリング: 対象 seed のゲームは howl + players も返す
+    if (req.inspectSeeds && req.inspectSeeds.includes(seed)) {
+      gameResult.seed = seed
+      gameResult.gameLength = state.day
+      gameResult.howl = formatHowl(events, state, lupaConfig)
+      gameResult.players = state.players.map(p => ({ seat: p.seat, role: p.role, alive: p.alive }))
+    }
+
+    results.push(gameResult)
   }
 
   return results

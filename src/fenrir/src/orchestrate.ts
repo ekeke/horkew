@@ -33,13 +33,15 @@ import { spawn, execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { generatePlanTokenTrainingBatch } from './ml/execution-plan-data.ts'
 import { collectBatchGameData } from './ml/pretrain-game-data.ts'
-import { PLAN_VOCAB } from './rule-action.ts'
+import { PLAN_VOCAB, parsePlanIndices } from './rule-action.ts'
+import { CO_ROLES } from './observation.ts'
 import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
   generateGamesParallel, deserializeStep,
 } from './parallel.ts'
 import { loadRandomSnapshots, countSnapshots } from './seed-bank.ts'
 import { Rng } from '../../lupa/random.ts'
+import { decodeObservation } from './decode-observation.ts'
 
 // ============================================================
 // Model Group Definitions
@@ -91,6 +93,8 @@ type OrchestratorConfig = {
   transformer: boolean
   strategyOnly: boolean
   miniBatchSize?: number
+  /** inspect サンプリング間隔（N ゲームに 1 回、0=無効） */
+  inspectInterval: number
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -110,6 +114,7 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   workers: -1,
   transformer: false,
   strategyOnly: false,
+  inspectInterval: 0,
 }
 
 function parseArgs(): OrchestratorConfig {
@@ -141,6 +146,7 @@ function parseArgs(): OrchestratorConfig {
       case '--transformer': config.transformer = true; break
       case '--strategy-only': config.strategyOnly = true; break
       case '--mini-batch': config.miniBatchSize = parseInt(args[++i]); break
+      case '--inspect-interval': config.inspectInterval = parseInt(args[++i]); break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -179,8 +185,148 @@ Options:
   --transformer            Transformerアーキテクチャを使用 (default: MLP)
   --strategy-only          戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
   --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
+  --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
   --help, -h               このヘルプを表示`)
   process.exit(0)
+}
+
+// ============================================================
+// Inspect Sampling
+// ============================================================
+
+const INSPECT_DIR = 'demo/public/inspect'
+
+let inspectGameCounter = 0
+
+function describePlanIndex(idx: number): string {
+  if (idx >= PLAN_VOCAB.SEAT_START && idx < PLAN_VOCAB.SEAT_END) return `seat${idx + 1}`
+  if (idx >= PLAN_VOCAB.ROLE_START && idx < PLAN_VOCAB.ROLE_END) return CO_ROLES[idx - PLAN_VOCAB.ROLE_START]
+  if (idx === PLAN_VOCAB.GRAYRAN) return 'grayran'
+  if (idx === PLAN_VOCAB.NEXT) return 'NEXT'
+  if (idx === PLAN_VOCAB.STOP) return 'STOP'
+  return `?${idx}`
+}
+
+/**
+ * バッチの seeds から inspect 対象の seed を選ぶ
+ * inspectInterval ゲームに 1 回の確率でサンプリング
+ */
+function pickInspectSeeds(seeds: number[], interval: number): number[] {
+  if (interval <= 0) return []
+  const result: number[] = []
+  for (const seed of seeds) {
+    inspectGameCounter++
+    if (inspectGameCounter % interval === 0) result.push(seed)
+  }
+  return result
+}
+
+/**
+ * SerializedGameResult から inspect JSON を生成・保存
+ */
+function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[], modelName: string, iteration: number) {
+  const sampled = results.filter(g => g.howl)
+  if (sampled.length === 0) return
+
+  mkdirSync(INSPECT_DIR, { recursive: true })
+
+  type IndexEntry = { file: string, seed: number, result: string, gameLength: number, model: string, iteration: number }
+  const indexPath = `${INSPECT_DIR}/index.json`
+  let indexEntries: IndexEntry[] = []
+  if (existsSync(indexPath)) {
+    try { indexEntries = JSON.parse(readFileSync(indexPath, 'utf-8')) } catch {}
+  }
+  const byFile = new Map(indexEntries.map(e => [e.file, e]))
+
+  for (const game of sampled) {
+    // trajectory をデコード
+    const timeline: Array<Record<string, unknown>> = []
+    for (const { seat, role, steps } of game.individualSteps) {
+      for (const step of steps) {
+        const obs = decodeObservation(new Float32Array(step.observation))
+        const entry: Record<string, unknown> = {
+          seat, role,
+          day: obs.global.day,
+          phase: obs.global.phase,
+          actionHead: step.actionHead,
+          actionDescription: describeAction(step.actionHead, step.actionIdx),
+          actionIdx: step.actionIdx,
+          logProb: step.logProb,
+          reward: step.reward,
+          value: step.value,
+          done: step.done,
+          observation: obs,
+        }
+        if (step.planForwardActions) {
+          const groups = parsePlanIndices(step.planForwardActions)
+          entry.planForward = {
+            indices: step.planForwardActions,
+            description: step.planForwardActions.map(describePlanIndex).join(' '),
+            groups,
+          }
+        }
+        if (step.planEndgameActions) {
+          const groups = parsePlanIndices(step.planEndgameActions)
+          entry.planEndgame = {
+            indices: step.planEndgameActions,
+            description: step.planEndgameActions.map(describePlanIndex).join(' '),
+            groups,
+          }
+        }
+        if (step.sigmoidActions && step.actionHead === 'predict') {
+          const ROLES_LIST = ['villager','seer','medium','bodyguard','mason','nekomata','werewolf','possessed','fanatic','werehamster','immoralist']
+          const predictions: Array<{ seat: number, roles: Array<{ role: string, value: number }> }> = []
+          for (let s = 0; s < 14; s++) {
+            const seatPreds: Array<{ role: string, value: number }> = []
+            for (let r = 0; r < 11; r++) {
+              const val = step.sigmoidActions[s * 11 + r]
+              if (val > 0.3) seatPreds.push({ role: ROLES_LIST[r], value: Math.round(val * 100) / 100 })
+            }
+            if (seatPreds.length > 0) predictions.push({ seat: s + 1, roles: seatPreds })
+          }
+          entry.predict = predictions
+        }
+        timeline.push(entry)
+      }
+    }
+
+    timeline.sort((a, b) => {
+      const da = a.day as number, db = b.day as number
+      if (da !== db) return da - db
+      const pa = a.phase === 'night' ? 0 : 1, pb = b.phase === 'night' ? 0 : 1
+      if (pa !== pb) return pa - pb
+      return (a.seat as number) - (b.seat as number)
+    })
+
+    const inspectData = {
+      seed: game.seed,
+      result: game.result,
+      gameLength: game.gameLength,
+      howl: game.howl,
+      players: game.players,
+      timeline,
+      model: modelName,
+      iteration,
+    }
+
+    const fileName = `game_${game.seed}.json`
+    writeFileSync(`${INSPECT_DIR}/${fileName}`, JSON.stringify(inspectData, null, 2))
+    byFile.set(fileName, { file: fileName, seed: game.seed!, result: game.result, gameLength: game.gameLength!, model: modelName, iteration })
+  }
+
+  const finalIndex = [...byFile.values()].sort((a, b) => a.seed - b.seed)
+  writeFileSync(indexPath, JSON.stringify(finalIndex, null, 2))
+  console.error(`  [inspect] ${sampled.length} game(s) saved (total ${finalIndex.length})`)
+}
+
+function describeAction(actionHead: string, actionIdx: number): string {
+  switch (actionHead) {
+    case 'vote': return `vote → seat${actionIdx + 1}`
+    case 'night': return actionIdx < 14 ? `night → seat${actionIdx + 1}` : 'night → skip'
+    case 'claim': return `claim: ${actionIdx}`
+    case 'strategy': return 'strategy (plan tokens)'
+    default: return `${actionHead}: ${actionIdx}`
+  }
 }
 
 // ============================================================
@@ -194,6 +340,10 @@ type ProgressEvalEntry = {
   winRates: Record<string, number>
   avgLen: number
   status: string
+  ppoMetrics?: { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number }
+  baseline?: number
+  target?: number
+  timing?: { gameMs: number, ppoMs: number, iterMs: number }
 }
 
 type ProgressCurriculumEntry = {
@@ -260,14 +410,23 @@ function updateProgressFile(progress: ProgressLog): void {
   // Eval history
   if (evals.length > 0) {
     lines.push('## Eval History')
-    lines.push('| Time | Model | Iter | village% | wolf% | hamster% | draw% | avgLen | Status |')
-    lines.push('|------|-------|------|----------|-------|----------|-------|--------|--------|')
+    lines.push('| Time | Model | Iter | village% | wolf% | hamster% | draw% | avgLen | base% | target% | pLoss | vLoss | ent | kl | game% | ppo% | Status |')
+    lines.push('|------|-------|------|----------|-------|----------|-------|--------|-------|---------|-------|-------|-----|-----|-------|------|--------|')
     for (const e of evals) {
       const v = fmtPct(e.winRates['villager_won'] ?? 0)
       const w = fmtPct(e.winRates['werewolf_won'] ?? 0)
       const h = fmtPct(e.winRates['werehamster_won'] ?? 0)
       const d = fmtPct(e.winRates['draw'] ?? 0)
-      lines.push(`| ${fmtTime(e.time)} | ${e.model} | ${e.iter} | ${v} | ${w} | ${h} | ${d} | ${e.avgLen.toFixed(1)} | ${e.status} |`)
+      const base = e.baseline != null ? (e.baseline * 100).toFixed(0) : '-'
+      const tgt = e.target != null ? (e.target * 100).toFixed(0) : '-'
+      const ppo = e.ppoMetrics
+      const pL = ppo ? ppo.policyLoss.toFixed(4) : '-'
+      const vL = ppo ? ppo.valueLoss.toFixed(4) : '-'
+      const ent = ppo ? ppo.entropy.toFixed(4) : '-'
+      const kl = ppo ? ppo.klLoss.toFixed(4) : '-'
+      const gPct = e.timing ? (e.timing.gameMs / e.timing.iterMs * 100).toFixed(0) : '-'
+      const pPct = e.timing ? (e.timing.ppoMs / e.timing.iterMs * 100).toFixed(0) : '-'
+      lines.push(`| ${fmtTime(e.time)} | ${e.model} | ${e.iter} | ${v} | ${w} | ${h} | ${d} | ${e.avgLen.toFixed(1)} | ${base} | ${tgt} | ${pL} | ${vL} | ${ent} | ${kl} | ${gPct} | ${pPct} | ${e.status} |`)
     }
     lines.push('')
   }
@@ -300,10 +459,12 @@ function ppoUpdate(
     klCoeff?: number,
   },
   precomputedRefLogits?: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }>,
-): { policyLoss: number, predictLoss: number, klLoss: number } {
-  if (batch.length === 0) return { policyLoss: 0, predictLoss: 0, klLoss: 0 }
+): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number } {
+  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
 
   let totalPolicyLoss = 0
+  let totalValueLoss = 0
+  let totalEntropy = 0
   let totalPredictLoss = 0
   let totalKlLoss = 0
   let batchCount = 0
@@ -348,15 +509,20 @@ function ppoUpdate(
       klCoeff: config.klCoeff,
     })
     totalPolicyLoss += result.policyLoss
+    totalValueLoss += result.valueLoss
+    totalEntropy += result.entropy
     totalPredictLoss += result.predictLoss
     totalKlLoss += result.klLoss
     batchCount++
   }
 
+  const n = Math.max(batchCount, 1)
   return {
-    policyLoss: totalPolicyLoss / Math.max(batchCount, 1),
-    predictLoss: totalPredictLoss / Math.max(batchCount, 1),
-    klLoss: totalKlLoss / Math.max(batchCount, 1),
+    policyLoss: totalPolicyLoss / n,
+    valueLoss: totalValueLoss / n,
+    entropy: totalEntropy / n,
+    predictLoss: totalPredictLoss / n,
+    klLoss: totalKlLoss / n,
   }
 }
 
@@ -886,6 +1052,7 @@ async function main(): Promise<void> {
             })
           : undefined
 
+        const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
         const serializedResults = await generateGamesParallel({
           weights: sharedWeights,
           trainingConfig,
@@ -894,7 +1061,9 @@ async function main(): Promise<void> {
           mlMaxSeats: 1,
           mlStartDay: (!batchSnapshots) ? masonMlStartDay : undefined,
           snapshots: batchSnapshots,
+          inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
         }, seeds)
+        if (inspectSeeds.length > 0) saveInspectGames(serializedResults, 'mason_individual', masonIter)
 
         for (const game of serializedResults) {
           const stepsMap = new Map<number, TrajectoryStep[]>()
@@ -908,7 +1077,7 @@ async function main(): Promise<void> {
         const tPpoStart = performance.now()
 
         // PPO update
-        let lastPpoResult = { policyLoss: 0, predictLoss: 0, klLoss: 0 }
+        let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
         if (allSteps.length > 0) {
           normalizeAdvantages(allSteps)
 
@@ -951,6 +1120,7 @@ async function main(): Promise<void> {
         const ppoPct = (ppoMs / iterMs * 100).toFixed(0)
         const pct = (iter / config.iterations * 100).toFixed(1)
         const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
+        const entStr = lastPpoResult.entropy ? ` ent=${lastPpoResult.entropy.toFixed(4)}` : ''
         const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${masonPpoConfig.klCoeff.toFixed(3)})` : ''
         const avgIterMs = (iterElapsed / iterCount / 1000).toFixed(1)
         const remaining = ((config.iterations - iter) * iterElapsed / iterCount / 1000).toFixed(0)
@@ -961,7 +1131,7 @@ async function main(): Promise<void> {
         process.stderr.write(
           `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
           `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
-          `steps=${allSteps.length} day=${masonMlStartDay}${lossStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
+          `steps=${allSteps.length} day=${masonMlStartDay}${lossStr}${entStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
         )
 
         // Eval
@@ -992,6 +1162,8 @@ async function main(): Promise<void> {
           progress.evals.push({
             time: new Date().toISOString(), model: 'mason_individual' as any, iter,
             winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: factionRate >= masonTargetRate ? 'GRADUATED' : '',
+            ppoMetrics: { ...lastPpoResult }, baseline: masonTargetRate, target: masonTargetRate * 0.9,
+            timing: { gameMs, ppoMs, iterMs },
           })
           progress.latest = { phase: '0', model: 'mason_individual', iter, maxIter: config.iterations, klCoeff: masonPpoConfig.klCoeff, mlStartDay: masonMlStartDay }
           updateProgressFile(progress)
@@ -1123,6 +1295,7 @@ async function main(): Promise<void> {
               })
             : undefined
 
+          const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
           const serializedResults = await generateGamesParallel({
             weights: sharedWeights,
             wolfTeamWeights: sharedWolfWeights,
@@ -1135,7 +1308,9 @@ async function main(): Promise<void> {
             mlStartDay: (!batchSnapshots && name === 'village') ? mlStartDay : undefined,
             snapshots: batchSnapshots,
             frozenMasonWeights: name === 'village' ? frozenMasonWeights : undefined,
+            inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
           }, seeds)
+          if (inspectSeeds.length > 0) saveInspectGames(serializedResults, name, iter)
 
           for (const game of serializedResults) {
             const stepsMap = new Map<number, TrajectoryStep[]>()
@@ -1156,7 +1331,7 @@ async function main(): Promise<void> {
           const tPpoStart = performance.now()
 
           // PPO update (shared TfNN に重みをスワップ)
-          let lastPpoResult = { policyLoss: 0, predictLoss: 0, klLoss: 0 }
+          let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
           if (allIndividual.length > 0) {
             normalizeAdvantages(allIndividual)
 
@@ -1229,11 +1404,12 @@ async function main(): Promise<void> {
           const timingStr = formatTimingStr(lastBatchTimings)
           const mlInfo = name === 'village' ? ` ml=${mlMaxSeats}/${ML_MAX_SEATS_CAP} day=${mlStartDay}` : ''
           const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
+          const entStr = lastPpoResult.entropy ? ` ent=${lastPpoResult.entropy.toFixed(4)}` : ''
           const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${ppoConfig.klCoeff.toFixed(3)})` : ''
           process.stderr.write(
             `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
             `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
-            `steps=${totalSteps}${mlInfo}${lossStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
+            `steps=${totalSteps}${mlInfo}${lossStr}${entStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
           )
 
           // Eval
@@ -1262,6 +1438,8 @@ async function main(): Promise<void> {
             progress.evals.push({
               time: new Date().toISOString(), model: name, iter,
               winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: evalStatus,
+              ppoMetrics: { ...lastPpoResult }, baseline: baselineRates[group.faction], target: targetRate,
+              timing: { gameMs, ppoMs, iterMs },
             })
             progress.latest = { phase: '1', model: name, iter, maxIter: config.iterations, klCoeff: ppoConfig.klCoeff, mlMaxSeats, mlStartDay }
 
@@ -1442,6 +1620,7 @@ async function main(): Promise<void> {
         const targetIter = Math.min(currentIter + config.chunkSize, config.iterations)
         const prefix = `${COLORS[name]}[${name.padEnd(16)}]${RESET}`
 
+        let lastPpoResult1p = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
         for (let iter = currentIter + 1; iter <= targetIter; iter++) {
           const iterStart = performance.now()
           const seeds = Array.from({ length: config.batch }, (_, g) => (10000 + iter) * config.batch + g)
@@ -1454,13 +1633,16 @@ async function main(): Promise<void> {
 
           if (gameWorkerPoolSize() > 0) {
             const modelGroupWeights = packAllModelWeights()
+            const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
             const serializedResults = await generateGamesParallel({
               weights: frozenVillageWeights,  // fallback
               modelGroupWeights,
               villageFrozenWeights: frozenVillageWeights,
               trainingConfig,
               phase: 1,
+              inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
             }, seeds)
+            if (inspectSeeds.length > 0) saveInspectGames(serializedResults, `phase1p_${name}`, iter)
 
             for (const game of serializedResults) {
               // 個人steps: fanatic/third のみ収集 (village は frozen)
@@ -1493,7 +1675,7 @@ async function main(): Promise<void> {
               const collectiveTf = name === 'wolf_collective' ? wolfCollectiveTf : masonCollectiveTf
               collectiveTf.loadWeights(collectiveNet.cloneWeights())
               for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
-                ppoUpdate(collectiveTf, steps, ppoConfig)
+                lastPpoResult1p = ppoUpdate(collectiveTf, steps, ppoConfig)
               }
               collectiveNet.loadWeights(collectiveTf.cloneWeights())
             }
@@ -1505,7 +1687,7 @@ async function main(): Promise<void> {
               const tf = name === 'fanatic' ? fanaticTf : tfNetwork
               tf.loadWeights(network.cloneWeights())
               for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
-                ppoUpdate(tf, allIndividual, ppoConfig)
+                lastPpoResult1p = ppoUpdate(tf, allIndividual, ppoConfig)
               }
               network.loadWeights(tf.cloneWeights())
             }
@@ -1571,6 +1753,8 @@ async function main(): Promise<void> {
             progress.evals.push({
               time: new Date().toISOString(), model: name, iter,
               winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: evalStatus,
+              ppoMetrics: { ...lastPpoResult1p }, baseline: baselineRates[group.faction], target: targetRate,
+              timing: { gameMs, ppoMs, iterMs },
             })
             progress.latest = { phase: "1'", model: name, iter, maxIter: config.iterations }
             updateProgressFile(progress)

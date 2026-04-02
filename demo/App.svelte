@@ -17,6 +17,7 @@
   import ColorSwatchPane from './ColorSwatchPane.svelte'
   import HatiPane from './HatiPane.svelte'
   import GmorkDebugPane from './GmorkDebugPane.svelte'
+  import InspectPane from './InspectPane.svelte'
   import './theme.css'
   import { runGame } from '../src/lupa/engine.ts'
   import { strategyAdapter } from '../src/lupa/adapters/strategy-adapter.ts'
@@ -79,6 +80,7 @@
   type Skin = 'flat' | 'excite'
 
   const paneEntries = [
+    { id: 'input', label: 'Input (Editor)' },
     { id: 'rawStatements', label: 'Raw Statements' },
     { id: 'parsed', label: 'Parsed' },
     { id: 'combined', label: 'Combined' },
@@ -88,6 +90,7 @@
     { id: 'colorSwatch', label: 'Color Swatch' },
     { id: 'hati', label: 'Hati (詰み)' },
     { id: 'gmorkDebug', label: 'Gmork Debug' },
+    { id: 'fenrirInspect', label: 'Fenrir Inspect' },
   ] as const
 
   type PaneId = typeof paneEntries[number]['id']
@@ -100,7 +103,7 @@
     panes: Record<PaneId, boolean>
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, gmorkDebug: false }
+  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, gmorkDebug: false, fenrirInspect: false }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: false, panes: { ...defaultPanes } }
@@ -1120,7 +1123,9 @@
 
   {#if debugMode}
   <div class="panes">
+    {#if paneVisible.input}
     {@render inputPane()}
+    {/if}
 
     {#if paneVisible.rawStatements}
     <section class="pane">
@@ -1220,6 +1225,17 @@
           // Retar 解析完了後に assumption をセットして Gmork を連動させる
           assumptions = new Map()
           pendingGmorkEntry = { seat: entry.seat, role: entry.role }
+        }} />
+      </div>
+    </section>
+    {/if}
+
+    {#if paneVisible.fenrirInspect}
+    <section class="pane">
+      <div class="pane-header">Fenrir Inspect</div>
+      <div class="pane-body">
+        <InspectPane onLoadHowl={(howl) => {
+          handleStartTrial(howl)
         }} />
       </div>
     </section>
