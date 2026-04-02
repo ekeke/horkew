@@ -48,17 +48,45 @@
   let selectedStepIdx = $state(-1)
   let howlExpanded = $state(false)
 
+  let autoReload = $state(true)
+  let autoReloadTimer: ReturnType<typeof setInterval> | null = null
+  let lastIndexLength = 0
+
   async function loadIndex() {
     try {
-      const res = await fetch(`${base}inspect/index.json`)
+      const res = await fetch(`${base}inspect/index.json`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`${res.status}`)
-      index = await res.json()
+      const newIndex = await res.json()
+      // 選択中のゲームを維持
+      const prevSeed = selectedGameIdx >= 0 ? index[selectedGameIdx]?.seed : null
+      index = newIndex
+      if (prevSeed != null) {
+        const newIdx = index.findIndex(e => e.seed === prevSeed)
+        if (newIdx >= 0) selectedGameIdx = newIdx
+      }
+      lastIndexLength = index.length
+      error = ''
     } catch (e) {
       error = `index.json 読み込み失敗: ${e}`
     } finally {
       loading = false
     }
   }
+
+  function startAutoReload() {
+    stopAutoReload()
+    autoReloadTimer = setInterval(loadIndex, 5000)
+  }
+
+  function stopAutoReload() {
+    if (autoReloadTimer) { clearInterval(autoReloadTimer); autoReloadTimer = null }
+  }
+
+  $effect(() => {
+    if (autoReload) startAutoReload()
+    else stopAutoReload()
+    return () => stopAutoReload()
+  })
 
   loadIndex()
 
@@ -199,7 +227,14 @@
     <div class="inspect-layout">
       <!-- Left: Game List -->
       <div class="inspect-list">
-        <div class="inspect-list-header">Games ({index.length})</div>
+        <div class="inspect-list-header">
+          <span>Games ({index.length})</span>
+          <button class="inspect-reload-btn" onclick={loadIndex} title="Reload">R</button>
+          <label class="inspect-auto-label" title="Auto-reload (5s)">
+            <input type="checkbox" bind:checked={autoReload} />
+            Auto
+          </label>
+        </div>
         {#each index as entry, i}
           <button
             class="inspect-game-item"
@@ -672,13 +707,39 @@
     flex-direction: column;
   }
   .inspect-list-header {
-    padding: 0.4rem 0.5rem;
+    padding: 0.3rem 0.5rem;
     font-weight: bold;
     color: var(--color-accent);
     font-size: 0.75rem;
     border-bottom: 1px solid var(--ctp-surface0);
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
+  .inspect-list-header span { flex: 1; }
+  .inspect-reload-btn {
+    border: 1px solid var(--ctp-surface1);
+    background: var(--ctp-surface0);
+    color: var(--ctp-text);
+    cursor: pointer;
+    font-size: 0.6rem;
+    font-family: inherit;
+    width: 18px; height: 18px;
+    border-radius: 3px;
+    padding: 0;
+  }
+  .inspect-reload-btn:hover { background: var(--ctp-surface1); }
+  .inspect-auto-label {
+    font-size: 0.6rem;
+    color: var(--ctp-subtext0);
+    font-weight: normal;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    cursor: pointer;
+  }
+  .inspect-auto-label input { margin: 0; width: 12px; height: 12px; }
   .inspect-game-item {
     display: flex;
     gap: 0.3rem;
