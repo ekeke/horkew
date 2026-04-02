@@ -1,0 +1,81 @@
+{
+  "seed": 51903,
+  "result": "villager_won",
+  "gameLength": 3,
+  "howl": "@ 狼3 村2 占1 霊1 狩1 共2 猫1 信1 狐1 背1\n\n# seed: 51903\n++背、狼１、村１、狐、狩、村２、霊、共１、狼２、猫、狼３、占、共２、信\n\n狐 死亡\n背 後追い\n\n共２ 死亡\n\n狼１ 占いCO 狼３○\n霊 霊能CO\n共１ 共有CO 共２白\n狼２ 占いCO 狩●\n占 占いCO 狐○\n\n狼１→狼２\n村１→狼２\n狩→狼２\n村２→狼２\n霊→狼２\n共１→狼２\n狼２→狼１\n猫→狼２\n狼３→狼２\n占→狼２\n信→狼２\n\n狼２処刑\n\n# 霊能: 狼２ = ●\n# 襲撃: 狼１ → 占\n# 護衛: 狩 → 霊\n# 占い: 占 → 狼３ ●\n占 死亡\n\n狼１ 村２○\n霊 ●\n信 霊能CO ○\n\n狼１→狼３\n村１→狼１\n狩→狼１\n村２→狼１\n霊→狼１\n共１→狼１\n猫→狼１\n狼３→狼１\n信→狼１\n\n狼１処刑\n\n# 霊能: 狼１ = ●\n# 護衛: 狩 → 共１\n# 襲撃: 狼３ → 信\n信 死亡\n\n霊 ●\n狼３ 占いCO 共１○ 村２○ 狩○\n\n村１→狼３\n狩→狼３\n村２→狼３\n霊→狼３\n共１→狼３\n猫→狼３\n狼３→村２\n\n狼３処刑\n\n# 霊能: 狼３ = ●\n\n村勝利\n\n背＝背徳\n狼１＝人狼\n村１＝村\n狐＝狐\n狩＝狩り\n村２＝村\n霊＝霊\n共１＝共有\n狼２＝人狼\n猫＝猫\n狼３＝人狼\n占＝占い\n共２＝共有\n信＝狂信\n",
+  "players": [
+    {
+      "seat": 1,
+      "role": "immoralist",
+      "alive": false
+    },
+    {
+      "seat": 2,
+      "role": "werewolf",
+      "alive": false
+    },
+    {
+      "seat": 3,
+      "role": "villager",
+      "alive": true
+    },
+    {
+      "seat": 4,
+      "role": "werehamster",
+      "alive": false
+    },
+    {
+      "seat": 5,
+      "role": "bodyguard",
+      "alive": true
+    },
+    {
+      "seat": 6,
+      "role": "villager",
+      "alive": true
+    },
+    {
+      "seat": 7,
+      "role": "medium",
+      "alive": true
+    },
+    {
+      "seat": 8,
+      "role": "mason",
+      "alive": true
+    },
+    {
+      "seat": 9,
+      "role": "werewolf",
+      "alive": false
+    },
+    {
+      "seat": 10,
+      "role": "nekomata",
+      "alive": true
+    },
+    {
+      "seat": 11,
+      "role": "werewolf",
+      "alive": false
+    },
+    {
+      "seat": 12,
+      "role": "seer",
+      "alive": false
+    },
+    {
+      "seat": 13,
+      "role": "mason",
+      "alive": false
+    },
+    {
+      "seat": 14,
+      "role": "fanatic",
+      "alive": false
+    }
+  ],
+  "timeline": [],
+  "model": "mason_individual",
+  "iteration": 610
+}

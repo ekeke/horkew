@@ -221,6 +221,8 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     } : undefined
 
     let tsumiCacheGetter: (() => Map<number, boolean>) | undefined
+    const isInspectGame = req.inspectSeeds != null && req.inspectSeeds.includes(seed)
+    let observationGetter: (() => import('./lupaAdapters/minimal-adapter.ts').CapturedObservation[]) | undefined
 
     if (snapshot) {
       // Seed Bank リプレイ: スナップショットから resumeGame
@@ -236,6 +238,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
             enableTsumi: true,
             roles,
             rules: config.rules,
+            captureObservations: isInspectGame,
           })
         : fullAdapter({
             strategies: strategiesMap,
@@ -250,6 +253,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
             rules: config.rules,
           })
       tsumiCacheGetter = () => handlers.getTsumiCache()
+      if (isInspectGame && 'getCapturedObservations' in handlers) observationGetter = () => (handlers as any).getCapturedObservations()
       const result = await resumeGame(snapshot, handlers)
       state = result.state
       events = result.events
@@ -269,8 +273,10 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         retarStartDay: req.mlStartDay,
         roles,
         rules: config.rules,
+        captureObservations: isInspectGame,
       })
       tsumiCacheGetter = () => handlers.getTsumiCache()
+      if (isInspectGame && handlers.getCapturedObservations) observationGetter = () => handlers.getCapturedObservations!()
       const result = await runGame(
         { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules },
         handlers,
@@ -465,12 +471,18 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       },
     }
 
-    // inspect サンプリング: 対象 seed のゲームは howl + players も返す
-    if (req.inspectSeeds && req.inspectSeeds.includes(seed)) {
+    // inspect サンプリング: 対象 seed のゲームは howl + players + 全員の observation も返す
+    if (isInspectGame) {
       gameResult.seed = seed
       gameResult.gameLength = state.day
       gameResult.howl = formatHowl(events, state, lupaConfig)
       gameResult.players = state.players.map(p => ({ seat: p.seat, role: p.role, alive: p.alive }))
+      if (observationGetter) {
+        gameResult.allObservations = observationGetter().map(o => ({
+          seat: o.seat, role: o.role, day: o.day,
+          observation: Array.from(o.observation),
+        }))
+      }
     }
 
     results.push(gameResult)

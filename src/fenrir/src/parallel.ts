@@ -169,6 +169,8 @@ export type SerializedGameResult = {
   seed?: number
   /** inspect サンプリング: ゲーム長（日数） */
   gameLength?: number
+  /** inspect サンプリング: 全プレイヤーの observation（日ごと） */
+  allObservations?: Array<{ seat: number, role: string, day: number, observation: number[] }>
 }
 
 /** Worker → メインスレッド */

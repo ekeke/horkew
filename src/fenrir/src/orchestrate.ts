@@ -298,6 +298,19 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
       return (a.seat as number) - (b.seat as number)
     })
 
+    // 全プレイヤーの observation をデコード
+    const allPlayerSteps: Array<Record<string, unknown>> = []
+    if (game.allObservations) {
+      for (const o of game.allObservations) {
+        allPlayerSteps.push({
+          seat: o.seat,
+          role: o.role,
+          day: o.day,
+          observation: decodeObservation(new Float32Array(o.observation)),
+        })
+      }
+    }
+
     const inspectData = {
       seed: game.seed,
       result: game.result,
@@ -305,6 +318,7 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
       howl: game.howl,
       players: game.players,
       timeline,
+      allPlayerSteps,
       model: modelName,
       iteration,
     }
@@ -1162,9 +1176,10 @@ async function main(): Promise<void> {
           const evalResult = await evaluate(
             masonNet, { ...trainingConfig, mlRoles: masonMlRoles }, config.evalGames,
             wolfTeamNet, masonTeamNet, 1,
-            { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), masonAsIndividual: true, evalIter: iter },
+            { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), masonAsIndividual: true, evalIter: iter, saveHowl: true },
           )
           process.stderr.write('\r\x1b[K')
+          if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
           appendEvalLog(masonDir, iter, evalResult, 'mason_individual')
           const factionRate = evalResult.winRates['villager_won'] ?? 0
           log(
@@ -1751,9 +1766,11 @@ async function main(): Promise<void> {
                 frozenVillageNet: networks.get('village')!,
                 individualNets,
                 evalIter: iter,
+                saveHowl: true,
               },
             )
             process.stderr.write('\r\x1b[K')
+            if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
             appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
             const factionRate = evalResult.winRates[group.faction] ?? 0
             const targetRate = config.targetWinRate ?? (baselineRates[group.faction] ?? 0.5)

@@ -16,5 +16,21 @@
     "seed": 44,
     "result": "werehamster_won",
     "gameLength": 4
+  },
+  {
+    "file": "game_45503.json",
+    "seed": 45503,
+    "result": "villager_won",
+    "gameLength": 5,
+    "model": "mason_individual",
+    "iteration": 610
+  },
+  {
+    "file": "game_51903.json",
+    "seed": 51903,
+    "result": "villager_won",
+    "gameLength": 3,
+    "model": "mason_individual",
+    "iteration": 610
   }
 ]

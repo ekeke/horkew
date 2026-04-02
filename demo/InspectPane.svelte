@@ -11,6 +11,7 @@
     howl: string
     players: Array<{ seat: number, role: string, alive: boolean }>
     timeline: Array<TimelineStep>
+    allPlayerSteps?: Array<{ seat: number, role: string, day: number, observation: any }>
   }
   type TimelineStep = {
     seat: number
@@ -106,6 +107,40 @@
   })
 
   let selectedStep = $derived(game && selectedStepIdx >= 0 ? game.timeline[selectedStepIdx] : null)
+  let selectedAllPlayerSeat = $state<number | null>(null)
+
+  // 選択中の day の全プレイヤー observation
+  let allPlayerForDay = $derived.by(() => {
+    if (!game?.allPlayerSteps || !selectedStep) return []
+    return game.allPlayerSteps.filter(s => s.day === selectedStep!.day).sort((a, b) => a.seat - b.seat)
+  })
+
+  // 全プレイヤー表示用の observation (selectedAllPlayerSeat に対応)
+  let allPlayerObs = $derived.by(() => {
+    if (!selectedAllPlayerSeat || !allPlayerForDay.length) return null
+    return allPlayerForDay.find(s => s.seat === selectedAllPlayerSeat) ?? null
+  })
+
+  // 報酬収支テーブル: seat × day の報酬合計
+  type RewardRow = { seat: number, role: string, byDay: Map<number, number>, total: number }
+  let rewardTable = $derived.by((): { rows: RewardRow[], days: number[] } => {
+    if (!game) return { rows: [], days: [] }
+    const seatMap = new Map<number, RewardRow>()
+    const daySet = new Set<number>()
+    for (const step of game.timeline) {
+      daySet.add(step.day)
+      let row = seatMap.get(step.seat)
+      if (!row) {
+        row = { seat: step.seat, role: step.role, byDay: new Map(), total: 0 }
+        seatMap.set(step.seat, row)
+      }
+      row.byDay.set(step.day, (row.byDay.get(step.day) ?? 0) + step.reward)
+      row.total += step.reward
+    }
+    const days = [...daySet].sort((a, b) => a - b)
+    const rows = [...seatMap.values()].sort((a, b) => a.seat - b.seat)
+    return { rows, days }
+  })
 
   function planTokenLabel(idx: number): { text: string, cls: string } {
     if (idx < 14) return { text: `seat${idx + 1}`, cls: 'pt-seat' }
@@ -174,6 +209,38 @@
           </div>
           {#if howlExpanded}
             <pre class="inspect-howl">{game.howl}</pre>
+          {/if}
+
+          <!-- Reward breakdown -->
+          {#if rewardTable.rows.length > 0}
+          <div class="reward-section">
+            <div class="inspect-day-header">Reward Breakdown</div>
+            <div class="reward-table-wrap">
+              <table class="reward-table">
+                <thead>
+                  <tr>
+                    <th>Seat</th>
+                    <th>Role</th>
+                    {#each rewardTable.days as d}<th>D{d}</th>{/each}
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each rewardTable.rows as row}
+                    <tr>
+                      <td class="rt-seat">{row.seat}</td>
+                      <td style="color:{ROLE_COLORS[row.role]}">{ROLE_SHORT[row.role] || '?'}</td>
+                      {#each rewardTable.days as d}
+                        {@const v = row.byDay.get(d) ?? 0}
+                        <td class:positive={v > 0} class:negative={v < 0}>{v !== 0 ? v.toFixed(3) : ''}</td>
+                      {/each}
+                      <td class="rt-total" class:positive={row.total > 0} class:negative={row.total < 0}>{row.total.toFixed(3)}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          </div>
           {/if}
 
           <!-- Timeline steps -->
@@ -348,6 +415,65 @@
               </div>
             </div>
           {/if}
+
+          <!-- All player observations -->
+          {#if allPlayerForDay.length > 0}
+            <div class="detail-section">
+              <div class="detail-label">All Players (Day {selectedStep.day})</div>
+              <div class="all-player-tabs">
+                {#each allPlayerForDay as ap}
+                  <button
+                    class="ap-tab"
+                    class:active={selectedAllPlayerSeat === ap.seat}
+                    onclick={() => selectedAllPlayerSeat = selectedAllPlayerSeat === ap.seat ? null : ap.seat}
+                    style="color:{ROLE_COLORS[ap.role]}"
+                  >{ROLE_SHORT[ap.role]}{ap.seat}</button>
+                {/each}
+              </div>
+              {#if allPlayerObs}
+                {@const aobs = allPlayerObs.observation}
+                <div class="ap-detail">
+                  <div class="detail-kv">
+                    <span class="kv-k">Role</span><span style="color:{ROLE_COLORS[allPlayerObs.role]}">{allPlayerObs.role}</span>
+                    <span class="kv-k">Alive</span><span>{(aobs.global.aliveRatio * 14).toFixed(0)} / 14</span>
+                    <span class="kv-k">Plan</span><span class="exec-plan">{#each [aobs.seats.filter((s: any) => s.planIncluded).sort((a: any, b: any) => a.planPosition - b.planPosition)] as planSeats}{#if planSeats.length > 0}{#each planSeats as ps, i}{#if i > 0} → {/if}<span class="plan-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === ps.seat)?.role ?? ''] || 'var(--ctp-text)'}">{ps.seat}</span>{/each}{:else}<span class="no-plan">なし</span>{/if}{/each}</span>
+                  </div>
+                  {#if aobs.private.divineResults.length > 0 || aobs.private.wolfTeammates.length > 0 || aobs.private.masonPartner || aobs.private.knownHamster}
+                    <div class="detail-private" style="margin-top:0.3rem">
+                      {#if aobs.private.divineResults.length > 0}
+                        <div>Divine: {#each aobs.private.divineResults as d}<span class={d.result === 'wolf' ? 'priv-wolf' : 'priv-human'}>seat{d.seat}={d.result}</span> {/each}</div>
+                      {/if}
+                      {#if aobs.private.wolfTeammates.length > 0}
+                        <div class="priv-wolf">Wolf: {aobs.private.wolfTeammates.map((s: number) => 'seat' + s).join(', ')}</div>
+                      {/if}
+                      {#if aobs.private.masonPartner}
+                        <div class="priv-human">Mason: seat{aobs.private.masonPartner}</div>
+                      {/if}
+                      {#if aobs.private.knownHamster}
+                        <div style="color:var(--color-fox)">Hamster: seat{aobs.private.knownHamster}</div>
+                      {/if}
+                    </div>
+                  {/if}
+                  <div style="margin-top:0.3rem">
+                    <div class="detail-label">Retar (Self)</div>
+                    <div class="heatmap" style="grid-template-columns: 2.5rem repeat({ROLES.length}, 1fr)">
+                      <span></span>
+                      {#each ROLES as r}
+                        <span class="hm-header" style="color:{ROLE_COLORS[r]}">{ROLE_SHORT[r]}</span>
+                      {/each}
+                      {#each aobs.seats as s}
+                        <span class="hm-seat" class:dead={!s.alive}>{s.seat}</span>
+                        {#each ROLES as r}
+                          {@const has = s.retarPossibilities.includes(r)}
+                          <span class="hm-cell" class:hm-on={has} class:hm-me={s.isMe}>{has ? 'O' : ''}</span>
+                        {/each}
+                      {/each}
+                    </div>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/if}
         {:else}
           <div class="inspect-msg">ステップを選択してください</div>
         {/if}
@@ -483,6 +609,33 @@
     overflow-y: auto;
     flex-shrink: 0;
   }
+
+  /* Reward table */
+  .reward-section { flex-shrink: 0; }
+  .reward-table-wrap { overflow-x: auto; }
+  .reward-table {
+    border-collapse: collapse;
+    font-size: 0.7rem;
+    width: 100%;
+  }
+  .reward-table th, .reward-table td {
+    padding: 0.15rem 0.4rem;
+    text-align: right;
+    border-bottom: 1px solid var(--ctp-mantle);
+    white-space: nowrap;
+  }
+  .reward-table th {
+    color: var(--ctp-overlay0);
+    font-size: 0.6rem;
+    font-weight: normal;
+    position: sticky;
+    top: 0;
+    background: var(--color-bg);
+  }
+  .reward-table td:first-child, .reward-table th:first-child { text-align: center; }
+  .reward-table td:nth-child(2), .reward-table th:nth-child(2) { text-align: left; }
+  .rt-seat { font-weight: bold; color: var(--ctp-subtext0); }
+  .rt-total { font-weight: bold; }
 
   .inspect-day-header {
     padding: 0.3rem 0.5rem;
@@ -623,4 +776,20 @@
   .predict-row { display: flex; gap: 3px; align-items: center; margin-bottom: 1px; }
   .predict-seat { color: var(--ctp-subtext0); width: 3.5em; }
   .predict-role { padding: 0 4px; border-radius: 2px; font-size: 0.65rem; }
+
+  /* All player tabs */
+  .all-player-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 0.3rem; }
+  .ap-tab {
+    border: 1px solid var(--ctp-surface1);
+    background: transparent;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    font-family: inherit;
+    cursor: pointer;
+    font-weight: bold;
+  }
+  .ap-tab:hover { background: var(--ctp-surface0); }
+  .ap-tab.active { background: var(--ctp-surface1); }
+  .ap-detail { font-size: 0.75rem; }
 </style>

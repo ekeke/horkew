@@ -10,7 +10,7 @@
 
 import type { SystemRole, ResolvedRules } from '../../../types/index.ts'
 import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../../../lupa/types.ts'
-import type { DecisionContext, TeamDecisionContext, Strategy, TeamStrategy, WolfNightAction } from '../../../lupa/strategy.ts'
+import type { DecisionContext, TeamDecisionContext, Strategy, TeamStrategy, WolfNightAction, ExecutionPlan } from '../../../lupa/strategy.ts'
 import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../../../lupa/handlers.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
 import { alivePlayers } from '../../../lupa/roles.ts'
@@ -23,6 +23,15 @@ import {
 } from '../../../lupa/retar-bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
 import { argmaxPlanTokens, parsePlanIndices, resolvePlanGroupSimple, type PlanDayGroup } from '../rule-action.ts'
+import { encodeObservation } from '../observation.ts'
+
+/** onVote 時にキャプチャされた全プレイヤーの observation */
+export type CapturedObservation = {
+  seat: number
+  role: string
+  day: number
+  observation: Float32Array
+}
 
 export type MinimalAdapterConfig = {
   strategies: Map<number, Strategy>
@@ -42,10 +51,13 @@ export type MinimalAdapterConfig = {
   roles?: Map<SystemRole, number>
   /** enableRetar時に必要 */
   rules?: Partial<ResolvedRules>
+  /** 全プレイヤーの observation をキャプチャ（inspect 用） */
+  captureObservations?: boolean
 }
 
-export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
+export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { getCapturedObservations?: () => CapturedObservation[] } {
   const rng = new Rng(config.seed)
+  const capturedObservations: CapturedObservation[] = []
 
   // Retar state
   let retarPossibilities: Map<number, Set<SystemRole>> | null = null
@@ -61,6 +73,8 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
   let cachedPlanGroups: PlanDayGroup[] | undefined
   let cachedPlanGroupIndex = 0
   let cachedEndgameGroups: PlanDayGroup[] | undefined
+  // 村の公認処刑プラン（上書きされるまで永続）
+  let currentExecutionPlans: ExecutionPlan[] = []
 
   function getStrategy(seat: number): Strategy {
     return config.strategies.get(seat) ?? config.defaultStrategy!
@@ -137,7 +151,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       masonPartner: view.masonPartner,
       revoteRound: null,
       revoteCandidates: null,
-      executionPlans: [],
+      executionPlans: currentExecutionPlans,
       tsumiTarget,
       rules: pctx.rules,
       ...extra,
@@ -292,6 +306,12 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
         }
       }
 
+      // dayProposals → executionPlans に変換して永続化
+      const dayPlans: ExecutionPlan[] = dayProposals
+        .filter(p => p.type === 'execute_order')
+        .map(p => ({ targets: [p.target], type: 'designated' as const }))
+      if (dayPlans.length > 0) currentExecutionPlans = dayPlans
+
       for (const player of alivePlayers(state)) {
         const view = buildPlayerView(state, player.seat)
         const ctx = buildCtx(vctx as PhaseContext, player, view, {
@@ -299,6 +319,16 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
           revoteCandidates: vctx.candidates,
           proposals: dayProposals,
         })
+
+        // inspect 用: 全プレイヤーの observation をキャプチャ
+        if (config.captureObservations) {
+          capturedObservations.push({
+            seat: player.seat,
+            role: player.role,
+            day: ctx.day,
+            observation: encodeObservation(ctx),
+          })
+        }
 
         const teamStrategy = player.role === 'werewolf' ? config.wolfTeamStrategy
           : player.role === 'mason' ? config.masonTeamStrategy
@@ -322,6 +352,10 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
     /** ゲーム中の詰み判定キャッシュ (day → isTsumi) */
     getTsumiCache(): Map<number, boolean> {
       return tsumiCache
+    },
+
+    getCapturedObservations() {
+      return capturedObservations
     },
   }
 }
