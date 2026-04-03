@@ -33,6 +33,7 @@ import { spawn, execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { generatePlanTokenTrainingBatch } from './ml/execution-plan-data.ts'
 import { collectBatchGameData } from './ml/pretrain-game-data.ts'
+import { collectTsumiBatch, saveTsumiCache, loadTsumiCache } from './ml/pretrain-tsumi-data.ts'
 import { PLAN_VOCAB, parsePlanIndices } from './rule-action.ts'
 import { CO_ROLES } from './observation.ts'
 import {
@@ -855,9 +856,27 @@ async function main(): Promise<void> {
     const pretrainTargetAcc = 0.85
     const pretrainLogInterval = 100
 
+    // Hati 詰みデータの読み込み or 生成
+    const tsumiCachePath = `${config.checkpointBase}/tsumi-pretrain-cache.ndjson`
+    let tsumiSamples = loadTsumiCache(tsumiCachePath)
+    if (tsumiSamples.length === 0) {
+      const tsumiGames = 500
+      log(`  Collecting tsumi data from ${tsumiGames} games...`)
+      const tT0 = performance.now()
+      tsumiSamples = await collectTsumiBatch(trainingConfig, tsumiGames, 80000, log)
+      log(`  Collected ${tsumiSamples.length} tsumi samples in ${((performance.now() - tT0) / 1000).toFixed(1)}s`)
+      if (tsumiSamples.length > 0) {
+        saveTsumiCache(tsumiSamples, tsumiCachePath)
+        log(`  Cached to ${tsumiCachePath}`)
+      }
+    } else {
+      log(`  Loaded ${tsumiSamples.length} cached tsumi samples`)
+    }
+    const tsumiRatio = tsumiSamples.length > 0 ? 0.3 : 0
+
     let bestAcc = 0
     for (let epoch = 1; epoch <= pretrainMaxEpochs; epoch++) {
-      const samples = generatePlanTokenTrainingBatch(pretrainBatchSize, epoch)
+      const samples = generatePlanTokenTrainingBatch(pretrainBatchSize, epoch, tsumiSamples, tsumiRatio)
       const { loss, accuracy } = (tfNetwork as any).trainSupervisedPlan({
         observations: samples.map(s => s.observation),
         forwardLabels: samples.map(s => s.forwardLabels),

@@ -592,11 +592,22 @@ function buildSuspectLabels(
  * forward (8トークン): 通常盤面 (7〜13人生存)、最大4席
  * endgame (4トークン): 終盤盤面 (4〜6人生存)、最大2席
  */
-export function generatePlanTokenTrainingBatch(count: number, seed: number = 42): PlanTokenTrainingSample[] {
+export function generatePlanTokenTrainingBatch(
+  count: number,
+  seed: number = 42,
+  tsumiSamples?: PlanTokenTrainingSample[],
+  tsumiRatio: number = 0,
+): PlanTokenTrainingSample[] {
   const rng = new Rng(seed)
   const samples: PlanTokenTrainingSample[] = []
 
   while (samples.length < count) {
+    // tsumi サンプルを混合
+    if (tsumiSamples && tsumiSamples.length > 0 && rng.next() < tsumiRatio) {
+      const idx = Math.floor(rng.next() * tsumiSamples.length)
+      samples.push(tsumiSamples[idx])
+      continue
+    }
     const day = 2 + Math.floor(rng.next() * 4)
     // forward 用は通常盤面、endgame 用は終盤盤面を別々に生成
     const fwdAliveCount = 7 + Math.floor(rng.next() * 7)  // 7-13人
