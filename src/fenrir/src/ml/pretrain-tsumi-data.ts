@@ -8,6 +8,7 @@
 
 import type { SystemRole } from '../../../types/index.ts'
 import type { StrategyNode } from '../../../hati/types.ts'
+import { forEachSeat, maskFromSeats } from '../../../hati/types.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
 import type { Strategy, DecisionContext } from '../strategy.ts'
 import type { PlanTokenTrainingSample } from './execution-plan-data.ts'
@@ -92,6 +93,33 @@ export function flattenStrategyToLabels(
   if (pos < numTokens) { labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true }
   if (pos < numTokens) { labels[pos] = PLAN_VOCAB.STOP; mask[pos] = true }
 
+  return mask[0] ? { labels, mask } : null
+}
+
+/**
+ * execSetsFromEnd から endgame labels を生成。
+ * 保護対象席 = 生存席のうち最終処刑 (step0) に含まれない席。
+ * seat index (0-based) を並べて STOP で打ち切り。
+ */
+export function execSetsToEndgameLabels(
+  execSetsFromEnd: number[],
+  aliveMask: number,
+  numTokens: number,
+): { labels: number[], mask: boolean[] } | null {
+  if (execSetsFromEnd.length === 0) return null
+  const lastExecMask = execSetsFromEnd[0]
+  const protectedMask = aliveMask & ~lastExecMask
+  if (protectedMask === 0) return null
+
+  const labels = new Array(numTokens).fill(PLAN_VOCAB.STOP)
+  const mask = new Array(numTokens).fill(false)
+  let pos = 0
+  forEachSeat(protectedMask, seat => {
+    if (pos >= numTokens) return
+    labels[pos] = seat - 1  // 0-based seat index
+    mask[pos++] = true
+  })
+  if (pos < numTokens) { labels[pos] = PLAN_VOCAB.STOP; mask[pos] = true }
   return mask[0] ? { labels, mask } : null
 }
 
@@ -250,8 +278,13 @@ export function loadTsumiFromDB(
 
         // Strategy tree → labels (multi-depth)
         const fwd = flattenStrategyToLabels(sr.strategy, NUM_FORWARD_TOKENS)
-        const eg = flattenStrategyToLabels(sr.strategy, NUM_ENDGAME_TOKENS)
-        if (!fwd || !eg) continue
+        if (!fwd) continue
+        // Endgame: execSetsFromEnd ベースで保護対象席をエンコード
+        const aliveMask = maskFromSeats(getAliveSeats(vs))
+        const eg = sr.strategy.type === 'action' && sr.strategy.execSetsFromEnd
+          ? execSetsToEndgameLabels(sr.strategy.execSetsFromEnd, aliveMask, NUM_ENDGAME_TOKENS)
+          : flattenStrategyToLabels(sr.strategy, NUM_ENDGAME_TOKENS)
+        if (!eg) continue
 
         samples.push({
           observation: obs,

@@ -3,7 +3,7 @@ import type {
   World, SimState, StrategyNode,
   ObservationKey, SearchOptions, PnDn,
 } from './types.ts'
-import { hasSeat, removeSeat, forEachSeat, popCount32, PN_INF } from './types.ts'
+import { seatBit, hasSeat, removeSeat, forEachSeat, popCount32, PN_INF } from './types.ts'
 import {
   checkOutcome, allWorldsVillageWin, anyWorldVillageLoss,
   applyExecution, simulateNight, validBiteTargetsMask,
@@ -21,6 +21,26 @@ const NEKOMATA_ROLE_ID = RoleBitIndex.nekomata
 
 /** 戦略木省略時のセンチネル（詰みありを示す軽量値） */
 const WIN: StrategyNode = { type: 'win' }
+
+/** 複数の子ノードの execSetsFromEnd を position-by-position OR で合成 */
+function unionExecSets(branches: Record<ObservationKey, StrategyNode>): number[] {
+  let maxLen = 0
+  for (const key in branches) {
+    const child = branches[key]
+    if (child.type !== 'win' && child.execSetsFromEnd) {
+      if (child.execSetsFromEnd.length > maxLen) maxLen = child.execSetsFromEnd.length
+    }
+  }
+  if (maxLen === 0) return []
+  const result = new Array<number>(maxLen).fill(0)
+  for (const key in branches) {
+    const child = branches[key]
+    if (child.type !== 'win' && child.execSetsFromEnd) {
+      for (let i = 0; i < child.execSetsFromEnd.length; i++) result[i] |= child.execSetsFromEnd[i]
+    }
+  }
+  return result
+}
 
 /** 6人以下のエンドゲームテーブル（正規形キー → 詰み可否） */
 const endgameTable = new Map<string, boolean>()
@@ -574,6 +594,7 @@ function isTsumi(
       type: 'action',
       action: { execute: precheck, bodyguardTarget: null, seerTargets: [] },
       branches: { 'win': WIN },
+      execSetsFromEnd: [seatBit(precheck)],
     }
     ss.memo.set(key, result)
     return result
@@ -710,6 +731,7 @@ function collapseBranches(
     type: 'action',
     action: { execute: commonTarget!, bodyguardTarget: null, seerTargets: [] },
     branches: { 'win': { type: 'win' } },
+    execSetsFromEnd: [seatBit(commonTarget!)],
   }
 }
 
@@ -877,10 +899,13 @@ function tryExecution(
     branches[obsKey] = nightResult
   }
 
+  const execSets = unionExecSets(branches)
+  execSets.push(seatBit(target))
   return {
     type: 'action',
     action: { execute: target, bodyguardTarget: null, seerTargets: [] },
     branches,
+    execSetsFromEnd: execSets,
   }
 }
 
@@ -1197,9 +1222,11 @@ function tryNightAction(
   const collapsed = collapseBranches(branches, bodyguardTarget, seerTargets)
   if (collapsed) return collapsed
 
+  const execSets = unionExecSets(branches)
   return {
     type: 'action',
     action: { execute: -1, bodyguardTarget, seerTargets },
     branches,
+    execSetsFromEnd: execSets.length > 0 ? execSets : undefined,
   }
 }

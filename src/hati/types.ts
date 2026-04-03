@@ -80,6 +80,8 @@ export type StrategyNode =
     action: VillageAction
     /** 観測結果ごとの分岐（ObservationKey → 子ノード） */
     branches: Record<ObservationKey, StrategyNode>
+    /** 末尾からk手目の処刑対象席ビットマスク (execSetsFromEnd[0]=最終処刑) */
+    execSetsFromEnd?: number[]
   }
 
 /** 生存者の役職候補分類と脅威指標（学習特徴量としても利用） */
