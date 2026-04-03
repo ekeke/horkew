@@ -21,8 +21,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { deepStrictEqual } from 'node:assert'
 import { join } from 'node:path'
-import type { SystemRole } from '../types/index.ts'
-import type { LupaConfig, GameEvent, GameState } from '../lupa/types.ts'
+import type { SystemRole, VillageStatus } from '../types/index.ts'
+import type { LupaConfig, GameState } from '../lupa/types.ts'
 import type { GameConfig as EngineGameConfig } from '../lupa/handlers.ts'
 import { runGame } from '../lupa/engine.ts'
 import { strategyAdapter } from './strategy-adapter.ts'
@@ -31,7 +31,7 @@ import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
-import type { AnalyzeOptions, AnalyzedPossibilities, AnalyzeResult } from '../retar/index.ts'
+import type { AnalyzeOptions, AnalyzeResult } from '../retar/index.ts'
 import { serializeVillageStatus, serializeOptions, parseWasmResult } from '../retar/wasm-helpers.ts'
 import { buildAssumptions } from '../fenrir/src/retar-bridge.ts'
 import { enableDump, disableDump, resetDump, getDump } from '../retar/dump.ts'
@@ -122,7 +122,7 @@ type VerifyResult = {
 }
 
 function verifyCheckpoint(
-  events: GameEvent[],
+  events: readonly any[],
   state: GameState,
   config: LupaConfig,
   checkpoint: Checkpoint,
@@ -220,7 +220,7 @@ function verifyCheckpoint(
  * Prior検証: 各座席の真の役職をassumptionにしてprior再計算 → 他席の真の役職が矛盾しないか
  */
 function verifyPriorCheckpoint(
-  events: GameEvent[],
+  events: readonly any[],
   state: GameState,
   config: LupaConfig,
   checkpoint: Checkpoint,
@@ -322,7 +322,7 @@ function verifyPriorCheckpoint(
  * 不一致時は dump を有効にして再実行し、最初に差異が出た中間ステップを特定する
  */
 function verifyCompatCheckpoint(
-  events: GameEvent[],
+  events: readonly any[],
   state: GameState,
   config: LupaConfig,
   checkpoint: Checkpoint,
@@ -408,7 +408,7 @@ function collectTsDump(
 let wasmAnalyzeWithDump: ((village: string, setup: string, options: string) => string) | null = null
 try {
   const wasm = await import('../retar-rs/pkg/retar.js')
-  wasmAnalyzeWithDump = wasm.analyze_with_dump ?? null
+  wasmAnalyzeWithDump = (wasm as any).analyze_with_dump ?? null
 } catch {
   // WASM not available
 }
@@ -489,7 +489,7 @@ function formatCompatDiff(
  * 各席Sの各役職Rについて S=R を仮定して analyzeSafe → 矛盾なら偽陽性
  */
 function verifyTightnessCheckpoint(
-  events: GameEvent[],
+  events: readonly any[],
   state: GameState,
   config: LupaConfig,
   checkpoint: Checkpoint,
@@ -571,7 +571,7 @@ function verifyTightnessCheckpoint(
  * Prior等価性検証: buildAssumptions を使い prior+assumptions と assumptions のみの結果が完全一致するか
  */
 function verifyPriorEquivCheckpoint(
-  events: GameEvent[],
+  events: readonly any[],
   state: GameState,
   config: LupaConfig,
   checkpoint: Checkpoint,

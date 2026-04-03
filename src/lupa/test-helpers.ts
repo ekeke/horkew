@@ -3,7 +3,7 @@
  */
 
 import type { SystemRole } from '../types/index.ts'
-import type { GameState, PlayerState, NightAction, DayClaim } from './types.ts'
+import type { GameState, NightAction, DayClaim } from './types.ts'
 import type { GameHandlers } from './handlers.ts'
 import { alivePlayers } from './roles.ts'
 import { Rng } from './random.ts'

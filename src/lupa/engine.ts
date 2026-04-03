@@ -111,7 +111,7 @@ export async function runGame<E = never>(config: GameConfig, handlers: GameHandl
   // ============================================================
 
   const snapshots = config.captureSnapshotDays ? new Map<number, GameSnapshot<E>>() : undefined
-  const loopResult = await runGameLoop(state, events, emit, rng, rules, handlers, config, 1, null, snapshots, seatRoles)
+  await runGameLoop(state, events, emit, rng, rules, handlers, config, 1, null, snapshots, seatRoles)
 
   // 役職公開
   for (const player of players) {

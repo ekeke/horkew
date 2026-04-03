@@ -3,7 +3,7 @@
  * verify.ts と同じロジックでゲーム→howl→パース→hati を実行
  */
 import type { SystemRole } from '../types/index.ts'
-import type { GameEvent, GameState } from '../lupa/types.ts'
+import type { GameState } from '../lupa/types.ts'
 import { runGame } from '../lupa/engine.ts'
 import { strategyAdapter } from '../verify/strategy-adapter.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../lupa/heuristic.ts'
@@ -25,6 +25,9 @@ const ANALYZE_OPTIONS: AnalyzeOptions = {
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),
+  id: 0,
+  batches: 1,
+  batch: 0,
 }
 
 function findExecutionCheckpoints(howl: string): { line: number, day: number }[] {
@@ -56,7 +59,7 @@ async function benchConfig(cfg: Config) {
   const perDay: Map<number, { totalMs: number, count: number, maxMs: number, maxNodes: number, times: number[] }> = new Map()
 
   for (let seed = cfg.seeds[0]; seed < cfg.seeds[1]; seed++) {
-    let events: GameEvent[], state: GameState
+    let events: any[], state: GameState
     try {
       const gameConfig = {
         roles: cfg.roles, seed,

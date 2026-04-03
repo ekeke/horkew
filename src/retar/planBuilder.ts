@@ -24,7 +24,7 @@ export function buildRoleTestPlan(
   village: VillageStatus,
   setup: Map<SystemRole, number>,
   multipleVictims: Seat[],
-  initialPossibilities?: Possibilities,
+  _initialPossibilities?: Possibilities,
 ): BuildPlanResult {
   // 露呈人外数の管理の準備
   let numLiars = 0

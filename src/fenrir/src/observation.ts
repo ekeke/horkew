@@ -8,7 +8,6 @@
  */
 
 import type { DecisionContext, TeamDecisionContext, PlanType } from './strategy.ts'
-import type { ForwardResult } from './ml/nn.ts'
 import type { SystemRole } from '../../types/index.ts'
 import type { FenrirEvent } from './events.ts'
 

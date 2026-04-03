@@ -10,7 +10,7 @@ import type { SystemRole } from '../../../types/index.ts'
 import type { GameEvent } from '../../../lupa/types.ts'
 import { resolveRules } from '../../../howl/ruleset.ts'
 import { Rng } from '../../../lupa/random.ts'
-import { encodeObservation, SEATS, CO_ROLES, ROLE_INDEX } from '../observation.ts'
+import { encodeObservation, SEATS, CO_ROLES } from '../observation.ts'
 import { maskVote } from '../action.ts'
 import { PLAN_VOCAB } from '../rule-action.ts'
 
@@ -633,7 +633,6 @@ export function generatePlanTokenTrainingBatch(
     // Endgame 盤面（別の盤面で生成）
     const egAliveSeats = shuffleArray(allSeats, rng).slice(0, egAliveCount)
     const egMySeat = egAliveSeats[Math.floor(rng.next() * egAliveSeats.length)]
-    const egMyRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
     const egCO = generateCOSituation(egAliveSeats, rng)
     const egRetar = generateSyntheticRetar(egAliveSeats, egMySeat, egCO.claims, rng)
     const egFox = egRetar.foxSeats.filter(s => s !== egMySeat)

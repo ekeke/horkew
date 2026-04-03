@@ -73,7 +73,7 @@ export function analyzeFromEventsParallel(
 ): Promise<Map<number, Set<SystemRole>>> {
   // プール未初期化ならシングルスレッドにフォールバック
   if (!poolReady || workerPool.length === 0) {
-    return Promise.resolve(analyzeFromEvents(events, state, config))
+    return Promise.resolve(analyzeFromEvents(events, state, config).possibilities)
   }
 
   const howl = formatHowl(events, state, config)

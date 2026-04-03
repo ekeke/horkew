@@ -11,7 +11,7 @@
 
 import type { Seat } from '../types/index.ts'
 import type { World } from './types.ts'
-import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
+import { hasSeat, removeSeat, popCount32 } from './types.ts'
 import {
   checkOutcome, simulateNight,
   getMediumResult, applyFollowDeaths,
@@ -149,7 +149,7 @@ function tryExecuteThenNight(
   worlds: World[],
   alive: number,
   executeTarget: Seat,
-  foxMask: number,
+  _foxMask: number,
   confirmedSeerMask: number,
   bodyguardAlive: boolean,
   anySeerAlive: boolean,

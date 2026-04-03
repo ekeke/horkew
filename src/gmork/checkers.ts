@@ -1,5 +1,5 @@
 import type { SystemRole, Seat, VillageStatus, Day } from '../types/index.ts'
-import type { Checker, CheckerInput, DenialReason, TaggedChecker } from './reasons.ts'
+import type { CheckerInput, DenialReason, TaggedChecker } from './reasons.ts'
 import { villageSpecialRoles, villageSideRoles, evilRoles } from './reasons.ts'
 import type { AnalysisResult } from './analysis.ts'
 import { isTrustworthy } from './analysis.ts'

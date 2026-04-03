@@ -24,7 +24,7 @@ import { buildVillageStatus } from '../../../howl/bridge.ts'
 import { rolesFromPossibility } from '../../../retar/possibilities.ts'
 import { resolveRules } from '../../../howl/ruleset.ts'
 import type { TrainingConfig } from '../training.ts'
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AnalyzeOptions } from '../../../retar/index.ts'
 
@@ -42,6 +42,9 @@ const DB_ANALYZE_OPTIONS: AnalyzeOptions = {
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),
+  id: 0,
+  batches: 1,
+  batch: 0,
 }
 
 // ============================================================
@@ -297,8 +300,6 @@ export function loadTsumiFromDB(
           // 前日の処刑席を取得
           const prevCp = checkpoints.find(c => c.day === tsumiInfo.day - 1)
           if (prevCp) {
-            const prevTruncated = howl.split('\n').slice(0, prevCp.lineIndex).join('\n')
-            const execMatch = prevTruncated.match(/^(.+)処刑$/m)
             // 一手前のラベル: [前日target, NEXT, 今日のstrategy...]
             // 簡易版: 前日は strategy の最初のアクション、今日は次のアクション
             // → そのまま depth+1 の strategy として表現

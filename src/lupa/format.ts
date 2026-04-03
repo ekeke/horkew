@@ -1,5 +1,5 @@
 import type { SystemRole } from '../types/index.ts'
-import type { LupaConfig, GameEvent, GameState } from './types.ts'
+import type { LupaConfig, GameState } from './types.ts'
 
 const ROLE_DISPLAY: Record<SystemRole, string> = {
   villager: '村',

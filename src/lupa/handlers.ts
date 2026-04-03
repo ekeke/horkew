@@ -94,6 +94,9 @@ export type GameHandlers<E = never> = {
 
   /** ゲーム終了後に計測値を取得（任意） */
   getTiming?(): GameTiming
+
+  /** 詰み判定キャッシュ (day → isTsumi)（任意） */
+  getTsumiCache?(): Map<number, boolean>
 }
 
 // ============================================================

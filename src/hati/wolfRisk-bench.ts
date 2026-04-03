@@ -5,7 +5,7 @@
  * Usage: node --experimental-strip-types src/hati/wolfRisk-bench.ts [seeds=10]
  */
 import type { SystemRole } from '../types/index.ts'
-import type { GameEvent, GameState } from '../lupa/types.ts'
+import type { GameState } from '../lupa/types.ts'
 import { runGame } from '../lupa/engine.ts'
 import { strategyAdapter } from '../verify/strategy-adapter.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../lupa/heuristic.ts'
@@ -16,7 +16,6 @@ import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions, AnalyzeResult } from '../retar/index.ts'
 import { Possibilities, possibilityFromRoles } from '../retar/possibilities.ts'
 import { evaluateWolfRisk } from './wolfRisk.ts'
-import { forEachSeat } from './types.ts'
 
 // --- 設定 ---
 
@@ -36,6 +35,9 @@ const ANALYZE_OPTIONS: AnalyzeOptions = {
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),
+  id: 0,
+  batches: 1,
+  batch: 0,
 }
 
 const numSeeds = parseInt(process.argv[2] ?? '10', 10)
@@ -84,7 +86,7 @@ const t0Global = performance.now()
 
 for (let seed = 0; seed < numSeeds; seed++) {
   // ゲーム生成
-  let events: GameEvent[], state: GameState
+  let events: any[], state: GameState
   try {
     const gameConfig = {
       roles: ROLES, seed,

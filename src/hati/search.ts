@@ -771,7 +771,7 @@ export function shouldPruneHamster(
 const PRECHECK_PRUNED = -1
 const PRECHECK_CONTINUE = -2
 
-export function precheckWorlds(worlds: World[], alive: number, disableHamsterPruning?: boolean): number {
+export function precheckWorlds(worlds: World[], alive: number, _disableHamsterPruning?: boolean): number {
   const aliveCount = popCount32(alive)
   let wolfUnion = 0
   let wolfIntersection = 0

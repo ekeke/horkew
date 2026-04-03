@@ -172,7 +172,7 @@ export type SerializedGameResult = {
   /** inspect サンプリング: ゲーム長（日数） */
   gameLength?: number
   /** inspect サンプリング: 全プレイヤーの observation（日ごと） */
-  allObservations?: Array<{ seat: number, role: string, day: number, observation: number[] }>
+  allObservations?: Array<{ seat: number, role: string, day: number, observation: number[], proposals?: unknown }>
 }
 
 /** Worker → メインスレッド */

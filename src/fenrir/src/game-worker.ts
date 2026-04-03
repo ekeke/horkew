@@ -15,13 +15,12 @@ import { fullAdapter } from './lupaAdapters/full-adapter.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { FenrirStrategy, FanaticStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
-import { terminalReward, intermediateReward, tsumiReward, predictAccuracyReward, buildKnownSeats, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { terminalReward, intermediateReward, tsumiReward, predictAccuracyReward, buildKnownSeats } from './reward.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { parse } from '../../howl/parser.ts'
 import { buildVillageStatus } from '../../howl/bridge.ts'
 import { searchTsumi } from '../../hati/index.ts'
 import { DEFAULT_RETAR_OPTIONS } from './retar-bridge.ts'
-import type { TrajectoryStep } from './ml/trajectory.ts'
 import { encodeTrueRoles } from './observation.ts'
 import {
   buildNetworkFromShared,
@@ -204,8 +203,8 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     // Reset trajectories
     for (const s of strategies.values()) s.resetTrajectory?.()
-    wolfTeamStrategy?.resetTrajectory?.()
-    masonTeamStrategy?.resetTrajectory?.()
+    ;(wolfTeamStrategy as any)?.resetTrajectory?.()
+    ;(masonTeamStrategy as any)?.resetTrajectory?.()
 
     const tGameStart = performance.now()
     let state: import('../../lupa/types.ts').GameState
@@ -262,7 +261,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
             roles,
             rules: config.rules,
           })
-      tsumiCacheGetter = () => handlers.getTsumiCache()
+      tsumiCacheGetter = () => handlers.getTsumiCache!()
       if (isInspectGame && 'getCapturedObservations' in handlers) observationGetter = () => (handlers as any).getCapturedObservations()
       const result = await resumeGame(snapshot, handlers)
       state = result.state
@@ -286,7 +285,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         captureObservations: isInspectGame,
         onMasonTakeover,
       })
-      tsumiCacheGetter = () => handlers.getTsumiCache()
+      tsumiCacheGetter = () => handlers.getTsumiCache!()
       if (isInspectGame && handlers.getCapturedObservations) observationGetter = () => handlers.getCapturedObservations!()
       const result = await runGame(
         { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: isInspectGame ? 'seat' as const : undefined },
@@ -311,7 +310,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         roles,
         rules: config.rules,
       })
-      tsumiCacheGetter = () => handlers.getTsumiCache()
+      tsumiCacheGetter = () => handlers.getTsumiCache!()
       const result = await runGame(
         { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: isInspectGame ? 'seat' as const : undefined },
         handlers,
@@ -337,13 +336,13 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       individualSteps.push({ seat, role, steps: steps.map(serializeStep) })
     }
 
-    const wSteps = wolfTeamStrategy?.trajectory ?? []
+    const wSteps = (wolfTeamStrategy as any)?.trajectory ?? []
     if (wSteps.length > 0) {
       wSteps[wSteps.length - 1].done = true
       wSteps[wSteps.length - 1].reward += terminalReward('werewolf', state.result ?? '', config.rewardConfig)
     }
 
-    const mSteps = masonTeamStrategy?.trajectory ?? []
+    const mSteps = (masonTeamStrategy as any)?.trajectory ?? []
     if (mSteps.length > 0) {
       mSteps[mSteps.length - 1].done = true
       mSteps[mSteps.length - 1].reward += terminalReward('mason', state.result ?? '', config.rewardConfig)

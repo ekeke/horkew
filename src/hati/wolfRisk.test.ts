@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { SystemRole, Seat, SeatStatus, VillageStatus, Assertion } from '../types/index.ts'
-import { Possibilities, RoleSignatureBits, possibilityFromRoles } from '../retar/possibilities.ts'
+import { Possibilities, possibilityFromRoles } from '../retar/possibilities.ts'
 import { evaluateWolfRisk } from './wolfRisk.ts'
 
 // --- ヘルパー ---

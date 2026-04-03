@@ -195,7 +195,7 @@ export function tsumiReward(
 export function predictAccuracyReward(
   predictActions: Float32Array,
   trueRoles: Float32Array,
-  playerRole: string,
+  _playerRole: string,
   config: RewardConfig = DEFAULT_REWARD_CONFIG,
   knownSeats?: Set<number>,
 ): number {

@@ -13,7 +13,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import type { SystemRole } from '../../types/index.ts'
-import type { GameSnapshot, GameState, GameEvent } from '../../lupa/types.ts'
+import type { GameSnapshot, GameState, GameEvent, PlayerState } from '../../lupa/types.ts'
 import type { GameConfig } from '../../lupa/handlers.ts'
 import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from './lupaAdapters/full-adapter.ts'
@@ -51,9 +51,9 @@ type SerializedPlayerState = {
   alive: boolean
   claimedRole: string | null
   claimedDay: number | null
-  divineHistory: [number, { target: number, result: string }][]
+  divineHistory: [number, { target: number, result: string | null }][]
   guardHistory: [number, number][]
-  fakeDivineHistory: [number, { target: number, result: string }][]
+  fakeDivineHistory: [number, { target: number, result: string | null }][]
   forecastTarget: number | null
 }
 
@@ -102,9 +102,9 @@ function deserializeSnapshot(data: SerializedSnapshot): GameSnapshot {
       alive: p.alive,
       claimedRole: p.claimedRole as SystemRole | null,
       claimedDay: p.claimedDay,
-      divineHistory: new Map(p.divineHistory),
+      divineHistory: new Map(p.divineHistory) as PlayerState['divineHistory'],
       guardHistory: new Map(p.guardHistory),
-      fakeDivineHistory: new Map(p.fakeDivineHistory),
+      fakeDivineHistory: new Map(p.fakeDivineHistory) as PlayerState['fakeDivineHistory'],
       forecastTarget: p.forecastTarget,
     })),
     day: data.state.day,

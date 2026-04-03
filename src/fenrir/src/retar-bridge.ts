@@ -112,8 +112,8 @@ export const lupaRunRetar: RunRetar = (vs, setup, options) => {
   }
   const retar = new VillageRetar(vs, setup, options)
   const result = retar.analyzeSafe()
-  if (result.error || !result.result) return resultToPossibilities({ possibilities: new Map(), maxSurvivingNV: 0 })
-  return resultToPossibilities({ possibilities: result.result, maxSurvivingNV: result.maxSurvivingNV })
+  if (result.error || !result.result) return resultToPossibilities({ result: new Map(), maxSurvivingNV: 0 })
+  return resultToPossibilities({ result: result.result, maxSurvivingNV: result.maxSurvivingNV })
 }
 
 // ============================================================
@@ -201,7 +201,7 @@ export function buildAssumptions(
       break
 
     case 'medium':
-      for (const [day, executedSeat] of state.executionHistory) {
+      for (const [_day, executedSeat] of state.executionHistory) {
         const executed = state.players.find(p => p.seat === executedSeat)
         if (executed && executed.role === 'werewolf') {
           trySet(executedSeat, 'werewolf')

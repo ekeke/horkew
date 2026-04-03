@@ -1,5 +1,5 @@
 import type { Seat, Day, VillageStatus, SystemRole } from '../types/index.ts'
-import type { ConfirmationChecker, ConfirmationCheckerInput, ConfirmationReason, TaggedConfirmationChecker } from './reasons.ts'
+import type { ConfirmationCheckerInput, ConfirmationReason, TaggedConfirmationChecker } from './reasons.ts'
 import { villageSideRoles } from './reasons.ts'
 import { isTrustworthy, analyzeSeer, analyzeMedium } from './analysis.ts'
 import { formatBustReason, formatReason } from './format.ts'

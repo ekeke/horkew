@@ -11,7 +11,7 @@ import { runGame, resumeGame } from '../../lupa/engine.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
 import { fullAdapter } from './lupaAdapters/full-adapter.ts'
-import { analyzeFromEventsParallel, initRetarWorkerPool, terminateRetarWorkerPool } from './retar-node-bridge.ts'
+import { initRetarWorkerPool, terminateRetarWorkerPool } from './retar-node-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
 import type { NetworkConfig, AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import { TfNeuralNetwork } from './ml/nn-tf.ts'
@@ -1453,8 +1453,6 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     }
     const tGameEnd = performance.now()
 
-    const tGaeEnd = performance.now()
-
     // === PPO更新 ===
     const tPpoStart = performance.now()
     let totalPolicyLoss = 0
@@ -1516,7 +1514,6 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
 
     // タイミング
     const gameMs = tGameEnd - tGameStart
-    const gaeMs = tGaeEnd - tGameEnd
     const ppoMs = tPpoEnd - tPpoStart
 
     // Progress bar

@@ -237,7 +237,7 @@ function main() {
 
   let totalMedian = 0
 
-  for (const [name, group] of groups) {
+  for (const [_name, group] of groups) {
     for (const s of group) {
       totalMedian += s.med
       console.log(

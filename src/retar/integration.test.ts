@@ -275,7 +275,7 @@ A死亡
   })
 
   test('pair denial removes possibility of both being werewolf simultaneously', () => {
-    const { result, players } = analyzeWithDenyals([])
+    const { result: _result, players } = analyzeWithDenyals([])
     const seatB = getSeatByName(players, 'B')
     const seatC = getSeatByName(players, 'C')
     // With denial, run analysis

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { SystemRole } from '../types/index.ts'
-import type { LupaConfig, GameEvent } from './types.ts'
+import type { LupaConfig } from './types.ts'
 import type { GameConfig } from './handlers.ts'
 import { runGame } from './engine.ts'
 import { makeRandomHandlers } from './test-helpers.ts'

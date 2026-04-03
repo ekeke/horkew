@@ -5,7 +5,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join } from 'node:path'
 
 const TS_DIR = join(import.meta.dirname, '.')
 const RS_DIR = join(import.meta.dirname, '..', 'retar-rs', 'src')
@@ -111,7 +111,8 @@ function stripRsTestModule(source: string): string {
   return idx >= 0 ? source.slice(0, idx) : source
 }
 
-function extractRsPubFunctions(source: string): string[] {
+// @ts-ignore: kept for future use
+function _extractRsPubFunctions(source: string): string[] {
   const src = stripRsTestModule(source)
   const fns: string[] = []
   for (const m of src.matchAll(/^\s*pub\s+fn\s+(\w+)\s*[<(]/gm)) {

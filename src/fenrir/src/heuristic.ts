@@ -38,12 +38,6 @@ const W = {
   CO_BUSTED: 200,             // CO役職がRetarで否定 = 破綻
 }
 
-// 指揮者追従率
-const FOLLOW_RATES: Record<string, number> = {
-  werewolf: 0.2, fanatic: 0.25, werehamster: 0.6, immoralist: 0.7,
-}
-const DEFAULT_FOLLOW_RATE = 1.0
-
 // CO役職の処刑優先度（高い=吊りやすい、低い=吊りにくい）
 const CO_EXECUTION_SCORE: Record<string, number> = {
   mason: 10,       // 共有: 吊って良い（確定白なので本来吊らないが、偽共有は吊る）
@@ -974,8 +968,9 @@ function decideVillagerComm(ctx: DecisionContext): CommunicationAction {
     const action = tryTsumiAction(ctx)
     if (action && action.execute > 0 && alive.includes(action.execute)) {
       proposals.push(action.execute)
-      if (action.seerTarget && alive.includes(action.seerTarget)) {
-        ctx.proposals.push({ type: 'investigate_order', target: action.seerTarget })
+      const seerTarget = action.seerTargets[0]
+      if (seerTarget && alive.includes(seerTarget)) {
+        ctx.proposals.push({ type: 'investigate_order', target: seerTarget })
       }
       if (action.bodyguardTarget && alive.includes(action.bodyguardTarget)) {
         ctx.proposals.push({ type: 'protect_order', target: action.bodyguardTarget })
@@ -1028,8 +1023,9 @@ function decideCommanderProposal(ctx: DecisionContext): Proposal | null {
   const action = tryTsumiAction(ctx)
   if (action && action.execute > 0 && alive.includes(action.execute)) {
     // 占い/護衛指示もproposalsに積む（他プレイヤーが参照する）
-    if (action.seerTarget && alive.includes(action.seerTarget)) {
-      ctx.proposals.push({ type: 'investigate_order', target: action.seerTarget })
+    const seerTarget = action.seerTargets[0]
+    if (seerTarget && alive.includes(seerTarget)) {
+      ctx.proposals.push({ type: 'investigate_order', target: seerTarget })
     }
     if (action.bodyguardTarget && alive.includes(action.bodyguardTarget)) {
       ctx.proposals.push({ type: 'protect_order', target: action.bodyguardTarget })

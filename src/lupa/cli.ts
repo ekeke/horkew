@@ -10,7 +10,7 @@ import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../hati/index.ts'
 import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
 import { RandomStrategy } from '../verify/random-strategy.ts'
-import { findScenario, scenarioToRoles, scenarios } from './scenarios.ts'
+import { findScenario, scenarios } from './scenarios.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 
 import type { StrategyAdapterConfig } from '../verify/strategy-adapter.ts'

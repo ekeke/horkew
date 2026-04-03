@@ -42,7 +42,7 @@ if (checkpoint) {
 }
 
 console.log(`\nRunning ${games} evaluation games...`)
-const result = evaluate(network, DEFAULT_TRAINING_CONFIG, games)
+const result = await evaluate(network, DEFAULT_TRAINING_CONFIG, games)
 
 console.log('\nResults:')
 console.log(`  Win rates: ${JSON.stringify(result.winRates, null, 2)}`)
