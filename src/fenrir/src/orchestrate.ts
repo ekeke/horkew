@@ -722,12 +722,17 @@ async function main(): Promise<void> {
   validateConfig(config)
   process.title = `fenrir-orch [${config.checkpointBase}]`
 
-  // PID ファイル
-  const pidFile = `${config.checkpointBase}/orchestrate.pid`
-  mkdirSync(config.checkpointBase, { recursive: true })
+  // PID ファイル（重複起動防止）
+  const pidFile = 'train-orchestrate.pid'
   if (existsSync(pidFile)) {
-    const oldPid = readFileSync(pidFile, 'utf-8').trim()
-    log(`⚠ PID file exists (pid=${oldPid}). Previous run may still be active or crashed.`)
+    const oldPid = parseInt(readFileSync(pidFile, 'utf-8').trim(), 10)
+    let alive = false
+    try { process.kill(oldPid, 0); alive = true } catch {}
+    if (alive) {
+      console.error(`ERROR: Orchestrator already running (pid=${oldPid}). Kill it first or remove ${pidFile}.`)
+      process.exit(1)
+    }
+    log(`Stale PID file found (pid=${oldPid}, not running). Overwriting.`)
   }
   writeFileSync(pidFile, String(process.pid))
   const cleanupPid = () => { try { unlinkSync(pidFile) } catch {} }
