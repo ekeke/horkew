@@ -14,6 +14,7 @@
   import { formatReason, formatConfirmationReason } from '../src/gmork/format.ts'
   import { scoreWolfPairs, type WolfPairSuggestion } from './status/wolfPairScorer.ts'
   import HelpPanel from './HelpPanel.svelte'
+  import YouTubePlayer from './YouTubePlayer.svelte'
   import ColorSwatchPane from './ColorSwatchPane.svelte'
   import HatiPane from './HatiPane.svelte'
   import './theme.css'
@@ -24,6 +25,7 @@
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
   import type { EditorView } from '@codemirror/view'
+  import { timeSeekPlugin, setOnSeek } from './editor/timeSeekPlugin.ts'
   import type { StatementInfo, PlayerNameInfo } from './editor/howlLanguage.ts'
 
   type EditorModule = typeof import('./editor/index.ts')
@@ -243,6 +245,167 @@
   let rawBodyEl: HTMLElement | undefined = $state()
   let helpPanel: HelpPanel | undefined = $state()
   let trialMode = $state(false)
+
+  // --- Video sync ---
+  let videoId = $state('')
+  let youtubePlayer: YouTubePlayer | undefined = $state()
+  let videoTimestamps: { line: number, seconds: number }[] = $state([])  // sorted by seconds
+  let videoCurrentTime = $state(0)
+  let videoSyncActive = $state(false)
+  let videoDay = $state(1)
+  let dayLineMap: Map<number, number> = $state(new Map())  // day → first line number
+  let maxDay = $state(1)
+
+  function extractYouTubeId(url: string): string {
+    const m = url.match(/(?:youtu\.be\/|v=|\/embed\/)([A-Za-z0-9_-]{11})/)
+    return m?.[1] ?? ''
+  }
+
+  function parseTimestamp(s: string): number {
+    const parts = String(s).split(':').map(Number)
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    if (parts.length === 2) return parts[0] * 60 + parts[1]
+    return parts[0] ?? 0
+  }
+
+  function buildDayLineMap(statements: any[]): Map<number, number> {
+    const map = new Map<number, number>()
+    for (const s of statements) {
+      if (s.day !== undefined && !map.has(s.day)) {
+        map.set(s.day, s.line)
+      }
+    }
+    return map
+  }
+
+  // Parse @time annotations from raw text
+  // Supports: `# @time MM:SS` (standalone) or `アリス処刑 # @time MM:SS` (inline)
+  // Returns a map of line_number → seconds
+  function parseTimeAnnotations(text: string): Map<number, number> {
+    const map = new Map<number, number>()
+    const lines = text.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/#\s*@time\s+(\d+(?::\d+){1,2})\s*$/)
+      if (m) {
+        map.set(i + 1, parseTimestamp(m[1]))  // 1-based line number
+      }
+    }
+    return map
+  }
+
+  // Build sorted timestamp array from @time annotations (line-level granularity)
+  function buildTimestampsFromAnnotations(timeAnnotations: Map<number, number>): { line: number, seconds: number }[] {
+    return [...timeAnnotations.entries()]
+      .map(([line, seconds]) => ({ line, seconds }))
+      .sort((a, b) => a.seconds - b.seconds)
+  }
+
+  // Build timestamps from frontmatter day→seconds format
+  function buildTimestampsFromFrontmatter(fmTimestamps: Record<string, string>, dayLines: Map<number, number>): { line: number, seconds: number }[] {
+    const ts: { line: number, seconds: number }[] = []
+    for (const [k, v] of Object.entries(fmTimestamps)) {
+      const day = Number(k)
+      const line = dayLines.get(day)
+      if (line !== undefined) {
+        ts.push({ line, seconds: parseTimestamp(v) })
+      }
+    }
+    return ts.sort((a, b) => a.seconds - b.seconds)
+  }
+
+  function formatSeconds(s: number): string {
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${String(sec).padStart(2, '0')}`
+  }
+
+  function insertTimeAnnotation() {
+    if (!editorView || !videoId) return
+    const time = formatSeconds(videoCurrentTime)
+    const pos = editorView.state.selection.main.head
+    const line = editorView.state.doc.lineAt(pos)
+    const lineContent = line.text.trim()
+    // If cursor is on a non-empty, non-comment line, append to end of line
+    // Otherwise insert as standalone comment line
+    let text: string
+    let from: number
+    if (lineContent.length > 0 && !lineContent.startsWith('#')) {
+      text = ` # @time ${time}`
+      from = line.to
+    } else {
+      text = `# @time ${time}\n`
+      from = pos
+    }
+    editorView.dispatch({
+      changes: { from, insert: text },
+      selection: { anchor: from + text.length },
+    })
+    // Trigger re-parse
+    input = editorView.state.doc.toString()
+    run()
+  }
+
+  function getVideoCursorLine(): number {
+    if (videoTimestamps.length === 0) return 999999
+    // Find the last timestamp that has been reached, and the one after it
+    let matchedIdx = -1
+    for (let i = 0; i < videoTimestamps.length; i++) {
+      if (videoCurrentTime >= videoTimestamps[i].seconds) matchedIdx = i
+      else break
+    }
+    if (matchedIdx < 0) return videoTimestamps[0].line - 1  // before first timestamp
+
+    // Show up to the line before the NEXT @time, or end of file
+    const nextIdx = matchedIdx + 1
+    const endLine = nextIdx < videoTimestamps.length
+      ? videoTimestamps[nextIdx].line - 1
+      : 999999
+
+    // Update videoDay from dayLineMap
+    const matchedLine = videoTimestamps[matchedIdx].line
+    let day = 1
+    for (const [d, dayLine] of dayLineMap) {
+      if (dayLine <= matchedLine) day = d
+    }
+    videoDay = day
+    return endLine
+  }
+
+  function goToDay(day: number) {
+    videoDay = day
+    // Show up to the end of this day
+    const nextDay = day + 1
+    if (dayLineMap.has(nextDay)) {
+      cursorLine = dayLineMap.get(nextDay)! - 1
+    } else {
+      cursorLine = 999999
+    }
+    videoSyncActive = false  // Disable auto-sync when manually navigating
+    runWithCursor(cursorLine)
+  }
+
+  function resumeVideoSync() {
+    videoSyncActive = true
+  }
+
+  let videoFullscreen = $state(false)
+
+  function toggleVideoFullscreen() {
+    videoFullscreen = !videoFullscreen
+  }
+
+  function onFullscreenKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') videoFullscreen = false
+  }
+
+  function seekVideo(seconds: number) {
+    youtubePlayer?.seekTo(seconds)
+    videoCurrentTime = seconds
+    videoSyncActive = true
+    runWithCursor(getVideoCursorLine())
+  }
+
+  setOnSeek(seekVideo)
 
   function doOpenHelp(sectionId?: string) {
     showHelp = true
@@ -482,7 +645,10 @@
     rawBodyEl.scrollTop = jsonLine * lineHeight
   }
 
+  let runningWithCursor = false
+
   function onCursorMove() {
+    if (runningWithCursor) return  // prevent re-entrant calls from editor dispatch
     run()
     tick().then(scrollRawToCursor)
   }
@@ -504,6 +670,7 @@
         onCursorChange(_line) {
           onCursorMove()
         },
+        extensions: [timeSeekPlugin],
       })
     })
     return () => {
@@ -772,7 +939,13 @@
     return { survivor, claimRow, claimCell, kill, exec, vote }
   }
 
-  function run() {
+  function runWithCursor(overrideCursorLine?: number) {
+    runningWithCursor = true
+    try { runWithCursorInner(overrideCursorLine) }
+    finally { runningWithCursor = false }
+  }
+
+  function runWithCursorInner(overrideCursorLine?: number) {
     const runStart = performance.now()
     analysisSeats = []
     analysisError = ''
@@ -782,8 +955,37 @@
     parsedLines = []
     sourceLines = { survivor: new Map(), claimRow: new Map(), claimCell: new Map(), kill: new Map(), exec: new Map(), vote: new Map() }
 
+    const effectiveCursorLine = overrideCursorLine ?? getCursorLine()
+
     try {
-      const { meta, statements } = parse(input, { cursorLine: getCursorLine() })
+      // First parse without cursor filter to build dayLineMap
+      const fullParse = parse(input)
+      const fullMeta = fullParse.meta
+
+      // Extract video info from frontmatter
+      const rawVideo = fullMeta.video as string | undefined
+      const newVideoId = rawVideo ? extractYouTubeId(rawVideo) : ''
+      if (newVideoId !== videoId) {
+        videoId = newVideoId
+        videoSyncActive = !!newVideoId
+      }
+      // Build day→line map from full parse for day navigation
+      dayLineMap = buildDayLineMap(fullParse.statements)
+      maxDay = Math.max(1, ...dayLineMap.keys())
+
+      // Build timestamps: frontmatter takes priority, then @time annotations
+      if (fullMeta.timestamps && typeof fullMeta.timestamps === 'object') {
+        videoTimestamps = buildTimestampsFromFrontmatter(fullMeta.timestamps as Record<string, string>, dayLineMap)
+      } else {
+        const timeAnnotations = parseTimeAnnotations(input)
+        if (timeAnnotations.size > 0) {
+          videoTimestamps = buildTimestampsFromAnnotations(timeAnnotations)
+        } else {
+          videoTimestamps = []
+        }
+      }
+
+      const { meta, statements } = parse(input, { cursorLine: effectiveCursorLine })
       rawStatements = JSON.stringify(statements, null, 2)
       parsedLines = stringifyStatements(statements)
       statementLines = statements.map((s: any) => s.line as number)
@@ -815,13 +1017,13 @@
           }
         }
         editorView.dispatch({ effects: [
-          editorModule!.setStatements.of({ statements: stmtInfo, cursorLine: getCursorLine(), playerNames: playerNameInfos }),
+          editorModule!.setStatements.of({ statements: stmtInfo, cursorLine: effectiveCursorLine, playerNames: playerNameInfos }),
           editorModule!.setPlayerList.of(playerList),
           editorModule!.setSetup.of(setup),
           editorModule!.setCurrentDay.of(vs.day),
         ] })
       }
-      cursorLine = getCursorLine()
+      cursorLine = effectiveCursorLine
       players = playersMap
       playerShortNames = shortNamesMap
       villageStatus = vs
@@ -903,6 +1105,28 @@
       villageStatus = null
     }
   }
+
+  function run() {
+    // When video sync is active, always use video-derived cursor line
+    if (videoSyncActive && videoTimestamps.length > 0) {
+      runWithCursor(getVideoCursorLine())
+    } else {
+      runWithCursor()
+    }
+  }
+
+  // Video sync: when currentTime changes, update cursorLine from timestamps
+  let lastVideoCursorLine = -1
+  $effect(() => {
+    if (!videoSyncActive || videoTimestamps.length === 0) return
+    const _time = videoCurrentTime  // track dependency
+    const newCursorLine = getVideoCursorLine()
+    if (newCursorLine !== lastVideoCursorLine) {
+      lastVideoCursorLine = newCursorLine
+      // Use untrack to avoid circular dependency with cursorLine
+      runWithCursor(newCursorLine)
+    }
+  })
 </script>
 
 <div class="layout skin-{skin}">
@@ -1156,7 +1380,40 @@
     {/if}
   </div>
   {:else}
-  <div class="panes panes-prod">
+  <div class="panes panes-prod" class:has-video={!!videoId}>
+    {#if videoId}
+    <div class="prod-left prod-video-col" class:hidden-by-fullscreen={videoFullscreen}>
+      <div class="video-container">
+        <YouTubePlayer bind:this={youtubePlayer} {videoId} bind:currentTime={videoCurrentTime} />
+      </div>
+      <div class="day-nav">
+        <button class="day-nav-btn" disabled={videoDay <= 1} onclick={() => goToDay(videoDay - 1)}>&lt;</button>
+        <span class="day-nav-label">{videoDay}日目</span>
+        <button class="day-nav-btn" disabled={videoDay >= maxDay} onclick={() => goToDay(videoDay + 1)}>&gt;</button>
+        {#if !videoSyncActive}
+          <button class="day-nav-sync" onclick={resumeVideoSync}>動画に同期</button>
+        {:else}
+          <span class="day-nav-synced">同期中</span>
+        {/if}
+        <span class="day-nav-time">{formatSeconds(videoCurrentTime)}</span>
+        <button class="day-nav-btn day-nav-fullscreen" onclick={() => toggleVideoFullscreen()}>全画面</button>
+      </div>
+      <div class="video-editor-wrap">
+        <div class="video-editor-toolbar">
+          <button class="mark-time-btn" onclick={insertTimeAnnotation}>いまここ！</button>
+        </div>
+        {@render inputPane()}
+      </div>
+    </div>
+    <div class="prod-right">
+      <div class="prod-right-top">
+        {@render statusPane()}
+      </div>
+      <div class="prod-right-bottom">
+        {@render analysisPane()}
+      </div>
+    </div>
+    {:else}
     <div class="prod-left">
       {@render inputPane()}
     </div>
@@ -1168,7 +1425,34 @@
         {@render analysisPane()}
       </div>
     </div>
+    {/if}
   </div>
+  {/if}
+
+  {#if videoFullscreen && videoId}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="vf-overlay" onkeydown={onFullscreenKeydown}>
+      <div class="vf-toolbar">
+        <button class="day-nav-btn" disabled={videoDay <= 1} onclick={() => goToDay(videoDay - 1)}>&lt;</button>
+        <span class="day-nav-label">{videoDay}日目</span>
+        <button class="day-nav-btn" disabled={videoDay >= maxDay} onclick={() => goToDay(videoDay + 1)}>&gt;</button>
+        {#if !videoSyncActive}
+          <button class="day-nav-sync" onclick={resumeVideoSync}>動画に同期</button>
+        {:else}
+          <span class="day-nav-synced">同期中</span>
+        {/if}
+        <span class="day-nav-time">{formatSeconds(videoCurrentTime)}</span>
+        <button class="vf-close" onclick={() => toggleVideoFullscreen()}>&times;</button>
+      </div>
+      <div class="vf-panels">
+        <div class="vf-status">
+          {@render statusPane()}
+        </div>
+        <div class="vf-analysis">
+          {@render analysisPane()}
+        </div>
+      </div>
+    </div>
   {/if}
 </div>
 
@@ -1502,6 +1786,223 @@
 
   .prod-right .pane:last-child {
     border-bottom: none;
+  }
+
+  /* Video sync layout */
+  .prod-video-col {
+    display: flex;
+    flex-direction: column;
+    max-width: 640px;
+    min-width: 320px;
+    flex: 1;
+  }
+
+  .prod-video-col.prod-left {
+    max-width: 640px;
+  }
+
+  .video-container {
+    flex: 0 0 auto;
+  }
+
+  .day-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 6px 8px;
+    background: var(--color-bg-elevated);
+    border-top: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .day-nav-btn {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 4px;
+    padding: 2px 10px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .day-nav-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  .day-nav-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text);
+    min-width: 4em;
+    text-align: center;
+  }
+
+  .day-nav-sync {
+    margin-left: auto;
+    background: var(--color-accent);
+    color: var(--color-bg);
+    border: none;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .day-nav-synced {
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+
+  .day-nav-time {
+    font-size: 12px;
+    font-family: 'Consolas', 'Menlo', monospace;
+    color: var(--color-text-muted);
+  }
+
+  .video-editor-wrap {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .video-editor-wrap :global(.pane) {
+    min-height: 0;
+  }
+
+  .video-editor-toolbar {
+    display: flex;
+    padding: 4px 8px;
+    background: var(--color-bg-elevated);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .mark-time-btn {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 4px;
+    padding: 2px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .mark-time-btn:hover {
+    background: var(--color-accent);
+    color: var(--color-bg);
+  }
+
+  /* Video fullscreen */
+  .hidden-by-fullscreen .video-container {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    background: #000;
+  }
+
+  .hidden-by-fullscreen .video-container :global(.yt-wrap) {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+  }
+
+  .vf-overlay {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 9999;
+    width: 340px;
+    display: flex;
+    flex-direction: column;
+    background: rgba(30, 30, 46, 0.85);
+    backdrop-filter: blur(8px);
+    border-left: 1px solid var(--color-border);
+    opacity: 0.3;
+    transition: opacity 0.2s;
+  }
+
+  .vf-overlay:hover {
+    opacity: 1;
+  }
+
+  .vf-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--color-border);
+    flex-wrap: wrap;
+  }
+
+  .vf-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--color-text);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+
+  .vf-close:hover {
+    color: var(--color-accent);
+  }
+
+  .vf-panels {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .vf-status {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .vf-analysis {
+    flex: 0 0 auto;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .vf-panels :global(.pane-header) {
+    display: none;
+  }
+
+  .day-nav-fullscreen {
+    font-size: 16px;
+    padding: 0 6px;
+  }
+
+  .hidden-by-fullscreen .day-nav,
+  .hidden-by-fullscreen .video-editor-wrap {
+    display: none;
+  }
+
+  :global(.cm-time-seek) {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 0 6px;
+    font-size: 11px;
+    line-height: 18px;
+    background: var(--color-surface);
+    color: var(--color-accent);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 3px;
+    cursor: pointer;
+    vertical-align: middle;
+  }
+
+  :global(.cm-time-seek:hover) {
+    background: var(--color-accent);
+    color: var(--color-bg);
   }
 
   .pane {
