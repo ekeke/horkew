@@ -721,6 +721,20 @@ async function main(): Promise<void> {
   const config = parseArgs()
   validateConfig(config)
   process.title = `fenrir-orch [${config.checkpointBase}]`
+
+  // PID ファイル
+  const pidFile = `${config.checkpointBase}/orchestrate.pid`
+  mkdirSync(config.checkpointBase, { recursive: true })
+  if (existsSync(pidFile)) {
+    const oldPid = readFileSync(pidFile, 'utf-8').trim()
+    log(`⚠ PID file exists (pid=${oldPid}). Previous run may still be active or crashed.`)
+  }
+  writeFileSync(pidFile, String(process.pid))
+  const cleanupPid = () => { try { unlinkSync(pidFile) } catch {} }
+  process.on('exit', cleanupPid)
+  process.on('SIGINT', () => { cleanupPid(); process.exit(130) })
+  process.on('SIGTERM', () => { cleanupPid(); process.exit(143) })
+
   await checkExistingCheckpoints(config)
 
   // Git情報
