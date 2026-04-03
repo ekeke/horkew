@@ -1,16 +1,14 @@
 /**
  * Hati 詰み手順を plan token 教師データとして収集
  *
- * 実ゲーム（ヒューリスティック同士）を回し、詰み検出時に:
- * 1. 詰み局面の observation + tsumiTarget をラベルとして記録
- * 2. 一手前の局面の observation + [前日処刑, NEXT, tsumiTarget] をラベルとして記録
- *
- * adapter が enableTsumi=true で検出した tsumiTarget（depth-1 の最初の処刑席）を使う。
- * 将来: adapter から strategy tree を露出させて multi-step ラベルに拡張。
+ * データソース:
+ * 1. DB (data/tsumi-db/) — howl + manifest から strategy tree を再構築、multi-depth ラベル
+ * 2. Runtime (フォールバック) — ゲーム実行 + adapter の tsumiTarget、depth-1 ラベル
  */
 
 import type { SystemRole } from '../../../types/index.ts'
 import type { StrategyNode } from '../../../hati/types.ts'
+import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
 import type { Strategy, DecisionContext } from '../strategy.ts'
 import type { PlanTokenTrainingSample } from './execution-plan-data.ts'
 import { runGame } from '../../../lupa/engine.ts'
@@ -19,15 +17,34 @@ import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../heu
 import { RandomStrategy, WolfTeamRandom, MasonTeamRandom } from '../../../verify/random-strategy.ts'
 import { encodeObservation } from '../observation.ts'
 import { PLAN_VOCAB } from '../rule-action.ts'
+import { lupaRunRetar } from '../retar-bridge.ts'
+import { parse } from '../../../howl/parser.ts'
+import { buildVillageStatus } from '../../../howl/bridge.ts'
+import { rolesFromPossibility } from '../../../retar/possibilities.ts'
 import { resolveRules } from '../../../howl/ruleset.ts'
 import type { TrainingConfig } from '../training.ts'
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import type { AnalyzeOptions } from '../../../retar/index.ts'
 
 const NUM_FORWARD_TOKENS = 8
 const NUM_ENDGAME_TOKENS = 4
 
+const DB_ANALYZE_OPTIONS: AnalyzeOptions = {
+  seerClaimingDueDate: 2,
+  mediumClaimingDueDate: 2,
+  bodyguardClaimingDueDate: 99,
+  masonClaimingDueDate: 2,
+  nekomataClaimingDueDate: 99,
+  dayCountFrom: 1,
+  hasFirstGhost: true,
+  assumptions: new Map(),
+  wolfPairDenyals: [],
+  hocusPocus: new Map(),
+}
+
 // ============================================================
-// Strategy tree → plan token 変換（将来用）
+// Strategy tree → plan token 変換
 // ============================================================
 
 /**
@@ -45,7 +62,9 @@ export function flattenStrategyToLabels(
   let node: StrategyNode = strategy
 
   while (node.type === 'action' && pos < numTokens - 1) {
-    labels[pos] = node.action.execute - 1  // 0-based seat index
+    const seatIdx = node.action.execute - 1  // 0-based seat index
+    if (seatIdx < 0 || seatIdx >= 14) break  // invalid seat
+    labels[pos] = seatIdx
     mask[pos++] = true
 
     const keys = Object.keys(node.branches)
@@ -67,7 +86,229 @@ export function flattenStrategyToLabels(
 }
 
 // ============================================================
-// ゲーム実行 + 詰み収集
+// DB から詰みデータを読み込み
+// ============================================================
+
+type ManifestEntry = {
+  seed: number
+  players: number
+  file: string
+  tsumi: Array<{
+    day: number
+    target: number
+    alive: number
+    strategyDepth: number
+  }>
+  result: string
+}
+
+function findExecutionCheckpoints(howl: string): { lineIndex: number, day: number }[] {
+  const lines = howl.split('\n')
+  const result: { lineIndex: number, day: number }[] = []
+  let day = 0
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].match(/処刑$/)) {
+      day++
+      result.push({ lineIndex: i + 1, day })
+    }
+  }
+  return result
+}
+
+/** howl の配役表から mason の seat を取得 */
+function findMasonSeat(howl: string): number | null {
+  const lines = howl.split('\n')
+  for (const line of lines) {
+    const m = line.match(/^(.+)＝共有$/)
+    if (m) {
+      // 座席名（プレイヤー名）→ 座席番号を howl の冒頭から探す
+      // ++player1, player2, ... の並び順で seat が決まる
+      const setupLine = lines.find(l => l.startsWith('++'))
+      if (!setupLine) continue
+      const players = setupLine.slice(2).split(/[、,]/).map(s => s.trim())
+      const idx = players.indexOf(m[1])
+      if (idx >= 0) return idx + 1
+    }
+  }
+  return null
+}
+
+/** VillageStatus から生存席リストを取得 */
+function getAliveSeats(vs: any): number[] {
+  const alive: number[] = []
+  if (vs.statuses) {
+    for (const [seat, status] of vs.statuses) {
+      if (status.alive) alive.push(seat)
+    }
+  }
+  return alive
+}
+
+/**
+ * DB の manifest + howl から pretrain サンプルを生成。
+ * howl → parse → VillageStatus → Retar → observation (tsumi masked) + strategy labels。
+ */
+export function loadTsumiFromDB(
+  dbDir: string,
+  log?: (msg: string) => void,
+): PlanTokenTrainingSample[] {
+  const manifestPath = join(dbDir, 'manifest.ndjson')
+  if (!existsSync(manifestPath)) return []
+
+  const text = readFileSync(manifestPath, 'utf-8')
+  const entries: ManifestEntry[] = text.split('\n').filter(Boolean).map(l => JSON.parse(l))
+
+  const samples: PlanTokenTrainingSample[] = []
+  let errors = 0
+
+  for (const entry of entries) {
+    const howlPath = join(dbDir, entry.file)
+    if (!existsSync(howlPath)) continue
+
+    const howl = readFileSync(howlPath, 'utf-8')
+    const checkpoints = findExecutionCheckpoints(howl)
+    const masonSeat = findMasonSeat(howl)
+    if (masonSeat === null) continue
+
+    // 一手前用: 前日の observation を記録
+    let prevObs: Float32Array | null = null
+    let prevDay = -1
+
+    for (const tsumiInfo of entry.tsumi) {
+      const cp = checkpoints.find(c => c.day === tsumiInfo.day)
+      if (!cp) continue
+
+      try {
+        // 処刑直前の状態を再構築
+        const truncated = howl.split('\n').slice(0, cp.lineIndex - 1).join('\n')
+        const { meta, statements } = parse(truncated)
+        const { vs, setup } = buildVillageStatus(statements, meta)
+
+        // Retar → 可能性マップ
+        const tsumiResult = searchTsumi(vs, setup, DB_ANALYZE_OPTIONS, lupaRunRetar)
+        if (!tsumiResult.isTsumi) continue
+
+        // Strategy tree を取得（DB 時は maxDepth を広げる）
+        const sr = searchTsumiStrategy(tsumiResult, { maxDepth: 6 })
+        if (!sr.strategy || sr.strategy.type !== 'action') continue
+
+        // Retar possibilities を DecisionContext 用に変換
+        // tsumiResult.conclusions は Possibilities (bitmask) 型
+        const conclusions = tsumiResult.conclusions as any
+        const retarPossibilities = new Map<number, Set<SystemRole>>()
+        if (conclusions?.possibilities) {
+          const aliveSeats = getAliveSeats(vs)
+          for (const seat of aliveSeats) {
+            const bits = conclusions.possibilities[seat]
+            if (bits) {
+              retarPossibilities.set(seat, new Set(rolesFromPossibility(bits)))
+            }
+          }
+        }
+
+        // mason 視点の簡易 DecisionContext を構築
+        const aliveSeats = getAliveSeats(vs)
+        const ctx: DecisionContext = {
+          mySeat: masonSeat,
+          myRole: 'mason',
+          myPlayer: { seat: masonSeat, role: 'mason', alive: aliveSeats.includes(masonSeat), divineHistory: new Map(), guardHistory: new Map(), claimed: null, fakeDivineHistory: null } as any,
+          day: tsumiInfo.day,
+          phase: 'day',
+          alivePlayers: aliveSeats,
+          publicEvents: [],
+          signals: [],
+          commander: null,
+          proposals: [],
+          rng: { next: () => 0 } as any,
+          gameState: { day: tsumiInfo.day, phase: 'day', players: [], commander: null } as any,
+          lastExecutedSeat: tsumiInfo.day > 1 ? (checkpoints.find(c => c.day === tsumiInfo.day - 1) ? null : null) : null,
+          retarPossibilities,
+          maxSurvivingNV: null,
+          globalRetarPossibilities: retarPossibilities,
+          wolfTeammates: null,
+          knownWolves: null,
+          knownHamster: null,
+          masonPartner: null,
+          revoteRound: null,
+          revoteCandidates: null,
+          executionPlans: [],
+          tsumiTarget: null,  // tsumi masked
+          rules: resolveRules(),
+        }
+
+        const obs = encodeObservation(ctx)
+
+        // Strategy tree → labels (multi-depth)
+        const fwd = flattenStrategyToLabels(sr.strategy, NUM_FORWARD_TOKENS)
+        const eg = flattenStrategyToLabels(sr.strategy, NUM_ENDGAME_TOKENS)
+        if (!fwd || !eg) continue
+
+        samples.push({
+          observation: obs,
+          forwardLabels: fwd.labels, forwardMask: fwd.mask,
+          endgameLabels: eg.labels, endgameMask: eg.mask,
+        })
+
+        // 一手前の局面
+        if (prevObs && prevDay === tsumiInfo.day - 1) {
+          // 前日の処刑席を取得
+          const prevCp = checkpoints.find(c => c.day === tsumiInfo.day - 1)
+          if (prevCp) {
+            const prevTruncated = howl.split('\n').slice(0, prevCp.lineIndex).join('\n')
+            const execMatch = prevTruncated.match(/^(.+)処刑$/m)
+            // 一手前のラベル: [前日target, NEXT, 今日のstrategy...]
+            // 簡易版: 前日は strategy の最初のアクション、今日は次のアクション
+            // → そのまま depth+1 の strategy として表現
+          }
+          // 一手前は prevObs + 今回の strategy の first action をラベルに
+          const target = sr.strategy.action.execute
+          const prevFwd = makePrevTsumiLabels(target, NUM_FORWARD_TOKENS)
+          samples.push({
+            observation: prevObs,
+            forwardLabels: prevFwd.labels, forwardMask: prevFwd.mask,
+            endgameLabels: eg.labels, endgameMask: eg.mask,
+          })
+        }
+
+        // 今日の observation を一手前用に保存
+        prevObs = obs
+        prevDay = tsumiInfo.day
+      } catch {
+        errors++
+      }
+    }
+  }
+
+  if (log) {
+    log(`  DB loaded: ${samples.length} samples from ${entries.length} games (${errors} errors)`)
+  }
+  return samples
+}
+
+/** 一手前の局面ラベル: [今日の詰み対象, STOP] (前日の observation に対して) */
+function makePrevTsumiLabels(tsumiTarget: number, numTokens: number): { labels: number[], mask: boolean[] } {
+  const labels = new Array(numTokens).fill(PLAN_VOCAB.STOP)
+  const mask = new Array(numTokens).fill(false)
+  labels[0] = tsumiTarget - 1
+  mask[0] = true
+  labels[1] = PLAN_VOCAB.STOP
+  mask[1] = true
+  if (numTokens > 2) { labels[2] = PLAN_VOCAB.STOP; mask[2] = true }
+  return { labels, mask }
+}
+
+function spreadLabels(
+  fwd: { labels: number[], mask: boolean[] },
+  eg: { labels: number[], mask: boolean[] },
+) {
+  return {
+    forwardLabels: fwd.labels, forwardMask: fwd.mask,
+    endgameLabels: eg.labels, endgameMask: eg.mask,
+  }
+}
+
+// ============================================================
+// Runtime 収集 (フォールバック、DB がない場合)
 // ============================================================
 
 /** 詰み対象を1席だけ指定する plan token */
@@ -82,21 +323,6 @@ function makeTsumiLabels(target: number, numTokens: number): { labels: number[],
   return { labels, mask }
 }
 
-/** 一手前の局面ラベル: [前日の処刑席, NEXT, 今日の詰み対象, STOP] */
-function makePrevTsumiLabels(
-  prevExecuted: number, tsumiTarget: number, numTokens: number,
-): { labels: number[], mask: boolean[] } {
-  const labels = new Array(numTokens).fill(PLAN_VOCAB.STOP)
-  const mask = new Array(numTokens).fill(false)
-  let pos = 0
-  labels[pos] = prevExecuted - 1; mask[pos++] = true
-  if (pos < numTokens - 1) { labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true }
-  if (pos < numTokens - 1) { labels[pos] = tsumiTarget - 1; mask[pos++] = true }
-  if (pos < numTokens) { labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true }
-  if (pos < numTokens) { labels[pos] = PLAN_VOCAB.STOP; mask[pos] = true }
-  return { labels, mask }
-}
-
 type TsumiRecord = {
   observation: Float32Array
   forwardLabels: number[]
@@ -105,10 +331,6 @@ type TsumiRecord = {
   endgameMask: boolean[]
 }
 
-/**
- * 1ゲームを実行し、詰み局面と一手前の局面を収集。
- * adapter の enableTsumi=true が ctx.tsumiTarget を設定する。
- */
 async function collectTsumiFromGame(
   config: TrainingConfig,
   seed: number,
@@ -121,8 +343,6 @@ async function collectTsumiFromGame(
   type DaySnapshot = { observation: Float32Array, day: number }
   const prevSnapshots: DaySnapshot[] = []
 
-  // mason は teamStrategy 経由で投票するため decideVote は呼ばれない。
-  // decideProposal が adapter の onVote 内で呼ばれるので、そこでキャプチャする。
   class TsumiStrategy implements Strategy {
     private inner = new HeuristicStrategy()
     decideNightAction(ctx: DecisionContext) { return this.inner.decideNightAction(ctx) }
@@ -139,7 +359,6 @@ async function collectTsumiFromGame(
       if (masonSeat === null) masonSeat = ctx.mySeat
       if (ctx.mySeat !== masonSeat) return result
 
-      // observation に tsumi フィールドを含めない（答えの漏洩防止）
       const savedTsumi = ctx.tsumiTarget
       ctx.tsumiTarget = null
       const obs = encodeObservation(ctx)
@@ -147,19 +366,17 @@ async function collectTsumiFromGame(
 
       if (ctx.tsumiTarget !== null) {
         const target = ctx.tsumiTarget
-        // 詰み局面そのもの
         records.push({
           observation: obs,
           ...spreadLabels(makeTsumiLabels(target, NUM_FORWARD_TOKENS), makeTsumiLabels(target, NUM_ENDGAME_TOKENS)),
         })
-        // 一手前の局面
         if (prevSnapshots.length > 0) {
           const prev = prevSnapshots[prevSnapshots.length - 1]
           if (prev.day === ctx.day - 1 && ctx.lastExecutedSeat !== null) {
             records.push({
               observation: prev.observation,
               ...spreadLabels(
-                makePrevTsumiLabels(ctx.lastExecutedSeat, target, NUM_FORWARD_TOKENS),
+                makeTsumiLabels(target, NUM_FORWARD_TOKENS),
                 makeTsumiLabels(target, NUM_ENDGAME_TOKENS),
               ),
             })
@@ -184,7 +401,6 @@ async function collectTsumiFromGame(
       for (const [seat, role] of seatRoles) {
         if (role === 'mason') {
           if (masonSeat === null) masonSeat = seat
-          // mason は常に TsumiStrategy（observation を記録するため）
           strategies.set(seat, tsumiStrategy)
         }
       }
@@ -204,18 +420,8 @@ async function collectTsumiFromGame(
   return records
 }
 
-function spreadLabels(
-  fwd: { labels: number[], mask: boolean[] },
-  eg: { labels: number[], mask: boolean[] },
-) {
-  return {
-    forwardLabels: fwd.labels, forwardMask: fwd.mask,
-    endgameLabels: eg.labels, endgameMask: eg.mask,
-  }
-}
-
 // ============================================================
-// バッチ収集 + キャッシュ
+// 公開 API
 // ============================================================
 
 export async function collectTsumiBatch(
