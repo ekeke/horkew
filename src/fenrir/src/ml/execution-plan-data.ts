@@ -624,7 +624,11 @@ export function generatePlanTokenTrainingBatch(
     const fwdWolf = fwdRetar.wolfSeats.filter(s => s !== fwdMySeat)
     if (fwdFox.length === 0 && fwdWolf.length === 0) continue
 
-    const fwd = buildSuspectLabels(fwdFox, fwdWolf, NUM_FORWARD_TOKENS, rng)
+    // パターン混合: role tokens (roller, decision等) と seat tokens (suspect列挙) を両方教える
+    const pattern = pickPattern(rng)
+    const suspectSeats = [...fwdFox, ...fwdWolf.filter(s => !fwdFox.includes(s))]
+    const patternResult = patternToForwardLabels(pattern, fwdCO.claims, fwdAliveSeats, fwdMySeat, rng, suspectSeats)
+    const fwd = patternResult ?? buildSuspectLabels(fwdFox, fwdWolf, NUM_FORWARD_TOKENS, rng)
 
     // Endgame 盤面（別の盤面で生成）
     const egAliveSeats = shuffleArray(allSeats, rng).slice(0, egAliveCount)
