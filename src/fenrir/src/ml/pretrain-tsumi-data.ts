@@ -62,8 +62,18 @@ export function flattenStrategyToLabels(
   let node: StrategyNode = strategy
 
   while (node.type === 'action' && pos < numTokens - 1) {
+    if (node.action.execute === -1) {
+      // Night ノード: ラベルに含めず branch を辿って次の Day ノードへ
+      const keys = Object.keys(node.branches)
+      if (keys.length === 0) break
+      const next = node.branches[keys[0]]
+      if (next.type === 'win') break
+      node = next
+      continue
+    }
+
     const seatIdx = node.action.execute - 1  // 0-based seat index
-    if (seatIdx < 0 || seatIdx >= 14) break  // invalid seat
+    if (seatIdx < 0 || seatIdx >= 14) break  // safety guard
     labels[pos] = seatIdx
     mask[pos++] = true
 
