@@ -29,6 +29,10 @@ description: Fenrir 学習セッション開始時のオンボーディング。
 2. **eval howl の確認**（存在する場合）:
    - `{checkpoint-base}/eval-howl/` の最新 iter から数ゲーム読み、プレイ品質を把握
 
+3. **inspect データの確認**（存在する場合）:
+   - `demo/public/inspect/game_*.json` — 学習中のゲームの詳細データ（plan tokens, observation, predict 等）
+   - timeline の `planForward` / `planEndgame` で mason の plan 出力を確認できる
+
 3. **実行中プロセスの確認はしない**:
    - `tasklist` や `ps` 等のプロセス確認コマンドは重いので実行禁止
    - eval_log.jsonl のタイムスタンプから稼働状況を推測すれば十分
