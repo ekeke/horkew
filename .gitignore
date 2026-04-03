@@ -1,5 +1,6 @@
 node_modules/
 train-orchestrate.pid
+train-orchestrate.sha
 data/
 demo/dist/
 .claude/*.local.*

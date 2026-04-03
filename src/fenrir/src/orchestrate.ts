@@ -735,7 +735,9 @@ async function main(): Promise<void> {
     log(`Stale PID file found (pid=${oldPid}, not running). Overwriting.`)
   }
   writeFileSync(pidFile, String(process.pid))
-  const cleanupPid = () => { try { unlinkSync(pidFile) } catch {} }
+  const shaFile = 'train-orchestrate.sha'
+  writeFileSync(shaFile, execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim() + '\n')
+  const cleanupPid = () => { try { unlinkSync(pidFile) } catch {}; try { unlinkSync(shaFile) } catch {} }
   const forceShutdown = (code: number) => {
     log(`\nShutting down (signal ${code})...`)
     terminateGameWorkerPool()
