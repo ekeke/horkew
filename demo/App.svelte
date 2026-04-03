@@ -273,6 +273,18 @@
   let videoSyncActive = $state(false)
   let videoDay = $state(1)
   let dayLineMap: Map<number, number> = $state(new Map())  // day → first line number
+  let videoInitialized = $state(false)  // true after first parse of current document
+
+  function resetVideoState() {
+    videoId = ''
+    videoSegments = []
+    activeSegmentIdx = 0
+    videoAutoplay = false
+    videoCurrentTime = 0
+    videoSyncActive = false
+    videoDay = 1
+    videoInitialized = false
+  }
   let maxDay = $state(1)
 
   function extractYouTubeId(url: string): string {
@@ -476,6 +488,7 @@
 
   function handleStartTrial(text: string) {
     trialMode = true
+    resetVideoState()
     input = text
     setEditorContent(text)
     showHelp = false
@@ -491,6 +504,7 @@
 
   function switchTo(key: string) {
     if (trialMode) trialMode = false
+    resetVideoState()
     activeKey = key
     input = loadText(key)
     setEditorContent(input)
@@ -1000,11 +1014,17 @@
 
       // Build video segments from @URL + @MM:SS annotations
       videoSegments = buildVideoSegments(fullParse.statements)
-      const firstId = videoSegments[0]?.videoId ?? ''
-      if (firstId !== videoId && activeSegmentIdx === 0) {
-        videoId = firstId
-        videoSyncActive = !!firstId
+      const activeId = videoSegments[activeSegmentIdx]?.videoId ?? ''
+      if (activeId !== videoId) {
+        videoId = activeId
+        videoSyncActive = !!activeId
       }
+      // First parse of a new document: autoplay if video annotations present
+      if (!videoInitialized && videoSegments.length > 0) {
+        videoAutoplay = true
+        videoSyncActive = true
+      }
+      videoInitialized = true
 
       // Build day→line map
       dayLineMap = buildDayLineMap(fullParse.statements)
