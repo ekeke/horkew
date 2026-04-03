@@ -10,10 +10,13 @@ export { EditorView } from '@codemirror/view'
 export { setStatements, type StatementInfo, type HighlightPayload, type PlayerNameInfo } from './howlLanguage.ts'
 export { setPlayerList, setSetup, setCurrentDay, type PlayerEntry } from './howlCompletion.ts'
 
+import type { Extension } from '@codemirror/state'
+
 export function createHowlEditor(parent: HTMLElement, opts: {
   doc: string
   onChange: (value: string) => void
   onCursorChange: (line: number) => void
+  extensions?: Extension[]
 }): EditorView {
   const state = EditorState.create({
     doc: opts.doc,
@@ -36,6 +39,7 @@ export function createHowlEditor(parent: HTMLElement, opts: {
           opts.onCursorChange(line)
         }
       }),
+      ...(opts.extensions ?? []),
     ],
   })
 
