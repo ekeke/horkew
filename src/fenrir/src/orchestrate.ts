@@ -943,35 +943,26 @@ async function main(): Promise<void> {
     if (gameSamples.length > 0) {
       const dMiniBatch = 256
       for (let epoch = 1; epoch <= pretrainDEpochs; epoch++) {
-        let epochPlanLoss = 0, epochPlanAcc = 0, epochPredLoss = 0, epochValLoss = 0
+        let epochPredLoss = 0, epochValLoss = 0
         let batchCount = 0
 
         for (let offset = 0; offset < gameSamples.length; offset += dMiniBatch) {
           const batch = gameSamples.slice(offset, offset + dMiniBatch)
 
-          const planResult = (tfNetwork as any).trainSupervisedPlan({
-            observations: batch.map(s => s.observation),
-            forwardLabels: batch.map(s => s.forwardLabels),
-            forwardMasks: batch.map(s => s.forwardMask),
-            numTokens: batch[0].forwardLabels.length,
-            vocabSize: PLAN_VOCAB.SIZE,
-          })
-
+          // plan は B で学習済み。D では predict + value のみ学習（plan 上書き防止）
           const multiResult = (tfNetwork as any).trainSupervisedMulti({
             observations: batch.map(s => s.observation),
             predictLabels: batch.map(s => s.predictLabel),
             valueLabels: batch.map(s => s.valueLabel),
           })
 
-          epochPlanLoss += planResult.loss
-          epochPlanAcc += planResult.accuracy
           epochPredLoss += multiResult.predictLoss
           epochValLoss += multiResult.valueLoss
           batchCount++
         }
 
         if ((epoch % 5 === 0 || epoch === 1) && batchCount > 0) {
-          log(`  epoch=${epoch} plan_loss=${(epochPlanLoss / batchCount).toFixed(4)} plan_acc=${(epochPlanAcc / batchCount * 100).toFixed(1)}% pred_loss=${(epochPredLoss / batchCount).toFixed(4)} val_loss=${(epochValLoss / batchCount).toFixed(4)}`)
+          log(`  epoch=${epoch} pred_loss=${(epochPredLoss / batchCount).toFixed(4)} val_loss=${(epochValLoss / batchCount).toFixed(4)}`)
         }
       }
 
