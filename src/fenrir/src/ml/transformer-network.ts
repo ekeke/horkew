@@ -292,9 +292,13 @@ export class TransformerNetwork {
           if (t !== STOP_IDX) stepLogits[t] = -Infinity
         }
       } else {
-        // Step 0 or after NEXT: disallow NEXT
+        // Step 0 or after NEXT: disallow NEXT (consecutive NEXT is meaningless)
         if (step === 0 || prevAction === NEXT_IDX) {
           stepLogits[NEXT_IDX] = -Infinity
+        }
+        // After NEXT: disallow STOP (NEXT must be followed by a target)
+        if (prevAction === NEXT_IDX) {
+          stepLogits[STOP_IDX] = -Infinity
         }
         // Disallow duplicates within group
         for (const used of groupUsed) {
