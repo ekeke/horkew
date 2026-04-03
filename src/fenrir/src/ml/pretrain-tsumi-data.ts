@@ -176,7 +176,7 @@ function getAliveSeats(vs: any): number[] {
   const alive: number[] = []
   if (vs.statuses) {
     for (const [seat, status] of vs.statuses) {
-      if (status.alive) alive.push(seat)
+      if (status.surviving) alive.push(seat)
     }
   }
   return alive
