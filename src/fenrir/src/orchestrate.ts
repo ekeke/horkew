@@ -332,7 +332,7 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
     byFile.set(fileName, { file: fileName, seed: game.seed!, result: game.result, gameLength: game.gameLength!, model: modelName, iteration, gitSha: sha })
   }
 
-  const finalIndex = [...byFile.values()].sort((a, b) => b.iteration - a.iteration || b.seed - a.seed)
+  const finalIndex = [...byFile.values()].sort((a, b) => b.iteration - a.iteration || a.seed - b.seed)
   writeFileSync(indexPath, JSON.stringify(finalIndex, null, 2))
   console.error(`  [inspect] ${sampled.length} game(s) saved (total ${finalIndex.length})`)
 }
