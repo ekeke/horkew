@@ -139,7 +139,11 @@ async function collectTsumiFromGame(
       if (masonSeat === null) masonSeat = ctx.mySeat
       if (ctx.mySeat !== masonSeat) return result
 
+      // observation に tsumi フィールドを含めない（答えの漏洩防止）
+      const savedTsumi = ctx.tsumiTarget
+      ctx.tsumiTarget = null
       const obs = encodeObservation(ctx)
+      ctx.tsumiTarget = savedTsumi
 
       if (ctx.tsumiTarget !== null) {
         const target = ctx.tsumiTarget
