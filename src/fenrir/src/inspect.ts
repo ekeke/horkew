@@ -24,6 +24,7 @@ import { loadCheckpoint } from './ml/checkpoint.ts'
 import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
 import { decodeObservation } from './decode-observation.ts'
 import { parsePlanIndices, PLAN_VOCAB } from './rule-action.ts'
 import { CO_ROLES } from './observation.ts'
@@ -383,8 +384,9 @@ for (let g = 0; g < count; g++) {
 
   const gameLength = state.day
 
-  const inspectData = { seed: gameSeed, result, gameLength, howl, players, timeline }
-  const fileName = `game_${gameSeed}.json`
+  const gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
+  const inspectData = { seed: gameSeed, result, gameLength, howl, players, timeline, gitSha }
+  const fileName = `game_seed${gameSeed}.json`
   const filePath = `${outdir}/${fileName}`
   writeFileSync(filePath, JSON.stringify(inspectData, null, 2))
 
@@ -393,17 +395,18 @@ for (let g = 0; g < count; g++) {
 }
 
 // index.json 更新（既存エントリとマージ）
-type IndexEntry = { file: string, seed: number, result: string, gameLength: number }
+type IndexEntry = { file: string, seed: number, result: string, gameLength: number, gitSha?: string }
 const indexPath = `${outdir}/index.json`
 let indexEntries: IndexEntry[] = []
 if (existsSync(indexPath)) {
   try { indexEntries = JSON.parse(readFileSync(indexPath, 'utf-8')) } catch {}
 }
-// seed で重複排除（新しい方を優先）
+// file で重複排除（新しい方を優先）
+const cliSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
 const byFile = new Map(indexEntries.map(e => [e.file, e]))
 for (const r of results) {
-  const fileName = `game_${r.seed}.json`
-  byFile.set(fileName, { file: fileName, seed: r.seed, result: r.result, gameLength: (JSON.parse(readFileSync(r.file, 'utf-8')) as { gameLength: number }).gameLength })
+  const fileName = `game_seed${r.seed}.json`
+  byFile.set(fileName, { file: fileName, seed: r.seed, result: r.result, gameLength: (JSON.parse(readFileSync(r.file, 'utf-8')) as { gameLength: number }).gameLength, gitSha: cliSha })
 }
 const finalIndex = [...byFile.values()].sort((a, b) => a.seed - b.seed)
 writeFileSync(indexPath, JSON.stringify(finalIndex, null, 2))

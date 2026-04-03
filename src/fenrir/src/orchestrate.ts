@@ -225,13 +225,14 @@ function pickInspectSeeds(seeds: number[], interval: number): number[] {
 /**
  * SerializedGameResult から inspect JSON を生成・保存
  */
-function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[], modelName: string, iteration: number) {
+function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[], modelName: string, iteration: number, gitSha?: string) {
   const sampled = results.filter(g => g.howl)
   if (sampled.length === 0) return
 
   mkdirSync(INSPECT_DIR, { recursive: true })
+  const sha = gitSha ?? execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
 
-  type IndexEntry = { file: string, seed: number, result: string, gameLength: number, model: string, iteration: number }
+  type IndexEntry = { file: string, seed: number, result: string, gameLength: number, model: string, iteration: number, gitSha: string }
   const indexPath = `${INSPECT_DIR}/index.json`
   let indexEntries: IndexEntry[] = []
   if (existsSync(indexPath)) {
@@ -323,14 +324,15 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
       allPlayerSteps,
       model: modelName,
       iteration,
+      gitSha: sha,
     }
 
-    const fileName = `game_${game.seed}.json`
+    const fileName = `game_iter${iteration}_seed${game.seed}.json`
     writeFileSync(`${INSPECT_DIR}/${fileName}`, JSON.stringify(inspectData, null, 2))
-    byFile.set(fileName, { file: fileName, seed: game.seed!, result: game.result, gameLength: game.gameLength!, model: modelName, iteration })
+    byFile.set(fileName, { file: fileName, seed: game.seed!, result: game.result, gameLength: game.gameLength!, model: modelName, iteration, gitSha: sha })
   }
 
-  const finalIndex = [...byFile.values()].sort((a, b) => a.seed - b.seed)
+  const finalIndex = [...byFile.values()].sort((a, b) => b.iteration - a.iteration || b.seed - a.seed)
   writeFileSync(indexPath, JSON.stringify(finalIndex, null, 2))
   console.error(`  [inspect] ${sampled.length} game(s) saved (total ${finalIndex.length})`)
 }
@@ -1142,7 +1144,7 @@ async function main(): Promise<void> {
           inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
           enableMasonTakeover: true,
         }, seeds)
-        if (inspectSeeds.length > 0) saveInspectGames(serializedResults, 'mason_individual', masonIter)
+        if (inspectSeeds.length > 0) saveInspectGames(serializedResults, 'mason_individual', masonIter, gitSha)
 
         for (const game of serializedResults) {
           const stepsMap = new Map<number, TrajectoryStep[]>()
@@ -1390,7 +1392,7 @@ async function main(): Promise<void> {
             frozenMasonWeights: name === 'village' ? frozenMasonWeights : undefined,
             inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
           }, seeds)
-          if (inspectSeeds.length > 0) saveInspectGames(serializedResults, name, iter)
+          if (inspectSeeds.length > 0) saveInspectGames(serializedResults, name, iter, gitSha)
 
           for (const game of serializedResults) {
             const stepsMap = new Map<number, TrajectoryStep[]>()
@@ -1723,7 +1725,7 @@ async function main(): Promise<void> {
               phase: 1,
               inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
             }, seeds)
-            if (inspectSeeds.length > 0) saveInspectGames(serializedResults, `phase1p_${name}`, iter)
+            if (inspectSeeds.length > 0) saveInspectGames(serializedResults, `phase1p_${name}`, iter, gitSha)
 
             for (const game of serializedResults) {
               // 個人steps: fanatic/third のみ収集 (village は frozen)
