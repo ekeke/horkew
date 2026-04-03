@@ -736,9 +736,15 @@ async function main(): Promise<void> {
   }
   writeFileSync(pidFile, String(process.pid))
   const cleanupPid = () => { try { unlinkSync(pidFile) } catch {} }
+  const forceShutdown = (code: number) => {
+    log(`\nShutting down (signal ${code})...`)
+    terminateGameWorkerPool()
+    cleanupPid()
+    process.exit(code)
+  }
   process.on('exit', cleanupPid)
-  process.on('SIGINT', () => { cleanupPid(); process.exit(130) })
-  process.on('SIGTERM', () => { cleanupPid(); process.exit(143) })
+  process.on('SIGINT', () => forceShutdown(130))
+  process.on('SIGTERM', () => forceShutdown(143))
 
   await checkExistingCheckpoints(config)
 
