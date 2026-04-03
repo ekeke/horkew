@@ -13,6 +13,7 @@ import type { GameEvent, GameState } from '../../src/lupa/types.ts'
 import { runGame } from '../../src/lupa/engine.ts'
 import { strategyAdapter } from '../../src/verify/strategy-adapter.ts'
 import { RandomStrategy, WolfTeamRandom, MasonTeamRandom } from '../../src/verify/random-strategy.ts'
+import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../../src/fenrir/src/heuristic.ts'
 import { formatHowl } from '../../src/lupa/format.ts'
 import { parse } from '../../src/howl/parser.ts'
 import { buildVillageStatus } from '../../src/howl/bridge.ts'
@@ -26,11 +27,13 @@ const { values: args } = parseArgs({
   options: {
     games: { type: 'string', default: '5000' },
     seed: { type: 'string', default: '0' },
+    heuristic: { type: 'boolean', default: false },
   },
 })
 
 const NUM_GAMES = parseInt(args.games!)
 const BASE_SEED = parseInt(args.seed!)
+const USE_HEURISTIC = args.heuristic!
 
 const ANALYZE_OPTIONS: AnalyzeOptions = {
   seerClaimingDueDate: 2,
@@ -104,6 +107,7 @@ async function main() {
   }
 
   console.log(`=== 詰み盤面 DB 生成 ===`)
+  console.log(`  strategy: ${USE_HEURISTIC ? 'heuristic' : 'random'}`)
   console.log(`  players: ${TOTAL_PLAYERS}`)
   console.log(`  games: ${NUM_GAMES}`)
   console.log(`  seed range: ${BASE_SEED}..${BASE_SEED + NUM_GAMES - 1}`)
@@ -123,9 +127,9 @@ async function main() {
     let events: GameEvent[], state: GameState
     try {
       const handlers = strategyAdapter({
-        defaultStrategy: new RandomStrategy(),
-        wolfTeamStrategy: new WolfTeamRandom(),
-        masonTeamStrategy: new MasonTeamRandom(),
+        defaultStrategy: USE_HEURISTIC ? new HeuristicStrategy() : new RandomStrategy(),
+        wolfTeamStrategy: USE_HEURISTIC ? new WolfTeamHeuristic() : new WolfTeamRandom(),
+        masonTeamStrategy: USE_HEURISTIC ? new MasonTeamHeuristic() : new MasonTeamRandom(),
         enableRetar: false,
         seed,
         roles: ROLES_14,
