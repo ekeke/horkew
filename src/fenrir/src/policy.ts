@@ -64,7 +64,7 @@ export class FenrirStrategy implements Strategy {
     const t = performance.now()
     const obs = encodeObservation(ctx)
     this.lastObs = obs
-    const result = this.network.forward(obs)
+    const result = this.network.forward(obs, this.config.explore)
     this.inferMs += performance.now() - t
     this.inferCount++
     return result
@@ -183,51 +183,6 @@ export class FenrirStrategy implements Strategy {
     })
   }
 
-  /** Plan token logitsから各位置のアクションをサンプリング/argmax */
-  private selectPlanTokens(
-    logits: Float32Array, numTokens: number, vocabSize: number,
-  ): { actions: number[], logProbs: number[] } {
-    const actions: number[] = []
-    const logProbs: number[] = []
-    for (let k = 0; k < numTokens; k++) {
-      const off = k * vocabSize
-      // softmax over vocab for this position
-      let maxVal = -Infinity
-      for (let v = 0; v < vocabSize; v++) {
-        if (logits[off + v] > maxVal) maxVal = logits[off + v]
-      }
-      const expVals = new Float32Array(vocabSize)
-      let sumExp = 0
-      for (let v = 0; v < vocabSize; v++) {
-        expVals[v] = Math.exp(logits[off + v] - maxVal)
-        sumExp += expVals[v]
-      }
-
-      let chosenIdx: number
-      if (this.config.explore) {
-        // Sample from distribution
-        const r = Math.random() * sumExp
-        let cumulative = 0
-        chosenIdx = vocabSize - 1
-        for (let v = 0; v < vocabSize; v++) {
-          cumulative += expVals[v]
-          if (cumulative >= r) { chosenIdx = v; break }
-        }
-      } else {
-        // Greedy
-        chosenIdx = 0
-        for (let v = 1; v < vocabSize; v++) {
-          if (expVals[v] > expVals[chosenIdx]) chosenIdx = v
-        }
-      }
-
-      const prob = expVals[chosenIdx] / sumExp
-      actions.push(chosenIdx)
-      logProbs.push(Math.log(prob + 1e-8))
-    }
-    return { actions, logProbs }
-  }
-
   /** 戦略ステップ（plan tokens + predict）を1つのtrajectoryステップとして記録 */
   private recordStrategy(
     forwardActions: number[], forwardLogProbs: number[],
@@ -329,10 +284,13 @@ export class FenrirStrategy implements Strategy {
       }
 
       // plan + predict を1つの strategy ステップとして記録
-      if (forwardLogits && endgameLogits) {
-        const fwd = this.selectPlanTokens(forwardLogits, this.numForwardTokens, this.planVocabSize)
-        const eg = this.selectPlanTokens(endgameLogits, this.numEndgameTokens, this.planVocabSize)
-        this.recordStrategy(fwd.actions, fwd.logProbs, eg.actions, eg.logProbs, predictActions, result.value, ctx.mySeat)
+      // GRU autoregressive decoder outputs are pre-computed in forward()
+      if (result.planForwardActions && result.planEndgameActions) {
+        this.recordStrategy(
+          result.planForwardActions, result.planForwardLogProbs!,
+          result.planEndgameActions, result.planEndgameLogProbs!,
+          predictActions, result.value, ctx.mySeat,
+        )
       }
 
       // 村陣営のみplanに従って投票、人外は自由（ランダム）
@@ -340,9 +298,9 @@ export class FenrirStrategy implements Strategy {
         // Debug: plan tokens の生出力
         // TODO: FENRIR_DEBUG=howl でデバッグ用Howlコメント（# [plan] ...）として出力できるようにする
         if (process.env.FENRIR_DEBUG) {
-          const fwdIdx = ruleAction.argmaxPlanTokens(forwardLogits, this.numForwardTokens, this.planVocabSize)
+          const fwdIdx = result.planForwardActions ?? ruleAction.argmaxPlanTokens(forwardLogits!, this.numForwardTokens, this.planVocabSize)
           const fwdGroups = ruleAction.parsePlanIndices(fwdIdx)
-          const egIdx = endgameLogits ? ruleAction.argmaxPlanTokens(endgameLogits, this.numEndgameTokens, this.planVocabSize) : []
+          const egIdx = result.planEndgameActions ?? (endgameLogits ? ruleAction.argmaxPlanTokens(endgameLogits, this.numEndgameTokens, this.planVocabSize) : [])
           const egGroups = ruleAction.parsePlanIndices(egIdx)
           const fmtGroup = (g: ruleAction.PlanDayGroup) => g.targets.map(t =>
             t.type === 'seat' ? `seat${t.seat}` : t.type === 'role' ? t.role : 'grayran'

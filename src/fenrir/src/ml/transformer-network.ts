@@ -8,20 +8,25 @@
  *   → 席間関係の構造的理解
  *
  * Strategy Layer (M層):
- *   20トークン(↑の出力) + Forward(8) + Endgame(4) = 32トークン
- *   → 処刑プラン + 推理 + CO方針
+ *   20トークン(↑の出力) = 20トークン
+ *   → 盤面理解の深化
+ *
+ * GRU Decoder:
+ *   CLS出力 → 初期hidden → 自己回帰でplan token列を生成
+ *   forward plan (8 steps) + endgame plan (4 steps)
  *
  * 出力:
  *   CLS → co_policy, fake_target_hint, fake_result_hint, value
  *   Seat[i] → predict(11), trust(1)  (per-seat softmax/scalar)
- *   Forward/Endgame[k] → Pointer(23)  (plan tokens)
+ *   GRU → plan_forward(8×22), plan_endgame(4×22)  (autoregressive)
  *   + 既存head (vote, night等) for backward compat
  */
 
 import type { NetworkConfig, ForwardResult, TransformerNetworkConfig } from './nn.ts'
-import { DenseLayer } from './nn.ts'
+import { DenseLayer, gaussianRandom } from './nn.ts'
 import { TransformerEncoder, type TransformerConfig, linearBatchedPublic } from './transformer.ts'
 import { tokenize, SEATS, NUM_ROLE_TOKENS, type ObservationMode } from '../observation.ts'
+import { PLAN_VOCAB } from '../rule-action.ts'
 
 export class TransformerNetwork {
   readonly config: NetworkConfig
@@ -37,12 +42,22 @@ export class TransformerNetwork {
   private seatEncoder: TransformerEncoder   // N layers, 20 tokens
   private strategyEncoder: TransformerEncoder  // M layers, 32 tokens
 
-  // Learnable embeddings for Forward/Endgame plan tokens
-  private forwardEmbeddings: Float32Array    // [numForward * dModel]
-  private endgameEmbeddings: Float32Array    // [numEndgame * dModel]
+  // GRU autoregressive decoder for plan tokens
+  private gruWz: Float32Array    // [dModel * dModel]
+  private gruWr: Float32Array
+  private gruWh: Float32Array
+  private gruUz: Float32Array    // [dModel * dModel]
+  private gruUr: Float32Array
+  private gruUh: Float32Array
+  private gruBz: Float32Array    // [dModel]
+  private gruBr: Float32Array
+  private gruBh: Float32Array
+  private planTokenEmbed: Float32Array   // [(vocabSize+1) * dModel] — 22 vocab + START
+  private planInitFwd: DenseLayer        // CLS → forward initial hidden
+  private planInitEg: DenseLayer         // CLS → endgame initial hidden
 
   // Pointer mechanism for plan tokens
-  private pointerQueryProj: DenseLayer       // dModel → dModel (plan token → query)
+  private pointerQueryProj: DenseLayer       // dModel → dModel (GRU hidden → query)
   private pointerKeyProj: DenseLayer         // dModel → dModel (target token → key)
   private specialKeys: Float32Array          // [3 * dModel] learnable keys for grayran/next/stop
 
@@ -59,7 +74,7 @@ export class TransformerNetwork {
 
   // Scratch buffers
   private _seatTokens: Float32Array    // [seatSeqLen * dModel] for seat encoder
-  private _stratTokens: Float32Array   // [stratSeqLen * dModel] for strategy encoder
+  private _stratTokens: Float32Array   // [seatSeqLen * dModel] for strategy encoder (20 tokens)
   private _seatMask: boolean[]
   private _stratMask: boolean[]
   private _seatProjected: Float32Array // [SEATS * dModel]
@@ -85,10 +100,7 @@ export class TransformerNetwork {
     const tc = this.tConfig
     const dm = tc.dModel
     const numRoles = tc.numRoleTokens ?? NUM_ROLE_TOKENS
-    const numForward = tc.numForwardTokens ?? 8
-    const numEndgame = tc.numEndgameTokens ?? 4
     const seatSeqLen = 1 + SEATS + numRoles  // CLS + 14 seats + 5 roles = 20
-    const stratSeqLen = seatSeqLen + numForward + numEndgame  // 20 + 8 + 4 = 32
 
     // Input projections
     this.projCls = new DenseLayer(tc.clsFeatures, dm)
@@ -106,26 +118,45 @@ export class TransformerNetwork {
       maxSeqLen: seatSeqLen,
     })
 
-    // Strategy Layer (M layers)
+    // Strategy Layer (M layers) — now 20 tokens (no plan embeddings)
     const strategyLayers = tc.strategyLayers ?? 2
     this.strategyEncoder = new TransformerEncoder({
       dModel: dm,
       numLayers: strategyLayers,
       numHeads: tc.numHeads,
       dFf: tc.dFf,
-      maxSeqLen: stratSeqLen,
+      maxSeqLen: seatSeqLen,
     })
 
-    // Learnable Forward/Endgame embeddings (random init)
-    this.forwardEmbeddings = new Float32Array(numForward * dm)
-    this.endgameEmbeddings = new Float32Array(numEndgame * dm)
+    // GRU autoregressive decoder for plan tokens
+    const vocabSize = tc.planVocabSize ?? 22
+    const embedSize = vocabSize + 1  // +1 for START token
     const scale = 0.02
-    for (let i = 0; i < this.forwardEmbeddings.length; i++) {
-      this.forwardEmbeddings[i] = (Math.random() - 0.5) * scale
+    const gruScale = Math.sqrt(2 / dm)
+
+    // GRU gate weights (Xavier init)
+    this.gruWz = new Float32Array(dm * dm)
+    this.gruWr = new Float32Array(dm * dm)
+    this.gruWh = new Float32Array(dm * dm)
+    this.gruUz = new Float32Array(dm * dm)
+    this.gruUr = new Float32Array(dm * dm)
+    this.gruUh = new Float32Array(dm * dm)
+    for (const w of [this.gruWz, this.gruWr, this.gruWh, this.gruUz, this.gruUr, this.gruUh]) {
+      for (let i = 0; i < w.length; i++) w[i] = gaussianRandom() * gruScale
     }
-    for (let i = 0; i < this.endgameEmbeddings.length; i++) {
-      this.endgameEmbeddings[i] = (Math.random() - 0.5) * scale
+    this.gruBz = new Float32Array(dm)
+    this.gruBr = new Float32Array(dm)
+    this.gruBh = new Float32Array(dm)
+
+    // Plan token embeddings: vocabSize + START
+    this.planTokenEmbed = new Float32Array(embedSize * dm)
+    for (let i = 0; i < this.planTokenEmbed.length; i++) {
+      this.planTokenEmbed[i] = (Math.random() - 0.5) * scale
     }
+
+    // Init projections: CLS → initial hidden state
+    this.planInitFwd = new DenseLayer(dm, dm)
+    this.planInitEg = new DenseLayer(dm, dm)
 
     // Pointer mechanism
     this.pointerQueryProj = new DenseLayer(dm, dm)
@@ -168,21 +199,165 @@ export class TransformerNetwork {
 
     // Scratch buffers
     this._seatTokens = new Float32Array(seatSeqLen * dm)
-    this._stratTokens = new Float32Array(stratSeqLen * dm)
+    this._stratTokens = new Float32Array(seatSeqLen * dm)  // now 20 tokens (no plan embeddings)
     this._seatMask = new Array(seatSeqLen).fill(true)
-    this._stratMask = new Array(stratSeqLen).fill(true)
+    this._stratMask = new Array(seatSeqLen).fill(true)
     this._seatProjected = new Float32Array(SEATS * dm)
     this._roleProjected = new Float32Array(numRoles * dm)
   }
 
-  forward(input: Float32Array): ForwardResult {
+  /** GRU cell: z/r/h gates */
+  private gruCell(input: Float32Array, hidden: Float32Array, dm: number): Float32Array {
+    const newHidden = new Float32Array(dm)
+    const z = new Float32Array(dm)
+    const r = new Float32Array(dm)
+    const hCandidate = new Float32Array(dm)
+
+    // z = sigmoid(input @ Wz + hidden @ Uz + bz)
+    for (let j = 0; j < dm; j++) {
+      let sumZ = this.gruBz[j]
+      let sumR = this.gruBr[j]
+      for (let i = 0; i < dm; i++) {
+        const idx = i * dm + j
+        sumZ += input[i] * this.gruWz[idx] + hidden[i] * this.gruUz[idx]
+        sumR += input[i] * this.gruWr[idx] + hidden[i] * this.gruUr[idx]
+      }
+      z[j] = 1 / (1 + Math.exp(-sumZ))
+      r[j] = 1 / (1 + Math.exp(-sumR))
+    }
+
+    // h_candidate = tanh(input @ Wh + (r * hidden) @ Uh + bh)
+    for (let j = 0; j < dm; j++) {
+      let sum = this.gruBh[j]
+      for (let i = 0; i < dm; i++) {
+        sum += input[i] * this.gruWh[i * dm + j] + (r[i] * hidden[i]) * this.gruUh[i * dm + j]
+      }
+      hCandidate[j] = Math.tanh(sum)
+    }
+
+    // newHidden = (1 - z) * hidden + z * h_candidate
+    for (let j = 0; j < dm; j++) {
+      newHidden[j] = (1 - z[j]) * hidden[j] + z[j] * hCandidate[j]
+    }
+    return newHidden
+  }
+
+  /** Autoregressive plan token decoding with grammar masking */
+  private decodePlan(
+    numSteps: number, vocabSize: number, dm: number,
+    keys: Float32Array, invSqrtD: number,
+    clsOut: Float32Array, initLayer: DenseLayer,
+    explore: boolean,
+  ): { logits: Float32Array, actions: number[], logProbs: number[] } {
+    const START_IDX = vocabSize  // START token is at index vocabSize (=22)
+    const NEXT_IDX = PLAN_VOCAB.NEXT
+    const STOP_IDX = PLAN_VOCAB.STOP
+    const totalKeys = vocabSize  // 22 keys (14 seat + 5 role + 3 special)
+
+    const allLogits = new Float32Array(numSteps * vocabSize)
+    const actions: number[] = []
+    const logProbs: number[] = []
+
+    // Initial hidden state: tanh(initLayer(clsOut))
+    const initRaw = initLayer.forward(clsOut)
+    let hidden = new Float32Array(dm)
+    for (let i = 0; i < dm; i++) hidden[i] = Math.tanh(initRaw[i])
+
+    let seenStop = false
+    let prevAction = START_IDX
+    const groupUsed = new Set<number>()
+
+    for (let step = 0; step < numSteps; step++) {
+      // Input: embedding of previous token
+      const embedOff = prevAction * dm
+      const input = this.planTokenEmbed.slice(embedOff, embedOff + dm)
+
+      // GRU step
+      hidden = this.gruCell(input, hidden, dm) as Float32Array<ArrayBuffer>
+
+      // Pointer: query from hidden state
+      const query = this.pointerQueryProj.forward(hidden)
+      const stepLogits = new Float32Array(vocabSize)
+      for (let t = 0; t < totalKeys; t++) {
+        let dot = 0
+        const kOff = t * dm
+        for (let i = 0; i < dm; i++) dot += query[i] * keys[kOff + i]
+        stepLogits[t] = dot * invSqrtD
+      }
+
+      // Grammar mask
+      if (seenStop) {
+        // After STOP: only STOP allowed
+        for (let t = 0; t < vocabSize; t++) {
+          if (t !== STOP_IDX) stepLogits[t] = -Infinity
+        }
+      } else {
+        // Step 0 or after NEXT: disallow NEXT
+        if (step === 0 || prevAction === NEXT_IDX) {
+          stepLogits[NEXT_IDX] = -Infinity
+        }
+        // Disallow duplicates within group
+        for (const used of groupUsed) {
+          stepLogits[used] = -Infinity
+        }
+      }
+
+      // Store logits (masked)
+      allLogits.set(stepLogits, step * vocabSize)
+
+      // Sample or argmax
+      let maxVal = -Infinity
+      for (let v = 0; v < vocabSize; v++) {
+        if (stepLogits[v] > maxVal) maxVal = stepLogits[v]
+      }
+      const expVals = new Float32Array(vocabSize)
+      let sumExp = 0
+      for (let v = 0; v < vocabSize; v++) {
+        expVals[v] = stepLogits[v] === -Infinity ? 0 : Math.exp(stepLogits[v] - maxVal)
+        sumExp += expVals[v]
+      }
+
+      let chosenIdx: number
+      if (explore) {
+        const r = Math.random() * sumExp
+        let cumulative = 0
+        chosenIdx = vocabSize - 1
+        for (let v = 0; v < vocabSize; v++) {
+          cumulative += expVals[v]
+          if (cumulative >= r) { chosenIdx = v; break }
+        }
+      } else {
+        chosenIdx = 0
+        for (let v = 1; v < vocabSize; v++) {
+          if (expVals[v] > expVals[chosenIdx]) chosenIdx = v
+        }
+      }
+
+      const prob = expVals[chosenIdx] / sumExp
+      actions.push(chosenIdx)
+      logProbs.push(seenStop ? 0 : Math.log(prob + 1e-8))  // STOP-forced steps have 0 logProb
+
+      // Update state for next step
+      if (chosenIdx === STOP_IDX) {
+        seenStop = true
+      } else if (chosenIdx === NEXT_IDX) {
+        groupUsed.clear()
+      } else {
+        groupUsed.add(chosenIdx)
+      }
+      prevAction = chosenIdx
+    }
+
+    return { logits: allLogits, actions, logProbs }
+  }
+
+  forward(input: Float32Array, explore?: boolean): ForwardResult {
     const tc = this.tConfig
     const dm = tc.dModel
     const numRoles = tc.numRoleTokens ?? NUM_ROLE_TOKENS
     const numForward = tc.numForwardTokens ?? 8
     const numEndgame = tc.numEndgameTokens ?? 4
     const seatSeqLen = 1 + SEATS + numRoles
-    const stratSeqLen = seatSeqLen + numForward + numEndgame
 
     // Tokenize
     const tok = tokenize(input, this.observationMode)
@@ -212,24 +387,9 @@ export class TransformerNetwork {
     // Run Seat Transformer
     this.seatEncoder.forward(this._seatTokens, seatSeqLen, this._seatMask)
 
-    // ========== Stage 2: Strategy Layer ==========
-    // Copy Seat Transformer output into Strategy input
-    this._stratTokens.fill(0)
-    this._stratTokens.set(
-      this._seatTokens.subarray(0, seatSeqLen * dm),
-      0,
-    )
-
-    // Append Forward embeddings at positions [seatSeqLen .. seatSeqLen+numForward)
-    const fwdStart = seatSeqLen * dm
-    this._stratTokens.set(this.forwardEmbeddings, fwdStart)
-
-    // Append Endgame embeddings at positions [seatSeqLen+numForward .. stratSeqLen)
-    const egStart = (seatSeqLen + numForward) * dm
-    this._stratTokens.set(this.endgameEmbeddings, egStart)
-
-    // Run Strategy Layer
-    this.strategyEncoder.forward(this._stratTokens, stratSeqLen, this._stratMask)
+    // ========== Stage 2: Strategy Layer (20 tokens, no plan embeddings) ==========
+    this._stratTokens.set(this._seatTokens.subarray(0, seatSeqLen * dm), 0)
+    this.strategyEncoder.forward(this._stratTokens, seatSeqLen, this._stratMask)
 
     // ========== Head readout ==========
     const seatBase = dm  // offset of first seat token in _stratTokens
@@ -289,55 +449,40 @@ export class TransformerNetwork {
       policies.set(name, head.forward(clsOut))
     }
 
-    // ========== Pointer mechanism for plan tokens ==========
-    // Keys: Seat(14) + Role(5) + special(3) = 22 targets = PLAN_VOCAB.SIZE
+    // ========== GRU autoregressive decoder for plan tokens ==========
     const vocabSize = tc.planVocabSize ?? 22
     const numTargetTokens = SEATS + numRoles  // 14 + 5 = 19 tokens provide keys
     const numSpecial = 3  // grayran, next, stop
     const invSqrtD = 1 / Math.sqrt(dm)
 
-    // Compute keys for seat + role tokens
+    // Compute pointer keys from seat + role tokens
     const keys = new Float32Array((numTargetTokens + numSpecial) * dm)
     for (let t = 0; t < numTargetTokens; t++) {
-      // Seat tokens at offset dm*(1+t), role tokens follow seats
       const tokenOff = (1 + t) * dm  // skip CLS
-      const keyOff = t * dm
       const raw = this._stratTokens.subarray(tokenOff, tokenOff + dm)
       const projected = this.pointerKeyProj.forward(raw)
-      keys.set(projected, keyOff)
+      keys.set(projected, t * dm)
     }
-    // Special keys (learnable, no projection needed — already in key space)
     keys.set(this.specialKeys, numTargetTokens * dm)
 
-    // Compute pointer logits for each Forward and Endgame token
-    const computePointerLogits = (tokenOffset: number, count: number): Float32Array => {
-      const allLogits = new Float32Array(count * vocabSize)
-      for (let k = 0; k < count; k++) {
-        const tokOff = tokenOffset + k * dm
-        const raw = this._stratTokens.subarray(tokOff, tokOff + dm)
-        const query = this.pointerQueryProj.forward(raw)
-
-        const logitOff = k * vocabSize
-        for (let t = 0; t < numTargetTokens + numSpecial; t++) {
-          let dot = 0
-          const kOff = t * dm
-          for (let i = 0; i < dm; i++) dot += query[i] * keys[kOff + i]
-          allLogits[logitOff + t] = dot * invSqrtD
-        }
-      }
-      return allLogits
-    }
-
-    const fwdTokenOffset = seatSeqLen * dm
-    policies.set('plan_forward', computePointerLogits(fwdTokenOffset, numForward))
-    const egTokenOffset = (seatSeqLen + numForward) * dm
-    policies.set('plan_endgame', computePointerLogits(egTokenOffset, numEndgame))
+    // Decode forward and endgame plans autoregressively
+    const doExplore = explore ?? true
+    const fwd = this.decodePlan(numForward, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitFwd, doExplore)
+    const eg = this.decodePlan(numEndgame, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitEg, doExplore)
+    policies.set('plan_forward', fwd.logits)
+    policies.set('plan_endgame', eg.logits)
 
     // Value head
     const rawValue = this.valueHead.forward(clsOut)
     const value = Math.tanh(rawValue[0])
 
-    return { policies, value }
+    return {
+      policies, value,
+      planForwardActions: fwd.actions,
+      planForwardLogProbs: fwd.logProbs,
+      planEndgameActions: eg.actions,
+      planEndgameLogProbs: eg.logProbs,
+    }
   }
 
   /** 重みのクローン（チェックポイント用） */
@@ -366,9 +511,21 @@ export class TransformerNetwork {
       weights.set(`strat_${name}`, new Float32Array(w))
     }
 
-    // Forward/Endgame embeddings
-    weights.set('forward_embeddings', new Float32Array(this.forwardEmbeddings))
-    weights.set('endgame_embeddings', new Float32Array(this.endgameEmbeddings))
+    // GRU decoder weights
+    weights.set('gru_wz', new Float32Array(this.gruWz))
+    weights.set('gru_wr', new Float32Array(this.gruWr))
+    weights.set('gru_wh', new Float32Array(this.gruWh))
+    weights.set('gru_uz', new Float32Array(this.gruUz))
+    weights.set('gru_ur', new Float32Array(this.gruUr))
+    weights.set('gru_uh', new Float32Array(this.gruUh))
+    weights.set('gru_bz', new Float32Array(this.gruBz))
+    weights.set('gru_br', new Float32Array(this.gruBr))
+    weights.set('gru_bh', new Float32Array(this.gruBh))
+    weights.set('plan_token_embed', new Float32Array(this.planTokenEmbed))
+    weights.set('plan_init_fwd_w', new Float32Array(this.planInitFwd.weights))
+    weights.set('plan_init_fwd_b', new Float32Array(this.planInitFwd.biases))
+    weights.set('plan_init_eg_w', new Float32Array(this.planInitEg.weights))
+    weights.set('plan_init_eg_b', new Float32Array(this.planInitEg.biases))
 
     // Pointer mechanism
     weights.set('pointer_query_w', new Float32Array(this.pointerQueryProj.weights))
@@ -437,11 +594,21 @@ export class TransformerNetwork {
     }
     this.strategyEncoder.loadWeights(stratWeights)
 
-    // Forward/Endgame embeddings
-    const fwdEmb = weights.get('forward_embeddings')
-    if (fwdEmb) this.forwardEmbeddings.set(fwdEmb)
-    const egEmb = weights.get('endgame_embeddings')
-    if (egEmb) this.endgameEmbeddings.set(egEmb)
+    // GRU decoder weights (optional for backward compat)
+    const gruKeys: [string, Float32Array][] = [
+      ['gru_wz', this.gruWz], ['gru_wr', this.gruWr], ['gru_wh', this.gruWh],
+      ['gru_uz', this.gruUz], ['gru_ur', this.gruUr], ['gru_uh', this.gruUh],
+      ['gru_bz', this.gruBz], ['gru_br', this.gruBr], ['gru_bh', this.gruBh],
+      ['plan_token_embed', this.planTokenEmbed],
+    ]
+    for (const [key, target] of gruKeys) {
+      const w = weights.get(key)
+      if (w) target.set(w)
+    }
+    const pifW = weights.get('plan_init_fwd_w')
+    if (pifW) { this.planInitFwd.weights.set(pifW); this.planInitFwd.biases.set(weights.get('plan_init_fwd_b')!) }
+    const pieW = weights.get('plan_init_eg_w')
+    if (pieW) { this.planInitEg.weights.set(pieW); this.planInitEg.biases.set(weights.get('plan_init_eg_b')!) }
 
     // Pointer mechanism
     this.pointerQueryProj.weights.set(weights.get('pointer_query_w')!)
@@ -487,7 +654,9 @@ export class TransformerNetwork {
     total += this.projRole.paramCount
     total += this.seatEncoder.paramCount
     total += this.strategyEncoder.paramCount
-    total += this.forwardEmbeddings.length + this.endgameEmbeddings.length
+    total += this.gruWz.length * 6 + this.gruBz.length * 3  // GRU gates
+    total += this.planTokenEmbed.length  // token embeddings
+    total += this.planInitFwd.paramCount + this.planInitEg.paramCount  // init projections
     total += this.pointerQueryProj.paramCount + this.pointerKeyProj.paramCount
     total += this.specialKeys.length
     for (const head of this.perSeatHeads.values()) total += head.paramCount
@@ -527,8 +696,13 @@ export class TransformerNetwork {
     }
     params.push(this.strategyEncoder.finalLN.scale, this.strategyEncoder.finalLN.bias)
 
-    // Forward/Endgame embeddings
-    params.push(this.forwardEmbeddings, this.endgameEmbeddings)
+    // GRU decoder weights
+    params.push(this.gruWz, this.gruWr, this.gruWh)
+    params.push(this.gruUz, this.gruUr, this.gruUh)
+    params.push(this.gruBz, this.gruBr, this.gruBh)
+    params.push(this.planTokenEmbed)
+    params.push(this.planInitFwd.weights, this.planInitFwd.biases)
+    params.push(this.planInitEg.weights, this.planInitEg.biases)
 
     // Pointer mechanism
     params.push(this.pointerQueryProj.weights, this.pointerQueryProj.biases)

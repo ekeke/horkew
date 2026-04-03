@@ -328,13 +328,15 @@ describe('TransformerNetwork', () => {
     const obs = new Float32Array(OBSERVATION_SIZE)
     for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
 
-    const r1 = net.forward(obs)
-    const r2 = net2.forward(obs)
+    const r1 = net.forward(obs, false)  // greedy for deterministic output
+    const r2 = net2.forward(obs, false)
 
     assert.ok(Math.abs(r1.value - r2.value) < 1e-4, `value mismatch: ${r1.value} vs ${r2.value}`)
     for (const [name, logits1] of r1.policies) {
       const logits2 = r2.policies.get(name)!
       for (let i = 0; i < logits1.length; i++) {
+        // Both -Infinity is OK (grammar mask), both finite must be close
+        if (logits1[i] === -Infinity && logits2[i] === -Infinity) continue
         assert.ok(Math.abs(logits1[i] - logits2[i]) < 1e-4,
           `head ${name}[${i}] mismatch: ${logits1[i]} vs ${logits2[i]}`)
       }
@@ -499,13 +501,14 @@ describe('Wolf Collective Network', () => {
 
     const obs = new Float32Array(WOLF_COLLECTIVE_OBSERVATION_SIZE)
     for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
-    const r1 = net1.forward(obs)
-    const r2 = net2.forward(obs)
+    const r1 = net1.forward(obs, false)  // greedy for deterministic output
+    const r2 = net2.forward(obs, false)
 
     assert.ok(Math.abs(r1.value - r2.value) < 1e-4)
     for (const [name, logits1] of r1.policies) {
       const logits2 = r2.policies.get(name)!
       for (let i = 0; i < logits1.length; i++) {
+        if (logits1[i] === -Infinity && logits2[i] === -Infinity) continue
         assert.ok(Math.abs(logits1[i] - logits2[i]) < 1e-4,
           `head ${name}[${i}] mismatch: ${logits1[i]} vs ${logits2[i]}`)
       }
@@ -559,13 +562,14 @@ describe('Fanatic Network', () => {
 
     const obs = new Float32Array(FANATIC_OBSERVATION_SIZE)
     for (let i = 0; i < obs.length; i++) obs[i] = Math.random() * 0.1
-    const r1 = net1.forward(obs)
-    const r2 = net2.forward(obs)
+    const r1 = net1.forward(obs, false)  // greedy for deterministic output
+    const r2 = net2.forward(obs, false)
 
     assert.ok(Math.abs(r1.value - r2.value) < 1e-4)
     for (const [name, logits1] of r1.policies) {
       const logits2 = r2.policies.get(name)!
       for (let i = 0; i < logits1.length; i++) {
+        if (logits1[i] === -Infinity && logits2[i] === -Infinity) continue
         assert.ok(Math.abs(logits1[i] - logits2[i]) < 1e-4,
           `head ${name}[${i}] mismatch: ${logits1[i]} vs ${logits2[i]}`)
       }

@@ -176,12 +176,17 @@ export type TransformerNetworkConfig = {
 export type ForwardResult = {
   policies: Map<string, Float32Array>  // head_name → logits (pre-softmax)
   value: number                         // scalar value estimate
+  // Autoregressive plan decoder outputs (populated by TransformerNetwork)
+  planForwardActions?: number[]
+  planForwardLogProbs?: number[]
+  planEndgameActions?: number[]
+  planEndgameLogProbs?: number[]
 }
 
 /** NeuralNetwork / TransformerNetwork 共通インターフェース (推論用) */
 export interface AnyNetwork {
   readonly config: NetworkConfig
-  forward(input: Float32Array): ForwardResult
+  forward(input: Float32Array, explore?: boolean): ForwardResult
   getParams(): Float32Array[]
   cloneWeights(): Map<string, Float32Array>
   loadWeights(weights: Map<string, Float32Array>): void
@@ -191,7 +196,7 @@ export interface AnyNetwork {
 /** TfNeuralNetwork / TfTransformerNetwork 共通インターフェース (学習用) */
 export interface AnyTfNetwork {
   readonly config: NetworkConfig
-  forward(input: Float32Array): ForwardResult
+  forward(input: Float32Array, explore?: boolean): ForwardResult
   trainBatch(batch: {
     observations: Float32Array[]
     actionHeads: string[]
