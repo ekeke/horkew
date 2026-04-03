@@ -2169,13 +2169,11 @@
   }
 
   :global(.cm-content .cm-line) {
-    position: relative;
+    display: flow-root;
   }
 
   :global(.cm-time-seek) {
-    position: absolute;
-    right: 4px;
-    top: 0;
+    float: right;
     padding: 0 6px;
     font-size: 11px;
     line-height: 18px;

@@ -51,7 +51,7 @@ export const timeSeekPlugin = ViewPlugin.fromClass(class {
     this.decorations = buildDecorations(view)
   }
   update(update: ViewUpdate) {
-    if (update.docChanged) {
+    if (update.docChanged || update.transactions.some(t => t.effects.length > 0)) {
       this.decorations = buildDecorations(update.view)
     }
   }
