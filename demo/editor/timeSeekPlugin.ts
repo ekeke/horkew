@@ -8,14 +8,14 @@ function parseTimestamp(s: string): number {
   return parts[0] ?? 0
 }
 
-let onSeek: ((seconds: number) => void) | undefined
+let onSeek: ((seconds: number, line: number) => void) | undefined
 
-export function setOnSeek(fn: (seconds: number) => void) {
+export function setOnSeek(fn: (seconds: number, line: number) => void) {
   onSeek = fn
 }
 
 class TimeSeekWidget extends WidgetType {
-  constructor(readonly seconds: number, readonly label: string) { super() }
+  constructor(readonly seconds: number, readonly label: string, readonly line: number) { super() }
   toDOM() {
     const btn = document.createElement('button')
     btn.textContent = `\u25B6 ${this.label}`
@@ -23,7 +23,7 @@ class TimeSeekWidget extends WidgetType {
     btn.addEventListener('mousedown', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      onSeek?.(this.seconds)
+      onSeek?.(Math.max(0, this.seconds - 3), this.line)
     })
     return btn
   }
@@ -34,10 +34,10 @@ function buildDecorations(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>()
   for (let i = 1; i <= view.state.doc.lines; i++) {
     const line = view.state.doc.line(i)
-    const m = line.text.match(/#\s*@time\s+(\d+(?::\d+){1,2})\s*$/)
+    const m = line.text.match(/[@\uFF20](\d{1,2}(?::\d{2}){1,2})\s*$/)
     if (m) {
       builder.add(line.to, line.to, Decoration.widget({
-        widget: new TimeSeekWidget(parseTimestamp(m[1]), m[1]),
+        widget: new TimeSeekWidget(parseTimestamp(m[1]), m[1], i),
         side: 1,
       }))
     }

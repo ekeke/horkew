@@ -2,19 +2,26 @@
   let {
     videoId,
     currentTime = $bindable(0),
+    autoplay = false,
+    onended,
   }: {
     videoId: string
     currentTime?: number
+    autoplay?: boolean
+    onended?: () => void
   } = $props()
 
   let container: HTMLDivElement | undefined = $state()
   let player: YT.Player | undefined
   let polling: ReturnType<typeof setInterval> | undefined
   let ready = $state(false)
+  let pendingSeek: number | undefined
 
   export function seekTo(seconds: number) {
-    if (player && typeof player.seekTo === 'function') {
+    if (ready && player && typeof player.seekTo === 'function') {
       player.seekTo(seconds, true)
+    } else {
+      pendingSeek = seconds
     }
   }
 
@@ -54,6 +61,7 @@
   $effect(() => {
     if (!container) return
     const id = videoId
+    ready = false
     ensureApi().then(() => {
       if (player) {
         player.destroy()
@@ -71,12 +79,17 @@
           onReady() {
             ready = true
             startPolling()
+            if (pendingSeek !== undefined) {
+              player!.seekTo(pendingSeek, true)
+              pendingSeek = undefined
+            }
+            if (autoplay && player) player.playVideo()
           },
           onStateChange(e: YT.OnStateChangeEvent) {
-            // Update immediately on any state change (seek, pause, etc.)
             if (player && typeof player.getCurrentTime === 'function') {
               currentTime = player.getCurrentTime()
             }
+            if (e.data === YT.PlayerState.ENDED) onended?.()
           },
         },
       })

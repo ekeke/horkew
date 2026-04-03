@@ -266,7 +266,9 @@
   // --- Video sync ---
   let videoId = $state('')
   let youtubePlayer: YouTubePlayer | undefined = $state()
-  let videoTimestamps: { line: number, seconds: number }[] = $state([])  // sorted by seconds
+  let videoSegments: { videoId: string, url: string, line: number, timestamps: { line: number, seconds: number }[] }[] = $state([])
+  let activeSegmentIdx = $state(0)
+  let videoAutoplay = $state(false)
   let videoCurrentTime = $state(0)
   let videoSyncActive = $state(false)
   let videoDay = $state(1)
@@ -276,13 +278,6 @@
   function extractYouTubeId(url: string): string {
     const m = url.match(/(?:youtu\.be\/|v=|\/embed\/)([A-Za-z0-9_-]{11})/)
     return m?.[1] ?? ''
-  }
-
-  function parseTimestamp(s: string): number {
-    const parts = String(s).split(':').map(Number)
-    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
-    if (parts.length === 2) return parts[0] * 60 + parts[1]
-    return parts[0] ?? 0
   }
 
   function buildDayLineMap(statements: any[]): Map<number, number> {
@@ -295,39 +290,21 @@
     return map
   }
 
-  // Parse @time annotations from raw text
-  // Supports: `# @time MM:SS` (standalone) or `アリス処刑 # @time MM:SS` (inline)
-  // Returns a map of line_number → seconds
-  function parseTimeAnnotations(text: string): Map<number, number> {
-    const map = new Map<number, number>()
-    const lines = text.split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(/#\s*@time\s+(\d+(?::\d+){1,2})\s*$/)
-      if (m) {
-        map.set(i + 1, parseTimestamp(m[1]))  // 1-based line number
+  // Build video segments: each @URL starts a new segment with its own timestamps
+  function buildVideoSegments(statements: any[]): typeof videoSegments {
+    const segments: typeof videoSegments = []
+    let current: typeof videoSegments[number] | null = null
+    for (const s of statements) {
+      if (s.type === 'videoSource') {
+        current = { videoId: extractYouTubeId(s.url), url: s.url, line: s.line, timestamps: [] }
+        segments.push(current)
+      } else if (current) {
+        if (s.type === 'timestamp') current.timestamps.push({ line: s.line, seconds: s.seconds })
+        else if (s.timestamp !== undefined) current.timestamps.push({ line: s.line, seconds: s.timestamp })
       }
     }
-    return map
-  }
-
-  // Build sorted timestamp array from @time annotations (line-level granularity)
-  function buildTimestampsFromAnnotations(timeAnnotations: Map<number, number>): { line: number, seconds: number }[] {
-    return [...timeAnnotations.entries()]
-      .map(([line, seconds]) => ({ line, seconds }))
-      .sort((a, b) => a.seconds - b.seconds)
-  }
-
-  // Build timestamps from frontmatter day→seconds format
-  function buildTimestampsFromFrontmatter(fmTimestamps: Record<string, string>, dayLines: Map<number, number>): { line: number, seconds: number }[] {
-    const ts: { line: number, seconds: number }[] = []
-    for (const [k, v] of Object.entries(fmTimestamps)) {
-      const day = Number(k)
-      const line = dayLines.get(day)
-      if (line !== undefined) {
-        ts.push({ line, seconds: parseTimestamp(v) })
-      }
-    }
-    return ts.sort((a, b) => a.seconds - b.seconds)
+    for (const seg of segments) seg.timestamps.sort((a, b) => a.seconds - b.seconds)
+    return segments
   }
 
   function formatSeconds(s: number): string {
@@ -342,44 +319,48 @@
     const pos = editorView.state.selection.main.head
     const line = editorView.state.doc.lineAt(pos)
     const lineContent = line.text.trim()
-    // If cursor is on a non-empty, non-comment line, append to end of line
-    // Otherwise insert as standalone comment line
     let text: string
     let from: number
-    if (lineContent.length > 0 && !lineContent.startsWith('#')) {
-      text = ` # @time ${time}`
+    if (lineContent.length > 0) {
+      // Inline: append @MM:SS at end of current line
+      text = ` @${time}`
       from = line.to
     } else {
-      text = `# @time ${time}\n`
-      from = pos
+      // Standalone: insert @MM:SS on blank line
+      text = `@${time}\n`
+      from = line.from
     }
     editorView.dispatch({
       changes: { from, insert: text },
       selection: { anchor: from + text.length },
     })
-    // Trigger re-parse
     input = editorView.state.doc.toString()
     run()
   }
 
   function getVideoCursorLine(): number {
-    if (videoTimestamps.length === 0) return 999999
-    // Find the last timestamp that has been reached, and the one after it
+    const seg = videoSegments[activeSegmentIdx]
+    if (!seg || seg.timestamps.length === 0) return 999999
+    const ts = seg.timestamps
+
+    // Find the last timestamp that has been reached
     let matchedIdx = -1
-    for (let i = 0; i < videoTimestamps.length; i++) {
-      if (videoCurrentTime >= videoTimestamps[i].seconds) matchedIdx = i
+    for (let i = 0; i < ts.length; i++) {
+      if (videoCurrentTime >= ts[i].seconds + 3) matchedIdx = i
       else break
     }
-    if (matchedIdx < 0) return videoTimestamps[0].line - 1  // before first timestamp
+    if (matchedIdx < 0) return ts[0].line - 1
 
-    // Show up to the line before the NEXT @time, or end of file
+    // Show up to the line before the NEXT timestamp, or end of this segment
     const nextIdx = matchedIdx + 1
-    const endLine = nextIdx < videoTimestamps.length
-      ? videoTimestamps[nextIdx].line - 1
-      : 999999
+    const nextSeg = videoSegments[activeSegmentIdx + 1]
+    const segEndLine = nextSeg ? nextSeg.line - 1 : 999999
+    const endLine = nextIdx < ts.length
+      ? ts[nextIdx].line - 1
+      : segEndLine
 
     // Update videoDay from dayLineMap
-    const matchedLine = videoTimestamps[matchedIdx].line
+    const matchedLine = ts[matchedIdx].line
     let day = 1
     for (const [d, dayLine] of dayLineMap) {
       if (dayLine <= matchedLine) day = d
@@ -415,7 +396,21 @@
     if (e.key === 'Escape') videoFullscreen = false
   }
 
-  function seekVideo(seconds: number) {
+  async function seekVideo(seconds: number, line?: number) {
+    // Find which segment this line belongs to and switch if needed
+    let videoChanged = false
+    if (line !== undefined) {
+      for (let i = videoSegments.length - 1; i >= 0; i--) {
+        if (videoSegments[i].line <= line) {
+          if (i !== activeSegmentIdx) {
+            switchToSegment(i)
+            videoChanged = true
+          }
+          break
+        }
+      }
+    }
+    if (videoChanged) await tick()  // wait for YouTubePlayer $effect to set ready=false
     youtubePlayer?.seekTo(seconds)
     videoCurrentTime = seconds
     videoSyncActive = true
@@ -999,28 +994,21 @@
       const fullParse = parse(input)
       const fullMeta = fullParse.meta
 
-      // Extract video info from frontmatter
-      const rawVideo = fullMeta.video as string | undefined
-      const newVideoId = rawVideo ? extractYouTubeId(rawVideo) : ''
-      if (newVideoId !== videoId) {
-        videoId = newVideoId
-        videoSyncActive = !!newVideoId
+      // Deprecation warnings for old frontmatter fields
+      if (fullMeta.video) console.warn('[horkew] frontmatter "video:" is deprecated. Use @URL annotation instead.')
+      if (fullMeta.timestamps) console.warn('[horkew] frontmatter "timestamps:" is deprecated. Use @MM:SS annotations instead.')
+
+      // Build video segments from @URL + @MM:SS annotations
+      videoSegments = buildVideoSegments(fullParse.statements)
+      const firstId = videoSegments[0]?.videoId ?? ''
+      if (firstId !== videoId && activeSegmentIdx === 0) {
+        videoId = firstId
+        videoSyncActive = !!firstId
       }
-      // Build day→line map from full parse for day navigation
+
+      // Build day→line map
       dayLineMap = buildDayLineMap(fullParse.statements)
       maxDay = Math.max(1, ...dayLineMap.keys())
-
-      // Build timestamps: frontmatter takes priority, then @time annotations
-      if (fullMeta.timestamps && typeof fullMeta.timestamps === 'object') {
-        videoTimestamps = buildTimestampsFromFrontmatter(fullMeta.timestamps as Record<string, string>, dayLineMap)
-      } else {
-        const timeAnnotations = parseTimeAnnotations(input)
-        if (timeAnnotations.size > 0) {
-          videoTimestamps = buildTimestampsFromAnnotations(timeAnnotations)
-        } else {
-          videoTimestamps = []
-        }
-      }
 
       const { meta, statements } = parse(input, { cursorLine: effectiveCursorLine })
       rawStatements = JSON.stringify(statements, null, 2)
@@ -1156,9 +1144,33 @@
     }
   }
 
+  function activeTimestamps(): { line: number, seconds: number }[] {
+    return videoSegments[activeSegmentIdx]?.timestamps ?? []
+  }
+
+  function switchToSegment(idx: number) {
+    if (idx < 0 || idx >= videoSegments.length) return
+    activeSegmentIdx = idx
+    const seg = videoSegments[idx]
+    if (seg.videoId !== videoId) {
+      videoAutoplay = true
+      videoId = seg.videoId
+    }
+  }
+
+  function onVideoEnded() {
+    if (!videoSyncActive) return
+    if (activeSegmentIdx + 1 >= videoSegments.length) return
+    switchToSegment(activeSegmentIdx + 1)
+    videoCurrentTime = 0
+    const nextLine = videoSegments[activeSegmentIdx].line
+    lastVideoCursorLine = nextLine
+    runWithCursor(nextLine)
+  }
+
   function run() {
     // When video sync is active, always use video-derived cursor line
-    if (videoSyncActive && videoTimestamps.length > 0) {
+    if (videoSyncActive && activeTimestamps().length > 0) {
       runWithCursor(getVideoCursorLine())
     } else {
       runWithCursor()
@@ -1168,12 +1180,14 @@
   // Video sync: when currentTime changes, update cursorLine from timestamps
   let lastVideoCursorLine = -1
   $effect(() => {
-    if (!videoSyncActive || videoTimestamps.length === 0) return
+    if (!videoSyncActive || videoSegments.length === 0) return
     const _time = videoCurrentTime  // track dependency
+    const seg = videoSegments[activeSegmentIdx]
+    if (!seg || seg.timestamps.length === 0) return
+
     const newCursorLine = getVideoCursorLine()
     if (newCursorLine !== lastVideoCursorLine) {
       lastVideoCursorLine = newCursorLine
-      // Use untrack to avoid circular dependency with cursorLine
       runWithCursor(newCursorLine)
     }
   })
@@ -1499,7 +1513,7 @@
     {#if videoId}
     <div class="prod-left prod-video-col" class:hidden-by-fullscreen={videoFullscreen}>
       <div class="video-container">
-        <YouTubePlayer bind:this={youtubePlayer} {videoId} bind:currentTime={videoCurrentTime} />
+        <YouTubePlayer bind:this={youtubePlayer} {videoId} bind:currentTime={videoCurrentTime} autoplay={videoAutoplay} onended={onVideoEnded} />
       </div>
       <div class="day-nav">
         <button class="day-nav-btn" disabled={videoDay <= 1} onclick={() => goToDay(videoDay - 1)}>&lt;</button>
@@ -2154,9 +2168,14 @@
     display: none;
   }
 
+  :global(.cm-content .cm-line) {
+    position: relative;
+  }
+
   :global(.cm-time-seek) {
-    display: inline-block;
-    margin-left: 8px;
+    position: absolute;
+    right: 4px;
+    top: 0;
     padding: 0 6px;
     font-size: 11px;
     line-height: 18px;
@@ -2165,7 +2184,6 @@
     border: 1px solid var(--color-border-strong);
     border-radius: 3px;
     cursor: pointer;
-    vertical-align: middle;
   }
 
   :global(.cm-time-seek:hover) {
