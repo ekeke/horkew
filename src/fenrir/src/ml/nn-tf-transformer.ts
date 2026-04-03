@@ -1293,7 +1293,7 @@ export class TfTransformerNetwork {
     const START_IDX = vocabSize  // START token index
     const NEXT_IDX = vocabSize - 2  // PLAN_VOCAB.NEXT = 20
     const STOP_IDX = vocabSize - 1  // PLAN_VOCAB.STOP = 21
-    const NEXT_WEIGHT = 4.0
+    const NEXT_WEIGHT = 2.0
 
     // Build teacher-forcing prevActions from labels: [START, label[0], label[1], ..., label[n-2]]
     const buildPrevActions = (labels: number[][], numToks: number): tf.Tensor2D => {
