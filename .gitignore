@@ -1,5 +1,6 @@
 node_modules/
 train-orchestrate.pid
+data/
 demo/dist/
 .claude/*.local.*
 .claude/worktrees/
