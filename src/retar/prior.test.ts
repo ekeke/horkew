@@ -23,7 +23,7 @@ const defaultOptions: AnalyzeOptions = {
 }
 
 // 猫又道連れシナリオ（6人村、全席確定）
-const scenario = `@ 狼1 村3 占1 猫1
+const scenario = `配役 狼1 村3 占1 猫1
 
 ++村１、狼、村２、占、猫、村３
 

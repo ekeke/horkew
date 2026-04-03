@@ -579,7 +579,7 @@ function getLeftArrowExclusions(lineText: string, players: PlayerEntry[]): Set<s
 
 const isAscii = /^[a-zA-Z0-9_\-]+$/
 
-const setupOrJoinRe = /^(?:[@＠]|\+\+?|#)/
+const setupOrJoinRe = /^(?:配役|レギュレーション|レギュ|setup|\+\+?|#)/
 
 const howlCompletionSource: CompletionSource = (context) => {
   // @行 (setup), +行 (join), ++行 (joinMulti), #行 (コメント) では補完無効

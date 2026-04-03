@@ -19,7 +19,7 @@ export function onStartTrial(fn: (text: string) => void) {
 }
 
 export const TUTORIAL_TEXT = `# 配役: 村人2, 占い師1, 人狼1, 狂人1
-@ 村2 占1 狼1 狂1
+配役 村2 占1 狼1 狂1
 
 # 参加者を登録
 ++アリス ボブ チャーリー デイブ エミリー

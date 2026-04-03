@@ -721,7 +721,7 @@ describe('mason statement', () => {
 
 describe('setup statement', () => {
   test('all roles with Japanese shorthand', () => {
-    const result = S.parseSetupStatement('@ 村4 占1 霊1 狩1 共2 猫1 狼3 狂1 狐1 背1', 1)
+    const result = S.parseSetupStatement('配役 村4 占1 霊1 狩1 共2 猫1 狼3 狂1 狐1 背1', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -733,8 +733,26 @@ describe('setup statement', () => {
     })
   })
 
-  test('full-width @', () => {
-    const result = S.parseSetupStatement('＠ 村4 占1 狼3', 1)
+  test('setup keyword', () => {
+    const result = S.parseSetupStatement('setup 村4 占1 狼3', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { villager: 4, seer: 1, werewolf: 3 },
+    })
+  })
+
+  test('レギュ keyword', () => {
+    const result = S.parseSetupStatement('レギュ 村4 占1 狼3', 1)
+    assert.deepEqual(result, {
+      type: 'setup',
+      line: 1,
+      roles: { villager: 4, seer: 1, werewolf: 3 },
+    })
+  })
+
+  test('レギュレーション keyword', () => {
+    const result = S.parseSetupStatement('レギュレーション 村4 占1 狼3', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -743,7 +761,7 @@ describe('setup statement', () => {
   })
 
   test('full-width digits', () => {
-    const result = S.parseSetupStatement('@ 村４ 占１ 狼３', 1)
+    const result = S.parseSetupStatement('配役 村４ 占１ 狼３', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -752,7 +770,7 @@ describe('setup statement', () => {
   })
 
   test('longer role names', () => {
-    const result = S.parseSetupStatement('@ 村人4 占い師1 霊媒師1 狩人1 人狼3', 1)
+    const result = S.parseSetupStatement('配役 村人4 占い師1 霊媒師1 狩人1 人狼3', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -761,7 +779,7 @@ describe('setup statement', () => {
   })
 
   test('delimiter variants (comma, 、)', () => {
-    const result = S.parseSetupStatement('@ 村4,占1,狼3', 1)
+    const result = S.parseSetupStatement('配役 村4,占1,狼3', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -770,7 +788,7 @@ describe('setup statement', () => {
   })
 
   test('no delimiters', () => {
-    const result = S.parseSetupStatement('@ 村4占1霊1狩1共2猫1狼3狂1狐1背1', 1)
+    const result = S.parseSetupStatement('配役 村4占1霊1狩1共2猫1狼3狂1狐1背1', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -783,7 +801,7 @@ describe('setup statement', () => {
   })
 
   test('mixed delimiters and no delimiters', () => {
-    const result = S.parseSetupStatement('@ 村4占1 霊1,狼3', 1)
+    const result = S.parseSetupStatement('配役 村4占1 霊1,狼3', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -792,7 +810,7 @@ describe('setup statement', () => {
   })
 
   test('fanatic with shorthand 信', () => {
-    const result = S.parseSetupStatement('@ 狼3 信1', 1)
+    const result = S.parseSetupStatement('配役 狼3 信1', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -801,7 +819,7 @@ describe('setup statement', () => {
   })
 
   test('fanatic with 狂信', () => {
-    const result = S.parseSetupStatement('@ 狂信1 狂1', 1)
+    const result = S.parseSetupStatement('配役 狂信1 狂1', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -810,7 +828,7 @@ describe('setup statement', () => {
   })
 
   test('fanatic with 狂信者', () => {
-    const result = S.parseSetupStatement('@ 狂信者1 狂人1', 1)
+    const result = S.parseSetupStatement('配役 狂信者1 狂人1', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -819,7 +837,7 @@ describe('setup statement', () => {
   })
 
   test('狂 alone maps to possessed, not fanatic', () => {
-    const result = S.parseSetupStatement('@ 狂1', 1)
+    const result = S.parseSetupStatement('配役 狂1', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -828,7 +846,7 @@ describe('setup statement', () => {
   })
 
   test('zero count is allowed', () => {
-    const result = S.parseSetupStatement('@ 村4 狼0', 1)
+    const result = S.parseSetupStatement('配役 村4 狼0', 1)
     assert.deepEqual(result, {
       type: 'setup',
       line: 1,
@@ -836,21 +854,21 @@ describe('setup statement', () => {
     })
   })
 
-  test('returns null for non-@ line', () => {
+  test('returns null for non-配役 line', () => {
     assert.equal(S.parseSetupStatement('+Alice', 1), null)
     assert.equal(S.parseSetupStatement('John→Bob', 1), null)
   })
 
-  test('returns null for @ with no valid tokens', () => {
-    assert.equal(S.parseSetupStatement('@ abc', 1), null)
+  test('returns null for 配役 with no valid tokens', () => {
+    assert.equal(S.parseSetupStatement('配役 abc', 1), null)
   })
 
-  test('returns null for @ with invalid token mixed in', () => {
-    assert.equal(S.parseSetupStatement('@ 村4 xyz 狼3', 1), null)
+  test('returns null for 配役 with invalid token mixed in', () => {
+    assert.equal(S.parseSetupStatement('配役 村4 xyz 狼3', 1), null)
   })
 
   test('parseStatement routes to setup', () => {
-    const result = S.parseStatement('@ 村4 狼2', 1)
+    const result = S.parseStatement('配役 村4 狼2', 1)
     assert.equal(result.type, 'setup')
   })
 })

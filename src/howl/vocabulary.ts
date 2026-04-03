@@ -65,5 +65,5 @@ export const race = `(?:${isHuman}|${isWolf})`
 // ********************************* Modifiers
 
 export const denial = `(?:非)`
-export const setupPrefix = `(?:@|＠)`
+export const setupPrefix = `(?:配役|レギュレーション|レギュ|setup)`
 export const survivors = `(?:生存者|全員)`

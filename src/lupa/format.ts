@@ -15,7 +15,7 @@ const ROLE_DISPLAY: Record<SystemRole, string> = {
   immoralist: '背徳',
 }
 
-// @記法用の短縮表記（パーサーのvocabulary最短形に合わせる）
+// 配役記法用の短縮表記（パーサーのvocabulary最短形に合わせる）
 const ROLE_SETUP_DISPLAY: Record<SystemRole, string> = {
   villager: '村',
   seer: '占',
@@ -42,11 +42,11 @@ export function formatHowl(events: readonly any[], state: GameState, config: Lup
   const lines: string[] = []
   const playerName = (seat: number) => state.players.find(p => p.seat === seat)!.name
 
-  // 配役（@記法）
+  // 配役
   const setupParts = Array.from(config.roles.entries())
     .map(([role, count]) => `${ROLE_SETUP_DISPLAY[role]}${count}`)
     .join(' ')
-  lines.push(`@ ${setupParts}`)
+  lines.push(`配役 ${setupParts}`)
   lines.push('')
 
   // シード値

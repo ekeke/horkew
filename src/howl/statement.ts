@@ -472,7 +472,7 @@ export function parseAssertStatement(text: string, line: number): AssertStatemen
   return { type: 'assert', line, actor, assertions }
 }
 
-// Setup statement: @ 村4 占1 霊1 狩1 共2 猫1 狼3 狂1 狐1 背1
+// Setup statement: 配役 村4 占1 霊1 狩1 共2 猫1 狼3 狂1 狐1 背1
 const setupRegex = new RegExp(`^${V.optionalSpace}${V.setupPrefix}${V.optionalSpace}(.+)$`)
 
 const roleMapping: [RegExp, string][] = [
