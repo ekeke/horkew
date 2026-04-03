@@ -1293,7 +1293,7 @@ export class TfTransformerNetwork {
     const START_IDX = vocabSize  // START token index
     const NEXT_IDX = vocabSize - 2  // PLAN_VOCAB.NEXT = 20
     const STOP_IDX = vocabSize - 1  // PLAN_VOCAB.STOP = 21
-    const NEXT_WEIGHT = 2.0
+    const FOCAL_GAMMA = 2.0
 
     // Build teacher-forcing prevActions from labels: [START, label[0], label[1], ..., label[n-2]]
     const buildPrevActions = (labels: number[][], numToks: number): tf.Tensor2D => {
@@ -1312,7 +1312,6 @@ export class TfTransformerNetwork {
       let totalLoss = tf.scalar(0)
       let correct = 0
       let totalMasked = 0
-      let totalWeight = 0
       let nextCorrect = 0, nextTotal = 0
       let stopCorrect = 0, stopTotal = 0
 
@@ -1345,15 +1344,10 @@ export class TfTransformerNetwork {
           const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
           const ce = tf.neg(tf.sum(tf.mul(oneHot, logProbs), 1))
 
-          // Class-weighted loss: NEXT tokens get NEXT_WEIGHT boost
-          const weights = new Float32Array(validLabels.length)
-          for (let j = 0; j < validLabels.length; j++) {
-            const w = validLabels[j] === NEXT_IDX ? NEXT_WEIGHT : 1.0
-            weights[j] = w
-            totalWeight += w
-          }
-          const weightTensor = tf.tensor1d(weights)
-          totalLoss = tf.add(totalLoss, tf.sum(tf.mul(ce, weightTensor)))
+          // Focal loss: -(1 - p_correct)^γ · log(p_correct)
+          const pCorrect = tf.sum(tf.mul(oneHot, probs), 1)
+          const focalWeight = tf.pow(tf.sub(tf.scalar(1), pCorrect), tf.scalar(FOCAL_GAMMA))
+          totalLoss = tf.add(totalLoss, tf.sum(tf.mul(ce, focalWeight)))
 
           const predIdx = tf.argMax(probs, 1).dataSync()
           for (let j = 0; j < validIndices.length; j++) {
@@ -1378,7 +1372,7 @@ export class TfTransformerNetwork {
         result.accuracy = correct / totalMasked
         result.nextAccuracy = nextTotal > 0 ? nextCorrect / nextTotal : 0
         result.stopAccuracy = stopTotal > 0 ? stopCorrect / stopTotal : 0
-        const avgLoss = tf.div(totalLoss, tf.scalar(totalWeight))
+        const avgLoss = tf.div(totalLoss, tf.scalar(totalMasked))
         result.loss = avgLoss.dataSync()[0]
         return avgLoss as tf.Scalar
       }
