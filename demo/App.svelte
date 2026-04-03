@@ -96,23 +96,28 @@
   ] as const
 
   type PaneId = typeof paneEntries[number]['id']
+  type DebugLayout = 'off' | 'debug' | 'fenrir'
+  const debugRotation: DebugLayout[] = ['off', 'debug', 'fenrir']
 
   interface Settings {
     active: string
     skin: Skin
     devMode: boolean
-    debug: boolean
+    debug: DebugLayout
     panes: Record<PaneId, boolean>
   }
 
   const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, gmorkDebug: false, fenrirInspect: false }
 
   function loadSettings(): Settings {
-    const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: false, panes: { ...defaultPanes } }
+    const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: 'off', panes: { ...defaultPanes } }
     try {
       const stored = localStorage.getItem(SETTINGS_KEY)
       if (stored) {
         const parsed = JSON.parse(stored)
+        // migrate boolean → DebugLayout
+        if (parsed.debug === true) parsed.debug = 'debug'
+        else if (parsed.debug === false) parsed.debug = 'off'
         return { ...defaults, ...parsed, panes: { ...defaultPanes, ...parsed.panes } }
       }
     } catch {}
@@ -246,7 +251,7 @@
   let currentSetup: Map<SystemRole, number> = $state(new Map())
   let skin: Skin = $state(settings.skin)
   let devMode = $state(settings.devMode)
-  let debugMode = $state(settings.debug)
+  let debugMode: DebugLayout = $state(settings.debug)
   let paneVisible: Record<PaneId, boolean> = $state(settings.panes)
   let showPaneMenu = $state(false)
   let showModal = $state(false)
@@ -608,7 +613,7 @@
     if (devTaps.length >= DEV_TAP_COUNT) {
       devTaps = []
       devMode = !devMode
-      if (!devMode) debugMode = false
+      if (!devMode) debugMode = 'off'
       updateSettings({ devMode, debug: debugMode })
       titleFlash = true
       setTimeout(() => titleFlash = false, 600)
@@ -1210,14 +1215,7 @@
       <option value="excite">Excite</option>
     </select>
 
-    <button
-      class="header-btn debug-btn"
-      class:debug-on={debugMode}
-      onclick={() => { debugMode = !debugMode; updateSettings({ debug: debugMode }) }}
-    >{debugMode ? 'DEBUG ON' : 'DEBUG OFF'}</button>
-    {/if}
-
-    {#if debugMode}
+    {#if debugMode === 'debug'}
     <div class="pane-menu-wrap">
       <button class="header-btn" onclick={() => showPaneMenu = !showPaneMenu}>Panes</button>
       {#if showPaneMenu}
@@ -1233,6 +1231,14 @@
         </div>
       {/if}
     </div>
+    {/if}
+
+    <button
+      class="header-btn debug-btn"
+      class:debug-on={debugMode === 'debug'}
+      class:debug-fenrir={debugMode === 'fenrir'}
+      onclick={() => { debugMode = debugRotation[(debugRotation.indexOf(debugMode) + 1) % debugRotation.length]; updateSettings({ debug: debugMode }) }}
+    >{{ off: 'DEBUG OFF', debug: 'DEBUG', fenrir: 'FENRIR' }[debugMode]}</button>
     {/if}
 
     <button class="header-btn help-btn" onclick={() => showHelp = true} title="Howl記法ヘルプ">?</button>
@@ -1345,7 +1351,7 @@
     </section>
   {/snippet}
 
-  {#if debugMode}
+  {#if debugMode === 'debug'}
   <div class="panes">
     {#if paneVisible.input}
     {@render inputPane()}
@@ -1464,6 +1470,29 @@
       </div>
     </section>
     {/if}
+  </div>
+  {:else if debugMode === 'fenrir'}
+  <div class="panes panes-fenrir">
+    <div class="fenrir-left">
+      {@render inputPane()}
+    </div>
+    <div class="fenrir-center">
+      <div class="prod-right-top">
+        {@render statusPane()}
+      </div>
+      <div class="prod-right-bottom">
+        {@render analysisPane()}
+      </div>
+    </div>
+    <div class="fenrir-right">
+      <section class="pane">
+        <div class="pane-body">
+          <InspectPane onLoadHowl={(howl) => {
+            handleStartTrial(howl)
+          }} />
+        </div>
+      </section>
+    </div>
   </div>
   {:else}
   <div class="panes panes-prod" class:has-video={!!videoId}>
@@ -1756,6 +1785,18 @@
     border-color: var(--ctp-maroon);
   }
 
+  .debug-btn.debug-fenrir {
+    opacity: 1;
+    background: var(--ctp-mauve);
+    color: var(--color-bg);
+    border-color: var(--ctp-mauve);
+  }
+
+  .debug-btn.debug-fenrir:hover {
+    background: var(--ctp-lavender);
+    border-color: var(--ctp-lavender);
+  }
+
   .pane-menu-wrap {
     position: relative;
   }
@@ -1802,6 +1843,47 @@
 
   .panes-prod {
     display: flex;
+  }
+
+  .panes-fenrir {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .panes-fenrir .pane-header {
+    display: none;
+  }
+
+  .fenrir-left {
+    display: flex;
+    flex: 1;
+    max-width: 400px;
+    min-width: 0;
+    border-right: 1px solid var(--color-border);
+  }
+
+  .fenrir-left .input-editor {
+    background: var(--ctp-mantle);
+  }
+
+  .fenrir-center {
+    display: flex;
+    flex-direction: column;
+    flex: 2;
+    min-width: 0;
+    background: var(--color-bg-elevated);
+    border-right: 1px solid var(--color-border);
+  }
+
+  .fenrir-right {
+    display: flex;
+    flex: 2;
+    min-width: 0;
+  }
+
+  .fenrir-right .pane {
+    border-right: none;
   }
 
   .prod-left {
