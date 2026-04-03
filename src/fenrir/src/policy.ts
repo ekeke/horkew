@@ -22,6 +22,9 @@ import * as ruleAction from './rule-action.ts'
 import { isVillagerAligned } from '../../lupa/roles.ts'
 import { HeuristicStrategy } from './heuristic.ts'
 
+/** plan depth 報酬の最大値（groups == nawa のとき） */
+const PLAN_DEPTH_REWARD_SCALE = 0.05
+
 export type FenrirStrategyConfig = {
   /** trueなら探索ノイズあり（学習時）、falseなら貪欲（評価時） */
   explore: boolean
@@ -189,11 +192,17 @@ export class FenrirStrategy implements Strategy {
     endgameActions: number[], endgameLogProbs: number[],
     predictActions: Float32Array | undefined,
     value: number, seat: number,
+    aliveCount: number,
   ): void {
     // plan tokensの合算logProbをPPO用に使う（predictはBCE補助損失で別途処理）
     let totalLogProb = 0
     for (const lp of forwardLogProbs) totalLogProb += lp
     for (const lp of endgameLogProbs) totalLogProb += lp
+
+    // plan depth 報酬: forward plan の group 数が残り縄数に近いほど +reward
+    const nawa = Math.floor((aliveCount - 1) / 2)
+    const groups = ruleAction.parsePlanIndices(forwardActions).length
+    const depthReward = nawa > 0 ? Math.max(0, 1 - Math.abs(groups - nawa) / nawa) * PLAN_DEPTH_REWARD_SCALE : 0
 
     this.trajectory.push({
       seat,
@@ -201,7 +210,7 @@ export class FenrirStrategy implements Strategy {
       actionHead: 'strategy',
       actionIdx: -1,
       logProb: totalLogProb,
-      reward: 0,
+      reward: depthReward,
       value,
       done: false,
       planForwardActions: forwardActions,
@@ -290,6 +299,7 @@ export class FenrirStrategy implements Strategy {
           result.planForwardActions, result.planForwardLogProbs!,
           result.planEndgameActions, result.planEndgameLogProbs!,
           predictActions, result.value, ctx.mySeat,
+          ctx.alivePlayers.length,
         )
       }
 
