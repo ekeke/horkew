@@ -908,9 +908,11 @@ async function main(): Promise<void> {
     const tsumiRatio = tsumiSamples.length > 0 ? 0.3 : 0
 
     let bestAcc = 0
+    let bestNextAcc = 0
+    const pretrainNextTargetAcc = 0.60
     for (let epoch = 1; epoch <= pretrainMaxEpochs; epoch++) {
       const samples = generatePlanTokenTrainingBatch(pretrainBatchSize, epoch, tsumiSamples, tsumiRatio)
-      const { loss, accuracy } = (tfNetwork as any).trainSupervisedPlan({
+      const { loss, accuracy, nextAccuracy, stopAccuracy } = (tfNetwork as any).trainSupervisedPlan({
         observations: samples.map(s => s.observation),
         forwardLabels: samples.map(s => s.forwardLabels),
         forwardMasks: samples.map(s => s.forwardMask),
@@ -921,11 +923,12 @@ async function main(): Promise<void> {
         vocabSize: PLAN_VOCAB.SIZE,
       })
       if (accuracy > bestAcc) bestAcc = accuracy
+      if (nextAccuracy > bestNextAcc) bestNextAcc = nextAccuracy
       if (epoch % pretrainLogInterval === 0 || epoch === 1) {
-        log(`  epoch=${epoch} loss=${loss.toFixed(4)} acc=${(accuracy * 100).toFixed(1)}% best=${(bestAcc * 100).toFixed(1)}%`)
+        log(`  epoch=${epoch} loss=${loss.toFixed(4)} acc=${(accuracy * 100).toFixed(1)}% next=${(nextAccuracy * 100).toFixed(1)}% stop=${(stopAccuracy * 100).toFixed(1)}% best=${(bestAcc * 100).toFixed(1)}%`)
       }
-      if (accuracy >= pretrainTargetAcc) {
-        log(`  Target accuracy ${(pretrainTargetAcc * 100).toFixed(0)}% reached at epoch ${epoch}`)
+      if (accuracy >= pretrainTargetAcc && nextAccuracy >= pretrainNextTargetAcc) {
+        log(`  Target accuracy ${(pretrainTargetAcc * 100).toFixed(0)}% + NEXT ${(pretrainNextTargetAcc * 100).toFixed(0)}% reached at epoch ${epoch}`)
         break
       }
     }
@@ -935,7 +938,7 @@ async function main(): Promise<void> {
       villageNet.loadWeights(tfNetwork.cloneWeights())
       log(`  Pretrained weights → village network`)
     }
-    log(`  Method B complete: ${(bestAcc * 100).toFixed(1)}% accuracy, ${((performance.now() - tB0) / 1000).toFixed(1)}s`)
+    log(`  Method B complete: ${(bestAcc * 100).toFixed(1)}% acc, ${(bestNextAcc * 100).toFixed(1)}% NEXT, ${((performance.now() - tB0) / 1000).toFixed(1)}s`)
 
     // === Method D: 実ゲームで predict + value の事前学習 ===
     log(`${BOLD}=== Pretrain D: Heuristic Game Supervised Learning ===${RESET}`)

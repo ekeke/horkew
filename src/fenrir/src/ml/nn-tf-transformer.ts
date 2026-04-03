@@ -1279,18 +1279,21 @@ export class TfTransformerNetwork {
     numTokens: number
     numEndgameTokens?: number
     vocabSize: number
-  }): { loss: number, accuracy: number } {
+  }): { loss: number, accuracy: number, nextAccuracy: number, stopAccuracy: number } {
     const n = batch.observations.length
-    if (n === 0) return { loss: 0, accuracy: 0 }
+    if (n === 0) return { loss: 0, accuracy: 0, nextAccuracy: 0, stopAccuracy: 0 }
 
     const inputSize = this.config.inputSize
     const obsData = new Float32Array(n * inputSize)
     for (let i = 0; i < n; i++) obsData.set(batch.observations[i], i * inputSize)
 
-    const result = { loss: 0, accuracy: 0 }
+    const result = { loss: 0, accuracy: 0, nextAccuracy: 0, stopAccuracy: 0 }
     const numTokens = batch.numTokens
     const vocabSize = batch.vocabSize
     const START_IDX = vocabSize  // START token index
+    const NEXT_IDX = vocabSize - 2  // PLAN_VOCAB.NEXT = 20
+    const STOP_IDX = vocabSize - 1  // PLAN_VOCAB.STOP = 21
+    const NEXT_WEIGHT = 4.0
 
     // Build teacher-forcing prevActions from labels: [START, label[0], label[1], ..., label[n-2]]
     const buildPrevActions = (labels: number[][], numToks: number): tf.Tensor2D => {
@@ -1309,6 +1312,9 @@ export class TfTransformerNetwork {
       let totalLoss = tf.scalar(0)
       let correct = 0
       let totalMasked = 0
+      let totalWeight = 0
+      let nextCorrect = 0, nextTotal = 0
+      let stopCorrect = 0, stopTotal = 0
 
       // Helper: compute CE loss for a plan via GRU teacher forcing
       const computeCE = (
@@ -1338,11 +1344,24 @@ export class TfTransformerNetwork {
           const oneHot = tf.oneHot(validLabels, vocabSize)
           const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
           const ce = tf.neg(tf.sum(tf.mul(oneHot, logProbs), 1))
-          totalLoss = tf.add(totalLoss, tf.sum(ce))
+
+          // Class-weighted loss: NEXT tokens get NEXT_WEIGHT boost
+          const weights = new Float32Array(validLabels.length)
+          for (let j = 0; j < validLabels.length; j++) {
+            const w = validLabels[j] === NEXT_IDX ? NEXT_WEIGHT : 1.0
+            weights[j] = w
+            totalWeight += w
+          }
+          const weightTensor = tf.tensor1d(weights)
+          totalLoss = tf.add(totalLoss, tf.sum(tf.mul(ce, weightTensor)))
 
           const predIdx = tf.argMax(probs, 1).dataSync()
           for (let j = 0; j < validIndices.length; j++) {
-            if (predIdx[j] === validLabels[j]) correct++
+            const lbl = validLabels[j]
+            const hit = predIdx[j] === lbl
+            if (hit) correct++
+            if (lbl === NEXT_IDX) { nextTotal++; if (hit) nextCorrect++ }
+            else if (lbl === STOP_IDX) { stopTotal++; if (hit) stopCorrect++ }
           }
         }
       }
@@ -1357,7 +1376,9 @@ export class TfTransformerNetwork {
 
       if (totalMasked > 0) {
         result.accuracy = correct / totalMasked
-        const avgLoss = tf.div(totalLoss, tf.scalar(totalMasked))
+        result.nextAccuracy = nextTotal > 0 ? nextCorrect / nextTotal : 0
+        result.stopAccuracy = stopTotal > 0 ? stopCorrect / stopTotal : 0
+        const avgLoss = tf.div(totalLoss, tf.scalar(totalWeight))
         result.loss = avgLoss.dataSync()[0]
         return avgLoss as tf.Scalar
       }

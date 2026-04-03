@@ -267,8 +267,8 @@ const PATTERNS: PatternType[] = [
   'multi_day_seats', 'multi_day_mixed', 'roller_then_seat',
 ]
 const PATTERN_WEIGHTS = [
-  0.08, 0.10, 0.08, 0.08, 0.10, 0.16,
-  0.15, 0.15, 0.10,
+  0.06, 0.08, 0.06, 0.06, 0.08, 0.12,  // single-day: 46%
+  0.18, 0.18, 0.18,                      // multi-day (NEXT): 54%
 ]
 
 function pickPattern(rng: Rng): PatternType {
