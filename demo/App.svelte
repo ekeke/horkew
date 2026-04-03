@@ -27,7 +27,7 @@
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
   import type { EditorView } from '@codemirror/view'
-  import { timeSeekPlugin, setOnSeek } from './editor/timeSeekPlugin.ts'
+  import { setOnSeek } from './editor/howlLanguage.ts'
   import type { StatementInfo, PlayerNameInfo } from './editor/howlLanguage.ts'
 
   type EditorModule = typeof import('./editor/index.ts')
@@ -696,7 +696,7 @@
         onCursorChange(_line) {
           onCursorMove()
         },
-        extensions: [timeSeekPlugin],
+        extensions: [],
       })
     })
     return () => {
@@ -1040,7 +1040,16 @@
 
       // Feed parse results to CM6 for syntax highlighting (after buildVillageStatus so dict is available)
       if (editorView) {
-        const stmtInfo: StatementInfo[] = statements.map((s: any) => ({ type: s.type, line: s.line }))
+        const stmtInfo: StatementInfo[] = statements.map((s: any) => {
+          const info: StatementInfo = { type: s.type, line: s.line }
+          if (s.type === 'timestamp') info.timestamp = { seconds: s.seconds, raw: s.raw }
+          else if (s.timestamp !== undefined) {
+            const m = Math.floor(s.timestamp / 60)
+            const sec = s.timestamp % 60
+            info.timestamp = { seconds: s.timestamp, raw: `${m}:${String(sec).padStart(2, '0')}` }
+          }
+          return info
+        })
         const playerNameInfos = buildPlayerNames(statements, dict, editorView.state.doc.toString())
         const playerList: { name: string, shortName?: string, aliases: string[], surviving: boolean, claimingRole?: string }[] = []
         let seat = 1
@@ -2188,26 +2197,6 @@
     display: none;
   }
 
-  :global(.cm-content .cm-line) {
-    display: flow-root;
-  }
-
-  :global(.cm-time-seek) {
-    float: right;
-    padding: 0 6px;
-    font-size: 11px;
-    line-height: 18px;
-    background: var(--color-surface);
-    color: var(--color-accent);
-    border: 1px solid var(--color-border-strong);
-    border-radius: 3px;
-    cursor: pointer;
-  }
-
-  :global(.cm-time-seek:hover) {
-    background: var(--color-accent);
-    color: var(--color-bg);
-  }
 
   .pane {
     display: flex;

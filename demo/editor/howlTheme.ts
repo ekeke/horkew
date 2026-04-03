@@ -60,19 +60,30 @@ export const howlThemeExtension: Extension = EditorView.theme({
   '.hw-player-resolved':   { backgroundColor: 'color-mix(in srgb, var(--color-editor-resolved) 13%, transparent)', color: 'var(--color-editor-resolved)' },
   '.hw-player-unresolved': { textDecoration: 'wavy underline var(--color-editor-unresolved)', textUnderlineOffset: '3px', backgroundColor: 'color-mix(in srgb, var(--color-editor-unresolved) 9%, transparent)' },
 
-  // Statement type gutter (left of line numbers)
+  // Timestamp seek gutter
   '.hwl-gutter': {
     width: '1.5em',
-    textAlign: 'center',
   },
   '.hwl-gutter .cm-gutterElement': {
     padding: '0',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  '.hwl-gutter .cm-gutterElement span': { fontSize: '1em', lineHeight: '1' },
-  '.hwg-unknown': { color: 'var(--color-editor-unresolved)' },
+  '.hwg-seek': {
+    display: 'block',
+    width: '100%',
+    padding: '0 2px',
+    border: 'none',
+    background: 'transparent',
+    color: 'var(--color-accent)',
+    fontSize: '11px',
+    lineHeight: '18px',
+    cursor: 'pointer',
+    textAlign: 'left',
+    fontFamily: "'Consolas', 'Menlo', monospace",
+  },
+  '.hwg-seek:hover': {
+    background: 'var(--color-accent)',
+    color: 'var(--color-bg)',
+  },
 
   // Autocomplete tooltip
   '.cm-tooltip.cm-tooltip-autocomplete': {

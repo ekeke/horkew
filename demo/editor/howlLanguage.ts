@@ -98,7 +98,7 @@ import * as V from '../../src/howl/vocabulary.ts'
 
 // ---- Public API ----
 
-export type StatementInfo = { type: StatementType, line: number }
+export type StatementInfo = { type: StatementType, line: number, timestamp?: { seconds: number, raw: string } }
 
 export type PlayerNameInfo = {
   line: number
@@ -163,48 +163,38 @@ const lineDeco: Record<string, Decoration> = {
 
 const beyondCursorDeco = Decoration.line({ class: 'hw-beyond-cursor' })
 
-// ---- Gutter markers (行タイプアイコン) ----
+// ---- Gutter markers (timestamp seek buttons) ----
 
-const gutterIcons: Record<string, string> = {
-  join: '🙋', joinMulti: '🙋',
-  vote: '🎫', multiVote: '🎫',
-  attack: '🐺', lynch: '⚔', curse: '💀', follow: '👻', peace: '☮',
-  revote: '🔄', over: '🏁',
-  assert: '💬', mason: '🤝',
-  reveal: '👁', unknown: '❓',
+let onSeek: ((seconds: number, line: number) => void) | undefined
+
+export function setOnSeek(fn: (seconds: number, line: number) => void) {
+  onSeek = fn
 }
 
-class StatementGutterMarker extends GutterMarker {
-  constructor(readonly icon: string, readonly cssClass: string) { super() }
+class SeekGutterMarker extends GutterMarker {
+  constructor(readonly seconds: number, readonly line: number) { super() }
   toDOM() {
-    const span = document.createElement('span')
-    span.textContent = this.icon
-    span.className = this.cssClass
-    return span
+    const btn = document.createElement('button')
+    btn.textContent = '▶'
+    btn.className = 'hwg-seek'
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      onSeek?.(Math.max(0, this.seconds - 3), this.line)
+    })
+    return btn
   }
 }
 
-const gutterMarkerCache = new Map<string, StatementGutterMarker>()
-function getGutterMarker(type: string): StatementGutterMarker | null {
-  const icon = gutterIcons[type]
-  if (!icon) return null
-  if (!gutterMarkerCache.has(type)) {
-    gutterMarkerCache.set(type, new StatementGutterMarker(icon, `hwg-${type}`))
-  }
-  return gutterMarkerCache.get(type)!
-}
-
-// ガターマーカーのRangeSetを構築
+// ガターマーカーのRangeSetを構築（タイムスタンプ行のみ）
 function buildGutterMarkers(
   statements: StatementInfo[],
   doc: { line(n: number): { from: number }, lines: number },
 ): RangeSet<GutterMarker> {
   const markers: { from: number, marker: GutterMarker }[] = []
   for (const s of statements) {
-    if (s.line < 1 || s.line > doc.lines) continue
-    const marker = getGutterMarker(s.type)
-    if (!marker) continue
-    markers.push({ from: doc.line(s.line).from, marker })
+    if (!s.timestamp || s.line < 1 || s.line > doc.lines) continue
+    markers.push({ from: doc.line(s.line).from, marker: new SeekGutterMarker(s.timestamp.seconds, s.line) })
   }
   markers.sort((a, b) => a.from - b.from)
   return RangeSet.of(markers.map(m => m.marker.range(m.from)))

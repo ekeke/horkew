@@ -28,6 +28,7 @@ export function createHowlEditor(parent: HTMLElement, opts: {
       drawSelection(),
       highlightActiveLine(),
       howlCompletionExtension,
+      EditorView.lineWrapping,
       keymap.of([...defaultKeymap, ...historyKeymap, ...completionKeymap]),
       EditorView.updateListener.of(update => {
         if (update.docChanged) {
