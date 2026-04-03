@@ -740,15 +740,28 @@ async function main(): Promise<void> {
   const shaFile = 'train-orchestrate.sha'
   writeFileSync(shaFile, execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim() + '\n')
   const cleanupPid = () => { try { unlinkSync(pidFile) } catch {}; try { unlinkSync(shaFile) } catch {} }
-  const forceShutdown = (code: number) => {
-    log(`\nShutting down (signal ${code})...`)
+  let shutdownRequested = 0  // 0=none, >0=exit code
+  const requestShutdown = (code: number) => {
+    if (shutdownRequested) {
+      // 2回目: 即座に強制終了
+      log(`\nForce shutdown (second signal)`)
+      terminateGameWorkerPool()
+      cleanupPid()
+      process.exit(code)
+    }
+    shutdownRequested = code
+    log(`\nShutdown requested (signal ${code}), will exit after current operation...`)
+  }
+  const checkShutdown = () => {
+    if (!shutdownRequested) return
+    log(`Shutting down...`)
     terminateGameWorkerPool()
     cleanupPid()
-    process.exit(code)
+    process.exit(shutdownRequested)
   }
   process.on('exit', cleanupPid)
-  process.on('SIGINT', () => forceShutdown(130))
-  process.on('SIGTERM', () => forceShutdown(143))
+  process.on('SIGINT', () => requestShutdown(130))
+  process.on('SIGTERM', () => requestShutdown(143))
 
   await checkExistingCheckpoints(config)
 
@@ -913,6 +926,7 @@ async function main(): Promise<void> {
     let bestNextAcc = 0
     const pretrainNextTargetAcc = 0.60
     for (let epoch = 1; epoch <= pretrainMaxEpochs; epoch++) {
+      checkShutdown()
       const samples = generatePlanTokenTrainingBatch(pretrainBatchSize, epoch, tsumiSamples, tsumiRatio)
       const { loss, accuracy, nextAccuracy, stopAccuracy } = (tfNetwork as any).trainSupervisedPlan({
         observations: samples.map(s => s.observation),
@@ -956,6 +970,7 @@ async function main(): Promise<void> {
     if (gameSamples.length > 0) {
       const dMiniBatch = 256
       for (let epoch = 1; epoch <= pretrainDEpochs; epoch++) {
+        checkShutdown()
         let epochPredLoss = 0, epochValLoss = 0
         let batchCount = 0
 
@@ -1117,6 +1132,7 @@ async function main(): Promise<void> {
       let iterCount = 0
 
       for (let iter = masonIter + 1; iter <= config.iterations && !graduated; iter++) {
+        checkShutdown()
         const iterStart = performance.now()
         const seeds = Array.from({ length: config.batch }, (_, g) => iter * config.batch + g)
 
@@ -1356,6 +1372,7 @@ async function main(): Promise<void> {
         let iterCount = 0
 
         for (let iter = currentIter + 1; iter <= targetIter; iter++) {
+          checkShutdown()
           const iterStart = performance.now()
           const seeds = Array.from({ length: config.batch }, (_, g) => iter * config.batch + g)
 
@@ -1705,6 +1722,7 @@ async function main(): Promise<void> {
 
         let lastPpoResult1p = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
         for (let iter = currentIter + 1; iter <= targetIter; iter++) {
+          checkShutdown()
           const iterStart = performance.now()
           const seeds = Array.from({ length: config.batch }, (_, g) => (10000 + iter) * config.batch + g)
 
