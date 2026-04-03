@@ -921,3 +921,153 @@ describe('forecast statement', () => {
     assert.equal(result.type, 'forecast')
   })
 })
+
+describe('videoSource statement', () => {
+  test('YouTube URL', () => {
+    const result = S.parseVideoSourceStatement('@https://youtube.com/watch?v=XXXXX', 1)
+    assert.deepEqual(result, {
+      type: 'videoSource',
+      line: 1,
+      url: 'https://youtube.com/watch?v=XXXXX',
+    })
+  })
+
+  test('Nicovideo URL', () => {
+    const result = S.parseVideoSourceStatement('@https://www.nicovideo.jp/watch/sm12345', 1)
+    assert.deepEqual(result, {
+      type: 'videoSource',
+      line: 1,
+      url: 'https://www.nicovideo.jp/watch/sm12345',
+    })
+  })
+
+  test('full-width ＠', () => {
+    const result = S.parseVideoSourceStatement('＠https://youtube.com/watch?v=ABC', 1)
+    assert.deepEqual(result, {
+      type: 'videoSource',
+      line: 1,
+      url: 'https://youtube.com/watch?v=ABC',
+    })
+  })
+
+  test('http URL', () => {
+    const result = S.parseVideoSourceStatement('@http://example.com/video', 1)
+    assert.deepEqual(result, {
+      type: 'videoSource',
+      line: 1,
+      url: 'http://example.com/video',
+    })
+  })
+
+  test('with surrounding whitespace', () => {
+    const result = S.parseVideoSourceStatement('  @https://example.com  ', 1)
+    assert.deepEqual(result, {
+      type: 'videoSource',
+      line: 1,
+      url: 'https://example.com',
+    })
+  })
+
+  test('returns null for non-URL', () => {
+    assert.equal(S.parseVideoSourceStatement('@not-a-url', 1), null)
+  })
+
+  test('returns null for bare @', () => {
+    assert.equal(S.parseVideoSourceStatement('@', 1), null)
+  })
+
+  test('parseStatement routes to videoSource', () => {
+    const result = S.parseStatement('@https://youtube.com/watch?v=XXXXX', 1)
+    assert.equal(result.type, 'videoSource')
+  })
+})
+
+describe('timestamp statement', () => {
+  test('MM:SS format', () => {
+    const result = S.parseTimestampStatement('@15:40', 1)
+    assert.deepEqual(result, {
+      type: 'timestamp',
+      line: 1,
+      seconds: 940,
+      raw: '15:40',
+    })
+  })
+
+  test('H:MM:SS format', () => {
+    const result = S.parseTimestampStatement('@1:15:40', 1)
+    assert.deepEqual(result, {
+      type: 'timestamp',
+      line: 1,
+      seconds: 4540,
+      raw: '1:15:40',
+    })
+  })
+
+  test('full-width ＠', () => {
+    const result = S.parseTimestampStatement('＠15:40', 1)
+    assert.deepEqual(result, {
+      type: 'timestamp',
+      line: 1,
+      seconds: 940,
+      raw: '15:40',
+    })
+  })
+
+  test('0:00', () => {
+    const result = S.parseTimestampStatement('@0:00', 1)
+    assert.deepEqual(result, {
+      type: 'timestamp',
+      line: 1,
+      seconds: 0,
+      raw: '0:00',
+    })
+  })
+
+  test('returns null for single number (no colon)', () => {
+    assert.equal(S.parseTimestampStatement('@15', 1), null)
+  })
+
+  test('returns null for non-timestamp', () => {
+    assert.equal(S.parseTimestampStatement('@abc', 1), null)
+  })
+
+  test('returns null for 4 segments', () => {
+    assert.equal(S.parseTimestampStatement('@1:02:03:04', 1), null)
+  })
+
+  test('parseStatement routes to timestamp', () => {
+    const result = S.parseStatement('@15:40', 1)
+    assert.equal(result.type, 'timestamp')
+  })
+})
+
+describe('inline timestamp', () => {
+  test('lynch with inline timestamp', () => {
+    const result = S.parseStatement('処刑 アリス @15:40', 1)
+    assert.equal(result.type, 'lynch')
+    assert.equal(result.timestamp, 940)
+  })
+
+  test('vote with inline timestamp', () => {
+    const result = S.parseStatement('ボブ→アリス @1:00:00', 1)
+    assert.equal(result.type, 'vote')
+    assert.equal(result.timestamp, 3600)
+  })
+
+  test('full-width ＠ inline', () => {
+    const result = S.parseStatement('処刑 アリス ＠15:40', 1)
+    assert.equal(result.type, 'lynch')
+    assert.equal(result.timestamp, 940)
+  })
+
+  test('standalone @timestamp is NOT treated as inline', () => {
+    const result = S.parseStatement('@15:40', 1)
+    assert.equal(result.type, 'timestamp')
+    assert.equal(result.timestamp, undefined)
+  })
+
+  test('no inline match when @ is not at end', () => {
+    const result = S.parseStatement('text @15:40 more text', 1)
+    assert.equal(result.timestamp, undefined)
+  })
+})

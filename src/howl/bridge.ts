@@ -443,6 +443,8 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       }
 
       case 'reveal':
+      case 'videoSource':
+      case 'timestamp':
       case 'unknown':
         break
     }

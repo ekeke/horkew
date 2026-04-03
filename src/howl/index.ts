@@ -23,6 +23,8 @@ export type {
   RevealStatement,
   UnknownStatement,
   GrelanStatement,
+  VideoSourceStatement,
+  TimestampStatement,
 } from './statement.ts'
 // GrelanStatement is exported for external consumers even though bridge.ts doesn't need it
 export { FlexibleDictionary } from './flexibleDictionary.ts'

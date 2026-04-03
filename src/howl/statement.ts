@@ -1,6 +1,6 @@
 import * as V from './vocabulary.ts'
 
-export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'unknown'
+export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'videoSource' | 'timestamp' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf'
@@ -20,6 +20,7 @@ export type Statement = {
     type: StatementType  // Type of statement (e.g., 'join', 'vote', etc.)
     line: number  // Line number in the source code where the statement appears
     day?: number  // Day number assigned during post-processing
+    timestamp?: number  // Inline @MM:SS annotation (seconds)
 }
 
 export type JoinStatement = Statement & {
@@ -110,6 +111,17 @@ export type GrelanStatement = Statement & {
 export type SetupStatement = Statement & {
     type: 'setup'
     roles: Record<string, number>
+}
+
+export type VideoSourceStatement = Statement & {
+    type: 'videoSource'
+    url: string
+}
+
+export type TimestampStatement = Statement & {
+    type: 'timestamp'
+    seconds: number
+    raw: string
 }
 
 export type UnknownStatement = Statement & {
@@ -532,8 +544,41 @@ export function parseSetupStatement(text: string, line: number): SetupStatement 
   return { type: 'setup', line, roles }
 }
 
+// Annotation: @URL (video source)
+const videoSourceRegex = /^[\s\u3000]*[@＠](https?:\/\/\S+)[\s\u3000]*$/
+
+export function parseVideoSourceStatement(text: string, line: number): VideoSourceStatement | null {
+  const m = text.match(videoSourceRegex)
+  if (!m) return null
+  return { type: 'videoSource', line, url: m[1] }
+}
+
+// Annotation: @MM:SS or @H:MM:SS (timestamp)
+const timestampLineRegex = /^[\s\u3000]*[@＠](\d{1,2}(?::\d{2}){1,2})[\s\u3000]*$/
+
+export function parseTimestampValue(s: string): number {
+  const parts = s.split(':').map(Number)
+  if (parts.some(isNaN)) return -1
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  return -1
+}
+
+export function parseTimestampStatement(text: string, line: number): TimestampStatement | null {
+  const m = text.match(timestampLineRegex)
+  if (!m) return null
+  const seconds = parseTimestampValue(m[1])
+  if (seconds < 0) return null
+  return { type: 'timestamp', line, seconds, raw: m[1] }
+}
+
+// Inline @MM:SS at end of line (stripped before normal parsing)
+const inlineTimestampRegex = /\s[@＠](\d{1,2}(?::\d{2}){1,2})[\s\u3000]*$/
+
 export function parseStatement (text: string, line: number): Statement {
   const parsers = [
+    parseVideoSourceStatement,
+    parseTimestampStatement,
     parseSetupStatement,
     parseJoinMultiStatement,
     parseJoinStatement,
@@ -553,14 +598,26 @@ export function parseStatement (text: string, line: number): Statement {
     parseRevealStatement,
   ]
 
-  for (const parser of parsers) {
-    const result = parser(text, line)
-    if (result) return result
+  // Check for inline @timestamp before normal parsing
+  let inlineSeconds: number | undefined
+  const inlineMatch = text.match(inlineTimestampRegex)
+  if (inlineMatch) {
+    const sec = parseTimestampValue(inlineMatch[1])
+    if (sec >= 0) {
+      inlineSeconds = sec
+      text = text.slice(0, inlineMatch.index!)
+    }
   }
 
-  return {
-    type: 'unknown',
-    line,
-    text,
-  } as UnknownStatement
+  for (const parser of parsers) {
+    const result = parser(text, line)
+    if (result) {
+      if (inlineSeconds !== undefined) result.timestamp = inlineSeconds
+      return result
+    }
+  }
+
+  const result: UnknownStatement = { type: 'unknown', line, text }
+  if (inlineSeconds !== undefined) result.timestamp = inlineSeconds
+  return result
 }
