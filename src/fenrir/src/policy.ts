@@ -87,19 +87,6 @@ export class FenrirStrategy implements Strategy {
     return result
   }
 
-  /** Forward plan tokensの数（config依存） */
-  private get numForwardTokens(): number {
-    return this.network.config.transformer?.numForwardTokens ?? 8
-  }
-
-  private get numEndgameTokens(): number {
-    return this.network.config.transformer?.numEndgameTokens ?? 4
-  }
-
-  private get planVocabSize(): number {
-    return this.network.config.transformer?.planVocabSize ?? 22
-  }
-
   private record(
     head: string, actionIdx: number,
     logProb: number, value: number, reward: number,
@@ -276,10 +263,8 @@ export class FenrirStrategy implements Strategy {
   decideVote(ctx: DecisionContext): number {
     if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideVote(ctx)
     if (this.config.strategyOnly) {
-      // 戦略NNの推論（キャッシュ or 新規）+ plan logitsで投票
+      // 戦略NNの推論（キャッシュ or 新規）+ plan actions で投票
       const result = this.getStrategyResult(ctx)
-      const forwardLogits = result.policies.get('plan_forward')
-      const endgameLogits = result.policies.get('plan_endgame')
 
       // observationを確保（キャッシュ済みなら高速）
       if (!this.lastObs) this.infer(ctx)
@@ -304,25 +289,23 @@ export class FenrirStrategy implements Strategy {
       }
 
       // 村陣営のみplanに従って投票、人外は自由（ランダム）
-      if (isVillagerAligned(ctx.myRole) && forwardLogits) {
-        // Debug: plan tokens の生出力
-        // TODO: FENRIR_DEBUG=howl でデバッグ用Howlコメント（# [plan] ...）として出力できるようにする
+      const fwdActions = result.planForwardActions
+      if (isVillagerAligned(ctx.myRole) && fwdActions) {
         if (process.env.FENRIR_DEBUG) {
-          const fwdIdx = result.planForwardActions ?? ruleAction.argmaxPlanTokens(forwardLogits!, this.numForwardTokens, this.planVocabSize)
-          const fwdGroups = ruleAction.parsePlanIndices(fwdIdx)
-          const egIdx = result.planEndgameActions ?? (endgameLogits ? ruleAction.argmaxPlanTokens(endgameLogits, this.numEndgameTokens, this.planVocabSize) : [])
-          const egGroups = ruleAction.parsePlanIndices(egIdx)
+          const fwdGroups = ruleAction.parsePlanIndices(fwdActions)
+          const egActions = result.planEndgameActions ?? []
+          const egGroups = ruleAction.parsePlanIndices(egActions)
           const fmtGroup = (g: ruleAction.PlanDayGroup) => g.targets.map(t =>
             t.type === 'seat' ? `seat${t.seat}` : t.type === 'role' ? t.role : 'grayran'
           ).join(',')
           process.stderr.write(
             `[plan] seat${ctx.mySeat}(${ctx.myRole}) day${ctx.day} alive=${ctx.alivePlayers.length}` +
-            ` fwd=[${fwdIdx.join(',')}]→[${fwdGroups.map(fmtGroup).join('|')}]` +
-            ` eg=[${egIdx.join(',')}]→[${egGroups.map(fmtGroup).join('|')}]` +
+            ` fwd=[${fwdActions.join(',')}]→[${fwdGroups.map(fmtGroup).join('|')}]` +
+            ` eg=[${egActions.join(',')}]→[${egGroups.map(fmtGroup).join('|')}]` +
             ` plans=[${(ctx as any).executionPlans?.map((p: any) => p.targets?.join(','))?.join('|') ?? 'none'}]\n`
           )
         }
-        const voteSeat = ruleAction.planToVote(forwardLogits, this.numForwardTokens, ctx, endgameLogits, this.numEndgameTokens)
+        const voteSeat = ruleAction.planToVote(fwdActions, ctx, result.planEndgameActions)
         if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
       }
       // フォールバック: ランダム生存者
@@ -362,8 +345,7 @@ export class FenrirStrategy implements Strategy {
     if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideCommunication(ctx)
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
-      const forwardLogits = result.policies.get('plan_forward') ?? null
-      return ruleAction.communication(forwardLogits, this.numForwardTokens, ctx)
+      return ruleAction.communication(result.planForwardActions ?? null, ctx)
     }
 
     const result = this.infer(ctx)
@@ -401,8 +383,7 @@ export class FenrirStrategy implements Strategy {
 
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
-      const forwardLogits = result.policies.get('plan_forward') ?? null
-      return ruleAction.proposal(forwardLogits, this.numForwardTokens, ctx)
+      return ruleAction.proposal(result.planForwardActions ?? null, ctx)
     }
 
     // 指揮者は vote head を使って処刑対象を提案

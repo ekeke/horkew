@@ -130,35 +130,33 @@ function resolveGroup(group: PlanDayGroup, ctx: DecisionContext): number | null 
 }
 
 /**
- * Forward/Endgame plan logitsから今日の処刑対象seatを決定
+ * GRU decoder のサンプリング済み actions から今日の処刑対象 seat を決定
  *
  * 生存者数で endgame に切り替え:
  *   ≤4人: 最終日 → endgame groups[0] (右→左で先頭=最終日)
  *   ≤6人: 最終日前日 → endgame groups[1] があればそれ、なければ groups[0]
  *   それ以外: forward の先頭グループ
  *
+ * @param forwardActions GRU decoder が出力した forward plan の token index 列
+ * @param ctx 意思決定コンテキスト
+ * @param endgameActions GRU decoder が出力した endgame plan の token index 列（省略時は forward のみ）
  * @returns 投票先seat (1-indexed) or null (プランなし/解決不能)
  */
 export function planToVote(
-  forwardLogits: Float32Array,
-  numForwardTokens: number,
+  forwardActions: number[],
   ctx: DecisionContext,
-  endgameLogits?: Float32Array | null,
-  numEndgameTokens?: number,
+  endgameActions?: number[] | null,
 ): number | null {
   const alive = ctx.alivePlayers.length
 
   // Endgame切り替え判定
-  if (endgameLogits && numEndgameTokens) {
-    const egIndices = argmaxPlanTokens(endgameLogits, numEndgameTokens)
-    const egGroups = parsePlanIndices(egIndices)  // 右→左: groups[0]=最終日, groups[1]=前日
+  if (endgameActions && endgameActions.length > 0) {
+    const egGroups = parsePlanIndices(endgameActions)  // 右→左: groups[0]=最終日, groups[1]=前日
 
     if (alive <= 4 && egGroups.length >= 1) {
-      // 最終日
       const seat = resolveGroup(egGroups[0], ctx)
       if (seat) return seat
     } else if (alive <= 6 && egGroups.length >= 1) {
-      // 最終日前日: groups[1]があればそれ、なければgroups[0]
       const group = egGroups.length >= 2 ? egGroups[1] : egGroups[0]
       const seat = resolveGroup(group, ctx)
       if (seat) return seat
@@ -166,8 +164,7 @@ export function planToVote(
   }
 
   // Forward plan
-  const indices = argmaxPlanTokens(forwardLogits, numForwardTokens)
-  const groups = parsePlanIndices(indices)
+  const groups = parsePlanIndices(forwardActions)
   if (groups.length === 0) return null
 
   const today = groups[0]
@@ -228,13 +225,12 @@ export function dayClaim(ctx: DecisionContext): DayClaim {
  * 最小限のシグナル: planの対象にvote_intent
  */
 export function communication(
-  forwardLogits: Float32Array | null,
-  numForwardTokens: number,
+  forwardActions: number[] | null,
   ctx: DecisionContext,
 ): CommunicationAction {
   // planの投票先にvote_intent
-  if (forwardLogits) {
-    const voteSeat = planToVote(forwardLogits, numForwardTokens, ctx)
+  if (forwardActions) {
+    const voteSeat = planToVote(forwardActions, ctx)
     if (voteSeat) {
       return {
         signal: { type: 'vote_intent', target: voteSeat },
@@ -253,14 +249,13 @@ export function communication(
  * plan の今日の対象をexecute_orderとして提案
  */
 export function proposal(
-  forwardLogits: Float32Array | null,
-  numForwardTokens: number,
+  forwardActions: number[] | null,
   ctx: DecisionContext,
 ): Proposal | null {
   if (ctx.commander !== ctx.mySeat) return null
 
-  if (forwardLogits) {
-    const voteSeat = planToVote(forwardLogits, numForwardTokens, ctx)
+  if (forwardActions) {
+    const voteSeat = planToVote(forwardActions, ctx)
     if (voteSeat) return { type: 'execute_order', target: voteSeat }
   }
   return null

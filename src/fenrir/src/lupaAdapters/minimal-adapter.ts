@@ -22,7 +22,7 @@ import {
   type RetarResult,
 } from '../retar-bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
-import { argmaxPlanTokens, parsePlanIndices, resolvePlanGroupSimple, type PlanDayGroup } from '../rule-action.ts'
+import { parsePlanIndices, resolvePlanGroupSimple, type PlanDayGroup } from '../rule-action.ts'
 
 /** PlanDayGroup[] → ExecutionPlan[] に変換（observation 注入用） */
 function planGroupsToExecutionPlans(
@@ -315,26 +315,23 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { g
         const mason = aliveMasons.find(m => config.strategies.has(m.seat)) ?? aliveMasons[0]
         const masonView = buildPlayerView(state, mason.seat)
         const masonCtx = buildCtx(vctx as PhaseContext, mason, masonView)
-        masonCtx.commander = mason.seat  // 提案を出すために指揮者扱い
+        masonCtx.commander = mason.seat
         const proposal = getStrategy(mason.seat).decideProposal?.(masonCtx)
         if (proposal && proposal.type === 'execute_order') {
           dayProposals.push(proposal)
         }
 
         // planグループをキャッシュ（死亡後の継続用）
+        // decideProposal が getStrategyResult を呼んで cachedStrategyResult に plan actions が入っている
         const s = getStrategy(mason.seat) as any
         const result = s.cachedStrategyResult
         if (result) {
-          const fwdLogits = result.policies?.get('plan_forward')
-          if (fwdLogits) {
-            const indices = argmaxPlanTokens(fwdLogits, s.numForwardTokens ?? 8)
-            cachedPlanGroups = parsePlanIndices(indices)
+          if (result.planForwardActions) {
+            cachedPlanGroups = parsePlanIndices(result.planForwardActions)
             cachedPlanGroupIndex = 1  // groups[0]は今日使った、次回はgroups[1]から
           }
-          const egLogits = result.policies?.get('plan_endgame')
-          if (egLogits) {
-            const egIndices = argmaxPlanTokens(egLogits, s.numEndgameTokens ?? 4)
-            cachedEndgameGroups = parsePlanIndices(egIndices)
+          if (result.planEndgameActions) {
+            cachedEndgameGroups = parsePlanIndices(result.planEndgameActions)
           }
         }
       } else if (allMasons.length > 0 && cachedPlanGroups) {
@@ -379,14 +376,10 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers & { g
         }
       }
 
-      // mason の decideProposal が cachedStrategyResult/lastObs をキャッシュ済みだが、
-      // その時点では currentExecutionPlans が未更新だった。
-      // キャッシュを無効化して decideVote 時に plan 入りの observation で再推論させる。
-      for (const mason of aliveMasons) {
-        const s = getStrategy(mason.seat) as any
-        s.cachedDay = -1
-        s.lastObs = null
-      }
+      // Note: mason の cachedStrategyResult は decideProposal 時に確定済み。
+      // キャッシュを無効化しない — decideVote で再推論すると異なる plan actions が出て
+      // execute_order と mason 自身の投票が不一致になるため。
+      // mason の observation に executionPlans が未反映だが、mason は plan の出し手なので問題ない。
 
       for (const player of alivePlayers(state)) {
         const view = buildPlayerView(state, player.seat)
