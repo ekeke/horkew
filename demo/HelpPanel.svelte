@@ -93,6 +93,7 @@
                 <li><a href="#help-notation-other-mason">共有確認</a></li>
                 <li><a href="#help-notation-other-reveal">役職公開</a></li>
                 <li><a href="#help-notation-other-over">決着</a></li>
+                <li><a href="#help-notation-other-video">動画・タイムスタンプ</a></li>
               </ul>
             </li>
             <li><a href="#help-notation-roles">役職名・記号一覧</a></li>
@@ -169,7 +170,7 @@
       <p>以下がサンプルのゲーム記録です。ボタンを押すと、保存なしの<strong>お試しモード</strong>でエディタに読み込まれます。自由に編集できますが、保存はされないので安心してください。</p>
       <button class="try-btn" onclick={() => startTrial(TUTORIAL_TEXT)}>お試しする</button>
       <pre><code># 配役: 村人2, 占い師1, 人狼1, 狂人1
-@ 村2 占1 狼1 狂1
+配役 村2 占1 狼1 狂1
 
 # 参加者を登録
 ++アリス ボブ チャーリー デイブ エミリー
@@ -202,7 +203,7 @@
       <p>入力した瞬間から、右側の画面にゲーム状況が反映されます。ポイントを見ていきましょう:</p>
 
       <div class="step-annotation">
-        <p><strong><code>@ 村2 占1 狼1 狂1</code></strong> — 配役を設定しています。「村人2人、占い師1人、人狼1人、狂人1人」という意味です。</p>
+        <p><strong><code>配役 村2 占1 狼1 狂1</code></strong> — 配役を設定しています。「村人2人、占い師1人、人狼1人、狂人1人」という意味です。</p>
       </div>
       <div class="step-annotation">
         <p><strong><code>++アリス ボブ チャーリー デイブ エミリー</code></strong> — 参加者をまとめて登録しています。</p>
@@ -256,7 +257,7 @@
 
       <h3 id="help-notation-structure">ドキュメント構造</h3>
       <p>Howlドキュメントは以下のような記法で構成されます。</p>
-      <pre><code>@ 村2 占1 狼1 狂1
+      <pre><code>配役 村2 占1 狼1 狂1
 ++アリス ボブ チャーリー デイブ エミリー
 
 アリス: 占いCO ボブ白
@@ -271,7 +272,7 @@
 村勝ち</code></pre>
       <p>Howlドキュメントは3つの要素で構成されます:</p>
       <ol>
-        <li><strong>配役行</strong>（<code>@</code>）— ゲームに登場する役職と人数</li>
+        <li><strong>配役行</strong>（<code>配役</code>）— ゲームに登場する役職と人数</li>
         <li><strong>参加者行</strong>（<code>++</code> / <code>+</code>）— プレイヤーの登録</li>
         <li><strong>ゲームイベント行</strong> — CO・投票・処刑・襲撃・決着など</li>
       </ol>
@@ -299,8 +300,8 @@
       <p>参加行は自動的に先頭に移動されるため、文中のどこに書いても構いません。</p>
 
       <h3 id="help-notation-setup">配役</h3>
-      <p><code>@</code>（または <code>＠</code>）の後に、各役職の略称と人数を続けて記述します。</p>
-      <pre><code>@ 村6 占1 霊1 狩1 共2 狼3 狂1 狐1</code></pre>
+      <p><code>配役</code>（または <code>レギュ</code>・<code>setup</code>）の後に、各役職の略称と人数を続けて記述します。</p>
+      <pre><code>配役 村6 占1 霊1 狩1 共2 狼3 狂1 狐1</code></pre>
       <p>区切りにはスペース・<code>,</code>・<code>、</code> などが使えます。全角数字にも対応しています。</p>
       <p>配役行も参加行と同様、文中のどこに書いても構いません。</p>
       <p>配役の指定は必須ではありません。省略した場合は参加者の人数に応じて自動的に配役が決まります。ただし、指定したほうが推理エンジンがより正確に役職を絞り込めます。</p>
@@ -335,6 +336,8 @@
 ボブ: 非猫CO</code></pre>
       <p>複数の役職略称を連結すると複合COになります。</p>
       <pre><code>アリス: 猫狩CO</code></pre>
+      <p><code>素村CO</code> で、全ての村役職（占い・霊媒・狩人・共有・猫又）を一括否定できます。</p>
+      <pre><code>ボブ: 素村CO</code></pre>
 
       <h3 id="help-notation-assert-result">占い・霊媒結果</h3>
       <p>CO行の中で、対象名の直後に結果記号を書きます。</p>
@@ -451,6 +454,18 @@
 狐勝ち
 引き分け</code></pre>
       <p>陣営: <code>村</code> <code>狼</code> <code>狐</code> / 勝利: <code>勝ち</code> <code>勝利</code> <code>勝</code></p>
+
+      <h3 id="help-notation-other-video">動画・タイムスタンプ</h3>
+      <p>動画URLとタイムスタンプを記述すると、テキストと動画を同期再生できます。</p>
+      <h4>動画ソース</h4>
+      <pre><code>@https://youtube.com/watch?v=XXXXX</code></pre>
+      <p><code>@</code>（または<code>＠</code>）の後にHTTP/HTTPS URLを記述します。</p>
+      <h4>タイムスタンプ</h4>
+      <pre><code>@15:40
+@1:05:30</code></pre>
+      <p><code>@MM:SS</code> または <code>@H:MM:SS</code> 形式で時刻を指定します。他の行の末尾に付加することもできます:</p>
+      <pre><code>チャーリー処刑 @15:40
+襲撃 アリス @1:05:30</code></pre>
     </section>
 
     <!-- 役職名・記号一覧 -->
@@ -467,7 +482,8 @@
           <tr><td>共有者</td><td><code>共有</code> <code>共</code></td></tr>
           <tr><td>猫又</td><td><code>猫</code></td></tr>
           <tr><td>人狼</td><td><code>狼</code></td></tr>
-          <tr><td>狂人</td><td><code>狂</code> <code>狂信者</code></td></tr>
+          <tr><td>狂人</td><td><code>狂</code></td></tr>
+          <tr><td>狂信者</td><td><code>狂信</code> <code>信</code></td></tr>
           <tr><td>妖狐</td><td><code>狐</code></td></tr>
           <tr><td>背徳者</td><td><code>背徳</code> <code>背</code></td></tr>
         </tbody>

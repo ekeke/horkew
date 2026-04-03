@@ -4,38 +4,7 @@ Howl (Horkew OutLine Log) is a compact text notation for recording Werewolf/Mafi
 
 ## Document Structure
 
-A `.howl` document consists of two optional sections:
-
-```
----
-YAML frontmatter
----
-body (statements, one per line)
-```
-
-### Frontmatter
-
-Optional YAML block delimited by `---`. Contains metadata such as game setup configuration and rules.
-
-```yaml
----
-setup:
-  villager: 4
-  werewolf: 2
-  seer: 1
-  medium: 1
-  bodyguard: 1
-  possessed: 1
-rules:
-  vote.final: revote   # final vote candidates can vote (default: they cannot)
----
-```
-
-If no `setup` is provided, defaults are inferred from player count.
-
-### Body
-
-The body is processed line by line. Each line is parsed as a **statement**.
+A `.howl` document is processed line by line. Each line is parsed as a **statement**.
 
 - **Blank lines** are ignored.
 - **Comment lines** starting with `#` are ignored.
@@ -73,7 +42,60 @@ Resolution priority:
 
 Statements are parsed in priority order. The first matching parser wins.
 
-### 1a. Join Multi (`joinMulti`)
+### 1. Video Source (`videoSource`)
+
+Marks a video URL for timestamp synchronization.
+
+**Syntax**: `@` or `＠` followed by an HTTP/HTTPS URL.
+
+```
+@https://youtube.com/watch?v=XXXXX
+＠https://example.com/video.mp4
+```
+
+**Output**: `{ type: 'videoSource', url: string }`
+
+### 2. Timestamp (`timestamp`)
+
+Marks a time position in the associated video. Can appear as a standalone line or inline at the end of any other statement.
+
+**Syntax**: `@MM:SS` or `@H:MM:SS` (full-width `＠` also accepted).
+
+```
+@15:40
+@1:05:30
+```
+
+**Inline**: Appended at the end of any statement line. The timestamp is stripped and stored as a `timestamp` field on the resulting statement.
+
+```
+チャーリー処刑 @15:40
+襲撃 アリス @1:05:30
+```
+
+**Output** (standalone): `{ type: 'timestamp', seconds: number }`
+
+**Output** (inline): The host statement gains `timestamp: number` (in seconds).
+
+### 3. Setup (`setup`)
+
+Declares the role composition of the game. If omitted, defaults are inferred from player count.
+
+**Syntax**: `配役`, `レギュレーション`, `レギュ`, or `setup` followed by role-count pairs.
+
+```
+配役 村4 占1 霊1 狩1 共2 猫1 狼3 狂1 狐1 背1
+レギュ 村6 占1 霊1 狩1 狼2 狂1
+setup 村2 占1 狼1 狂1
+```
+
+Delimiters between pairs can be spaces, commas, etc. Full-width digits are accepted (e.g., `村４ 占１`).
+
+**Role shorthands**: See [Role Names](#role-names-for-co) for the full list. Additionally, `村`/`村人` (villager) is used for the base villager count.
+
+**Output**: `{ type: 'setup', setup: Record<string, number> }`
+
+### 4a. Join Multi (`joinMulti`)
 
 Registers multiple players into the game in a single line.
 
@@ -96,7 +118,7 @@ Names containing spaces or delimiters can be quoted with `"`, `'`, or their full
 
 **Output**: `{ type: 'joinMulti', players: string[] }`
 
-### 1b. Join (`join`)
+### 4b. Join (`join`)
 
 Registers a single player per line, with optional short display name and search aliases.
 
@@ -122,7 +144,7 @@ Quoted names are supported, same as `joinMulti`:
 
 **Output**: `{ type: 'join', name: string, shortName?: string, aliases: string[] }`
 
-### 2. Vote (`vote`)
+### 5. Vote (`vote`)
 
 A single player votes for another.
 
@@ -135,7 +157,7 @@ Alice→Bob
 
 **Output**: `{ type: 'vote', voter: string, target: string }`
 
-### 3. Multi Vote (`multiVote`)
+### 6. Multi Vote (`multiVote`)
 
 Multiple players vote for the same target, or declares that all remaining (unvoted) players vote for the target.
 
@@ -153,7 +175,7 @@ When voters are **empty**, it means "all surviving players who have not yet vote
 
 An empty `voters` array indicates the "all remaining" semantic.
 
-### 4. Attack (`attack`)
+### 7. Attack (`attack`)
 
 Night kill(s). Advances the day counter.
 
@@ -167,7 +189,7 @@ Night kill(s). Advances the day counter.
 
 **Output**: `{ type: 'attack', target: string[] }`
 
-### 5. Lynch (`lynch`)
+### 8. Lynch (`lynch`)
 
 Daytime execution of a player, or declaration that no execution occurred. Supports transposition for single-target (e.g., `ボブ吊り`).
 
@@ -193,7 +215,7 @@ To indicate no execution took place, append `なし`, `無し`, or `ナシ` (opt
 
 When `target` is `null`, no player is executed on that day.
 
-### 6. Curse (`curse`)
+### 9. Curse (`curse`)
 
 Nekomata's death curse — a player is killed as a side effect of the nekomata dying. Supports transposition.
 
@@ -206,7 +228,7 @@ Nekomata's death curse — a player is killed as a side effect of the nekomata d
 
 **Output**: `{ type: 'curse', target: string }`
 
-### 7. Follow (`follow`)
+### 10. Follow (`follow`)
 
 Immoralist's follow-death — the immoralist dies when their linked werehamster dies. Supports transposition.
 
@@ -218,7 +240,7 @@ Immoralist's follow-death — the immoralist dies when their linked werehamster 
 
 **Output**: `{ type: 'follow', target: string }`
 
-### 8. Revote (`revote`)
+### 11. Revote (`revote`)
 
 Resets all vote state. Optionally lists candidates for a final vote.
 
@@ -237,7 +259,7 @@ When targets are empty, it is a simple revote reset with no candidate restrictio
 
 **Output**: `{ type: 'revote', targets: string[] }`
 
-### 9. Over (`over`)
+### 12. Over (`over`)
 
 Declares the game result.
 
@@ -259,7 +281,7 @@ Declares the game result.
 
 **Output**: `{ type: 'over', result: 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw' }`
 
-### 10. Peace (`peace`)
+### 13. Peace (`peace`)
 
 No night kill occurred. Advances the day counter.
 
@@ -271,7 +293,7 @@ No night kill occurred. Advances the day counter.
 
 **Output**: `{ type: 'peace' }`
 
-### 11. Mason (`mason`)
+### 14. Mason (`mason`)
 
 Shorthand for declaring mason (共有) players.
 
@@ -284,7 +306,7 @@ Shorthand for declaring mason (共有) players.
 
 **Output**: `{ type: 'mason', players: string[] }`
 
-### 12. Assert (`assert`)
+### 15. Assert (`assert`)
 
 Role claims and divination/medium/guard action results.
 
@@ -307,6 +329,9 @@ Each role accepts multiple notations:
 | Bodyguard (狩人) | `護衛`, `護`, `狩人`, `狩り`, `狩` | `狩人CO`, `護衛CO`, `狩CO` |
 | Mason (共有者) | `共有者`, `共有`, `共` | `共有CO`, `共CO` |
 | Nekomata (猫又) | `猫又`, `猫` | `猫又CO`, `猫CO` |
+| Fanatic (狂信者) | `狂信者`, `狂信`, `信` | `狂信CO`, `信CO` |
+
+Fanatic (狂信者) is a separate role from Possessed (狂人). The fanatic knows werewolf identities from the start but is otherwise similar to possessed.
 
 If the CO text does not match any known role, the claim is inferred as `nonVillage`.
 
@@ -322,6 +347,14 @@ Multiple roles in a single CO denote a multi-role claim (ギドラ). The player 
 
 ```
 アリス: 猫狩CO    # "I am either nekomata or bodyguard"
+```
+
+#### Plain Villager CO (素村CO)
+
+`素村CO` (or `素村人CO`) denies all village power roles at once — equivalent to claiming "I am none of seer, medium, bodyguard, mason, or nekomata."
+
+```
+ボブ: 素村CO      # denies seer, medium, bodyguard, mason, nekomata
 ```
 
 #### Medium Target Auto-fill
@@ -398,7 +431,7 @@ This also handles **result slides** (結果スライド): when a player corrects
 百面ダイス: スレッタ黒        # → Night 0: スレッタ● (overwrites グロ○)
 ```
 
-### 13. Forecast (`forecast`)
+### 16. Forecast (`forecast`)
 
 A seer claimant announces who they will divine the following night (占い予告). The actor must have already made a seer CO.
 
@@ -412,7 +445,7 @@ If the seer dies that night, the forecast target is treated as divined. If the f
 
 **Output**: `{ type: 'forecast', actor: string, target: string }`
 
-### 14. Grelan (`grelan`)
+### 17. Grelan (`grelan`)
 
 Marks the following execution as a grey random vote (グレラン), indicating the executed player had no opportunity to CO a role before being lynched.
 
@@ -427,7 +460,7 @@ Without this marker, Retar assumes that a non-claiming executed player voluntari
 
 **Output**: `{ type: 'grelan' }`
 
-### 15. Reveal (`reveal`)
+### 18. Reveal (`reveal`)
 
 Reveals a player's actual role (post-game or GM disclosure).
 
@@ -440,7 +473,7 @@ Alice=占い
 
 **Output**: `{ type: 'reveal', player: string, role: string }`
 
-### 16. Unknown (`unknown`)
+### 19. Unknown (`unknown`)
 
 Any line that does not match the above parsers.
 
@@ -450,23 +483,28 @@ Any line that does not match the above parsers.
 
 Statements are tried in this order. The first match wins:
 
-1. `joinMulti`
-2. `join`
-3. `vote`
-4. `multiVote`
-5. `attack`
-6. `grelan`
-7. `lynch`
-8. `curse`
-9. `follow`
-10. `revote`
-11. `over`
-12. `peace`
-13. `mason`
-14. `forecast`
-15. `assert`
-16. `reveal`
-17. `unknown` (fallback)
+1. `videoSource`
+2. `timestamp`
+3. `setup`
+4. `joinMulti`
+5. `join`
+6. `vote`
+7. `multiVote`
+8. `attack`
+9. `grelan`
+10. `lynch`
+11. `curse`
+12. `follow`
+13. `revote`
+14. `over`
+15. `peace`
+16. `mason`
+17. `forecast`
+18. `assert`
+19. `reveal`
+20. `unknown` (fallback)
+
+**Note**: Inline timestamps (`@MM:SS` at the end of a line) are stripped before this parser loop runs, so any statement can carry a `timestamp` field.
 
 ## Post-Processing Pipeline
 
@@ -479,15 +517,8 @@ After parsing, statements go through three post-processing passes:
 ## Example Game Log
 
 ```howl
----
-setup:
-  villager: 3
-  werewolf: 1
-  seer: 1
-  medium: 1
-  bodyguard: 1
-  possessed: 1
----
+配役 村3 狼1 占1 霊1 狩1 狂1
+
 # Day 1
 ++アリス、ボブ、チャーリー、デイビッド、エマ、フランク、ジョージ、ハナ
 
