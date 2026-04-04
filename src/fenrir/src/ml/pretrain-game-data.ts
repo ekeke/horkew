@@ -8,7 +8,7 @@
 import type { SystemRole } from '../../../types/index.ts'
 import type { Agent, DecisionContext } from '../agents/agent.ts'
 import { runGame } from '../../../lupa/engine.ts'
-import { strategyOnlyAdapter } from '../adapters/strategy-only-adapter.ts'
+import { MasonTrainingAdapter } from '../adapters/mason-training-adapter.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents/rule-based-agent.ts'
 import { encodeObservation, SEATS, NUM_ROLES, ROLE_INDEX } from '../observation.ts'
 import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
@@ -122,7 +122,7 @@ export async function collectGameData(
 
   const recordingStrategy = new RecordingStrategy()
 
-  const handlers = strategyOnlyAdapter({
+  const handlers = new MasonTrainingAdapter({
     agents: new Map<number, Agent>(),
     defaultAgent: recordingStrategy,
     wolfTeamAgent: new WolfTeamRuleAgent(),

@@ -10,7 +10,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Agent } from './agents/agent.ts'
 import { runGame, resumeGame } from '../../lupa/engine.ts'
-import { strategyOnlyAdapter } from './adapters/strategy-only-adapter.ts'
+import { MasonTrainingAdapter } from './adapters/mason-training-adapter.ts'
 import { fullAdapter } from './adapters/full-adapter.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { NeuralAgent } from './agents/neural-agent.ts'
@@ -238,7 +238,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     if (snapshot) {
       // Seed Bank リプレイ: スナップショットから resumeGame
       const handlers = config.strategyOnly
-        ? strategyOnlyAdapter({
+        ? new MasonTrainingAdapter({
             agents: agentsMap,
             defaultAgent: defaultAgent,
             wolfTeamAgent: wolfTeamAgent,
@@ -273,7 +273,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       gameRetarCount = result.timing?.retarCount ?? 0
     } else if (config.strategyOnly) {
       // minimal-adapter: 議論フェーズ全スキ��プで高速化
-      const handlers = strategyOnlyAdapter({
+      const handlers = new MasonTrainingAdapter({
         agents: agentsMap,
         defaultAgent: defaultAgent,
         wolfTeamAgent: wolfTeamAgent,

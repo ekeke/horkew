@@ -13,7 +13,7 @@ import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
 import type { Agent, DecisionContext } from '../agents/agent.ts'
 import type { PlanTokenTrainingSample } from './execution-plan-data.ts'
 import { runGame } from '../../../lupa/engine.ts'
-import { strategyOnlyAdapter } from '../adapters/strategy-only-adapter.ts'
+import { MasonTrainingAdapter } from '../adapters/mason-training-adapter.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents/rule-based-agent.ts'
 import { RandomAgent, WolfTeamRandomAgent, MasonTeamRandomAgent } from '../../../verify/random-agent.ts'
 import { encodeObservation } from '../observation.ts'
@@ -436,7 +436,7 @@ async function collectTsumiFromGame(
   const tsumiStrategy = new TsumiStrategy()
   const strategies = new Map<number, Agent>()
 
-  const handlers = strategyOnlyAdapter({
+  const handlers = new MasonTrainingAdapter({
     agents: strategies,
     defaultAgent: useRandom ? new RandomAgent() : new RuleBasedAgent(),
     wolfTeamAgent: useRandom ? new WolfTeamRandomAgent() : new WolfTeamRuleAgent(),

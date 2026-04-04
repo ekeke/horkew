@@ -9,7 +9,7 @@ import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
 import type { Agent } from './agents/agent.ts'
 import { runGame, resumeGame } from '../../lupa/engine.ts'
 import { formatHowl } from '../../lupa/format.ts'
-import { strategyOnlyAdapter } from './adapters/strategy-only-adapter.ts'
+import { MasonTrainingAdapter } from './adapters/mason-training-adapter.ts'
 import { fullAdapter } from './adapters/full-adapter.ts'
 import { initRetarWorkerPool, terminateRetarWorkerPool } from './retar-node-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
@@ -519,7 +519,7 @@ async function generateGame(
   let events: (import('../../lupa/types.ts').GameEvent | import('./events.ts').FenrirExtEvent)[]
 
   if (config.strategyOnly) {
-    const handlers = strategyOnlyAdapter({
+    const handlers = new MasonTrainingAdapter({
       agents: agentsMap,
       defaultAgent: agents.defaultAgent,
       wolfTeamAgent: agents.wolfTeamAgent,
@@ -928,7 +928,7 @@ export async function evaluate(
     if (snapshot) {
       // Seed Bank リプレイ
       const handlers = config.strategyOnly
-        ? strategyOnlyAdapter({
+        ? new MasonTrainingAdapter({
             agents: evalAgents,
             defaultAgent: heuristic,
             wolfTeamAgent: lupaConfig.wolfTeamAgent,
@@ -951,7 +951,7 @@ export async function evaluate(
       state = gameResult.state
       if (options?.saveHowl) events = gameResult.events
     } else if (config.strategyOnly) {
-      const handlers = strategyOnlyAdapter({
+      const handlers = new MasonTrainingAdapter({
         agents: evalAgents,
         defaultAgent: heuristic,
         wolfTeamAgent: lupaConfig.wolfTeamAgent,

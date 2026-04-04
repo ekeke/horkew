@@ -13,7 +13,7 @@ import type { LupaConfig } from '../../lupa/types.ts'
 import type { Agent } from './agents/agent.ts'
 import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from './adapters/full-adapter.ts'
-import { strategyOnlyAdapter } from './adapters/strategy-only-adapter.ts'
+import { MasonTrainingAdapter } from './adapters/mason-training-adapter.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from './agents/rule-based-agent.ts'
 import {
@@ -233,7 +233,7 @@ if (mldir) {
 
   const gameSeed = seed ?? Math.floor(Math.random() * 100000)
   const handlers = strategyOnly
-    ? strategyOnlyAdapter({
+    ? new MasonTrainingAdapter({
         agents: agentsMap,
         defaultAgent: heuristic,
         wolfTeamAgent: wolfTeamAgent,
