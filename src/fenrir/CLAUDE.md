@@ -103,7 +103,9 @@ StrategyBaseAdapter を継承し、mason 固有の2つの責務を追加:
 事前生成した中盤スナップショットから `resumeGame` でリプレイ。序盤の Retar コストを償却。
 `seed-bank.ts` がスナップショット生成・保存・読み込み・ローテーションを担当。
 
-## オーケストレーター (`npm run orchestrate`)
+## オーケストレーター
+
+**常に `npm run train:orchestrate` 経由で起動すること**（`TF_FORCE_GPU_ALLOW_GROWTH=true` が設定済み。直接 `node ...` で起動すると GPU VRAM を全取りして OOM になる可能性がある）。
 
 ### 主要オプション
 
