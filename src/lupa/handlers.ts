@@ -35,16 +35,16 @@ export type GameConfig = {
 // ============================================================
 
 /** 基本フェーズコンテキスト */
-export type PhaseContext<E = never> = {
+export type PhaseContext<E = never, Ext = unknown> = {
   day: number
-  state: Readonly<GameState>
+  state: Readonly<GameState<Ext>>
   events: readonly (GameEvent | E)[]
   alivePlayers: number[]
   rules: ResolvedRules
 }
 
 /** 投票フェーズコンテキスト */
-export type VoteContext<E = never> = PhaseContext<E> & {
+export type VoteContext<E = never, Ext = unknown> = PhaseContext<E, Ext> & {
   /** 再投票ラウンド (0=初回) */
   revoteRound: number
   /** 再投票候補 (null=全員が対象) */
@@ -67,27 +67,27 @@ export type PreVoteResult<E = never> = {
 // ゲームハンドラー（外部から注入するコールバック）
 // ============================================================
 
-export type GameHandlers<E = never> = {
-  /** 役職割当後、ゲーム開始前に呼ばれる */
-  onSetup?(roles: Map<number, SystemRole>): MaybePromise<void>
+export type GameHandlers<E = never, Ext = unknown> = {
+  /** 役職割当後、ゲーム開始前に呼ばれる。mutable stateを受け取り、ext初期化が可能。 */
+  onSetup?(roles: Map<number, SystemRole>, state: GameState<Ext>): MaybePromise<void>
 
   /** 夜フェーズ: 夜行動を持つプレイヤーのアクションを返す */
-  onNight(ctx: PhaseContext<E>): MaybePromise<Map<number, NightAction>>
+  onNight(ctx: PhaseContext<E, Ext>): MaybePromise<Map<number, NightAction>>
 
   /** 昼COフェーズ: 各プレイヤーのCO/結果報告を返す */
-  onDayClaims(ctx: PhaseContext<E>): MaybePromise<Map<number, DayClaim>>
+  onDayClaims(ctx: PhaseContext<E, Ext>): MaybePromise<Map<number, DayClaim>>
 
   /**
    * 投票前フェーズ（オプション）: 議論、指揮者選出、予告等
    * 未提供の場合、エンジンはCOの直後に投票に進む
    */
-  onPreVote?(ctx: PhaseContext<E>): MaybePromise<PreVoteResult<E>>
+  onPreVote?(ctx: PhaseContext<E, Ext>): MaybePromise<PreVoteResult<E>>
 
   /** 遺言フェーズ（オプション）: 処刑対象者が最後にCOする機会 */
-  onLastWill?(ctx: PhaseContext<E>, executedSeat: number): MaybePromise<DayClaim>
+  onLastWill?(ctx: PhaseContext<E, Ext>, executedSeat: number): MaybePromise<DayClaim>
 
   /** 投票フェーズ: 各プレイヤーの投票先を返す（再投票時にも呼ばれる） */
-  onVote(ctx: VoteContext<E>): MaybePromise<Map<number, number>>
+  onVote(ctx: VoteContext<E, Ext>): MaybePromise<Map<number, number>>
 
   /** イベント通知（観測用、任意） */
   onEvent?(event: GameEvent | E): void
@@ -103,14 +103,14 @@ export type GameHandlers<E = never> = {
 // ゲーム結果
 // ============================================================
 
-export type GameResult<E = never> = {
+export type GameResult<E = never, Ext = unknown> = {
   events: (GameEvent | E)[]
-  state: GameState
+  state: GameState<Ext>
   config: GameConfig
   /** ハンドラーが報告した計測値 */
   timing?: GameTiming
   /** captureSnapshotDays で取得されたスナップショット */
-  snapshots?: Map<number, GameSnapshot<E>>
+  snapshots?: Map<number, GameSnapshot<E, Ext>>
 }
 
 /** ハンドラーからエンジンに報告する計測値 */

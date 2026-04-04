@@ -27,7 +27,7 @@ const MAX_DAYS = 50
 // 公開API
 // ============================================================
 
-export async function runGame<E = never>(config: GameConfig, handlers: GameHandlers<E>): Promise<GameResult<E>> {
+export async function runGame<E = never, Ext = unknown>(config: GameConfig, handlers: GameHandlers<E, Ext>): Promise<GameResult<E, Ext>> {
   const rules = resolveRules(config.rules)
   const rng = new Rng(config.seed)
   const totalPlayers = Array.from(config.roles.values()).reduce((a, b) => a + b, 0)
@@ -46,7 +46,7 @@ export async function runGame<E = never>(config: GameConfig, handlers: GameHandl
     : generateRoleNames(assignedRoles)
   const players = assignRoles(config.roles, names, shuffledIndices)
 
-  const state: GameState = {
+  const state: GameState<Ext> = {
     players,
     day: 0,
     phase: 'night',
@@ -55,6 +55,7 @@ export async function runGame<E = never>(config: GameConfig, handlers: GameHandl
     executionHistory: new Map(),
     commander: null,
     masonPartners: new Map(),
+    ext: undefined as unknown as Ext,
   }
 
   const events: (GameEvent | E)[] = []
@@ -67,7 +68,7 @@ export async function runGame<E = never>(config: GameConfig, handlers: GameHandl
 
   // onSetup: 役職割当を通知
   const seatRoles = new Map(players.map(p => [p.seat, p.role]))
-  if (handlers.onSetup) await handlers.onSetup(seatRoles)
+  if (handlers.onSetup) await handlers.onSetup(seatRoles, state)
 
   // ============================================================
   // Night 0
@@ -110,7 +111,7 @@ export async function runGame<E = never>(config: GameConfig, handlers: GameHandl
   // メインループ
   // ============================================================
 
-  const snapshots = config.captureSnapshotDays ? new Map<number, GameSnapshot<E>>() : undefined
+  const snapshots = config.captureSnapshotDays ? new Map<number, GameSnapshot<E, Ext>>() : undefined
   await runGameLoop(state, events, emit, rng, rules, handlers, config, 1, null, snapshots, seatRoles)
 
   // 役職公開
@@ -127,7 +128,7 @@ export async function runGame<E = never>(config: GameConfig, handlers: GameHandl
  * snapshot.state.day の次の Night から開始。
  * handlers.onSetup が呼ばれるので、戦略の初期化はそこで行う。
  */
-export async function resumeGame<E = never>(snapshot: GameSnapshot<E>, handlers: GameHandlers<E>): Promise<GameResult<E>> {
+export async function resumeGame<E = never, Ext = unknown>(snapshot: GameSnapshot<E, Ext>, handlers: GameHandlers<E, Ext>): Promise<GameResult<E, Ext>> {
   const state = structuredClone(snapshot.state)
   const events: (GameEvent | E)[] = [...snapshot.events]
   const rng = Rng.fromState(snapshot.rngState)
@@ -140,7 +141,7 @@ export async function resumeGame<E = never>(snapshot: GameSnapshot<E>, handlers:
   }
 
   // onSetup: 役職割当を通知（戦略初期化用）
-  if (handlers.onSetup) await handlers.onSetup(snapshot.seatRoles)
+  if (handlers.onSetup) await handlers.onSetup(snapshot.seatRoles, state)
 
   const lastExecutedSeat = state.executionHistory.get(state.day) ?? null
   const startDay = state.day + 1
@@ -160,17 +161,17 @@ export async function resumeGame<E = never>(snapshot: GameSnapshot<E>, handlers:
 // メインゲームループ（runGame / resumeGame 共用）
 // ============================================================
 
-async function runGameLoop<E = never>(
-  state: GameState,
+async function runGameLoop<E = never, Ext = unknown>(
+  state: GameState<Ext>,
   events: (GameEvent | E)[],
   emit: (event: GameEvent | E) => void,
   rng: Rng,
   rules: ResolvedRules,
-  handlers: GameHandlers<E>,
+  handlers: GameHandlers<E, Ext>,
   config: GameConfig,
   startDay: number,
   lastExecutedSeat: number | null,
-  snapshots?: Map<number, GameSnapshot<E>>,
+  snapshots?: Map<number, GameSnapshot<E, Ext>>,
   seatRoles?: Map<number, SystemRole>,
 ): Promise<void> {
   const players = state.players
@@ -270,7 +271,7 @@ async function runGameLoop<E = never>(
       }
 
       // 通常投票 or full_revote: ハンドラーに委任
-      const voteCtx: VoteContext<E> = {
+      const voteCtx: VoteContext<E, Ext> = {
         ...makePhaseContext(state, events, rules),
         revoteRound: revoteCount,
         candidates: revoteCandidates,
@@ -372,7 +373,7 @@ async function runGameLoop<E = never>(
 // 内部ヘルパー
 // ============================================================
 
-function makePhaseContext<E = never>(state: GameState, events: (GameEvent | E)[], rules: ResolvedRules): PhaseContext<E> {
+function makePhaseContext<E = never, Ext = unknown>(state: GameState<Ext>, events: (GameEvent | E)[], rules: ResolvedRules): PhaseContext<E, Ext> {
   return {
     day: state.day,
     state,

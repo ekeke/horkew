@@ -114,6 +114,7 @@ function deserializeSnapshot(data: SerializedSnapshot): GameSnapshot {
     executionHistory: new Map(data.state.executionHistory),
     commander: data.state.commander,
     masonPartners: new Map(data.state.masonPartners),
+    ext: undefined,
   }
 
   const config: GameConfig = {

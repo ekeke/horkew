@@ -63,7 +63,7 @@ export type PlayerState = {
   forecastTarget: number | null
 }
 
-export type GameState = {
+export type GameState<Ext = unknown> = {
   players: PlayerState[]
   day: number
   phase: 'night' | 'day'
@@ -75,6 +75,8 @@ export type GameState = {
   commander: number | null
   /** 共有CO時のpartner記録: seat → partnerSeat */
   masonPartners?: Map<number, number>
+  /** Consumer定義の拡張データ。Lupaは中身に触らない。structuredCloneで自動複製される。 */
+  ext: Ext
 }
 
 export type NightAction =
@@ -117,8 +119,8 @@ export type GameEvent =
   | { type: 'reveal', seat: number, role: SystemRole }
 
 /** 中盤スナップショット（Seed Bank 用） */
-export type GameSnapshot<E = never> = {
-  state: GameState
+export type GameSnapshot<E = never, Ext = unknown> = {
+  state: GameState<Ext>
   events: (GameEvent | E)[]
   rngState: number
   config: import('./handlers.ts').GameConfig
