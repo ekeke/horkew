@@ -675,6 +675,9 @@
 
   function onCursorMove() {
     if (runningWithCursor) return  // prevent re-entrant calls from editor dispatch
+    if (videoSyncActive) {
+      videoSyncActive = false
+    }
     run()
     tick().then(scrollRawToCursor)
   }
@@ -1040,16 +1043,19 @@
 
       // Feed parse results to CM6 for syntax highlighting (after buildVillageStatus so dict is available)
       if (editorView) {
-        const stmtInfo: StatementInfo[] = statements.map((s: any) => {
+        const toStmtInfo = (s: any): StatementInfo => {
           const info: StatementInfo = { type: s.type, line: s.line }
-          if (s.type === 'timestamp') info.timestamp = { seconds: s.seconds, raw: s.raw }
+          if (s.type === 'videoSource') info.timestamp = { seconds: 0, raw: '0:00' }
+          else if (s.type === 'timestamp') info.timestamp = { seconds: s.seconds, raw: s.raw }
           else if (s.timestamp !== undefined) {
             const m = Math.floor(s.timestamp / 60)
             const sec = s.timestamp % 60
             info.timestamp = { seconds: s.timestamp, raw: `${m}:${String(sec).padStart(2, '0')}` }
           }
           return info
-        })
+        }
+        const stmtInfo: StatementInfo[] = statements.map(toStmtInfo)
+        const allStmtInfo: StatementInfo[] = fullParse.statements.map(toStmtInfo)
         const playerNameInfos = buildPlayerNames(statements, dict, editorView.state.doc.toString())
         const playerList: { name: string, shortName?: string, aliases: string[], surviving: boolean, claimingRole?: string }[] = []
         let seat = 1
@@ -1071,7 +1077,7 @@
           }
         }
         editorView.dispatch({ effects: [
-          editorModule!.setStatements.of({ statements: stmtInfo, cursorLine: effectiveCursorLine, playerNames: playerNameInfos }),
+          editorModule!.setStatements.of({ statements: stmtInfo, allStatements: allStmtInfo, cursorLine: effectiveCursorLine, playerNames: playerNameInfos }),
           editorModule!.setPlayerList.of(playerList),
           editorModule!.setSetup.of(setup),
           editorModule!.setCurrentDay.of(vs.day),
@@ -1205,6 +1211,13 @@
       runWithCursor()
     }
   }
+
+  // Toggle editor readonly based on sync mode
+  $effect(() => {
+    if (editorView && editorModule) {
+      editorModule.setEditable(editorView, !videoSyncActive)
+    }
+  })
 
   // Video sync: when currentTime changes, update cursorLine from timestamps
   let lastVideoCursorLine = -1
@@ -1549,9 +1562,9 @@
         <span class="day-nav-label">{videoDay}日目</span>
         <button class="day-nav-btn" disabled={videoDay >= maxDay} onclick={() => goToDay(videoDay + 1)}>&gt;</button>
         {#if !videoSyncActive}
-          <button class="day-nav-sync" onclick={resumeVideoSync}>動画に同期</button>
+          <button class="day-nav-sync" onclick={resumeVideoSync}>同期再生</button>
         {:else}
-          <span class="day-nav-synced">同期中</span>
+          <button class="day-nav-sync day-nav-sync-active" onclick={() => videoSyncActive = false}>同期再生中</button>
         {/if}
         <span class="day-nav-time">{formatSeconds(videoCurrentTime)}</span>
         <button class="day-nav-btn day-nav-fullscreen" onclick={() => toggleVideoFullscreen()}>全画面</button>
@@ -1595,9 +1608,9 @@
         <span class="day-nav-label">{videoDay}日目</span>
         <button class="day-nav-btn" disabled={videoDay >= maxDay} onclick={() => goToDay(videoDay + 1)}>&gt;</button>
         {#if !videoSyncActive}
-          <button class="day-nav-sync" onclick={resumeVideoSync}>動画に同期</button>
+          <button class="day-nav-sync" onclick={resumeVideoSync}>同期再生</button>
         {:else}
-          <span class="day-nav-synced">同期中</span>
+          <button class="day-nav-sync day-nav-sync-active" onclick={() => videoSyncActive = false}>同期再生中</button>
         {/if}
         <span class="day-nav-time">{formatSeconds(videoCurrentTime)}</span>
         <button class="vf-close" onclick={() => toggleVideoFullscreen()}>&times;</button>
@@ -2060,10 +2073,10 @@
     cursor: pointer;
   }
 
-  .day-nav-synced {
-    margin-left: auto;
-    font-size: 12px;
+  .day-nav-sync-active {
+    background: var(--color-surface);
     color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
   }
 
   .day-nav-time {

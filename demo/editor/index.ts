@@ -1,4 +1,4 @@
-import { EditorState } from '@codemirror/state'
+import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, drawSelection, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { completionKeymap } from '@codemirror/autocomplete'
@@ -11,6 +11,12 @@ export { setStatements, type StatementInfo, type HighlightPayload, type PlayerNa
 export { setPlayerList, setSetup, setCurrentDay, type PlayerEntry } from './howlCompletion.ts'
 
 import type { Extension } from '@codemirror/state'
+
+const editableCompartment = new Compartment()
+
+export function setEditable(view: EditorView, editable: boolean) {
+  view.dispatch({ effects: editableCompartment.reconfigure(EditorView.editable.of(editable)) })
+}
 
 export function createHowlEditor(parent: HTMLElement, opts: {
   doc: string
@@ -29,6 +35,7 @@ export function createHowlEditor(parent: HTMLElement, opts: {
       highlightActiveLine(),
       howlCompletionExtension,
       EditorView.lineWrapping,
+      editableCompartment.of(EditorView.editable.of(true)),
       keymap.of([...defaultKeymap, ...historyKeymap, ...completionKeymap]),
       EditorView.updateListener.of(update => {
         if (update.docChanged) {

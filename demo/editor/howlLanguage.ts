@@ -109,6 +109,7 @@ export type PlayerNameInfo = {
 
 export type HighlightPayload = {
   statements: StatementInfo[]
+  allStatements: StatementInfo[]
   cursorLine: number
   playerNames: PlayerNameInfo[]
 }
@@ -205,7 +206,7 @@ const gutterField = StateField.define<RangeSet<GutterMarker>>({
   update(markers, tr) {
     for (const e of tr.effects) {
       if (e.is(setStatements)) {
-        return buildGutterMarkers(e.value.statements, tr.state.doc)
+        return buildGutterMarkers(e.value.allStatements, tr.state.doc)
       }
     }
     if (tr.docChanged) {
