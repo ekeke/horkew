@@ -152,7 +152,9 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const masonCtx = this.buildCtx(
       vctx as PhaseContext<FenrirExtEvent, FenrirExt>, mason, masonView, ext,
     )
-    const result = agent.cachedStrategyResult ?? agent.getStrategyResult?.(masonCtx)
+    // getStrategyResult は cachedDay !== ctx.day のとき再推論する。
+    // cachedStrategyResult を直接読むと前日の stale result を使ってしまう。
+    const result = agent.getStrategyResult?.(masonCtx) as import('../ml/nn.ts').ForwardResult | undefined
     if (!result) return
 
     if (result.planForwardActions) {
