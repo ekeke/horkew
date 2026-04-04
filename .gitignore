@@ -16,3 +16,4 @@ src/retar-rs/pkg/
 src/retar-rs/pkg-web/
 demo/public/inspect/
 .committing/
+.npmrc
