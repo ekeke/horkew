@@ -64,6 +64,7 @@
   let selected = $derived(selectedIdx >= 0 && selectedIdx < filtered.length ? filtered[selectedIdx] : null)
 
   let scenarioText = $state('')
+  let copiedCommand = $state('')
 
   function extractPartial(raw: string, bodyLine: number): string {
     const text = raw.replace(/\r\n/g, '\n')
@@ -80,6 +81,13 @@
     selectedIdx = idx
     const entry = filtered[idx]
     if (!entry) return
+
+    // /gmork-improve コマンドをクリップボードに自動コピー
+    const lineArg = entry.line !== null ? String(entry.line) : 'end'
+    const cmd = `/gmork-improve ${entry.file} ${lineArg}`
+    copiedCommand = cmd
+    navigator.clipboard.writeText(cmd).catch(() => {})
+
     try {
       const full = await fetchScenario(entry.file)
       if (entry.line !== null) {
@@ -146,6 +154,9 @@
           <span class="gmork-target">{selected.player}/{selected.role}</span>
           <span class="gmork-file">{selected.file}:{selected.line ?? 'end'}</span>
         </div>
+        {#if copiedCommand}
+          <div class="gmork-copied">{copiedCommand} copied</div>
+        {/if}
         <div class="gmork-desc">
           {#if selected.kind === 'deny'}
             Retarは「{selected.player}」が {selected.role} ではないと判定したが、Gmorkはその理由を説明できない
@@ -254,6 +265,13 @@
     background: var(--ctp-blue) !important;
     color: var(--ctp-base) !important;
     border-color: var(--ctp-blue) !important;
+  }
+
+  .gmork-copied {
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-size: 0.65rem;
+    color: var(--ctp-teal);
+    padding: 0.1rem 0.5rem;
   }
 
   .gmork-detail {
