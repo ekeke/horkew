@@ -8,8 +8,8 @@
  *   → 席間関係の構造的理解
  *
  * Strategy Layer (M層):
- *   20トークン(↑の出力) = 20トークン
- *   → 盤面理解の深化
+ *   20トークン(↑の出力) + 8 forward plan + 4 endgame plan = 32トークン
+ *   → 盤面理解 + plan token の文脈理解
  *
  * GRU Decoder:
  *   CLS出力 → 初期hidden → 自己回帰でplan token列を生成
@@ -25,7 +25,7 @@
 import type { NetworkConfig, ForwardResult, TransformerNetworkConfig } from './nn.ts'
 import { DenseLayer, gaussianRandom } from './nn.ts'
 import { TransformerEncoder, linearBatchedPublic } from './transformer.ts'
-import { tokenize, SEATS, NUM_ROLE_TOKENS, type ObservationMode } from '../observation.ts'
+import { tokenize, SEATS, NUM_ROLE_TOKENS, NUM_PLAN_FORWARD, NUM_PLAN_ENDGAME, type ObservationMode } from '../observation.ts'
 import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
 
 export class TransformerNetwork {
@@ -56,6 +56,11 @@ export class TransformerNetwork {
   private planInitFwd: DenseLayer        // CLS → forward initial hidden
   private planInitEg: DenseLayer         // CLS → endgame initial hidden
 
+  // Plan observation embeddings (Strategy Encoder input)
+  private planVocabEmbed: Float32Array       // [22 * dModel] vocab index → embedding
+  private forwardPosEmbed: Float32Array      // [8 * dModel] position embeddings for forward plan
+  private endgamePosEmbed: Float32Array      // [4 * dModel] position embeddings for endgame plan
+
   // Pointer mechanism for plan tokens
   private pointerQueryProj: DenseLayer       // dModel → dModel (GRU hidden → query)
   private pointerKeyProj: DenseLayer         // dModel → dModel (target token → key)
@@ -74,7 +79,7 @@ export class TransformerNetwork {
 
   // Scratch buffers
   private _seatTokens: Float32Array    // [seatSeqLen * dModel] for seat encoder
-  private _stratTokens: Float32Array   // [seatSeqLen * dModel] for strategy encoder (20 tokens)
+  private _stratTokens: Float32Array   // [stratSeqLen * dModel] for strategy encoder (32 tokens)
   private _seatMask: boolean[]
   private _stratMask: boolean[]
   private _seatProjected: Float32Array // [SEATS * dModel]
@@ -118,14 +123,16 @@ export class TransformerNetwork {
       maxSeqLen: seatSeqLen,
     })
 
-    // Strategy Layer (M layers) — now 20 tokens (no plan embeddings)
+    // Strategy Layer (M layers) — 20 seat tokens + 8 forward plan + 4 endgame plan = 32 tokens
+    const numPlanTokens = NUM_PLAN_FORWARD + NUM_PLAN_ENDGAME  // 12
+    const stratSeqLen = seatSeqLen + numPlanTokens  // 32
     const strategyLayers = tc.strategyLayers ?? 2
     this.strategyEncoder = new TransformerEncoder({
       dModel: dm,
       numLayers: strategyLayers,
       numHeads: tc.numHeads,
       dFf: tc.dFf,
-      maxSeqLen: seatSeqLen,
+      maxSeqLen: stratSeqLen,
     })
 
     // GRU autoregressive decoder for plan tokens
@@ -157,6 +164,15 @@ export class TransformerNetwork {
     // Init projections: CLS → initial hidden state
     this.planInitFwd = new DenseLayer(dm, dm)
     this.planInitEg = new DenseLayer(dm, dm)
+
+    // Plan observation embeddings (vocab + position → Strategy Encoder)
+    const vocabEmbedSize = (tc.planVocabSize ?? 22) * dm
+    this.planVocabEmbed = new Float32Array(vocabEmbedSize)
+    for (let i = 0; i < vocabEmbedSize; i++) this.planVocabEmbed[i] = (Math.random() - 0.5) * scale
+    this.forwardPosEmbed = new Float32Array(NUM_PLAN_FORWARD * dm)
+    for (let i = 0; i < this.forwardPosEmbed.length; i++) this.forwardPosEmbed[i] = (Math.random() - 0.5) * scale
+    this.endgamePosEmbed = new Float32Array(NUM_PLAN_ENDGAME * dm)
+    for (let i = 0; i < this.endgamePosEmbed.length; i++) this.endgamePosEmbed[i] = (Math.random() - 0.5) * scale
 
     // Pointer mechanism
     this.pointerQueryProj = new DenseLayer(dm, dm)
@@ -199,9 +215,9 @@ export class TransformerNetwork {
 
     // Scratch buffers
     this._seatTokens = new Float32Array(seatSeqLen * dm)
-    this._stratTokens = new Float32Array(seatSeqLen * dm)  // now 20 tokens (no plan embeddings)
+    this._stratTokens = new Float32Array(stratSeqLen * dm)  // 32 tokens (20 seat + 12 plan)
     this._seatMask = new Array(seatSeqLen).fill(true)
-    this._stratMask = new Array(seatSeqLen).fill(true)
+    this._stratMask = new Array(stratSeqLen).fill(true)
     this._seatProjected = new Float32Array(SEATS * dm)
     this._roleProjected = new Float32Array(numRoles * dm)
   }
@@ -391,9 +407,37 @@ export class TransformerNetwork {
     // Run Seat Transformer
     this.seatEncoder.forward(this._seatTokens, seatSeqLen, this._seatMask)
 
-    // ========== Stage 2: Strategy Layer (20 tokens, no plan embeddings) ==========
+    // ========== Stage 2: Strategy Layer (32 tokens: 20 seat + 8 fwd plan + 4 eg plan) ==========
+    const numPlanTokens = NUM_PLAN_FORWARD + NUM_PLAN_ENDGAME
+    const stratSeqLen = seatSeqLen + numPlanTokens
+
+    // Copy seat encoder output → first 20 tokens
+    this._stratTokens.fill(0)
     this._stratTokens.set(this._seatTokens.subarray(0, seatSeqLen * dm), 0)
-    this.strategyEncoder.forward(this._stratTokens, seatSeqLen, this._stratMask)
+
+    // Append forward plan tokens: posEmbed + vocabEmbed[index]
+    let planOff = seatSeqLen * dm
+    for (let i = 0; i < NUM_PLAN_FORWARD; i++) {
+      const vocabIdx = Math.min(Math.max(0, Math.round(tok.planForward[i])), (tc.planVocabSize ?? 22) - 1)
+      const posBase = i * dm
+      const vocabBase = vocabIdx * dm
+      for (let d = 0; d < dm; d++) {
+        this._stratTokens[planOff + d] = this.forwardPosEmbed[posBase + d] + this.planVocabEmbed[vocabBase + d]
+      }
+      planOff += dm
+    }
+    // Append endgame plan tokens
+    for (let i = 0; i < NUM_PLAN_ENDGAME; i++) {
+      const vocabIdx = Math.min(Math.max(0, Math.round(tok.planEndgame[i])), (tc.planVocabSize ?? 22) - 1)
+      const posBase = i * dm
+      const vocabBase = vocabIdx * dm
+      for (let d = 0; d < dm; d++) {
+        this._stratTokens[planOff + d] = this.endgamePosEmbed[posBase + d] + this.planVocabEmbed[vocabBase + d]
+      }
+      planOff += dm
+    }
+
+    this.strategyEncoder.forward(this._stratTokens, stratSeqLen, this._stratMask)
 
     // ========== Head readout ==========
     const seatBase = dm  // offset of first seat token in _stratTokens
@@ -531,6 +575,11 @@ export class TransformerNetwork {
     weights.set('plan_init_eg_w', new Float32Array(this.planInitEg.weights))
     weights.set('plan_init_eg_b', new Float32Array(this.planInitEg.biases))
 
+    // Plan observation embeddings
+    weights.set('plan_vocab_embed', new Float32Array(this.planVocabEmbed))
+    weights.set('forward_pos_embed', new Float32Array(this.forwardPosEmbed))
+    weights.set('endgame_pos_embed', new Float32Array(this.endgamePosEmbed))
+
     // Pointer mechanism
     weights.set('pointer_query_w', new Float32Array(this.pointerQueryProj.weights))
     weights.set('pointer_query_b', new Float32Array(this.pointerQueryProj.biases))
@@ -614,6 +663,14 @@ export class TransformerNetwork {
     const pieW = weights.get('plan_init_eg_w')
     if (pieW) { this.planInitEg.weights.set(pieW); this.planInitEg.biases.set(weights.get('plan_init_eg_b')!) }
 
+    // Plan observation embeddings
+    const pve = weights.get('plan_vocab_embed')
+    if (pve) this.planVocabEmbed.set(pve)
+    const fpe = weights.get('forward_pos_embed')
+    if (fpe) this.forwardPosEmbed.set(fpe)
+    const epe = weights.get('endgame_pos_embed')
+    if (epe) this.endgamePosEmbed.set(epe)
+
     // Pointer mechanism
     this.pointerQueryProj.weights.set(weights.get('pointer_query_w')!)
     this.pointerQueryProj.biases.set(weights.get('pointer_query_b')!)
@@ -661,6 +718,7 @@ export class TransformerNetwork {
     total += this.gruWz.length * 6 + this.gruBz.length * 3  // GRU gates
     total += this.planTokenEmbed.length  // token embeddings
     total += this.planInitFwd.paramCount + this.planInitEg.paramCount  // init projections
+    total += this.planVocabEmbed.length + this.forwardPosEmbed.length + this.endgamePosEmbed.length  // plan obs embeddings
     total += this.pointerQueryProj.paramCount + this.pointerKeyProj.paramCount
     total += this.specialKeys.length
     for (const head of this.perSeatHeads.values()) total += head.paramCount
@@ -707,6 +765,9 @@ export class TransformerNetwork {
     params.push(this.planTokenEmbed)
     params.push(this.planInitFwd.weights, this.planInitFwd.biases)
     params.push(this.planInitEg.weights, this.planInitEg.biases)
+
+    // Plan observation embeddings
+    params.push(this.planVocabEmbed, this.forwardPosEmbed, this.endgamePosEmbed)
 
     // Pointer mechanism
     params.push(this.pointerQueryProj.weights, this.pointerQueryProj.biases)
