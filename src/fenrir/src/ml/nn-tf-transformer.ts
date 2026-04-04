@@ -824,9 +824,9 @@ export class TfTransformerNetwork {
     refPlanEndgameLogits?: (Float32Array | undefined)[]
     /** KL penalty coefficient (β). >0 で KL(π_new || π_ref) を loss に加算 */
     klCoeff?: number
-  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number } {
+  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klForwardLoss: number, klEndgameLoss: number } {
     const n = batch.observations.length
-    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
 
     const inputSize = this.config.inputSize
     const sigmoidHeadNames = new Set(Object.keys(this.config.sigmoidHeads ?? {}))
@@ -837,7 +837,7 @@ export class TfTransformerNetwork {
       obsData.set(batch.observations[i], i * inputSize)
     }
 
-    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
 
     // ヘッド別グループ化
     const headGroups = new Map<string, number[]>()
@@ -990,6 +990,8 @@ export class TfTransformerNetwork {
           const klTotal = tf.add(fwdResult.kl, egResult.kl) as tf.Scalar
           totalPolicyLoss = tf.add(totalPolicyLoss, tf.mul(tf.scalar(klCoeff), klTotal))
           result.klLoss = klTotal.dataSync()[0]
+          result.klForwardLoss = fwdResult.kl.dataSync()[0]
+          result.klEndgameLoss = egResult.kl.dataSync()[0]
         }
 
         headGroups.delete('strategy')  // 通常ヘッドループでは処理しない

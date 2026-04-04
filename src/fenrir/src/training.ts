@@ -717,14 +717,16 @@ function ppoUpdate(
   batch: ProcessedStep[],
   config: TrainingConfig,
   precomputedRefLogits?: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }>,
-): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number } {
-  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klForwardLoss: number, klEndgameLoss: number } {
+  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
 
   let totalPolicyLoss = 0
   let totalValueLoss = 0
   let totalEntropy = 0
   let totalPredictLoss = 0
   let totalKlLoss = 0
+  let totalKlForwardLoss = 0
+  let totalKlEndgameLoss = 0
   let batchCount = 0
 
   // Shuffle batch
@@ -773,15 +775,20 @@ function ppoUpdate(
     totalEntropy += result.entropy
     totalPredictLoss += result.predictLoss
     totalKlLoss += result.klLoss
+    totalKlForwardLoss += result.klForwardLoss
+    totalKlEndgameLoss += result.klEndgameLoss
     batchCount++
   }
 
+  const n = Math.max(batchCount, 1)
   return {
-    policyLoss: totalPolicyLoss / Math.max(batchCount, 1),
-    valueLoss: totalValueLoss / Math.max(batchCount, 1),
-    entropy: totalEntropy / Math.max(batchCount, 1),
-    predictLoss: totalPredictLoss / Math.max(batchCount, 1),
-    klLoss: totalKlLoss / Math.max(batchCount, 1),
+    policyLoss: totalPolicyLoss / n,
+    valueLoss: totalValueLoss / n,
+    entropy: totalEntropy / n,
+    predictLoss: totalPredictLoss / n,
+    klLoss: totalKlLoss / n,
+    klForwardLoss: totalKlForwardLoss / n,
+    klEndgameLoss: totalKlEndgameLoss / n,
   }
 }
 
@@ -1021,6 +1028,7 @@ export function appendEvalLog(
   iteration: number,
   evalResult: { winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number },
   label?: string,
+  ppoMetrics?: { klLoss: number, klCoeff: number, policyLoss: number, valueLoss: number, entropy: number },
 ): void {
   mkdirSync(checkpointDir, { recursive: true })
   const entry = {
@@ -1030,6 +1038,7 @@ export function appendEvalLog(
     ms: Math.round(evalResult.avgElapsedMs),
     ts: new Date().toISOString(),
     ...(label != null ? { label } : {}),
+    ...(ppoMetrics != null ? { kl: ppoMetrics.klLoss, beta: ppoMetrics.klCoeff, pol: ppoMetrics.policyLoss, vLoss: ppoMetrics.valueLoss, ent: ppoMetrics.entropy } : {}),
   }
   appendFileSync(`${checkpointDir}/eval_log.jsonl`, JSON.stringify(entry) + '\n')
 }

@@ -285,7 +285,10 @@ export class TransformerNetwork {
         stepLogits[t] = dot * invSqrtD
       }
 
-      // Grammar mask
+      // Store raw logits (before grammar mask) for KL reference computation
+      allLogits.set(stepLogits, step * vocabSize)
+
+      // Grammar mask (applied to local copy for sampling only)
       if (seenStop) {
         // After STOP: only STOP allowed
         for (let t = 0; t < vocabSize; t++) {
@@ -306,10 +309,7 @@ export class TransformerNetwork {
         }
       }
 
-      // Store logits (masked)
-      allLogits.set(stepLogits, step * vocabSize)
-
-      // Sample or argmax
+      // Sample or argmax (from masked logits)
       let maxVal = -Infinity
       for (let v = 0; v < vocabSize; v++) {
         if (stepLogits[v] > maxVal) maxVal = stepLogits[v]

@@ -28,7 +28,7 @@ import {
   DEFAULT_TRAINING_CONFIG,
   type TrainingConfig,
 } from './training.ts'
-import { existsSync, readdirSync, readFileSync, unlinkSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, unlinkSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
 import { spawn, execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { generatePlanTokenTrainingBatch } from './ml/execution-plan-data.ts'
@@ -489,14 +489,16 @@ function ppoUpdate(
     klCoeff?: number,
   },
   precomputedRefLogits?: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }>,
-): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number } {
-  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klForwardLoss: number, klEndgameLoss: number } {
+  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
 
   let totalPolicyLoss = 0
   let totalValueLoss = 0
   let totalEntropy = 0
   let totalPredictLoss = 0
   let totalKlLoss = 0
+  let totalKlForwardLoss = 0
+  let totalKlEndgameLoss = 0
   // grammarLoss removed — GRU decoder enforces grammar structurally
   let batchCount = 0
 
@@ -544,6 +546,8 @@ function ppoUpdate(
     totalEntropy += result.entropy
     totalPredictLoss += result.predictLoss
     totalKlLoss += result.klLoss
+    totalKlForwardLoss += result.klForwardLoss
+    totalKlEndgameLoss += result.klEndgameLoss
     batchCount++
   }
 
@@ -554,9 +558,20 @@ function ppoUpdate(
     entropy: totalEntropy / n,
     predictLoss: totalPredictLoss / n,
     klLoss: totalKlLoss / n,
+    klForwardLoss: totalKlForwardLoss / n,
+    klEndgameLoss: totalKlEndgameLoss / n,
   }
 }
 
+
+/** KL 診断ログを checkpointBase/kl_log.jsonl に追記 */
+function appendKlLog(
+  checkpointBase: string,
+  entry: { iter: number, klForward: number, klEndgame: number, klTotal: number, beta: number },
+): void {
+  const line = JSON.stringify({ ...entry, ts: new Date().toISOString() })
+  appendFileSync(`${checkpointBase}/kl_log.jsonl`, line + '\n')
+}
 
 // ============================================================
 // Checkpoint helpers
@@ -1174,7 +1189,7 @@ async function main(): Promise<void> {
         const tPpoStart = performance.now()
 
         // PPO update
-        let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+        let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
         if (allSteps.length > 0) {
           normalizeAdvantages(allSteps)
 
@@ -1206,6 +1221,10 @@ async function main(): Promise<void> {
           }
           masonPpoConfig.klCoeff = Math.max(0.01, Math.min(10, masonPpoConfig.klCoeff))
         }
+        appendKlLog(config.checkpointBase, {
+          iter, klForward: lastPpoResult.klForwardLoss, klEndgame: lastPpoResult.klEndgameLoss,
+          klTotal: lastPpoResult.klLoss, beta: masonPpoConfig.klCoeff,
+        })
 
         const tPpoEnd = performance.now()
         const iterMs = performance.now() - iterStart
@@ -1250,7 +1269,10 @@ async function main(): Promise<void> {
           )
           process.stderr.write('\r\x1b[K')
           if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
-          appendEvalLog(masonDir, iter, evalResult, 'mason_individual')
+          appendEvalLog(masonDir, iter, evalResult, 'mason_individual', {
+            klLoss: lastPpoResult.klLoss, klCoeff: masonPpoConfig.klCoeff,
+            policyLoss: lastPpoResult.policyLoss, valueLoss: lastPpoResult.valueLoss, entropy: lastPpoResult.entropy,
+          })
           const factionRate = evalResult.winRates['villager_won'] ?? 0
           log(
             `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
@@ -1430,7 +1452,7 @@ async function main(): Promise<void> {
           const tPpoStart = performance.now()
 
           // PPO update (shared TfNN に重みをスワップ)
-          let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+          let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
           if (allIndividual.length > 0) {
             normalizeAdvantages(allIndividual)
 
@@ -1482,6 +1504,10 @@ async function main(): Promise<void> {
             // β の上下限
             ppoConfig.klCoeff = Math.max(0.01, Math.min(10, ppoConfig.klCoeff))
           }
+          appendKlLog(config.checkpointBase, {
+            iter, klForward: lastPpoResult.klForwardLoss, klEndgame: lastPpoResult.klEndgameLoss,
+            klTotal: lastPpoResult.klLoss, beta: ppoConfig.klCoeff,
+          })
 
           const tPpoEnd = performance.now()
 
@@ -1526,7 +1552,10 @@ async function main(): Promise<void> {
             const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), evalIter: iter, frozenMasonNet: name === 'village' ? frozenMasonNet : undefined, saveHowl: true })
             process.stderr.write('\r\x1b[K')
             if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
-            appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
+            appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name, {
+              klLoss: lastPpoResult.klLoss, klCoeff: ppoConfig.klCoeff,
+              policyLoss: lastPpoResult.policyLoss, valueLoss: lastPpoResult.valueLoss, entropy: lastPpoResult.entropy,
+            })
             const factionRate = evalResult.winRates[group.faction] ?? 0
             log(
               `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
@@ -1720,7 +1749,7 @@ async function main(): Promise<void> {
         const targetIter = Math.min(currentIter + config.chunkSize, config.iterations)
         const prefix = `${COLORS[name]}[${name.padEnd(16)}]${RESET}`
 
-        let lastPpoResult1p = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0 }
+        let lastPpoResult1p = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
         for (let iter = currentIter + 1; iter <= targetIter; iter++) {
           checkShutdown()
           const iterStart = performance.now()
@@ -1843,7 +1872,10 @@ async function main(): Promise<void> {
             )
             process.stderr.write('\r\x1b[K')
             if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
-            appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name)
+            appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name, {
+              klLoss: lastPpoResult1p.klLoss, klCoeff: 0,
+              policyLoss: lastPpoResult1p.policyLoss, valueLoss: lastPpoResult1p.valueLoss, entropy: lastPpoResult1p.entropy,
+            })
             const factionRate = evalResult.winRates[group.faction] ?? 0
             const targetRate = config.targetWinRate ?? (baselineRates[group.faction] ?? 0.5)
             log(

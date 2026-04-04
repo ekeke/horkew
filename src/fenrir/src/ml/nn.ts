@@ -221,7 +221,7 @@ export interface AnyTfNetwork {
     refPlanEndgameLogits?: (Float32Array | undefined)[]
     /** KL penalty coefficient (β). >0 で KL(π_new || π_ref) を loss に加算 */
     klCoeff?: number
-  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number }
+  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klForwardLoss: number, klEndgameLoss: number }
   cloneWeights(): Map<string, Float32Array>
   loadWeights(weights: Map<string, Float32Array>): void
   get totalParams(): number
