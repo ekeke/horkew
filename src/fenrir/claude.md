@@ -61,20 +61,42 @@ Pretrain B+D → Phase 0 (Mason Individual) → Phase 1 (Village) → Phase 1' (
 
 ## Adapter 構成
 
-### strategy-only-adapter (`adapters/strategy-only-adapter.ts`)
+### クラス階層
 
-**strategy-only 訓練用**。通信フェーズ（シグナル・指揮者選出・予告・防御CO）を全スキップ。
+```
+StrategyBaseAdapter (strategy-base-adapter.ts)
+  └── MasonTrainingAdapter (mason-training-adapter.ts)
+```
 
-- onNight + onDayClaims + onVote のみ実装
-- 全永続データは `state.ext` (`FenrirExt`) 経由で管理（ステートレス adapter）
-- **mason plan 注入**: onVote 内で mason 席の `decideProposal` → `executionPlans` に自動注入
-- **mason 死亡後**: `ext.planState` から日毎インクリメント
-- **plan 解決**: `resolvePlanGroup()` で seat/grayran を生存席に解決
+#### StrategyBaseAdapter（抽象基底クラス）
+
+plan ライフサイクルと共通ロジックを管理。onVote はテンプレートメソッドパターン:
+
+1. Retar + Tsumi
+2. `beforePlanDistribution()` — hook（サブクラスが planState を更新）
+3. `distributePlans()` — planState → ext.executionPlans
+4. `collectProposals()` — hook → Proposal[]
+5. 投票収集 — 全プレイヤーの decideVote
+6. `afterVoteCollection()` — hook
+
+- 全永続データは `state.ext` (`FenrirExt`) 経由で管理
+- 通信フェーズ（シグナル・指揮者選出・予告・防御CO）は全スキップ
+
+#### MasonTrainingAdapter（mason 訓練用）
+
+StrategyBaseAdapter を継承し、mason 固有の2つの責務を追加:
+
+1. **Mason が ext.planState を更新できる**（plan 書き込み権限）
+2. **村エージェントの投票に plan が 100% 反映される**（executionPlans + Proposal 経由）
+
+- mason takeover: ML mason 死亡時にパートナーへ agent 移譲
+- mason 死亡後: cached planState から��毎消費（`advanceDayIndexOnce`）
+- endgame 切り替え: ≤6人で endgameGroups を優先
 
 ### full-adapter (`adapters/full-adapter.ts`)
 
 **全フェーズ実行**。シグナル 3R、指揮者選出、予告、防御CO、Retar、詰み探索を含む。
-非 strategy-only モードおよび eval で使用。
+非 strategy-only モードおよび eval で使用。StrategyBaseAdapter とは独立（クロージャベース）。
 
 ## Seed Bank
 
@@ -114,7 +136,8 @@ npm run train:orchestrate -- \
 orchestrate.ts ─── Phase 0/1/1'/2 の学習ループ管理
   ├── parallel.ts ──── worker pool 管理、generateGamesParallel
   │     └── game-worker.ts ──── 1バッチ分のゲーム実行 (worker_threads)
-  │           ├── adapters/strategy-only-adapter.ts ── strategy-only用（mason plan注入含む）
+  │           ├── adapters/strategy-base-adapter.ts ── 抽象基底（plan ライフサイクル）
+  │           ├── adapters/mason-training-adapter.ts ── mason 訓練用（plan commit + 投票強制）
   │           └── adapters/full-adapter.ts ───── 全フェーズ実行用
   ├── training.ts ──── NN生成、evaluate()、PPO update (ppoUpdate)
   │     ├── ml/transformer-network.ts ─ Seat Transformer (推論用, Pure JS)
