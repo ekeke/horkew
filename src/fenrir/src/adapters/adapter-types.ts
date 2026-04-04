@@ -4,13 +4,14 @@
 
 import type { SystemRole, ResolvedRules } from '../../../types/index.ts'
 import type { Agent, TeamAgent } from '../agents/agent.ts'
+import type { CollectedObservation } from '../observation.ts'
 
 /** CapturedObservation: inspect 用 observation キャプチャ */
 export type CapturedObservation = {
   seat: number
   role: string
   day: number
-  observation: Float32Array
+  observation: CollectedObservation
   proposals?: { type: string, target: number }[]
 }
 

@@ -177,6 +177,7 @@ export class NeuralAgent implements Agent {
     predictActions: Float32Array | undefined,
     value: number, seat: number,
     aliveCount: number,
+    day?: number,
   ): void {
     let totalLogProb = 0
     for (const lp of forwardLogProbs) totalLogProb += lp
@@ -188,6 +189,7 @@ export class NeuralAgent implements Agent {
 
     this.trajectory.push({
       seat,
+      day,
       observation: this.lastObs!,
       actionHead: 'strategy',
       actionIdx: -1,
@@ -274,7 +276,7 @@ export class NeuralAgent implements Agent {
           result.planForwardActions, result.planForwardLogProbs!,
           result.planEndgameActions, result.planEndgameLogProbs!,
           predictActions, result.value, ctx.mySeat,
-          ctx.alivePlayers.length,
+          ctx.alivePlayers.length, ctx.day,
         )
       }
 

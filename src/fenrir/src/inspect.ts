@@ -27,7 +27,6 @@ import { MasonTeamAgent } from './agents/mason-collective.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
-import { decodeObservation } from './decode-observation.ts'
 import { parsePlanIndices, PLAN_VOCAB } from './plan/plan-vocab.ts'
 import { CO_ROLES } from './observation.ts'
 
@@ -279,6 +278,7 @@ for (let g = 0; g < count; g++) {
         enableRetar: true,
         roles,
         rules: DEFAULT_TRAINING_CONFIG.rules,
+        captureObservations: true,
       })
     : fullAdapter({
         agents: agentsMap,
@@ -318,17 +318,16 @@ for (let g = 0; g < count; g++) {
   }
   players.sort((a, b) => a.seat - b.seat)
 
-  // タイムライン: 全 NeuralAgent からトラジェクトリを収集
+  // タイムライン: 全 NeuralAgent からトラジェクトリを収集（observation は allPlayerSteps で一元管理）
   const timeline: Array<Record<string, unknown>> = []
   for (const [seat, strat] of neuralAgents) {
     const role = players.find(p => p.seat === seat)?.role ?? 'unknown'
     for (const step of strat.trajectory) {
-      const decoded = decodeObservation(step.observation)
       const entry: Record<string, unknown> = {
         seat,
         role,
-        day: decoded.global.day,
-        phase: decoded.global.phase,
+        day: step.day,
+        phase: 'day',
         actionHead: step.actionHead,
         actionDescription: describeAction(step.actionHead, step.actionIdx),
         actionIdx: step.actionIdx,
@@ -336,7 +335,6 @@ for (let g = 0; g < count; g++) {
         reward: step.reward,
         value: step.value,
         done: step.done,
-        observation: decoded,
       }
 
       // Plan tokens
@@ -375,19 +373,29 @@ for (let g = 0; g < count; g++) {
     }
   }
 
-  // seat + step 順でソート (day → phase → seat)
+  // seat + step 順でソート (day → seat)
   timeline.sort((a, b) => {
     const da = a.day as number, db = b.day as number
     if (da !== db) return da - db
-    const pa = a.phase === 'night' ? 0 : 1, pb = b.phase === 'night' ? 0 : 1
-    if (pa !== pb) return pa - pb
     return (a.seat as number) - (b.seat as number)
   })
+
+  // 全プレイヤーの observation（capturedObservations → CollectedObservation）
+  const allPlayerSteps: Array<Record<string, unknown>> = []
+  if ('getCapturedObservations' in handlers && typeof handlers.getCapturedObservations === 'function') {
+    for (const o of handlers.getCapturedObservations()) {
+      allPlayerSteps.push({
+        seat: o.seat, role: o.role, day: o.day,
+        observation: o.observation,
+        proposals: o.proposals,
+      })
+    }
+  }
 
   const gameLength = state.day
 
   const gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
-  const inspectData = { seed: gameSeed, result, gameLength, howl, players, timeline, gitSha }
+  const inspectData = { seed: gameSeed, result, gameLength, howl, players, timeline, allPlayerSteps, gitSha }
   const fileName = `game_seed${gameSeed}.json`
   const filePath = `${outdir}/${fileName}`
   writeFileSync(filePath, JSON.stringify(inspectData, null, 2))

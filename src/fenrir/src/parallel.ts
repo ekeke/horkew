@@ -172,7 +172,7 @@ export type SerializedGameResult = {
   /** inspect サンプリング: ゲーム長（日数） */
   gameLength?: number
   /** inspect サンプリング: 全プレイヤーの observation（日ごと） */
-  allObservations?: Array<{ seat: number, role: string, day: number, observation: number[], proposals?: unknown }>
+  allObservations?: Array<{ seat: number, role: string, day: number, observation: unknown, proposals?: unknown }>
 }
 
 /** Worker → メインスレッド */
@@ -184,6 +184,7 @@ export type WorkerResult = {
 /** TrajectoryStep のシリアライズ形式（worker_threads メッセージ用） */
 export type SerializedStep = {
   seat: number
+  day?: number
   observation: number[]
   actionHead: string
   actionIdx: number
@@ -203,6 +204,7 @@ export type SerializedStep = {
 export function serializeStep(step: TrajectoryStep): SerializedStep {
   return {
     seat: step.seat,
+    day: step.day,
     observation: Array.from(step.observation),
     actionHead: step.actionHead,
     actionIdx: step.actionIdx,
@@ -223,6 +225,7 @@ export function serializeStep(step: TrajectoryStep): SerializedStep {
 export function deserializeStep(s: SerializedStep): TrajectoryStep {
   return {
     seat: s.seat,
+    day: s.day,
     observation: new Float32Array(s.observation),
     actionHead: s.actionHead,
     actionIdx: s.actionIdx,

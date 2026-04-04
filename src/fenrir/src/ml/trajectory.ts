@@ -4,6 +4,7 @@
 
 export type TrajectoryStep = {
   seat: number                    // プレイヤー seat
+  day?: number                    // ゲーム内の日数 (inspect 用)
   observation: Float32Array       // 観測ベクトル
   actionHead: string              // どのヘッドのアクションか
   actionIdx: number               // 選択されたアクション (softmax用, sigmoid時は-1)

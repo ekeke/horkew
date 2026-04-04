@@ -285,7 +285,7 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
 // ============================================================
 
 /** per-seat の公開情報（イベントから収集） */
-type SeatPublicData = {
+export type SeatPublicData = {
   alive: boolean
   claimedRole: SystemRole | undefined
   isMe: boolean
@@ -309,7 +309,10 @@ type SeatPublicData = {
   voteAgainst: number
 }
 
-/** encodeObservation の中間データ。この型を見れば observation の内容が分かる */
+/**
+ * encodeObservation の中間データ。この型を見れば observation の内容が分かる。
+ * JSON-serializable: inspect データとしてそのまま出力可能。
+ */
 export type CollectedObservation = {
   global: {
     day: number
@@ -325,13 +328,13 @@ export type CollectedObservation = {
   /** 14席分の公開情報 (index 0 = seat 1) */
   seats: SeatPublicData[]
   private: {
-    /** 占い結果: seat → human/wolf (占い師のみ) */
-    divineResults: Map<number, 'human' | 'wolf'>
+    /** 占い結果: [seat, human/wolf] (占い師のみ) */
+    divineResults: Array<[number, 'human' | 'wolf']>
     /** 人狼の仲間 or 狂信者が知る狼の席 */
     wolfTeamSeats: number[]
     masonPartner: number | null
-    /** 護衛済み席集合 (狩人のみ) */
-    guardedSeats: Set<number>
+    /** 護衛済み席 (狩人のみ) */
+    guardedSeats: number[]
     knownHamster: number | null
   }
   revote: {
@@ -339,16 +342,29 @@ export type CollectedObservation = {
     candidates: number[]
   }
   /** 直近3日分の履歴: per-window, per-seat の [votedFor, executed, killed, claimed, signaled] */
-  history: Float32Array
+  history: number[]
   retar: {
-    self: Map<number, Set<SystemRole>> | null
-    global: Map<number, Set<SystemRole>> | null
+    /** seat(string key) → 可能役職リスト */
+    self: Record<string, SystemRole[]> | null
+    global: Record<string, SystemRole[]> | null
   }
   plan: {
     forwardIndices: number[] | null
     endgameIndices: number[] | null
   }
   tsumiTarget: number | null
+}
+
+/** Map<number, Set<SystemRole>> → Record<string, SystemRole[]> (JSON-serializable) */
+function mapOfSetsToRecord(
+  map: Map<number, Set<SystemRole>> | null | undefined,
+): Record<string, SystemRole[]> | null {
+  if (!map) return null
+  const rec: Record<string, SystemRole[]> = {}
+  for (const [seat, roles] of map) {
+    rec[String(seat)] = [...roles]
+  }
+  return rec
 }
 
 // ============================================================
@@ -499,19 +515,23 @@ export function collectObservation(ctx: DecisionContext): CollectedObservation {
   }
 
   // private 情報
-  const divineResults = new Map<number, 'human' | 'wolf'>()
+  const divineResults: Array<[number, 'human' | 'wolf']> = []
   if (ctx.myRole === 'seer') {
     for (const [, result] of ctx.myPlayer.divineHistory) {
       if (result.target >= 1 && result.target <= SEATS) {
-        divineResults.set(result.target, result.result as 'human' | 'wolf')
+        divineResults.push([result.target, result.result as 'human' | 'wolf'])
       }
     }
   }
 
-  const guardedSeats = new Set<number>()
+  const guardedSeats: number[] = []
   if (ctx.myRole === 'bodyguard') {
+    const seen = new Set<number>()
     for (const [, target] of ctx.myPlayer.guardHistory) {
-      if (target >= 1 && target <= SEATS) guardedSeats.add(target)
+      if (target >= 1 && target <= SEATS && !seen.has(target)) {
+        seen.add(target)
+        guardedSeats.push(target)
+      }
     }
   }
 
@@ -545,10 +565,10 @@ export function collectObservation(ctx: DecisionContext): CollectedObservation {
       round: ctx.revoteRound ?? 0,
       candidates: ctx.revoteCandidates ?? [],
     },
-    history,
+    history: Array.from(history),
     retar: {
-      self: ctx.retarPossibilities,
-      global: ctx.globalRetarPossibilities,
+      self: mapOfSetsToRecord(ctx.retarPossibilities),
+      global: mapOfSetsToRecord(ctx.globalRetarPossibilities),
     },
     plan: {
       forwardIndices: ctx.planForwardIndices,
@@ -617,7 +637,7 @@ export function packObservation(data: CollectedObservation): Float32Array {
   }
   offset += 1
   for (const seat of data.private.guardedSeats) {
-    obs[offset + (seat - 1)] = 1
+    if (seat >= 1 && seat <= SEATS) obs[offset + (seat - 1)] = 1
   }
   offset += SEATS
   if (data.private.knownHamster !== null && data.private.knownHamster >= 1 && data.private.knownHamster <= SEATS) {
@@ -634,13 +654,13 @@ export function packObservation(data: CollectedObservation): Float32Array {
   offset += SEATS
 
   // ========== History ==========
-  obs.set(data.history, offset)
+  for (let i = 0; i < HISTORY_SIZE; i++) obs[offset + i] = data.history[i] ?? 0
   offset += HISTORY_SIZE
 
   // ========== Retar ==========
   if (data.retar.self) {
     for (let seat = 1; seat <= SEATS; seat++) {
-      const roles = data.retar.self.get(seat)
+      const roles = data.retar.self[String(seat)]
       if (!roles) continue
       for (const role of roles) {
         const rIdx = ROLE_INDEX.get(role)
@@ -651,7 +671,7 @@ export function packObservation(data: CollectedObservation): Float32Array {
   offset += RETAR_POSSIBILITIES_SIZE
   if (data.retar.global) {
     for (let seat = 1; seat <= SEATS; seat++) {
-      const roles = data.retar.global.get(seat)
+      const roles = data.retar.global[String(seat)]
       if (!roles) continue
       for (const role of roles) {
         const rIdx = ROLE_INDEX.get(role)

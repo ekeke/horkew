@@ -33,7 +33,7 @@ import {
 } from '../retar-bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
 import { resolvePlanGroup } from '../plan/plan-resolve.ts'
-import { encodeObservation } from '../observation.ts'
+import { collectObservation } from '../observation.ts'
 
 /** PlanDayGroup[] → ExecutionPlan[] に変換（observation 注入用） */
 function planGroupsToExecutionPlans(
@@ -188,7 +188,7 @@ export abstract class StrategyBaseAdapter
           seat: player.seat,
           role: player.role,
           day: ctx.day,
-          observation: encodeObservation(ctx),
+          observation: collectObservation(ctx),
           proposals: dayProposals.map(p => ({ type: p.type, target: p.target })),
         })
       }

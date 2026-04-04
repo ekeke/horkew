@@ -42,7 +42,7 @@ import {
 } from './parallel.ts'
 import { loadRandomSnapshots, countSnapshots } from './seed-bank.ts'
 import { Rng } from '../../lupa/random.ts'
-import { decodeObservation } from './decode-observation.ts'
+// decode-observation.ts は削除済み — CollectedObservation を直接使用
 
 // ============================================================
 // Model Group Definitions
@@ -241,15 +241,14 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
   const byFile = new Map(indexEntries.map(e => [e.file, e]))
 
   for (const game of sampled) {
-    // trajectory をデコード
+    // trajectory → timeline（observation は allPlayerSteps で一元管理）
     const timeline: Array<Record<string, unknown>> = []
     for (const { seat, role, steps } of game.individualSteps) {
       for (const step of steps) {
-        const obs = decodeObservation(new Float32Array(step.observation))
         const entry: Record<string, unknown> = {
           seat, role,
-          day: obs.global.day,
-          phase: obs.global.phase,
+          day: step.day,
+          phase: 'day',
           actionHead: step.actionHead,
           actionDescription: describeAction(step.actionHead, step.actionIdx),
           actionIdx: step.actionIdx,
@@ -257,7 +256,6 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
           reward: step.reward,
           value: step.value,
           done: step.done,
-          observation: obs,
         }
         if (step.planForwardActions) {
           const groups = parsePlanIndices(step.planForwardActions)
@@ -300,7 +298,7 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
       return (a.seat as number) - (b.seat as number)
     })
 
-    // 全プレイヤーの observation をデコード
+    // 全プレイヤーの observation（CollectedObservation をそのまま使用）
     const allPlayerSteps: Array<Record<string, unknown>> = []
     if (game.allObservations) {
       for (const o of game.allObservations) {
@@ -308,7 +306,7 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
           seat: o.seat,
           role: o.role,
           day: o.day,
-          observation: decodeObservation(new Float32Array(o.observation)),
+          observation: o.observation,
           proposals: o.proposals,
         })
       }

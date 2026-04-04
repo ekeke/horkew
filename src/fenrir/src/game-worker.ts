@@ -493,7 +493,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       if (observationGetter) {
         gameResult.allObservations = observationGetter().map(o => ({
           seat: o.seat, role: o.role, day: o.day,
-          observation: Array.from(o.observation),
+          observation: o.observation,
           proposals: o.proposals,
         }))
       }
