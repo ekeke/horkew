@@ -259,7 +259,8 @@ export class NeuralAgent implements Agent {
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
 
-      if (!this.lastObs) this.infer(ctx)
+      // Re-encode with current ctx (executionPlans populated after distributePlans)
+      this.lastObs = encodeObservation(ctx)
 
       const predictLogits = result.policies.get('predict')
       let predictActions: Float32Array | undefined
