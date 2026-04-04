@@ -35,6 +35,7 @@ rules:
 # @expect ガーグァ: [mason]
 # @expect サターニャ: [werewolf, fanatic, werehamster, immoralist]
 # @expect 闇さとし: [werewolf, fanatic, werehamster, immoralist]
+# @gmork-deny エーカゲン２世/werehamster: sole_night_kill_with_immoralist
 # @gmork-deny 闇さとし/seer: seer_claim_contradicted > result_contradicts_confirmed
 
 サターニャ指定

@@ -18,6 +18,7 @@ export type DenialReason =
   | { type: 'cursed_by_nekomata' }
   | { type: 'follow_hamster' }
   | { type: 'sole_night_kill', night: Day }
+  | { type: 'sole_night_kill_with_immoralist', night: Day }
   | { type: 'villager_co' }
   | { type: 'surrender_co' }
   | { type: 'silent_execution' }

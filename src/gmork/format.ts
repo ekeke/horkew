@@ -57,6 +57,8 @@ export function formatReason(reason: DenialReason, role: SystemRole): string {
       return '妖狐の死亡に後追いしているため背徳者に確定'
     case 'sole_night_kill':
       return `${reason.night}d夜に単独で襲撃死しているため人狼ではありえない`
+    case 'sole_night_kill_with_immoralist':
+      return `${reason.night}d夜の死者が1人だけで背徳者が生存しているため妖狐ではありえない（呪殺なら背徳者が後追いして2人以上死亡するはず）`
     case 'villager_co':
       return `村人をCOしているため${roleName(role)}ではありえない`
     case 'surrender_co':

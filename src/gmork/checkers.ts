@@ -167,6 +167,38 @@ function checkSoleNightKill({ village, status, role }: CheckerInput): DenialReas
   return null
 }
 
+function checkSoleNightKillDeniesHamster({ village, setup, status, role }: CheckerInput): DenialReason | null {
+  if (
+    role === 'werehamster' &&
+    !status.surviving &&
+    status.causeOfDeath === 'night_kill' &&
+    status.diedDay != null
+  ) {
+    const nightDeaths = village.kills.get(status.diedDay) || []
+    if (nightDeaths.length !== 1) return null
+
+    // 背徳者がセットアップにいなければ、呪殺の可能性を排除できない
+    // （狼が狐を噛み + 占いが狐を呪殺 → 1死体の可能性がある）
+    const immoralistCount = setup.get('immoralist') || 0
+    if (immoralistCount === 0) return null
+
+    // この夜までに背徳後追い死が発生していたら、背徳者は既に死亡 → 排除できない
+    for (const [, st] of village.statuses) {
+      if (
+        !st.surviving &&
+        (st.causeOfDeath === 'follow_executed_hamster' || st.causeOfDeath === 'follow_killed_hamster') &&
+        st.diedDay != null &&
+        st.diedDay <= status.diedDay
+      ) {
+        return null
+      }
+    }
+
+    return { type: 'sole_night_kill_with_immoralist', night: status.diedDay }
+  }
+  return null
+}
+
 function checkVillagerCo({ status, role }: CheckerInput): DenialReason | null {
   if (status.claimingRole === 'villager' && villageSpecialRoles.includes(role)) {
     return { type: 'villager_co' }
@@ -953,6 +985,7 @@ export const allCheckers: TaggedChecker[] = [
   { fn: checkCursedByNekomata, category: 'axiomatic' },
   { fn: checkFollowHamster, category: 'axiomatic' },
   { fn: checkSoleNightKill, category: 'axiomatic' },
+  { fn: checkSoleNightKillDeniesHamster, category: 'axiomatic' },
   { fn: checkVillagerCo, category: 'axiomatic' },
   { fn: checkSurrenderCo, category: 'axiomatic' },
   { fn: checkSilentExecution, category: 'axiomatic' },
