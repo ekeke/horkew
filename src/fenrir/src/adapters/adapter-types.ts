@@ -14,8 +14,8 @@ export type CapturedObservation = {
   proposals?: { type: string, target: number }[]
 }
 
-/** Strategy-Only Adapter の設定 */
-export type StrategyOnlyAdapterConfig = {
+/** Strategy Base Adapter の設定（plan ライフサイクル共通） */
+export type StrategyBaseAdapterConfig = {
   agents: Map<number, Agent>
   defaultAgent?: Agent
   wolfTeamAgent?: TeamAgent
@@ -35,9 +35,16 @@ export type StrategyOnlyAdapterConfig = {
   rules?: Partial<ResolvedRules>
   /** 全プレイヤーの observation をキャプチャ（inspect 用） */
   captureObservations?: boolean
+}
+
+/** Mason Training Adapter の設定（mason 固有オプション追加） */
+export type MasonTrainingAdapterConfig = StrategyBaseAdapterConfig & {
   /** Mason takeover: ML mason 死亡時に生存パートナーに agent を移す */
   onMasonTakeover?: (deadSeat: number, newSeat: number) => void
 }
+
+/** 後方互換エイリアス */
+export type StrategyOnlyAdapterConfig = MasonTrainingAdapterConfig
 
 /** Full Adapter の設定 */
 export type FullAdapterConfig = {
