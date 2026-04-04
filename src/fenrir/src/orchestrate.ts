@@ -298,15 +298,31 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
       return (a.seat as number) - (b.seat as number)
     })
 
-    // 全プレイヤーの observation（CollectedObservation をそのまま使用）
-    const allPlayerSteps: Array<Record<string, unknown>> = []
+    // observation を per-day 共通部分と per-player 部分に分離
+    const daySnapshots: Record<number, Record<string, unknown>> = {}
+    const playerSteps: Array<Record<string, unknown>> = []
     if (game.allObservations) {
       for (const o of game.allObservations) {
-        allPlayerSteps.push({
+        const obs = o.observation as import('./observation.ts').CollectedObservation
+        if (!daySnapshots[o.day]) {
+          const { myRole: _, ropeMargin: __, ...globalRest } = obs.global
+          daySnapshots[o.day] = {
+            global: globalRest,
+            seats: obs.seats.map(s => { const { isMe: _, ...rest } = s; return rest }),
+            revote: obs.revote,
+            history: obs.history,
+            plan: obs.plan,
+            tsumiTarget: obs.tsumiTarget,
+          }
+        }
+        playerSteps.push({
           seat: o.seat,
           role: o.role,
           day: o.day,
-          observation: o.observation,
+          myRole: obs.global.myRole,
+          ropeMargin: obs.global.ropeMargin,
+          private: obs.private,
+          retar: obs.retar,
           proposals: o.proposals,
         })
       }
@@ -319,7 +335,8 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
       howl: game.howl,
       players: game.players,
       timeline,
-      allPlayerSteps,
+      daySnapshots,
+      playerSteps,
       model: modelName,
       iteration,
       gitSha: sha,

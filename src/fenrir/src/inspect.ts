@@ -380,13 +380,31 @@ for (let g = 0; g < count; g++) {
     return (a.seat as number) - (b.seat as number)
   })
 
-  // 全プレイヤーの observation（capturedObservations → CollectedObservation）
-  const allPlayerSteps: Array<Record<string, unknown>> = []
+  // observation を per-day 共通部分と per-player 部分に分離
+  const daySnapshots: Record<number, Record<string, unknown>> = {}
+  const playerSteps: Array<Record<string, unknown>> = []
   if ('getCapturedObservations' in handlers && typeof handlers.getCapturedObservations === 'function') {
     for (const o of handlers.getCapturedObservations()) {
-      allPlayerSteps.push({
-        seat: o.seat, role: o.role, day: o.day,
-        observation: o.observation,
+      const obs = o.observation
+      if (!daySnapshots[o.day]) {
+        const { myRole: _, ropeMargin: __, ...globalRest } = obs.global
+        daySnapshots[o.day] = {
+          global: globalRest,
+          seats: obs.seats.map(s => { const { isMe: _, ...rest } = s; return rest }),
+          revote: obs.revote,
+          history: obs.history,
+          plan: obs.plan,
+          tsumiTarget: obs.tsumiTarget,
+        }
+      }
+      playerSteps.push({
+        seat: o.seat,
+        role: o.role,
+        day: o.day,
+        myRole: obs.global.myRole,
+        ropeMargin: obs.global.ropeMargin,
+        private: obs.private,
+        retar: obs.retar,
         proposals: o.proposals,
       })
     }
@@ -395,7 +413,7 @@ for (let g = 0; g < count; g++) {
   const gameLength = state.day
 
   const gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
-  const inspectData = { seed: gameSeed, result, gameLength, howl, players, timeline, allPlayerSteps, gitSha }
+  const inspectData = { seed: gameSeed, result, gameLength, howl, players, timeline, daySnapshots, playerSteps, gitSha }
   const fileName = `game_seed${gameSeed}.json`
   const filePath = `${outdir}/${fileName}`
   writeFileSync(filePath, JSON.stringify(inspectData, null, 2))
