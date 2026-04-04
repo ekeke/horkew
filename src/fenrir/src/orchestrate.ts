@@ -564,10 +564,20 @@ function ppoUpdate(
 }
 
 
+/** KL target warmup: pretrain→PPO 移行初期は大きな KL を許容し、徐々に引き締める */
+const KL_TARGET_INITIAL = 0.5
+const KL_TARGET_FINAL = 0.05
+const KL_WARMUP_ITERS = 300
+
+function klTargetForIter(iter: number): number {
+  if (iter >= KL_WARMUP_ITERS) return KL_TARGET_FINAL
+  return KL_TARGET_INITIAL + (KL_TARGET_FINAL - KL_TARGET_INITIAL) * (iter / KL_WARMUP_ITERS)
+}
+
 /** KL 診断ログを checkpointBase/kl_log.jsonl に追記 */
 function appendKlLog(
   checkpointBase: string,
-  entry: { iter: number, klForward: number, klEndgame: number, klTotal: number, beta: number },
+  entry: { iter: number, klForward: number, klEndgame: number, klTotal: number, beta: number, klTarget: number },
 ): void {
   const line = JSON.stringify({ ...entry, ts: new Date().toISOString() })
   appendFileSync(`${checkpointBase}/kl_log.jsonl`, line + '\n')
@@ -1211,9 +1221,9 @@ async function main(): Promise<void> {
           masonNet.loadWeights(masonTf.cloneWeights())
         }
 
-        // Adaptive KL
+        // Adaptive KL (warmup: target 0.5→0.05 over 300 iters)
         if (masonPpoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
-          const klTarget = 0.05
+          const klTarget = klTargetForIter(iter)
           if (lastPpoResult.klLoss > klTarget * 1.5) {
             masonPpoConfig.klCoeff *= 1.5
           } else if (lastPpoResult.klLoss < klTarget / 1.5) {
@@ -1223,7 +1233,7 @@ async function main(): Promise<void> {
         }
         appendKlLog(config.checkpointBase, {
           iter, klForward: lastPpoResult.klForwardLoss, klEndgame: lastPpoResult.klEndgameLoss,
-          klTotal: lastPpoResult.klLoss, beta: masonPpoConfig.klCoeff,
+          klTotal: lastPpoResult.klLoss, beta: masonPpoConfig.klCoeff, klTarget: klTargetForIter(iter),
         })
 
         const tPpoEnd = performance.now()
@@ -1493,20 +1503,19 @@ async function main(): Promise<void> {
             masonTeamNet.loadWeights(masonTeamTf.cloneWeights())
           }
 
-          // Adaptive KL: β を自動調整して KL を目標付近に維持
+          // Adaptive KL (warmup: target 0.5→0.05 over 300 iters)
           if (ppoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
-            const klTarget = 0.05  // 目標 KL divergence
+            const klTarget = klTargetForIter(iter)
             if (lastPpoResult.klLoss > klTarget * 1.5) {
-              ppoConfig.klCoeff *= 1.5  // KL 高すぎ → β 増
+              ppoConfig.klCoeff *= 1.5
             } else if (lastPpoResult.klLoss < klTarget / 1.5) {
-              ppoConfig.klCoeff /= 1.5  // KL 低すぎ → β 減
+              ppoConfig.klCoeff /= 1.5
             }
-            // β の上下限
             ppoConfig.klCoeff = Math.max(0.01, Math.min(10, ppoConfig.klCoeff))
           }
           appendKlLog(config.checkpointBase, {
             iter, klForward: lastPpoResult.klForwardLoss, klEndgame: lastPpoResult.klEndgameLoss,
-            klTotal: lastPpoResult.klLoss, beta: ppoConfig.klCoeff,
+            klTotal: lastPpoResult.klLoss, beta: ppoConfig.klCoeff, klTarget: klTargetForIter(iter),
           })
 
           const tPpoEnd = performance.now()
