@@ -44,7 +44,7 @@
 3. ゲーム生成:
    - mlRoles=['mason'], mlMaxSeats=1
    - Seed Bank (Day 3 スナップショット) からリプレイ
-   - strategy-only-adapter が mason の plan → executionPlans に注入
+   - MasonTrainingAdapter が mason の plan → executionPlans に注入
    - ヒューリスティック村人が executionPlans に従って投票
 4. PPO update: strategy action head のみ (plan_forward, plan_endgame, predict)
 5. eval: masonAsIndividual=true (team strategy をバイパス)
@@ -59,10 +59,15 @@ mason の NeuralAgent
     → recordStrategy: trajectory に plan token + predict を記録
     → planToVote: plan logits → 投票先 seat に解決
 
-strategy-only-adapter の onVote
-  → mason 生存時: mason の decideProposal → execute_order → executionPlans に注入
-  → mason 死亡後: cachedPlanGroups[index++] → resolvePlanGroup → executionPlans に注入
-  → 各プレイヤーの decideVote: ctx.executionPlans を参照してヒューリスティックが従う
+MasonTrainingAdapter (extends StrategyBaseAdapter)
+  beforePlanDistribution():
+    → mason 生存時: NN の plan token → ext.planState に書き込み
+  collectProposals():
+    → mason 生存時: decideProposal → execute_order
+    → mason 死亡後: planState[dayIndex] → resolvePlanGroup → execute_order
+  StrategyBaseAdapter.onVote():
+    → distributePlans(): planState → ext.executionPlans
+    → 各プレイヤーの decideVote: ctx.executionPlans を参照してヒューリスティックが従う
 ```
 
 ### mason 死亡後の plan 継続

@@ -139,6 +139,7 @@ Hati（詰み探索）とRetar（役職推理）は機械学習パイプライ�
 - Discriminated unions keyed on `type` field for statement and event types
 - `tasks/` ディレクトリは `.gitignore` に含まれる（ローカル作業用、コミット対象外）
 - **変数名・関数名を過度に省略しない**: `ctx`, `idx` 程度の定着した略語は可。`cand`（candidates）、`persp`（perspective）レベルの省略は避け、読んで意味が分かる名前にする
+- **ドキュメントは常に最新に保つ**: コードを変更したとき、関連する CLAUDE.md・TrainingPhases.md 等のドキュメントに古いファイルパス・クラス名・関数名が残っていないか確認し、同じコミットまたは直後のコミットで更新する
 
 ## Gmork (Role Reasoning Engine)
 
