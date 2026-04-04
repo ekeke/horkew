@@ -346,7 +346,14 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
       gitSha: sha,
     }
 
-    const fileName = `game_iter${iteration}_seed${game.seed}.json`
+    const now = new Date()
+    const ts = now.getFullYear().toString()
+      + String(now.getMonth() + 1).padStart(2, '0')
+      + String(now.getDate()).padStart(2, '0')
+      + String(now.getHours()).padStart(2, '0')
+      + String(now.getMinutes()).padStart(2, '0')
+      + String(now.getSeconds()).padStart(2, '0')
+    const fileName = `${ts}.json`
     writeFileSync(`${INSPECT_DIR}/${fileName}`, JSON.stringify(inspectData, null, 2))
     byFile.set(fileName, { file: fileName, seed: game.seed!, result: game.result, gameLength: game.gameLength!, model: modelName, iteration, gitSha: sha })
   }
