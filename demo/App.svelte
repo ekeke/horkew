@@ -734,6 +734,7 @@
   const GMORK_DEBUG = true
 
   function runGmork(): string {
+    if (!devMode) return ''
     if (assumptions.size !== 1 || !villageStatus) return ''
     const [[seat, role]] = [...assumptions]
     const possibilities = new Map(baseAnalysisSeats.map(s => [s.seat, new Set(s.roles)]))
