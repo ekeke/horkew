@@ -257,42 +257,41 @@ export class NeuralAgent implements Agent {
   }
 
   /**
-   * 事前に取得した ForwardResult から trajectory 記録 + 投票先決定を行う。
-   * adapter が onPreVote で forward pass を済ませた後、onVote で呼ぶ。
-   * observation は ctx から再エンコードする（distributePlans 後の正しい状態）。
+   * observation を外部からセットする（adapter が trajectory 記録前に使用）。
    */
-  strategyVote(ctx: DecisionContext, result: ForwardResult): number {
-    this.lastObs = encodeObservation(ctx)
-
-    const predictLogits = result.policies.get('predict')
-    let predictActions: Float32Array | undefined
-    if (predictLogits) {
-      const predictMask = new Float32Array(predictLogits.length).fill(0)
-      predictActions = this.selectSigmoidAction(predictLogits, predictMask).actions
-    }
-
-    if (result.planForwardActions && result.planEndgameActions) {
-      this.recordStrategy(
-        result.planForwardActions, result.planForwardLogProbs!,
-        result.planEndgameActions, result.planEndgameLogProbs!,
-        predictActions, result.value, ctx.mySeat,
-        ctx.alivePlayers.length, ctx.day,
-      )
-    }
-
-    const fwdActions = result.planForwardActions
-    if (isVillagerAligned(ctx.myRole) && fwdActions) {
-      const voteSeat = planToVote(fwdActions, ctx, result.planEndgameActions)
-      if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
-    }
-    const targets = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
-    return targets[Math.floor(ctx.rng.next() * targets.length)]
+  setLastObs(obs: Float32Array): void {
+    this.lastObs = obs
   }
 
   decideVote(ctx: DecisionContext): number {
     if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideVote(ctx)
     if (this.config.strategyOnly) {
-      return this.strategyVote(ctx, this.getStrategyResult(ctx))
+      const result = this.getStrategyResult(ctx)
+      this.lastObs = encodeObservation(ctx)
+
+      const predictLogits = result.policies.get('predict')
+      let predictActions: Float32Array | undefined
+      if (predictLogits) {
+        const predictMask = new Float32Array(predictLogits.length).fill(0)
+        predictActions = this.selectSigmoidAction(predictLogits, predictMask).actions
+      }
+
+      if (result.planForwardActions && result.planEndgameActions) {
+        this.recordStrategy(
+          result.planForwardActions, result.planForwardLogProbs!,
+          result.planEndgameActions, result.planEndgameLogProbs!,
+          predictActions, result.value, ctx.mySeat,
+          ctx.alivePlayers.length, ctx.day,
+        )
+      }
+
+      const fwdActions = result.planForwardActions
+      if (isVillagerAligned(ctx.myRole) && fwdActions) {
+        const voteSeat = planToVote(fwdActions, ctx, result.planEndgameActions)
+        if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
+      }
+      const targets = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
+      return targets[Math.floor(ctx.rng.next() * targets.length)]
     }
 
     const result = this.infer(ctx)

@@ -2,11 +2,10 @@
  * MasonTrainingAdapter — mason 訓練用 adapter
  *
  * StrategyBaseAdapter を継承し、mason 固有の責務を追加:
- *   1. onPreVote で NN mason の forward pass → plan 配布 → proposal 生成
- *   2. onVote で NN mason の投票 + trajectory 記録を adapter 層で完結
+ *   1. onPreVote で全意思決定を完結: forward pass → plan 配布 → 投票先確定 → trajectory 記録
+ *   2. onVote は機械的な票割り当て: 村陣営は plan に従い、非村は decideVote
  *
- * NeuralAgent.decideVote は呼ばない。getStrategyResult は onPreVote で1回だけ呼び、
- * onVote では strategyVote に result を直接渡す。cache 依存なし。
+ * NeuralAgent.decideVote は呼ばない。getStrategyResult は onPreVote で1回だけ呼ぶ。
  */
 
 import type { GameState, PlayerState } from '../../../lupa/types.ts'
@@ -20,19 +19,17 @@ import type { ForwardResult } from '../ml/nn.ts'
 import type { NeuralAgent } from '../agents/neural-agent.ts'
 import { StrategyBaseAdapter } from './strategy-base-adapter.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
-import { alivePlayers } from '../../../lupa/roles.ts'
+import { alivePlayers, isVillagerAligned } from '../../../lupa/roles.ts'
 import { parsePlanIndices } from '../plan/plan-vocab.ts'
 import { resolvePlanGroup } from '../plan/plan-resolve.ts'
 import { planToVote } from '../plan/plan-helpers.ts'
-import { collectObservation } from '../observation.ts'
+import { encodeObservation, collectObservation } from '../observation.ts'
 
 export class MasonTrainingAdapter extends StrategyBaseAdapter {
   private readonly masonConfig: MasonTrainingAdapterConfig
 
-  /** onPreVote で取得した NN mason の forward result（onVote で消費） */
-  private masonResult: ForwardResult | null = null
-  /** onPreVote で確定した NN mason の seat（onVote で使用） */
-  private masonSeat: number | null = null
+  /** onPreVote で確定した plan 投票先（onVote で村陣営全員が使用） */
+  private planVoteTarget: number | null = null
   /** onPreVote で生成した proposals（onVote に渡す） */
   private dayProposals: Proposal[] = []
 
@@ -58,39 +55,76 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const aliveMasons = allMasons.filter(p => p.alive)
     this.handleMasonTakeover(state, ext.planState, allMasons, aliveMasons)
 
-    this.masonResult = null
-    this.masonSeat = null
+    this.planVoteTarget = null
     this.dayProposals = []
 
+    let masonResult: ForwardResult | null = null
     if (aliveMasons.length > 0) {
-      this.commitMasonPlans(pctx, ext, aliveMasons)
+      masonResult = this.commitMasonPlans(pctx, ext, aliveMasons)
     }
 
     // 3. distributePlans: planState → ext.executionPlans
     const aliveSeats = alivePlayers(state).map(p => p.seat)
     this.distributePlans(ext, aliveSeats, pctx.events)
 
-    // 4. Proposal 生成
-    // eslint-disable-next-line -- TS narrows this.masonResult to null despite commitMasonPlans mutation
-    const masonFwd = (this.masonResult as ForwardResult | null)
-    if (aliveMasons.length > 0 && masonFwd) {
-      const fwdActions = masonFwd.planForwardActions
+    // 4. Plan → 投票先確定 + trajectory 記録
+    if (masonResult) {
+      const fwdActions = masonResult.planForwardActions
       if (fwdActions) {
-        const dummyCtx = this.buildCtx(pctx, aliveMasons[0], buildPlayerView(state, aliveMasons[0].seat), ext)
-        const target = planToVote(fwdActions, dummyCtx, masonFwd.planEndgameActions)
+        const mason = aliveMasons.find(m => this.masonConfig.agents.has(m.seat)) ?? aliveMasons[0]
+        const masonCtx = this.buildCtx(pctx, mason, buildPlayerView(state, mason.seat), ext)
+        const target = planToVote(fwdActions, masonCtx, masonResult.planEndgameActions)
         if (target != null) {
+          this.planVoteTarget = target
           this.dayProposals.push({ type: 'execute_order', target })
         }
+      }
+
+      // Trajectory 記録（NN mason）
+      const nnMason = aliveMasons.find(m => this.masonConfig.agents.has(m.seat))
+      if (nnMason) {
+        const agent = this.getAgent(nnMason.seat) as NeuralAgent
+        const trajCtx = this.buildCtx(pctx, nnMason, buildPlayerView(state, nnMason.seat), ext)
+        agent.setLastObs(encodeObservation(trajCtx))
+        this.recordMasonStrategy(agent, masonResult, nnMason.seat, aliveSeats.length, pctx.day)
       }
     } else if (allMasons.length > 0 && ext.planState.forwardGroups.length > 0) {
       // Mason 死亡: cached plan から解決
       const target = this.resolveDeadMasonTarget(pctx, ext)
       if (target != null) {
+        this.planVoteTarget = target
         this.dayProposals.push({ type: 'execute_order', target })
       }
     }
 
     return {}
+  }
+
+  /** NN mason の strategy trajectory を記録する */
+  private recordMasonStrategy(
+    agent: NeuralAgent, result: ForwardResult,
+    seat: number, aliveCount: number, day: number,
+  ): void {
+    const predictLogits = result.policies.get('predict')
+    let predictActions: Float32Array | undefined
+    if (predictLogits) {
+      const predictMask = new Float32Array(predictLogits.length).fill(0)
+      // Greedy sigmoid for predict (学習時は explore だが predict は閾値判定)
+      const actions = new Float32Array(predictLogits.length)
+      for (let i = 0; i < predictLogits.length; i++) {
+        const p = 1 / (1 + Math.exp(-(predictLogits[i] + predictMask[i])))
+        actions[i] = p > 0.5 ? 1 : 0
+      }
+      predictActions = actions
+    }
+
+    if (result.planForwardActions && result.planEndgameActions) {
+      agent.recordStrategy(
+        result.planForwardActions, result.planForwardLogProbs!,
+        result.planEndgameActions, result.planEndgameLogProbs!,
+        predictActions, result.value, seat, aliveCount, day,
+      )
+    }
   }
 
   // ════════════════════════════════════════════
@@ -114,6 +148,13 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
 
     const votes = new Map<number, number>()
     for (const player of alivePlayers(state)) {
+      // 村陣営 + plan あり → plan に従う（mason も villager も同じ）
+      if (isFirstRound && isVillagerAligned(player.role)
+        && this.planVoteTarget != null && this.planVoteTarget !== player.seat) {
+        votes.set(player.seat, this.planVoteTarget)
+        continue
+      }
+
       const view = buildPlayerView(state, player.seat)
       const ctx = this.buildCtx(
         vctx as PhaseContext<FenrirExtEvent, FenrirExt>, player, view, ext, {
@@ -134,17 +175,8 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
         })
       }
 
-      // NN mason: adapter が直接 vote + trajectory 記録
-      if (isFirstRound && player.seat === this.masonSeat && this.masonResult) {
-        const agent = this.getAgent(player.seat) as NeuralAgent
-        votes.set(player.seat, agent.strategyVote(ctx, this.masonResult))
-        continue
-      }
-
-      // 他のプレイヤー: 通常の decideVote
-      const teamAgent = player.role === 'werewolf' ? this.config.wolfTeamAgent
-        : player.role === 'mason' ? this.config.masonTeamAgent
-        : null
+      // 非村 or plan なし → 従来の decideVote
+      const teamAgent = player.role === 'werewolf' ? this.config.wolfTeamAgent : null
 
       if (teamAgent) {
         const teamCtx = this.buildTeamCtx(ctx, state, player.role, player.seat)
@@ -212,18 +244,15 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     pctx: PhaseContext<FenrirExtEvent, FenrirExt>,
     ext: FenrirExt,
     aliveMasons: PlayerState[],
-  ): void {
+  ): ForwardResult | null {
     const state = pctx.state as GameState<FenrirExt>
     const mason = aliveMasons.find(m => this.masonConfig.agents.has(m.seat)) ?? aliveMasons[0]
     const agent = this.getAgent(mason.seat) as any
-    if (typeof agent.getStrategyResult !== 'function') return
+    if (typeof agent.getStrategyResult !== 'function') return null
 
     const masonView = buildPlayerView(state, mason.seat)
     const masonCtx = this.buildCtx(pctx, mason, masonView, ext)
     const result: ForwardResult = agent.getStrategyResult(masonCtx)
-
-    this.masonResult = result
-    this.masonSeat = mason.seat
 
     if (result.planForwardActions) {
       ext.planForwardIndices = [...result.planForwardActions]
@@ -234,6 +263,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
       ext.planEndgameIndices = [...result.planEndgameActions]
       ext.planState.endgameGroups = parsePlanIndices(result.planEndgameActions)
     }
+    return result
   }
 
   /**
