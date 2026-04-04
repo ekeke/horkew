@@ -22,7 +22,7 @@
   import './theme.css'
   import { runGame } from '../src/lupa/engine.ts'
   import { agentAdapter } from '../src/verify/agent-adapter.ts'
-  import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../src/lupa/heuristic.ts'
+  import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../src/fenrir/src/agents/rule-based-agent.ts'
   import { formatHowl } from '../src/lupa/format.ts'
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
@@ -470,9 +470,9 @@
     ])
     const seed = Date.now()
     const handlers = agentAdapter({
-      defaultStrategy: new HeuristicStrategy(),
-      wolfTeamStrategy: new WolfTeamHeuristic(),
-      masonTeamStrategy: new MasonTeamHeuristic(),
+      defaultAgent: new RuleBasedAgent(),
+      wolfTeamAgent: new WolfTeamRuleAgent(),
+      masonTeamAgent: new MasonTeamRuleAgent(),
       enableRetar: false,
       seed,
       roles,
