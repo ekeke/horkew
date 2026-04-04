@@ -252,7 +252,7 @@ export abstract class StrategyBaseAdapter
   // ════════════════════════════════════════════
 
   /** planState → ext.executionPlans に変換・配布 */
-  private distributePlans(
+  protected distributePlans(
     ext: FenrirExt,
     aliveSeats: number[],
     events: readonly (GameEvent | FenrirExtEvent)[],

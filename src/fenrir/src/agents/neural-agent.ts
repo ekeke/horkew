@@ -17,7 +17,7 @@ import {
 } from '../action.ts'
 import { endgameVoteReward } from '../reward.ts'
 import { sigmoid } from '../ml/nn.ts'
-import { parsePlanIndices, type PlanDayGroup } from '../plan/plan-vocab.ts'
+import { parsePlanIndices } from '../plan/plan-vocab.ts'
 import { planToVote, nightAction, dayClaim, communication, proposal, leadershipResponse } from '../plan/plan-helpers.ts'
 import { isVillagerAligned } from '../../../lupa/roles.ts'
 import { RuleBasedAgent } from './rule-based-agent.ts'
@@ -256,51 +256,43 @@ export class NeuralAgent implements Agent {
     return { type: 'none' }
   }
 
+  /**
+   * 事前に取得した ForwardResult から trajectory 記録 + 投票先決定を行う。
+   * adapter が onPreVote で forward pass を済ませた後、onVote で呼ぶ。
+   * observation は ctx から再エンコードする（distributePlans 後の正しい状態）。
+   */
+  strategyVote(ctx: DecisionContext, result: ForwardResult): number {
+    this.lastObs = encodeObservation(ctx)
+
+    const predictLogits = result.policies.get('predict')
+    let predictActions: Float32Array | undefined
+    if (predictLogits) {
+      const predictMask = new Float32Array(predictLogits.length).fill(0)
+      predictActions = this.selectSigmoidAction(predictLogits, predictMask).actions
+    }
+
+    if (result.planForwardActions && result.planEndgameActions) {
+      this.recordStrategy(
+        result.planForwardActions, result.planForwardLogProbs!,
+        result.planEndgameActions, result.planEndgameLogProbs!,
+        predictActions, result.value, ctx.mySeat,
+        ctx.alivePlayers.length, ctx.day,
+      )
+    }
+
+    const fwdActions = result.planForwardActions
+    if (isVillagerAligned(ctx.myRole) && fwdActions) {
+      const voteSeat = planToVote(fwdActions, ctx, result.planEndgameActions)
+      if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
+    }
+    const targets = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
+    return targets[Math.floor(ctx.rng.next() * targets.length)]
+  }
+
   decideVote(ctx: DecisionContext): number {
     if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideVote(ctx)
     if (this.config.strategyOnly) {
-      const result = this.getStrategyResult(ctx)
-
-      // Re-encode with current ctx (executionPlans populated after distributePlans)
-      this.lastObs = encodeObservation(ctx)
-
-      const predictLogits = result.policies.get('predict')
-      let predictActions: Float32Array | undefined
-      if (predictLogits) {
-        const predictMask = new Float32Array(predictLogits.length).fill(0)
-        predictActions = this.selectSigmoidAction(predictLogits, predictMask).actions
-      }
-
-      if (result.planForwardActions && result.planEndgameActions) {
-        this.recordStrategy(
-          result.planForwardActions, result.planForwardLogProbs!,
-          result.planEndgameActions, result.planEndgameLogProbs!,
-          predictActions, result.value, ctx.mySeat,
-          ctx.alivePlayers.length, ctx.day,
-        )
-      }
-
-      const fwdActions = result.planForwardActions
-      if (isVillagerAligned(ctx.myRole) && fwdActions) {
-        if (process.env.FENRIR_DEBUG) {
-          const fwdGroups = parsePlanIndices(fwdActions)
-          const egActions = result.planEndgameActions ?? []
-          const egGroups = parsePlanIndices(egActions)
-          const fmtGroup = (g: PlanDayGroup) => g.targets.map(t =>
-            t.type === 'seat' ? `seat${t.seat}` : t.type === 'role' ? t.role : 'grayran'
-          ).join(',')
-          process.stderr.write(
-            `[plan] seat${ctx.mySeat}(${ctx.myRole}) day${ctx.day} alive=${ctx.alivePlayers.length}` +
-            ` fwd=[${fwdActions.join(',')}]→[${fwdGroups.map(fmtGroup).join('|')}]` +
-            ` eg=[${egActions.join(',')}]→[${egGroups.map(fmtGroup).join('|')}]` +
-            ` plans=[${(ctx as any).executionPlans?.map((p: any) => p.targets?.join(','))?.join('|') ?? 'none'}]\n`
-          )
-        }
-        const voteSeat = planToVote(fwdActions, ctx, result.planEndgameActions)
-        if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
-      }
-      const targets = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
-      return targets[Math.floor(ctx.rng.next() * targets.length)]
+      return this.strategyVote(ctx, this.getStrategyResult(ctx))
     }
 
     const result = this.infer(ctx)
