@@ -242,3 +242,7 @@ rmdir .committing
 ```
 
 **注意**: ロック取得後に失敗した場合も、必ず `rmdir .committing` を実行すること。
+
+## Constraints
+
+- ユーザーはPythonが嫌い。Pythonは使わない。
