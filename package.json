@@ -17,7 +17,7 @@
     "bench:retar:wasm": "node --experimental-strip-types src/retar/bench-wasm.ts",
     "bench:hati": "node --experimental-strip-types src/hati/bench.ts",
     "lupa": "node --experimental-strip-types src/lupa/cli.ts",
-    "verify:retar": "node --experimental-strip-types src/lupa/verify.ts",
+    "verify:retar": "node --experimental-strip-types src/verify/retar-verify.ts",
     "verify:hati": "node --experimental-strip-types src/hati/verify.ts",
     "train": "node --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/cli.ts",
     "play": "node --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/play.ts",

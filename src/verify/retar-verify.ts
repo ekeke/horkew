@@ -16,9 +16,10 @@
  *   npm run verify:retar -- --seed 114                      # 単一seed
  *   npm run verify:retar -- --seeds 100-200                 # seed範囲
  *   npm run verify:retar -- --scenario full-15p --seed 114  # 組み合わせ
+ *   npm run verify:retar -- --file src/retar/scenarios/allstar1.howl  # howlファイル直接検証
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { deepStrictEqual } from 'node:assert'
 import { join } from 'node:path'
 import type { SystemRole, VillageStatus } from '../types/index.ts'
@@ -714,6 +715,7 @@ const configs: VerifyGameConfig[] = [
 ]
 
 type Args = {
+  file: string | null
   outdir: string | null
   scenario: string | null
   seed: number | null
@@ -732,6 +734,7 @@ function showHelp(): never {
 Usage: npm run verify:retar [-- options]
 
 Options:
+  --file <path>      .howlファイルを直接読み込みTS↔WASM比較
   --scenario <name>   指定シナリオのみ実行
   --seed <n>          単一seedで実行
   --seeds <from>-<to> seed範囲を指定 (例: 100-200)
@@ -757,10 +760,13 @@ Examples:
 function parseArgs(): Args {
   const args = process.argv.slice(2)
   if (args.includes('--help') || args.includes('-h')) showHelp()
-  const result: Args = { outdir: null, scenario: null, seed: null, seeds: null, quiet: false, prior: false, priorEquiv: false, tightness: false, compat: false }
+  const result: Args = { file: null, outdir: null, scenario: null, seed: null, seeds: null, quiet: false, prior: false, priorEquiv: false, tightness: false, compat: false }
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
+      case '--file':
+        result.file = args[++i]
+        break
       case '--outdir':
         result.outdir = args[++i]
         break
@@ -814,8 +820,125 @@ function renderProgress(
   )
 }
 
+function verifyHowlFile(filePath: string): void {
+  if (!wasmAnalyze) {
+    console.error('--file: WASM版が利用できません。npm run build:wasm:node でビルドしてください。')
+    process.exit(1)
+  }
+
+  const rawText = readFileSync(filePath, 'utf-8')
+  const fmMatch = rawText.match(/^(---\n[\s\S]*?\n---\n)/)
+  const frontmatter = fmMatch ? fmMatch[1] : ''
+  const bodyText = fmMatch ? rawText.slice(fmMatch[1].length) : rawText
+  const bodyLines = bodyText.split('\n')
+
+  // integration test と同じ @expect パターンで checkpoint を検出
+  const expectPattern = /^#\s*@expect(?:-skip)?\s+(.+)$/
+  const checkpointLineNumbers: number[] = []
+  let lastWasExpect = false
+  for (let i = 0; i < bodyLines.length; i++) {
+    const line = bodyLines[i].trim()
+    if (expectPattern.test(line)) {
+      if (!lastWasExpect) checkpointLineNumbers.push(i)
+      lastWasExpect = true
+    } else {
+      lastWasExpect = false
+    }
+  }
+
+  // checkpoint がなければファイル末尾全体を1つの checkpoint とする
+  if (checkpointLineNumbers.length === 0) {
+    checkpointLineNumbers.push(bodyLines.length)
+  }
+
+  const defaultFileOptions: AnalyzeOptions = {
+    seerClaimingDueDate: 2,
+    mediumClaimingDueDate: 2,
+    bodyguardClaimingDueDate: 99,
+    masonClaimingDueDate: 2,
+    nekomataClaimingDueDate: 99,
+    dayCountFrom: 1,
+    hasFirstGhost: false,
+    assumptions: new Map(),
+    wolfPairDenyals: [],
+    hocusPocus: new Map(),
+    id: 0,
+    batches: 1,
+    batch: 0,
+  }
+
+  let failures = 0
+
+  for (const cpLine of checkpointLineNumbers) {
+    const partialBody = bodyLines.slice(0, cpLine).join('\n')
+    const partialText = frontmatter + partialBody
+
+    const { meta, statements } = parse(partialText)
+    const unknowns = statements.filter(s => s.type === 'unknown')
+    if (unknowns.length > 0) {
+      console.log(`  checkpoint line ${cpLine + 1}: skipped (unknown statements: ${unknowns.map((s: any) => s.raw).join(', ')})`)
+      continue
+    }
+
+    const { vs, setup } = buildVillageStatus(statements, meta)
+    const options = {
+      ...defaultFileOptions,
+      ...(meta.options || {}),
+      assumptions: meta.options?.assumptions
+        ? new Map(Object.entries(meta.options.assumptions))
+        : defaultFileOptions.assumptions,
+      hocusPocus: meta.options?.hocusPocus
+        ? new Map(Object.entries(meta.options.hocusPocus))
+        : defaultFileOptions.hocusPocus,
+    }
+
+    // JS版
+    const retar = new VillageRetar(vs, setup, options)
+    const jsResult = retar.analyze()
+
+    // WASM版
+    const vsJson = JSON.stringify(serializeVillageStatus(vs))
+    const setupJson = JSON.stringify(Object.fromEntries(setup))
+    const optJson = JSON.stringify(serializeOptions(options))
+    let wasmRaw: AnalyzeResult
+    try {
+      wasmRaw = parseWasmResult(wasmAnalyze!(vsJson, setupJson, optJson))
+    } catch (e: any) {
+      console.error(`  checkpoint line ${cpLine + 1}: WASM panic — ${e.message}`)
+      failures++
+      continue
+    }
+
+    try {
+      deepStrictEqual({ ...wasmRaw, elapsed: undefined }, { ...jsResult, elapsed: undefined })
+      console.log(`  checkpoint line ${cpLine + 1}: OK`)
+    } catch {
+      const tsDump = collectTsDump(vs, setup, options)
+      const rsDump = collectRsDump(vsJson, setupJson, optJson)
+      const diffSummary = formatCompatDiff(jsResult, wasmRaw, tsDump, rsDump)
+      console.error(`  checkpoint line ${cpLine + 1}: MISMATCH`)
+      console.error(diffSummary)
+      failures++
+    }
+  }
+
+  const total = checkpointLineNumbers.length
+  if (failures === 0) {
+    console.log(`\n${filePath}: 全 ${total} checkpoint 通過`)
+  } else {
+    console.error(`\n${filePath}: ${total} 中 ${failures} checkpoint 失敗`)
+    process.exit(1)
+  }
+}
+
 async function main() {
-  const { outdir, scenario, seed: singleSeed, seeds: seedRange, quiet, prior, priorEquiv, tightness, compat } = parseArgs()
+  const { file, outdir, scenario, seed: singleSeed, seeds: seedRange, quiet, prior, priorEquiv, tightness, compat } = parseArgs()
+
+  if (file) {
+    verifyHowlFile(file)
+    return
+  }
+
   if (compat && !wasmAnalyze) {
     console.error('--compat: WASM版が利用できません。npm run build:wasm:node でビルドしてください。')
     process.exit(1)
