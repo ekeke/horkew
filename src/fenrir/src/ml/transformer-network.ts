@@ -306,18 +306,18 @@ export class TransformerNetwork {
 
       // Grammar mask (applied to local copy for sampling only)
       //
-      // | prev     | allowed next                          |
-      // |----------|---------------------------------------|
-      // | START    | seat, role, grayran, STOP             |
-      // | seat     | seat (no dup), NEXT, STOP             |
-      // | role     | same role, NEXT, STOP                 |
-      // | grayran  | NEXT, STOP                            |
-      // | NEXT     | seat, role, grayran                   |
-      // | STOP     | STOP                                  |
+      // | prev        | allowed next                      |
+      // |-------------|-----------------------------------|
+      // | START       | seat, role, grayran, STOP         |
+      // | seat        | seat (no dup), NEXT, STOP         |
+      // | role/grayran| NEXT, STOP                        |
+      // | NEXT        | seat, role, grayran               |
+      // | STOP        | STOP                              |
       {
         const GRAYRAN_IDX = PLAN_VOCAB.GRAYRAN
         const ROLE_START = PLAN_VOCAB.ROLE_START
         const ROLE_END = PLAN_VOCAB.ROLE_END
+        const isRoleOrGrayran = (t: number) => (t >= ROLE_START && t < ROLE_END) || t === GRAYRAN_IDX
 
         if (seenStop) {
           // After STOP: only STOP
@@ -333,14 +333,8 @@ export class TransformerNetwork {
           for (let t = ROLE_START; t < ROLE_END; t++) stepLogits[t] = -Infinity
           stepLogits[GRAYRAN_IDX] = -Infinity
           for (const used of groupUsed) stepLogits[used] = -Infinity
-        } else if (prevAction >= ROLE_START && prevAction < ROLE_END) {
-          // After role: same role, NEXT, STOP
-          for (let t = 0; t < vocabSize; t++) {
-            if (t === prevAction || t === NEXT_IDX || t === STOP_IDX) continue
-            stepLogits[t] = -Infinity
-          }
-        } else if (prevAction === GRAYRAN_IDX) {
-          // After grayran: NEXT, STOP only
+        } else if (isRoleOrGrayran(prevAction)) {
+          // After role or grayran: NEXT, STOP only (single-token group)
           for (let t = 0; t < vocabSize; t++) {
             if (t === NEXT_IDX || t === STOP_IDX) continue
             stepLogits[t] = -Infinity
