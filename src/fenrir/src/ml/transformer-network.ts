@@ -305,23 +305,46 @@ export class TransformerNetwork {
       allLogits.set(stepLogits, step * vocabSize)
 
       // Grammar mask (applied to local copy for sampling only)
-      if (seenStop) {
-        // After STOP: only STOP allowed
-        for (let t = 0; t < vocabSize; t++) {
-          if (t !== STOP_IDX) stepLogits[t] = -Infinity
-        }
-      } else {
-        // Step 0 or after NEXT: disallow NEXT (consecutive NEXT is meaningless)
-        if (step === 0 || prevAction === NEXT_IDX) {
+      //
+      // | prev     | allowed next                          |
+      // |----------|---------------------------------------|
+      // | START    | seat, role, grayran, STOP             |
+      // | seat     | seat (no dup), NEXT, STOP             |
+      // | role     | same role, NEXT, STOP                 |
+      // | grayran  | NEXT, STOP                            |
+      // | NEXT     | seat, role, grayran                   |
+      // | STOP     | STOP                                  |
+      {
+        const GRAYRAN_IDX = PLAN_VOCAB.GRAYRAN
+        const ROLE_START = PLAN_VOCAB.ROLE_START
+        const ROLE_END = PLAN_VOCAB.ROLE_END
+
+        if (seenStop) {
+          // After STOP: only STOP
+          for (let t = 0; t < vocabSize; t++) {
+            if (t !== STOP_IDX) stepLogits[t] = -Infinity
+          }
+        } else if (step === 0 || prevAction === NEXT_IDX) {
+          // START or after NEXT: seat, role, grayran only
           stepLogits[NEXT_IDX] = -Infinity
-        }
-        // After NEXT: disallow STOP (NEXT must be followed by a target)
-        if (prevAction === NEXT_IDX) {
-          stepLogits[STOP_IDX] = -Infinity
-        }
-        // Disallow duplicates within group
-        for (const used of groupUsed) {
-          stepLogits[used] = -Infinity
+          stepLogits[STOP_IDX] = step === 0 ? stepLogits[STOP_IDX] : -Infinity  // START allows STOP, NEXT does not
+        } else if (prevAction >= 0 && prevAction < PLAN_VOCAB.SEAT_END) {
+          // After seat: seat (no dup), NEXT, STOP
+          for (let t = ROLE_START; t < ROLE_END; t++) stepLogits[t] = -Infinity
+          stepLogits[GRAYRAN_IDX] = -Infinity
+          for (const used of groupUsed) stepLogits[used] = -Infinity
+        } else if (prevAction >= ROLE_START && prevAction < ROLE_END) {
+          // After role: same role, NEXT, STOP
+          for (let t = 0; t < vocabSize; t++) {
+            if (t === prevAction || t === NEXT_IDX || t === STOP_IDX) continue
+            stepLogits[t] = -Infinity
+          }
+        } else if (prevAction === GRAYRAN_IDX) {
+          // After grayran: NEXT, STOP only
+          for (let t = 0; t < vocabSize; t++) {
+            if (t === NEXT_IDX || t === STOP_IDX) continue
+            stepLogits[t] = -Infinity
+          }
         }
       }
 
