@@ -1,0 +1,29 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "dictionaries": ["custom-dictionary-workspace", "css", "fonts", "git", "node", "npm", "rust", "svelte", "typescript"],
+  "dictionaryDefinitions": [
+    {
+      "name": "custom-dictionary-workspace",
+      "path": ".cspell/custom-dictionary-workspace.txt",
+      "addWords": true
+    }
+  ],
+  "ignorePaths": [
+    "node_modules",
+    "dist",
+    "demo/dist",
+    "package-lock.json",
+    ".git",
+    "*.wasm",
+    "*.howl",
+    "data/",
+    "tmp/",
+    "checkpoints/",
+    ".claude/worktrees/",
+    "src/retar-rs/target/",
+    "src/retar-rs/pkg/",
+    "src/retar-rs/pkg-web/"
+  ],
+  "useGitignore": true
+}
