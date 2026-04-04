@@ -44,7 +44,7 @@
 3. ゲーム生成:
    - mlRoles=['mason'], mlMaxSeats=1
    - Seed Bank (Day 3 スナップショット) からリプレイ
-   - minimal-adapter が mason の plan → executionPlans に注入
+   - strategy-only-adapter が mason の plan → executionPlans に注入
    - ヒューリスティック村人が executionPlans に従って投票
 4. PPO update: strategy action head のみ (plan_forward, plan_endgame, predict)
 5. eval: masonAsIndividual=true (team strategy をバイパス)
@@ -53,15 +53,15 @@
 ### mason の plan が村全体に伝わる仕組み
 
 ```
-mason の FenrirStrategy
+mason の NeuralAgent
   → decideVote (strategy-only)
     → getStrategyResult: plan_forward/plan_endgame logits を推論 (1日1回キャッシュ)
     → recordStrategy: trajectory に plan token + predict を記録
     → planToVote: plan logits → 投票先 seat に解決
 
-minimal-adapter の onVote
+strategy-only-adapter の onVote
   → mason 生存時: mason の decideProposal → execute_order → executionPlans に注入
-  → mason 死亡後: cachedPlanGroups[index++] → resolvePlanGroupSimple → executionPlans に注入
+  → mason 死亡後: cachedPlanGroups[index++] → resolvePlanGroup → executionPlans に注入
   → 各プレイヤーの decideVote: ctx.executionPlans を参照してヒューリスティックが従う
 ```
 
