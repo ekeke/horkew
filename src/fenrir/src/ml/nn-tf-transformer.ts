@@ -208,6 +208,11 @@ export class TfTransformerNetwork {
   private planInitEgW: tf.Variable
   private planInitEgB: tf.Variable
 
+  // Plan observation embeddings (Strategy Encoder input)
+  private planVocabEmbed: tf.Variable       // [22, dModel] vocab index → embedding
+  private forwardPosEmbed: tf.Variable      // [8, dModel] position embeddings
+  private endgamePosEmbed: tf.Variable      // [4, dModel] position embeddings
+
   // Pointer mechanism
   private pointerQueryW: tf.Variable
   private pointerQueryB: tf.Variable
@@ -352,6 +357,18 @@ export class TfTransformerNetwork {
       this.planInitFwdW, this.planInitFwdB,
       this.planInitEgW, this.planInitEgB,
     )
+
+    // Plan observation embeddings (vocab + position → Strategy Encoder)
+    this.planVocabEmbed = tf.variable(
+      tf.randomNormal([vocabSize, dm], 0, 0.02), true, `${prefix}plan_vocab_emb`,
+    )
+    this.forwardPosEmbed = tf.variable(
+      tf.randomNormal([NUM_PLAN_FORWARD, dm], 0, 0.02), true, `${prefix}fwd_pos_emb`,
+    )
+    this.endgamePosEmbed = tf.variable(
+      tf.randomNormal([NUM_PLAN_ENDGAME, dm], 0, 0.02), true, `${prefix}eg_pos_emb`,
+    )
+    this.allVariables.push(this.planVocabEmbed, this.forwardPosEmbed, this.endgamePosEmbed)
 
     // Pointer mechanism
     this.pointerQueryW = this.makeVar([dm, dm], dm, `${prefix}ptr_q_w`)
@@ -672,7 +689,7 @@ export class TfTransformerNetwork {
   }
 
   /**
-   * Trunk forward: obs → Seat Transformer → Strategy Layer (20 tokens) → outputs + pointer keys
+   * Trunk forward: obs → Seat Transformer → Strategy Layer (32 tokens) → outputs + pointer keys
    */
   private forwardTrunk(obsTensor: tf.Tensor2D): {
     clsOut: tf.Tensor2D
@@ -688,12 +705,29 @@ export class TfTransformerNetwork {
       seatInput, this.seatLayers, this.seatFinalLnScale, this.seatFinalLnBias,
     )  // [batch, 20, dm]
 
-    // Stage 2: Strategy Layer (20 tokens, no plan embeddings)
-    const stratEncoded = this.forwardEncoder(
-      seatEncoded, this.stratLayers, this.stratFinalLnScale, this.stratFinalLnBias,
-    )  // [batch, 20, dm]
+    // Build plan token embeddings from raw indices in observation
+    const rawPlanStart = NEW_SIGNALS_START + NEW_SIGNALS_SIZE
+    const planRaw = obsTensor.slice([0, rawPlanStart], [-1, NUM_PLAN_FORWARD + NUM_PLAN_ENDGAME])  // [batch, 12]
+    const planInt = planRaw.round().clipByValue(0, (this.tConfig.planVocabSize ?? 22) - 1).cast('int32')
+    const fwdIndices = planInt.slice([0, 0], [-1, NUM_PLAN_FORWARD])  // [batch, 8]
+    const egIndices = planInt.slice([0, NUM_PLAN_FORWARD], [-1, NUM_PLAN_ENDGAME])  // [batch, 4]
 
-    // Extract outputs
+    // Lookup vocab embeddings + add position embeddings
+    const fwdVocab = tf.gather(this.planVocabEmbed, fwdIndices) as tf.Tensor3D  // [batch, 8, dm]
+    const fwdPos = this.forwardPosEmbed.expandDims(0).tile([batch, 1, 1])  // [batch, 8, dm]
+    const fwdTokens = tf.add(fwdVocab, fwdPos)  // [batch, 8, dm]
+
+    const egVocab = tf.gather(this.planVocabEmbed, egIndices) as tf.Tensor3D  // [batch, 4, dm]
+    const egPos = this.endgamePosEmbed.expandDims(0).tile([batch, 1, 1])  // [batch, 4, dm]
+    const egTokens = tf.add(egVocab, egPos)  // [batch, 4, dm]
+
+    // Stage 2: Strategy Layer (32 tokens: 20 seat + 8 fwd plan + 4 eg plan)
+    const stratInput = tf.concat([seatEncoded, fwdTokens, egTokens], 1) as tf.Tensor3D  // [batch, 32, dm]
+    const stratEncoded = this.forwardEncoder(
+      stratInput, this.stratLayers, this.stratFinalLnScale, this.stratFinalLnBias,
+    )  // [batch, 32, dm]
+
+    // Extract outputs (from first 20 tokens — seat encoder positions)
     const clsOut = stratEncoded.slice([0, 0, 0], [batch, 1, this.dm]).reshape([batch, this.dm]) as tf.Tensor2D
     const seatOutputs = stratEncoded.slice([0, 1, 0], [batch, SEATS, this.dm]) as tf.Tensor3D
 
@@ -1433,6 +1467,10 @@ export class TfTransformerNetwork {
     weights.set('plan_init_eg_w', this.planInitEgW.dataSync() as Float32Array)
     weights.set('plan_init_eg_b', this.planInitEgB.dataSync() as Float32Array)
 
+    weights.set('plan_vocab_embed', this.planVocabEmbed.dataSync() as Float32Array)
+    weights.set('forward_pos_embed', this.forwardPosEmbed.dataSync() as Float32Array)
+    weights.set('endgame_pos_embed', this.endgamePosEmbed.dataSync() as Float32Array)
+
     weights.set('pointer_query_w', this.pointerQueryW.dataSync() as Float32Array)
     weights.set('pointer_query_b', this.pointerQueryB.dataSync() as Float32Array)
     weights.set('pointer_key_w', this.pointerKeyW.dataSync() as Float32Array)
@@ -1518,6 +1556,13 @@ export class TfTransformerNetwork {
         const w = weights.get(key)
         if (w) variable.assign(tf.tensor(w, variable.shape))
       }
+
+      const pve = weights.get('plan_vocab_embed')
+      if (pve) this.planVocabEmbed.assign(tf.tensor(pve, this.planVocabEmbed.shape))
+      const fpe = weights.get('forward_pos_embed')
+      if (fpe) this.forwardPosEmbed.assign(tf.tensor(fpe, this.forwardPosEmbed.shape))
+      const epe = weights.get('endgame_pos_embed')
+      if (epe) this.endgamePosEmbed.assign(tf.tensor(epe, this.endgamePosEmbed.shape))
 
       this.pointerQueryW.assign(tf.tensor(weights.get('pointer_query_w')!, this.pointerQueryW.shape))
       this.pointerQueryB.assign(tf.tensor(weights.get('pointer_query_b')!, this.pointerQueryB.shape))
