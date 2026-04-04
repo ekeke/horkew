@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { parsePlanIndices, resolvePlanGroupSimple, PLAN_VOCAB, type PlanDayGroup } from './rule-action.ts'
+import { parsePlanIndices, PLAN_VOCAB, type PlanDayGroup } from './plan/plan-vocab.ts'
+import { resolvePlanGroup } from './plan/plan-resolve.ts'
 
 describe('parsePlanIndices', () => {
   it('single group with seats', () => {
@@ -45,10 +46,10 @@ describe('parsePlanIndices', () => {
   })
 })
 
-describe('resolvePlanGroupSimple', () => {
+describe('resolvePlanGroup', () => {
   it('resolves alive seat', () => {
     const group: PlanDayGroup = { targets: [{ type: 'seat', seat: 3 }] }
-    assert.equal(resolvePlanGroupSimple(group, [1, 3, 5, 7]), 3)
+    assert.equal(resolvePlanGroup(group, [1, 3, 5, 7]), 3)
   })
 
   it('skips dead seat, picks next', () => {
@@ -57,12 +58,12 @@ describe('resolvePlanGroupSimple', () => {
       { type: 'seat', seat: 7 },
     ] }
     // seat3 is dead (not in aliveSeats)
-    assert.equal(resolvePlanGroupSimple(group, [1, 5, 7]), 7)
+    assert.equal(resolvePlanGroup(group, [1, 5, 7]), 7)
   })
 
   it('grayran picks first alive (no events)', () => {
     const group: PlanDayGroup = { targets: [{ type: 'grayran' }] }
-    assert.equal(resolvePlanGroupSimple(group, [5, 9, 12]), 5)
+    assert.equal(resolvePlanGroup(group, [5, 9, 12]), 5)
   })
 
   it('grayran excludes CO claimers when events provided', () => {
@@ -72,7 +73,7 @@ describe('resolvePlanGroupSimple', () => {
       { type: 'medium_claim', actor: 9 },
     ]
     // seat 5, 9 are CO → gray = [12]
-    assert.equal(resolvePlanGroupSimple(group, [5, 9, 12], events), 12)
+    assert.equal(resolvePlanGroup(group, [5, 9, 12], events), 12)
   })
 
   it('grayran falls back to all alive when everyone has CO', () => {
@@ -81,7 +82,7 @@ describe('resolvePlanGroupSimple', () => {
       { type: 'seer_claim', actor: 5 },
       { type: 'medium_claim', actor: 9 },
     ]
-    assert.equal(resolvePlanGroupSimple(group, [5, 9], events), 5)
+    assert.equal(resolvePlanGroup(group, [5, 9], events), 5)
   })
 
   it('role resolves to CO claimer', () => {
@@ -89,7 +90,7 @@ describe('resolvePlanGroupSimple', () => {
     const events = [
       { type: 'seer_claim', actor: 7 },
     ]
-    assert.equal(resolvePlanGroupSimple(group, [3, 7, 10], events), 7)
+    assert.equal(resolvePlanGroup(group, [3, 7, 10], events), 7)
   })
 
   it('role skips dead CO claimer', () => {
@@ -98,22 +99,22 @@ describe('resolvePlanGroupSimple', () => {
       { type: 'seer_claim', actor: 7 },
     ]
     // seat 7 is dead
-    assert.equal(resolvePlanGroupSimple(group, [3, 10], events), null)
+    assert.equal(resolvePlanGroup(group, [3, 10], events), null)
   })
 
   it('role returns null without events', () => {
     const group: PlanDayGroup = { targets: [{ type: 'role', role: 'seer' as any }] }
-    assert.equal(resolvePlanGroupSimple(group, [3, 7, 10]), null)
+    assert.equal(resolvePlanGroup(group, [3, 7, 10]), null)
   })
 
   it('returns null when no target resolves', () => {
     const group: PlanDayGroup = { targets: [{ type: 'seat', seat: 3 }] }
-    assert.equal(resolvePlanGroupSimple(group, [1, 5, 7]), null)
+    assert.equal(resolvePlanGroup(group, [1, 5, 7]), null)
   })
 
   it('returns null for empty targets', () => {
     const group: PlanDayGroup = { targets: [] }
-    assert.equal(resolvePlanGroupSimple(group, [1, 5, 7]), null)
+    assert.equal(resolvePlanGroup(group, [1, 5, 7]), null)
   })
 })
 
@@ -138,11 +139,11 @@ describe('plan day increment (mason死亡後のplan継続)', () => {
         // ここではキャッシュ更新のみ検証
         cachedGroups = groups
         cachedIndex = day + 1  // 今日のグループの次から
-        results.push(day < groups.length ? resolvePlanGroupSimple(groups[day], alive) : null)
+        results.push(day < groups.length ? resolvePlanGroup(groups[day], alive) : null)
       } else if (cachedGroups && cachedIndex < cachedGroups.length) {
         // mason死亡: キャッシュの次グループ
         const group = cachedGroups[cachedIndex++]
-        results.push(resolvePlanGroupSimple(group, alive))
+        results.push(resolvePlanGroup(group, alive))
       } else {
         // キャッシュ切れ
         results.push(null)

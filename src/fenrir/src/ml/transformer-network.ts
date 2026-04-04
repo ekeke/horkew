@@ -26,7 +26,7 @@ import type { NetworkConfig, ForwardResult, TransformerNetworkConfig } from './n
 import { DenseLayer, gaussianRandom } from './nn.ts'
 import { TransformerEncoder, linearBatchedPublic } from './transformer.ts'
 import { tokenize, SEATS, NUM_ROLE_TOKENS, type ObservationMode } from '../observation.ts'
-import { PLAN_VOCAB } from '../rule-action.ts'
+import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
 
 export class TransformerNetwork {
   readonly config: NetworkConfig

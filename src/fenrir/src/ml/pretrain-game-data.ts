@@ -6,12 +6,12 @@
  */
 
 import type { SystemRole } from '../../../types/index.ts'
-import type { Strategy, DecisionContext } from '../strategy.ts'
+import type { Agent, DecisionContext } from '../agents/agent.ts'
 import { runGame } from '../../../lupa/engine.ts'
-import { minimalAdapter } from '../lupaAdapters/minimal-adapter.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../heuristic.ts'
+import { strategyOnlyAdapter } from '../adapters/strategy-only-adapter.ts'
+import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents/rule-based-agent.ts'
 import { encodeObservation, SEATS, NUM_ROLES, ROLE_INDEX } from '../observation.ts'
-import { PLAN_VOCAB } from '../rule-action.ts'
+import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
 import { terminalReward, DEFAULT_REWARD_CONFIG } from '../reward.ts'
 import { resolveRules } from '../../../howl/ruleset.ts'
 import type { TrainingConfig } from '../training.ts'
@@ -90,8 +90,8 @@ export async function collectGameData(
   // → 実際には minimalAdapter の onVote 内で strategy.decideVote が呼ばれる
   //   ので、記録付きの wrapper strategy を使う
 
-  class RecordingStrategy implements Strategy {
-    private inner = new HeuristicStrategy()
+  class RecordingStrategy implements Agent {
+    private inner = new RuleBasedAgent()
 
     decideNightAction(ctx: DecisionContext) { return this.inner.decideNightAction(ctx) }
     decideDayClaim(ctx: DecisionContext) { return this.inner.decideDayClaim(ctx) }
@@ -122,11 +122,11 @@ export async function collectGameData(
 
   const recordingStrategy = new RecordingStrategy()
 
-  const handlers = minimalAdapter({
-    strategies: new Map<number, Strategy>(),
-    defaultStrategy: recordingStrategy,
-    wolfTeamStrategy: new WolfTeamHeuristic(),
-    masonTeamStrategy: new MasonTeamHeuristic(),
+  const handlers = strategyOnlyAdapter({
+    agents: new Map<number, Agent>(),
+    defaultAgent: recordingStrategy,
+    wolfTeamAgent: new WolfTeamRuleAgent(),
+    masonTeamAgent: new MasonTeamRuleAgent(),
     onRolesAssigned: () => {},
     seed,
     enableRetar: true,

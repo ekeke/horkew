@@ -5,14 +5,14 @@
  * パターン: ローラー(30%), 決め打ち(20%), 吊り先指定(20%), グレラン(30%)
  */
 
-import type { DecisionContext, ExecutionPlan } from '../strategy.ts'
+import type { DecisionContext, ExecutionPlan } from '../agents/agent.ts'
 import type { SystemRole } from '../../../types/index.ts'
 import type { GameEvent } from '../../../lupa/types.ts'
 import { resolveRules } from '../../../howl/ruleset.ts'
 import { Rng } from '../../../lupa/random.ts'
 import { encodeObservation, SEATS, CO_ROLES } from '../observation.ts'
 import { maskVote } from '../action.ts'
-import { PLAN_VOCAB } from '../rule-action.ts'
+import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
 
 export type PlanTrainingSample = {
   observation: Float32Array

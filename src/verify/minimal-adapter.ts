@@ -8,7 +8,7 @@
 
 import type { SystemRole, ResolvedRules } from '../types/index.ts'
 import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../lupa/types.ts'
-import type { DecisionContext, TeamDecisionContext, Strategy, TeamStrategy, WolfNightAction } from '../fenrir/src/strategy.ts'
+import type { DecisionContext, TeamDecisionContext, Agent as Strategy, TeamAgent as TeamStrategy, WolfNightAction } from '../fenrir/src/agents/agent.ts'
 import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../lupa/handlers.ts'
 import { buildPlayerView } from '../lupa/player-view.ts'
 import { alivePlayers } from '../lupa/roles.ts'
@@ -230,7 +230,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       const votes = new Map<number, number>()
 
       // 共有者の提案を executionPlans に注入（指揮者選出をスキップ）
-      const executionPlans: import('../fenrir/src/strategy.ts').ExecutionPlan[] = []
+      const executionPlans: import('../fenrir/src/agents/agent.ts').ExecutionPlan[] = []
       const aliveMasons = alivePlayers(state).filter(p => p.role === 'mason')
       if (aliveMasons.length > 0) {
         const mason = aliveMasons[0]

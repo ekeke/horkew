@@ -9,8 +9,8 @@ import type { SystemRole, ResolvedRules } from '../../../types/index.ts'
 import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../../../lupa/types.ts'
 import type {
   DecisionContext, TeamDecisionContext,
-  Strategy, TeamStrategy, WolfNightAction,
-} from '../strategy.ts'
+  Agent, TeamAgent, WolfNightAction,
+} from '../agents/agent.ts'
 import type { SignalRecord } from '../communication.ts'
 import type { Proposal } from '../leadership.ts'
 import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../../../lupa/handlers.ts'
@@ -19,7 +19,7 @@ import { alivePlayers } from '../../../lupa/roles.ts'
 import { detectCommander } from '../leadership.ts'
 import type { FenrirExtEvent } from '../events.ts'
 import { Rng } from '../../../lupa/random.ts'
-import { forceTrueRoleCO, isVillagePowerRole } from '../heuristic.ts'
+import { forceTrueRoleCO, isVillagePowerRole } from '../agents/rule-based-agent.ts'
 import {
   analyzePerPlayer as retarAnalyzePerPlayer,
   retarResultToPossibilities,
@@ -29,10 +29,10 @@ import {
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
 
 export type FullAdapterConfig = {
-  strategies?: Map<number, Strategy>
-  defaultStrategy: Strategy
-  wolfTeamStrategy?: TeamStrategy
-  masonTeamStrategy?: TeamStrategy
+  agents?: Map<number, Agent>
+  defaultAgent: Agent
+  wolfTeamAgent?: TeamAgent
+  masonTeamAgent?: TeamAgent
   enableRetar?: boolean
   /** 詰み探索を有効化（pretrain用、デフォルトfalse） */
   enableTsumi?: boolean
@@ -61,8 +61,8 @@ export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers<Fenr
   let lastRetarArtifacts: { vs: any, setup: Map<SystemRole, number>, options: any } | null = null
   const tsumiCache = new Map<number, boolean>()  // day → isTsumi
 
-  function getStrategy(seat: number): Strategy {
-    return adapterConfig.strategies?.get(seat) ?? adapterConfig.defaultStrategy
+  function getStrategy(seat: number): Agent {
+    return adapterConfig.agents?.get(seat) ?? adapterConfig.defaultAgent
   }
 
   function buildCtx(
@@ -118,20 +118,20 @@ export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers<Fenr
 
   function decideForPlayer<T>(
     pctx: PhaseContext<FenrirExtEvent>, player: PlayerState,
-    individualFn: (s: Strategy, c: DecisionContext) => T,
-    teamFn: (s: TeamStrategy, c: TeamDecisionContext) => T,
+    individualFn: (s: Agent, c: DecisionContext) => T,
+    teamFn: (s: TeamAgent, c: TeamDecisionContext) => T,
   ): T {
     const state = pctx.state as GameState
     const view = buildPlayerView(state, player.seat)
     const ctx = buildCtx(pctx, player, view)
 
-    const teamStrategy = player.role === 'werewolf' ? adapterConfig.wolfTeamStrategy
-      : player.role === 'mason' ? adapterConfig.masonTeamStrategy
+    const teamAgent = player.role === 'werewolf' ? adapterConfig.wolfTeamAgent
+      : player.role === 'mason' ? adapterConfig.masonTeamAgent
       : null
 
-    if (teamStrategy) {
+    if (teamAgent) {
       const teamCtx = buildTeamCtx(ctx, state, player.role, player.seat)
-      return teamFn(teamStrategy, teamCtx)
+      return teamFn(teamAgent, teamCtx)
     }
     return individualFn(getStrategy(player.seat), ctx)
   }
@@ -189,14 +189,14 @@ export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers<Fenr
       const actions = new Map<number, NightAction>()
 
       // 狼チーム夜行動
-      if (adapterConfig.wolfTeamStrategy) {
+      if (adapterConfig.wolfTeamAgent) {
         const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
         if (aliveWolves.length > 0) {
           const leader = aliveWolves[0]
           const view = buildPlayerView(state, leader.seat)
           const ctx = buildCtx(pctx, leader, view)
           const teamCtx = buildTeamCtx(ctx, state, 'werewolf')
-          const wolfAction = adapterConfig.wolfTeamStrategy.decideNightAction(teamCtx) as WolfNightAction
+          const wolfAction = adapterConfig.wolfTeamAgent.decideNightAction(teamCtx) as WolfNightAction
 
           for (const wolf of aliveWolves) {
             if (wolf.seat === wolfAction.attacker) {
@@ -343,13 +343,13 @@ export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers<Fenr
           revoteCandidates: vctx.candidates,
         })
 
-        const teamStrategy = player.role === 'werewolf' ? adapterConfig.wolfTeamStrategy
-          : player.role === 'mason' ? adapterConfig.masonTeamStrategy
+        const teamAgent = player.role === 'werewolf' ? adapterConfig.wolfTeamAgent
+          : player.role === 'mason' ? adapterConfig.masonTeamAgent
           : null
 
-        if (teamStrategy) {
+        if (teamAgent) {
           const teamCtx = buildTeamCtx(ctx, state, player.role, player.seat)
-          votes.set(player.seat, teamStrategy.decideVote(teamCtx))
+          votes.set(player.seat, teamAgent.decideVote(teamCtx))
         } else {
           votes.set(player.seat, getStrategy(player.seat).decideVote(ctx))
         }

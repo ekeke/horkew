@@ -2,9 +2,9 @@ import type { EnumSpecies, ResolvedRules } from '../types/index.ts'
 import type { GameState, PlayerState, NightAction, DayClaim } from '../lupa/types.ts'
 import type { Signal, CommunicationAction } from '../fenrir/src/communication.ts'
 import type { Proposal, LeadershipResponse } from '../fenrir/src/leadership.ts'
-import type { Strategy, DecisionContext, TeamStrategy, TeamDecisionContext, WolfNightAction } from '../fenrir/src/strategy.ts'
+import type { Agent as Strategy, DecisionContext, TeamAgent as TeamStrategy, TeamDecisionContext, WolfNightAction } from '../fenrir/src/agents/agent.ts'
 import { alivePlayers, alivePlayersExcept, getMediumResult, isWerewolfAligned } from '../lupa/roles.ts'
-import { forceTrueRoleCO, isVillagePowerRole, isDefensiveCONeeded } from '../fenrir/src/heuristic.ts'
+import { forceTrueRoleCO, isVillagePowerRole, isDefensiveCONeeded } from '../fenrir/src/agents/rule-based-agent.ts'
 import type { Rng } from '../lupa/random.ts'
 
 const CO_PROBABILITY = 0.4

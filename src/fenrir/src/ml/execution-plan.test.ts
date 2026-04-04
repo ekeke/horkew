@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { classifyPlan, formatPlanLabel } from './execution-plan.ts'
-import type { ExecutionPlan } from '../strategy.ts'
+import type { ExecutionPlan } from '../agents/agent.ts'
 import type { SystemRole } from '../../../types/index.ts'
 
 describe('classifyPlan', () => {

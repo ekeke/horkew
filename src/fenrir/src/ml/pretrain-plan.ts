@@ -8,7 +8,7 @@
 import { createTransformerTfNetwork, createTransformerNetwork } from '../training.ts'
 import { generatePlanTokenTrainingBatch } from './execution-plan-data.ts'
 import { saveCheckpoint } from './checkpoint.ts'
-import { PLAN_VOCAB } from '../rule-action.ts'
+import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
 import { parseArgs } from 'node:util'
 
 const { values: args } = parseArgs({

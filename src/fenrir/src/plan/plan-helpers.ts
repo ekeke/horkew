@@ -5,7 +5,7 @@
 import type { NightAction, DayClaim } from '../../../lupa/types.ts'
 import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
-import type { DecisionContext } from '../strategy.ts'
+import type { DecisionContext } from '../agents/agent.ts'
 import type { PlanDayGroup } from './plan-vocab.ts'
 import { parsePlanIndices } from './plan-vocab.ts'
 import { resolvePlanGroup } from './plan-resolve.ts'

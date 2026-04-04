@@ -10,19 +10,21 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
-import type { Strategy } from './strategy.ts'
+import type { Agent } from './agents/agent.ts'
 import { runGame } from '../../lupa/engine.ts'
-import { fullAdapter } from './lupaAdapters/full-adapter.ts'
-import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
+import { fullAdapter } from './adapters/full-adapter.ts'
+import { strategyOnlyAdapter } from './adapters/strategy-only-adapter.ts'
 import { formatHowl } from '../../lupa/format.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
+import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from './agents/rule-based-agent.ts'
 import {
   createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
   createTransformerNetwork, createWolfTeamTransformerNetwork, createMasonTeamTransformerNetwork,
   DEFAULT_TRAINING_CONFIG,
 } from './training.ts'
 import { loadCheckpoint } from './ml/checkpoint.ts'
-import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
+import { NeuralAgent } from './agents/neural-agent.ts'
+import { WolfTeamAgent } from './agents/wolf-collective.ts'
+import { MasonTeamAgent } from './agents/mason-collective.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 
@@ -147,11 +149,11 @@ const rolesConfig = rolesStr
 const roles = new Map(Object.entries(rolesConfig) as [SystemRole, number][])
 const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
 
-const heuristic = new HeuristicStrategy()
+const heuristic = new RuleBasedAgent()
 
 // ネットワークとストラテジー構築
-let wolfTeamStrategy: WolfTeamStrategy | WolfTeamHeuristic | undefined
-let masonTeamStrategy: MasonTeamStrategy | MasonTeamHeuristic | undefined
+let wolfTeamStrategy: WolfTeamAgent | WolfTeamRuleAgent | undefined
+let masonTeamStrategy: MasonTeamAgent | MasonTeamRuleAgent | undefined
 
 if (mldir) {
   // === --mldir モード: グループ別にモデルをロード ===
@@ -192,7 +194,7 @@ if (mldir) {
   }
 
   // 役割が判明してからストラテジーを割り当てる
-  const strategiesMap = new Map<number, Strategy>()
+  const strategiesMap = new Map<number, Agent>()
 
   const onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
     for (const [seat, role] of seatRoles) {
@@ -209,7 +211,7 @@ if (mldir) {
       const groupName = ROLE_TO_GROUP.get(role)
       const net = groupName ? groupNets.get(groupName) : undefined
       if (net) {
-        strategiesMap.set(seat, new FenrirStrategy(net, { explore: false, strategyOnly }))
+        strategiesMap.set(seat, new NeuralAgent(net, { explore: false, strategyOnly }))
       } else {
         strategiesMap.set(seat, heuristic)
       }
@@ -220,22 +222,22 @@ if (mldir) {
   const wolfOverride = modelOverrides.get('werewolf')
   const useWolfMl = wolfOverride ? wolfOverride === 'ml' : defaultModel === 'ml'
   wolfTeamStrategy = useWolfMl && groupNets.has('werewolf')
-    ? new WolfTeamStrategy(wolfTeamNet, { explore: false })
-    : new WolfTeamHeuristic()
+    ? new WolfTeamAgent(wolfTeamNet, { explore: false })
+    : new WolfTeamRuleAgent()
 
   const masonOverride = modelOverrides.get('mason')
   const useMasonMl = masonOverride ? masonOverride === 'ml' : defaultModel === 'ml'
   masonTeamStrategy = useMasonMl && groupNets.has('mason')
-    ? new MasonTeamStrategy(masonTeamNet, { explore: false })
-    : new MasonTeamHeuristic()
+    ? new MasonTeamAgent(masonTeamNet, { explore: false })
+    : new MasonTeamRuleAgent()
 
   const gameSeed = seed ?? Math.floor(Math.random() * 100000)
   const handlers = strategyOnly
-    ? minimalAdapter({
-        strategies: strategiesMap,
-        defaultStrategy: heuristic,
-        wolfTeamStrategy,
-        masonTeamStrategy,
+    ? strategyOnlyAdapter({
+        agents: strategiesMap,
+        defaultAgent: heuristic,
+        wolfTeamAgent: wolfTeamStrategy,
+        masonTeamAgent: masonTeamStrategy,
         onRolesAssigned,
         seed: gameSeed,
         enableRetar: true,
@@ -243,10 +245,10 @@ if (mldir) {
         rules: DEFAULT_TRAINING_CONFIG.rules,
       })
     : fullAdapter({
-        strategies: strategiesMap,
-        defaultStrategy: heuristic,
-        wolfTeamStrategy,
-        masonTeamStrategy,
+        agents: strategiesMap,
+        defaultAgent: heuristic,
+        wolfTeamAgent: wolfTeamStrategy,
+        masonTeamAgent: masonTeamStrategy,
         enableRetar: true,
         onRolesAssigned,
         seed: gameSeed,
@@ -276,13 +278,13 @@ if (mldir) {
     console.error('# No checkpoint — using untrained network')
   }
 
-  const strategies = new Map<number, Strategy>()
+  const strategies = new Map<number, Agent>()
   for (let seat = 1; seat <= totalPlayers; seat++) {
     if (allMl) {
-      strategies.set(seat, new FenrirStrategy(network, { explore: false, strategyOnly }))
+      strategies.set(seat, new NeuralAgent(network, { explore: false, strategyOnly }))
     } else {
       if (seat % 2 === 0) {
-        strategies.set(seat, new FenrirStrategy(network, { explore: false, strategyOnly }))
+        strategies.set(seat, new NeuralAgent(network, { explore: false, strategyOnly }))
       } else {
         strategies.set(seat, heuristic)
       }
@@ -291,8 +293,8 @@ if (mldir) {
 
   const gameSeed = seed ?? Math.floor(Math.random() * 100000)
   const handlers = fullAdapter({
-    strategies,
-    defaultStrategy: heuristic,
+    agents: strategies,
+    defaultAgent: heuristic,
     enableRetar: true,
     seed: gameSeed,
     roles,

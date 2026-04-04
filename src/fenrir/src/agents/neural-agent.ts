@@ -17,7 +17,8 @@ import {
 } from '../action.ts'
 import { endgameVoteReward } from '../reward.ts'
 import { sigmoid } from '../ml/nn.ts'
-import * as ruleAction from '../rule-action.ts'
+import { parsePlanIndices, type PlanDayGroup } from '../plan/plan-vocab.ts'
+import { planToVote, nightAction, dayClaim, communication, proposal, leadershipResponse } from '../plan/plan-helpers.ts'
 import { isVillagerAligned } from '../../../lupa/roles.ts'
 import { RuleBasedAgent } from './rule-based-agent.ts'
 
@@ -182,7 +183,7 @@ export class NeuralAgent implements Agent {
     for (const lp of endgameLogProbs) totalLogProb += lp
 
     const nawa = Math.floor((aliveCount - 1) / 2)
-    const groups = ruleAction.parsePlanIndices(forwardActions).length
+    const groups = parsePlanIndices(forwardActions).length
     const depthReward = nawa > 0 ? Math.max(0, 1 - Math.abs(groups - nawa) / nawa) * PLAN_DEPTH_REWARD_SCALE : 0
 
     this.trajectory.push({
@@ -208,7 +209,7 @@ export class NeuralAgent implements Agent {
 
   decideNightAction(ctx: DecisionContext): NightAction {
     if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideNightAction(ctx)
-    if (this.config.strategyOnly) return ruleAction.nightAction(ctx)
+    if (this.config.strategyOnly) return nightAction(ctx)
 
     const result = this.infer(ctx)
     const logits = result.policies.get('night')!
@@ -222,7 +223,7 @@ export class NeuralAgent implements Agent {
 
   decideDayClaim(ctx: DecisionContext): DayClaim {
     if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideDayClaim(ctx)
-    if (this.config.strategyOnly) return ruleAction.dayClaim(ctx)
+    if (this.config.strategyOnly) return dayClaim(ctx)
 
     const result = this.infer(ctx)
     const claimLogits = result.policies.get('claim')!
@@ -279,10 +280,10 @@ export class NeuralAgent implements Agent {
       const fwdActions = result.planForwardActions
       if (isVillagerAligned(ctx.myRole) && fwdActions) {
         if (process.env.FENRIR_DEBUG) {
-          const fwdGroups = ruleAction.parsePlanIndices(fwdActions)
+          const fwdGroups = parsePlanIndices(fwdActions)
           const egActions = result.planEndgameActions ?? []
-          const egGroups = ruleAction.parsePlanIndices(egActions)
-          const fmtGroup = (g: ruleAction.PlanDayGroup) => g.targets.map(t =>
+          const egGroups = parsePlanIndices(egActions)
+          const fmtGroup = (g: PlanDayGroup) => g.targets.map(t =>
             t.type === 'seat' ? `seat${t.seat}` : t.type === 'role' ? t.role : 'grayran'
           ).join(',')
           process.stderr.write(
@@ -292,7 +293,7 @@ export class NeuralAgent implements Agent {
             ` plans=[${(ctx as any).executionPlans?.map((p: any) => p.targets?.join(','))?.join('|') ?? 'none'}]\n`
           )
         }
-        const voteSeat = ruleAction.planToVote(fwdActions, ctx, result.planEndgameActions)
+        const voteSeat = planToVote(fwdActions, ctx, result.planEndgameActions)
         if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
       }
       const targets = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
@@ -329,7 +330,7 @@ export class NeuralAgent implements Agent {
     if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideCommunication(ctx)
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
-      return ruleAction.communication(result.planForwardActions ?? null, ctx)
+      return communication(result.planForwardActions ?? null, ctx)
     }
 
     const result = this.infer(ctx)
@@ -364,7 +365,7 @@ export class NeuralAgent implements Agent {
 
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
-      return ruleAction.proposal(result.planForwardActions ?? null, ctx)
+      return proposal(result.planForwardActions ?? null, ctx)
     }
 
     const result = this.infer(ctx)
@@ -377,7 +378,7 @@ export class NeuralAgent implements Agent {
 
   decideLeadershipResponse(ctx: DecisionContext, _proposal: Proposal): LeadershipResponse {
     if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideLeadershipResponse?.(ctx, _proposal) ?? { type: 'follow' }
-    if (this.config.strategyOnly) return ruleAction.leadershipResponse()
+    if (this.config.strategyOnly) return leadershipResponse()
 
     const result = this.infer(ctx)
     const logits = result.policies.get('leader')!

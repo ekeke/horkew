@@ -14,6 +14,19 @@
 - 学習ジョブ実行中のコード変更は次回再起動まで反映されないことに注意
 - progress.md と eval_log.jsonl が学習状況の正規ソース。memory よりこちらを信頼する
 
+### コミットの break タグ
+
+学習ジョブの再起動が必要な変更にはコミットメッセージの先頭にタグを付ける:
+
+| タグ | 意味 | 必要なアクション |
+|------|------|-----------------|
+| `[break:all]` | pretrain からやり直し | 新しい checkpoint-base で起動 |
+| `[break:ppo]` | PPO のみやり直し | `--resume` で再開（pretrain はスキップ） |
+| タグなし | 再起動不要 or 学習に無関係 | そのまま |
+
+確認方法: `bash scripts/check-training-breaks.sh`
+起動時の git SHA は `train-orchestrate.sha` に保存される。
+
 ## 学習対象役職
 
 当面の目標では **possessed は学習対象外**。
@@ -31,7 +44,7 @@
 - 集団NN: 1つのNNがチーム全員を同時制御（個人NN + チームNNを統合）
 - 狂信者は狼と通信不可のため集団に入れない（情報隔壁）
 - 狂信者は**専用NN config**（`FANATIC_TRANSFORMER_CONFIG`）: 観測サイズ +168（village_predict 154 + village_trust 14）、Seat 85次元
-- `FanaticStrategy extends FenrirStrategy`: infer時にfrozen村NNをforward → `encodeFanaticObservation()` で注入
+- `FanaticAgent extends NeuralAgent`: infer時にfrozen村NNをforward → `encodeFanaticObservation()` で注入
 - 村NN注入: frozen村NNの出力（predict, trust）をper-seat特徴量として注入（狼集団 + 狂信者）
 
 ## 学習パイプライン
@@ -44,18 +57,19 @@ Pretrain B+D → Phase 0 (Mason Individual) → Phase 1 (Village) → Phase 1' (
 
 ## Strategy-Only モード
 
-`--strategy-only` フラグで有効化。FenrirStrategy の意思決定を2層に分離。詳細は **[TrainingPhases.md](TrainingPhases.md)** の Strategy-Only セクションおよび **[ActionAndReward.md](ActionAndReward.md)** を参照。
+`--strategy-only` フラグで有効化。NeuralAgent の意思決定を2層に分離。詳細は **[TrainingPhases.md](TrainingPhases.md)** の Strategy-Only セクションおよび **[ActionAndReward.md](ActionAndReward.md)** を参照。
 
 ## Adapter 構成
 
-### minimal-adapter (`lupaAdapters/minimal-adapter.ts`)
+### strategy-only-adapter (`adapters/strategy-only-adapter.ts`)
 
 **strategy-only 訓練用**。通信フェーズ（シグナル・指揮者選出・予告・防御CO）を全スキップ。
 
 - onNight + onDayClaims + onVote のみ実装
+- 全永続データは `state.ext` (`FenrirExt`) 経由で管理（ステートレス adapter）
 - **mason plan 注入**: onVote 内で mason 席の `decideProposal` → `executionPlans` に自動注入
-- **mason 死亡後**: plan グループキャッシュから日毎インクリメント（`cachedPlanGroups` + `cachedPlanGroupIndex`）
-- **plan 解決**: `resolvePlanGroupSimple()` で seat/grayran を生存席に解決
+- **mason 死亡後**: `ext.planState` から日毎インクリメント
+- **plan 解決**: `resolvePlanGroup()` で seat/grayran を生存席に解決
 
 ### full-adapter (`lupaAdapters/full-adapter.ts`)
 
@@ -65,16 +79,7 @@ Pretrain B+D → Phase 0 (Mason Individual) → Phase 1 (Village) → Phase 1' (
 ## Seed Bank
 
 事前生成した中盤スナップショットから `resumeGame` でリプレイ。序盤の Retar コストを償却。
-
-| ファイル | 役割 |
-|----------|------|
-| `seed-bank.ts` | スナップショット生成・保存・読み込み・ローテーション |
-| `generate-snapshots.ts` | CLI (`npm run generate-snapshots`) |
-
-```
-tmp/snapshots/day{1,2,3}/village-3/      — 学習用（ローテーション可）
-tmp/snapshots-eval/day{1,2,3}/village-3/  — eval用（固定、Rng(42)で選択）
-```
+`seed-bank.ts` がスナップショット生成・保存・読み込み・ローテーションを担当。
 
 ## オーケストレーター (`npm run orchestrate`)
 
@@ -109,13 +114,24 @@ npm run train:orchestrate -- \
 orchestrate.ts ─── Phase 0/1/1'/2 の学習ループ管理
   ├── parallel.ts ──── worker pool 管理、generateGamesParallel
   │     └── game-worker.ts ──── 1バッチ分のゲーム実行 (worker_threads)
-  │           ├── minimal-adapter.ts ── strategy-only用（mason plan注入含む）
-  │           └── full-adapter.ts ───── 全フェーズ実行用
+  │           ├── adapters/strategy-only-adapter.ts ── strategy-only用（mason plan注入含む）
+  │           └── adapters/full-adapter.ts ───── 全フェーズ実行用
   ├── training.ts ──── NN生成、evaluate()、PPO update (ppoUpdate)
   │     ├── ml/transformer-network.ts ─ Seat Transformer (推論用, Pure JS)
   │     └── ml/nn-tf-transformer.ts ─── TF.js GPU 学習用
-  ├── policy.ts ─────── FenrirStrategy（strategy-only/full 両対応）
-  │     └── rule-action.ts ──── plan token → ゲーム行動変換
+  ├── agents/ ─────── Agent 実装
+  │     ├── agent.ts ──────── Agent/TeamAgent interface, DecisionContext
+  │     ├── neural-agent.ts ── NeuralAgent（strategy-only/full 両対応）
+  │     ├── rule-based-agent.ts ── RuleBasedAgent（ヒューリスティック）
+  │     ├── wolf-collective.ts ── WolfTeamAgent, WolfCollective
+  │     ├── mason-collective.ts ─ MasonTeamAgent, MasonCollective
+  │     ├── fanatic-agent.ts ──── FanaticAgent
+  │     └── team-base.ts ──── TeamStrategyBase, CollectiveStrategyBase
+  ├── plan/ ─────── 処刑プラン管理
+  │     ├── plan-vocab.ts ──── PLAN_VOCAB, parsePlanIndices
+  │     ├── plan-resolve.ts ── resolvePlanGroup()
+  │     └── plan-helpers.ts ── planToVote(), nightAction(), dayClaim() 等
+  ├── ext.ts ──────── FenrirExt 型定義, createFenrirExt()
   ├── observation.ts ── 盤面 → NN入力エンコード（tokenize含む）
   ├── reward.ts ─────── 報酬設計（terminal, intermediate, predict accuracy）
   └── seed-bank.ts ──── スナップショット生成・読み込み

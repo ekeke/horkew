@@ -9,24 +9,26 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
-import type { Strategy } from './strategy.ts'
+import type { Agent } from './agents/agent.ts'
 import { runGame } from '../../lupa/engine.ts'
-import { fullAdapter } from './lupaAdapters/full-adapter.ts'
-import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
+import { fullAdapter } from './adapters/full-adapter.ts'
+import { strategyOnlyAdapter } from './adapters/strategy-only-adapter.ts'
 import { formatHowl } from '../../lupa/format.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
+import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from './agents/rule-based-agent.ts'
 import {
   createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
   createTransformerNetwork, createWolfTeamTransformerNetwork, createMasonTeamTransformerNetwork,
   DEFAULT_TRAINING_CONFIG,
 } from './training.ts'
 import { loadCheckpoint } from './ml/checkpoint.ts'
-import { FenrirStrategy, WolfTeamStrategy, MasonTeamStrategy } from './policy.ts'
+import { NeuralAgent } from './agents/neural-agent.ts'
+import { WolfTeamAgent } from './agents/wolf-collective.ts'
+import { MasonTeamAgent } from './agents/mason-collective.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { decodeObservation } from './decode-observation.ts'
-import { parsePlanIndices, PLAN_VOCAB } from './rule-action.ts'
+import { parsePlanIndices, PLAN_VOCAB } from './plan/plan-vocab.ts'
 import { CO_ROLES } from './observation.ts'
 
 // ============================================================
@@ -163,7 +165,7 @@ mkdirSync(outdir, { recursive: true })
 
 const rolesConfig = DEFAULT_TRAINING_CONFIG.roles
 const roles = new Map(Object.entries(rolesConfig) as [SystemRole, number][])
-const heuristic = new HeuristicStrategy()
+const heuristic = new RuleBasedAgent()
 
 // ネットワーク構築
 const makeNet = (): AnyNetwork => transformer ? createTransformerNetwork() : createNetwork()
@@ -221,11 +223,11 @@ for (let g = 0; g < count; g++) {
   const gameSeed = seed + g
 
   // Strategy 構築（ゲームごとに新規作成して trajectory をリセット）
-  const strategiesMap = new Map<number, Strategy>()
-  const fenrirStrategies = new Map<number, FenrirStrategy>()
+  const strategiesMap = new Map<number, Agent>()
+  const neuralAgents = new Map<number, NeuralAgent>()
 
-  let wolfTeamStrategy: WolfTeamStrategy | WolfTeamHeuristic
-  let masonTeamStrategy: MasonTeamStrategy | MasonTeamHeuristic
+  let wolfTeamStrategy: WolfTeamAgent | WolfTeamRuleAgent
+  let masonTeamStrategy: MasonTeamAgent | MasonTeamRuleAgent
 
   const onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
     for (const [seat, role] of seatRoles) {
@@ -240,15 +242,15 @@ for (let g = 0; g < count; g++) {
       const groupName = ROLE_TO_GROUP.get(role)
       const net = groupName ? groupNets.get(groupName) : undefined
       if (net) {
-        const strat = new FenrirStrategy(net, { explore: false, strategyOnly })
+        const strat = new NeuralAgent(net, { explore: false, strategyOnly })
         strategiesMap.set(seat, strat)
-        fenrirStrategies.set(seat, strat)
+        neuralAgents.set(seat, strat)
       } else {
         // 未学習 NN でもトラジェクトリを取りたい場合
         const fallbackNet = makeNet()
-        const strat = new FenrirStrategy(fallbackNet, { explore: false, strategyOnly })
+        const strat = new NeuralAgent(fallbackNet, { explore: false, strategyOnly })
         strategiesMap.set(seat, strat)
-        fenrirStrategies.set(seat, strat)
+        neuralAgents.set(seat, strat)
       }
     }
   }
@@ -257,21 +259,21 @@ for (let g = 0; g < count; g++) {
   const wolfOverride = modelOverrides.get('werewolf')
   const useWolfMl = wolfOverride ? wolfOverride === 'ml' : defaultModel === 'ml'
   wolfTeamStrategy = useWolfMl && groupNets.has('werewolf')
-    ? new WolfTeamStrategy(wolfTeamNet, { explore: false })
-    : new WolfTeamHeuristic()
+    ? new WolfTeamAgent(wolfTeamNet, { explore: false })
+    : new WolfTeamRuleAgent()
 
   const masonOverride = modelOverrides.get('mason')
   const useMasonMl = masonOverride ? masonOverride === 'ml' : defaultModel === 'ml'
   masonTeamStrategy = useMasonMl && groupNets.has('mason')
-    ? new MasonTeamStrategy(masonTeamNet, { explore: false })
-    : new MasonTeamHeuristic()
+    ? new MasonTeamAgent(masonTeamNet, { explore: false })
+    : new MasonTeamRuleAgent()
 
   const handlers = strategyOnly
-    ? minimalAdapter({
-        strategies: strategiesMap,
-        defaultStrategy: heuristic,
-        wolfTeamStrategy,
-        masonTeamStrategy,
+    ? strategyOnlyAdapter({
+        agents: strategiesMap,
+        defaultAgent: heuristic,
+        wolfTeamAgent: wolfTeamStrategy,
+        masonTeamAgent: masonTeamStrategy,
         onRolesAssigned,
         seed: gameSeed,
         enableRetar: true,
@@ -279,10 +281,10 @@ for (let g = 0; g < count; g++) {
         rules: DEFAULT_TRAINING_CONFIG.rules,
       })
     : fullAdapter({
-        strategies: strategiesMap,
-        defaultStrategy: heuristic,
-        wolfTeamStrategy,
-        masonTeamStrategy,
+        agents: strategiesMap,
+        defaultAgent: heuristic,
+        wolfTeamAgent: wolfTeamStrategy,
+        masonTeamAgent: masonTeamStrategy,
         enableRetar: true,
         onRolesAssigned,
         seed: gameSeed,
@@ -316,9 +318,9 @@ for (let g = 0; g < count; g++) {
   }
   players.sort((a, b) => a.seat - b.seat)
 
-  // タイムライン: 全 FenrirStrategy からトラジェクトリを収集
+  // タイムライン: 全 NeuralAgent からトラジェクトリを収集
   const timeline: Array<Record<string, unknown>> = []
-  for (const [seat, strat] of fenrirStrategies) {
+  for (const [seat, strat] of neuralAgents) {
     const role = players.find(p => p.seat === seat)?.role ?? 'unknown'
     for (const step of strat.trajectory) {
       const decoded = decodeObservation(step.observation)

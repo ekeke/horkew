@@ -6,7 +6,7 @@ import type { GameConfig } from '../lupa/handlers.ts'
 import { minimalAdapter } from './minimal-adapter.ts'
 import { strategyAdapter } from './strategy-adapter.ts'
 import { RandomStrategy } from './random-strategy.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../fenrir/src/heuristic.ts'
+import { RuleBasedAgent as HeuristicStrategy, WolfTeamRuleAgent as WolfTeamHeuristic, MasonTeamRuleAgent as MasonTeamHeuristic } from '../fenrir/src/agents/rule-based-agent.ts'
 
 // 14D猫の標準構成
 const STANDARD_ROLES: Map<SystemRole, number> = new Map([

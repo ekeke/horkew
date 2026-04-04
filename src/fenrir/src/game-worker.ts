@@ -8,13 +8,16 @@
 import { parentPort } from 'node:worker_threads'
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
-import type { Strategy } from './strategy.ts'
+import type { Agent } from './agents/agent.ts'
 import { runGame, resumeGame } from '../../lupa/engine.ts'
-import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
-import { fullAdapter } from './lupaAdapters/full-adapter.ts'
+import { strategyOnlyAdapter } from './adapters/strategy-only-adapter.ts'
+import { fullAdapter } from './adapters/full-adapter.ts'
 import type { AnyNetwork } from './ml/nn.ts'
-import { FenrirStrategy, FanaticStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
+import { NeuralAgent } from './agents/neural-agent.ts'
+import { FanaticAgent } from './agents/fanatic-agent.ts'
+import { WolfTeamAgent, WolfCollective } from './agents/wolf-collective.ts'
+import { MasonTeamAgent, MasonCollective } from './agents/mason-collective.ts'
+import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from './agents/rule-based-agent.ts'
 import { terminalReward, intermediateReward, tsumiReward, predictAccuracyReward, buildKnownSeats } from './reward.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { parse } from '../../howl/parser.ts'
@@ -91,7 +94,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
   for (let seedIdx = 0; seedIdx < req.seeds.length; seedIdx++) {
     const seed = req.seeds[seedIdx]
     const snapshot = req.snapshots?.[seedIdx]
-    const strategies = new Map<number, FenrirStrategy>()
+    const strategies = new Map<number, NeuralAgent>()
     // seat → role マッピング (role フィールド出力用)
     let seatRoleMap: Map<number, SystemRole> | undefined
 
@@ -103,37 +106,37 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
         if (usePool && poolNets.length > 0 && seat % 3 === 0) {
           const pastNet = poolNets[Math.floor(Math.random() * poolNets.length)]
-          strategies.set(seat, new FenrirStrategy(pastNet, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+          strategies.set(seat, new NeuralAgent(pastNet, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
         } else {
-          strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+          strategies.set(seat, new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
         }
       }
     }
 
-    let wolfTeamStrategy: WolfTeamStrategy | WolfCollectiveStrategy | WolfTeamHeuristic | undefined
-    let masonTeamStrategy: MasonTeamStrategy | MasonCollectiveStrategy | MasonTeamHeuristic | undefined
+    let wolfTeamStrategy: WolfTeamAgent | WolfCollective | WolfTeamRuleAgent | undefined
+    let masonTeamStrategy: MasonTeamAgent | MasonCollective | MasonTeamRuleAgent | undefined
     if (config.strategyOnly) {
       // strategy-only: チーム戦略はheuristicにフォールバック（チームNNはstrategy-only未対応）
       if (req.useTeamStrategy === 'wolf_team' || (!req.useTeamStrategy && (!useHeuristic || multiModel))) {
-        wolfTeamStrategy = new WolfTeamHeuristic()
+        wolfTeamStrategy = new WolfTeamRuleAgent()
       }
       if (req.useTeamStrategy === 'mason_team' || (!req.useTeamStrategy && (!useHeuristic || multiModel))) {
-        masonTeamStrategy = new MasonTeamHeuristic()
+        masonTeamStrategy = new MasonTeamRuleAgent()
       }
     } else if (req.useTeamStrategy) {
       // orchestrator: 指定チームだけML
       if (req.useTeamStrategy === 'wolf_team' && wolfTeamNet) {
-        wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
+        wolfTeamStrategy = new WolfTeamAgent(wolfTeamNet, { explore: true })
       }
       if (req.useTeamStrategy === 'mason_team' && masonTeamNet) {
-        masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
+        masonTeamStrategy = new MasonTeamAgent(masonTeamNet, { explore: true })
       }
     } else if (!useHeuristic || multiModel) {
-      if (wolfTeamNet) wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
-      if (masonTeamNet) masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
+      if (wolfTeamNet) wolfTeamStrategy = new WolfTeamAgent(wolfTeamNet, { explore: true })
+      if (masonTeamNet) masonTeamStrategy = new MasonTeamAgent(masonTeamNet, { explore: true })
     }
 
-    const defaultStrategy = (useHeuristic || multiModel) ? new HeuristicStrategy() : undefined
+    const defaultStrategy = (useHeuristic || multiModel) ? new RuleBasedAgent() : undefined
 
     let onRolesAssigned: ((seatRoles: Map<number, SystemRole>) => void) | undefined
 
@@ -146,13 +149,13 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         // 集団 strategy の構築
         const wolfNet = groupNets.get('wolf_collective')
         if (wolfNet) {
-          const ws = new WolfCollectiveStrategy(wolfNet, { explore: true })
+          const ws = new WolfCollective(wolfNet, { explore: true })
           if (frozenVillageNet) ws.frozenVillageNetwork = frozenVillageNet
           wolfTeamStrategy = ws
         }
         const masonNet = groupNets.get('mason_collective')
         if (masonNet) {
-          masonTeamStrategy = new MasonCollectiveStrategy(masonNet, { explore: true })
+          masonTeamStrategy = new MasonCollective(masonNet, { explore: true })
         }
 
         // 個人NN の割り当て (collective roles はチーム strategy 経由なのでスキップ)
@@ -162,11 +165,11 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
           const net = groupName ? groupNets.get(groupName) : undefined
           if (net) {
             if (groupName === 'fanatic') {
-              const fs = new FanaticStrategy(net, { explore: true, strategyOnly: config.strategyOnly })
+              const fs = new FanaticAgent(net, { explore: true, strategyOnly: config.strategyOnly })
               if (frozenVillageNet) fs.frozenVillageNetwork = frozenVillageNet
               strategies.set(seat, fs)
             } else {
-              strategies.set(seat, new FenrirStrategy(net, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+              strategies.set(seat, new NeuralAgent(net, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
             }
           }
           // groupName が無い (possessed等) → defaultStrategy にフォールバック
@@ -179,7 +182,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         if (frozenMasonNet) {
           for (const [seat, role] of seatRoles) {
             if (role === 'mason') {
-              strategies.set(seat, new FenrirStrategy(frozenMasonNet, { explore: false, strategyOnly: config.strategyOnly }))
+              strategies.set(seat, new NeuralAgent(frozenMasonNet, { explore: false, strategyOnly: config.strategyOnly }))
             }
           }
         }
@@ -192,12 +195,12 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         }
         const limit = req.mlMaxSeats ?? candidates.length
         for (let i = 0; i < Math.min(limit, candidates.length); i++) {
-          strategies.set(candidates[i][0], new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+          strategies.set(candidates[i][0], new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
         }
       }
     }
 
-    const strategiesMap = new Map<number, Strategy>(strategies)
+    const strategiesMap = new Map<number, Agent>(strategies)
     // formatHowl 用の最小設定
     const lupaConfig = { roles, seed } as LupaConfig
 
@@ -221,7 +224,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     let tsumiCacheGetter: (() => Map<number, boolean>) | undefined
     const isInspectGame = req.inspectSeeds != null && req.inspectSeeds.includes(seed)
-    let observationGetter: (() => import('./lupaAdapters/minimal-adapter.ts').CapturedObservation[]) | undefined
+    let observationGetter: (() => import('./adapters/adapter-types.ts').CapturedObservation[]) | undefined
 
     // Mason takeover callback: ML mason 死亡時に strategies map を更新
     const onMasonTakeover = req.enableMasonTakeover ? (deadSeat: number, newSeat: number) => {
@@ -235,11 +238,11 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     if (snapshot) {
       // Seed Bank リプレイ: スナップショットから resumeGame
       const handlers = config.strategyOnly
-        ? minimalAdapter({
-            strategies: strategiesMap,
-            defaultStrategy,
-            wolfTeamStrategy,
-            masonTeamStrategy,
+        ? strategyOnlyAdapter({
+            agents: strategiesMap,
+            defaultAgent: defaultStrategy,
+            wolfTeamAgent: wolfTeamStrategy,
+            masonTeamAgent: masonTeamStrategy,
             onRolesAssigned: onRolesAssignedWrapped,
             seed,
             enableRetar: config.enableRetar,
@@ -250,10 +253,10 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
             onMasonTakeover,
           })
         : fullAdapter({
-            strategies: strategiesMap,
-            defaultStrategy: defaultStrategy ?? new HeuristicStrategy(),
-            wolfTeamStrategy,
-            masonTeamStrategy,
+            agents: strategiesMap,
+            defaultAgent: defaultStrategy ?? new RuleBasedAgent(),
+            wolfTeamAgent: wolfTeamStrategy,
+            masonTeamAgent: masonTeamStrategy,
             enableRetar: config.enableRetar,
             enableTsumi: true,
             onRolesAssigned: onRolesAssignedWrapped,
@@ -270,11 +273,11 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       gameRetarCount = result.timing?.retarCount ?? 0
     } else if (config.strategyOnly) {
       // minimal-adapter: 議論フェーズ全スキ��プで高速化
-      const handlers = minimalAdapter({
-        strategies: strategiesMap,
-        defaultStrategy,
-        wolfTeamStrategy,
-        masonTeamStrategy,
+      const handlers = strategyOnlyAdapter({
+        agents: strategiesMap,
+        defaultAgent: defaultStrategy,
+        wolfTeamAgent: wolfTeamStrategy,
+        masonTeamAgent: masonTeamStrategy,
         onRolesAssigned: onRolesAssignedWrapped,
         seed,
         enableRetar: config.enableRetar,
@@ -298,10 +301,10 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     } else {
       // strategy-adapter: 全フェーズ実行
       const handlers = fullAdapter({
-        strategies: strategiesMap,
-        defaultStrategy: defaultStrategy ?? new HeuristicStrategy(),
-        wolfTeamStrategy,
-        masonTeamStrategy,
+        agents: strategiesMap,
+        defaultAgent: defaultStrategy ?? new RuleBasedAgent(),
+        wolfTeamAgent: wolfTeamStrategy,
+        masonTeamAgent: masonTeamStrategy,
         enableRetar: config.enableRetar,
         enableTsumi: true,
         retarStartDay: req.mlStartDay,

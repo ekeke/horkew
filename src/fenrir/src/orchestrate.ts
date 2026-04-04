@@ -12,7 +12,7 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
-import { computeRefPlanLogits } from './policy.ts'
+import { computeRefPlanLogits } from './agents/neural-agent.ts'
 import { DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
@@ -34,7 +34,7 @@ import { createInterface } from 'node:readline'
 import { generatePlanTokenTrainingBatch } from './ml/execution-plan-data.ts'
 import { collectBatchGameData } from './ml/pretrain-game-data.ts'
 import { collectTsumiBatch, saveTsumiCache, loadTsumiCache, loadTsumiFromDB } from './ml/pretrain-tsumi-data.ts'
-import { PLAN_VOCAB, parsePlanIndices } from './rule-action.ts'
+import { PLAN_VOCAB, parsePlanIndices } from './plan/plan-vocab.ts'
 import { CO_ROLES } from './observation.ts'
 import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,

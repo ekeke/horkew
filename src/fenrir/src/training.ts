@@ -6,11 +6,11 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig, RevoteConfig } from '../../lupa/types.ts'
-import type { Strategy } from './strategy.ts'
+import type { Agent } from './agents/agent.ts'
 import { runGame, resumeGame } from '../../lupa/engine.ts'
 import { formatHowl } from '../../lupa/format.ts'
-import { minimalAdapter } from './lupaAdapters/minimal-adapter.ts'
-import { fullAdapter } from './lupaAdapters/full-adapter.ts'
+import { strategyOnlyAdapter } from './adapters/strategy-only-adapter.ts'
+import { fullAdapter } from './adapters/full-adapter.ts'
 import { initRetarWorkerPool, terminateRetarWorkerPool } from './retar-node-bridge.ts'
 import { NeuralNetwork } from './ml/nn.ts'
 import type { NetworkConfig, AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
@@ -28,8 +28,11 @@ import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
   ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS } from './observation.ts'
 import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
 import { encodeTrueRoles } from './observation.ts'
-import { FenrirStrategy, FanaticStrategy, WolfTeamStrategy, MasonTeamStrategy, WolfCollectiveStrategy, MasonCollectiveStrategy } from './policy.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from './heuristic.ts'
+import { NeuralAgent } from './agents/neural-agent.ts'
+import { FanaticAgent } from './agents/fanatic-agent.ts'
+import { WolfTeamAgent, WolfCollective } from './agents/wolf-collective.ts'
+import { MasonTeamAgent, MasonCollective } from './agents/mason-collective.ts'
+import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from './agents/rule-based-agent.ts'
 import { terminalReward, intermediateReward, predictAccuracyReward, buildKnownSeats, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
@@ -491,11 +494,11 @@ type GameTrajectories = {
 }
 
 type GameAgents = {
-  strategies: Map<number, FenrirStrategy>
-  defaultStrategy?: Strategy
+  strategies: Map<number, NeuralAgent>
+  defaultStrategy?: Agent
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
-  wolfTeamStrategy?: WolfTeamStrategy
-  masonTeamStrategy?: MasonTeamStrategy
+  wolfTeamStrategy?: WolfTeamAgent
+  masonTeamStrategy?: MasonTeamAgent
 }
 
 async function generateGame(
@@ -505,7 +508,7 @@ async function generateGame(
 ): Promise<GameTrajectories> {
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
 
-  const strategiesMap = new Map<number, Strategy>(agents.strategies)
+  const strategiesMap = new Map<number, Agent>(agents.strategies)
 
   // Reset trajectories
   for (const s of agents.strategies.values()) s.resetTrajectory?.()
@@ -516,12 +519,12 @@ async function generateGame(
   let events: (import('../../lupa/types.ts').GameEvent | import('./events.ts').FenrirExtEvent)[]
 
   if (config.strategyOnly) {
-    const handlers = minimalAdapter({
-      strategies: strategiesMap,
-      defaultStrategy: agents.defaultStrategy,
-      wolfTeamStrategy: agents.wolfTeamStrategy,
-      masonTeamStrategy: agents.masonTeamStrategy,
-      onRolesAssigned: agents.onRolesAssigned ? (seatRoles) => {
+    const handlers = strategyOnlyAdapter({
+      agents: strategiesMap,
+      defaultAgent: agents.defaultStrategy,
+      wolfTeamAgent: agents.wolfTeamStrategy,
+      masonTeamAgent: agents.masonTeamStrategy,
+      onRolesAssigned: agents.onRolesAssigned ? (seatRoles: Map<number, SystemRole>) => {
         agents.onRolesAssigned!(seatRoles)
         for (const [seat, s] of agents.strategies) {
           if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
@@ -537,12 +540,12 @@ async function generateGame(
     events = result.events
   } else {
     const handlers = fullAdapter({
-      strategies: strategiesMap,
-      defaultStrategy: agents.defaultStrategy ?? new HeuristicStrategy(),
-      wolfTeamStrategy: agents.wolfTeamStrategy,
-      masonTeamStrategy: agents.masonTeamStrategy,
+      agents: strategiesMap,
+      defaultAgent: agents.defaultStrategy ?? new RuleBasedAgent(),
+      wolfTeamAgent: agents.wolfTeamStrategy,
+      masonTeamAgent: agents.masonTeamStrategy,
       enableRetar: config.enableRetar,
-      onRolesAssigned: agents.onRolesAssigned ? (seatRoles) => {
+      onRolesAssigned: agents.onRolesAssigned ? (seatRoles: Map<number, SystemRole>) => {
         agents.onRolesAssigned!(seatRoles)
         for (const [seat, s] of agents.strategies) {
           if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
@@ -644,14 +647,14 @@ async function generateGameAsync(
 ): Promise<GameTrajectories> {
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
 
-  const strategiesMap = new Map<number, Strategy>(agents.strategies)
+  const strategiesMap = new Map<number, Agent>(agents.strategies)
   const handlers = fullAdapter({
-    strategies: strategiesMap,
-    defaultStrategy: agents.defaultStrategy ?? new HeuristicStrategy(),
-    wolfTeamStrategy: agents.wolfTeamStrategy,
-    masonTeamStrategy: agents.masonTeamStrategy,
+    agents: strategiesMap,
+    defaultAgent: agents.defaultStrategy ?? new RuleBasedAgent(),
+    wolfTeamAgent: agents.wolfTeamStrategy,
+    masonTeamAgent: agents.masonTeamStrategy,
     enableRetar: config.enableRetar,
-    onRolesAssigned: agents.onRolesAssigned ? (seatRoles) => {
+    onRolesAssigned: agents.onRolesAssigned ? (seatRoles: Map<number, SystemRole>) => {
       agents.onRolesAssigned!(seatRoles)
       for (const [seat, s] of agents.strategies) {
         if (!strategiesMap.has(seat)) strategiesMap.set(seat, s)
@@ -814,7 +817,7 @@ export async function evaluate(
   mlMaxSeats?: number,
   options?: EvaluateOptions,
 ): Promise<{ winRates: Record<string, number>, avgGameLength: number, avgElapsedMs: number, howlGames?: Array<{ seed: number, howl: string, result: string, gameLength: number }> }> {
-  const heuristic = new HeuristicStrategy()
+  const heuristic = new RuleBasedAgent()
   const roles = new Map(Object.entries(config.roles) as [SystemRole, number][])
   const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
 
@@ -833,7 +836,7 @@ export async function evaluate(
     if (!mlRolesSet) {
       for (let seat = 1; seat <= totalPlayers; seat++) {
         if (seat % 2 === 0) {
-          strategies.set(seat, new FenrirStrategy(network, { explore: false }))
+          strategies.set(seat, new NeuralAgent(network, { explore: false }))
         } else {
           strategies.set(seat, heuristic)
         }
@@ -848,7 +851,7 @@ export async function evaluate(
       if (options?.frozenMasonNet) {
         for (const [seat, role] of seatRoles) {
           if (role === 'mason') {
-            strategies.set(seat, new FenrirStrategy(options.frozenMasonNet, { explore: false, strategyOnly: config.strategyOnly }))
+            strategies.set(seat, new NeuralAgent(options.frozenMasonNet, { explore: false, strategyOnly: config.strategyOnly }))
           }
         }
       }
@@ -865,18 +868,18 @@ export async function evaluate(
         if (options?.individualNets?.has(role)) {
           const roleNet = options.individualNets.get(role)!
           if (role === 'fanatic' && options?.fanaticNet) {
-            const fs = new FanaticStrategy(options.fanaticNet, { explore: false, strategyOnly: config.strategyOnly })
+            const fs = new FanaticAgent(options.fanaticNet, { explore: false, strategyOnly: config.strategyOnly })
             if (options?.frozenVillageNet) fs.frozenVillageNetwork = options.frozenVillageNet
             strategies.set(seat, fs)
           } else {
-            strategies.set(seat, new FenrirStrategy(roleNet, { explore: false, strategyOnly: config.strategyOnly }))
+            strategies.set(seat, new NeuralAgent(roleNet, { explore: false, strategyOnly: config.strategyOnly }))
           }
         } else if (role === 'fanatic' && options?.fanaticNet) {
-          const fs = new FanaticStrategy(options.fanaticNet, { explore: false, strategyOnly: config.strategyOnly })
+          const fs = new FanaticAgent(options.fanaticNet, { explore: false, strategyOnly: config.strategyOnly })
           if (options?.frozenVillageNet) fs.frozenVillageNetwork = options.frozenVillageNet
           strategies.set(seat, fs)
         } else {
-          strategies.set(seat, new FenrirStrategy(network, { explore: false, strategyOnly: config.strategyOnly }))
+          strategies.set(seat, new NeuralAgent(network, { explore: false, strategyOnly: config.strategyOnly }))
         }
       }
     } : undefined
@@ -884,13 +887,13 @@ export async function evaluate(
     // Wolf team strategy: collective > legacy team > heuristic
     let wolfTeamStrategy: any
     if (options?.wolfCollectiveNet) {
-      const ws = new WolfCollectiveStrategy(options.wolfCollectiveNet, { explore: false })
+      const ws = new WolfCollective(options.wolfCollectiveNet, { explore: false })
       if (options?.frozenVillageNet) ws.frozenVillageNetwork = options.frozenVillageNet
       wolfTeamStrategy = ws
     } else if (wolfTeamNet) {
-      wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: false })
+      wolfTeamStrategy = new WolfTeamAgent(wolfTeamNet, { explore: false })
     } else {
-      wolfTeamStrategy = new WolfTeamHeuristic()
+      wolfTeamStrategy = new WolfTeamRuleAgent()
     }
 
     // Mason team strategy: frozenMason > individual(Phase0) > collective > legacy team > heuristic
@@ -898,11 +901,11 @@ export async function evaluate(
     if (options?.frozenMasonNet || options?.masonAsIndividual) {
       masonTeamStrategy = undefined  // 個人戦略にフォールバック
     } else if (options?.masonCollectiveNet) {
-      masonTeamStrategy = new MasonCollectiveStrategy(options.masonCollectiveNet, { explore: false })
+      masonTeamStrategy = new MasonCollective(options.masonCollectiveNet, { explore: false })
     } else if (masonTeamNet) {
-      masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: false })
+      masonTeamStrategy = new MasonTeamAgent(masonTeamNet, { explore: false })
     } else {
-      masonTeamStrategy = new MasonTeamHeuristic()
+      masonTeamStrategy = new MasonTeamRuleAgent()
     }
 
     const lupaConfig: LupaConfig = {
@@ -925,19 +928,19 @@ export async function evaluate(
     if (snapshot) {
       // Seed Bank リプレイ
       const handlers = config.strategyOnly
-        ? minimalAdapter({
-            strategies,
-            defaultStrategy: heuristic,
-            wolfTeamStrategy: lupaConfig.wolfTeamStrategy,
-            masonTeamStrategy: lupaConfig.masonTeamStrategy,
+        ? strategyOnlyAdapter({
+            agents: strategies,
+            defaultAgent: heuristic,
+            wolfTeamAgent: lupaConfig.wolfTeamStrategy,
+            masonTeamAgent: lupaConfig.masonTeamStrategy,
             onRolesAssigned,
             seed,
           })
         : fullAdapter({
-            strategies,
-            defaultStrategy: heuristic,
-            wolfTeamStrategy: lupaConfig.wolfTeamStrategy,
-            masonTeamStrategy: lupaConfig.masonTeamStrategy,
+            agents: strategies,
+            defaultAgent: heuristic,
+            wolfTeamAgent: lupaConfig.wolfTeamStrategy,
+            masonTeamAgent: lupaConfig.masonTeamStrategy,
             enableRetar: config.enableRetar,
             onRolesAssigned,
             seed,
@@ -948,11 +951,11 @@ export async function evaluate(
       state = gameResult.state
       if (options?.saveHowl) events = gameResult.events
     } else if (config.strategyOnly) {
-      const handlers = minimalAdapter({
-        strategies,
-        defaultStrategy: heuristic,
-        wolfTeamStrategy: lupaConfig.wolfTeamStrategy,
-        masonTeamStrategy: lupaConfig.masonTeamStrategy,
+      const handlers = strategyOnlyAdapter({
+        agents: strategies,
+        defaultAgent: heuristic,
+        wolfTeamAgent: lupaConfig.wolfTeamStrategy,
+        masonTeamAgent: lupaConfig.masonTeamStrategy,
         onRolesAssigned,
         seed,
       })
@@ -964,10 +967,10 @@ export async function evaluate(
       if (options?.saveHowl) events = gameResult.events
     } else {
       const handlers = fullAdapter({
-        strategies,
-        defaultStrategy: heuristic,
-        wolfTeamStrategy: lupaConfig.wolfTeamStrategy,
-        masonTeamStrategy: lupaConfig.masonTeamStrategy,
+        agents: strategies,
+        defaultAgent: heuristic,
+        wolfTeamAgent: lupaConfig.wolfTeamStrategy,
+        masonTeamAgent: lupaConfig.masonTeamStrategy,
         enableRetar: config.enableRetar,
         onRolesAssigned,
         seed,
@@ -1348,24 +1351,24 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     } else {
       // === 直列フォールバック ===
       const useAsync = config.enableRetar
-      const gamePromises: Array<Promise<{ game: GameTrajectories, strategies: Map<number, FenrirStrategy>, wolfTeamStrategy?: WolfTeamStrategy, masonTeamStrategy?: MasonTeamStrategy }>> = []
+      const gamePromises: Array<Promise<{ game: GameTrajectories, strategies: Map<number, NeuralAgent>, wolfTeamStrategy?: WolfTeamAgent, masonTeamStrategy?: MasonTeamAgent }>> = []
 
       for (const seed of seeds) {
-        const strategies = new Map<number, FenrirStrategy>()
+        const strategies = new Map<number, NeuralAgent>()
         const mlRolesSet = config.mlRoles ? new Set(config.mlRoles) : null
 
         let onRolesAssigned: ((seatRoles: Map<number, SystemRole>) => void) | undefined
-        let defaultStrategy: Strategy | undefined
+        let defaultStrategy: Agent | undefined
 
         if (multiModel) {
           // マルチモデル: onRolesAssigned で role に応じたグループ network を割り当て
-          defaultStrategy = new HeuristicStrategy()
+          defaultStrategy = new RuleBasedAgent()
           onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
             for (const [seat, role] of seatRoles) {
               const groupName = ROLE_TO_GROUP_NAME.get(role)
               const group = groupName ? modelGroups.get(groupName) : undefined
               if (group && !group.heuristicOnly) {
-                strategies.set(seat, new FenrirStrategy(group.network, { explore: true, strategyOnly: config.strategyOnly }))
+                strategies.set(seat, new NeuralAgent(group.network, { explore: true, strategyOnly: config.strategyOnly }))
               }
             }
           }
@@ -1378,27 +1381,27 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
                 const pastWeights = pool[Math.floor(Math.random() * pool.length)]
                 const pastNet = makeNetwork()
                 pastNet.loadWeights(pastWeights)
-                strategies.set(seat, new FenrirStrategy(pastNet, { explore: true, strategyOnly: config.strategyOnly }))
+                strategies.set(seat, new NeuralAgent(pastNet, { explore: true, strategyOnly: config.strategyOnly }))
               } else {
-                strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
+                strategies.set(seat, new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly }))
               }
             }
           }
-          defaultStrategy = useHeuristic ? new HeuristicStrategy() : undefined
+          defaultStrategy = useHeuristic ? new RuleBasedAgent() : undefined
           onRolesAssigned = (useHeuristic && mlRolesSet) ? (seatRoles: Map<number, SystemRole>) => {
             for (const [seat, role] of seatRoles) {
               if (mlRolesSet.has(role)) {
-                strategies.set(seat, new FenrirStrategy(network, { explore: true, strategyOnly: config.strategyOnly }))
+                strategies.set(seat, new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly }))
               }
             }
           } : undefined
         }
 
-        let wolfTeamStrategy: WolfTeamStrategy | undefined
-        let masonTeamStrategy: MasonTeamStrategy | undefined
+        let wolfTeamStrategy: WolfTeamAgent | undefined
+        let masonTeamStrategy: MasonTeamAgent | undefined
         if (!useHeuristic || multiModel) {
-          wolfTeamStrategy = new WolfTeamStrategy(wolfTeamNet, { explore: true })
-          masonTeamStrategy = new MasonTeamStrategy(masonTeamNet, { explore: true })
+          wolfTeamStrategy = new WolfTeamAgent(wolfTeamNet, { explore: true })
+          masonTeamStrategy = new MasonTeamAgent(masonTeamNet, { explore: true })
         }
 
         const agents = { strategies, defaultStrategy, onRolesAssigned, wolfTeamStrategy, masonTeamStrategy }

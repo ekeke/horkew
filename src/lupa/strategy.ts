@@ -1,8 +1,8 @@
 /**
- * 後方互換 re-export — 実体は fenrir/src/strategy.ts に移動
+ * 後方互換 re-export — 実体は fenrir/src/agents/agent.ts に移動
  */
 export type {
   DecisionContext, PlanType, ExecutionPlan,
-  Strategy, TeamDecisionContext, WolfNightAction, TeamStrategy,
-  AsyncStrategy, AsyncTeamStrategy,
-} from '../fenrir/src/strategy.ts'
+  Agent as Strategy, TeamDecisionContext, WolfNightAction, TeamAgent as TeamStrategy,
+  AsyncAgent as AsyncStrategy, AsyncTeamAgent as AsyncTeamStrategy,
+} from '../fenrir/src/agents/agent.ts'

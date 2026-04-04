@@ -10,14 +10,14 @@ import type { SystemRole } from '../../../types/index.ts'
 import type { StrategyNode } from '../../../hati/types.ts'
 import { forEachSeat, maskFromSeats } from '../../../hati/types.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
-import type { Strategy, DecisionContext } from '../strategy.ts'
+import type { Agent, DecisionContext } from '../agents/agent.ts'
 import type { PlanTokenTrainingSample } from './execution-plan-data.ts'
 import { runGame } from '../../../lupa/engine.ts'
-import { minimalAdapter } from '../lupaAdapters/minimal-adapter.ts'
-import { HeuristicStrategy, WolfTeamHeuristic, MasonTeamHeuristic } from '../heuristic.ts'
+import { strategyOnlyAdapter } from '../adapters/strategy-only-adapter.ts'
+import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents/rule-based-agent.ts'
 import { RandomStrategy, WolfTeamRandom, MasonTeamRandom } from '../../../verify/random-strategy.ts'
 import { encodeObservation } from '../observation.ts'
-import { PLAN_VOCAB } from '../rule-action.ts'
+import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
 import { lupaRunRetar } from '../retar-bridge.ts'
 import { parse } from '../../../howl/parser.ts'
 import { buildVillageStatus } from '../../../howl/bridge.ts'
@@ -387,8 +387,8 @@ async function collectTsumiFromGame(
   type DaySnapshot = { observation: Float32Array, day: number }
   const prevSnapshots: DaySnapshot[] = []
 
-  class TsumiStrategy implements Strategy {
-    private inner = new HeuristicStrategy()
+  class TsumiStrategy implements Agent {
+    private inner = new RuleBasedAgent()
     decideNightAction(ctx: DecisionContext) { return this.inner.decideNightAction(ctx) }
     decideDayClaim(ctx: DecisionContext) { return this.inner.decideDayClaim(ctx) }
     decideForecast(ctx: DecisionContext) { return this.inner.decideForecast(ctx) }
@@ -434,13 +434,13 @@ async function collectTsumiFromGame(
   }
 
   const tsumiStrategy = new TsumiStrategy()
-  const strategies = new Map<number, Strategy>()
+  const strategies = new Map<number, Agent>()
 
-  const handlers = minimalAdapter({
-    strategies,
-    defaultStrategy: useRandom ? new RandomStrategy() : new HeuristicStrategy(),
-    wolfTeamStrategy: useRandom ? new WolfTeamRandom() : new WolfTeamHeuristic(),
-    masonTeamStrategy: useRandom ? new MasonTeamRandom() : new MasonTeamHeuristic(),
+  const handlers = strategyOnlyAdapter({
+    agents: strategies,
+    defaultAgent: useRandom ? new RandomStrategy() : new RuleBasedAgent(),
+    wolfTeamAgent: useRandom ? new WolfTeamRandom() : new WolfTeamRuleAgent(),
+    masonTeamAgent: useRandom ? new MasonTeamRandom() : new MasonTeamRuleAgent(),
     onRolesAssigned: (seatRoles) => {
       for (const [seat, role] of seatRoles) {
         if (role === 'mason') {

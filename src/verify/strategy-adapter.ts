@@ -9,8 +9,8 @@ import type { SystemRole, ResolvedRules } from '../types/index.ts'
 import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../lupa/types.ts'
 import type {
   DecisionContext, TeamDecisionContext,
-  Strategy, TeamStrategy, WolfNightAction,
-} from '../fenrir/src/strategy.ts'
+  Agent as Strategy, TeamAgent as TeamStrategy, WolfNightAction,
+} from '../fenrir/src/agents/agent.ts'
 import type { SignalRecord } from '../fenrir/src/communication.ts'
 import type { Proposal } from '../fenrir/src/leadership.ts'
 import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../lupa/handlers.ts'
@@ -19,7 +19,7 @@ import { buildPlayerView } from '../lupa/player-view.ts'
 import { alivePlayers } from '../lupa/roles.ts'
 import { detectCommander } from '../fenrir/src/leadership.ts'
 import { Rng } from '../lupa/random.ts'
-import { forceTrueRoleCO, isVillagePowerRole } from '../fenrir/src/heuristic.ts'
+import { forceTrueRoleCO, isVillagePowerRole } from '../fenrir/src/agents/rule-based-agent.ts'
 import {
   analyzePerPlayer as retarAnalyzePerPlayer,
   retarResultToPossibilities,
