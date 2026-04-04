@@ -775,7 +775,7 @@ async function main(): Promise<void> {
       process.exit(code)
     }
     shutdownRequested = code
-    log(`\nShutdown requested (signal ${code}), will exit after current operation...`)
+    process.stderr.write(`\nShutdown requested, will exit after current operation...\n`)
   }
   const checkShutdown = () => {
     if (!shutdownRequested) return
@@ -988,7 +988,7 @@ async function main(): Promise<void> {
 
     log(`  Collecting data from ${pretrainGames} heuristic games...`)
     const tD0 = performance.now()
-    const gameSamples = await collectBatchGameData(trainingConfig, pretrainGames)
+    const gameSamples = await collectBatchGameData(trainingConfig, pretrainGames, 50000, checkShutdown)
     const tDCollect = performance.now() - tD0
     log(`  Collected ${gameSamples.length} vote samples from ${pretrainGames} games in ${(tDCollect / 1000).toFixed(1)}s (${(tDCollect / pretrainGames).toFixed(0)}ms/game)`)
 
@@ -1000,6 +1000,7 @@ async function main(): Promise<void> {
         let batchCount = 0
 
         for (let offset = 0; offset < gameSamples.length; offset += dMiniBatch) {
+          checkShutdown()
           const batch = gameSamples.slice(offset, offset + dMiniBatch)
 
           // plan は B で学習済み。D では predict + value のみ学習（plan 上書き防止）

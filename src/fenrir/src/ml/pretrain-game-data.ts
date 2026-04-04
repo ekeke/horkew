@@ -176,11 +176,13 @@ export async function collectBatchGameData(
   config: TrainingConfig,
   numGames: number,
   baseSeed: number = 50000,
+  onGameDone?: () => void,
 ): Promise<PretrainSample[]> {
   const allSamples: PretrainSample[] = []
   for (let i = 0; i < numGames; i++) {
     const samples = await collectGameData(config, baseSeed + i)
     allSamples.push(...samples)
+    onGameDone?.()
   }
   return allSamples
 }
