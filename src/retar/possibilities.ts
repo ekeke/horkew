@@ -22,6 +22,8 @@ export const RoleSignatureBitsReverseMap: Map<number, SystemRole> = new Map(
 )
 
 export const ROLE_COUNT = 11
+/** inPending が 32bit ビット演算なので最大32席（seat 1..=31） */
+export const MAX_SEATS = 32
 
 // Bit position index for each role (villager=0, seer=1, ..., immoralist=10)
 export const RoleBitIndex: { [role in SystemRole]: number } = {
@@ -217,6 +219,9 @@ export class Possibilities {
       this.setup[RoleBitIndex[role]] = num
       count += num
       initial |= RoleSignatureBits[role]
+    }
+    if (count >= MAX_SEATS) {
+      throw new Error(`seat count ${count} exceeds maximum supported (${MAX_SEATS - 1})`)
     }
     this.setupOriginal = new Uint8Array(this.setup)
     this.possibilities = new Uint16Array(count + 1) // 0番目は使わない

@@ -422,6 +422,52 @@ describe('fix confluence', () => {
   })
 })
 
+describe('MAX_SEATS boundary', () => {
+  it('should accept 31 seats (MAX_SEATS - 1)', () => {
+    const setup = new Map<SystemRole, number>([
+      ['villager', 25],
+      ['werewolf', 5],
+      ['seer', 1],
+    ])
+    const p = new Possibilities(setup)
+    assert.strictEqual(p.seatCount(), 31)
+  })
+
+  it('should throw on 32 seats (MAX_SEATS)', () => {
+    const setup = new Map<SystemRole, number>([
+      ['villager', 26],
+      ['werewolf', 5],
+      ['seer', 1],
+    ])
+    assert.throws(() => new Possibilities(setup), { message: /seat count 32 exceeds maximum supported/ })
+  })
+
+  it('should handle fix cascade at 31 seats without error', () => {
+    const setup = new Map<SystemRole, number>([
+      ['villager', 20],
+      ['seer', 1],
+      ['medium', 1],
+      ['bodyguard', 1],
+      ['mason', 2],
+      ['nekomata', 1],
+      ['werewolf', 3],
+      ['possessed', 1],
+      ['werehamster', 1],
+    ])
+    const p = new Possibilities(setup)
+    assert.strictEqual(p.seatCount(), 31)
+    const roles: SystemRole[] = [
+      'seer', 'medium', 'bodyguard',
+      'mason', 'mason', 'nekomata',
+      'werewolf', 'werewolf', 'werewolf',
+      'possessed', 'werehamster',
+    ]
+    for (let i = 0; i < roles.length; i++) {
+      p.fixRole(i + 1, roles[i])
+    }
+  })
+})
+
 describe('combinationWithReplacementInLimit', () => {
   it('should generate combinations with replacement within limits', () => {
     const roles: SystemRole[] = ['seer', 'bodyguard', 'nekomata']

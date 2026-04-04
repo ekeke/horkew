@@ -2,6 +2,8 @@ use crate::types::{SystemRole, Seat};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const ROLE_COUNT: usize = 11;
+/// in_pending が u32 ビットマスクなので最大32席（seat 1..=31）
+pub const MAX_SEATS: usize = 32;
 
 // Composite bitmask constants
 pub const ALL_ROLES: u16 = (1u16 << ROLE_COUNT) - 1; // 0b11111111111
@@ -134,6 +136,11 @@ impl Possibilities {
             count += num as usize;
             initial |= role.bit();
         }
+        assert!(
+            count < MAX_SEATS,
+            "seat count {} exceeds maximum supported ({})",
+            count, MAX_SEATS - 1,
+        );
         let setup_original = setup_arr;
         let mut possibilities = vec![0u16; count + 1]; // index 0 unused
         for i in 1..=count {
@@ -207,14 +214,14 @@ impl Possibilities {
     }
 
     pub fn fix(&mut self, seat: Seat) -> bool {
-        let mut buf = [0u8; 21];
+        let mut buf = [0u8; MAX_SEATS];
         buf[0] = seat as u8;
         self.drain(&mut buf, 0, 1, 1u32 << seat)
     }
 
     pub fn refix(&mut self) -> bool {
         self.setup = self.setup_original;
-        let mut buf = [0u8; 21];
+        let mut buf = [0u8; MAX_SEATS];
         let mut tail: usize = 0;
         let mut in_pending: u32 = 0;
         for i in 1..self.possibilities.len() {
@@ -228,7 +235,7 @@ impl Possibilities {
     }
 
     /// ワークリストを処理し、全 singleton のカスケードを伝播する
-    fn drain(&mut self, buf: &mut [u8; 21], mut head: usize, mut tail: usize, mut in_pending: u32) -> bool {
+    fn drain(&mut self, buf: &mut [u8; MAX_SEATS], mut head: usize, mut tail: usize, mut in_pending: u32) -> bool {
         while head < tail {
             let s = buf[head] as usize;
             head += 1;
@@ -830,5 +837,57 @@ mod tests {
         });
 
         assert_eq!(results.len(), 4);
+    }
+
+    #[test]
+    fn from_setup_max_seats_boundary() {
+        // 31席（MAX_SEATS - 1）: ちょうど上限 → パニックしない
+        let setup = make_setup(&[
+            (SystemRole::Villager, 25),
+            (SystemRole::Werewolf, 5),
+            (SystemRole::Seer, 1),
+        ]);
+        let p = Possibilities::from_setup(&setup);
+        assert_eq!(p.seat_count(), 31);
+    }
+
+    #[test]
+    #[should_panic(expected = "seat count 32 exceeds maximum supported")]
+    fn from_setup_exceeds_max_seats() {
+        // 32席（MAX_SEATS）: 上限超過 → パニック
+        let setup = make_setup(&[
+            (SystemRole::Villager, 26),
+            (SystemRole::Werewolf, 5),
+            (SystemRole::Seer, 1),
+        ]);
+        Possibilities::from_setup(&setup);
+    }
+
+    #[test]
+    fn fix_cascade_at_max_seats() {
+        // 31席で全席 fix_role → drain の buf が溢れないことを確認
+        let setup = make_setup(&[
+            (SystemRole::Villager, 20),
+            (SystemRole::Seer, 1),
+            (SystemRole::Medium, 1),
+            (SystemRole::Bodyguard, 1),
+            (SystemRole::Mason, 2),
+            (SystemRole::Nekomata, 1),
+            (SystemRole::Werewolf, 3),
+            (SystemRole::Possessed, 1),
+            (SystemRole::Werehamster, 1),
+        ]);
+        let mut p = Possibilities::from_setup(&setup);
+        assert_eq!(p.seat_count(), 31);
+        // 全席を順に fix しても panic しないこと
+        let roles = [
+            SystemRole::Seer, SystemRole::Medium, SystemRole::Bodyguard,
+            SystemRole::Mason, SystemRole::Mason, SystemRole::Nekomata,
+            SystemRole::Werewolf, SystemRole::Werewolf, SystemRole::Werewolf,
+            SystemRole::Possessed, SystemRole::Werehamster,
+        ];
+        for (i, &role) in roles.iter().enumerate() {
+            p.fix_role((i + 1) as Seat, role);
+        }
     }
 }
