@@ -55,8 +55,9 @@ export function resolvePlanGroup(
       if (aliveSet.has(target.seat) && target.seat !== excludeSeat) return target.seat
     } else if (target.type === 'role') {
       const claimers = coClaimed.get(target.role) ?? []
-      for (const seat of claimers) {
-        if (aliveSet.has(seat) && seat !== excludeSeat) return seat
+      const alive = claimers.filter(s => aliveSet.has(s) && s !== excludeSeat)
+      if (alive.length > 0) {
+        return rng ? alive[Math.floor(rng.next() * alive.length)] : alive[0]
       }
     } else if (target.type === 'grayran') {
       const grays = aliveSeats.filter(s => s !== excludeSeat && !allCOSeats.has(s))

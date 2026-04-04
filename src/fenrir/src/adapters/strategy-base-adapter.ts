@@ -41,10 +41,11 @@ function planGroupsToExecutionPlans(
   aliveSeats: number[],
   events: readonly any[],
   type: 'designated' | 'endgame',
+  rng?: Rng,
 ): ExecutionPlan[] {
   const plans: ExecutionPlan[] = []
   for (const group of groups) {
-    const seat = resolvePlanGroup(group, aliveSeats, events)
+    const seat = resolvePlanGroup(group, aliveSeats, events, { rng })
     if (seat != null) {
       plans.push({ targets: [seat], type })
     }
@@ -259,10 +260,10 @@ export abstract class StrategyBaseAdapter
   ): void {
     const ps = ext.planState
     const fwdPlans = ps.forwardGroups.length > 0
-      ? planGroupsToExecutionPlans(ps.forwardGroups, aliveSeats, events, 'designated')
+      ? planGroupsToExecutionPlans(ps.forwardGroups, aliveSeats, events, 'designated', this.rng)
       : []
     const egPlans = ps.endgameGroups.length > 0
-      ? planGroupsToExecutionPlans(ps.endgameGroups, aliveSeats, events, 'endgame')
+      ? planGroupsToExecutionPlans(ps.endgameGroups, aliveSeats, events, 'endgame', this.rng)
       : []
     if (fwdPlans.length > 0 || egPlans.length > 0) {
       ext.executionPlans = [...fwdPlans, ...egPlans]

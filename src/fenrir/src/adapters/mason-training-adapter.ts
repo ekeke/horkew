@@ -280,21 +280,23 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const alive = aliveSeats.length
     let target: number | null = null
 
-    // Endgame plan 優先（≤6人）
+    const opts = { rng: this.rng }
+
+    // Endgame plan 優先（���6人）
     if (planState.endgameGroups.length > 0) {
       if (alive <= 4) {
-        target = resolvePlanGroup(planState.endgameGroups[0], aliveSeats, pctx.events)
+        target = resolvePlanGroup(planState.endgameGroups[0], aliveSeats, pctx.events, opts)
       } else if (alive <= 6) {
         const group = planState.endgameGroups.length >= 2
           ? planState.endgameGroups[1] : planState.endgameGroups[0]
-        target = resolvePlanGroup(group, aliveSeats, pctx.events)
+        target = resolvePlanGroup(group, aliveSeats, pctx.events, opts)
       }
     }
 
     // Forward plan フォールバック
     if (target == null && planState.dayIndex < planState.forwardGroups.length) {
       const group = planState.forwardGroups[planState.dayIndex]
-      target = resolvePlanGroup(group, aliveSeats, pctx.events)
+      target = resolvePlanGroup(group, aliveSeats, pctx.events, opts)
       this.advanceDayIndexOnce(ext, pctx.day)
     }
 
