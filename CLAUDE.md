@@ -213,3 +213,30 @@ The notation and vocabulary support dual Japanese/ASCII syntax:
 ## Development Stage
 
 このプロジェクトは現在**ブートストラップ段階**。GitHub のワークフロー（PR、Issues、CI など）は使用していない。リモートリポジトリへの push も不要。worktree を作る場合は**ローカルの `main` ブランチ**をベースにすること。
+
+### ブランチ運用
+
+- 作業はすべて**ローカルの `main` ブランチ**上で直接行う（feature branch は使わない）
+- 複数のエージェントが同時に異なる作業を進めることがある
+- 意味的なコンフリクト（同じファイルの同じ箇所を変更するなど）の回避はユーザー（Akira）が管理する
+
+### コミット手順（ロックファイルによる排他制御）
+
+複数エージェントの同時コミットによる競合を防ぐため、以下の手順を**必ず**守ること:
+
+1. **ロック取得**: `mkdir .commiting` を実行する（アトミックな操作）
+   - 成功 → ロック取得完了、次へ進む
+   - 失敗（既に存在） → **コミットを断念**し、ユーザーに報告して指示を仰ぐ
+2. **ステージング**: 自分が変更したファイル**だけ**を `git add` する（`git add .` や `git add -A` は禁止）
+3. **コミット**: `git commit` を実行する
+4. **ロック解放**: `rmdir .commiting` でロックを解放する
+
+```bash
+# 手順例
+mkdir .commiting                          # 失敗したらコミット断念
+git add src/path/to/changed-file.ts
+git commit -m "commit message"
+rmdir .commiting
+```
+
+**注意**: ロック取得後に失敗した場合も、必ず `rmdir .commiting` を実行すること。
