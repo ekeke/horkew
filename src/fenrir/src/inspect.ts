@@ -223,11 +223,11 @@ for (let g = 0; g < count; g++) {
   const gameSeed = seed + g
 
   // Strategy 構築（ゲームごとに新規作成して trajectory をリセット）
-  const strategiesMap = new Map<number, Agent>()
+  const agentsMap = new Map<number, Agent>()
   const neuralAgents = new Map<number, NeuralAgent>()
 
-  let wolfTeamStrategy: WolfTeamAgent | WolfTeamRuleAgent
-  let masonTeamStrategy: MasonTeamAgent | MasonTeamRuleAgent
+  let wolfTeamAgent: WolfTeamAgent | WolfTeamRuleAgent
+  let masonTeamAgent: MasonTeamAgent | MasonTeamRuleAgent
 
   const onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
     for (const [seat, role] of seatRoles) {
@@ -235,7 +235,7 @@ for (let g = 0; g < count; g++) {
       const useModel = override ?? defaultModel
 
       if (useModel === 'heuristic' && !allMl) {
-        strategiesMap.set(seat, heuristic)
+        agentsMap.set(seat, heuristic)
         continue
       }
 
@@ -243,13 +243,13 @@ for (let g = 0; g < count; g++) {
       const net = groupName ? groupNets.get(groupName) : undefined
       if (net) {
         const strat = new NeuralAgent(net, { explore: false, strategyOnly })
-        strategiesMap.set(seat, strat)
+        agentsMap.set(seat, strat)
         neuralAgents.set(seat, strat)
       } else {
         // 未学習 NN でもトラジェクトリを取りたい場合
         const fallbackNet = makeNet()
         const strat = new NeuralAgent(fallbackNet, { explore: false, strategyOnly })
-        strategiesMap.set(seat, strat)
+        agentsMap.set(seat, strat)
         neuralAgents.set(seat, strat)
       }
     }
@@ -258,22 +258,22 @@ for (let g = 0; g < count; g++) {
   // チーム戦略
   const wolfOverride = modelOverrides.get('werewolf')
   const useWolfMl = wolfOverride ? wolfOverride === 'ml' : defaultModel === 'ml'
-  wolfTeamStrategy = useWolfMl && groupNets.has('werewolf')
+  wolfTeamAgent = useWolfMl && groupNets.has('werewolf')
     ? new WolfTeamAgent(wolfTeamNet, { explore: false })
     : new WolfTeamRuleAgent()
 
   const masonOverride = modelOverrides.get('mason')
   const useMasonMl = masonOverride ? masonOverride === 'ml' : defaultModel === 'ml'
-  masonTeamStrategy = useMasonMl && groupNets.has('mason')
+  masonTeamAgent = useMasonMl && groupNets.has('mason')
     ? new MasonTeamAgent(masonTeamNet, { explore: false })
     : new MasonTeamRuleAgent()
 
   const handlers = strategyOnly
     ? strategyOnlyAdapter({
-        agents: strategiesMap,
+        agents: agentsMap,
         defaultAgent: heuristic,
-        wolfTeamAgent: wolfTeamStrategy,
-        masonTeamAgent: masonTeamStrategy,
+        wolfTeamAgent: wolfTeamAgent,
+        masonTeamAgent: masonTeamAgent,
         onRolesAssigned,
         seed: gameSeed,
         enableRetar: true,
@@ -281,10 +281,10 @@ for (let g = 0; g < count; g++) {
         rules: DEFAULT_TRAINING_CONFIG.rules,
       })
     : fullAdapter({
-        agents: strategiesMap,
+        agents: agentsMap,
         defaultAgent: heuristic,
-        wolfTeamAgent: wolfTeamStrategy,
-        masonTeamAgent: masonTeamStrategy,
+        wolfTeamAgent: wolfTeamAgent,
+        masonTeamAgent: masonTeamAgent,
         enableRetar: true,
         onRolesAssigned,
         seed: gameSeed,

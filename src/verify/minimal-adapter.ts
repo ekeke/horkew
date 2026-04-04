@@ -1,5 +1,5 @@
 /**
- * Minimal Adapter — strategyOnly訓練用
+ * Minimal Adapter — agentOnly訓練用
  *
  * onNight + onDayClaims + onVote のみ実装。
  * onPreVote なし → シグナル/指揮者/予告/防御CO全スキップ。
@@ -8,7 +8,7 @@
 
 import type { SystemRole, ResolvedRules } from '../types/index.ts'
 import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../lupa/types.ts'
-import type { DecisionContext, TeamDecisionContext, Agent as Strategy, TeamAgent as TeamStrategy, WolfNightAction } from '../fenrir/src/agents/agent.ts'
+import type { DecisionContext, TeamDecisionContext, Agent, TeamAgent, WolfNightAction } from '../fenrir/src/agents/agent.ts'
 import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../lupa/handlers.ts'
 import { buildPlayerView } from '../lupa/player-view.ts'
 import { alivePlayers } from '../lupa/roles.ts'
@@ -22,11 +22,11 @@ import {
 import { searchTsumi, searchTsumiStrategy } from '../hati/index.ts'
 
 export type MinimalAdapterConfig = {
-  strategies: Map<number, Strategy>
-  defaultStrategy?: Strategy
-  wolfTeamStrategy?: TeamStrategy
-  masonTeamStrategy?: TeamStrategy
-  /** 役職割当後にstrategy差し替え用コールバック */
+  agents: Map<number, Agent>
+  defaultAgent?: Agent
+  wolfTeamAgent?: TeamAgent
+  masonTeamAgent?: TeamAgent
+  /** 役職割当後にagent差し替え用コールバック */
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   seed?: number
   /** Retar有効化（デフォルト: false） */
@@ -55,8 +55,8 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
   let lastRetarArtifacts: { vs: any, setup: Map<SystemRole, number>, options: any } | null = null
   const tsumiCache = new Map<number, boolean>()  // day → isTsumi
 
-  function getStrategy(seat: number): Strategy {
-    return config.strategies.get(seat) ?? config.defaultStrategy!
+  function getAgent(seat: number): Agent {
+    return config.agents.get(seat) ?? config.defaultAgent!
   }
 
   function runRetar(pctx: PhaseContext): void {
@@ -161,14 +161,14 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
       const actions = new Map<number, NightAction>()
 
       // 狼チーム夜行動
-      if (config.wolfTeamStrategy) {
+      if (config.wolfTeamAgent) {
         const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
         if (aliveWolves.length > 0) {
           const leader = aliveWolves[0]
           const view = buildPlayerView(state, leader.seat)
           const ctx = buildCtx(pctx, leader, view)
           const teamCtx = buildTeamCtx(ctx, state, 'werewolf')
-          const wolfAction = config.wolfTeamStrategy.decideNightAction(teamCtx) as WolfNightAction
+          const wolfAction = config.wolfTeamAgent.decideNightAction(teamCtx) as WolfNightAction
 
           for (const wolf of aliveWolves) {
             if (wolf.seat === wolfAction.attacker) {
@@ -185,7 +185,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
         if (actions.has(player.seat)) continue  // 狼チームで処理済み
         const view = buildPlayerView(state, player.seat)
         const ctx = buildCtx(pctx, player, view)
-        actions.set(player.seat, getStrategy(player.seat).decideNightAction(ctx))
+        actions.set(player.seat, getAgent(player.seat).decideNightAction(ctx))
       }
 
       return actions
@@ -200,16 +200,16 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
         const view = buildPlayerView(state, player.seat)
         const ctx = buildCtx(pctx, player, view)
 
-        // チーム戦略があればそちらを使う
-        const teamStrategy = player.role === 'werewolf' ? config.wolfTeamStrategy
-          : player.role === 'mason' ? config.masonTeamStrategy
+        // チームエージェントがあればそちらを使う
+        const teamAgent = player.role === 'werewolf' ? config.wolfTeamAgent
+          : player.role === 'mason' ? config.masonTeamAgent
           : null
 
-        if (teamStrategy) {
+        if (teamAgent) {
           const teamCtx = buildTeamCtx(ctx, state, player.role, player.seat)
-          claims.set(player.seat, teamStrategy.decideDayClaim(teamCtx))
+          claims.set(player.seat, teamAgent.decideDayClaim(teamCtx))
         } else {
-          claims.set(player.seat, getStrategy(player.seat).decideDayClaim(ctx))
+          claims.set(player.seat, getAgent(player.seat).decideDayClaim(ctx))
         }
       }
 
@@ -237,7 +237,7 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
         const masonView = buildPlayerView(state, mason.seat)
         const masonCtx = buildCtx(vctx as PhaseContext, mason, masonView)
         masonCtx.commander = mason.seat  // 提案を出すために指揮者扱い
-        const proposal = getStrategy(mason.seat).decideProposal(masonCtx)
+        const proposal = getAgent(mason.seat).decideProposal(masonCtx)
         if (proposal && proposal.type === 'execute_order') {
           executionPlans.push({ targets: [proposal.target], type: 'designated' })
         }
@@ -251,15 +251,15 @@ export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {
           executionPlans,
         })
 
-        const teamStrategy = player.role === 'werewolf' ? config.wolfTeamStrategy
-          : player.role === 'mason' ? config.masonTeamStrategy
+        const teamAgent = player.role === 'werewolf' ? config.wolfTeamAgent
+          : player.role === 'mason' ? config.masonTeamAgent
           : null
 
-        if (teamStrategy) {
+        if (teamAgent) {
           const teamCtx = buildTeamCtx(ctx, state, player.role, player.seat)
-          votes.set(player.seat, teamStrategy.decideVote(teamCtx))
+          votes.set(player.seat, teamAgent.decideVote(teamCtx))
         } else {
-          votes.set(player.seat, getStrategy(player.seat).decideVote(ctx))
+          votes.set(player.seat, getAgent(player.seat).decideVote(ctx))
         }
       }
 

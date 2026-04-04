@@ -126,7 +126,7 @@ orchestrate.ts ─── Phase 0/1/1'/2 の学習ループ管理
   │     ├── wolf-collective.ts ── WolfTeamAgent, WolfCollective
   │     ├── mason-collective.ts ─ MasonTeamAgent, MasonCollective
   │     ├── fanatic-agent.ts ──── FanaticAgent
-  │     └── team-base.ts ──── TeamStrategyBase, CollectiveStrategyBase
+  │     └── team-base.ts ──── TeamAgentBase, CollectiveAgentBase
   ├── plan/ ─────── 処刑プラン管理
   │     ├── plan-vocab.ts ──── PLAN_VOCAB, parsePlanIndices
   │     ├── plan-resolve.ts ── resolvePlanGroup()

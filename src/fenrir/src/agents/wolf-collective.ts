@@ -13,9 +13,9 @@ import type { AnyNetwork, ForwardResult } from '../ml/nn.ts'
 import type { VillageNNOutput } from '../observation.ts'
 import { encodeObservation, encodeCollectiveWolfObservation } from '../observation.ts'
 import { maskAttackTarget, maskAttacker, decodeWolfNightAction } from '../action.ts'
-import { TeamStrategyBase, CollectiveStrategyBase } from './team-base.ts'
+import { TeamAgentBase, CollectiveAgentBase } from './team-base.ts'
 
-export class WolfTeamAgent extends TeamStrategyBase implements TeamAgent {
+export class WolfTeamAgent extends TeamAgentBase implements TeamAgent {
   decideNightAction(ctx: TeamDecisionContext): WolfNightAction {
     const result = this.infer(ctx)
 
@@ -62,7 +62,7 @@ export class WolfTeamAgent extends TeamStrategyBase implements TeamAgent {
   }
 }
 
-export class WolfCollective extends CollectiveStrategyBase implements TeamAgent {
+export class WolfCollective extends CollectiveAgentBase implements TeamAgent {
   /** frozen村NNの出力（外部から注入、またはfrozenVillageNetworkから自動生成） */
   villageNNOutput: VillageNNOutput | undefined = undefined
   /** frozen村NN（セットされていれば infer 時に自動で forward して villageNNOutput を更新） */

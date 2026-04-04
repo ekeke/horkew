@@ -11,9 +11,9 @@ import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
 import type { ForwardResult } from '../ml/nn.ts'
 import { encodeCollectiveMasonObservation } from '../observation.ts'
-import { TeamStrategyBase, CollectiveStrategyBase } from './team-base.ts'
+import { TeamAgentBase, CollectiveAgentBase } from './team-base.ts'
 
-export class MasonTeamAgent extends TeamStrategyBase implements TeamAgent {
+export class MasonTeamAgent extends TeamAgentBase implements TeamAgent {
   decideNightAction(_ctx: TeamDecisionContext): NightAction {
     return { type: 'none' }
   }
@@ -47,7 +47,7 @@ export class MasonTeamAgent extends TeamStrategyBase implements TeamAgent {
   }
 }
 
-export class MasonCollective extends CollectiveStrategyBase implements TeamAgent {
+export class MasonCollective extends CollectiveAgentBase implements TeamAgent {
   protected override infer(ctx: TeamDecisionContext): ForwardResult {
     const t = performance.now()
     const obs = encodeCollectiveMasonObservation(ctx)

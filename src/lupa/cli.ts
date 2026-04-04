@@ -8,17 +8,17 @@ import { formatHowl } from './format.ts'
 import { parse } from '../howl/index.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../hati/index.ts'
-import { RuleBasedAgent as HeuristicStrategy, WolfTeamRuleAgent as WolfTeamHeuristic, MasonTeamRuleAgent as MasonTeamHeuristic } from '../fenrir/src/agents/rule-based-agent.ts'
+import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../fenrir/src/agents/rule-based-agent.ts'
 import { RandomStrategy } from '../verify/random-strategy.ts'
 import { findScenario, scenarios } from './scenarios.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 
-import type { StrategyAdapterConfig } from '../verify/strategy-adapter.ts'
+import type { AgentAdapterConfig } from '../verify/strategy-adapter.ts'
 
 type CliOptions = {
   gameConfig: GameConfig
   lupaConfig: LupaConfig
-  adapterConfig: StrategyAdapterConfig
+  adapterConfig: AgentAdapterConfig
   tsumi: boolean
   stats: boolean
   games: number
@@ -100,20 +100,20 @@ function parseArgs(args: string[]): CliOptions {
   const gameConfig: GameConfig = { roles, seed, hasFirstGhost, revoteConfig }
   const lupaConfig: LupaConfig = { roles, seed, hasFirstGhost, revoteConfig }
 
-  const adapterConfig: StrategyAdapterConfig = {
-    defaultStrategy: new RandomStrategy(),
+  const adapterConfig: AgentAdapterConfig = {
+    defaultAgent: new RandomStrategy(),
     seed,
     roles,
   }
 
   if (heuristic) {
-    const h = new HeuristicStrategy()
-    const strategies = new Map<number, import('../fenrir/src/agents/agent.ts').Agent>()
-    for (let s = 1; s <= totalPlayers; s++) strategies.set(s, h)
-    adapterConfig.strategies = strategies
-    adapterConfig.defaultStrategy = h
-    adapterConfig.wolfTeamStrategy = new WolfTeamHeuristic()
-    adapterConfig.masonTeamStrategy = new MasonTeamHeuristic()
+    const h = new RuleBasedAgent()
+    const agents = new Map<number, import('../fenrir/src/agents/agent.ts').Agent>()
+    for (let s = 1; s <= totalPlayers; s++) agents.set(s, h)
+    adapterConfig.agents = agents
+    adapterConfig.defaultAgent = h
+    adapterConfig.wolfTeamAgent = new WolfTeamRuleAgent()
+    adapterConfig.masonTeamAgent = new MasonTeamRuleAgent()
 
     if (randomRoles.length > 0) {
       const randomRoleSet = new Set(randomRoles)
@@ -121,7 +121,7 @@ function parseArgs(args: string[]): CliOptions {
       adapterConfig.onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
         for (const [seat, role] of seatRoles) {
           if (randomRoleSet.has(role)) {
-            strategies.set(seat, r)
+            agents.set(seat, r)
           }
         }
       }

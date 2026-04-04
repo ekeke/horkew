@@ -1,5 +1,5 @@
 /**
- * Strategy Adapter — 既存Strategy/TeamStrategyをGameHandlersに変換
+ * Strategy Adapter — 既存Agent/TeamAgentをGameHandlersに変換
  *
  * 全フェーズ対応: シグナル3R、指揮者選出、予告、防御CO。
  * Retar統合はオプション。旧エンジンとの互換性を保つ。
@@ -9,7 +9,7 @@ import type { SystemRole, ResolvedRules } from '../types/index.ts'
 import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../lupa/types.ts'
 import type {
   DecisionContext, TeamDecisionContext,
-  Agent as Strategy, TeamAgent as TeamStrategy, WolfNightAction,
+  Agent, TeamAgent, WolfNightAction,
 } from '../fenrir/src/agents/agent.ts'
 import type { SignalRecord } from '../fenrir/src/communication.ts'
 import type { Proposal } from '../fenrir/src/leadership.ts'
@@ -28,24 +28,27 @@ import {
 } from '../fenrir/src/retar-bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../hati/index.ts'
 
-export type StrategyAdapterConfig = {
-  strategies?: Map<number, Strategy>
-  defaultStrategy: Strategy
-  wolfTeamStrategy?: TeamStrategy
-  masonTeamStrategy?: TeamStrategy
+export type AgentAdapterConfig = {
+  agents?: Map<number, Agent>
+  defaultAgent: Agent
+  wolfTeamAgent?: TeamAgent
+  masonTeamAgent?: TeamAgent
   enableRetar?: boolean
   /** 詰み探索を有効化（pretrain用、デフォルトfalse） */
   enableTsumi?: boolean
   /** Retarを有効にする開始Day（このDay以降にretarを走らせる、カリキュラム用） */
   retarStartDay?: number
-  /** 役職割当後にstrategy差し替え用コールバック */
+  /** 役職割当後にagent差し替え用コールバック */
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   seed?: number
   roles: Map<SystemRole, number>
   rules?: Partial<ResolvedRules>
 }
 
-export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandlers<FenrirExtEvent> {
+/** @deprecated Use AgentAdapterConfig */
+export type StrategyAdapterConfig = AgentAdapterConfig
+
+export function strategyAdapter(adapterConfig: AgentAdapterConfig): GameHandlers<FenrirExtEvent> {
   const rng = new Rng(adapterConfig.seed)
   let retarPossibilities: Map<number, Set<SystemRole>> | null = null
   let maxSurvivingNV: number | null = null
@@ -62,8 +65,8 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
   let lastRetarArtifacts: { vs: any, setup: Map<SystemRole, number>, options: any } | null = null
   const tsumiCache = new Map<number, boolean>()  // day → isTsumi
 
-  function getStrategy(seat: number): Strategy {
-    return adapterConfig.strategies?.get(seat) ?? adapterConfig.defaultStrategy
+  function getAgent(seat: number): Agent {
+    return adapterConfig.agents?.get(seat) ?? adapterConfig.defaultAgent
   }
 
   function buildCtx(
@@ -119,22 +122,22 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
 
   function decideForPlayer<T>(
     pctx: PhaseContext<FenrirExtEvent>, player: PlayerState,
-    individualFn: (s: Strategy, c: DecisionContext) => T,
-    teamFn: (s: TeamStrategy, c: TeamDecisionContext) => T,
+    individualFn: (s: Agent, c: DecisionContext) => T,
+    teamFn: (s: TeamAgent, c: TeamDecisionContext) => T,
   ): T {
     const state = pctx.state as GameState
     const view = buildPlayerView(state, player.seat)
     const ctx = buildCtx(pctx, player, view)
 
-    const teamStrategy = player.role === 'werewolf' ? adapterConfig.wolfTeamStrategy
-      : player.role === 'mason' ? adapterConfig.masonTeamStrategy
+    const teamAgent = player.role === 'werewolf' ? adapterConfig.wolfTeamAgent
+      : player.role === 'mason' ? adapterConfig.masonTeamAgent
       : null
 
-    if (teamStrategy) {
+    if (teamAgent) {
       const teamCtx = buildTeamCtx(ctx, state, player.role, player.seat)
-      return teamFn(teamStrategy, teamCtx)
+      return teamFn(teamAgent, teamCtx)
     }
-    return individualFn(getStrategy(player.seat), ctx)
+    return individualFn(getAgent(player.seat), ctx)
   }
 
   function runRetar(pctx: PhaseContext<FenrirExtEvent>): void {
@@ -191,14 +194,14 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
       const actions = new Map<number, NightAction>()
 
       // 狼チーム夜行動
-      if (adapterConfig.wolfTeamStrategy) {
+      if (adapterConfig.wolfTeamAgent) {
         const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
         if (aliveWolves.length > 0) {
           const leader = aliveWolves[0]
           const view = buildPlayerView(state, leader.seat)
           const ctx = buildCtx(pctx, leader, view)
           const teamCtx = buildTeamCtx(ctx, state, 'werewolf')
-          const wolfAction = adapterConfig.wolfTeamStrategy.decideNightAction(teamCtx) as WolfNightAction
+          const wolfAction = adapterConfig.wolfTeamAgent.decideNightAction(teamCtx) as WolfNightAction
 
           for (const wolf of aliveWolves) {
             if (wolf.seat === wolfAction.attacker) {
@@ -215,7 +218,7 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
         if (actions.has(player.seat)) continue
         const view = buildPlayerView(state, player.seat)
         const ctx = buildCtx(pctx, player, view)
-        actions.set(player.seat, getStrategy(player.seat).decideNightAction(ctx))
+        actions.set(player.seat, getAgent(player.seat).decideNightAction(ctx))
       }
 
       return actions
@@ -345,15 +348,15 @@ export function strategyAdapter(adapterConfig: StrategyAdapterConfig): GameHandl
           revoteCandidates: vctx.candidates,
         })
 
-        const teamStrategy = player.role === 'werewolf' ? adapterConfig.wolfTeamStrategy
-          : player.role === 'mason' ? adapterConfig.masonTeamStrategy
+        const teamAgent = player.role === 'werewolf' ? adapterConfig.wolfTeamAgent
+          : player.role === 'mason' ? adapterConfig.masonTeamAgent
           : null
 
-        if (teamStrategy) {
+        if (teamAgent) {
           const teamCtx = buildTeamCtx(ctx, state, player.role, player.seat)
-          votes.set(player.seat, teamStrategy.decideVote(teamCtx))
+          votes.set(player.seat, teamAgent.decideVote(teamCtx))
         } else {
-          votes.set(player.seat, getStrategy(player.seat).decideVote(ctx))
+          votes.set(player.seat, getAgent(player.seat).decideVote(ctx))
         }
       }
 

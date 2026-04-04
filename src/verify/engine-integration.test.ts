@@ -6,7 +6,7 @@ import type { GameConfig } from '../lupa/handlers.ts'
 import { minimalAdapter } from './minimal-adapter.ts'
 import { strategyAdapter } from './strategy-adapter.ts'
 import { RandomStrategy } from './random-strategy.ts'
-import { RuleBasedAgent as HeuristicStrategy, WolfTeamRuleAgent as WolfTeamHeuristic, MasonTeamRuleAgent as MasonTeamHeuristic } from '../fenrir/src/agents/rule-based-agent.ts'
+import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../fenrir/src/agents/rule-based-agent.ts'
 
 // 14D猫の標準構成
 const STANDARD_ROLES: Map<SystemRole, number> = new Map([
@@ -28,10 +28,10 @@ const STANDARD_CONFIG: GameConfig = {
 
 describe('engine-next + minimal-adapter', () => {
   it('runs a complete game with RandomStrategy', async () => {
-    const defaultStrategy = new RandomStrategy()
+    const defaultAgent = new RandomStrategy()
     const handlers = minimalAdapter({
-      strategies: new Map(),
-      defaultStrategy,
+      agents: new Map(),
+      defaultAgent,
       seed: 42,
     })
 
@@ -49,8 +49,8 @@ describe('engine-next + minimal-adapter', () => {
 
   it('produces game_over event', async () => {
     const handlers = minimalAdapter({
-      strategies: new Map(),
-      defaultStrategy: new RandomStrategy(),
+      agents: new Map(),
+      defaultAgent: new RandomStrategy(),
       seed: 123,
     })
 
@@ -63,8 +63,8 @@ describe('engine-next + minimal-adapter', () => {
     const results: string[] = []
     for (let seed = 0; seed < 10; seed++) {
       const handlers = minimalAdapter({
-        strategies: new Map(),
-        defaultStrategy: new RandomStrategy(),
+        agents: new Map(),
+        defaultAgent: new RandomStrategy(),
         seed,
       })
       const result = await runGame({ ...STANDARD_CONFIG, seed }, handlers)
@@ -77,8 +77,8 @@ describe('engine-next + minimal-adapter', () => {
 
   it('correctly tracks execution history', async () => {
     const handlers = minimalAdapter({
-      strategies: new Map(),
-      defaultStrategy: new RandomStrategy(),
+      agents: new Map(),
+      defaultAgent: new RandomStrategy(),
       seed: 42,
     })
     const result = await runGame(STANDARD_CONFIG, handlers)
@@ -91,9 +91,9 @@ describe('engine-next + minimal-adapter', () => {
 describe('engine-next + strategy-adapter', () => {
   it('runs a complete game with HeuristicStrategy', async () => {
     const handlers = strategyAdapter({
-      defaultStrategy: new HeuristicStrategy(),
-      wolfTeamStrategy: new WolfTeamHeuristic(),
-      masonTeamStrategy: new MasonTeamHeuristic(),
+      defaultAgent: new RuleBasedAgent(),
+      wolfTeamAgent: new WolfTeamRuleAgent(),
+      masonTeamAgent: new MasonTeamRuleAgent(),
       enableRetar: false,
       seed: 42,
       roles: STANDARD_ROLES,
@@ -108,9 +108,9 @@ describe('engine-next + strategy-adapter', () => {
 
   it('produces signal events with onPreVote', async () => {
     const handlers = strategyAdapter({
-      defaultStrategy: new HeuristicStrategy(),
-      wolfTeamStrategy: new WolfTeamHeuristic(),
-      masonTeamStrategy: new MasonTeamHeuristic(),
+      defaultAgent: new RuleBasedAgent(),
+      wolfTeamAgent: new WolfTeamRuleAgent(),
+      masonTeamAgent: new MasonTeamRuleAgent(),
       enableRetar: false,
       seed: 42,
       roles: STANDARD_ROLES,
@@ -130,8 +130,8 @@ describe('engine-next performance', () => {
     const t0 = performance.now()
     for (let i = 0; i < N; i++) {
       const handlers = minimalAdapter({
-        strategies: new Map(),
-        defaultStrategy: new RandomStrategy(),
+        agents: new Map(),
+        defaultAgent: new RandomStrategy(),
         seed: i,
       })
       await runGame({ ...STANDARD_CONFIG, seed: i }, handlers)
@@ -142,8 +142,8 @@ describe('engine-next performance', () => {
     const t1 = performance.now()
     for (let i = 0; i < N; i++) {
       const handlers = strategyAdapter({
-        defaultStrategy: new HeuristicStrategy(),
-        wolfTeamStrategy: new WolfTeamHeuristic(),
+        defaultAgent: new RuleBasedAgent(),
+        wolfTeamAgent: new WolfTeamRuleAgent(),
         enableRetar: false,
         seed: i,
         roles: STANDARD_ROLES,

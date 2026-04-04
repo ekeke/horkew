@@ -1,8 +1,8 @@
 /**
  * チームエージェント共通ベースクラス
  *
- * TeamStrategyBase: 基本的なチーム推論・記録
- * CollectiveStrategyBase: 1日1回キャッシュ付き推論
+ * TeamAgentBase: 基本的なチーム推論・記録
+ * CollectiveAgentBase: 1日1回キャッシュ付き推論
  */
 
 import type { TeamDecisionContext } from './agent.ts'
@@ -20,7 +20,7 @@ import {
 } from '../action.ts'
 import { sigmoid } from '../ml/nn.ts'
 
-export abstract class TeamStrategyBase {
+export abstract class TeamAgentBase {
   readonly network: AnyNetwork
   readonly config: NeuralAgentConfig
   trajectory: TrajectoryStep[] = []
@@ -215,10 +215,10 @@ export abstract class TeamStrategyBase {
 }
 
 /**
- * 集団戦略の共通基盤。TeamStrategyBase を拡張し、
+ * 集団戦略の共通基盤。TeamAgentBase を拡張し、
  * once-per-day キャッシュと集団用observation encoding を提供する。
  */
-export abstract class CollectiveStrategyBase extends TeamStrategyBase {
+export abstract class CollectiveAgentBase extends TeamAgentBase {
   private cachedResult: ForwardResult | null = null
   private cachedDay = -1
 

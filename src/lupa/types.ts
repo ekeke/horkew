@@ -1,5 +1,5 @@
 import type { SystemRole, EnumSpecies, ResolvedRules } from '../types/index.ts'
-import type { Agent as Strategy, TeamAgent as TeamStrategy, AsyncAgent as AsyncStrategy, AsyncTeamAgent as AsyncTeamStrategy } from '../fenrir/src/agents/agent.ts'
+import type { Agent, TeamAgent, AsyncAgent, AsyncTeamAgent } from '../fenrir/src/agents/agent.ts'
 
 export type LupaConfig = {
   roles: Map<SystemRole, number>
@@ -7,16 +7,16 @@ export type LupaConfig = {
   verify?: boolean
   useRandomNames?: boolean
   hasFirstGhost?: boolean
-  /** プレイヤーごとの戦略（未指定はdefaultStrategy、それも未指定ならRandomStrategy） */
-  strategies?: Map<number, Strategy>
-  /** strategiesに未登録のseatに使う戦略 */
-  defaultStrategy?: Strategy
-  /** 役職割り当て後のコールバック（seat→roleマップを受け取り、strategiesを動的に設定できる） */
+  /** プレイヤーごとのエージェント（未指定はdefaultAgent、それも未指定ならRandomStrategy） */
+  agents?: Map<number, Agent>
+  /** agentsに未登録のseatに使うエージェント */
+  defaultAgent?: Agent
+  /** 役職割り当て後のコールバック（seat→roleマップを受け取り、agentsを動的に設定できる） */
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
-  /** 狼チーム戦略 */
-  wolfTeamStrategy?: TeamStrategy
-  /** 共有者チーム戦略 */
-  masonTeamStrategy?: TeamStrategy
+  /** 狼チームエージェント */
+  wolfTeamAgent?: TeamAgent
+  /** 共有者チームエージェント */
+  masonTeamAgent?: TeamAgent
   /** Retar論理推論（デフォルトON、falseで無効化） */
   enableRetar?: boolean
   /** カスタムRetar実行関数（並列版等を注入する場合） */
@@ -25,14 +25,14 @@ export type LupaConfig = {
   revoteConfig?: RevoteConfig
   /** 投票確定後のCO許可 = 遺言 (デフォルト: false) */
   allowPostVoteCO?: boolean
-  /** 非同期戦略 (runGameAsync専用、対話型CLI等) */
-  asyncStrategies?: Map<number, AsyncStrategy>
-  /** asyncStrategiesに未登録のseatに使う非同期戦略 */
-  defaultAsyncStrategy?: AsyncStrategy
-  /** 非同期狼チーム戦略 */
-  asyncWolfTeamStrategy?: AsyncTeamStrategy
-  /** 非同期共有者チーム戦略 */
-  asyncMasonTeamStrategy?: AsyncTeamStrategy
+  /** 非同期エージェント (runGameAsync専用、対話型CLI等) */
+  asyncAgents?: Map<number, AsyncAgent>
+  /** asyncAgentsに未登録のseatに使う非同期エージェント */
+  defaultAsyncAgent?: AsyncAgent
+  /** 非同期狼チームエージェント */
+  asyncWolfTeamAgent?: AsyncTeamAgent
+  /** 非同期共有者チームエージェント */
+  asyncMasonTeamAgent?: AsyncTeamAgent
   /** オプションルール（未指定分はるる鯛14D猫デフォルト） */
   rules?: Partial<ResolvedRules>
 }

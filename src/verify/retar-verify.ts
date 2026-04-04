@@ -851,7 +851,7 @@ async function main() {
   const nameCount = new Map<string, number>()
   if (outdir) mkdirSync(outdir, { recursive: true })
 
-  const defaultStrategy = new RandomStrategy()
+  const defaultAgent = new RandomStrategy()
 
   for (const gc of activeConfigs) {
     const roles = new Map(Object.entries(gc.roles) as [SystemRole, number][])
@@ -877,7 +877,7 @@ async function main() {
         hasFirstGhost: gc.hasFirstGhost,
         revoteConfig: gc.revoteConfig,
       }
-      const handlers = strategyAdapter({ defaultStrategy, seed, roles })
+      const handlers = strategyAdapter({ defaultAgent, seed, roles })
       const { events, state } = await runGame(engineConfig, handlers)
       totalGames++
       if (state.result) configResults[state.result]++
