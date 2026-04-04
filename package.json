@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:lib && npm run build:demo",
+    "build:lib": "tsc",
     "test": "node --experimental-strip-types --test --experimental-test-coverage",
     "typecheck": "tsc --noEmit",
     "build:wasm": "bash src/retar-rs/build.sh all",
