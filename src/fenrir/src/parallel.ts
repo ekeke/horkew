@@ -3,7 +3,7 @@
  *
  * worker_threads でゲーム生成を並列化するための設計:
  *
- * 課題: FenrirStrategy は NeuralNetwork インスタンスを保持しており、
+ * 課題: NeuralAgent は NeuralNetwork インスタンスを保持しており、
  * worker_threads 間で共有できない。
  *
  * 解決策: 重みを SharedArrayBuffer で共有し、各workerが独自のNN を構築。

@@ -71,7 +71,7 @@ Pretrain B+D → Phase 0 (Mason Individual) → Phase 1 (Village) → Phase 1' (
 - **mason 死亡後**: `ext.planState` から日毎インクリメント
 - **plan 解決**: `resolvePlanGroup()` で seat/grayran を生存席に解決
 
-### full-adapter (`lupaAdapters/full-adapter.ts`)
+### full-adapter (`adapters/full-adapter.ts`)
 
 **全フェーズ実行**。シグナル 3R、指揮者選出、予告、防御CO、Retar、詰み探索を含む。
 非 strategy-only モードおよび eval で使用。
