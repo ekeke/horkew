@@ -15,7 +15,7 @@ import type { PlanTokenTrainingSample } from './execution-plan-data.ts'
 import { runGame } from '../../../lupa/engine.ts'
 import { strategyOnlyAdapter } from '../adapters/strategy-only-adapter.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents/rule-based-agent.ts'
-import { RandomStrategy, WolfTeamRandom, MasonTeamRandom } from '../../../verify/random-strategy.ts'
+import { RandomAgent, WolfTeamRandomAgent, MasonTeamRandomAgent } from '../../../verify/random-agent.ts'
 import { encodeObservation } from '../observation.ts'
 import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
 import { lupaRunRetar } from '../retar-bridge.ts'
@@ -438,9 +438,9 @@ async function collectTsumiFromGame(
 
   const handlers = strategyOnlyAdapter({
     agents: strategies,
-    defaultAgent: useRandom ? new RandomStrategy() : new RuleBasedAgent(),
-    wolfTeamAgent: useRandom ? new WolfTeamRandom() : new WolfTeamRuleAgent(),
-    masonTeamAgent: useRandom ? new MasonTeamRandom() : new MasonTeamRuleAgent(),
+    defaultAgent: useRandom ? new RandomAgent() : new RuleBasedAgent(),
+    wolfTeamAgent: useRandom ? new WolfTeamRandomAgent() : new WolfTeamRuleAgent(),
+    masonTeamAgent: useRandom ? new MasonTeamRandomAgent() : new MasonTeamRuleAgent(),
     onRolesAssigned: (seatRoles) => {
       for (const [seat, role] of seatRoles) {
         if (role === 'mason') {

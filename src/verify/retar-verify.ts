@@ -25,8 +25,8 @@ import type { SystemRole, VillageStatus } from '../types/index.ts'
 import type { LupaConfig, GameState } from '../lupa/types.ts'
 import type { GameConfig as EngineGameConfig } from '../lupa/handlers.ts'
 import { runGame } from '../lupa/engine.ts'
-import { strategyAdapter } from './strategy-adapter.ts'
-import { RandomStrategy } from './random-strategy.ts'
+import { agentAdapter } from './agent-adapter.ts'
+import { RandomAgent } from './random-agent.ts'
 import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
@@ -851,7 +851,7 @@ async function main() {
   const nameCount = new Map<string, number>()
   if (outdir) mkdirSync(outdir, { recursive: true })
 
-  const defaultAgent = new RandomStrategy()
+  const defaultAgent = new RandomAgent()
 
   for (const gc of activeConfigs) {
     const roles = new Map(Object.entries(gc.roles) as [SystemRole, number][])
@@ -877,7 +877,7 @@ async function main() {
         hasFirstGhost: gc.hasFirstGhost,
         revoteConfig: gc.revoteConfig,
       }
-      const handlers = strategyAdapter({ defaultAgent, seed, roles })
+      const handlers = agentAdapter({ defaultAgent, seed, roles })
       const { events, state } = await runGame(engineConfig, handlers)
       totalGames++
       if (state.result) configResults[state.result]++

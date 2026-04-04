@@ -4,8 +4,8 @@ import type { SystemRole } from '../types/index.ts'
 import { runGame } from '../lupa/engine.ts'
 import type { GameConfig } from '../lupa/handlers.ts'
 import { minimalAdapter } from './minimal-adapter.ts'
-import { strategyAdapter } from './strategy-adapter.ts'
-import { RandomStrategy } from './random-strategy.ts'
+import { agentAdapter } from './agent-adapter.ts'
+import { RandomAgent } from './random-agent.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../fenrir/src/agents/rule-based-agent.ts'
 
 // 14D猫の標準構成
@@ -27,8 +27,8 @@ const STANDARD_CONFIG: GameConfig = {
 }
 
 describe('engine-next + minimal-adapter', () => {
-  it('runs a complete game with RandomStrategy', async () => {
-    const defaultAgent = new RandomStrategy()
+  it('runs a complete game with RandomAgent', async () => {
+    const defaultAgent = new RandomAgent()
     const handlers = minimalAdapter({
       agents: new Map(),
       defaultAgent,
@@ -50,7 +50,7 @@ describe('engine-next + minimal-adapter', () => {
   it('produces game_over event', async () => {
     const handlers = minimalAdapter({
       agents: new Map(),
-      defaultAgent: new RandomStrategy(),
+      defaultAgent: new RandomAgent(),
       seed: 123,
     })
 
@@ -64,7 +64,7 @@ describe('engine-next + minimal-adapter', () => {
     for (let seed = 0; seed < 10; seed++) {
       const handlers = minimalAdapter({
         agents: new Map(),
-        defaultAgent: new RandomStrategy(),
+        defaultAgent: new RandomAgent(),
         seed,
       })
       const result = await runGame({ ...STANDARD_CONFIG, seed }, handlers)
@@ -78,7 +78,7 @@ describe('engine-next + minimal-adapter', () => {
   it('correctly tracks execution history', async () => {
     const handlers = minimalAdapter({
       agents: new Map(),
-      defaultAgent: new RandomStrategy(),
+      defaultAgent: new RandomAgent(),
       seed: 42,
     })
     const result = await runGame(STANDARD_CONFIG, handlers)
@@ -88,9 +88,9 @@ describe('engine-next + minimal-adapter', () => {
   })
 })
 
-describe('engine-next + strategy-adapter', () => {
-  it('runs a complete game with HeuristicStrategy', async () => {
-    const handlers = strategyAdapter({
+describe('engine-next + agent-adapter', () => {
+  it('runs a complete game with RuleBasedAgent', async () => {
+    const handlers = agentAdapter({
       defaultAgent: new RuleBasedAgent(),
       wolfTeamAgent: new WolfTeamRuleAgent(),
       masonTeamAgent: new MasonTeamRuleAgent(),
@@ -107,7 +107,7 @@ describe('engine-next + strategy-adapter', () => {
   })
 
   it('produces signal events with onPreVote', async () => {
-    const handlers = strategyAdapter({
+    const handlers = agentAdapter({
       defaultAgent: new RuleBasedAgent(),
       wolfTeamAgent: new WolfTeamRuleAgent(),
       masonTeamAgent: new MasonTeamRuleAgent(),
@@ -123,7 +123,7 @@ describe('engine-next + strategy-adapter', () => {
 })
 
 describe('engine-next performance', () => {
-  it('minimal-adapter is faster than strategy-adapter for same seed', async () => {
+  it('minimal-adapter is faster than agent-adapter for same seed', async () => {
     const N = 20
 
     // minimal (no discussion)
@@ -131,17 +131,17 @@ describe('engine-next performance', () => {
     for (let i = 0; i < N; i++) {
       const handlers = minimalAdapter({
         agents: new Map(),
-        defaultAgent: new RandomStrategy(),
+        defaultAgent: new RandomAgent(),
         seed: i,
       })
       await runGame({ ...STANDARD_CONFIG, seed: i }, handlers)
     }
     const minimalMs = performance.now() - t0
 
-    // strategy-adapter (full discussion, no retar)
+    // agent-adapter (full discussion, no retar)
     const t1 = performance.now()
     for (let i = 0; i < N; i++) {
-      const handlers = strategyAdapter({
+      const handlers = agentAdapter({
         defaultAgent: new RuleBasedAgent(),
         wolfTeamAgent: new WolfTeamRuleAgent(),
         enableRetar: false,

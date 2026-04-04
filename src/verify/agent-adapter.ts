@@ -1,5 +1,5 @@
 /**
- * Strategy Adapter — 既存Agent/TeamAgentをGameHandlersに変換
+ * Agent Adapter — Agent/TeamAgentをGameHandlersに変換
  *
  * 全フェーズ対応: シグナル3R、指揮者選出、予告、防御CO。
  * Retar統合はオプション。旧エンジンとの互換性を保つ。
@@ -45,10 +45,7 @@ export type AgentAdapterConfig = {
   rules?: Partial<ResolvedRules>
 }
 
-/** @deprecated Use AgentAdapterConfig */
-export type StrategyAdapterConfig = AgentAdapterConfig
-
-export function strategyAdapter(adapterConfig: AgentAdapterConfig): GameHandlers<FenrirExtEvent> {
+export function agentAdapter(adapterConfig: AgentAdapterConfig): GameHandlers<FenrirExtEvent> {
   const rng = new Rng(adapterConfig.seed)
   let retarPossibilities: Map<number, Set<SystemRole>> | null = null
   let maxSurvivingNV: number | null = null

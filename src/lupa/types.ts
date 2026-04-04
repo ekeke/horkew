@@ -7,7 +7,7 @@ export type LupaConfig = {
   verify?: boolean
   useRandomNames?: boolean
   hasFirstGhost?: boolean
-  /** プレイヤーごとのエージェント（未指定はdefaultAgent、それも未指定ならRandomStrategy） */
+  /** プレイヤーごとのエージェント（未指定はdefaultAgent、それも未指定ならRandomAgent） */
   agents?: Map<number, Agent>
   /** agentsに未登録のseatに使うエージェント */
   defaultAgent?: Agent

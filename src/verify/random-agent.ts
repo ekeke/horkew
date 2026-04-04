@@ -10,7 +10,7 @@ import type { Rng } from '../lupa/random.ts'
 const CO_PROBABILITY = 0.4
 const FORECAST_PROBABILITY = 0.3
 
-export class RandomStrategy implements Agent {
+export class RandomAgent implements Agent {
   // ============================================================
   // 夜アクション
   // ============================================================
@@ -638,8 +638,8 @@ function collectBlackTargets(state: GameState): Set<number> {
 // 狼チームランダム
 // ============================================================
 
-export class WolfTeamRandom implements TeamAgent {
-  private individual = new RandomStrategy()
+export class WolfTeamRandomAgent implements TeamAgent {
+  private individual = new RandomAgent()
 
   decideNightAction(ctx: TeamDecisionContext): WolfNightAction {
     const state = ctx.gameState
@@ -727,8 +727,8 @@ export class WolfTeamRandom implements TeamAgent {
 // 共有者チームヒューリスティック
 // ============================================================
 
-export class MasonTeamRandom implements TeamAgent {
-  private individual = new RandomStrategy()
+export class MasonTeamRandomAgent implements TeamAgent {
+  private individual = new RandomAgent()
 
   decideNightAction(_ctx: TeamDecisionContext): NightAction {
     return { type: 'none' }

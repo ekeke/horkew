@@ -299,7 +299,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       gameRetarMs = result.timing?.retarMs ?? 0
       gameRetarCount = result.timing?.retarCount ?? 0
     } else {
-      // strategy-adapter: 全フェーズ実行
+      // full-adapter: 全フェーズ実行
       const handlers = fullAdapter({
         agents: agentsMap,
         defaultAgent: defaultAgent ?? new RuleBasedAgent(),

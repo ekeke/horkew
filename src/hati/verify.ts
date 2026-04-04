@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import type { SystemRole } from '../types/index.ts'
 import type { GameEvent, GameState } from '../lupa/types.ts'
 import { runGame } from '../lupa/engine.ts'
-import { strategyAdapter } from '../verify/strategy-adapter.ts'
+import { agentAdapter } from '../verify/agent-adapter.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../fenrir/src/agents/rule-based-agent.ts'
 import { formatHowl } from '../lupa/format.ts'
 import { parse } from '../howl/parser.ts'
@@ -448,7 +448,7 @@ async function runVerify(args: Args): Promise<void> {
           hasFirstGhost: cfg.hasFirstGhost,
           revoteConfig: cfg.revoteConfig ?? { maxRevotes: 2, style: 'full_revote' as const, tiebreaker: 'draw' as const },
         }
-        const handlers = strategyAdapter({
+        const handlers = agentAdapter({
           defaultAgent: new RuleBasedAgent(),
           wolfTeamAgent: new WolfTeamRuleAgent(),
           masonTeamAgent: new MasonTeamRuleAgent(),
@@ -958,7 +958,7 @@ async function runFalseNegativeFromDb(args: Args): Promise<void> {
           hasFirstGhost: cfg.hasFirstGhost,
           revoteConfig: cfg.revoteConfig ?? { maxRevotes: 2, style: 'full_revote' as const, tiebreaker: 'draw' as const },
         }
-        const handlers = strategyAdapter({
+        const handlers = agentAdapter({
           defaultAgent: new RuleBasedAgent(),
           wolfTeamAgent: new WolfTeamRuleAgent(),
           masonTeamAgent: new MasonTeamRuleAgent(),

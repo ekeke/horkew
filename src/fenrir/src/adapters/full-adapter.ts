@@ -1,7 +1,7 @@
 /**
  * Full Adapter — 全フェーズ対応（議論・シグナル・提案・予告・防御CO）
  *
- * lupa の strategy-adapter.ts をベースに fenrir 用にコピー・リネーム。
+ * verify/agent-adapter.ts をベースに fenrir 用にコピー・リネーム。
  * Retar統合はオプション。
  */
 

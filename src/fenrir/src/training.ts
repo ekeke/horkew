@@ -639,7 +639,7 @@ async function generateGame(
   }
 }
 
-/** 非同期版: strategy-adapter + Retarを使用 */
+/** 非同期版: full-adapter + Retarを使用 */
 async function generateGameAsync(
   config: TrainingConfig,
   agents: GameAgents,
