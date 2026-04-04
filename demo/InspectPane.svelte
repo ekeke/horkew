@@ -220,7 +220,7 @@
       return { text: ROLE_SHORT[roles[idx - 14]] || roles[idx - 14], cls: 'pt-role' }
     }
     if (idx === 19) return { text: 'grayran', cls: 'pt-gray' }
-    if (idx === 20) return { text: '|', cls: 'pt-next' }
+    if (idx === 20) return { text: 'NEXT', cls: 'pt-next' }
     if (idx === 21) return { text: 'STOP', cls: 'pt-stop' }
     return { text: `?${idx}`, cls: '' }
   }
