@@ -273,6 +273,8 @@ export function loadTsumiFromDB(
           revoteRound: null,
           revoteCandidates: null,
           executionPlans: [],
+          planForwardIndices: null,
+          planEndgameIndices: null,
           tsumiTarget: null,  // tsumi masked
           rules: resolveRules(),
         }

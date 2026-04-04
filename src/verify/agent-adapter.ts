@@ -98,6 +98,8 @@ export function agentAdapter(adapterConfig: AgentAdapterConfig): GameHandlers<Fe
       revoteRound: null,
       revoteCandidates: null,
       executionPlans: [],
+      planForwardIndices: null,
+      planEndgameIndices: null,
       tsumiTarget,
       rules: pctx.rules,
       ...extra,

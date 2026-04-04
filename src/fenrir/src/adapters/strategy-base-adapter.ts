@@ -365,6 +365,8 @@ export abstract class StrategyBaseAdapter
       revoteRound: null,
       revoteCandidates: null,
       executionPlans: ext.executionPlans,
+      planForwardIndices: ext.planForwardIndices,
+      planEndgameIndices: ext.planEndgameIndices,
       tsumiTarget: ext.tsumiTarget,
       rules: pctx.rules,
       ...extra,

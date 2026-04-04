@@ -51,6 +51,10 @@ export type FenrirExt = {
   planState: PlanState
   /** 村全体に公開された処刑プラン */
   executionPlans: ExecutionPlan[]
+  /** mason の NN が出力した raw plan token indices (forward 8 tokens, vocab 0-21) */
+  planForwardIndices: number[]
+  /** mason の NN が出力した raw plan token indices (endgame 4 tokens, vocab 0-21) */
+  planEndgameIndices: number[]
   /** Retar 解析結果のキャッシュ */
   retarCache: RetarCache | null
   /** 詰み判定キャッシュ: day → isTsumi */
@@ -72,6 +76,8 @@ export function createFenrirExt(): FenrirExt {
       masonTakeoverDone: false,
     },
     executionPlans: [],
+    planForwardIndices: [21, 21, 21, 21, 21, 21, 21, 21],
+    planEndgameIndices: [21, 21, 21, 21],
     retarCache: null,
     tsumiCache: new Map(),
     tsumiTarget: null,

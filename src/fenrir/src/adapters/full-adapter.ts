@@ -97,6 +97,8 @@ export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers<Fenr
       revoteRound: null,
       revoteCandidates: null,
       executionPlans: [],
+      planForwardIndices: null,
+      planEndgameIndices: null,
       tsumiTarget,
       rules: pctx.rules,
       ...extra,

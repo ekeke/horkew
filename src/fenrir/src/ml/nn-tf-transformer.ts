@@ -11,7 +11,6 @@ import type { NetworkConfig, ForwardResult, TransformerNetworkConfig } from './n
 import {
   SEATS, NUM_ROLES,
   HISTORY_WINDOW, OBSERVATION_SIZE,
-  PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS,
   ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS, ROLE_INDEX, CO_ROLES,
   type ObservationMode,
 } from '../observation.ts'
@@ -44,18 +43,15 @@ const RETAR_START = HISTORY_START + HISTORY_SIZE
 const RETAR_SIZE = SEATS * NUM_ROLES
 const GLOBAL_RETAR_START = RETAR_START + RETAR_SIZE
 const GLOBAL_RETAR_SIZE = SEATS * NUM_ROLES
-const PLAN_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
-const PLAN_INCLUDED_START = PLAN_START
-const PLAN_POSITION_START = PLAN_START + SEATS
-const PLAN_GLOBAL_START = PLAN_START + SEATS * 2
-const PLAN_SIZE = SEATS * 2 + 3  // 31
-const PLAN_APPROVED_START = PLAN_START + PLAN_SIZE
+const PLAN_APPROVED_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
 const PLAN_APPROVED_SIZE = SEATS
 const NEW_SIGNALS_PER_SEAT = 4
 const NEW_SIGNALS_START = PLAN_APPROVED_START + PLAN_APPROVED_SIZE
 const NEW_SIGNALS_SIZE = SEATS * NEW_SIGNALS_PER_SEAT
-const PLAN_TOKENS_SIZE = 1 + MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES
-const TSUMI_START = NEW_SIGNALS_START + NEW_SIGNALS_SIZE + PLAN_TOKENS_SIZE
+const NUM_PLAN_FORWARD = 8
+const NUM_PLAN_ENDGAME = 4
+const RAW_PLAN_SIZE = NUM_PLAN_FORWARD + NUM_PLAN_ENDGAME
+const TSUMI_START = NEW_SIGNALS_START + NEW_SIGNALS_SIZE + RAW_PLAN_SIZE
 
 // Team offsets
 const TEAM_SIZE_START = OBSERVATION_SIZE
@@ -84,8 +80,6 @@ function buildClsIndices(mode: ObservationMode): number[] {
   indices.push(KNOWN_HAMSTER_START)
   // revote_round (1)
   indices.push(REVOTE_ROUND_START)
-  // plan_global (3)
-  indices.push(PLAN_GLOBAL_START, PLAN_GLOBAL_START + 1, PLAN_GLOBAL_START + 2)
   // tsumi (1)
   indices.push(TSUMI_START)
   // team_size (1) — team/collective共通
@@ -117,9 +111,6 @@ function buildSeatIndices(mode: ObservationMode): number[] {
     // global retar — 公開情報のみ (11)
     const grOff = GLOBAL_RETAR_START + s * NUM_ROLES
     for (let i = 0; i < NUM_ROLES; i++) indices.push(grOff + i)
-    // plan (2)
-    indices.push(PLAN_INCLUDED_START + s)
-    indices.push(PLAN_POSITION_START + s)
     // plan_approved (1)
     indices.push(PLAN_APPROVED_START + s)
     // new signals (4): confirm_human, confirm_wolf, vote_for, vote_against

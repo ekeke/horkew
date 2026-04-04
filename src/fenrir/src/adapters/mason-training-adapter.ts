@@ -156,10 +156,12 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     if (!result) return
 
     if (result.planForwardActions) {
+      ext.planForwardIndices = [...result.planForwardActions]
       ext.planState.forwardGroups = parsePlanIndices(result.planForwardActions)
       ext.planState.dayIndex = 1  // groups[0] は今日使用済み
     }
     if (result.planEndgameActions) {
+      ext.planEndgameIndices = [...result.planEndgameActions]
       ext.planState.endgameGroups = parsePlanIndices(result.planEndgameActions)
     }
   }

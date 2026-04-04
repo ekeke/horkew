@@ -335,13 +335,18 @@
                   {#if gobs.tsumi}<span>Tsumi <b class="positive">seat{gobs.tsumi}</b></span>{/if}
                   {#if gobs.revote.round > 0}<span>Revote <b>R{gobs.revote.round.toFixed(0)}</b></span>{/if}
                 </div>
-                {#if dayGroup.planForward || gobs.seats.some((s: any) => s.planIncluded)}
+                {#if dayGroup.planForward || gobs.planForward?.some((v: number) => v !== 21)}
                   <div class="day-plan-section">
                     {#if dayGroup.planForward}
                       <div class="day-plan-row">
                         <span class="day-plan-label">Fwd</span>
                         <span class="plan-tokens">{#each dayGroup.planForward.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                         <span class="plan-groups">{dayGroup.planForward.groups.length}g</span>
+                      </div>
+                    {:else if gobs.planForward}
+                      <div class="day-plan-row">
+                        <span class="day-plan-label">Fwd</span>
+                        <span class="plan-tokens">{#each gobs.planForward as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                       </div>
                     {/if}
                     {#if dayGroup.planEndgame}
@@ -350,15 +355,12 @@
                         <span class="plan-tokens">{#each dayGroup.planEndgame.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                         <span class="plan-groups">{dayGroup.planEndgame.groups.length}g</span>
                       </div>
+                    {:else if gobs.planEndgame}
+                      <div class="day-plan-row">
+                        <span class="day-plan-label">End</span>
+                        <span class="plan-tokens">{#each gobs.planEndgame as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                      </div>
                     {/if}
-                    {#each [gobs.seats.filter((s: any) => s.planIncluded).sort((a: any, b: any) => a.planPosition - b.planPosition)] as planSeats}
-                      {#if planSeats.length > 0}
-                        <div class="day-plan-row">
-                          <span class="day-plan-label">Resolved</span>
-                          <span class="exec-plan">{#each planSeats as ps, i}{#if i > 0} → {/if}<span class="plan-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === ps.seat)?.role ?? ''] || 'var(--ctp-text)'}">{ps.seat}</span>{/each}</span>
-                        </div>
-                      {/if}
-                    {/each}
                   </div>
                 {/if}
               </div>
@@ -486,17 +488,20 @@
             </div>
           </div>
 
-          <!-- Plan Tokens (input) -->
-          {#if obs.planTokens.count > 0}
+          <!-- Plan Indices (observation input) -->
+          {#if obs.planForward?.some((v: number) => v !== 21)}
             <div class="detail-section">
-              <div class="detail-label">Plan Tokens ({obs.planTokens.count})</div>
-              {#each obs.planTokens.tokens as pt, i}
-                <div class="plan-token-input">
-                  <span class="plan-token-type-badge {['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? ''}">{['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? '?'}</span>
-                  <span class="plan-token-seats">{#each pt.targetMask as v, j}{#if v > 0.5}<span class="plan-token-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === j + 1)?.role ?? ''] || 'var(--ctp-text)'}">seat{j + 1}</span>{/if}{/each}</span>
-                  {#if pt.priority > 0}<span class="plan-token-pri">pri:{pt.priority.toFixed(1)}</span>{/if}
+              <div class="detail-label">Plan (observation)</div>
+              <div class="day-plan-row">
+                <span class="day-plan-label">Fwd</span>
+                <span class="plan-tokens">{#each obs.planForward as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+              </div>
+              {#if obs.planEndgame?.some((v: number) => v !== 21)}
+                <div class="day-plan-row">
+                  <span class="day-plan-label">End</span>
+                  <span class="plan-tokens">{#each obs.planEndgame as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                 </div>
-              {/each}
+              {/if}
             </div>
           {/if}
 
@@ -613,16 +618,19 @@
             </div>
           </div>
 
-          {#if aobs.planTokens.count > 0}
+          {#if aobs.planForward?.some((v: number) => v !== 21)}
             <div class="detail-section">
-              <div class="detail-label">Plan Tokens ({aobs.planTokens.count})</div>
-              {#each aobs.planTokens.tokens as pt, i}
-                <div class="plan-token-input">
-                  <span class="plan-token-type-badge {['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? ''}">{['roller','decision','designated','grayran','endgame'][pt.typeOneHot.indexOf(Math.max(...pt.typeOneHot))] ?? '?'}</span>
-                  <span class="plan-token-seats">{#each pt.targetMask as v, j}{#if v > 0.5}<span class="plan-token-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === j + 1)?.role ?? ''] || 'var(--ctp-text)'}">seat{j + 1}</span>{/if}{/each}</span>
-                  {#if pt.priority > 0}<span class="plan-token-pri">pri:{pt.priority.toFixed(1)}</span>{/if}
+              <div class="detail-label">Plan (observation)</div>
+              <div class="day-plan-row">
+                <span class="day-plan-label">Fwd</span>
+                <span class="plan-tokens">{#each aobs.planForward as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+              </div>
+              {#if aobs.planEndgame?.some((v: number) => v !== 21)}
+                <div class="day-plan-row">
+                  <span class="day-plan-label">End</span>
+                  <span class="plan-tokens">{#each aobs.planEndgame as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                 </div>
-              {/each}
+              {/if}
             </div>
           {/if}
         {:else}

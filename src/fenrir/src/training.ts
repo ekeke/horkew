@@ -24,7 +24,6 @@ import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
   WOLF_COLLECTIVE_CLS_FEATURES, WOLF_COLLECTIVE_SEAT_FEATURES,
   MASON_COLLECTIVE_CLS_FEATURES, MASON_COLLECTIVE_SEAT_FEATURES,
   FANATIC_CLS_FEATURES, FANATIC_SEAT_FEATURES,
-  PLAN_TOKEN_FEATURES, MAX_PLAN_TOKENS,
   ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS } from './observation.ts'
 import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
 import { encodeTrueRoles } from './observation.ts'
@@ -228,8 +227,8 @@ const TRANSFORMER_COMMON = {
   dModel: 64,
   numHeads: 4,
   dFf: 128,
-  planFeatures: PLAN_TOKEN_FEATURES,
-  maxPlanTokens: MAX_PLAN_TOKENS,
+  planFeatures: 0,    // 旧互換: raw plan indices 方式では不要
+  maxPlanTokens: 0,   // 旧互換: raw plan indices 方式では不要
   roleFeatures: ROLE_TOKEN_FEATURES,
   numRoleTokens: NUM_ROLE_TOKENS,
   seatLayers: 3,

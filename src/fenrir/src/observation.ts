@@ -7,15 +7,10 @@
  * 公開情報(publicEvents, signals)と自分の秘密情報(myPlayer)のみからエンコード。
  */
 
-import type { DecisionContext, TeamDecisionContext, PlanType } from './agents/agent.ts'
+import type { DecisionContext, TeamDecisionContext } from './agents/agent.ts'
 import type { SystemRole } from '../../types/index.ts'
 import type { FenrirEvent } from './events.ts'
 
-// プラン種別インデックス
-const PLAN_TYPES: PlanType[] = ['roller', 'decision', 'designated', 'grayran', 'endgame']
-const PLAN_TYPE_INDEX: Record<string, number> = {}
-for (let i = 0; i < PLAN_TYPES.length; i++) PLAN_TYPE_INDEX[PLAN_TYPES[i]] = i
-const PLAN_TYPE_COUNT = PLAN_TYPES.length
 
 /** 14D猫専用: 席数固定 */
 export const SEATS = 14
@@ -59,30 +54,23 @@ const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
 const GLOBAL_RETAR_SIZE = SEATS * NUM_ROLES  // 154
 // 騙り前提Retar: 廃止 — 村NN出力注入で代替（Architecture.md参照）
 
-// 処刑プラン: per-seat(included, position) + global(length, is_grayran, active)
-const PLAN_PER_SEAT_SIZE = 2
-const PLAN_GLOBAL_SIZE = 3
-const PLAN_SIZE = SEATS * PLAN_PER_SEAT_SIZE + PLAN_GLOBAL_SIZE  // 31
 // プラン賛否: per-seat (Step 6)
 const PLAN_APPROVED_SIZE = SEATS  // 14
 // 新シグナル: per-seat × 4 (confirm_human, confirm_wolf, vote_for, vote_against) (Step 6)
 const NEW_SIGNALS_PER_SEAT = 4
 const NEW_SIGNALS_SIZE = SEATS * NEW_SIGNALS_PER_SEAT  // 56
 
-/** プラントークンの特徴量次元 */
-export const PLAN_TOKEN_FEATURES = 20
-/** プラントークンの最大数 */
-export const MAX_PLAN_TOKENS = 8
-
-// プラントークン: plan_token_count(1) + MAX_PLAN_TOKENS × PLAN_TOKEN_FEATURES
-const PLAN_TOKENS_COUNT_SIZE = 1
-const PLAN_TOKENS_DATA_SIZE = MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES  // 160
-const PLAN_TOKENS_SIZE = PLAN_TOKENS_COUNT_SIZE + PLAN_TOKENS_DATA_SIZE  // 161
+// Raw plan token indices: forward(8) + endgame(4) vocab indices (0-21)
+/** forward plan token 数 */
+export const NUM_PLAN_FORWARD = 8
+/** endgame plan token 数 */
+export const NUM_PLAN_ENDGAME = 4
+const RAW_PLAN_SIZE = NUM_PLAN_FORWARD + NUM_PLAN_ENDGAME  // 12
 
 // 詰み情報: tsumi_target_seat スカラー (0=詰みなし, seat/SEATS=詰み対象席)
 const TSUMI_SIZE = 1
 
-export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + GLOBAL_RETAR_SIZE + PLAN_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE + PLAN_TOKENS_SIZE + TSUMI_SIZE
+export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE + REVOTE_SIZE + HISTORY_SIZE + RETAR_POSSIBILITIES_SIZE + GLOBAL_RETAR_SIZE + PLAN_APPROVED_SIZE + NEW_SIGNALS_SIZE + RAW_PLAN_SIZE + TSUMI_SIZE
 
 // ============================================================
 // Transformer用トークン化
@@ -103,20 +91,14 @@ const REVOTE_CANDIDATES_START = REVOTE_START + 1
 const HISTORY_START = REVOTE_START + REVOTE_SIZE
 const RETAR_START = HISTORY_START + HISTORY_SIZE
 const GLOBAL_RETAR_START = RETAR_START + RETAR_POSSIBILITIES_SIZE
-const PLAN_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
-const PLAN_INCLUDED_START = PLAN_START
-const PLAN_POSITION_START = PLAN_START + SEATS
-const PLAN_GLOBAL_START = PLAN_START + SEATS * PLAN_PER_SEAT_SIZE
-const PLAN_APPROVED_START = PLAN_START + PLAN_SIZE
+const PLAN_APPROVED_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
 const NEW_SIGNALS_START = PLAN_APPROVED_START + PLAN_APPROVED_SIZE
 
-// プラントークンセクション
-const PLAN_TOKENS_START = NEW_SIGNALS_START + NEW_SIGNALS_SIZE
-const PLAN_TOKEN_COUNT_START = PLAN_TOKENS_START
-const PLAN_TOKEN_DATA_START = PLAN_TOKENS_START + 1
+// Raw plan token indices セクション
+export const RAW_PLAN_START = NEW_SIGNALS_START + NEW_SIGNALS_SIZE
 
 // 詰みセクション
-const TSUMI_START = PLAN_TOKENS_START + PLAN_TOKENS_SIZE
+const TSUMI_START = RAW_PLAN_START + RAW_PLAN_SIZE
 
 // チーム拡張オフセット (OBSERVATION_SIZE基準)
 const TEAM_SIZE_START = OBSERVATION_SIZE
@@ -126,13 +108,13 @@ const TEAM_FAKE_DIVINE_START = TEAM_IS_CURRENT_ACTOR_START + SEATS
 
 // トークン特徴量次元
 /** CLSトークンの特徴量次元 (individual) */
-export const CLS_FEATURES = 26  // 25 + tsumi(1)
+export const CLS_FEATURES = 23  // global(19) + mason_partner(1) + known_hamster(1) + revote_round(1) + tsumi(1)
 /** CLSトークンの特徴量次元 (team) */
-export const TEAM_CLS_FEATURES = 27  // 26 + tsumi(1)
+export const TEAM_CLS_FEATURES = 24  // CLS_FEATURES + team_size(1)
 /** 席トークンの特徴量次元 (individual) */
-export const SEAT_TOKEN_FEATURES = 73  // 57 + globalRetar(11) + plan_approved(1) + new_signals(4)
+export const SEAT_TOKEN_FEATURES = 71  // per_seat(25) + private(4) + history(15) + retar(11) + globalRetar(11) + plan_approved(1) + new_signals(4)
 /** 席トークンの特徴量次元 (team) */
-export const TEAM_SEAT_TOKEN_FEATURES = 76  // 73 + team(3)
+export const TEAM_SEAT_TOKEN_FEATURES = 74  // SEAT_TOKEN_FEATURES + team(3)
 
 /** CO可能役職 (Role token対象) */
 export const CO_ROLES: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
@@ -147,12 +129,12 @@ export type TokenizedObservation = {
   cls: Float32Array
   /** 席トークン [SEATS * seatFeatures] — flat, stride = seatFeatures */
   seats: Float32Array
-  /** プラントークン [planCount * PLAN_TOKEN_FEATURES] — flat */
-  plans: Float32Array
+  /** Forward plan token raw indices [NUM_PLAN_FORWARD] (vocab 0-21) */
+  planForward: Float32Array
+  /** Endgame plan token raw indices [NUM_PLAN_ENDGAME] (vocab 0-21) */
+  planEndgame: Float32Array
   /** Role tokens [NUM_ROLE_TOKENS * ROLE_TOKEN_FEATURES] — flat */
   roles: Float32Array
-  /** プラントークン数 (0 = プランなし) */
-  planCount: number
   /** 席特徴量次元 */
   seatFeatures: number
   /** CLS特徴量次元 */
@@ -195,10 +177,6 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
   cls[co++] = obs[KNOWN_HAMSTER_START]
   // revote_round (1)
   cls[co++] = obs[REVOTE_ROUND_START]
-  // plan_global (3)
-  cls[co++] = obs[PLAN_GLOBAL_START]
-  cls[co++] = obs[PLAN_GLOBAL_START + 1]
-  cls[co++] = obs[PLAN_GLOBAL_START + 2]
   // tsumi is_tsumi (1)
   cls[co++] = obs[TSUMI_START]
   // team/collective extension
@@ -236,10 +214,6 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
     const grOff = GLOBAL_RETAR_START + s * NUM_ROLES
     for (let i = 0; i < NUM_ROLES; i++) seats[so++] = obs[grOff + i]
 
-    // plan per-seat (2)
-    seats[so++] = obs[PLAN_INCLUDED_START + s]
-    seats[so++] = obs[PLAN_POSITION_START + s]
-
     // plan_approved (1)
     seats[so++] = obs[PLAN_APPROVED_START + s]
 
@@ -270,21 +244,11 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
     }
   }
 
-  // ========== Plan tokens ==========
-  const planCount = Math.min(Math.round(obs[PLAN_TOKEN_COUNT_START]), MAX_PLAN_TOKENS)
-  let plans: Float32Array
-  if (planCount > 0) {
-    plans = new Float32Array(planCount * PLAN_TOKEN_FEATURES)
-    for (let p = 0; p < planCount; p++) {
-      const srcOff = PLAN_TOKEN_DATA_START + p * PLAN_TOKEN_FEATURES
-      const dstOff = p * PLAN_TOKEN_FEATURES
-      for (let i = 0; i < PLAN_TOKEN_FEATURES; i++) {
-        plans[dstOff + i] = obs[srcOff + i]
-      }
-    }
-  } else {
-    plans = new Float32Array(0)
-  }
+  // ========== Raw plan indices ==========
+  const planForward = new Float32Array(NUM_PLAN_FORWARD)
+  for (let i = 0; i < NUM_PLAN_FORWARD; i++) planForward[i] = obs[RAW_PLAN_START + i]
+  const planEndgame = new Float32Array(NUM_PLAN_ENDGAME)
+  for (let i = 0; i < NUM_PLAN_ENDGAME; i++) planEndgame[i] = obs[RAW_PLAN_START + NUM_PLAN_FORWARD + i]
 
   // ========== Role tokens ==========
   // CO可能5役職それぞれについて、seat tokensのclaimed_roleからCO者情報を集約
@@ -308,9 +272,9 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
   return {
     cls,
     seats,
-    plans,
+    planForward,
+    planEndgame,
     roles,
-    planCount,
     seatFeatures: sf,
     clsFeatures: cf,
   }
@@ -611,29 +575,6 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   }
   offset += GLOBAL_RETAR_SIZE
 
-  // ========== Execution Plan (primary plan — backward compat) ==========
-  const primaryPlan = ctx.executionPlans.length > 0 ? ctx.executionPlans[0] : null
-  if (primaryPlan) {
-    // per-seat: plan_included (14次元)
-    for (let seat = 1; seat <= SEATS; seat++) {
-      obs[offset + seat - 1] = primaryPlan.targets.includes(seat) ? 1 : 0
-    }
-    offset += SEATS
-    // per-seat: plan_position (14次元, normalized by plan length)
-    const len = primaryPlan.targets.length
-    for (let seat = 1; seat <= SEATS; seat++) {
-      const idx = primaryPlan.targets.indexOf(seat)
-      obs[offset + seat - 1] = idx >= 0 && len > 0 ? (idx + 1) / len : 0
-    }
-    offset += SEATS
-    // global: plan_length, plan_is_grayran, plan_active
-    obs[offset++] = len / SEATS
-    obs[offset++] = primaryPlan.type === 'grayran' ? 1 : 0
-    obs[offset++] = 1  // plan_active
-  } else {
-    offset += PLAN_SIZE  // all zeros
-  }
-
   // ========== Plan Approved (per-seat) ==========
   // agree/disagreeシグナルから導出: 処刑提案者への賛否
   {
@@ -682,26 +623,12 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   }
   offset += NEW_SIGNALS_SIZE
 
-  // ========== Plan Tokens (Transformer用、全プラン) ==========
-  const planCount = Math.min(ctx.executionPlans.length, MAX_PLAN_TOKENS)
-  obs[offset++] = planCount  // plan_token_count
-
-  for (let p = 0; p < planCount; p++) {
-    const plan = ctx.executionPlans[p]
-    const base = offset + p * PLAN_TOKEN_FEATURES
-    // target_mask[14]
-    for (let seat = 1; seat <= SEATS; seat++) {
-      obs[base + seat - 1] = plan.targets.includes(seat) ? 1 : 0
-    }
-    // type_onehot[5]: roller/decision/designated/grayran/endgame
-    const typeIdx = PLAN_TYPE_INDEX[plan.type]
-    if (typeIdx !== undefined) {
-      obs[base + SEATS + typeIdx] = 1
-    }
-    // priority[1]
-    obs[base + SEATS + PLAN_TYPE_COUNT] = planCount > 1 ? p / (planCount - 1) : 0
-  }
-  offset += PLAN_TOKENS_DATA_SIZE  // always advance by max size
+  // ========== Raw Plan Indices ==========
+  // forward 8 tokens + endgame 4 tokens (vocab 0-21, default STOP=21)
+  const fwdIdx = ctx.planForwardIndices
+  for (let i = 0; i < NUM_PLAN_FORWARD; i++) obs[offset++] = fwdIdx?.[i] ?? 21
+  const egIdx = ctx.planEndgameIndices
+  for (let i = 0; i < NUM_PLAN_ENDGAME; i++) obs[offset++] = egIdx?.[i] ?? 21
 
   // ========== Tsumi ==========
   // commander と同じエンコーディング: 0=詰みなし, seat/SEATS=詰み対象席
@@ -754,14 +681,14 @@ const WOLF_FAKE_DIVINE_START = COLLECTIVE_TEAM_SIZE_START + 1
 const WOLF_VILLAGE_PREDICT_START = WOLF_FAKE_DIVINE_START + WOLF_COLLECTIVE_FAKE_DIVINE_SIZE
 const WOLF_VILLAGE_TRUST_START = WOLF_VILLAGE_PREDICT_START + WOLF_COLLECTIVE_VILLAGE_PREDICT_SIZE
 
-/** 狼集団 Seat token特徴量次元: individual(73) + village_predict(11) + village_trust(1) + fake_divine(1) */
-export const WOLF_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1 + 1  // 86
-/** 狼集団 CLS token特徴量次元: individual(26) + team_size(1) — my_role(11)は0埋め */
-export const WOLF_COLLECTIVE_CLS_FEATURES = CLS_FEATURES + 1  // 27
-/** 共有集団 Seat token特徴量次元: individual(73) — is_meがis_my_teamになるだけ */
-export const MASON_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES  // 73
-/** 共有集団 CLS token特徴量次元: individual(26) + team_size(1) */
-export const MASON_COLLECTIVE_CLS_FEATURES = CLS_FEATURES + 1  // 27
+/** 狼集団 Seat token特徴量次元: individual(71) + village_predict(11) + village_trust(1) + fake_divine(1) */
+export const WOLF_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1 + 1  // 84
+/** 狼集団 CLS token特徴量次元: individual(23) + team_size(1) — my_role(11)は0埋め */
+export const WOLF_COLLECTIVE_CLS_FEATURES = CLS_FEATURES + 1  // 24
+/** 共有集団 Seat token特徴量次元: individual(71) — is_meがis_my_teamになるだけ */
+export const MASON_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES  // 71
+/** 共有集団 CLS token特徴量次元: individual(23) + team_size(1) */
+export const MASON_COLLECTIVE_CLS_FEATURES = CLS_FEATURES + 1  // 24
 
 // 狂信者拡張: village_predict(14×11=154) + village_trust(14) = 168
 const FANATIC_VILLAGE_PREDICT_SIZE = SEATS * NUM_ROLES  // 154
@@ -773,10 +700,10 @@ export const FANATIC_OBSERVATION_SIZE = OBSERVATION_SIZE + FANATIC_EXTRA
 const FANATIC_VILLAGE_PREDICT_START = OBSERVATION_SIZE
 const FANATIC_VILLAGE_TRUST_START = FANATIC_VILLAGE_PREDICT_START + FANATIC_VILLAGE_PREDICT_SIZE
 
-/** 狂信者 Seat token特徴量次元: individual(73) + village_predict(11) + village_trust(1) */
-export const FANATIC_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1  // 85
-/** 狂信者 CLS token特徴量次元: individual(26) — team_sizeなし */
-export const FANATIC_CLS_FEATURES = CLS_FEATURES  // 26
+/** 狂信者 Seat token特徴量次元: individual(71) + village_predict(11) + village_trust(1) */
+export const FANATIC_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1  // 83
+/** 狂信者 CLS token特徴量次元: individual(23) — team_sizeなし */
+export const FANATIC_CLS_FEATURES = CLS_FEATURES  // 23
 
 /** 村NN出力の注入データ */
 export type VillageNNOutput = {

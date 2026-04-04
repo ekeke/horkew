@@ -9,7 +9,7 @@
 
 import {
   SEATS, MAX_DAYS, HISTORY_WINDOW, NUM_ROLES,
-  MAX_PLAN_TOKENS, PLAN_TOKEN_FEATURES,
+  NUM_PLAN_FORWARD, NUM_PLAN_ENDGAME, RAW_PLAN_START,
 } from './observation.ts'
 
 import type { SystemRole } from '../../types/index.ts'
@@ -33,13 +33,9 @@ const HISTORY_DAY_SIZE = SEATS * 5  // 70
 const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 210
 const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
 const GLOBAL_RETAR_SIZE = SEATS * NUM_ROLES  // 154
-const PLAN_SIZE = SEATS * 2 + 3  // 31
 const PLAN_APPROVED_SIZE = SEATS  // 14
 const NEW_SIGNALS_PER_SEAT = 4
-const NEW_SIGNALS_SIZE = SEATS * NEW_SIGNALS_PER_SEAT  // 56
-const PLAN_TOKENS_COUNT_SIZE = 1
-const PLAN_TOKENS_DATA_SIZE = MAX_PLAN_TOKENS * PLAN_TOKEN_FEATURES  // 160
-const PLAN_TOKENS_SIZE = PLAN_TOKENS_COUNT_SIZE + PLAN_TOKENS_DATA_SIZE  // 161
+const RAW_PLAN_SIZE = NUM_PLAN_FORWARD + NUM_PLAN_ENDGAME  // 12
 // セクション開始オフセット
 const GLOBAL_START = 0
 const PER_SEAT_START = GLOBAL_SIZE
@@ -53,12 +49,9 @@ const REVOTE_START = PRIVATE_START + PRIVATE_SIZE
 const HISTORY_START = REVOTE_START + REVOTE_SIZE
 const RETAR_START = HISTORY_START + HISTORY_SIZE
 const GLOBAL_RETAR_START = RETAR_START + RETAR_POSSIBILITIES_SIZE
-const PLAN_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
-const PLAN_APPROVED_START = PLAN_START + PLAN_SIZE
+const PLAN_APPROVED_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE
 const NEW_SIGNALS_START = PLAN_APPROVED_START + PLAN_APPROVED_SIZE
-const PLAN_TOKENS_START = NEW_SIGNALS_START + NEW_SIGNALS_SIZE
-const PLAN_TOKEN_DATA_START = PLAN_TOKENS_START + 1
-const TSUMI_START = PLAN_TOKENS_START + PLAN_TOKENS_SIZE
+const TSUMI_START = RAW_PLAN_START + RAW_PLAN_SIZE
 
 // ============================================================
 // 型定義
@@ -94,8 +87,6 @@ export type DecodedSeat = {
   nominateCommander: number
   retarPossibilities: string[]
   globalRetarPossibilities: string[]
-  planIncluded: boolean
-  planPosition: number
   planApproved: number
   newSignals: { confirmHuman: number, confirmWolf: number, voteFor: number, voteAgainst: number }
 }
@@ -131,7 +122,8 @@ export type DecodedObservation = {
   private: DecodedPrivate
   revote: DecodedRevote
   history: DecodedHistoryDay[]
-  planTokens: { count: number, tokens: Array<{ targetMask: number[], typeOneHot: number[], priority: number }> }
+  planForward: number[]
+  planEndgame: number[]
   tsumi: number | null
 }
 
@@ -214,10 +206,6 @@ export function decodeObservation(obs: Float32Array): DecodedObservation {
       if (obs[globalRetarBase + i] > 0.5) globalRetarPoss.push(ROLES[i])
     }
 
-    // Plan
-    const planIncluded = obs[PLAN_START + (seat - 1)] > 0.5
-    const planPosition = obs[PLAN_START + SEATS + (seat - 1)]
-
     // Plan approved
     const planApproved = obs[PLAN_APPROVED_START + (seat - 1)]
 
@@ -238,7 +226,7 @@ export function decodeObservation(obs: Float32Array): DecodedObservation {
       accuseWolf, accuseFox, voteIntent, nominateCommander,
       retarPossibilities: retarPoss,
       globalRetarPossibilities: globalRetarPoss,
-      planIncluded, planPosition, planApproved,
+      planApproved,
       newSignals,
     })
   }
@@ -294,22 +282,15 @@ export function decodeObservation(obs: Float32Array): DecodedObservation {
     history.push({ window: w, perSeat })
   }
 
-  // ---------- Plan tokens ----------
-  const planCount = Math.round(obs[PLAN_TOKENS_START])
-  const tokens: DecodedObservation['planTokens']['tokens'] = []
-  for (let p = 0; p < Math.min(planCount, MAX_PLAN_TOKENS); p++) {
-    const base = PLAN_TOKEN_DATA_START + p * PLAN_TOKEN_FEATURES
-    const targetMask: number[] = []
-    for (let i = 0; i < SEATS; i++) targetMask.push(obs[base + i])
-    const typeOneHot: number[] = []
-    for (let i = 0; i < 5; i++) typeOneHot.push(obs[base + SEATS + i])
-    const priority = obs[base + SEATS + 5]
-    tokens.push({ targetMask, typeOneHot, priority })
-  }
+  // ---------- Raw plan indices ----------
+  const planForwardDecoded: number[] = []
+  for (let i = 0; i < NUM_PLAN_FORWARD; i++) planForwardDecoded.push(Math.round(obs[RAW_PLAN_START + i]))
+  const planEndgameDecoded: number[] = []
+  for (let i = 0; i < NUM_PLAN_ENDGAME; i++) planEndgameDecoded.push(Math.round(obs[RAW_PLAN_START + NUM_PLAN_FORWARD + i]))
 
   // ---------- Tsumi ----------
   const tsumiVal = obs[TSUMI_START]
   const tsumi = tsumiVal > 0 ? Math.round(tsumiVal * SEATS) : null
 
-  return { global, seats, private: { divineResults, wolfTeammates, masonPartner, guardHistory, knownHamster }, revote: { round: revoteRound, candidates: revoteCandidates }, history, planTokens: { count: planCount, tokens }, tsumi }
+  return { global, seats, private: { divineResults, wolfTeammates, masonPartner, guardHistory, knownHamster }, revote: { round: revoteRound, candidates: revoteCandidates }, history, planForward: planForwardDecoded, planEndgame: planEndgameDecoded, tsumi }
 }

@@ -178,6 +178,8 @@ function buildSyntheticContext(params: {
     revoteRound: null,
     revoteCandidates: null,
     executionPlans: [params.plan],
+    planForwardIndices: null,
+    planEndgameIndices: null,
     tsumiTarget: params.tsumiTarget ?? null,
     rules: resolveRules(),
   }
