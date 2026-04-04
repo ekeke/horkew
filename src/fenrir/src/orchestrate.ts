@@ -10,10 +10,6 @@
  *   CPU: Pure JS NN × 3 (推論用)
  */
 
-// NOTE: GPU VRAM の全取りを防ぐには起動時に環境変数をセットする:
-//   TF_FORCE_GPU_ALLOW_GROWTH=true node ...
-// ESM では import が process.env 代入より先に実行されるため、ここでのセットは効かない。
-
 import type { SystemRole } from '../../types/index.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import { computeRefPlanLogits } from './agents/neural-agent.ts'
