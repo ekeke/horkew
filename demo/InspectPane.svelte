@@ -144,13 +144,16 @@
     day: number
     allPlayers: Array<{ seat: number, role: string, day: number, observation: any }>
     mlSteps: Array<TimelineStep & { _idx: number }>
+    globalObs: any | null
+    planForward: TimelineStep['planForward'] | null
+    planEndgame: TimelineStep['planEndgame'] | null
   }
   let mergedDays = $derived.by((): DayGroup[] => {
     if (!game) return []
     const map = new Map<number, DayGroup>()
     const getGroup = (day: number) => {
       let g = map.get(day)
-      if (!g) { g = { day, allPlayers: [], mlSteps: [] }; map.set(day, g) }
+      if (!g) { g = { day, allPlayers: [], mlSteps: [], globalObs: null, planForward: null, planEndgame: null }; map.set(day, g) }
       return g
     }
     if (game.allPlayerSteps) {
@@ -160,10 +163,18 @@
     }
     for (let i = 0; i < game.timeline.length; i++) {
       const step = game.timeline[i]
-      getGroup(step.day).mlSteps.push({ ...step, _idx: i })
+      const g = getGroup(step.day)
+      g.mlSteps.push({ ...step, _idx: i })
+      if (step.actionHead === 'strategy' && !g.planForward) {
+        g.planForward = step.planForward ?? null
+        g.planEndgame = step.planEndgame ?? null
+      }
     }
     for (const g of map.values()) {
       g.allPlayers.sort((a, b) => a.seat - b.seat)
+      if (!g.globalObs && g.allPlayers.length > 0) {
+        g.globalObs = g.allPlayers[0].observation
+      }
     }
     return [...map.values()].sort((a, b) => a.day - b.day)
   })
@@ -313,6 +324,45 @@
           <!-- Day sections: allPlayers icons + ML steps -->
           {#each mergedDays as dayGroup}
             <div class="inspect-day-header">Day {dayGroup.day}</div>
+            {#if dayGroup.globalObs}
+              {@const gobs = dayGroup.globalObs}
+              <div class="day-global">
+                <div class="day-global-row">
+                  <span>Alive <b>{(gobs.global.aliveRatio * 14).toFixed(0)}/14</b></span>
+                  <span>Rope <b>{gobs.global.ropeMargin.toFixed(1)}</b></span>
+                  <span>Parity <b>{gobs.global.aliveParity ? 'odd' : 'even'}</b></span>
+                  {#if gobs.global.commander}<span>Commander <b>seat{gobs.global.commander}</b></span>{/if}
+                  {#if gobs.tsumi}<span>Tsumi <b class="positive">seat{gobs.tsumi}</b></span>{/if}
+                  {#if gobs.revote.round > 0}<span>Revote <b>R{gobs.revote.round.toFixed(0)}</b></span>{/if}
+                </div>
+                {#if dayGroup.planForward || gobs.seats.some((s: any) => s.planIncluded)}
+                  <div class="day-plan-section">
+                    {#if dayGroup.planForward}
+                      <div class="day-plan-row">
+                        <span class="day-plan-label">Fwd</span>
+                        <span class="plan-tokens">{#each dayGroup.planForward.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                        <span class="plan-groups">{dayGroup.planForward.groups.length}g</span>
+                      </div>
+                    {/if}
+                    {#if dayGroup.planEndgame}
+                      <div class="day-plan-row">
+                        <span class="day-plan-label">End</span>
+                        <span class="plan-tokens">{#each dayGroup.planEndgame.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                        <span class="plan-groups">{dayGroup.planEndgame.groups.length}g</span>
+                      </div>
+                    {/if}
+                    {#each [gobs.seats.filter((s: any) => s.planIncluded).sort((a: any, b: any) => a.planPosition - b.planPosition)] as planSeats}
+                      {#if planSeats.length > 0}
+                        <div class="day-plan-row">
+                          <span class="day-plan-label">Resolved</span>
+                          <span class="exec-plan">{#each planSeats as ps, i}{#if i > 0} → {/if}<span class="plan-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === ps.seat)?.role ?? ''] || 'var(--ctp-text)'}">{ps.seat}</span>{/each}</span>
+                        </div>
+                      {/if}
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/if}
             <div class="inspect-day-steps">
               <!-- All player icons -->
               {#if dayGroup.allPlayers.length > 0}
@@ -367,28 +417,10 @@
       <div class="inspect-detail">
         {#if selectedStep}
           {@const obs = selectedStep.observation}
-          <div class="detail-title">Seat {selectedStep.seat} ({selectedStep.role})</div>
+          <div class="detail-title">Seat {selectedStep.seat} <span style="color:{ROLE_COLORS[selectedStep.role]}">{selectedStep.role}</span></div>
 
           <!-- ==================== INPUT ==================== -->
           <div class="section-divider">INPUT</div>
-
-          <!-- Global -->
-          <div class="detail-section">
-            <div class="detail-label">Global</div>
-            <div class="detail-kv">
-              <span class="kv-k">Day</span><span>{obs.global.day}</span>
-              <span class="kv-k">Phase</span><span>{obs.global.phase}</span>
-              <span class="kv-k">My Role</span><span style="color:{ROLE_COLORS[obs.global.myRole]}">{obs.global.myRole} ({ROLE_SHORT[obs.global.myRole] || '?'})</span>
-              <span class="kv-k">Alive</span><span>{(obs.global.aliveRatio * 14).toFixed(0)} / 14</span>
-              <span class="kv-k">Rope</span><span>{obs.global.ropeMargin.toFixed(1)}</span>
-              <span class="kv-k">Parity</span><span>{obs.global.aliveParity ? 'odd' : 'even'}</span>
-              <span class="kv-k">Commander</span><span>{obs.global.commander ? `seat${obs.global.commander}` : 'なし'}</span>
-              <span class="kv-k">Tsumi</span><span>{obs.tsumi ? `seat${obs.tsumi}` : 'なし'}</span>
-              <span class="kv-k">狼CO要求</span><span>{obs.global.demandWolfCoCount}</span>
-              <span class="kv-k">Revote</span><span>{obs.revote.round > 0 ? `R${obs.revote.round.toFixed(0)} [${obs.revote.candidates.map((s: number) => s).join(',')}]` : 'なし'}</span>
-              <span class="kv-k">Plan</span><span class="exec-plan">{#each [obs.seats.filter((s: any) => s.planIncluded).sort((a: any, b: any) => a.planPosition - b.planPosition)] as planSeats}{#if planSeats.length > 0}{#each planSeats as ps, i}{#if i > 0} → {/if}<span class="plan-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === ps.seat)?.role ?? ''] || 'var(--ctp-text)'}">{ps.seat}</span>{/each}{:else}<span class="no-plan">なし</span>{/if}{/each}</span>
-            </div>
-          </div>
 
           <!-- Private -->
           <div class="detail-section">
@@ -504,6 +536,7 @@
                   <span class="plan-token {pt.cls}">{pt.text}</span>
                 {/each}
               </div>
+              <div class="plan-groups">{selectedStep.planEndgame.groups.length} group(s)</div>
             </div>
           {/if}
 
@@ -533,86 +566,11 @@
             </div>
           </div>
 
-          <!-- All player observations -->
-          {#if allPlayerForDay.length > 0}
-            <div class="detail-section">
-              <div class="detail-label">All Players (Day {selectedStep.day})</div>
-              <div class="all-player-tabs">
-                {#each allPlayerForDay as ap}
-                  <button
-                    class="ap-tab"
-                    class:active={selectedAllPlayerSeat === ap.seat}
-                    onclick={() => selectedAllPlayerSeat = selectedAllPlayerSeat === ap.seat ? null : ap.seat}
-                    style="color:{ROLE_COLORS[ap.role]}"
-                  >{ROLE_SHORT[ap.role]}{ap.seat}</button>
-                {/each}
-              </div>
-              {#if allPlayerObs}
-                {@const aobs = allPlayerObs.observation}
-                <div class="ap-detail">
-                  <div class="detail-kv">
-                    <span class="kv-k">Role</span><span style="color:{ROLE_COLORS[allPlayerObs.role]}">{allPlayerObs.role}</span>
-                    <span class="kv-k">Alive</span><span>{(aobs.global.aliveRatio * 14).toFixed(0)} / 14</span>
-                    <span class="kv-k">Plan</span><span class="exec-plan">{#each [aobs.seats.filter((s: any) => s.planIncluded).sort((a: any, b: any) => a.planPosition - b.planPosition)] as planSeats}{#if planSeats.length > 0}{#each planSeats as ps, i}{#if i > 0} → {/if}<span class="plan-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === ps.seat)?.role ?? ''] || 'var(--ctp-text)'}">{ps.seat}</span>{/each}{:else}<span class="no-plan">なし</span>{/if}{/each}</span>
-                  </div>
-                  {#if aobs.private.divineResults.length > 0 || aobs.private.wolfTeammates.length > 0 || aobs.private.masonPartner || aobs.private.knownHamster}
-                    <div class="detail-private" style="margin-top:0.3rem">
-                      {#if aobs.private.divineResults.length > 0}
-                        <div>Divine: {#each aobs.private.divineResults as d}<span class={d.result === 'wolf' ? 'priv-wolf' : 'priv-human'}>seat{d.seat}={d.result}</span> {/each}</div>
-                      {/if}
-                      {#if aobs.private.wolfTeammates.length > 0}
-                        <div class="priv-wolf">Wolf: {aobs.private.wolfTeammates.map((s: number) => 'seat' + s).join(', ')}</div>
-                      {/if}
-                      {#if aobs.private.masonPartner}
-                        <div class="priv-human">Mason: seat{aobs.private.masonPartner}</div>
-                      {/if}
-                      {#if aobs.private.knownHamster}
-                        <div style="color:var(--color-fox)">Hamster: seat{aobs.private.knownHamster}</div>
-                      {/if}
-                    </div>
-                  {/if}
-                  <div style="margin-top:0.3rem">
-                    <div class="detail-label">Retar (Self)</div>
-                    <div class="heatmap" style="grid-template-columns: 2.5rem repeat({ROLES.length}, 1fr)">
-                      <span></span>
-                      {#each ROLES as r}
-                        <span class="hm-header" style="color:{ROLE_COLORS[r]}">{ROLE_SHORT[r]}</span>
-                      {/each}
-                      {#each aobs.seats as s}
-                        <span class="hm-seat" class:dead={!s.alive}>{s.seat}</span>
-                        {#each ROLES as r}
-                          {@const has = s.retarPossibilities.includes(r)}
-                          <span class="hm-cell" class:hm-on={has} class:hm-me={s.isMe}>{has ? 'O' : ''}</span>
-                        {/each}
-                      {/each}
-                    </div>
-                  </div>
-                </div>
-              {/if}
-            </div>
-          {/if}
         {:else if allPlayerObs}
           {@const aobs = allPlayerObs.observation}
-          <div class="detail-title">Seat {allPlayerObs.seat} ({allPlayerObs.role}) - Day {allPlayerObs.day}</div>
+          <div class="detail-title">Seat {allPlayerObs.seat} <span style="color:{ROLE_COLORS[allPlayerObs.role]}">{allPlayerObs.role}</span> - Day {allPlayerObs.day}</div>
 
           <div class="section-divider">OBSERVATION</div>
-
-          <div class="detail-section">
-            <div class="detail-label">Global</div>
-            <div class="detail-kv">
-              <span class="kv-k">Day</span><span>{aobs.global.day}</span>
-              <span class="kv-k">Phase</span><span>{aobs.global.phase}</span>
-              <span class="kv-k">My Role</span><span style="color:{ROLE_COLORS[aobs.global.myRole]}">{aobs.global.myRole} ({ROLE_SHORT[aobs.global.myRole] || '?'})</span>
-              <span class="kv-k">Alive</span><span>{(aobs.global.aliveRatio * 14).toFixed(0)} / 14</span>
-              <span class="kv-k">Rope</span><span>{aobs.global.ropeMargin.toFixed(1)}</span>
-              <span class="kv-k">Parity</span><span>{aobs.global.aliveParity ? 'odd' : 'even'}</span>
-              <span class="kv-k">Commander</span><span>{aobs.global.commander ? `seat${aobs.global.commander}` : 'なし'}</span>
-              <span class="kv-k">Tsumi</span><span>{aobs.tsumi ? `seat${aobs.tsumi}` : 'なし'}</span>
-              <span class="kv-k">狼CO要求</span><span>{aobs.global.demandWolfCoCount}</span>
-              <span class="kv-k">Revote</span><span>{aobs.revote.round > 0 ? `R${aobs.revote.round.toFixed(0)} [${aobs.revote.candidates.map((s: number) => s).join(',')}]` : 'なし'}</span>
-              <span class="kv-k">Plan</span><span class="exec-plan">{#each [aobs.seats.filter((s: any) => s.planIncluded).sort((a: any, b: any) => a.planPosition - b.planPosition)] as planSeats}{#if planSeats.length > 0}{#each planSeats as ps, i}{#if i > 0} → {/if}<span class="plan-seat" style="color:{ROLE_COLORS[game!.players.find((p: any) => p.seat === ps.seat)?.role ?? ''] || 'var(--ctp-text)'}">{ps.seat}</span>{/each}{:else}<span class="no-plan">なし</span>{/if}{/each}</span>
-            </div>
-          </div>
 
           <div class="detail-section">
             <div class="detail-label">Private</div>
@@ -856,6 +814,40 @@
   .rt-seat { font-weight: bold; color: var(--ctp-subtext0); }
   .rt-total { font-weight: bold; }
 
+  /* Day global info */
+  .day-global {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.7rem;
+    background: var(--ctp-mantle);
+    border-radius: 0 0 3px 3px;
+    margin-top: -0.2rem;
+  }
+  .day-global-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.8rem;
+    color: var(--ctp-subtext0);
+  }
+  .day-global-row b { color: var(--ctp-text); }
+  .day-plan-section {
+    margin-top: 0.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .day-plan-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .day-plan-label {
+    font-size: 0.6rem;
+    color: var(--ctp-overlay0);
+    min-width: 3.5em;
+    text-transform: uppercase;
+    font-weight: bold;
+  }
+
   .ap-icon-row {
     display: flex;
     flex-wrap: wrap;
@@ -1040,19 +1032,5 @@
   .predict-seat { color: var(--ctp-subtext0); width: 3.5em; }
   .predict-role { padding: 0 4px; border-radius: 2px; font-size: 0.65rem; }
 
-  /* All player tabs */
-  .all-player-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 0.3rem; }
-  .ap-tab {
-    border: 1px solid var(--ctp-surface1);
-    background: transparent;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 0.65rem;
-    font-family: inherit;
-    cursor: pointer;
-    font-weight: bold;
-  }
-  .ap-tab:hover { background: var(--ctp-surface0); }
-  .ap-tab.active { background: var(--ctp-surface1); }
   .ap-detail { font-size: 0.75rem; }
 </style>
