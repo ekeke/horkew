@@ -4,6 +4,24 @@
   const ROLE_COLORS: Record<string, string> = {villager:'var(--color-village)',seer:'var(--ctp-sapphire)',medium:'var(--ctp-lavender)',bodyguard:'var(--ctp-peach)',mason:'var(--ctp-green)',nekomata:'var(--ctp-pink)',werewolf:'var(--color-wolf)',possessed:'var(--ctp-maroon)',fanatic:'var(--ctp-flamingo)',werehamster:'var(--color-fox)',immoralist:'var(--ctp-rosewater)'}
 
   type IndexEntry = { file: string, seed: number, result: string, gameLength: number }
+  type DaySnapshot = {
+    global: { aliveCount: number, commander: number | null, demandWolfCoCount: number, aliveParity: number }
+    seats: Array<{ alive: boolean, claimedRole?: string, blackCount: number, whiteCount: number, voteReceived: number, suspicion: number, trust: number, executeProposal: number, isCommander: boolean, accuseWolf: number, accuseFox: number, voteIntent: number, nominateCommander: number, planApproved: number, confirmHuman: number, confirmWolf: number, voteFor: number, voteAgainst: number }>
+    revote: { round: number, candidates: number[] }
+    history: number[]
+    plan: { forwardIndices: number[] | null, endgameIndices: number[] | null }
+    tsumiTarget: number | null
+  }
+  type PlayerStep = {
+    seat: number
+    role: string
+    day: number
+    myRole: string
+    ropeMargin: number | null
+    private: { divineResults: Array<[number, string]>, wolfTeamSeats: number[], masonPartner: number | null, guardedSeats: number[], knownHamster: number | null }
+    retar: { self: Record<string, string[]> | null, global: Record<string, string[]> | null }
+    proposals?: Array<{ type: string, target: number }>
+  }
   type InspectGame = {
     seed: number
     result: string
@@ -11,7 +29,8 @@
     howl: string
     players: Array<{ seat: number, role: string, alive: boolean }>
     timeline: Array<TimelineStep>
-    allPlayerSteps?: Array<{ seat: number, role: string, day: number, observation: any }>
+    daySnapshots?: Record<string, DaySnapshot>
+    playerSteps?: PlayerStep[]
   }
   type TimelineStep = {
     seat: number
@@ -25,7 +44,6 @@
     reward: number
     value: number
     done: boolean
-    observation: any
     planForward?: { indices: number[], description: string, groups: any[] }
     planEndgame?: { indices: number[], description: string, groups: any[] }
     predict?: Array<{ seat: number, roles: Array<{ role: string, value: number }> }>
@@ -139,12 +157,12 @@
   let selectedAllPlayerSeat = $state<number | null>(null)
   let selectedAllPlayerDay = $state<number | null>(null)
 
-  // 全 day を統合: allPlayerSteps + timeline を day でマージ
+  // 全 day を統合: playerSteps + timeline を day でマージ
   type DayGroup = {
     day: number
-    allPlayers: Array<{ seat: number, role: string, day: number, observation: any }>
+    snapshot: DaySnapshot | null
+    players: PlayerStep[]
     mlSteps: Array<TimelineStep & { _idx: number }>
-    globalObs: any | null
     planForward: TimelineStep['planForward'] | null
     planEndgame: TimelineStep['planEndgame'] | null
   }
@@ -153,12 +171,16 @@
     const map = new Map<number, DayGroup>()
     const getGroup = (day: number) => {
       let g = map.get(day)
-      if (!g) { g = { day, allPlayers: [], mlSteps: [], globalObs: null, planForward: null, planEndgame: null }; map.set(day, g) }
+      if (!g) {
+        const snap = game!.daySnapshots?.[String(day)] ?? null
+        g = { day, snapshot: snap, players: [], mlSteps: [], planForward: null, planEndgame: null }
+        map.set(day, g)
+      }
       return g
     }
-    if (game.allPlayerSteps) {
-      for (const s of game.allPlayerSteps) {
-        getGroup(s.day).allPlayers.push(s)
+    if (game.playerSteps) {
+      for (const s of game.playerSteps) {
+        getGroup(s.day).players.push(s)
       }
     }
     for (let i = 0; i < game.timeline.length; i++) {
@@ -171,25 +193,23 @@
       }
     }
     for (const g of map.values()) {
-      g.allPlayers.sort((a, b) => a.seat - b.seat)
-      if (!g.globalObs && g.allPlayers.length > 0) {
-        g.globalObs = g.allPlayers[0].observation
-      }
+      g.players.sort((a, b) => a.seat - b.seat)
     }
     return [...map.values()].sort((a, b) => a.day - b.day)
   })
 
-  // 選択中の day の全プレイヤー observation (timeline のステップか allPlayerDay から)
+  // 選択中の day の全プレイヤー (timeline のステップか allPlayerDay から)
   let activeDay = $derived(selectedStep?.day ?? selectedAllPlayerDay)
-  let allPlayerForDay = $derived.by(() => {
-    if (!game?.allPlayerSteps || activeDay == null) return []
-    return game.allPlayerSteps.filter(s => s.day === activeDay).sort((a, b) => a.seat - b.seat)
+  let playersForDay = $derived.by(() => {
+    if (!game?.playerSteps || activeDay == null) return []
+    return game.playerSteps.filter(s => s.day === activeDay).sort((a, b) => a.seat - b.seat)
   })
+  let snapshotForDay = $derived(activeDay != null && game?.daySnapshots ? game.daySnapshots[String(activeDay)] ?? null : null)
 
-  // 全プレイヤー表示用の observation (selectedAllPlayerSeat に対応)
-  let allPlayerObs = $derived.by(() => {
-    if (!selectedAllPlayerSeat || !allPlayerForDay.length) return null
-    return allPlayerForDay.find(s => s.seat === selectedAllPlayerSeat) ?? null
+  // 全プレイヤー表示用 (selectedAllPlayerSeat に対応)
+  let selectedPlayerStep = $derived.by(() => {
+    if (!selectedAllPlayerSeat || !playersForDay.length) return null
+    return playersForDay.find(s => s.seat === selectedAllPlayerSeat) ?? null
   })
 
   // 報酬収支テーブル: seat × day の報酬合計
@@ -212,6 +232,8 @@
     const rows = [...seatMap.values()].sort((a, b) => a.seat - b.seat)
     return { rows, days }
   })
+
+  type PrivateData = PlayerStep['private']
 
   function planTokenLabel(idx: number): { text: string, cls: string } {
     if (idx < 14) return { text: `seat${idx + 1}`, cls: 'pt-seat' }
@@ -321,21 +343,21 @@
           </div>
           {/if}
 
-          <!-- Day sections: allPlayers icons + ML steps -->
+          <!-- Day sections: player icons + ML steps -->
           {#each mergedDays as dayGroup}
             <div class="inspect-day-header">Day {dayGroup.day}</div>
-            {#if dayGroup.globalObs}
-              {@const gobs = dayGroup.globalObs}
+            {#if dayGroup.snapshot}
+              {@const snap = dayGroup.snapshot}
               <div class="day-global">
                 <div class="day-global-row">
-                  <span>Alive <b>{(gobs.global.aliveRatio * 14).toFixed(0)}/14</b></span>
-                  <span>Rope <b>{gobs.global.ropeMargin.toFixed(1)}</b></span>
-                  <span>Parity <b>{gobs.global.aliveParity ? 'odd' : 'even'}</b></span>
-                  {#if gobs.global.commander}<span>Commander <b>seat{gobs.global.commander}</b></span>{/if}
-                  {#if gobs.tsumi}<span>Tsumi <b class="positive">seat{gobs.tsumi}</b></span>{/if}
-                  {#if gobs.revote.round > 0}<span>Revote <b>R{gobs.revote.round.toFixed(0)}</b></span>{/if}
+                  <span>Alive <b>{snap.global.aliveCount}/14</b></span>
+                  {#if dayGroup.players[0]?.ropeMargin != null}<span>Rope <b>{dayGroup.players[0].ropeMargin.toFixed(1)}</b></span>{/if}
+                  <span>Parity <b>{snap.global.aliveParity ? 'odd' : 'even'}</b></span>
+                  {#if snap.global.commander}<span>Commander <b>seat{snap.global.commander}</b></span>{/if}
+                  {#if snap.tsumiTarget}<span>Tsumi <b class="positive">seat{snap.tsumiTarget}</b></span>{/if}
+                  {#if snap.revote.round > 0}<span>Revote <b>R{snap.revote.round}</b></span>{/if}
                 </div>
-                {#if dayGroup.planForward || gobs.planForward?.some((v: number) => v !== 21)}
+                {#if dayGroup.planForward || snap.plan.forwardIndices?.some(v => v !== 21)}
                   <div class="day-plan-section">
                     {#if dayGroup.planForward}
                       <div class="day-plan-row">
@@ -343,10 +365,10 @@
                         <span class="plan-tokens">{#each dayGroup.planForward.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                         <span class="plan-groups">{dayGroup.planForward.groups.length}g</span>
                       </div>
-                    {:else if gobs.planForward}
+                    {:else if snap.plan.forwardIndices}
                       <div class="day-plan-row">
                         <span class="day-plan-label">Fwd</span>
-                        <span class="plan-tokens">{#each gobs.planForward as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                        <span class="plan-tokens">{#each snap.plan.forwardIndices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                       </div>
                     {/if}
                     {#if dayGroup.planEndgame}
@@ -355,10 +377,10 @@
                         <span class="plan-tokens">{#each dayGroup.planEndgame.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                         <span class="plan-groups">{dayGroup.planEndgame.groups.length}g</span>
                       </div>
-                    {:else if gobs.planEndgame}
+                    {:else if snap.plan.endgameIndices?.some(v => v !== 21)}
                       <div class="day-plan-row">
                         <span class="day-plan-label">End</span>
-                        <span class="plan-tokens">{#each gobs.planEndgame as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                        <span class="plan-tokens">{#each snap.plan.endgameIndices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                       </div>
                     {/if}
                   </div>
@@ -366,17 +388,17 @@
               </div>
             {/if}
             <div class="inspect-day-steps">
-              <!-- All player icons -->
-              {#if dayGroup.allPlayers.length > 0}
+              <!-- Player icons -->
+              {#if dayGroup.players.length > 0}
                 <div class="ap-icon-row">
-                  {#each dayGroup.allPlayers as ap}
+                  {#each dayGroup.players as ps}
                     <button
                       class="ap-icon"
-                      class:active={selectedAllPlayerDay === ap.day && selectedAllPlayerSeat === ap.seat}
-                      onclick={() => { selectedAllPlayerDay = ap.day; selectedAllPlayerSeat = ap.seat; selectedStepIdx = -1 }}
-                      title="seat{ap.seat} {ap.role}"
-                      style="background:color-mix(in srgb, {ROLE_COLORS[ap.role] || 'var(--ctp-overlay0)'} 25%, transparent);color:{ROLE_COLORS[ap.role]}"
-                    >{ap.seat}</button>
+                      class:active={selectedAllPlayerDay === ps.day && selectedAllPlayerSeat === ps.seat}
+                      onclick={() => { selectedAllPlayerDay = ps.day; selectedAllPlayerSeat = ps.seat; selectedStepIdx = -1 }}
+                      title="seat{ps.seat} {ps.role}"
+                      style="background:color-mix(in srgb, {ROLE_COLORS[ps.role] || 'var(--ctp-overlay0)'} 25%, transparent);color:{ROLE_COLORS[ps.role]}"
+                    >{ps.seat}</button>
                   {/each}
                 </div>
               {/if}
@@ -415,91 +437,113 @@
         {/if}
       </div>
 
+      <!-- Shared render snippets -->
+      {#snippet privateSection(priv: PrivateData)}
+        <div class="detail-section">
+          <div class="detail-label">Private</div>
+          <div class="detail-private">
+            {#if priv.divineResults.length > 0}
+              <div>Divine: {#each priv.divineResults as [seat, result]}<span class={result === 'wolf' ? 'priv-wolf' : 'priv-human'}>seat{seat}={result}</span> {/each}</div>
+            {/if}
+            {#if priv.wolfTeamSeats.length > 0}
+              <div class="priv-wolf">Wolf: {priv.wolfTeamSeats.map((s: number) => 'seat' + s).join(', ')}</div>
+            {/if}
+            {#if priv.masonPartner}
+              <div class="priv-human">Mason: seat{priv.masonPartner}</div>
+            {/if}
+            {#if priv.guardedSeats.length > 0}
+              <div>Guard: {priv.guardedSeats.map((s: number) => 'seat' + s).join(', ')}</div>
+            {/if}
+            {#if priv.knownHamster}
+              <div style="color:var(--color-fox)">Hamster: seat{priv.knownHamster}</div>
+            {/if}
+            {#if !priv.divineResults.length && !priv.wolfTeamSeats.length && !priv.masonPartner && !priv.guardedSeats.length && !priv.knownHamster}
+              <div class="no-plan">なし</div>
+            {/if}
+          </div>
+        </div>
+      {/snippet}
+
+      {#snippet retarHeatmap(retarSelf: Record<string, string[]>, seats: DaySnapshot['seats'], mySeat: number)}
+        <div class="detail-section">
+          <div class="detail-label">Retar (Self)</div>
+          <div class="heatmap" style="grid-template-columns: 2.5rem repeat({ROLES.length}, 1fr)">
+            <span></span>
+            {#each ROLES as r}
+              <span class="hm-header" style="color:{ROLE_COLORS[r]}">{ROLE_SHORT[r]}</span>
+            {/each}
+            {#each seats as s, i}
+              {@const seatNum = i + 1}
+              {@const poss = retarSelf[String(seatNum)] ?? []}
+              <span class="hm-seat" class:dead={!s.alive}>{seatNum}</span>
+              {#each ROLES as r}
+                {@const has = poss.includes(r)}
+                <span class="hm-cell" class:hm-on={has} class:hm-me={seatNum === mySeat}>{has ? 'O' : ''}</span>
+              {/each}
+            {/each}
+          </div>
+        </div>
+      {/snippet}
+
+      {#snippet seatsSummary(seats: DaySnapshot['seats'], mySeat?: number)}
+        <div class="detail-section">
+          <div class="detail-label">Seats</div>
+          <div class="detail-seats">
+            {#each seats as s, i}
+              {@const seatNum = i + 1}
+              {#if s.alive || seatNum === mySeat}
+                <div class="seat-line" class:dead={!s.alive}>
+                  <span class="seat-num">{seatNum}</span>
+                  {#if seatNum === mySeat}<span class="seat-me">ME</span>{/if}
+                  {#if s.claimedRole}<span style="color:{ROLE_COLORS[s.claimedRole]}">CO:{ROLE_SHORT[s.claimedRole]}</span>{/if}
+                  {#if s.blackCount > 0}<span class="priv-wolf">black:{s.blackCount}</span>{/if}
+                  {#if s.whiteCount > 0}<span class="priv-human">white:{s.whiteCount}</span>{/if}
+                  {#if s.suspicion > 0}<span>sus:{s.suspicion}</span>{/if}
+                  {#if s.trust > 0}<span>trust:{s.trust}</span>{/if}
+                  {#if s.voteReceived > 0}<span>votes:{s.voteReceived}</span>{/if}
+                </div>
+              {/if}
+            {/each}
+          </div>
+        </div>
+      {/snippet}
+
       <!-- Right: Detail -->
       <div class="inspect-detail">
         {#if selectedStep}
-          {@const obs = selectedStep.observation}
+          {@const ps = playersForDay.find(p => p.seat === selectedStep!.seat)}
           <div class="detail-title">Seat {selectedStep.seat} <span style="color:{ROLE_COLORS[selectedStep.role]}">{selectedStep.role}</span></div>
 
           <!-- ==================== INPUT ==================== -->
           <div class="section-divider">INPUT</div>
 
           <!-- Private -->
-          <div class="detail-section">
-            <div class="detail-label">Private</div>
-            <div class="detail-private">
-              {#if obs.private.divineResults.length > 0}
-                <div>Divine: {#each obs.private.divineResults as d}<span class={d.result === 'wolf' ? 'priv-wolf' : 'priv-human'}>seat{d.seat}={d.result}</span> {/each}</div>
-              {/if}
-              {#if obs.private.wolfTeammates.length > 0}
-                <div class="priv-wolf">Wolf: {obs.private.wolfTeammates.map((s: number) => 'seat' + s).join(', ')}</div>
-              {/if}
-              {#if obs.private.masonPartner}
-                <div class="priv-human">Mason: seat{obs.private.masonPartner}</div>
-              {/if}
-              {#if obs.private.guardHistory.length > 0}
-                <div>Guard: {obs.private.guardHistory.map((s: number) => 'seat' + s).join(', ')}</div>
-              {/if}
-              {#if obs.private.knownHamster}
-                <div style="color:var(--color-fox)">Hamster: seat{obs.private.knownHamster}</div>
-              {/if}
-              {#if !obs.private.divineResults.length && !obs.private.wolfTeammates.length && !obs.private.masonPartner && !obs.private.guardHistory.length && !obs.private.knownHamster}
-                <div class="no-plan">なし</div>
-              {/if}
-            </div>
-          </div>
+          {#if ps}
+            {@render privateSection(ps.private)}
+          {/if}
 
           <!-- Retar heatmap -->
-          <div class="detail-section">
-            <div class="detail-label">Retar (Self)</div>
-            <div class="heatmap" style="grid-template-columns: 2.5rem repeat({ROLES.length}, 1fr)">
-              <span></span>
-              {#each ROLES as r}
-                <span class="hm-header" style="color:{ROLE_COLORS[r]}">{ROLE_SHORT[r]}</span>
-              {/each}
-              {#each obs.seats as s}
-                <span class="hm-seat" class:dead={!s.alive}>{s.seat}</span>
-                {#each ROLES as r}
-                  {@const has = s.retarPossibilities.includes(r)}
-                  <span class="hm-cell" class:hm-on={has} class:hm-me={s.isMe}>{has ? 'O' : ''}</span>
-                {/each}
-              {/each}
-            </div>
-          </div>
+          {#if ps?.retar.self && snapshotForDay}
+            {@render retarHeatmap(ps.retar.self, snapshotForDay.seats, ps.seat)}
+          {/if}
 
           <!-- Seats summary -->
-          <div class="detail-section">
-            <div class="detail-label">Seats</div>
-            <div class="detail-seats">
-              {#each obs.seats as s}
-                {#if s.alive || s.isMe}
-                  <div class="seat-line" class:dead={!s.alive}>
-                    <span class="seat-num">{s.seat}</span>
-                    {#if s.isMe}<span class="seat-me">ME</span>{/if}
-                    {#if s.claimedRole}<span style="color:{ROLE_COLORS[s.claimedRole]}">CO:{ROLE_SHORT[s.claimedRole]}</span>{/if}
-                    {#if s.blackCount > 0}<span class="priv-wolf">black:{s.blackCount.toFixed(0)}</span>{/if}
-                    {#if s.whiteCount > 0}<span class="priv-human">white:{s.whiteCount.toFixed(0)}</span>{/if}
-                    {#if s.suspicion > 0}<span>sus:{s.suspicion.toFixed(1)}</span>{/if}
-                    {#if s.trust > 0}<span>trust:{s.trust.toFixed(1)}</span>{/if}
-                    {#if s.voteReceived > 0}<span>votes:{s.voteReceived.toFixed(0)}</span>{/if}
-                  </div>
-                {/if}
-              {/each}
-            </div>
-          </div>
+          {#if snapshotForDay}
+            {@render seatsSummary(snapshotForDay.seats, ps?.seat)}
+          {/if}
 
           <!-- Plan Indices (observation input) -->
-          {#if obs.planForward?.some((v: number) => v !== 21)}
+          {#if snapshotForDay?.plan.forwardIndices?.some(v => v !== 21)}
             <div class="detail-section">
               <div class="detail-label">Plan (observation)</div>
               <div class="day-plan-row">
                 <span class="day-plan-label">Fwd</span>
-                <span class="plan-tokens">{#each obs.planForward as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                <span class="plan-tokens">{#each snapshotForDay.plan.forwardIndices! as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
               </div>
-              {#if obs.planEndgame?.some((v: number) => v !== 21)}
+              {#if snapshotForDay.plan.endgameIndices?.some(v => v !== 21)}
                 <div class="day-plan-row">
                   <span class="day-plan-label">End</span>
-                  <span class="plan-tokens">{#each obs.planEndgame as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                  <span class="plan-tokens">{#each snapshotForDay.plan.endgameIndices! as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                 </div>
               {/if}
             </div>
@@ -571,64 +615,32 @@
             </div>
           </div>
 
-        {:else if allPlayerObs}
-          {@const aobs = allPlayerObs.observation}
-          <div class="detail-title">Seat {allPlayerObs.seat} <span style="color:{ROLE_COLORS[allPlayerObs.role]}">{allPlayerObs.role}</span> - Day {allPlayerObs.day}</div>
+        {:else if selectedPlayerStep}
+          <div class="detail-title">Seat {selectedPlayerStep.seat} <span style="color:{ROLE_COLORS[selectedPlayerStep.role]}">{selectedPlayerStep.role}</span> - Day {selectedPlayerStep.day}</div>
 
           <div class="section-divider">OBSERVATION</div>
 
-          <div class="detail-section">
-            <div class="detail-label">Private</div>
-            <div class="detail-private">
-              {#if aobs.private.divineResults.length > 0}
-                <div>Divine: {#each aobs.private.divineResults as d}<span class={d.result === 'wolf' ? 'priv-wolf' : 'priv-human'}>seat{d.seat}={d.result}</span> {/each}</div>
-              {/if}
-              {#if aobs.private.wolfTeammates.length > 0}
-                <div class="priv-wolf">Wolf: {aobs.private.wolfTeammates.map((s: number) => 'seat' + s).join(', ')}</div>
-              {/if}
-              {#if aobs.private.masonPartner}
-                <div class="priv-human">Mason: seat{aobs.private.masonPartner}</div>
-              {/if}
-              {#if aobs.private.guardHistory.length > 0}
-                <div>Guard: {aobs.private.guardHistory.map((s: number) => 'seat' + s).join(', ')}</div>
-              {/if}
-              {#if aobs.private.knownHamster}
-                <div style="color:var(--color-fox)">Hamster: seat{aobs.private.knownHamster}</div>
-              {/if}
-              {#if !aobs.private.divineResults.length && !aobs.private.wolfTeammates.length && !aobs.private.masonPartner && !aobs.private.guardHistory.length && !aobs.private.knownHamster}
-                <div class="no-plan">なし</div>
-              {/if}
-            </div>
-          </div>
+          {@render privateSection(selectedPlayerStep.private)}
 
-          <div class="detail-section">
-            <div class="detail-label">Retar (Self)</div>
-            <div class="heatmap" style="grid-template-columns: 2.5rem repeat({ROLES.length}, 1fr)">
-              <span></span>
-              {#each ROLES as r}
-                <span class="hm-header" style="color:{ROLE_COLORS[r]}">{ROLE_SHORT[r]}</span>
-              {/each}
-              {#each aobs.seats as s}
-                <span class="hm-seat" class:dead={!s.alive}>{s.seat}</span>
-                {#each ROLES as r}
-                  {@const has = s.retarPossibilities.includes(r)}
-                  <span class="hm-cell" class:hm-on={has} class:hm-me={s.isMe}>{has ? 'O' : ''}</span>
-                {/each}
-              {/each}
-            </div>
-          </div>
+          {#if selectedPlayerStep.retar.self && snapshotForDay}
+            {@render retarHeatmap(selectedPlayerStep.retar.self, snapshotForDay.seats, selectedPlayerStep.seat)}
+          {/if}
 
-          {#if aobs.planForward?.some((v: number) => v !== 21)}
+          {#if snapshotForDay}
+            {@render seatsSummary(snapshotForDay.seats, selectedPlayerStep.seat)}
+          {/if}
+
+          {#if snapshotForDay?.plan.forwardIndices?.some(v => v !== 21)}
             <div class="detail-section">
               <div class="detail-label">Plan (observation)</div>
               <div class="day-plan-row">
                 <span class="day-plan-label">Fwd</span>
-                <span class="plan-tokens">{#each aobs.planForward as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                <span class="plan-tokens">{#each snapshotForDay.plan.forwardIndices! as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
               </div>
-              {#if aobs.planEndgame?.some((v: number) => v !== 21)}
+              {#if snapshotForDay.plan.endgameIndices?.some(v => v !== 21)}
                 <div class="day-plan-row">
                   <span class="day-plan-label">End</span>
-                  <span class="plan-tokens">{#each aobs.planEndgame as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                  <span class="plan-tokens">{#each snapshotForDay.plan.endgameIndices! as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                 </div>
               {/if}
             </div>
