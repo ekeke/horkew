@@ -108,7 +108,7 @@ function parseArgs(args: string[]): CliOptions {
 
   if (heuristic) {
     const h = new HeuristicStrategy()
-    const strategies = new Map<number, import('./strategy.ts').Strategy>()
+    const strategies = new Map<number, import('../fenrir/src/agents/agent.ts').Agent>()
     for (let s = 1; s <= totalPlayers; s++) strategies.set(s, h)
     adapterConfig.strategies = strategies
     adapterConfig.defaultStrategy = h

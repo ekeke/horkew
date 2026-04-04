@@ -1,5 +1,5 @@
 import type { SystemRole, EnumSpecies, ResolvedRules } from '../types/index.ts'
-import type { Strategy, TeamStrategy, AsyncStrategy, AsyncTeamStrategy } from './strategy.ts'
+import type { Agent as Strategy, TeamAgent as TeamStrategy, AsyncAgent as AsyncStrategy, AsyncTeamAgent as AsyncTeamStrategy } from '../fenrir/src/agents/agent.ts'
 
 export type LupaConfig = {
   roles: Map<SystemRole, number>
