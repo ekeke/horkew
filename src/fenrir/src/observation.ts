@@ -280,52 +280,87 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
   }
 }
 
-export function encodeObservation(ctx: DecisionContext): Float32Array {
-  const obs = new Float32Array(OBSERVATION_SIZE)
-  let offset = 0
+// ============================================================
+// Observation 中間データ型
+// ============================================================
 
-  // ========== Global features ==========
-  obs[offset++] = ctx.day / MAX_DAYS                    // normalized day
-  obs[offset++] = ctx.phase === 'night' ? 0 : 1         // phase
-  obs[offset++] = ctx.alivePlayers.length / SEATS        // alive ratio
+/** per-seat の公開情報（イベントから収集） */
+type SeatPublicData = {
+  alive: boolean
+  claimedRole: SystemRole | undefined
+  isMe: boolean
+  blackCount: number
+  whiteCount: number
+  voteReceived: number
+  suspicion: number
+  trust: number
+  executeProposal: number
+  isCommander: boolean
+  accuseWolf: number
+  accuseFox: number
+  voteIntent: number
+  nominateCommander: number
+  /** plan 賛否 (agree - disagree) */
+  planApproved: number
+  /** 新シグナル: 人間確認、狼確認、投票先、投票反対 */
+  confirmHuman: number
+  confirmWolf: number
+  voteFor: number
+  voteAgainst: number
+}
 
-  // my_role one-hot
-  const roleIdx = ROLE_INDEX.get(ctx.myRole) ?? 0
-  for (let i = 0; i < NUM_ROLES; i++) {
-    obs[offset++] = i === roleIdx ? 1 : 0
+/** encodeObservation の中間データ。この型を見れば observation の内容が分かる */
+export type CollectedObservation = {
+  global: {
+    day: number
+    phase: 'night' | 'day'
+    aliveCount: number
+    myRole: SystemRole
+    commander: number | null
+    demandWolfCoCount: number
+    /** 縄余裕 = 残り処刑回数 - maxSurvivingNV（null = Retar 未実行） */
+    ropeMargin: number | null
+    aliveParity: number
   }
-
-  obs[offset++] = ctx.commander !== null ? ctx.commander / SEATS : 0  // commander
-  obs[offset++] = ctx.day / MAX_DAYS  // game progress
-
-  // demand_wolf_co_count: 当日のdemand_wolf_coシグナル数
-  let demandWolfCoCount = 0
-  for (const event of ctx.publicEvents as readonly FenrirEvent[]) {
-    if (event.type === 'signal' && event.signal.type === 'demand_wolf_co') {
-      demandWolfCoCount++
-    }
+  /** 14席分の公開情報 (index 0 = seat 1) */
+  seats: SeatPublicData[]
+  private: {
+    /** 占い結果: seat → human/wolf (占い師のみ) */
+    divineResults: Map<number, 'human' | 'wolf'>
+    /** 人狼の仲間 or 狂信者が知る狼の席 */
+    wolfTeamSeats: number[]
+    masonPartner: number | null
+    /** 護衛済み席集合 (狩人のみ) */
+    guardedSeats: Set<number>
+    knownHamster: number | null
   }
-  obs[offset++] = Math.min(demandWolfCoCount / 5, 1)
-
-  // rope_margin: 縄余裕 = 残り処刑回数 - maxSurvivingNV
-  // 正 = 村有利、0 = ギリギリ、負 = 村不利
-  if (ctx.maxSurvivingNV !== null) {
-    const aliveCount = ctx.alivePlayers.length
-    const remainingExecutions = (aliveCount - 1) / 2
-    const ropeMargin = remainingExecutions - ctx.maxSurvivingNV
-    obs[offset++] = ropeMargin / SEATS  // normalized
-  } else {
-    obs[offset++] = 0
+  revote: {
+    round: number
+    candidates: number[]
   }
+  /** 直近3日分の履歴: per-window, per-seat の [votedFor, executed, killed, claimed, signaled] */
+  history: Float32Array
+  retar: {
+    self: Map<number, Set<SystemRole>> | null
+    global: Map<number, Set<SystemRole>> | null
+  }
+  plan: {
+    forwardIndices: number[] | null
+    endgameIndices: number[] | null
+  }
+  tsumiTarget: number | null
+}
 
-  // alive_parity: 生存者数の偶奇 (0=偶数, 1=奇数)
-  // 処刑後のパリティが勝敗に直結するため明示的に入れる
-  obs[offset++] = ctx.alivePlayers.length % 2
+// ============================================================
+// 意味的な収集
+// ============================================================
 
-  // ========== Per-seat features ==========
+/** DecisionContext から意味的なデータを収集（ドメインロジック） */
+export function collectObservation(ctx: DecisionContext): CollectedObservation {
+  const events = ctx.publicEvents as readonly FenrirEvent[]
   const aliveSet = new Set(ctx.alivePlayers)
 
-  // Build public knowledge from events
+  // per-seat カウンタ（イベント1回走査で全部集める）
   const claimedRoles = new Map<number, SystemRole>()
   const blackCounts = new Map<number, number>()
   const whiteCounts = new Map<number, number>()
@@ -337,8 +372,19 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
   const accuseFoxCounts = new Map<number, number>()
   const voteIntentCounts = new Map<number, number>()
   const nominateCommanderCounts = new Map<number, number>()
+  const agreeCounts = new Map<number, number>()
+  const disagreeCounts = new Map<number, number>()
+  const confirmHumanCounts = new Map<number, number>()
+  const confirmWolfCounts = new Map<number, number>()
+  const voteForCounts = new Map<number, number>()
+  const voteAgainstCounts = new Map<number, number>()
+  let demandWolfCoCount = 0
 
-  for (const event of ctx.publicEvents as readonly FenrirEvent[]) {
+  // 履歴: 直近3日分
+  const history = new Float32Array(HISTORY_SIZE)
+  const currentDay = ctx.day
+
+  for (const event of events) {
     switch (event.type) {
       case 'seer_claim':
         claimedRoles.set(event.actor, 'seer')
@@ -351,26 +397,17 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
         if (event.result === 'wolf') blackCounts.set(event.target, (blackCounts.get(event.target) ?? 0) + 1)
         else whiteCounts.set(event.target, (whiteCounts.get(event.target) ?? 0) + 1)
         break
-      case 'medium_claim':
-        claimedRoles.set(event.actor, 'medium')
-        break
-      case 'bodyguard_claim':
-        claimedRoles.set(event.actor, 'bodyguard')
-        break
-      case 'mason_claim':
-        claimedRoles.set(event.actor, 'mason')
-        break
-      case 'nekomata_claim':
-        claimedRoles.set(event.actor, 'nekomata')
-        break
-      case 'wolf_claim':
-        claimedRoles.set(event.actor, event.claimedRole)
-        break
+      case 'medium_claim': claimedRoles.set(event.actor, 'medium'); break
+      case 'bodyguard_claim': claimedRoles.set(event.actor, 'bodyguard'); break
+      case 'mason_claim': claimedRoles.set(event.actor, 'mason'); break
+      case 'nekomata_claim': claimedRoles.set(event.actor, 'nekomata'); break
+      case 'wolf_claim': claimedRoles.set(event.actor, event.claimedRole); break
       case 'vote':
         voteCounts.set(event.target, (voteCounts.get(event.target) ?? 0) + 1)
         break
       case 'signal': {
         const sig = event.signal
+        if (sig.type === 'demand_wolf_co') { demandWolfCoCount++; break }
         if ('target' in sig) {
           const t = sig.target
           switch (sig.type) {
@@ -380,146 +417,41 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
             case 'accuse_fox': accuseFoxCounts.set(t, (accuseFoxCounts.get(t) ?? 0) + 1); break
             case 'vote_intent': voteIntentCounts.set(t, (voteIntentCounts.get(t) ?? 0) + 1); break
             case 'nominate_commander': nominateCommanderCounts.set(t, (nominateCommanderCounts.get(t) ?? 0) + 1); break
+            case 'agree': agreeCounts.set(t, (agreeCounts.get(t) ?? 0) + 1); break
+            case 'disagree': disagreeCounts.set(t, (disagreeCounts.get(t) ?? 0) + 1); break
+            case 'confirm_human': confirmHumanCounts.set(t, (confirmHumanCounts.get(t) ?? 0) + 1); break
+            case 'confirm_wolf': confirmWolfCounts.set(t, (confirmWolfCounts.get(t) ?? 0) + 1); break
+            case 'vote_for': voteForCounts.set(t, (voteForCounts.get(t) ?? 0) + 1); break
+            case 'vote_against': voteAgainstCounts.set(t, (voteAgainstCounts.get(t) ?? 0) + 1); break
           }
         }
         break
       }
       case 'execute_proposals':
-        for (const t of event.targets) {
-          executeCounts.set(t, (executeCounts.get(t) ?? 0) + 1)
-        }
+        for (const t of event.targets) executeCounts.set(t, (executeCounts.get(t) ?? 0) + 1)
         break
     }
-  }
 
-  for (let seat = 1; seat <= SEATS; seat++) {
-    const base = offset + (seat - 1) * PER_SEAT_SIZE
-    let o = base
-
-    obs[o++] = aliveSet.has(seat) ? 1 : 0
-
-    // claimed_role one-hot (11 roles + none)
-    const claimed = claimedRoles.get(seat)
-    for (let i = 0; i < NUM_ROLES; i++) {
-      obs[o++] = claimed !== undefined && ROLE_INDEX.get(claimed) === i ? 1 : 0
-    }
-    obs[o++] = claimed === undefined ? 1 : 0  // no claim
-
-    obs[o++] = seat === ctx.mySeat ? 1 : 0
-    obs[o++] = Math.min((blackCounts.get(seat) ?? 0) / 3, 1)
-    obs[o++] = Math.min((whiteCounts.get(seat) ?? 0) / 3, 1)
-    obs[o++] = Math.min((voteCounts.get(seat) ?? 0) / 10, 1)
-    obs[o++] = Math.min((suspicionCounts.get(seat) ?? 0) / 5, 1)
-    obs[o++] = Math.min((trustCounts.get(seat) ?? 0) / 5, 1)
-    obs[o++] = Math.min((executeCounts.get(seat) ?? 0) / 5, 1)
-    obs[o++] = ctx.commander === seat ? 1 : 0
-    obs[o++] = Math.min((accuseWolfCounts.get(seat) ?? 0) / 5, 1)
-    obs[o++] = Math.min((accuseFoxCounts.get(seat) ?? 0) / 5, 1)
-    obs[o++] = Math.min((voteIntentCounts.get(seat) ?? 0) / 5, 1)
-    obs[o++] = Math.min((nominateCommanderCounts.get(seat) ?? 0) / 3, 1)
-  }
-  offset += SEAT_SECTION_SIZE
-
-  // ========== Private knowledge ==========
-  const privateBase = offset
-
-  // Seer divine results: per seat (0=unknown, 0.5=human, 1.0=wolf)
-  if (ctx.myRole === 'seer') {
-    for (const [, result] of ctx.myPlayer.divineHistory) {
-      const seat = result.target
-      if (seat >= 1 && seat <= SEATS) {
-        obs[privateBase + (seat - 1)] = result.result === 'human' ? 0.5 : 1.0
-      }
-    }
-  }
-  offset += SEATS
-
-  // Wolf teammates mask (人狼: 仲間の狼, 狂信者: 狼の位置)
-  if (ctx.wolfTeammates) {
-    for (const seat of ctx.wolfTeammates) {
-      if (seat >= 1 && seat <= SEATS) {
-        obs[offset + (seat - 1)] = 1
-      }
-    }
-  } else if (ctx.knownWolves) {
-    for (const seat of ctx.knownWolves) {
-      if (seat >= 1 && seat <= SEATS) {
-        obs[offset + (seat - 1)] = 1
-      }
-    }
-  }
-  offset += SEATS
-
-  // Mason partner
-  if (ctx.masonPartner !== null && ctx.masonPartner >= 1 && ctx.masonPartner <= SEATS) {
-    obs[offset] = ctx.masonPartner / SEATS
-  }
-  offset += 1
-
-  // Bodyguard guard history: per seat (1 if ever guarded)
-  if (ctx.myRole === 'bodyguard') {
-    for (const [, target] of ctx.myPlayer.guardHistory) {
-      if (target >= 1 && target <= SEATS) {
-        obs[offset + (target - 1)] = 1
-      }
-    }
-  }
-  offset += SEATS
-
-  // Immoralist: known hamster seat
-  if (ctx.knownHamster !== null && ctx.knownHamster >= 1 && ctx.knownHamster <= SEATS) {
-    obs[offset] = ctx.knownHamster / SEATS
-  }
-  offset += 1
-
-  // ========== Revote information ==========
-  if (ctx.revoteRound !== null && ctx.revoteRound > 0) {
-    obs[offset] = Math.min(ctx.revoteRound / 3, 1)  // normalized revote round (0..1)
-  }
-  offset += 1
-
-  // Revote candidates mask
-  if (ctx.revoteCandidates) {
-    for (const seat of ctx.revoteCandidates) {
-      if (seat >= 1 && seat <= SEATS) {
-        obs[offset + (seat - 1)] = 1
-      }
-    }
-  }
-  offset += SEATS
-
-  // ========== History window (last 3 days) ==========
-  const currentDay = ctx.day
-  for (let w = 0; w < HISTORY_WINDOW; w++) {
-    const histDay = currentDay - HISTORY_WINDOW + w + 1
-    if (histDay < 1) continue
-
-    const dayBase = offset + w * HISTORY_DAY_SIZE
-
-    // Collect events for this day
-    for (const event of ctx.publicEvents as readonly FenrirEvent[]) {
+    // 履歴 (直近3日分) — 同じイベントループ内で処理
+    for (let w = 0; w < HISTORY_WINDOW; w++) {
+      const histDay = currentDay - HISTORY_WINDOW + w + 1
+      if (histDay < 1) continue
+      const dayBase = w * HISTORY_DAY_SIZE
       switch (event.type) {
         case 'vote': {
-          // Record who voted for whom as one-hot-ish per seat
-          const voterSlot = event.voter - 1
-          if (voterSlot >= 0 && voterSlot < SEATS) {
-            obs[dayBase + voterSlot * 5 + 0] = event.target / SEATS
-          }
+          const slot = event.voter - 1
+          if (slot >= 0 && slot < SEATS) history[dayBase + slot * 5 + 0] = event.target / SEATS
           break
         }
         case 'execution': {
           const slot = event.target - 1
-          if (slot >= 0 && slot < SEATS) {
-            obs[dayBase + slot * 5 + 1] = 1
-          }
+          if (slot >= 0 && slot < SEATS) history[dayBase + slot * 5 + 1] = 1
           break
         }
         case 'night_kill':
         case 'fox_kill': {
           const slot = event.target - 1
-          if (slot >= 0 && slot < SEATS) {
-            obs[dayBase + slot * 5 + 2] = 1
-          }
+          if (slot >= 0 && slot < SEATS) history[dayBase + slot * 5 + 2] = 1
           break
         }
         case 'seer_claim':
@@ -528,115 +460,238 @@ export function encodeObservation(ctx: DecisionContext): Float32Array {
         case 'mason_claim':
         case 'nekomata_claim': {
           const slot = event.actor - 1
-          if (slot >= 0 && slot < SEATS) {
-            obs[dayBase + slot * 5 + 3] = 1
-          }
+          if (slot >= 0 && slot < SEATS) history[dayBase + slot * 5 + 3] = 1
           break
         }
         case 'signal': {
           const slot = event.actor - 1
-          if (slot >= 0 && slot < SEATS) {
-            obs[dayBase + slot * 5 + 4] = 1
-          }
+          if (slot >= 0 && slot < SEATS) history[dayBase + slot * 5 + 4] = 1
           break
         }
       }
     }
   }
+
+  // per-seat データ構築
+  const seats: SeatPublicData[] = []
+  for (let seat = 1; seat <= SEATS; seat++) {
+    seats.push({
+      alive: aliveSet.has(seat),
+      claimedRole: claimedRoles.get(seat),
+      isMe: seat === ctx.mySeat,
+      blackCount: blackCounts.get(seat) ?? 0,
+      whiteCount: whiteCounts.get(seat) ?? 0,
+      voteReceived: voteCounts.get(seat) ?? 0,
+      suspicion: suspicionCounts.get(seat) ?? 0,
+      trust: trustCounts.get(seat) ?? 0,
+      executeProposal: executeCounts.get(seat) ?? 0,
+      isCommander: ctx.commander === seat,
+      accuseWolf: accuseWolfCounts.get(seat) ?? 0,
+      accuseFox: accuseFoxCounts.get(seat) ?? 0,
+      voteIntent: voteIntentCounts.get(seat) ?? 0,
+      nominateCommander: nominateCommanderCounts.get(seat) ?? 0,
+      planApproved: (agreeCounts.get(seat) ?? 0) - (disagreeCounts.get(seat) ?? 0),
+      confirmHuman: confirmHumanCounts.get(seat) ?? 0,
+      confirmWolf: confirmWolfCounts.get(seat) ?? 0,
+      voteFor: voteForCounts.get(seat) ?? 0,
+      voteAgainst: voteAgainstCounts.get(seat) ?? 0,
+    })
+  }
+
+  // private 情報
+  const divineResults = new Map<number, 'human' | 'wolf'>()
+  if (ctx.myRole === 'seer') {
+    for (const [, result] of ctx.myPlayer.divineHistory) {
+      if (result.target >= 1 && result.target <= SEATS) {
+        divineResults.set(result.target, result.result as 'human' | 'wolf')
+      }
+    }
+  }
+
+  const guardedSeats = new Set<number>()
+  if (ctx.myRole === 'bodyguard') {
+    for (const [, target] of ctx.myPlayer.guardHistory) {
+      if (target >= 1 && target <= SEATS) guardedSeats.add(target)
+    }
+  }
+
+  // rope margin
+  let ropeMargin: number | null = null
+  if (ctx.maxSurvivingNV !== null) {
+    const remainingExecutions = (ctx.alivePlayers.length - 1) / 2
+    ropeMargin = remainingExecutions - ctx.maxSurvivingNV
+  }
+
+  return {
+    global: {
+      day: ctx.day,
+      phase: ctx.phase,
+      aliveCount: ctx.alivePlayers.length,
+      myRole: ctx.myRole,
+      commander: ctx.commander,
+      demandWolfCoCount,
+      ropeMargin,
+      aliveParity: ctx.alivePlayers.length % 2,
+    },
+    seats,
+    private: {
+      divineResults,
+      wolfTeamSeats: ctx.wolfTeammates ?? ctx.knownWolves ?? [],
+      masonPartner: ctx.masonPartner,
+      guardedSeats,
+      knownHamster: ctx.knownHamster,
+    },
+    revote: {
+      round: ctx.revoteRound ?? 0,
+      candidates: ctx.revoteCandidates ?? [],
+    },
+    history,
+    retar: {
+      self: ctx.retarPossibilities,
+      global: ctx.globalRetarPossibilities,
+    },
+    plan: {
+      forwardIndices: ctx.planForwardIndices,
+      endgameIndices: ctx.planEndgameIndices,
+    },
+    tsumiTarget: ctx.tsumiTarget,
+  }
+}
+
+// ============================================================
+// 機械的な obs 配列への収納
+// ============================================================
+
+/** CollectedObservation を固定長 Float32Array に詰める（機械的エンコーディング） */
+export function packObservation(data: CollectedObservation): Float32Array {
+  const obs = new Float32Array(OBSERVATION_SIZE)
+  const g = data.global
+
+  // ========== Global features ==========
+  let offset = 0
+  obs[offset++] = g.day / MAX_DAYS
+  obs[offset++] = g.phase === 'night' ? 0 : 1
+  obs[offset++] = g.aliveCount / SEATS
+  const roleIdx = ROLE_INDEX.get(g.myRole) ?? 0
+  for (let i = 0; i < NUM_ROLES; i++) obs[offset++] = i === roleIdx ? 1 : 0
+  obs[offset++] = g.commander !== null ? g.commander / SEATS : 0
+  obs[offset++] = g.day / MAX_DAYS
+  obs[offset++] = Math.min(g.demandWolfCoCount / 5, 1)
+  obs[offset++] = g.ropeMargin !== null ? g.ropeMargin / SEATS : 0
+  obs[offset++] = g.aliveParity
+
+  // ========== Per-seat features ==========
+  for (let i = 0; i < SEATS; i++) {
+    const s = data.seats[i]
+    let o = offset + i * PER_SEAT_SIZE
+    obs[o++] = s.alive ? 1 : 0
+    const cr = s.claimedRole
+    for (let r = 0; r < NUM_ROLES; r++) obs[o++] = cr !== undefined && ROLE_INDEX.get(cr) === r ? 1 : 0
+    obs[o++] = cr === undefined ? 1 : 0
+    obs[o++] = s.isMe ? 1 : 0
+    obs[o++] = Math.min(s.blackCount / 3, 1)
+    obs[o++] = Math.min(s.whiteCount / 3, 1)
+    obs[o++] = Math.min(s.voteReceived / 10, 1)
+    obs[o++] = Math.min(s.suspicion / 5, 1)
+    obs[o++] = Math.min(s.trust / 5, 1)
+    obs[o++] = Math.min(s.executeProposal / 5, 1)
+    obs[o++] = s.isCommander ? 1 : 0
+    obs[o++] = Math.min(s.accuseWolf / 5, 1)
+    obs[o++] = Math.min(s.accuseFox / 5, 1)
+    obs[o++] = Math.min(s.voteIntent / 5, 1)
+    obs[o++] = Math.min(s.nominateCommander / 3, 1)
+  }
+  offset += SEAT_SECTION_SIZE
+
+  // ========== Private knowledge ==========
+  for (const [seat, result] of data.private.divineResults) {
+    obs[offset + (seat - 1)] = result === 'human' ? 0.5 : 1.0
+  }
+  offset += SEATS
+  for (const seat of data.private.wolfTeamSeats) {
+    if (seat >= 1 && seat <= SEATS) obs[offset + (seat - 1)] = 1
+  }
+  offset += SEATS
+  if (data.private.masonPartner !== null && data.private.masonPartner >= 1 && data.private.masonPartner <= SEATS) {
+    obs[offset] = data.private.masonPartner / SEATS
+  }
+  offset += 1
+  for (const seat of data.private.guardedSeats) {
+    obs[offset + (seat - 1)] = 1
+  }
+  offset += SEATS
+  if (data.private.knownHamster !== null && data.private.knownHamster >= 1 && data.private.knownHamster <= SEATS) {
+    obs[offset] = data.private.knownHamster / SEATS
+  }
+  offset += 1
+
+  // ========== Revote ==========
+  if (data.revote.round > 0) obs[offset] = Math.min(data.revote.round / 3, 1)
+  offset += 1
+  for (const seat of data.revote.candidates) {
+    if (seat >= 1 && seat <= SEATS) obs[offset + (seat - 1)] = 1
+  }
+  offset += SEATS
+
+  // ========== History ==========
+  obs.set(data.history, offset)
   offset += HISTORY_SIZE
 
-  // ========== Retar possibilities (自分視点) ==========
-  if (ctx.retarPossibilities) {
+  // ========== Retar ==========
+  if (data.retar.self) {
     for (let seat = 1; seat <= SEATS; seat++) {
-      const roles = ctx.retarPossibilities.get(seat)
+      const roles = data.retar.self.get(seat)
       if (!roles) continue
       for (const role of roles) {
         const rIdx = ROLE_INDEX.get(role)
-        if (rIdx !== undefined) {
-          obs[offset + (seat - 1) * NUM_ROLES + rIdx] = 1
-        }
+        if (rIdx !== undefined) obs[offset + (seat - 1) * NUM_ROLES + rIdx] = 1
       }
     }
   }
   offset += RETAR_POSSIBILITIES_SIZE
-
-  // ========== Global Retar (公開情報のみ) ==========
-  if (ctx.globalRetarPossibilities) {
+  if (data.retar.global) {
     for (let seat = 1; seat <= SEATS; seat++) {
-      const roles = ctx.globalRetarPossibilities.get(seat)
+      const roles = data.retar.global.get(seat)
       if (!roles) continue
       for (const role of roles) {
         const rIdx = ROLE_INDEX.get(role)
-        if (rIdx !== undefined) {
-          obs[offset + (seat - 1) * NUM_ROLES + rIdx] = 1
-        }
+        if (rIdx !== undefined) obs[offset + (seat - 1) * NUM_ROLES + rIdx] = 1
       }
     }
   }
   offset += GLOBAL_RETAR_SIZE
 
-  // ========== Plan Approved (per-seat) ==========
-  // agree/disagreeシグナルから導出: 処刑提案者への賛否
-  {
-    const agreeCounts = new Map<number, number>()
-    const disagreeCounts = new Map<number, number>()
-    for (const event of ctx.publicEvents as readonly FenrirEvent[]) {
-      if (event.type === 'signal' && 'target' in event.signal) {
-        if (event.signal.type === 'agree') {
-          agreeCounts.set(event.signal.target, (agreeCounts.get(event.signal.target) ?? 0) + 1)
-        } else if (event.signal.type === 'disagree') {
-          disagreeCounts.set(event.signal.target, (disagreeCounts.get(event.signal.target) ?? 0) + 1)
-        }
-      }
-    }
-    for (let seat = 1; seat <= SEATS; seat++) {
-      const net = (agreeCounts.get(seat) ?? 0) - (disagreeCounts.get(seat) ?? 0)
-      obs[offset + seat - 1] = Math.max(-1, Math.min(1, net / 5))  // clamp to [-1, 1]
-    }
+  // ========== Plan Approved + New Signals ==========
+  for (let i = 0; i < SEATS; i++) {
+    obs[offset + i] = Math.max(-1, Math.min(1, data.seats[i].planApproved / 5))
   }
   offset += PLAN_APPROVED_SIZE
-
-  // ========== New Signals (per-seat × 4) ==========
-  {
-    const confirmHumanCounts = new Map<number, number>()
-    const confirmWolfCounts = new Map<number, number>()
-    const voteForCounts = new Map<number, number>()
-    const voteAgainstCounts = new Map<number, number>()
-    for (const event of ctx.publicEvents as readonly FenrirEvent[]) {
-      if (event.type === 'signal' && 'target' in event.signal) {
-        const t = event.signal.target
-        switch (event.signal.type) {
-          case 'confirm_human': confirmHumanCounts.set(t, (confirmHumanCounts.get(t) ?? 0) + 1); break
-          case 'confirm_wolf': confirmWolfCounts.set(t, (confirmWolfCounts.get(t) ?? 0) + 1); break
-          case 'vote_for': voteForCounts.set(t, (voteForCounts.get(t) ?? 0) + 1); break
-          case 'vote_against': voteAgainstCounts.set(t, (voteAgainstCounts.get(t) ?? 0) + 1); break
-        }
-      }
-    }
-    for (let seat = 1; seat <= SEATS; seat++) {
-      const base = offset + (seat - 1) * NEW_SIGNALS_PER_SEAT
-      obs[base + 0] = Math.min((confirmHumanCounts.get(seat) ?? 0) / 5, 1)
-      obs[base + 1] = Math.min((confirmWolfCounts.get(seat) ?? 0) / 5, 1)
-      obs[base + 2] = Math.min((voteForCounts.get(seat) ?? 0) / 5, 1)
-      obs[base + 3] = Math.min((voteAgainstCounts.get(seat) ?? 0) / 5, 1)
-    }
+  for (let i = 0; i < SEATS; i++) {
+    const base = offset + i * NEW_SIGNALS_PER_SEAT
+    obs[base + 0] = Math.min(data.seats[i].confirmHuman / 5, 1)
+    obs[base + 1] = Math.min(data.seats[i].confirmWolf / 5, 1)
+    obs[base + 2] = Math.min(data.seats[i].voteFor / 5, 1)
+    obs[base + 3] = Math.min(data.seats[i].voteAgainst / 5, 1)
   }
   offset += NEW_SIGNALS_SIZE
 
   // ========== Raw Plan Indices ==========
-  // forward 8 tokens + endgame 4 tokens (vocab 0-21, default STOP=21)
-  const fwdIdx = ctx.planForwardIndices
-  for (let i = 0; i < NUM_PLAN_FORWARD; i++) obs[offset++] = fwdIdx?.[i] ?? 21
-  const egIdx = ctx.planEndgameIndices
-  for (let i = 0; i < NUM_PLAN_ENDGAME; i++) obs[offset++] = egIdx?.[i] ?? 21
+  const fwd = data.plan.forwardIndices
+  for (let i = 0; i < NUM_PLAN_FORWARD; i++) obs[offset++] = fwd?.[i] ?? 21
+  const eg = data.plan.endgameIndices
+  for (let i = 0; i < NUM_PLAN_ENDGAME; i++) obs[offset++] = eg?.[i] ?? 21
 
   // ========== Tsumi ==========
-  // commander と同じエンコーディング: 0=詰みなし, seat/SEATS=詰み対象席
-  if (ctx.tsumiTarget !== null && ctx.tsumiTarget >= 1 && ctx.tsumiTarget <= SEATS) {
-    obs[TSUMI_START] = ctx.tsumiTarget / SEATS
+  if (data.tsumiTarget !== null && data.tsumiTarget >= 1 && data.tsumiTarget <= SEATS) {
+    obs[TSUMI_START] = data.tsumiTarget / SEATS
   }
 
   return obs
+}
+
+/** encodeObservation: collect → pack のショートカット */
+export function encodeObservation(ctx: DecisionContext): Float32Array {
+  return packObservation(collectObservation(ctx))
 }
 
 // ============================================================
