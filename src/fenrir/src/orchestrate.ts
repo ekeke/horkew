@@ -565,9 +565,9 @@ function ppoUpdate(
 
 
 /** KL target warmup: pretrain→PPO 移行初期は大きな KL を許容し、徐々に引き締める */
-const KL_TARGET_INITIAL = 0.5
+const KL_TARGET_INITIAL = 2.0
 const KL_TARGET_FINAL = 0.05
-const KL_WARMUP_ITERS = 300
+const KL_WARMUP_ITERS = 500
 
 function klTargetForIter(iter: number): number {
   if (iter >= KL_WARMUP_ITERS) return KL_TARGET_FINAL
