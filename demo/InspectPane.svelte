@@ -3,7 +3,7 @@
   const ROLE_SHORT: Record<string, string> = {villager:'村',seer:'占',medium:'霊',bodyguard:'狩',mason:'共',nekomata:'猫',werewolf:'狼',possessed:'狂',fanatic:'信',werehamster:'狐',immoralist:'背'}
   const ROLE_COLORS: Record<string, string> = {villager:'var(--color-village)',seer:'var(--ctp-sapphire)',medium:'var(--ctp-lavender)',bodyguard:'var(--ctp-peach)',mason:'var(--ctp-green)',nekomata:'var(--ctp-pink)',werewolf:'var(--color-wolf)',possessed:'var(--ctp-maroon)',fanatic:'var(--ctp-flamingo)',werehamster:'var(--color-fox)',immoralist:'var(--ctp-rosewater)'}
 
-  type IndexEntry = { file: string, seed: number, result: string, gameLength: number }
+  type IndexEntry = { file: string, seed: number, result: string, gameLength: number, model?: string, iteration?: number }
   type DaySnapshot = {
     global: { aliveCount: number, commander: number | null, demandWolfCoCount: number, aliveParity: number }
     seats: Array<{ alive: boolean, claimedRole?: string, blackCount: number, whiteCount: number, voteReceived: number, suspicion: number, trust: number, executeProposal: number, isCommander: boolean, accuseWolf: number, accuseFox: number, voteIntent: number, nominateCommander: number, planApproved: number, confirmHuman: number, confirmWolf: number, voteFor: number, voteAgainst: number }>
@@ -125,6 +125,23 @@
     } finally {
       gameLoading = false
     }
+  }
+
+  function formatEntryLabel(entry: IndexEntry): string {
+    // タイムスタンプ形式 (20260404145000.json) → HH:MM:SS
+    const m = entry.file.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.json$/)
+    if (m) {
+      const prefix = entry.iteration != null ? `i${entry.iteration} ` : ''
+      return `${prefix}${m[4]}:${m[5]}:${m[6]}`
+    }
+    return `#${entry.seed}`
+  }
+
+  function resultShort(r: string): string {
+    if (r.includes('villager')) return '村'
+    if (r.includes('werewolf')) return '狼'
+    if (r.includes('hamster')) return '狐'
+    return '分'
   }
 
   function resultClass(r: string): string {
@@ -275,8 +292,8 @@
             class:active={i === selectedGameIdx}
             onclick={() => selectGame(i)}
           >
-            <span class="inspect-seed">#{entry.seed}</span>
-            <span class="inspect-result {resultClass(entry.result)}">{entry.result.replace('_won', '')}</span>
+            <span class="inspect-seed">{formatEntryLabel(entry)}</span>
+            <span class="inspect-result {resultClass(entry.result)}">{resultShort(entry.result)}</span>
             <span class="inspect-days">{entry.gameLength}d</span>
           </button>
         {/each}
