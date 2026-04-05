@@ -29,6 +29,7 @@ import {
   type TrainingConfig,
 } from './training.ts'
 import { existsSync, readdirSync, readFileSync, unlinkSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
+import { basename } from 'node:path'
 import { spawn, execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { generatePlanTokenTrainingBatch, generateStructurePretrainBatch } from './ml/execution-plan-data.ts'
@@ -101,6 +102,8 @@ type OrchestratorConfig = {
   miniBatchSize?: number
   /** inspect サンプリング間隔（N ゲームに 1 回、0=無効） */
   inspectInterval: number
+  /** `p` 選択時に true — resume 後に iterCounts を 0 にリセット */
+  ppoRestart: boolean
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -108,7 +111,7 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   phase2Iterations: 40000,
   chunkSize: 100,
   batch: 64,
-  checkpointBase: './checkpoints',
+  checkpointBase: '',
   noRetar: false,
   evalInterval: 100,
   checkpointInterval: 10,
@@ -121,12 +124,12 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   transformer: false,
   strategyOnly: false,
   inspectInterval: 0,
+  ppoRestart: false,
 }
 
 function parseArgs(): OrchestratorConfig {
   const args = process.argv.slice(2)
   const config = { ...DEFAULT_CONFIG }
-  let checkpointBaseSet = false
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
@@ -134,7 +137,7 @@ function parseArgs(): OrchestratorConfig {
       case '--phase2-iterations': config.phase2Iterations = parseInt(args[++i]); break
       case '--chunk-size': config.chunkSize = parseInt(args[++i]); break
       case '--batch': config.batch = parseInt(args[++i]); break
-      case '--checkpoint-base': config.checkpointBase = args[++i]; checkpointBaseSet = true; break
+      case '--checkpoint-base': config.checkpointBase = args[++i]; break
       case '--no-retar': config.noRetar = true; break
       case '--eval-interval': config.evalInterval = parseInt(args[++i]); break
       case '--checkpoint-interval': config.checkpointInterval = parseInt(args[++i]); break
@@ -157,13 +160,6 @@ function parseArgs(): OrchestratorConfig {
     }
   }
 
-  // checkpoint base にアーキテクチャサブディレクトリを付与
-  if (!checkpointBaseSet) {
-    config.checkpointBase = config.transformer
-      ? './checkpoints/transformer'
-      : './checkpoints/nn'
-  }
-
   return config
 }
 
@@ -177,7 +173,7 @@ Options:
   --phase2-iterations <n>  Phase 2 イテレーション (default: ${DEFAULT_CONFIG.phase2Iterations})
   --chunk-size <n>         ラウンドロビンのチャンクサイズ (default: ${DEFAULT_CONFIG.chunkSize})
   --batch <n>              バッチサイズ (default: ${DEFAULT_CONFIG.batch})
-  --checkpoint-base <dir>  ベースDir (default: ${DEFAULT_CONFIG.checkpointBase})
+  --checkpoint-base <dir>  ベースDir (省略時: 新規=tmp/orch-run-N, resume=前回のランから自動取得)
   --eval-interval <n>      評価間隔 (default: ${DEFAULT_CONFIG.evalInterval})
   --checkpoint-interval <n> チェックポイント間隔 (default: ${DEFAULT_CONFIG.checkpointInterval})
   --eval-games <n>       評価ゲーム数 (default: ${DEFAULT_CONFIG.evalGames})
@@ -185,7 +181,7 @@ Options:
   --phase1-only            Phase 2 をスキップ
   --phase2-only            Phase 1 をスキップ
   --target-winrate <n>     目標勝率の上書き (default: baseline eval から自動算出)
-  --resume                 既存チェックポイントから再開
+  --resume                 既存チェックポイントから再開 (base省略時はtrain-status.jsonから自動取得)
   --lr <n>                 学習率 (default: ${DEFAULT_CONFIG.learningRate})
   --workers <n|auto>       ゲーム生成ワーカー数 (auto=CPU-1, default: 直列)
   --transformer            Transformerアーキテクチャを使用 (default: MLP)
@@ -199,8 +195,6 @@ Options:
 // ============================================================
 // Inspect Sampling
 // ============================================================
-
-const INSPECT_DIR = 'demo/public/inspect'
 
 let inspectGameCounter = 0
 
@@ -230,15 +224,16 @@ function pickInspectSeeds(seeds: number[], interval: number): number[] {
 /**
  * SerializedGameResult から inspect JSON を生成・保存
  */
-function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[], modelName: string, iteration: number, gitSha?: string) {
+function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[], modelName: string, iteration: number, options: { gitSha?: string, runId: string, checkpointBase: string }) {
   const sampled = results.filter(g => g.howl)
   if (sampled.length === 0) return
 
-  mkdirSync(INSPECT_DIR, { recursive: true })
-  const sha = gitSha ?? execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
+  const inspectDir = `${options.checkpointBase}/inspect`
+  mkdirSync(inspectDir, { recursive: true })
+  const sha = options.gitSha ?? execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
 
-  type IndexEntry = { file: string, seed: number, result: string, gameLength: number, model: string, iteration: number, gitSha: string }
-  const indexPath = `${INSPECT_DIR}/index.json`
+  type IndexEntry = { file: string, seed: number, result: string, gameLength: number, model: string, iteration: number, gitSha: string, runId: string }
+  const indexPath = `${inspectDir}/index.json`
   let indexEntries: IndexEntry[] = []
   if (existsSync(indexPath)) {
     try { indexEntries = JSON.parse(readFileSync(indexPath, 'utf-8')) } catch {}
@@ -342,6 +337,8 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
     }
 
     const inspectData = {
+      runId: options.runId,
+      checkpointBase: options.checkpointBase,
       seed: game.seed,
       result: game.result,
       gameLength: game.gameLength,
@@ -363,8 +360,8 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
       + String(now.getMinutes()).padStart(2, '0')
       + String(now.getSeconds()).padStart(2, '0')
     const fileName = `${ts}.json`
-    writeFileSync(`${INSPECT_DIR}/${fileName}`, JSON.stringify(inspectData, null, 2))
-    byFile.set(fileName, { file: fileName, seed: game.seed!, result: game.result, gameLength: game.gameLength!, model: modelName, iteration, gitSha: sha })
+    writeFileSync(`${inspectDir}/${fileName}`, JSON.stringify(inspectData, null, 2))
+    byFile.set(fileName, { file: fileName, seed: game.seed!, result: game.result, gameLength: game.gameLength!, model: modelName, iteration, gitSha: sha, runId: options.runId })
   }
 
   const finalIndex = [...byFile.values()].sort((a, b) => b.iteration - a.iteration || a.seed - b.seed)
@@ -395,8 +392,60 @@ function saveEvalHowl(
 }
 
 // ============================================================
-// Progress Log (固定ファイルへの進捗書き出し)
+// Train Status / History / Progress
 // ============================================================
+
+type TrainStatus = {
+  status: 'running' | 'stopped'
+  runId: string
+  checkpointBase: string
+  pid: number
+  gitSha: string
+  updated: string
+}
+
+const TRAIN_STATUS_FILE = 'train-status.json'
+const TRAIN_HISTORY_FILE = 'train-history.jsonl'
+
+function readTrainStatus(): TrainStatus | null {
+  if (!existsSync(TRAIN_STATUS_FILE)) return null
+  try { return JSON.parse(readFileSync(TRAIN_STATUS_FILE, 'utf-8')) } catch { return null }
+}
+
+function writeTrainStatus(status: TrainStatus): void {
+  writeFileSync(TRAIN_STATUS_FILE, JSON.stringify(status, null, 2) + '\n')
+}
+
+function appendTrainHistory(event: Record<string, unknown>): void {
+  appendFileSync(TRAIN_HISTORY_FILE, JSON.stringify(event) + '\n')
+}
+
+function generateRunId(checkpointBase: string): string {
+  const now = new Date()
+  const ts = now.getFullYear().toString()
+    + String(now.getMonth() + 1).padStart(2, '0')
+    + String(now.getDate()).padStart(2, '0')
+    + '-'
+    + String(now.getHours()).padStart(2, '0')
+    + String(now.getMinutes()).padStart(2, '0')
+    + String(now.getSeconds()).padStart(2, '0')
+  return `${basename(checkpointBase)}-${ts}`
+}
+
+/** checkpointBase 省略時に次の連番ディレクトリを決定 */
+function nextCheckpointBase(): string {
+  mkdirSync('tmp', { recursive: true })
+  let maxN = 0
+  try {
+    for (const entry of readdirSync('tmp')) {
+      const m = entry.match(/^orch-run-(\d+)$/)
+      if (m) { const n = parseInt(m[1]); if (n > maxN) maxN = n }
+    }
+  } catch { /* tmp/ doesn't exist yet */ }
+  return `tmp/orch-run-${maxN + 1}`
+}
+
+// --- Progress (per-checkpointBase) ---
 
 type ProgressEvalEntry = {
   time: string
@@ -419,11 +468,12 @@ type ProgressCurriculumEntry = {
   event: string
 }
 
-type ProgressLog = {
+type TrainProgress = {
+  runId: string
   checkpointBase: string
   runInfo: {
     started: string
-    git: string
+    gitSha: string
     arch: string
     configSummary: string
   }
@@ -437,78 +487,26 @@ type ProgressLog = {
     klCoeff?: number
     mlMaxSeats?: number
     mlStartDay?: number
+    updated?: string
   }
 }
 
-function fmtTime(iso: string): string {
-  return iso.slice(11, 19)
+function readTrainProgress(checkpointBase: string): TrainProgress | null {
+  const path = `${checkpointBase}/train-progress.json`
+  if (!existsSync(path)) return null
+  try { return JSON.parse(readFileSync(path, 'utf-8')) } catch { return null }
 }
 
-function fmtPct(v: number): string {
-  return (v * 100).toFixed(0)
-}
-
-function updateProgressFile(progress: ProgressLog): void {
-  const { runInfo, curriculum, evals, latest } = progress
-  const lines: string[] = []
-
-  lines.push('# Fenrir Training Progress')
-  lines.push('')
-  lines.push('## Run Info')
-  lines.push(`- Started: ${runInfo.started}`)
-  lines.push(`- Git: ${runInfo.git}`)
-  lines.push(`- Architecture: ${runInfo.arch}`)
-  lines.push(`- Config: ${runInfo.configSummary}`)
-  lines.push('')
-
-  // Curriculum
-  if (curriculum.length > 0) {
-    lines.push('## Curriculum Changes')
-    lines.push('| Time | Iter | mlMaxSeats | mlStartDay | Event |')
-    lines.push('|------|------|-----------|-----------|-------|')
-    for (const c of curriculum) {
-      lines.push(`| ${fmtTime(c.time)} | ${c.iter} | ${c.mlMaxSeats} | ${c.mlStartDay} | ${c.event} |`)
-    }
-    lines.push('')
-  }
-
-  // Eval history
-  if (evals.length > 0) {
-    lines.push('## Eval History')
-    lines.push('| Time | Model | Iter | village% | wolf% | hamster% | draw% | avgLen | base% | target% | pLoss | vLoss | ent | kl | game% | ppo% | Status |')
-    lines.push('|------|-------|------|----------|-------|----------|-------|--------|-------|---------|-------|-------|-----|-----|-------|------|--------|')
-    for (const e of evals) {
-      const v = fmtPct(e.winRates['villager_won'] ?? 0)
-      const w = fmtPct(e.winRates['werewolf_won'] ?? 0)
-      const h = fmtPct(e.winRates['werehamster_won'] ?? 0)
-      const d = fmtPct(e.winRates['draw'] ?? 0)
-      const base = e.baseline != null ? (e.baseline * 100).toFixed(0) : '-'
-      const tgt = e.target != null ? (e.target * 100).toFixed(0) : '-'
-      const ppo = e.ppoMetrics
-      const pL = ppo ? ppo.policyLoss.toFixed(4) : '-'
-      const vL = ppo ? ppo.valueLoss.toFixed(4) : '-'
-      const ent = ppo ? ppo.entropy.toFixed(4) : '-'
-      const kl = ppo ? ppo.klLoss.toFixed(4) : '-'
-      const gPct = e.timing ? (e.timing.gameMs / e.timing.iterMs * 100).toFixed(0) : '-'
-      const pPct = e.timing ? (e.timing.ppoMs / e.timing.iterMs * 100).toFixed(0) : '-'
-      lines.push(`| ${fmtTime(e.time)} | ${e.model} | ${e.iter} | ${v} | ${w} | ${h} | ${d} | ${e.avgLen.toFixed(1)} | ${base} | ${tgt} | ${pL} | ${vL} | ${ent} | ${kl} | ${gPct} | ${pPct} | ${e.status} |`)
-    }
-    lines.push('')
-  }
-
-  // Latest status
-  lines.push('## Latest Status')
-  lines.push(`- Phase: ${latest.phase}`)
-  lines.push(`- Current Model: ${latest.model}`)
-  lines.push(`- Iteration: ${latest.iter}/${latest.maxIter}`)
-  if (latest.klCoeff != null) lines.push(`- KL coeff (beta): ${latest.klCoeff.toFixed(3)}`)
-  if (latest.mlMaxSeats != null) lines.push(`- mlMaxSeats: ${latest.mlMaxSeats}`)
-  if (latest.mlStartDay != null) lines.push(`- mlStartDay: ${latest.mlStartDay}`)
-  lines.push(`- Updated: ${new Date().toISOString()}`)
-  lines.push('')
-
+function writeTrainProgress(progress: TrainProgress): void {
   mkdirSync(progress.checkpointBase, { recursive: true })
-  writeFileSync(`${progress.checkpointBase}/progress.md`, lines.join('\n'))
+  progress.latest.updated = new Date().toISOString()
+  writeFileSync(`${progress.checkpointBase}/train-progress.json`, JSON.stringify(progress, null, 2) + '\n')
+  // train-status.json の updated も更新（道標を最新に保つ）
+  const status = readTrainStatus()
+  if (status && status.runId === progress.runId) {
+    status.updated = progress.latest.updated
+    writeTrainStatus(status)
+  }
 }
 
 // ============================================================
@@ -704,6 +702,7 @@ async function checkExistingCheckpoints(config: OrchestratorConfig): Promise<voi
     }
     log('PPOチェックポイントを削除しました (pretrain checkpoint_0 は保持)。')
     config.resume = true  // pretrain checkpoint から resume
+    config.ppoRestart = true  // iterCounts を 0 にリセット
   } else {
     log('中断しました。--resume を付けて再実行してください。')
     process.exit(0)
@@ -784,31 +783,52 @@ function validateConfig(config: OrchestratorConfig): void {
 async function main(): Promise<void> {
   const config = parseArgs()
   validateConfig(config)
+
+  // === checkpointBase の自動決定 ===
+  if (!config.checkpointBase) {
+    if (config.resume) {
+      const status = readTrainStatus()
+      if (!status) {
+        console.error('ERROR: No previous run found (train-status.json missing). Specify --checkpoint-base.')
+        process.exit(1)
+      }
+      config.checkpointBase = status.checkpointBase
+      log(`Resuming from: ${config.checkpointBase} (run: ${status.runId})`)
+    } else {
+      config.checkpointBase = nextCheckpointBase()
+      log(`New run: ${config.checkpointBase}`)
+    }
+  }
+
   process.title = `fenrir-orch [${config.checkpointBase}]`
 
-  // PID ファイル（重複起動防止）
-  const pidFile = 'train-orchestrate.pid'
-  if (existsSync(pidFile)) {
-    const oldPid = parseInt(readFileSync(pidFile, 'utf-8').trim(), 10)
+  // === 重複起動チェック (train-status.json) ===
+  const existingStatus = readTrainStatus()
+  if (existingStatus && existingStatus.status === 'running') {
     let alive = false
-    try { process.kill(oldPid, 0); alive = true } catch {}
+    try { process.kill(existingStatus.pid, 0); alive = true } catch {}
     if (alive) {
-      console.error(`ERROR: Orchestrator already running (pid=${oldPid}). Kill it first or remove ${pidFile}.`)
+      console.error(`ERROR: Orchestrator already running (pid=${existingStatus.pid}, run=${existingStatus.runId}). Kill it first.`)
       process.exit(1)
     }
-    log(`Stale PID file found (pid=${oldPid}, not running). Overwriting.`)
+    log(`Stale train-status.json found (pid=${existingStatus.pid}, status=running but not alive). Overwriting.`)
   }
-  writeFileSync(pidFile, String(process.pid))
-  const shaFile = 'train-orchestrate.sha'
-  writeFileSync(shaFile, execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim() + '\n')
-  const cleanupPid = () => { try { unlinkSync(pidFile) } catch {}; try { unlinkSync(shaFile) } catch {} }
+
+  // === Shutdown handling ===
   let shutdownRequested = 0  // 0=none, >0=exit code
+  let runId = ''     // set below after runId is determined
+  let gitSha = ''    // set below after git info is fetched
+  const shutdownCleanup = (reason: string) => {
+    if (runId) {
+      appendTrainHistory({ event: 'shutdown', time: new Date().toISOString(), runId, pid: process.pid, reason })
+      writeTrainStatus({ status: 'stopped', runId, checkpointBase: config.checkpointBase, pid: process.pid, gitSha, updated: new Date().toISOString() })
+    }
+    terminateGameWorkerPool()
+  }
   const requestShutdown = (code: number) => {
     if (shutdownRequested) {
-      // 2回目: 即座に強制終了
       log(`\nForce shutdown (second signal)`)
-      terminateGameWorkerPool()
-      cleanupPid()
+      shutdownCleanup(code === 130 ? 'SIGINT' : 'SIGTERM')
       process.exit(code)
     }
     shutdownRequested = code
@@ -817,38 +837,48 @@ async function main(): Promise<void> {
   const checkShutdown = () => {
     if (!shutdownRequested) return
     log(`Shutting down...`)
-    terminateGameWorkerPool()
-    cleanupPid()
+    shutdownCleanup(shutdownRequested === 130 ? 'SIGINT' : 'SIGTERM')
     process.exit(shutdownRequested)
   }
-  process.on('exit', cleanupPid)
   process.on('SIGINT', () => requestShutdown(130))
   process.on('SIGTERM', () => requestShutdown(143))
 
   await checkExistingCheckpoints(config)
 
-  // Git情報
-  const gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
+  // === Git 情報 ===
+  gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
   const gitDirty = execSync('git status --porcelain', { encoding: 'utf-8' }).trim() !== ''
   log(`${BOLD}Fenrir Training Orchestrator (round-robin)${RESET}`)
   log(`Git: ${gitSha}${gitDirty ? ' (dirty)' : ''} | ${new Date().toISOString()}`)
   log(`Architecture: ${config.transformer ? 'Transformer' : 'MLP'}${config.strategyOnly ? ' (strategy-only)' : ''}`)
   log(`Iterations: ${config.iterations}/model, Chunk: ${config.chunkSize}, Batch: ${config.batch}`)
 
-  // === Progress Log ===
-  const progress: ProgressLog = {
+  // === Run ID + Status + History + Progress ===
+  const existingProgress = readTrainProgress(config.checkpointBase)
+  runId = config.resume && existingProgress?.runId
+    ? existingProgress.runId
+    : generateRunId(config.checkpointBase)
+
+  const startMode = config.ppoRestart ? 'ppo_restart' : config.resume ? 'resumed' : 'new'
+  writeTrainStatus({ status: 'running', runId, checkpointBase: config.checkpointBase, pid: process.pid, gitSha, updated: new Date().toISOString() })
+  appendTrainHistory({ event: 'started', time: new Date().toISOString(), runId, checkpointBase: config.checkpointBase, gitSha, pid: process.pid, mode: startMode })
+
+  const arch = `${config.transformer ? 'Transformer' : 'MLP'}${config.strategyOnly ? ' (strategy-only)' : ''}`
+  const configSummary = `batch=${config.batch}, lr=${config.learningRate}, evalInterval=${config.evalInterval}, chunkSize=${config.chunkSize}, workers=${config.workers}`
+  const progress: TrainProgress = {
+    runId,
     checkpointBase: config.checkpointBase,
     runInfo: {
-      started: new Date().toISOString(),
-      git: `${gitSha}${gitDirty ? ' (dirty)' : ''}`,
-      arch: `${config.transformer ? 'Transformer' : 'MLP'}${config.strategyOnly ? ' (strategy-only)' : ''}`,
-      configSummary: `batch=${config.batch}, lr=${config.learningRate}, evalInterval=${config.evalInterval}, chunkSize=${config.chunkSize}, workers=${config.workers}`,
+      started: existingProgress?.runInfo.started ?? new Date().toISOString(),
+      gitSha,
+      arch,
+      configSummary,
     },
-    curriculum: [],
-    evals: [],
-    latest: { phase: 'init', model: '-', iter: 0, maxIter: config.iterations },
+    curriculum: existingProgress?.curriculum ?? [],
+    evals: existingProgress?.evals ?? [],
+    latest: { phase: 'init', model: '-', iter: 0, maxIter: config.iterations, updated: new Date().toISOString() },
   }
-  updateProgressFile(progress)
+  writeTrainProgress(progress)
 
   const trainingConfig: TrainingConfig = {
     ...DEFAULT_TRAINING_CONFIG,
@@ -929,6 +959,12 @@ async function main(): Promise<void> {
     }
   } else {
     for (const name of MODEL_NAMES) iterCounts.set(name, 0)
+  }
+
+  // PPO restart: 重みはロード済みだが iter は 0 からやり直す
+  if (config.ppoRestart) {
+    for (const name of MODEL_NAMES) iterCounts.set(name, 0)
+    log('PPO restart: all iterCounts reset to 0')
   }
 
   // Resume 状況の表示
@@ -1278,7 +1314,7 @@ async function main(): Promise<void> {
           inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
           enableMasonTakeover: true,
         }, seeds)
-        if (inspectSeeds.length > 0) saveInspectGames(serializedResults, 'mason_individual', masonIter, gitSha)
+        if (inspectSeeds.length > 0) saveInspectGames(serializedResults, 'mason_individual', masonIter, { gitSha, runId, checkpointBase: config.checkpointBase })
 
         for (const game of serializedResults) {
           const stepsMap = new Map<number, TrajectoryStep[]>()
@@ -1391,7 +1427,7 @@ async function main(): Promise<void> {
             timing: { gameMs, ppoMs, iterMs },
           })
           progress.latest = { phase: '0', model: 'mason_individual', iter, maxIter: config.iterations, klCoeff: masonPpoConfig.klCoeff, mlStartDay: masonMlStartDay }
-          updateProgressFile(progress)
+          writeTrainProgress(progress)
 
           const MASON_MIN_ITER = 1000
           // Day カリキュラム: 勝率達成で Day をデクリメント
@@ -1536,7 +1572,7 @@ async function main(): Promise<void> {
             frozenMasonWeights: name === 'village' ? frozenMasonWeights : undefined,
             inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
           }, seeds)
-          if (inspectSeeds.length > 0) saveInspectGames(serializedResults, name, iter, gitSha)
+          if (inspectSeeds.length > 0) saveInspectGames(serializedResults, name, iter, { gitSha, runId, checkpointBase: config.checkpointBase })
 
           for (const game of serializedResults) {
             const stepsMap = new Map<number, TrajectoryStep[]>()
@@ -1699,7 +1735,7 @@ async function main(): Promise<void> {
               }
             }
 
-            updateProgressFile(progress)
+            writeTrainProgress(progress)
 
             if (factionRate >= targetRate) {
               log(`${prefix} ${BOLD}GRADUATED${RESET} (${group.faction}=${(factionRate * 100).toFixed(0)}% >= ${(targetRate * 100).toFixed(0)}%)`)
@@ -1760,14 +1796,14 @@ async function main(): Promise<void> {
 
     log(`${BOLD}=== Phase 1 Complete ===${RESET}`)
     progress.latest = { phase: '1 (complete)', model: '-', iter: config.iterations, maxIter: config.iterations }
-    updateProgressFile(progress)
+    writeTrainProgress(progress)
   }
 
   // === Phase 1': 集団NN + 狂信者 + 第三勢力の学習 (frozen村NN注入) ===
   if (!config.phase2Only) {
     log(`${BOLD}=== Phase 1': Collective + Non-Village Training ===${RESET}`)
     progress.latest = { phase: "1'", model: '-', iter: 0, maxIter: config.iterations }
-    updateProgressFile(progress)
+    writeTrainProgress(progress)
 
     // 集団NN用の推論/学習ネットワーク (config が異なるため専用インスタンスが必要)
     const wolfCollectiveNet = createWolfCollectiveNetwork()
@@ -1878,7 +1914,7 @@ async function main(): Promise<void> {
               phase: 1,
               inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
             }, seeds)
-            if (inspectSeeds.length > 0) saveInspectGames(serializedResults, `phase1p_${name}`, iter, gitSha)
+            if (inspectSeeds.length > 0) saveInspectGames(serializedResults, `phase1p_${name}`, iter, { gitSha, runId, checkpointBase: config.checkpointBase })
 
             for (const game of serializedResults) {
               // 個人steps: fanatic/third のみ収集 (village は frozen)
@@ -1998,7 +2034,7 @@ async function main(): Promise<void> {
               timing: { gameMs, ppoMs, iterMs },
             })
             progress.latest = { phase: "1'", model: name, iter, maxIter: config.iterations }
-            updateProgressFile(progress)
+            writeTrainProgress(progress)
 
             if (factionRate >= targetRate) {
               log(`${prefix} ${BOLD}GRADUATED${RESET} (${group.faction}=${(factionRate * 100).toFixed(0)}% >= ${(targetRate * 100).toFixed(0)}%)`)
@@ -2038,7 +2074,7 @@ async function main(): Promise<void> {
 
     log(`${BOLD}=== Phase 1' Complete ===${RESET}`)
     progress.latest = { phase: "1' (complete)", model: '-', iter: config.iterations, maxIter: config.iterations }
-    updateProgressFile(progress)
+    writeTrainProgress(progress)
   }
 
   // === Cleanup GPU ===
@@ -2051,7 +2087,7 @@ async function main(): Promise<void> {
   if (!config.phase1Only) {
     log(`${BOLD}=== Phase 2: Self-Play ===${RESET}`)
     progress.latest = { phase: '2', model: 'self-play', iter: 0, maxIter: config.phase2Iterations }
-    updateProgressFile(progress)
+    writeTrainProgress(progress)
     const dirs = MODEL_NAMES.map(name => `${config.checkpointBase}/ckpt-${name}`).join(',')
     const args = [
       '--experimental-strip-types', 'src/fenrir/src/cli.ts',

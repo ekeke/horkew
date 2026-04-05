@@ -2,14 +2,14 @@
 # 実行中の学習ジョブ以降のコミットで [break:*] タグを表示
 # Usage: ./scripts/check-training-breaks.sh
 
-SHA_FILE="train-orchestrate.sha"
+STATUS_FILE="train-status.json"
 
-if [ ! -f "$SHA_FILE" ]; then
-  echo "No training job running (${SHA_FILE} not found)"
+if [ ! -f "$STATUS_FILE" ]; then
+  echo "No training job found (${STATUS_FILE} not found)"
   exit 0
 fi
 
-SHA=$(cat "$SHA_FILE" | tr -d '[:space:]')
+SHA=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$STATUS_FILE','utf-8')).gitSha)")
 echo "Training started at: ${SHA}"
 echo ""
 

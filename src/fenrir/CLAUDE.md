@@ -12,7 +12,7 @@
 - fenrir の学習に関わる作業を開始するとき、まず `/fenrir-onboard` を実行する
 - セッション終了前に `/fenrir-handoff` を実行し、次のセッションが即座に再開できるようにする
 - 学習ジョブ実行中のコード変更は次回再起動まで反映されないことに注意
-- progress.md と eval_log.jsonl が学習状況の正規ソース。memory よりこちらを信頼する
+- train-progress.json と eval_log.jsonl が学習状況の正規ソース。memory よりこちらを信頼する
 
 ### コミットの break タグ
 
@@ -25,7 +25,7 @@
 | タグなし | 再起動不要 or 学習に無関係 | そのまま |
 
 確認方法: `bash scripts/check-training-breaks.sh`
-起動時の git SHA は `train-orchestrate.sha` に保存される。
+起動時の git SHA は `train-status.json` に保存される。
 
 ## 学習対象役職
 
@@ -118,7 +118,7 @@ npm run train:orchestrate -- \
   --batch 64             # バッチサイズ
   --mini-batch 512       # PPO ミニバッチ
   --eval-interval 100    # eval 間隔
-  --checkpoint-base tmp/orch-test  # チェックポイント保存先
+  --checkpoint-base tmp/orch-test  # チェックポイント保存先（省略時: 新規=tmp/orch-run-N, resume=前回から自動取得）
   --resume               # 既存チェックポイントから再開
 ```
 
@@ -128,9 +128,11 @@ npm run train:orchestrate -- \
 - `generateGamesParallel()` → game-worker.ts（worker_threads）
 - timing 情報は `formatTimingStr()` で統一表示
 
-### 進捗ログ (`progress.md`)
+### 進捗ログ (`train-progress.json`)
 
-`{checkpointBase}/progress.md` に自動書き出し。eval ごとに上書き更新。
+`{checkpointBase}/train-progress.json` に JSON で書き出し。eval ごとに更新。
+プロジェクトルートの `train-status.json` が現在のラン（runId, pid, checkpointBase, gitSha）の道標。
+`train-history.jsonl` がラン履歴（起動・終了）の append-only ログ。
 
 ## キーモジュール関係図
 
