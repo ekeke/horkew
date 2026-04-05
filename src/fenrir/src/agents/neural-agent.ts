@@ -100,7 +100,7 @@ export class NeuralAgent implements Agent {
       }
     }
 
-    return { aliveSeats, claimedRoles, confirmedVillageSeats }
+    return { aliveSeats, claimedRoles, confirmedVillageSeats, mySeat: ctx.mySeat - 1 }
   }
 
   protected infer(ctx: DecisionContext): ForwardResult {

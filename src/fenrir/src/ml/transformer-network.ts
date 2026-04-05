@@ -343,7 +343,7 @@ export class TransformerNetwork {
         }
       }
 
-      // Context mask: 死亡席・未CO役職・確定白席を禁止
+      // Context mask: 死亡席・未CO役職・確定白席・自席を禁止
       if (planContext) {
         for (let t = 0; t < PLAN_VOCAB.SEAT_END; t++) {
           if (!planContext.aliveSeats[t]) stepLogits[t] = -Infinity
@@ -355,6 +355,9 @@ export class TransformerNetwork {
           for (let t = 0; t < PLAN_VOCAB.SEAT_END; t++) {
             if (planContext.confirmedVillageSeats[t]) stepLogits[t] = -Infinity
           }
+        }
+        if (planContext.mySeat != null) {
+          stepLogits[planContext.mySeat] = -Infinity
         }
       }
 

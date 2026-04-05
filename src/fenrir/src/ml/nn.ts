@@ -188,6 +188,7 @@ export type PlanContext = {
   aliveSeats: boolean[]    // [14] seat 0-13 の生存フラグ
   claimedRoles: boolean[]  // [5] CO_ROLES の CO 有無
   confirmedVillageSeats?: boolean[]  // [14] 確定白席（Phase 2 で解禁可）
+  mySeat?: number          // 0-indexed seat index（自席を処刑対象から除外）
 }
 
 /** NeuralNetwork / TransformerNetwork 共通インターフェース (推論用) */
