@@ -253,7 +253,11 @@
   type PrivateData = PlayerStep['private']
 
   function planTokenLabel(idx: number): { text: string, cls: string } {
-    if (idx < 14) return { text: `seat${idx + 1}`, cls: 'pt-seat' }
+    if (idx < 14) {
+      const player = game?.players[idx]
+      const name = player ? `${ROLE_SHORT[player.role] || '?'}${idx + 1}` : `seat${idx + 1}`
+      return { text: name, cls: 'pt-seat' }
+    }
     if (idx < 19) {
       const roles = ['seer','medium','bodyguard','mason','nekomata']
       return { text: ROLE_SHORT[roles[idx - 14]] || roles[idx - 14], cls: 'pt-role' }
