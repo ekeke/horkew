@@ -31,8 +31,9 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
   /** plan が null のときの村陣営投票フォールバック（NN の decideVote を避ける） */
   private readonly heuristicFallback = new RuleBasedAgent()
 
-  /** onPreVote で確定した plan 投票先（onVote で村陣営全員が使用） */
-  private planVoteTarget: number | null = null
+  /** onPreVote で取得した plan token（onVote で各エージェントが独立に解決） */
+  private planForwardActions: number[] | null = null
+  private planEndgameActions: number[] | null = null
   /** onPreVote で生成した proposals（onVote に渡す） */
   private dayProposals: Proposal[] = []
 
@@ -58,7 +59,8 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const aliveMasons = allMasons.filter(p => p.alive)
     this.handleMasonTakeover(state, ext.planState, allMasons, aliveMasons)
 
-    this.planVoteTarget = null
+    this.planForwardActions = null
+    this.planEndgameActions = null
     this.dayProposals = []
 
     let masonResult: ForwardResult | null = null
@@ -70,15 +72,17 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const aliveSeats = alivePlayers(state).map(p => p.seat)
     this.distributePlans(ext, aliveSeats, pctx.events)
 
-    // 4. Plan → 投票先確定 + trajectory 記録
+    // 4. Plan token 保持 + proposal 生成 + trajectory 記録
     if (masonResult) {
-      const fwdActions = masonResult.planForwardActions
-      if (fwdActions) {
+      this.planForwardActions = masonResult.planForwardActions ?? null
+      this.planEndgameActions = masonResult.planEndgameActions ?? null
+
+      // Proposal 用に1回解決（mason 視点）
+      if (this.planForwardActions) {
         const mason = aliveMasons.find(m => this.masonConfig.agents.has(m.seat)) ?? aliveMasons[0]
         const masonCtx = this.buildCtx(pctx, mason, buildPlayerView(state, mason.seat), ext)
-        const target = planToVote(fwdActions, masonCtx, masonResult.planEndgameActions)
+        const target = planToVote(this.planForwardActions, masonCtx, this.planEndgameActions)
         if (target != null) {
-          this.planVoteTarget = target
           this.dayProposals.push({ type: 'execute_order', target })
         }
       }
@@ -92,10 +96,9 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
         this.recordMasonStrategy(agent, masonResult, nnMason.seat, aliveSeats.length, pctx.day)
       }
     } else if (allMasons.length > 0 && ext.planState.forwardGroups.length > 0) {
-      // Mason 死亡: cached plan から解決
+      // Mason 死亡: cached plan から解決（proposal 用）
       const target = this.resolveDeadMasonTarget(pctx, ext)
       if (target != null) {
-        this.planVoteTarget = target
         this.dayProposals.push({ type: 'execute_order', target })
       }
     }
@@ -153,15 +156,23 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const votes = new Map<number, number>()
     const alive = alivePlayers(state)
     for (const player of alive) {
-      // 村陣営 + plan あり → plan に従う（mason も villager も同じ）
-      if (isFirstRound && isVillagerAligned(player.role) && this.planVoteTarget != null) {
-        if (this.planVoteTarget !== player.seat) {
-          votes.set(player.seat, this.planVoteTarget)
-        } else {
-          // 自分自身は吊れない → 他の生存者からランダム
-          const others = alive.filter(p => p.seat !== player.seat)
-          votes.set(player.seat, others[Math.floor(this.rng.next() * others.length)].seat)
+      // 村陣営 + plan あり → 各自が独立に plan を解決して投票
+      if (isFirstRound && isVillagerAligned(player.role) && this.planForwardActions) {
+        const view = buildPlayerView(state, player.seat)
+        const playerCtx = this.buildCtx(
+          vctx as PhaseContext<FenrirExtEvent, FenrirExt>, player, view, ext, {
+            revoteRound: vctx.revoteRound,
+            revoteCandidates: vctx.candidates,
+            proposals: this.dayProposals,
+          },
+        )
+        const target = planToVote(this.planForwardActions, playerCtx, this.planEndgameActions)
+        if (target != null && target !== player.seat) {
+          votes.set(player.seat, target)
+          continue
         }
+        // plan 解決失敗 → heuristic フォールバック
+        votes.set(player.seat, this.heuristicFallback.decideVote(playerCtx))
         continue
       }
 
