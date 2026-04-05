@@ -24,9 +24,12 @@ import { parsePlanIndices } from '../plan/plan-vocab.ts'
 import { resolvePlanGroup } from '../plan/plan-resolve.ts'
 import { planToVote } from '../plan/plan-helpers.ts'
 import { encodeObservation, collectObservation } from '../observation.ts'
+import { RuleBasedAgent } from '../agents/rule-based-agent.ts'
 
 export class MasonTrainingAdapter extends StrategyBaseAdapter {
   private readonly masonConfig: MasonTrainingAdapterConfig
+  /** plan が null のときの村陣営投票フォールバック（NN の decideVote を避ける） */
+  private readonly heuristicFallback = new RuleBasedAgent()
 
   /** onPreVote で確定した plan 投票先（onVote で村陣営全員が使用） */
   private planVoteTarget: number | null = null
@@ -182,12 +185,13 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
         })
       }
 
-      // 非村 or plan なし → 従来の decideVote
-      const teamAgent = player.role === 'werewolf' ? this.config.wolfTeamAgent : null
-
-      if (teamAgent) {
+      // 非村 → 従来の decideVote、村陣営 plan なし → heuristic フォールバック
+      if (player.role === 'werewolf' && this.config.wolfTeamAgent) {
         const teamCtx = this.buildTeamCtx(ctx, state, player.role, player.seat)
-        votes.set(player.seat, teamAgent.decideVote(teamCtx))
+        votes.set(player.seat, this.config.wolfTeamAgent.decideVote(teamCtx))
+      } else if (isVillagerAligned(player.role)) {
+        // plan なしの村陣営: heuristic で投票（NN の decideVote を避けて二重記録を防ぐ）
+        votes.set(player.seat, this.heuristicFallback.decideVote(ctx))
       } else {
         votes.set(player.seat, this.getAgent(player.seat).decideVote(ctx))
       }
