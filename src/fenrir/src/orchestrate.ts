@@ -287,7 +287,14 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
           }
           entry.predict = predictions
         }
-        timeline.push(entry)
+        // 同一 seat+day+actionHead の重複は後勝ち（onPreVote → decideVote の二重記録対策）
+        const dedupeKey = `${seat}:${step.day}:${step.actionHead}`
+        const existing = timeline.findIndex(e => `${e.seat}:${e.day}:${e.actionHead}` === dedupeKey)
+        if (existing >= 0) {
+          timeline[existing] = entry
+        } else {
+          timeline.push(entry)
+        }
       }
     }
 
