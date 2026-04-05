@@ -74,12 +74,12 @@ export class NeuralAgent implements Agent {
     const aliveSeats = new Array(SEATS).fill(false)
     for (let i = 0; i < SEATS; i++) aliveSeats[i] = aliveSet.has(i + 1)
 
-    // CO 状況: publicEvents から CO 有無を判定
+    // CO 状況: publicEvents から生存 CO 者の有無を判定
     const claimedRoles = new Array(CO_ROLES.length).fill(false)
     for (const e of ctx.publicEvents) {
       if ('actor' in e && typeof (e as any).type === 'string') {
         for (let r = 0; r < CO_ROLES.length; r++) {
-          if ((e as any).type.startsWith(`${CO_ROLES[r]}_claim`)) {
+          if ((e as any).type.startsWith(`${CO_ROLES[r]}_claim`) && aliveSet.has((e as any).actor)) {
             claimedRoles[r] = true
           }
         }
