@@ -5,10 +5,12 @@
  *   1. onPreVote で全意思決定を完結: forward pass → plan 配布 → 投票先確定 → trajectory 記録
  *   2. onVote は機械的な票割り当て: 村陣営は plan に従い、非村は decideVote
  *
- * NeuralAgent.decideVote は呼ばない。getStrategyResult は onPreVote で1回だけ呼ぶ。
+ * NeuralAgent.decideVote は呼ばない。getStrategyResult は onPreVote で呼ぶ
+ * （指定→CO が発生した場合は 2nd forward で再評価、計2回）。
  */
 
-import type { GameState, PlayerState } from '../../../lupa/types.ts'
+import type { SystemRole } from '../../../types/index.ts'
+import type { GameState, GameEvent, PlayerState, DayClaim } from '../../../lupa/types.ts'
 import type { VoteContext, PhaseContext, PreVoteResult } from '../../../lupa/handlers.ts'
 import type { FenrirExt } from '../ext.ts'
 import type { FenrirExtEvent } from '../events.ts'
@@ -20,10 +22,25 @@ import type { NeuralAgent } from '../agents/neural-agent.ts'
 import { StrategyBaseAdapter } from './strategy-base-adapter.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
 import { alivePlayers, isVillagerAligned } from '../../../lupa/roles.ts'
+import { forceTrueRoleCO } from '../../../lupa/engine-utils.ts'
+import { isVillagePowerRole } from '../agents/rule-based-agent.ts'
 import { resolvePlanGroup } from '../plan/plan-resolve.ts'
 import { planToVote } from '../plan/plan-helpers.ts'
 import { encodeObservation, collectObservation } from '../observation.ts'
 import { RuleBasedAgent } from '../agents/rule-based-agent.ts'
+
+// ============================================================
+// 指定→CO シミュレーション確率定数（Phase 0 mason 学習用）
+// ============================================================
+
+const DESIGNATION_CO = {
+  /** グレラン/role 指定時、村パワーロールが CO する確率 */
+  VILLAGE_GRAYRAN_CO_PROB: 0.4,
+  /** 非村が fake CO (bodyguard/nekomata) する確率 */
+  NON_VILLAGE_FAKE_CO_PROB: 0.08,
+  /** 対抗 CO フェーズで非村が対抗する確率 */
+  NON_VILLAGE_COUNTER_CO_PROB: 0.05,
+} as const
 
 export class MasonTrainingAdapter extends StrategyBaseAdapter {
   private readonly masonConfig: MasonTrainingAdapterConfig
@@ -71,7 +88,17 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const aliveSeats = alivePlayers(state).map(p => p.seat)
     this.distributePlans(ext, aliveSeats, pctx.events)
 
-    // 4. Plan token 保持 + proposal 生成 + trajectory 記録
+    // 4. 指定→CO シミュレーション + plan 再評価
+    let additionalClaims: Map<number, DayClaim> | undefined
+    if (masonResult && pctx.day >= 2) {
+      const coResult = this.simulateDesignationCO(pctx, ext, aliveMasons, masonResult)
+      if (coResult.claims.size > 0) {
+        additionalClaims = coResult.claims
+        masonResult = coResult.masonResult
+      }
+    }
+
+    // 5. Plan token 保持 + proposal 生成 + trajectory 記録
     if (masonResult) {
       this.planForwardActions = masonResult.planForwardActions ?? null
       this.planEndgameActions = masonResult.planEndgameActions ?? null
@@ -102,7 +129,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
       }
     }
 
-    return {}
+    return additionalClaims ? { additionalClaims } : {}
   }
 
   /** NN mason の strategy trajectory を記録する */
@@ -313,5 +340,202 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     }
 
     return target
+  }
+
+  // ════════════════════════════════════════════
+  // 指定→CO シミュレーション（Phase 0 mason 学習用）
+  // ════════════════════════════════════════════
+
+  /**
+   * 1st forward の plan から指定→CO→対抗CO をシミュレーションし、
+   * CO があれば 2nd forward で plan を再評価する。
+   */
+  private simulateDesignationCO(
+    pctx: PhaseContext<FenrirExtEvent, FenrirExt>,
+    ext: FenrirExt,
+    aliveMasons: PlayerState[],
+    firstResult: ForwardResult,
+  ): { claims: Map<number, DayClaim>, masonResult: ForwardResult } {
+    const state = pctx.state as GameState<FenrirExt>
+    const claims = new Map<number, DayClaim>()
+
+    // 指定タイプ判定
+    const groups = ext.planState.forwardGroups
+    if (groups.length === 0 || groups[0].targets.length === 0) {
+      return { claims, masonResult: firstResult }
+    }
+
+    const firstTarget = groups[0].targets[0]
+    const designationType: 'seat' | 'grayran' = firstTarget.type === 'seat' ? 'seat' : 'grayran'
+
+    // 具体的な seat に解決
+    const aliveSeats = alivePlayers(state).map(p => p.seat)
+    const designatedSeat = resolvePlanGroup(
+      { targets: [firstTarget] }, aliveSeats, pctx.events as any[], { rng: this.rng },
+    )
+    if (designatedSeat == null) {
+      return { claims, masonResult: firstResult }
+    }
+
+    const lastExecutedSeat = state.executionHistory.get(pctx.day - 1) ?? null
+    const events = pctx.events as (GameEvent | FenrirExtEvent)[]
+
+    // 1. 指定対象の CO 判定
+    const designatedPlayer = state.players.find(p => p.seat === designatedSeat)
+    if (!designatedPlayer || !designatedPlayer.alive) {
+      return { claims, masonResult: firstResult }
+    }
+
+    const designationClaim = this.generateDesignationResponse(
+      state, designatedPlayer, designationType, pctx.day, lastExecutedSeat,
+    )
+    if (designationClaim.type !== 'none') {
+      claims.set(designatedSeat, designationClaim)
+      this.applyClaimLocally(state, designatedSeat, pctx.day, designationClaim, events)
+    }
+
+    // 2. 対抗 CO（bodyguard/nekomata CO が発生した場合のみ）
+    if (designationClaim.type === 'bodyguard_co' || designationClaim.type === 'nekomata_co') {
+      const triggeredRole: SystemRole = designationClaim.type === 'bodyguard_co' ? 'bodyguard' : 'nekomata'
+      const counterClaims = this.generateCounterCOs(
+        state, triggeredRole, designatedSeat, pctx.day, lastExecutedSeat,
+      )
+      for (const [seat, claim] of counterClaims) {
+        claims.set(seat, claim)
+        this.applyClaimLocally(state, seat, pctx.day, claim, events)
+      }
+    }
+
+    if (claims.size === 0) {
+      return { claims, masonResult: firstResult }
+    }
+
+    // 3. 2nd forward: CO を観測した上で plan を再評価
+    const nnMason = aliveMasons.find(m => this.masonConfig.agents.has(m.seat))
+    if (nnMason) {
+      const agent = this.getAgent(nnMason.seat) as any
+      agent.cachedDay = -1
+      agent.cachedStrategyResult = null
+    }
+
+    const secondResult = this.commitMasonPlans(pctx, ext, aliveMasons)
+    this.distributePlans(ext, aliveSeats, pctx.events)
+
+    return { claims, masonResult: secondResult ?? firstResult }
+  }
+
+  /**
+   * 指定された player の CO 判定。
+   * - 村パワーロール (未CO) + seat 指定 → 100% CO
+   * - 村パワーロール (未CO) + grayran → 確率 CO
+   * - 素村 → none
+   * - 非村 → 低確率で bodyguard_co / nekomata_co
+   */
+  private generateDesignationResponse(
+    state: GameState<FenrirExt>,
+    player: PlayerState,
+    designationType: 'seat' | 'grayran',
+    day: number,
+    lastExecutedSeat: number | null,
+  ): DayClaim {
+    if (player.claimedRole !== null) return { type: 'none' }
+
+    if (isVillagerAligned(player.role)) {
+      if (!isVillagePowerRole(player.role)) return { type: 'none' }
+      if (designationType === 'seat') {
+        return forceTrueRoleCO(state, player, day, lastExecutedSeat)
+      }
+      // grayran/role → 確率 CO
+      if (this.rng.next() < DESIGNATION_CO.VILLAGE_GRAYRAN_CO_PROB) {
+        return forceTrueRoleCO(state, player, day, lastExecutedSeat)
+      }
+      return { type: 'none' }
+    }
+
+    // 非村: 低確率で bodyguard or nekomata fake CO（結果不要）
+    if (this.rng.next() < DESIGNATION_CO.NON_VILLAGE_FAKE_CO_PROB) {
+      return this.rng.next() < 0.5
+        ? { type: 'bodyguard_co', targets: [] }
+        : { type: 'nekomata_co' }
+    }
+    return { type: 'none' }
+  }
+
+  /**
+   * bodyguard/nekomata CO に対する対抗 CO 生成。
+   * - 村・同役職（未CO） → 100% CO
+   * - 非村（未CO） → 低確率で同役職の fake CO
+   */
+  private generateCounterCOs(
+    state: GameState<FenrirExt>,
+    triggeredRole: SystemRole,
+    triggerSeat: number,
+    day: number,
+    lastExecutedSeat: number | null,
+  ): Map<number, DayClaim> {
+    const counterClaims = new Map<number, DayClaim>()
+
+    for (const player of state.players) {
+      if (!player.alive || player.seat === triggerSeat || player.claimedRole !== null) continue
+
+      if (player.role === triggeredRole) {
+        // 村・同役職 → 100% 対抗 CO
+        const claim = forceTrueRoleCO(state, player, day, lastExecutedSeat)
+        if (claim.type !== 'none') counterClaims.set(player.seat, claim)
+      } else if (!isVillagerAligned(player.role)) {
+        // 非村 → 低確率で fake 対抗
+        if (this.rng.next() < DESIGNATION_CO.NON_VILLAGE_COUNTER_CO_PROB) {
+          const claim: DayClaim = triggeredRole === 'bodyguard'
+            ? { type: 'bodyguard_co', targets: [] }
+            : { type: 'nekomata_co' }
+          counterClaims.set(player.seat, claim)
+        }
+      }
+    }
+
+    return counterClaims
+  }
+
+  /**
+   * onPreVote 内で state を直接変更し、合成イベントを events に追加。
+   * engine の applyClaim が後で再実行されるが冪等。
+   */
+  private applyClaimLocally(
+    state: GameState<FenrirExt>,
+    seat: number,
+    day: number,
+    claim: DayClaim,
+    events: (GameEvent | FenrirExtEvent)[],
+  ): void {
+    const player = state.players.find(p => p.seat === seat)!
+    switch (claim.type) {
+      case 'seer_co':
+        player.claimedRole = 'seer'
+        player.claimedDay = day
+        events.push({ type: 'seer_claim', actor: seat, results: claim.results })
+        break
+      case 'medium_co':
+        player.claimedRole = 'medium'
+        player.claimedDay = day
+        events.push({ type: 'medium_claim', actor: seat })
+        break
+      case 'bodyguard_co':
+        player.claimedRole = 'bodyguard'
+        player.claimedDay = day
+        events.push({ type: 'bodyguard_claim', actor: seat, targets: claim.targets })
+        break
+      case 'mason_co':
+        player.claimedRole = 'mason'
+        player.claimedDay = day
+        events.push({ type: 'mason_claim', actor: seat, partner: claim.partner })
+        if (!state.masonPartners) (state as any).masonPartners = new Map()
+        state.masonPartners?.set(seat, claim.partner)
+        break
+      case 'nekomata_co':
+        player.claimedRole = 'nekomata'
+        player.claimedDay = day
+        events.push({ type: 'nekomata_claim', actor: seat })
+        break
+    }
   }
 }
