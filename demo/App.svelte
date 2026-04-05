@@ -19,6 +19,7 @@
   import HatiPane from './HatiPane.svelte'
   import GmorkDebugPane from './GmorkDebugPane.svelte'
   import InspectPane from './InspectPane.svelte'
+  import PretrainPane from './PretrainPane.svelte'
   import './theme.css'
   import { runGame } from '../src/lupa/engine.ts'
   import { agentAdapter } from '../src/verify/agent-adapter.ts'
@@ -93,6 +94,7 @@
     { id: 'hati', label: 'Hati (詰み)' },
     { id: 'gmorkDebug', label: 'Gmork Debug' },
     { id: 'fenrirInspect', label: 'Fenrir Inspect' },
+    { id: 'pretrainViz', label: 'Pretrain Viz' },
   ] as const
 
   type PaneId = typeof paneEntries[number]['id']
@@ -107,7 +109,7 @@
     panes: Record<PaneId, boolean>
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, gmorkDebug: false, fenrirInspect: false }
+  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, gmorkDebug: false, fenrirInspect: false, pretrainViz: false }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: 'off', panes: { ...defaultPanes } }
@@ -1524,6 +1526,15 @@
         <InspectPane onLoadHowl={(howl) => {
           handleStartTrial(howl)
         }} />
+      </div>
+    </section>
+    {/if}
+
+    {#if paneVisible.pretrainViz}
+    <section class="pane">
+      <div class="pane-header">Pretrain Viz</div>
+      <div class="pane-body">
+        <PretrainPane />
       </div>
     </section>
     {/if}

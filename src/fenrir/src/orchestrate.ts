@@ -42,6 +42,11 @@ import {
 } from './parallel.ts'
 import { loadRandomSnapshots, countSnapshots } from './seed-bank.ts'
 import { Rng } from '../../lupa/random.ts'
+import {
+  type PretrainSnapshot,
+  SNAPSHOT_EPOCHS_B, SNAPSHOT_EPOCHS_B2, SNAPSHOT_EPOCHS_D,
+  capturePlanSnapshot, captureGameSnapshot, savePretrainSnapshots,
+} from './pretrain-snapshot.ts'
 // decode-observation.ts は削除済み — CollectedObservation を直接使用
 
 // ============================================================
@@ -982,7 +987,11 @@ async function main(): Promise<void> {
     let bestAcc = 0
     let bestNextAcc = 0
     const pretrainNextTargetAcc = 0.60
+    const pretrainSnapshots: PretrainSnapshot[] = []
+    // Fixed probe samples for snapshot comparison (same input across all epochs)
+    const probeSamplesB = generatePlanTokenTrainingBatch(8, 99999, tsumiSamples, tsumiRatio)
     for (let epoch = 1; epoch <= pretrainMaxEpochs; epoch++) {
+      await new Promise(r => setTimeout(r, 0))  // yield to event loop for signal handling
       checkShutdown()
       const samples = generatePlanTokenTrainingBatch(pretrainBatchSize, epoch, tsumiSamples, tsumiRatio)
       const { loss, accuracy, nextAccuracy, stopAccuracy } = (tfNetwork as any).trainSupervisedPlan({
@@ -999,6 +1008,10 @@ async function main(): Promise<void> {
       if (nextAccuracy > bestNextAcc) bestNextAcc = nextAccuracy
       if (epoch % pretrainLogInterval === 0 || epoch === 1) {
         log(`  epoch=${epoch} loss=${loss.toFixed(4)} acc=${(accuracy * 100).toFixed(1)}% next=${(nextAccuracy * 100).toFixed(1)}% stop=${(stopAccuracy * 100).toFixed(1)}% best=${(bestAcc * 100).toFixed(1)}%`)
+      }
+      if (SNAPSHOT_EPOCHS_B.has(epoch)) {
+        const villageNet = networks.get('village' as ModelName)
+        if (villageNet) pretrainSnapshots.push(capturePlanSnapshot('B', epoch, { loss, accuracy, nextAccuracy, stopAccuracy }, probeSamplesB, villageNet, tfNetwork))
       }
       if (accuracy >= pretrainTargetAcc && nextAccuracy >= pretrainNextTargetAcc) {
         log(`  Target accuracy ${(pretrainTargetAcc * 100).toFixed(0)}% + NEXT ${(pretrainNextTargetAcc * 100).toFixed(0)}% reached at epoch ${epoch}`)
@@ -1019,7 +1032,9 @@ async function main(): Promise<void> {
     const b2MaxEpochs = 500
     const b2TargetNextAcc = 0.80
     let b2BestNextAcc = 0
+    const probeSamplesB2 = generateStructurePretrainBatch(8, 199999)
     for (let epoch = 1; epoch <= b2MaxEpochs; epoch++) {
+      await new Promise(r => setTimeout(r, 0))
       checkShutdown()
       const structSamples = generateStructurePretrainBatch(pretrainBatchSize, epoch + 100000)
       const { loss, accuracy, nextAccuracy, stopAccuracy } = (tfNetwork as any).trainSupervisedPlan({
@@ -1035,6 +1050,10 @@ async function main(): Promise<void> {
       if (nextAccuracy > b2BestNextAcc) b2BestNextAcc = nextAccuracy
       if (epoch % pretrainLogInterval === 0 || epoch === 1) {
         log(`  epoch=${epoch} loss=${loss.toFixed(4)} acc=${(accuracy * 100).toFixed(1)}% next=${(nextAccuracy * 100).toFixed(1)}% stop=${(stopAccuracy * 100).toFixed(1)}%`)
+      }
+      if (SNAPSHOT_EPOCHS_B2.has(epoch)) {
+        const villageNet = networks.get('village' as ModelName)
+        if (villageNet) pretrainSnapshots.push(capturePlanSnapshot('B2', epoch, { loss, accuracy, nextAccuracy, stopAccuracy }, probeSamplesB2, villageNet, tfNetwork))
       }
       if (nextAccuracy >= b2TargetNextAcc) {
         log(`  NEXT accuracy ${(b2TargetNextAcc * 100).toFixed(0)}% reached at epoch ${epoch}`)
@@ -1058,7 +1077,9 @@ async function main(): Promise<void> {
 
     if (gameSamples.length > 0) {
       const dMiniBatch = 256
+      const probeSamplesD = gameSamples.slice(0, 8)
       for (let epoch = 1; epoch <= pretrainDEpochs; epoch++) {
+        await new Promise(r => setTimeout(r, 0))
         checkShutdown()
         let epochPredLoss = 0, epochValLoss = 0
         let batchCount = 0
@@ -1082,6 +1103,10 @@ async function main(): Promise<void> {
         if ((epoch % 5 === 0 || epoch === 1) && batchCount > 0) {
           log(`  epoch=${epoch} pred_loss=${(epochPredLoss / batchCount).toFixed(4)} val_loss=${(epochValLoss / batchCount).toFixed(4)}`)
         }
+        if (SNAPSHOT_EPOCHS_D.has(epoch) && batchCount > 0) {
+          const villageNet = networks.get('village' as ModelName)
+          if (villageNet) pretrainSnapshots.push(captureGameSnapshot(epoch, { predictLoss: epochPredLoss / batchCount, valueLoss: epochValLoss / batchCount }, probeSamplesD, villageNet, tfNetwork))
+        }
       }
 
       // 重みを village にコピー
@@ -1093,6 +1118,9 @@ async function main(): Promise<void> {
     }
     const tDTotal = performance.now() - tD0
     log(`  Method D complete: ${pretrainGames} games, ${pretrainDEpochs} epochs, ${(tDTotal / 1000).toFixed(1)}s total`)
+
+    // Pretrain スナップショット保存
+    savePretrainSnapshots(pretrainSnapshots, config.checkpointBase)
 
     // Pretrain 済み checkpoint を保存 (--resume で復帰可能)
     const villageDir = `${config.checkpointBase}/ckpt-village`
