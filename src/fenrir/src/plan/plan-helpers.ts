@@ -39,37 +39,6 @@ export function createPlanState(): PlanState {
 }
 
 // ============================================================
-// PlanState 操作ヘルパー
-// ============================================================
-
-/**
- * mason の plan tokens で PlanState を更新
- * mason 生存時に毎投票フェーズで呼ぶ
- */
-export function updatePlanState(
-  planState: PlanState,
-  forwardActions: number[],
-  endgameActions: number[] | null,
-): void {
-  planState.forwardGroups = parsePlanIndices(forwardActions)
-  planState.endgameGroups = endgameActions ? parsePlanIndices(endgameActions) : []
-  planState.dayIndex = 0
-}
-
-/**
- * mason 死亡後の日送り
- * キャッシュされた plan の次のグループへ進む
- */
-export function advancePlanState(planState: PlanState): void {
-  planState.dayIndex++
-}
-
-/** キャッシュ済み plan が残っているか */
-export function hasPlanGroups(planState: PlanState): boolean {
-  return planState.dayIndex < planState.forwardGroups.length
-}
-
-// ============================================================
 // Plan → Game Action 変換
 // ============================================================
 

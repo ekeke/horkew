@@ -82,3 +82,34 @@ export function parsePlanIndices(indices: number[]): PlanDayGroup[] {
 
   return groups
 }
+
+/**
+ * Raw plan token 列の先頭グループ（最初の NEXT or STOP まで）を削除し、
+ * 残りを STOP パディングで元の長さに揃えて返す。
+ *
+ * grammar: group = (seat|role|grayran)+, separator = NEXT, terminator = STOP
+ *
+ * [seat3, NEXT, seat7, NEXT, grayran, STOP, STOP, STOP]
+ * → [seat7, NEXT, grayran, STOP, STOP, STOP, STOP, STOP]
+ */
+export function stripFirstPlanGroup(indices: number[], totalLength: number): number[] {
+  let i = 0
+  // 先頭グループのトークンをスキップ
+  while (i < indices.length && indices[i] !== PLAN_VOCAB.NEXT && indices[i] !== PLAN_VOCAB.STOP) {
+    i++
+  }
+  // NEXT の場合はセパレータ自体もスキップ
+  if (i < indices.length && indices[i] === PLAN_VOCAB.NEXT) {
+    i++
+  }
+  // STOP or 終端 → 全グループ消費済み
+  if (i >= indices.length || indices[i] === PLAN_VOCAB.STOP) {
+    return new Array(totalLength).fill(PLAN_VOCAB.STOP)
+  }
+  const remaining = indices.slice(i)
+  // STOP パディングで固定長に揃える
+  while (remaining.length < totalLength) {
+    remaining.push(PLAN_VOCAB.STOP)
+  }
+  return remaining.slice(0, totalLength)
+}

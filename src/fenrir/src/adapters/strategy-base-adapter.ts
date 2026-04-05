@@ -33,6 +33,7 @@ import {
 } from '../retar-bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
 import { resolvePlanGroup } from '../plan/plan-resolve.ts'
+import { parsePlanIndices, stripFirstPlanGroup } from '../plan/plan-vocab.ts'
 import { collectObservation } from '../observation.ts'
 
 /** PlanDayGroup[] → ExecutionPlan[] に変換（observation 注入用） */
@@ -242,11 +243,13 @@ export abstract class StrategyBaseAdapter
     return []
   }
 
-  /** 投票収集の後に呼ばれる。 */
+  /** 投票収集の後に呼ばれる。plan の日送りを行う。 */
   protected afterVoteCollection(
-    _vctx: VoteContext<FenrirExtEvent, FenrirExt>,
-    _ext: FenrirExt,
-  ): void {}
+    vctx: VoteContext<FenrirExtEvent, FenrirExt>,
+    ext: FenrirExt,
+  ): void {
+    this.advancePlanOnce(ext, vctx.day)
+  }
 
   // ════════════════════════════════════════════
   // Plan distribution (base が所有)
@@ -270,12 +273,30 @@ export abstract class StrategyBaseAdapter
     }
   }
 
-  /** dayIndex を1日1回だけ進める（revote 安全） */
-  protected advanceDayIndexOnce(ext: FenrirExt, day: number): void {
-    if (this.lastAdvancedDay < day) {
-      ext.planState.dayIndex++
-      this.lastAdvancedDay = day
+  /** NN 出力の plan tokens を ext に保存する（infrastructure） */
+  protected commitPlanTokens(
+    ext: FenrirExt,
+    forwardActions: number[] | null,
+    endgameActions: number[] | null,
+  ): void {
+    if (forwardActions) {
+      ext.planForwardIndices = [...forwardActions]
+      ext.planState.forwardGroups = parsePlanIndices(forwardActions)
     }
+    if (endgameActions) {
+      ext.planEndgameIndices = [...endgameActions]
+      ext.planState.endgameGroups = parsePlanIndices(endgameActions)
+    }
+  }
+
+  /** forward plan を1日分進める（raw indices + parsed groups を同期更新、revote 安全） */
+  protected advancePlanOnce(ext: FenrirExt, day: number): void {
+    if (this.lastAdvancedDay >= day) return
+    this.lastAdvancedDay = day
+
+    ext.planForwardIndices = stripFirstPlanGroup(ext.planForwardIndices, ext.planForwardIndices.length)
+    ext.planState.forwardGroups = ext.planState.forwardGroups.slice(1)
+    ext.planState.dayIndex++
   }
 
   // ════════════════════════════════════════════

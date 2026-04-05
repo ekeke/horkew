@@ -20,7 +20,6 @@ import type { NeuralAgent } from '../agents/neural-agent.ts'
 import { StrategyBaseAdapter } from './strategy-base-adapter.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
 import { alivePlayers, isVillagerAligned } from '../../../lupa/roles.ts'
-import { parsePlanIndices } from '../plan/plan-vocab.ts'
 import { resolvePlanGroup } from '../plan/plan-resolve.ts'
 import { planToVote } from '../plan/plan-helpers.ts'
 import { encodeObservation, collectObservation } from '../observation.ts'
@@ -276,15 +275,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const masonCtx = this.buildCtx(pctx, mason, masonView, ext)
     const result: ForwardResult = agent.getStrategyResult(masonCtx)
 
-    if (result.planForwardActions) {
-      ext.planForwardIndices = [...result.planForwardActions]
-      ext.planState.forwardGroups = parsePlanIndices(result.planForwardActions)
-      ext.planState.dayIndex = 1  // groups[0] は今日使用済み
-    }
-    if (result.planEndgameActions) {
-      ext.planEndgameIndices = [...result.planEndgameActions]
-      ext.planState.endgameGroups = parsePlanIndices(result.planEndgameActions)
-    }
+    this.commitPlanTokens(ext, result.planForwardActions ?? null, result.planEndgameActions ?? null)
     return result
   }
 
@@ -315,11 +306,10 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
       }
     }
 
-    // Forward plan フォールバック
-    if (target == null && planState.dayIndex < planState.forwardGroups.length) {
-      const group = planState.forwardGroups[planState.dayIndex]
+    // Forward plan フォールバック（groups は afterVoteCollection で日送り済み、[0] が今日）
+    if (target == null && planState.forwardGroups.length > 0) {
+      const group = planState.forwardGroups[0]
       target = resolvePlanGroup(group, aliveSeats, pctx.events, opts)
-      this.advanceDayIndexOnce(ext, pctx.day)
     }
 
     return target
