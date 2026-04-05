@@ -22,7 +22,7 @@
  *   + 既存head (vote, night等) for backward compat
  */
 
-import type { NetworkConfig, ForwardResult, TransformerNetworkConfig } from './nn.ts'
+import type { NetworkConfig, ForwardResult, TransformerNetworkConfig, PlanContext } from './nn.ts'
 import { DenseLayer, gaussianRandom } from './nn.ts'
 import { TransformerEncoder, linearBatchedPublic } from './transformer.ts'
 import { tokenize, SEATS, NUM_ROLE_TOKENS, NUM_PLAN_FORWARD, NUM_PLAN_ENDGAME, type ObservationMode } from '../observation.ts'
@@ -264,6 +264,7 @@ export class TransformerNetwork {
     keys: Float32Array, invSqrtD: number,
     clsOut: Float32Array, initLayer: DenseLayer,
     explore: boolean,
+    planContext?: PlanContext,
   ): { logits: Float32Array, actions: number[], logProbs: number[] } {
     const START_IDX = vocabSize  // START token is at index vocabSize (=22)
     const NEXT_IDX = PLAN_VOCAB.NEXT
@@ -342,6 +343,16 @@ export class TransformerNetwork {
         }
       }
 
+      // Context mask: 死亡席・未CO役職を禁止
+      if (planContext) {
+        for (let t = 0; t < PLAN_VOCAB.SEAT_END; t++) {
+          if (!planContext.aliveSeats[t]) stepLogits[t] = -Infinity
+        }
+        for (let r = 0; r < planContext.claimedRoles.length; r++) {
+          if (!planContext.claimedRoles[r]) stepLogits[PLAN_VOCAB.ROLE_START + r] = -Infinity
+        }
+      }
+
       // Sample or argmax (from masked logits)
       let maxVal = -Infinity
       for (let v = 0; v < vocabSize; v++) {
@@ -388,7 +399,7 @@ export class TransformerNetwork {
     return { logits: allLogits, actions, logProbs }
   }
 
-  forward(input: Float32Array, explore?: boolean): ForwardResult {
+  forward(input: Float32Array, explore?: boolean, planContext?: PlanContext): ForwardResult {
     const tc = this.tConfig
     const dm = tc.dModel
     const numRoles = tc.numRoleTokens ?? NUM_ROLE_TOKENS
@@ -532,8 +543,8 @@ export class TransformerNetwork {
 
     // Decode forward and endgame plans autoregressively
     const doExplore = explore ?? true
-    const fwd = this.decodePlan(numForward, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitFwd, doExplore)
-    const eg = this.decodePlan(numEndgame, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitEg, doExplore)
+    const fwd = this.decodePlan(numForward, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitFwd, doExplore, planContext)
+    const eg = this.decodePlan(numEndgame, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitEg, doExplore, planContext)
     policies.set('plan_forward', fwd.logits)
     policies.set('plan_endgame', eg.logits)
 

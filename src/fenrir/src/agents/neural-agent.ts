@@ -7,9 +7,9 @@ import type { Agent, DecisionContext } from './agent.ts'
 import type { NightAction, DayClaim } from '../../../lupa/types.ts'
 import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
-import type { AnyNetwork, ForwardResult } from '../ml/nn.ts'
+import type { AnyNetwork, ForwardResult, PlanContext } from '../ml/nn.ts'
 import type { TrajectoryStep } from '../ml/trajectory.ts'
-import { encodeObservation } from '../observation.ts'
+import { encodeObservation, SEATS, CO_ROLES } from '../observation.ts'
 import {
   maskNightAction, maskClaim, maskVote, maskComm, maskPropose, maskPredict, maskLeader, maskTarget,
   sampleMasked,
@@ -63,11 +63,32 @@ export class NeuralAgent implements Agent {
 
   protected lastObs: Float32Array | null = null
 
+  /** DecisionContext から plan decoder 用の盤面文脈を構築 */
+  static buildPlanContext(ctx: DecisionContext): PlanContext {
+    const aliveSet = new Set(ctx.alivePlayers)
+    const aliveSeats = new Array(SEATS).fill(false)
+    for (let i = 0; i < SEATS; i++) aliveSeats[i] = aliveSet.has(i + 1)
+
+    // CO 状況: publicEvents から CO 有無を判定
+    const claimedRoles = new Array(CO_ROLES.length).fill(false)
+    for (const e of ctx.publicEvents) {
+      if ('actor' in e && typeof (e as any).type === 'string') {
+        for (let r = 0; r < CO_ROLES.length; r++) {
+          if ((e as any).type.startsWith(`${CO_ROLES[r]}_claim`)) {
+            claimedRoles[r] = true
+          }
+        }
+      }
+    }
+    return { aliveSeats, claimedRoles }
+  }
+
   protected infer(ctx: DecisionContext): ForwardResult {
     const t = performance.now()
     const obs = encodeObservation(ctx)
     this.lastObs = obs
-    const result = this.network.forward(obs, this.config.explore)
+    const planContext = NeuralAgent.buildPlanContext(ctx)
+    const result = this.network.forward(obs, this.config.explore, planContext)
     this.inferMs += performance.now() - t
     this.inferCount++
     return result

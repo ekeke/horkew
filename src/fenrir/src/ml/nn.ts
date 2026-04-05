@@ -183,10 +183,16 @@ export type ForwardResult = {
   planEndgameLogProbs?: number[]
 }
 
+/** Plan decoder に渡す盤面文脈（死亡席・未CO役職の mask 用） */
+export type PlanContext = {
+  aliveSeats: boolean[]    // [14] seat 0-13 の生存フラグ
+  claimedRoles: boolean[]  // [5] CO_ROLES の CO 有無
+}
+
 /** NeuralNetwork / TransformerNetwork 共通インターフェース (推論用) */
 export interface AnyNetwork {
   readonly config: NetworkConfig
-  forward(input: Float32Array, explore?: boolean): ForwardResult
+  forward(input: Float32Array, explore?: boolean, planContext?: PlanContext): ForwardResult
   getParams(): Float32Array[]
   cloneWeights(): Map<string, Float32Array>
   loadWeights(weights: Map<string, Float32Array>): void
@@ -265,7 +271,7 @@ export class NeuralNetwork {
     this.valueHead = new DenseLayer(prevSize, 1)
   }
 
-  forward(input: Float32Array): ForwardResult {
+  forward(input: Float32Array, _explore?: boolean, _planContext?: PlanContext): ForwardResult {
     this._trunkPreActivations = []
 
     // Trunk: Dense → ReLU → Dense → ReLU → ...
