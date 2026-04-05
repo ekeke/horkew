@@ -83,8 +83,53 @@ function servePretrainSnapshots(): Plugin {
   }
 }
 
+/** tmp/orch-* から最新の inspect/ を自動配信（dev only） */
+function serveInspect(): Plugin {
+  let base = '/horkew/'
+
+  return {
+    name: 'serve-inspect',
+
+    configResolved(config) {
+      base = config.base
+    },
+
+    configureServer(server) {
+      const prefix = `${base}inspect/`
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith(prefix)) return next()
+        const filename = decodeURIComponent(req.url.slice(prefix.length))
+        // tmp/orch-* の中から最新の inspect/ ディレクトリを探す
+        try {
+          const dirs = readdirSync(orchBase)
+            .filter(d => d.startsWith('orch-'))
+            .map(d => join(orchBase, d, 'inspect'))
+            .filter(p => existsSync(p))
+            .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+          if (dirs.length === 0) {
+            res.statusCode = 404
+            res.end('No inspect directory found')
+            return
+          }
+          const filePath = join(dirs[0], filename)
+          if (!existsSync(filePath)) {
+            res.statusCode = 404
+            res.end('Not found')
+            return
+          }
+          const content = readFileSync(filePath, 'utf-8')
+          res.setHeader('Content-Type', 'application/json')
+          res.end(content)
+        } catch {
+          next()
+        }
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [svelte({ configFile: '../svelte.config.js' }), serveScenarios(), servePretrainSnapshots()],
+  plugins: [svelte({ configFile: '../svelte.config.js' }), serveScenarios(), servePretrainSnapshots(), serveInspect()],
   root: 'demo',
   base: '/horkew/',
   server: { port: 5375, strictPort: true },
