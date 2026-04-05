@@ -587,10 +587,10 @@ function ppoUpdate(
 }
 
 
-/** KL target warmup: pretrain→PPO 移行初期は大きな KL を許容し、徐々に引き締める
- * 初期 KL は ~1.5 に着地し、学習中も ~1.0 で安定するため、
- * target が実 KL を下回らないよう余裕を持たせる（初期 3.0、2000 iter で 0.05 へ） */
-const KL_TARGET_INITIAL = 3.0
+/** KL target warmup: pretrain→PPO 移行初期は実 KL 付近から開始し、徐々に引き締める
+ * 実測初期 KL ≈ 2.0-2.3 のため、target=2.0 で β が floor に張り付かず即座に制御が効く
+ * （orch-run-2 で target=3.0 → β=0.01 が 500 iter 続き pretrain 知識が破壊された教訓） */
+const KL_TARGET_INITIAL = 2.0
 const KL_TARGET_FINAL = 0.05
 const KL_WARMUP_ITERS = 2000
 
