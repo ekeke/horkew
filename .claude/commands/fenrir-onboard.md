@@ -21,21 +21,28 @@ description: Fenrir 学習セッション開始時のオンボーディング。
 
 ## Step 2: 現在の学習状況の把握
 
-1. **アクティブな学習ジョブの確認**:
-   - `tmp/orch-*` ディレクトリを一覧し、最新の checkpoint-base を特定
-   - 最新の `progress.md` を読む
+1. **道標の確認**:
+   - `train-status.json`（プロジェクトルート）を読む — `status`（running/stopped）、`runId`、`checkpointBase`、`gitSha` が記載
+   - 存在しない場合は `tmp/orch-*` ディレクトリを一覧し、最新の checkpoint-base を特定
+
+2. **学習進捗の確認**:
+   - `{checkpointBase}/train-progress.json` を読む — runInfo、eval 履歴、カリキュラム、最新ステータス
    - `eval_log.jsonl` から学習曲線の推移を確認
 
-2. **eval howl の確認**（存在する場合）:
-   - `{checkpoint-base}/eval-howl/` の最新 iter から数ゲーム読み、プレイ品質を把握
+3. **eval howl の確認**（存在する場合）:
+   - `{checkpointBase}/eval-howl/` の最新 iter から数ゲーム読み、プレイ品質を把握
 
-3. **inspect データの確認**（存在する場合）:
-   - `demo/public/inspect/game_*.json` — 学習中のゲームの詳細データ（plan tokens, observation, predict 等）
+4. **inspect データの確認**（存在する場合）:
+   - `{checkpointBase}/inspect/*.json` — 学習中のゲームの詳細データ（plan tokens, observation, predict 等）
+   - 各 inspect JSON に `runId` と `checkpointBase` が埋め込まれているので出所を即座に特定可能
    - timeline の `planForward` / `planEndgame` で mason の plan 出力を確認できる
 
-3. **実行中プロセスの確認はしない**:
+5. **ラン履歴の確認**（必要な場合のみ）:
+   - `train-history.jsonl`（プロジェクトルート）— 全ランの起動・終了の時系列ログ（切り札用）
+
+6. **実行中プロセスの確認はしない**:
    - `tasklist` や `ps` 等のプロセス確認コマンドは重いので実行禁止
-   - eval_log.jsonl のタイムスタンプから稼働状況を推測すれば十分
+   - `train-status.json` の `status` フィールドと `updated` タイムスタンプから稼働状況を判断
 
 ## Step 3: 前セッションの引き継ぎ
 

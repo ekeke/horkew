@@ -11,10 +11,10 @@ description: Fenrir 学習セッション終了時のハンドオフ文書生成
 
 以下を収集:
 
-1. **学習状況**: 最新の `progress.md` と `eval_log.jsonl`
+1. **学習状況**: `train-status.json`（道標）と `{checkpointBase}/train-progress.json`、`eval_log.jsonl`
 2. **git 差分**: `git log --oneline` で今日のコミットを列挙、`git diff --stat` で未コミットの変更
 3. **未完了タスク**: `tasks/todo.md` の残り項目
-4. **実行中のジョブ**: checkpoint-base パス、コマンドライン引数
+4. **実行中のジョブ**: `train-status.json` から runId、checkpointBase、status を取得
 
 ## Step 2: ハンドオフ文書の作成
 
@@ -28,7 +28,8 @@ description: Fenrir 学習セッション終了時のハンドオフ文書生成
 - 重要なバグ修正や設計変更は詳細に記述
 
 ## 現在の学習状況
-- Phase, checkpoint-base, iter 数
+- train-status.json の内容（status, runId, checkpointBase）
+- Phase, iter 数（train-progress.json から）
 - eval 推移（テーブル）
 - baseline と卒業ラインの値
 
