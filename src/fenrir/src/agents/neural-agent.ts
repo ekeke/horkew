@@ -63,6 +63,11 @@ export class NeuralAgent implements Agent {
 
   protected lastObs: Float32Array | null = null
 
+  /** 村側役職の集合（確定白判定用） */
+  private static readonly VILLAGE_ROLES: ReadonlySet<string> = new Set([
+    'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
+  ])
+
   /** DecisionContext から plan decoder 用の盤面文脈を構築 */
   static buildPlanContext(ctx: DecisionContext): PlanContext {
     const aliveSet = new Set(ctx.alivePlayers)
@@ -80,7 +85,22 @@ export class NeuralAgent implements Agent {
         }
       }
     }
-    return { aliveSeats, claimedRoles }
+
+    // 確定白席: Retar possibilities が村側役職のみの席
+    let confirmedVillageSeats: boolean[] | undefined
+    if (ctx.retarPossibilities) {
+      confirmedVillageSeats = new Array(SEATS).fill(false)
+      for (const [seat, roles] of ctx.retarPossibilities) {
+        if (seat === ctx.mySeat) continue
+        let allVillage = true
+        for (const r of roles) {
+          if (!NeuralAgent.VILLAGE_ROLES.has(r)) { allVillage = false; break }
+        }
+        if (allVillage) confirmedVillageSeats[seat - 1] = true
+      }
+    }
+
+    return { aliveSeats, claimedRoles, confirmedVillageSeats }
   }
 
   protected infer(ctx: DecisionContext): ForwardResult {
