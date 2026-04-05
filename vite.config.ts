@@ -83,7 +83,7 @@ function servePretrainSnapshots(): Plugin {
   }
 }
 
-/** tmp/orch-* から最新の inspect/ を自動配信（dev only） */
+/** train-status.json の checkpointBase から inspect/ を配信（dev only） */
 function serveInspect(): Plugin {
   let base = '/horkew/'
 
@@ -99,19 +99,16 @@ function serveInspect(): Plugin {
       server.middlewares.use((req, res, next) => {
         if (!req.url?.startsWith(prefix)) return next()
         const filename = decodeURIComponent(req.url.slice(prefix.length))
-        // tmp/orch-* の中から最新の inspect/ ディレクトリを探す
         try {
-          const dirs = readdirSync(orchBase)
-            .filter(d => d.startsWith('orch-'))
-            .map(d => join(orchBase, d, 'inspect'))
-            .filter(p => existsSync(p))
-            .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
-          if (dirs.length === 0) {
+          const statusPath = 'train-status.json'
+          if (!existsSync(statusPath)) {
             res.statusCode = 404
-            res.end('No inspect directory found')
+            res.end('No train-status.json found')
             return
           }
-          const filePath = join(dirs[0], filename)
+          const status = JSON.parse(readFileSync(statusPath, 'utf-8'))
+          const inspectDir = join(status.checkpointBase, 'inspect')
+          const filePath = join(inspectDir, filename)
           if (!existsSync(filePath)) {
             res.statusCode = 404
             res.end('Not found')
