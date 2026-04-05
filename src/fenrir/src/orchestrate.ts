@@ -31,7 +31,7 @@ import {
 import { existsSync, readdirSync, readFileSync, unlinkSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
 import { spawn, execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { generatePlanTokenTrainingBatch } from './ml/execution-plan-data.ts'
+import { generatePlanTokenTrainingBatch, generateStructurePretrainBatch } from './ml/execution-plan-data.ts'
 import { collectBatchGameData } from './ml/pretrain-game-data.ts'
 import { collectTsumiBatch, saveTsumiCache, loadTsumiCache, loadTsumiFromDB } from './ml/pretrain-tsumi-data.ts'
 import { PLAN_VOCAB, parsePlanIndices } from './plan/plan-vocab.ts'
@@ -1002,6 +1002,38 @@ async function main(): Promise<void> {
       log(`  Pretrained weights → village network`)
     }
     log(`  Method B complete: ${(bestAcc * 100).toFixed(1)}% acc, ${(bestNextAcc * 100).toFixed(1)}% NEXT, ${((performance.now() - tB0) / 1000).toFixed(1)}s`)
+
+    // === Pretrain B2: Plan 構造 (NEXT 配置) の教師あり学習 ===
+    log(`${BOLD}=== Pretrain B2: Plan Structure (NEXT placement) ===${RESET}`)
+    const tB2_0 = performance.now()
+    const b2MaxEpochs = 500
+    const b2TargetNextAcc = 0.80
+    let b2BestNextAcc = 0
+    for (let epoch = 1; epoch <= b2MaxEpochs; epoch++) {
+      checkShutdown()
+      const structSamples = generateStructurePretrainBatch(pretrainBatchSize, epoch + 100000)
+      const { loss, accuracy, nextAccuracy, stopAccuracy } = (tfNetwork as any).trainSupervisedPlan({
+        observations: structSamples.map(s => s.observation),
+        forwardLabels: structSamples.map(s => s.forwardLabels),
+        forwardMasks: structSamples.map(s => s.forwardMask),
+        endgameLabels: structSamples.map(s => s.endgameLabels),
+        endgameMasks: structSamples.map(s => s.endgameMask),
+        numTokens: structSamples[0].forwardLabels.length,
+        numEndgameTokens: structSamples[0].endgameLabels.length,
+        vocabSize: PLAN_VOCAB.SIZE,
+      })
+      if (nextAccuracy > b2BestNextAcc) b2BestNextAcc = nextAccuracy
+      if (epoch % pretrainLogInterval === 0 || epoch === 1) {
+        log(`  epoch=${epoch} loss=${loss.toFixed(4)} acc=${(accuracy * 100).toFixed(1)}% next=${(nextAccuracy * 100).toFixed(1)}% stop=${(stopAccuracy * 100).toFixed(1)}%`)
+      }
+      if (nextAccuracy >= b2TargetNextAcc) {
+        log(`  NEXT accuracy ${(b2TargetNextAcc * 100).toFixed(0)}% reached at epoch ${epoch}`)
+        break
+      }
+    }
+    log(`  B2 complete: ${(b2BestNextAcc * 100).toFixed(1)}% NEXT, ${((performance.now() - tB2_0) / 1000).toFixed(1)}s`)
+
+    // pretrain 済みの重みを village の推論用 NN にコピー（B + B2 の結果）
 
     // === Method D: 実ゲームで predict + value の事前学習 ===
     log(`${BOLD}=== Pretrain D: Heuristic Game Supervised Learning ===${RESET}`)

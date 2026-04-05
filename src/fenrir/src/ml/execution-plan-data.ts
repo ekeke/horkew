@@ -663,3 +663,95 @@ export function generatePlanTokenTrainingBatch(
 
   return samples
 }
+
+// ============================================================
+// Pretrain B2: Plan 構造 (NEXT 配置) の教師データ生成
+// ============================================================
+
+/**
+ * groups 数 ≈ nawa のラベルを生成。中身はランダム seat、構造だけ教える。
+ * grammar 準拠: seat NEXT seat NEXT ... seat STOP STOP ...
+ */
+function buildStructureLabels(
+  aliveSeats: number[],
+  mySeat: number,
+  numTokens: number,
+  rng: Rng,
+): { labels: number[], mask: boolean[] } {
+  const nawa = Math.floor((aliveSeats.length - 1) / 2)
+  const maxGroups = Math.floor((numTokens + 1) / 2)  // seat+NEXT pairs + final seat
+  const numGroups = Math.min(Math.max(1, nawa), maxGroups)
+
+  const candidates = aliveSeats.filter(s => s !== mySeat)
+  if (candidates.length === 0) {
+    return { labels: new Array(numTokens).fill(PLAN_VOCAB.STOP), mask: new Array(numTokens).fill(false) }
+  }
+
+  const labels = new Array(numTokens).fill(PLAN_VOCAB.STOP)
+  const mask = new Array(numTokens).fill(false)
+  const shuffled = shuffleArray(candidates, rng)
+  let pos = 0
+
+  for (let g = 0; g < numGroups && pos < numTokens; g++) {
+    const seat = shuffled[g % shuffled.length]
+    labels[pos] = seat - 1; mask[pos++] = true
+    if (g < numGroups - 1 && pos < numTokens) {
+      labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
+    }
+  }
+  if (pos < numTokens) {
+    labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
+  }
+  fillStopPadding(labels, mask)
+  return { labels, mask }
+}
+
+/**
+ * Plan 構造 pretrain 用バッチ生成。
+ * observation はランダム盤面、ラベルは nawa 個のグループに分割された seat 列。
+ */
+export function generateStructurePretrainBatch(
+  count: number,
+  seed: number = 42,
+): PlanTokenTrainingSample[] {
+  const rng = new Rng(seed)
+  const samples: PlanTokenTrainingSample[] = []
+
+  while (samples.length < count) {
+    const day = 2 + Math.floor(rng.next() * 4)
+    const fwdAliveCount = 7 + Math.floor(rng.next() * 7)  // 7-13人
+    const egAliveCount = 4 + Math.floor(rng.next() * 3)   // 4-6人
+    const allSeats = Array.from({ length: SEATS }, (_, i) => i + 1)
+
+    // Forward 盤面
+    const fwdAliveSeats = shuffleArray(allSeats, rng).slice(0, fwdAliveCount)
+    const fwdMySeat = fwdAliveSeats[Math.floor(rng.next() * fwdAliveSeats.length)]
+    const fwdMyRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
+    const fwdCO = generateCOSituation(fwdAliveSeats, rng)
+
+    const fwd = buildStructureLabels(fwdAliveSeats, fwdMySeat, NUM_FORWARD_TOKENS, rng)
+
+    // Endgame 盤面
+    const egAliveSeats = shuffleArray(allSeats, rng).slice(0, egAliveCount)
+    const egMySeat = egAliveSeats[Math.floor(rng.next() * egAliveSeats.length)]
+    const eg = buildStructureLabels(egAliveSeats, egMySeat, NUM_ENDGAME_TOKENS, rng)
+
+    // observation
+    const plan: ExecutionPlan = { targets: [], type: 'grayran' }
+    const ctx = buildSyntheticContext({
+      day, mySeat: fwdMySeat, myRole: fwdMyRole, aliveSeats: fwdAliveSeats,
+      events: fwdCO.events, plan, rng,
+    })
+    const observation = encodeObservation(ctx)
+
+    samples.push({
+      observation,
+      forwardLabels: fwd.labels,
+      forwardMask: fwd.mask,
+      endgameLabels: eg.labels,
+      endgameMask: eg.mask,
+    })
+  }
+
+  return samples
+}
