@@ -178,6 +178,7 @@ export class NeuralAgent implements Agent {
     value: number, seat: number,
     aliveCount: number,
     day?: number,
+    source?: string,
   ): void {
     let totalLogProb = 0
     for (const lp of forwardLogProbs) totalLogProb += lp
@@ -202,6 +203,7 @@ export class NeuralAgent implements Agent {
       planEndgameActions: endgameActions,
       planEndgameLogProbs: endgameLogProbs,
       sigmoidActions: predictActions,
+      source,
     })
   }
 
@@ -282,6 +284,7 @@ export class NeuralAgent implements Agent {
           result.planEndgameActions, result.planEndgameLogProbs!,
           predictActions, result.value, ctx.mySeat,
           ctx.alivePlayers.length, ctx.day,
+          'NeuralAgent.decideVote:strategyOnly',
         )
       }
 

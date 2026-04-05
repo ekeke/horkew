@@ -123,6 +123,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
         result.planForwardActions, result.planForwardLogProbs!,
         result.planEndgameActions, result.planEndgameLogProbs!,
         predictActions, result.value, seat, aliveCount, day,
+        'MasonAdapter.onPreVote',
       )
     }
   }
@@ -147,11 +148,17 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     }
 
     const votes = new Map<number, number>()
-    for (const player of alivePlayers(state)) {
+    const alive = alivePlayers(state)
+    for (const player of alive) {
       // 村陣営 + plan あり → plan に従う（mason も villager も同じ）
-      if (isFirstRound && isVillagerAligned(player.role)
-        && this.planVoteTarget != null && this.planVoteTarget !== player.seat) {
-        votes.set(player.seat, this.planVoteTarget)
+      if (isFirstRound && isVillagerAligned(player.role) && this.planVoteTarget != null) {
+        if (this.planVoteTarget !== player.seat) {
+          votes.set(player.seat, this.planVoteTarget)
+        } else {
+          // 自分自身は吊れない → 他の生存者からランダム
+          const others = alive.filter(p => p.seat !== player.seat)
+          votes.set(player.seat, others[Math.floor(this.rng.next() * others.length)].seat)
+        }
         continue
       }
 

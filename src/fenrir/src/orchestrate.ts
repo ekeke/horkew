@@ -256,6 +256,7 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
           reward: step.reward,
           value: step.value,
           done: step.done,
+          ...(step.source ? { source: step.source } : {}),
         }
         if (step.planForwardActions) {
           const groups = parsePlanIndices(step.planForwardActions)

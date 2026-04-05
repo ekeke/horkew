@@ -198,6 +198,7 @@ export type SerializedStep = {
   planForwardLogProbs?: number[]
   planEndgameActions?: number[]
   planEndgameLogProbs?: number[]
+  source?: string
 }
 
 /** TrajectoryStep → SerializedStep */
@@ -218,6 +219,7 @@ export function serializeStep(step: TrajectoryStep): SerializedStep {
     planForwardLogProbs: step.planForwardLogProbs,
     planEndgameActions: step.planEndgameActions,
     planEndgameLogProbs: step.planEndgameLogProbs,
+    source: step.source,
   }
 }
 
@@ -239,6 +241,7 @@ export function deserializeStep(s: SerializedStep): TrajectoryStep {
     planForwardLogProbs: s.planForwardLogProbs,
     planEndgameActions: s.planEndgameActions,
     planEndgameLogProbs: s.planEndgameLogProbs,
+    source: s.source,
   }
 }
 

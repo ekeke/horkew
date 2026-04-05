@@ -24,6 +24,8 @@ export type TrajectoryStep = {
   planEndgameLogProbs?: number[]
   /** predict補助損失用: 実際の役職 (14席×11役職 = 154次元one-hot、ゲーム終了後に注入) */
   trueRoles?: Float32Array
+  /** デバッグ用: trajectory 記録の呼び出し元 */
+  source?: string
 }
 
 export type ProcessedStep = TrajectoryStep & {
