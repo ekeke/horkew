@@ -1319,9 +1319,9 @@ async function main(): Promise<void> {
         // Adaptive KL (warmup: target 0.5→0.05 over 300 iters)
         if (masonPpoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
           const klTarget = klTargetForIter(iter)
-          if (lastPpoResult.klLoss > klTarget * 1.5) {
+          if (lastPpoResult.klLoss > klTarget * 1.2) {
             masonPpoConfig.klCoeff *= 1.5
-          } else if (lastPpoResult.klLoss < klTarget / 1.5) {
+          } else if (lastPpoResult.klLoss < klTarget / 1.2) {
             masonPpoConfig.klCoeff /= 1.5
           }
           masonPpoConfig.klCoeff = Math.max(0.01, Math.min(3, masonPpoConfig.klCoeff))
@@ -1603,9 +1603,9 @@ async function main(): Promise<void> {
           // Adaptive KL (warmup: target 0.5→0.05 over 300 iters)
           if (ppoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
             const klTarget = klTargetForIter(iter)
-            if (lastPpoResult.klLoss > klTarget * 1.5) {
+            if (lastPpoResult.klLoss > klTarget * 1.2) {
               ppoConfig.klCoeff *= 1.5
-            } else if (lastPpoResult.klLoss < klTarget / 1.5) {
+            } else if (lastPpoResult.klLoss < klTarget / 1.2) {
               ppoConfig.klCoeff /= 1.5
             }
             ppoConfig.klCoeff = Math.max(0.01, Math.min(3, ppoConfig.klCoeff))
