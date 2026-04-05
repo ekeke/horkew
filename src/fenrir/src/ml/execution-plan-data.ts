@@ -264,6 +264,24 @@ function generateSyntheticRetar(
   return { possibilities, foxSeats, wolfSeats }
 }
 
+/** Retar possibilities が村側役職のみの席を返す（mySeat は除外） */
+function getConfirmedVillageSeats(
+  possibilities: Map<number, Set<SystemRole>>,
+  mySeat: number,
+): Set<number> {
+  const confirmed = new Set<number>()
+  const villageSet = new Set<SystemRole>(VILLAGE_ONLY)
+  for (const [seat, roles] of possibilities) {
+    if (seat === mySeat) continue
+    let allVillage = true
+    for (const r of roles) {
+      if (!villageSet.has(r)) { allVillage = false; break }
+    }
+    if (allVillage) confirmed.add(seat)
+  }
+  return confirmed
+}
+
 const PATTERNS: PatternType[] = [
   'tsumi', 'roller', 'decision', 'designated', 'grayran', 'retar_suspect',
   'multi_day_seats', 'multi_day_mixed', 'roller_then_seat',
@@ -388,6 +406,7 @@ function patternToForwardLabels(
   mySeat: number,
   rng: Rng,
   suspectSeats?: number[],
+  confirmedVillage?: Set<number>,
 ): { labels: number[], mask: boolean[], tsumiTarget?: number } | null {
   const labels = new Array(NUM_FORWARD_TOKENS).fill(PLAN_VOCAB.STOP)
   const mask = new Array(NUM_FORWARD_TOKENS).fill(false)
@@ -400,7 +419,7 @@ function patternToForwardLabels(
   switch (pattern) {
     case 'tsumi': {
       // 詰み: [target_seat, stop, ...]
-      const candidates = aliveSeats.filter((s: number) => s !== mySeat)
+      const candidates = aliveSeats.filter((s: number) => s !== mySeat && !confirmedVillage?.has(s))
       if (candidates.length === 0) return null
       const target = candidates[Math.floor(rng.next() * candidates.length)]
       let pos = 0
@@ -431,7 +450,7 @@ function patternToForwardLabels(
     }
     case 'designated': {
       // [seat_i, stop, ...]
-      const candidates = aliveSeats.filter((s: number) => s !== mySeat)
+      const candidates = aliveSeats.filter((s: number) => s !== mySeat && !confirmedVillage?.has(s))
       if (candidates.length === 0) return null
       const target = candidates[Math.floor(rng.next() * candidates.length)]
       let pos = 0
@@ -461,7 +480,7 @@ function patternToForwardLabels(
     }
     case 'multi_day_seats': {
       // 複数日の異なる席指定: [seat_a, NEXT, seat_b, NEXT, seat_c, STOP, ...]
-      const candidates = aliveSeats.filter((s: number) => s !== mySeat)
+      const candidates = aliveSeats.filter((s: number) => s !== mySeat && !confirmedVillage?.has(s))
       if (candidates.length < 2) return null
       const shuffled = shuffleArray(candidates, rng)
       const numDays = 2 + Math.floor(rng.next() * 2) // 2〜3日
@@ -481,7 +500,7 @@ function patternToForwardLabels(
     }
     case 'multi_day_mixed': {
       // 席+役職+グレランの混合: [seat, NEXT, ROLE, NEXT, GRAYRAN, STOP, ...]
-      const candidates = aliveSeats.filter((s: number) => s !== mySeat)
+      const candidates = aliveSeats.filter((s: number) => s !== mySeat && !confirmedVillage?.has(s))
       if (candidates.length === 0) return null
       const grays = aliveSeats.filter(s => s !== mySeat && !claims.has(s))
 
@@ -523,8 +542,8 @@ function patternToForwardLabels(
     case 'roller_then_seat': {
       // ローラー後に席指定: [ROLE, NEXT, ROLE, NEXT, seat, STOP, ...]
       if (claimants.length < 2 || roleVocabIdx < 0) return null
-      const grays = aliveSeats.filter(s => s !== mySeat && !claims.has(s))
-      const afterRollerCandidates = grays.length > 0 ? grays : aliveSeats.filter(s => s !== mySeat)
+      const grays = aliveSeats.filter(s => s !== mySeat && !claims.has(s) && !confirmedVillage?.has(s))
+      const afterRollerCandidates = grays.length > 0 ? grays : aliveSeats.filter(s => s !== mySeat && !confirmedVillage?.has(s))
       if (afterRollerCandidates.length === 0) return null
 
       let pos = 0
@@ -622,6 +641,7 @@ export function generatePlanTokenTrainingBatch(
     const fwdMyRole = VILLAGE_ROLES[Math.floor(rng.next() * VILLAGE_ROLES.length)]
     const fwdCO = generateCOSituation(fwdAliveSeats, rng)
     const fwdRetar = generateSyntheticRetar(fwdAliveSeats, fwdMySeat, fwdCO.claims, rng)
+    const fwdConfirmedVillage = getConfirmedVillageSeats(fwdRetar.possibilities, fwdMySeat)
     const fwdFox = fwdRetar.foxSeats.filter(s => s !== fwdMySeat)
     const fwdWolf = fwdRetar.wolfSeats.filter(s => s !== fwdMySeat)
     if (fwdFox.length === 0 && fwdWolf.length === 0) continue
@@ -629,7 +649,7 @@ export function generatePlanTokenTrainingBatch(
     // パターン混合: role tokens (roller, decision等) と seat tokens (suspect列挙) を両方教える
     const pattern = pickPattern(rng)
     const suspectSeats = [...fwdFox, ...fwdWolf.filter(s => !fwdFox.includes(s))]
-    const patternResult = patternToForwardLabels(pattern, fwdCO.claims, fwdAliveSeats, fwdMySeat, rng, suspectSeats)
+    const patternResult = patternToForwardLabels(pattern, fwdCO.claims, fwdAliveSeats, fwdMySeat, rng, suspectSeats, fwdConfirmedVillage)
     const fwd = patternResult ?? buildSuspectLabels(fwdFox, fwdWolf, NUM_FORWARD_TOKENS, rng)
 
     // Endgame 盤面（別の盤面で生成）

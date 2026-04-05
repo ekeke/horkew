@@ -1308,8 +1308,10 @@ async function main(): Promise<void> {
           }
 
           masonTf.loadWeights(masonNet.cloneWeights())
+          const klEarlyStopThreshold = klTargetForIter(iter) * 2
           for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
             lastPpoResult = ppoUpdate(masonTf, allSteps, masonPpoConfig, precomputedRefLogits)
+            if (lastPpoResult.klLoss > klEarlyStopThreshold) break
           }
           masonNet.loadWeights(masonTf.cloneWeights())
         }
@@ -1322,7 +1324,7 @@ async function main(): Promise<void> {
           } else if (lastPpoResult.klLoss < klTarget / 1.5) {
             masonPpoConfig.klCoeff /= 1.5
           }
-          masonPpoConfig.klCoeff = Math.max(0.01, Math.min(10, masonPpoConfig.klCoeff))
+          masonPpoConfig.klCoeff = Math.max(0.01, Math.min(3, masonPpoConfig.klCoeff))
         }
         appendKlLog(config.checkpointBase, {
           iter, klForward: lastPpoResult.klForwardLoss, klEndgame: lastPpoResult.klEndgameLoss,
@@ -1572,8 +1574,10 @@ async function main(): Promise<void> {
             }
 
             tfNetwork.loadWeights(network.cloneWeights())
+            const klEarlyStopThreshold = klTargetForIter(iter) * 2
             for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
               lastPpoResult = ppoUpdate(tfNetwork, allIndividual, ppoConfig, precomputedRefLogits)
+              if (lastPpoResult.klLoss > klEarlyStopThreshold) break
             }
             network.loadWeights(tfNetwork.cloneWeights())
           }
@@ -1604,7 +1608,7 @@ async function main(): Promise<void> {
             } else if (lastPpoResult.klLoss < klTarget / 1.5) {
               ppoConfig.klCoeff /= 1.5
             }
-            ppoConfig.klCoeff = Math.max(0.01, Math.min(10, ppoConfig.klCoeff))
+            ppoConfig.klCoeff = Math.max(0.01, Math.min(3, ppoConfig.klCoeff))
           }
           appendKlLog(config.checkpointBase, {
             iter, klForward: lastPpoResult.klForwardLoss, klEndgame: lastPpoResult.klEndgameLoss,
