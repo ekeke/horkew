@@ -23,7 +23,7 @@ import { isVillagerAligned } from '../../../lupa/roles.ts'
 import { RuleBasedAgent } from './rule-based-agent.ts'
 
 /** plan depth 報酬の最大値（groups == nawa のとき） */
-const PLAN_DEPTH_REWARD_SCALE = 0.3
+const PLAN_DEPTH_REWARD_SCALE = 0.1
 
 export type NeuralAgentConfig = {
   /** trueなら探索ノイズあり（学習時）、falseなら貪欲（評価時） */
