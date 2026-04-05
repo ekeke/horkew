@@ -90,7 +90,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
 
     // 4. 指定→CO シミュレーション + plan 再評価
     let additionalClaims: Map<number, DayClaim> | undefined
-    if (masonResult && pctx.day >= 2) {
+    if (masonResult) {
       const coResult = this.simulateDesignationCO(pctx, ext, aliveMasons, masonResult)
       if (coResult.claims.size > 0) {
         additionalClaims = coResult.claims
