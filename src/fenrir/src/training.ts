@@ -32,7 +32,7 @@ import { FanaticAgent } from './agents/fanatic-agent.ts'
 import { WolfTeamAgent, WolfCollective } from './agents/wolf-collective.ts'
 import { MasonTeamAgent, MasonCollective } from './agents/mason-collective.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from './agents/rule-based-agent.ts'
-import { terminalReward, intermediateReward, predictAccuracyReward, buildKnownSeats, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { terminalReward, intermediateReward, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import { packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize, generateGamesParallel, deserializeStep, type SharedWeights } from './parallel.ts'
@@ -616,17 +616,9 @@ async function generateGame(
 
   // trueRoles注入 + 推理精度報酬
   const trueRoles = encodeTrueRoles(state.players)
-  for (const [seat, steps] of allSteps) {
-    const player = state.players.find(p => p.seat === seat)
-    if (!player) continue
-    const knownSeats = buildKnownSeats(seat, player.role, state)
+  for (const [, steps] of allSteps) {
     for (const step of steps) {
       step.trueRoles = trueRoles
-      if (step.actionHead === 'predict' && step.sigmoidActions) {
-        step.reward += predictAccuracyReward(
-          step.sigmoidActions, trueRoles, player.role, config.rewardConfig, knownSeats,
-        )
-      }
     }
   }
 

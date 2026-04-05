@@ -185,6 +185,7 @@ export class TfNeuralNetwork {
       let totalEntropy = tf.scalar(0)
 
       for (const [headName, indices] of headGroups) {
+        if (headName === 'predict') continue  // predict は BCE auxiliary loss のみ
         if (sigmoidHeadNames.has(headName)) {
           // === Sigmoid head: PPO with multi-binary BCE ===
           const [hw, hb] = this.sigmoidHeadWeights.get(headName)!

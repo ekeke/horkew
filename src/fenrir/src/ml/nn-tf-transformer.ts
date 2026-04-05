@@ -1021,18 +1021,13 @@ export class TfTransformerNetwork {
 
         headGroups.delete('strategy')  // 通常ヘッドループでは処理しない
       } else if (strategyIndices && strategyIndices.length > 0) {
-        // freezePlan: plan PPO はスキップするが、predict sigmoid PPO は残す
-        // strategy indices を predict head として通常ループに回す
-        if (sigmoidHeadNames.has('predict')) {
-          const existing = headGroups.get('predict') ?? []
-          headGroups.set('predict', [...existing, ...strategyIndices])
-        }
         headGroups.delete('strategy')
       } else {
         headGroups.delete('strategy')
       }
 
       for (const [headName, indices] of headGroups) {
+        if (headName === 'predict') continue  // predict は BCE auxiliary loss のみ
         const headLogitsTensor = allLogits.get(headName)!
 
         if (sigmoidHeadNames.has(headName)) {

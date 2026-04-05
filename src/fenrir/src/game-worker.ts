@@ -18,7 +18,7 @@ import { FanaticAgent } from './agents/fanatic-agent.ts'
 import { WolfTeamAgent, WolfCollective } from './agents/wolf-collective.ts'
 import { MasonTeamAgent, MasonCollective } from './agents/mason-collective.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from './agents/rule-based-agent.ts'
-import { terminalReward, intermediateReward, tsumiReward, predictAccuracyReward, buildKnownSeats } from './reward.ts'
+import { terminalReward, intermediateReward, tsumiReward } from './reward.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { parse } from '../../howl/parser.ts'
 import { buildVillageStatus } from '../../howl/bridge.ts'
@@ -369,20 +369,12 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       }
     }
 
-    // trueRoles注入 + 推理精度報酬
+    // trueRoles注入（BCE auxiliary loss 用）
     const trueRoles = encodeTrueRoles(state.players)
     const trueRolesArray = Array.from(trueRoles)
     for (const entry of individualSteps) {
-      const player = state.players.find(p => p.seat === entry.seat)
-      const knownSeats = player ? buildKnownSeats(entry.seat, player.role, state) : undefined
       for (const step of entry.steps) {
         step.trueRoles = trueRolesArray
-        // predict stepに推理精度報酬を付与
-        if (step.actionHead === 'predict' && step.sigmoidActions) {
-          step.reward += predictAccuracyReward(
-            new Float32Array(step.sigmoidActions), trueRoles, entry.role, config.rewardConfig, knownSeats,
-          )
-        }
       }
     }
 

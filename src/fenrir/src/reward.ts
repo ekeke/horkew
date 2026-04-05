@@ -10,7 +10,7 @@
 
 import type { GameState, GameEvent } from '../../lupa/types.ts'
 import type { SystemRole } from '../../types/index.ts'
-import { SEATS, NUM_ROLES } from './observation.ts'
+
 
 export type RewardConfig = {
   /** 勝利報酬 */
@@ -31,10 +31,6 @@ export type RewardConfig = {
   tsumiVillagePerDay: number
   /** 中間報酬: Hati 被詰み (狼陣営、詰み後の1日あたり) */
   tsumiWolfPerDay: number
-  /** 推理中間報酬: 未知席の正解1席あたり */
-  predictAccuracyReward: number
-  /** 既知席の推理報酬の減衰率 (既知席の正解 = predictAccuracyReward × この値) */
-  predictKnownSeatDiscount: number
   /** 中間報酬: 護衛成功 (bodyguard, peace時) */
   guardSuccess: number
   /** 中間報酬: 占い呪殺 (seer, fox_kill時) */
@@ -61,8 +57,6 @@ export const DEFAULT_REWARD_CONFIG: RewardConfig = {
   foxSurvival: 0.07,
   tsumiVillagePerDay: 0.1,
   tsumiWolfPerDay: -0.2,
-  predictAccuracyReward: 0.02,
-  predictKnownSeatDiscount: 0.25,
   guardSuccess: 0,     // TODO: Lupa改修後に正確なイベント判定で有効化
   foxKillReward: 0,    // TODO: 同上
   endgamePreFinalFoxTarget: 0.08,
@@ -179,64 +173,6 @@ export function tsumiReward(
     }
   }
   return rewards
-}
-
-/**
- * 推理精度報酬: predict headの出力と実際の役職を比較
- * 全陣営対象。既知席（自席・仲間等）は低い報酬、未知席は高い報酬。
- *
- * @param predictActions sigmoid出力 (154次元, 0/1)
- * @param trueRoles 実際の役職 one-hot (154次元)
- * @param playerRole プレイヤーの役職
- * @param config 報酬設定
- * @param knownSeats 既知の席（自席、狼仲間、共有相方等）。0-indexed seat番号
- * @returns 報酬
- */
-export function predictAccuracyReward(
-  predictActions: Float32Array,
-  trueRoles: Float32Array,
-  _playerRole: string,
-  config: RewardConfig = DEFAULT_REWARD_CONFIG,
-  knownSeats?: Set<number>,
-): number {
-  let reward = 0
-  for (let seat = 0; seat < SEATS; seat++) {
-    // 各席でargmaxの役職が一致しているか
-    let predMax = 0, predIdx = 0
-    let trueIdx = 0
-    for (let r = 0; r < NUM_ROLES; r++) {
-      const idx = seat * NUM_ROLES + r
-      if (predictActions[idx] > predMax) {
-        predMax = predictActions[idx]
-        predIdx = r
-      }
-      if (trueRoles[idx] > 0) trueIdx = r
-    }
-    if (predIdx === trueIdx) {
-      const isKnown = knownSeats?.has(seat) ?? false
-      reward += isKnown
-        ? config.predictAccuracyReward * config.predictKnownSeatDiscount
-        : config.predictAccuracyReward
-    }
-  }
-
-  return reward / SEATS
-}
-
-/** プレイヤーが初期知識として知っている席のセットを構築 (0-indexed seat番号) */
-export function buildKnownSeats(seat: number, role: string, state: GameState): Set<number> {
-  const known = new Set<number>()
-  known.add(seat)  // 自席
-  if (role === 'werewolf') {
-    for (const p of state.players) if (p.role === 'werewolf' && p.seat !== seat) known.add(p.seat)
-  } else if (role === 'fanatic') {
-    for (const p of state.players) if (p.role === 'werewolf') known.add(p.seat)
-  } else if (role === 'mason') {
-    for (const p of state.players) if (p.role === 'mason' && p.seat !== seat) known.add(p.seat)
-  } else if (role === 'immoralist') {
-    for (const p of state.players) if (p.role === 'werehamster') known.add(p.seat)
-  }
-  return known
 }
 
 /**

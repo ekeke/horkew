@@ -313,11 +313,7 @@ export class NeuralAgent implements Agent {
       this.lastObs = encodeObservation(ctx)
 
       const predictLogits = result.policies.get('predict')
-      let predictActions: Float32Array | undefined
-      if (predictLogits) {
-        const predictMask = new Float32Array(predictLogits.length).fill(0)
-        predictActions = this.selectSigmoidAction(predictLogits, predictMask).actions
-      }
+      const predictActions = predictLogits ? sigmoid(predictLogits) : undefined
 
       if (result.planForwardActions && result.planEndgameActions) {
         this.recordStrategy(
@@ -354,12 +350,7 @@ export class NeuralAgent implements Agent {
 
     this.record('vote', action, logProb, result.value, reward, ctx.mySeat)
 
-    const predictLogits = result.policies.get('predict')
-    if (predictLogits) {
-      const predictMask = new Float32Array(predictLogits.length).fill(0)
-      const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
-      this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, ctx.mySeat)
-    }
+    // predict は BCE auxiliary loss のみで学習（RL action ではない）
 
     return action + 1
   }
@@ -385,13 +376,10 @@ export class NeuralAgent implements Agent {
     this.recordSigmoid('propose', proposeActions, proposeLogProb, result.value, 0, ctx.mySeat)
     const proposals = decodePropose(proposeActions, 0.5)
 
-    const predictMask = maskPredict(commAction)
     let predictions = undefined
-    if (predictMask[0] !== -Infinity) {
+    if (maskPredict(commAction)[0] !== -Infinity) {
       const predictLogits = result.policies.get('predict')!
-      const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
-      this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, ctx.mySeat)
-      predictions = decodePredict(predictActions, 0.5)
+      predictions = decodePredict(sigmoid(predictLogits), 0.5)
     }
 
     return { signal, proposals, predictions }
