@@ -35,8 +35,7 @@ import { createInterface } from 'node:readline'
 import { generatePlanTokenTrainingBatch, generateStructurePretrainBatch } from './ml/execution-plan-data.ts'
 import { collectBatchGameData } from './ml/pretrain-game-data.ts'
 import { collectTsumiBatch, saveTsumiCache, loadTsumiCache, loadTsumiFromDB } from './ml/pretrain-tsumi-data.ts'
-import { PLAN_VOCAB, parsePlanIndices } from './plan/plan-vocab.ts'
-import { CO_ROLES } from './observation.ts'
+import { PLAN_VOCAB, parsePlanIndices, describePlanIndex } from './plan/plan-vocab.ts'
 import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
   generateGamesParallel, deserializeStep,
@@ -197,15 +196,6 @@ Options:
 // ============================================================
 
 let inspectGameCounter = 0
-
-function describePlanIndex(idx: number): string {
-  if (idx >= PLAN_VOCAB.SEAT_START && idx < PLAN_VOCAB.SEAT_END) return `seat${idx + 1}`
-  if (idx >= PLAN_VOCAB.ROLE_START && idx < PLAN_VOCAB.ROLE_END) return CO_ROLES[idx - PLAN_VOCAB.ROLE_START]
-  if (idx === PLAN_VOCAB.GRAYRAN) return 'grayran'
-  if (idx === PLAN_VOCAB.NEXT) return 'NEXT'
-  if (idx === PLAN_VOCAB.STOP) return 'STOP'
-  return `?${idx}`
-}
 
 /**
  * バッチの seeds から inspect 対象の seed を選ぶ

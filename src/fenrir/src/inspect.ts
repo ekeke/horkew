@@ -27,8 +27,7 @@ import { MasonTeamAgent } from './agents/mason-collective.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
-import { parsePlanIndices, PLAN_VOCAB } from './plan/plan-vocab.ts'
-import { CO_ROLES } from './observation.ts'
+import { parsePlanIndices, describePlanIndices } from './plan/plan-vocab.ts'
 
 // ============================================================
 // Model Group Definitions (play.ts と同じ)
@@ -116,23 +115,6 @@ function findTeamCheckpoint(dir: string, teamType: 'wolf_team' | 'mason_team'): 
   }
   if (maxIter === 0) return null
   return `${dir}/${teamType}_${maxIter}.json`
-}
-
-// ============================================================
-// Plan token → human-readable description
-// ============================================================
-
-function describePlanIndex(idx: number): string {
-  if (idx >= PLAN_VOCAB.SEAT_START && idx < PLAN_VOCAB.SEAT_END) return `seat${idx + 1}`
-  if (idx >= PLAN_VOCAB.ROLE_START && idx < PLAN_VOCAB.ROLE_END) return CO_ROLES[idx - PLAN_VOCAB.ROLE_START]
-  if (idx === PLAN_VOCAB.GRAYRAN) return 'grayran'
-  if (idx === PLAN_VOCAB.NEXT) return 'NEXT'
-  if (idx === PLAN_VOCAB.STOP) return 'STOP'
-  return `?${idx}`
-}
-
-function describePlanIndices(indices: number[]): string {
-  return indices.map(describePlanIndex).join(' ')
 }
 
 // ============================================================

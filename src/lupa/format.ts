@@ -226,6 +226,15 @@ export function formatHowl(events: readonly any[], state: GameState, config: Lup
         lines.push(`# [予想] ${playerName(event.actor)}: ${parts.join(', ')}`)
         break
       }
+      case 'plan_commit': {
+        const parts: string[] = []
+        if (event.forward) parts.push(`forward: ${event.forward}`)
+        if (event.endgame) parts.push(`endgame: ${event.endgame}`)
+        if (parts.length > 0) {
+          lines.push(`# [プラン] ${playerName(event.actor)} ${parts.join(' | ')}`)
+        }
+        break
+      }
       case 'commander_appointed':
       case 'proposal':
       case 'leadership_response':

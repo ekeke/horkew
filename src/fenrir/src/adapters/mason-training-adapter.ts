@@ -27,6 +27,7 @@ import { isVillagePowerRole } from '../agents/rule-based-agent.ts'
 import { resolvePlanGroup } from '../plan/plan-resolve.ts'
 import { planToVote } from '../plan/plan-helpers.ts'
 import { encodeObservation, collectObservation } from '../observation.ts'
+import { describePlanIndices } from '../plan/plan-vocab.ts'
 import { RuleBasedAgent } from '../agents/rule-based-agent.ts'
 
 // ============================================================
@@ -129,6 +130,20 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
       }
     }
 
+    // 6. Plan commit イベント（howl 出力用）
+    if (this.planForwardActions || this.planEndgameActions) {
+      const actor = aliveMasons.find(m => this.masonConfig.agents.has(m.seat))?.seat ?? aliveMasons[0]?.seat
+      if (actor != null) {
+        const events = pctx.events as (GameEvent | FenrirExtEvent)[]
+        events.push({
+          type: 'plan_commit',
+          actor,
+          forward: this.planForwardActions ? describePlanIndices(this.planForwardActions) : '',
+          endgame: this.planEndgameActions ? describePlanIndices(this.planEndgameActions) : '',
+        })
+      }
+    }
+
     return additionalClaims ? { additionalClaims } : {}
   }
 
@@ -192,6 +207,18 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
             proposals: this.dayProposals,
           },
         )
+
+        // inspect 用: observation キャプチャ
+        if (this.config.captureObservations) {
+          this.capturedObservations.push({
+            seat: player.seat,
+            role: player.role,
+            day: playerCtx.day,
+            observation: collectObservation(playerCtx),
+            proposals: this.dayProposals.map(p => ({ type: p.type, target: p.target })),
+          })
+        }
+
         const target = planToVote(this.planForwardActions, playerCtx, this.planEndgameActions)
         if (target != null && target !== player.seat) {
           votes.set(player.seat, target)

@@ -92,6 +92,21 @@ export function parsePlanIndices(indices: number[]): PlanDayGroup[] {
  * [seat3, NEXT, seat7, NEXT, grayran, STOP, STOP, STOP]
  * → [seat7, NEXT, grayran, STOP, STOP, STOP, STOP, STOP]
  */
+/** Plan token index を人間が読める文字列に変換 */
+export function describePlanIndex(idx: number): string {
+  if (idx >= PLAN_VOCAB.SEAT_START && idx < PLAN_VOCAB.SEAT_END) return `seat${idx + 1}`
+  if (idx >= PLAN_VOCAB.ROLE_START && idx < PLAN_VOCAB.ROLE_END) return CO_ROLES[idx - PLAN_VOCAB.ROLE_START]
+  if (idx === PLAN_VOCAB.GRAYRAN) return 'grayran'
+  if (idx === PLAN_VOCAB.NEXT) return 'NEXT'
+  if (idx === PLAN_VOCAB.STOP) return 'STOP'
+  return `?${idx}`
+}
+
+/** Plan token indices を人間が読める文字列に変換 */
+export function describePlanIndices(indices: number[]): string {
+  return indices.map(describePlanIndex).join(' ')
+}
+
 export function stripFirstPlanGroup(indices: number[], totalLength: number): number[] {
   let i = 0
   // 先頭グループのトークンをスキップ
