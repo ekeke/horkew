@@ -250,6 +250,72 @@ describe('MasonTrainingAdapter integration', () => {
     }
   })
 
+  it('nekomata COs when designated by seat in plan', async () => {
+    // seed 42: mason=[11,14], nekomata=seat2
+    const seed = 42
+    const nekoSeat = 2
+    const masonSeat = 11
+    const STOP = PLAN_VOCAB.STOP
+
+    // plan: seat2 (nekomata) を直指定
+    const handlers = createTestAdapter({
+      masonSeat,
+      forwardActions: [nekoSeat - 1, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
+      endgameActions: [STOP, STOP, STOP, STOP],
+      seed,
+    })
+
+    const result = await runGame({ ...STANDARD_CONFIG, seed }, handlers)
+    const nekoClaims = result.events.filter(e => e.type === 'nekomata_claim')
+    assert.ok(nekoClaims.length > 0, 'nekomata should CO when designated by seat plan')
+    // CO した猫のうち少なくとも1人は真猫
+    const nekoActors = nekoClaims.map((e: any) => e.actor)
+    assert.ok(nekoActors.includes(nekoSeat), `seat ${nekoSeat} (true nekomata) should be among CO actors, got: ${nekoActors}`)
+  })
+
+  it('nekomata COs after mason takeover', async () => {
+    // seed 42: mason=[11,14], nekomata=seat2
+    // mason 11 に NN をセット、onMasonTakeover を有効化
+    // mason 11 が死亡したら mason 14 に takeover → 猫指名で CO すべき
+    const seed = 42
+    const nekoSeat = 2
+    const masonSeat = 11
+    const STOP = PLAN_VOCAB.STOP
+
+    const network = createMockNetwork({
+      forwardActions: [nekoSeat - 1, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
+      endgameActions: [STOP, STOP, STOP, STOP],
+    })
+    const agent = new NeuralAgent(network, { explore: false, strategyOnly: true })
+    const agents = new Map<number, any>([[masonSeat, agent]])
+
+    const handlers = new MasonTrainingAdapter({
+      agents,
+      defaultAgent: new RuleBasedAgent(),
+      wolfTeamAgent: new WolfTeamRuleAgent(),
+      seed,
+      enableRetar: false,
+      roles: STANDARD_ROLES,
+      onMasonTakeover: (deadSeat: number, newSeat: number) => {
+        // game-worker と同じ: 外部 agents マップを更新（ここでは adapter 内部で処理）
+      },
+    }) as unknown as GameHandlers<FenrirExtEvent, FenrirExt>
+
+    const result = await runGame({ ...STANDARD_CONFIG, seed }, handlers)
+
+    // plan_commit を確認 — mason 死亡後もplan が出ているか
+    const planCommits = result.events.filter(e => e.type === 'plan_commit')
+    // nekomata_claim を確認
+    const nekoClaims = result.events.filter(e => e.type === 'nekomata_claim')
+
+    // mason 11 が生存中に猫を指名してCOさせるか、takeover 後に猫を指名してCOさせるか
+    // どちらかで nekomata_claim が出るべき
+    const nekoActors = nekoClaims.map((e: any) => e.actor)
+    assert.ok(nekoActors.includes(nekoSeat),
+      `seat ${nekoSeat} (true nekomata) should CO at some point. ` +
+      `nekoClaims=${nekoClaims.length}, planCommits=${planCommits.length}, nekoActors=${nekoActors}`)
+  })
+
   it('runs 10 games with different seeds without crashing', async () => {
     const STOP = PLAN_VOCAB.STOP
     const results: string[] = []

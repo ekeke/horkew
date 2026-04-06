@@ -384,8 +384,9 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
   // ════════════════════════════════════════════
 
   /**
-   * 1st forward の plan から指定→CO→対抗CO をシミュレーションし、
-   * CO があれば 2nd forward で plan を再評価する。
+   * plan から指定→CO→対抗CO をシミュレーションし、
+   * CO があれば re-forward で plan を再評価する。
+   * 新 plan で別の CO が起きうるため収束するまで繰り返す。
    */
   private simulateDesignationCO(
     pctx: PhaseContext<FenrirExtEvent, FenrirExt>,
@@ -394,71 +395,84 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     firstResult: ForwardResult,
   ): { claims: Map<number, DayClaim>, masonResult: ForwardResult } {
     const state = pctx.state as GameState<FenrirExt>
-    const claims = new Map<number, DayClaim>()
+    const allClaims = new Map<number, DayClaim>()
+    const aliveSeats = alivePlayers(state).map(p => p.seat)
+    const lastExecutedSeat = state.executionHistory.get(pctx.day - 1) ?? null
+    const events = pctx.events as (GameEvent | FenrirExtEvent)[]
+    let currentResult = firstResult
 
-    // 指定タイプ判定
-    const groups = ext.planState.forwardGroups
-    if (groups.length === 0 || groups[0].targets.length === 0) {
-      return { claims, masonResult: firstResult }
+    for (let round = 0; round < 10; round++) {
+      const newClaims = this.runOneDesignationRound(
+        state, ext, pctx.day, aliveSeats, lastExecutedSeat, events,
+      )
+      if (newClaims.size === 0) break
+
+      for (const [seat, claim] of newClaims) allClaims.set(seat, claim)
+
+      // re-forward: CO を観測した上で plan を再評価
+      const nnMason = aliveMasons.find(m => this.masonConfig.agents.has(m.seat))
+      if (nnMason) {
+        const agent = this.getAgent(nnMason.seat) as any
+        agent.cachedDay = -1
+        agent.cachedStrategyResult = null
+      }
+
+      const reResult = this.commitMasonPlans(pctx, ext, aliveMasons)
+      this.distributePlans(ext, aliveSeats, pctx.events)
+      if (reResult) currentResult = reResult
     }
+
+    return { claims: allClaims, masonResult: currentResult }
+  }
+
+  /**
+   * 1回分の指名→CO→対抗CO。新たに発生した CO を返す。
+   */
+  private runOneDesignationRound(
+    state: GameState<FenrirExt>,
+    ext: FenrirExt,
+    day: number,
+    aliveSeats: number[],
+    lastExecutedSeat: number | null,
+    events: (GameEvent | FenrirExtEvent)[],
+  ): Map<number, DayClaim> {
+    const claims = new Map<number, DayClaim>()
+    const groups = ext.planState.forwardGroups
+    if (groups.length === 0 || groups[0].targets.length === 0) return claims
 
     const firstTarget = groups[0].targets[0]
     const designationType: 'seat' | 'grayran' = firstTarget.type === 'grayran' ? 'grayran' : 'seat'
 
-    // 具体的な seat に解決
-    const aliveSeats = alivePlayers(state).map(p => p.seat)
     const designatedSeat = resolvePlanGroup(
-      { targets: [firstTarget] }, aliveSeats, pctx.events as any[], { rng: this.rng },
+      { targets: [firstTarget] }, aliveSeats, events as any[], { rng: this.rng },
     )
-    if (designatedSeat == null) {
-      return { claims, masonResult: firstResult }
-    }
+    if (designatedSeat == null) return claims
 
-    const lastExecutedSeat = state.executionHistory.get(pctx.day - 1) ?? null
-    const events = pctx.events as (GameEvent | FenrirExtEvent)[]
-
-    // 1. 指定対象の CO 判定
     const designatedPlayer = state.players.find(p => p.seat === designatedSeat)
-    if (!designatedPlayer || !designatedPlayer.alive) {
-      return { claims, masonResult: firstResult }
-    }
+    if (!designatedPlayer || !designatedPlayer.alive) return claims
 
+    // 指定対象の CO 判定
     const designationClaim = this.generateDesignationResponse(
-      state, designatedPlayer, designationType, pctx.day, lastExecutedSeat,
+      state, designatedPlayer, designationType, day, lastExecutedSeat,
     )
     if (designationClaim.type !== 'none') {
       claims.set(designatedSeat, designationClaim)
-      this.applyClaimLocally(state, designatedSeat, pctx.day, designationClaim, events)
+      this.applyClaimLocally(state, designatedSeat, day, designationClaim, events)
     }
 
-    // 2. 対抗 CO（bodyguard/nekomata CO が発生した場合のみ）
+    // 対抗 CO（bodyguard/nekomata CO が発生した場合のみ）
     if (designationClaim.type === 'bodyguard_co' || designationClaim.type === 'nekomata_co') {
       const triggeredRole: SystemRole = designationClaim.type === 'bodyguard_co' ? 'bodyguard' : 'nekomata'
       const counterClaims = this.generateCounterCOs(
-        state, triggeredRole, designatedSeat, pctx.day, lastExecutedSeat,
+        state, triggeredRole, designatedSeat, day, lastExecutedSeat,
       )
       for (const [seat, claim] of counterClaims) {
         claims.set(seat, claim)
-        this.applyClaimLocally(state, seat, pctx.day, claim, events)
+        this.applyClaimLocally(state, seat, day, claim, events)
       }
     }
 
-    if (claims.size === 0) {
-      return { claims, masonResult: firstResult }
-    }
-
-    // 3. 2nd forward: CO を観測した上で plan を再評価
-    const nnMason = aliveMasons.find(m => this.masonConfig.agents.has(m.seat))
-    if (nnMason) {
-      const agent = this.getAgent(nnMason.seat) as any
-      agent.cachedDay = -1
-      agent.cachedStrategyResult = null
-    }
-
-    const secondResult = this.commitMasonPlans(pctx, ext, aliveMasons)
-    this.distributePlans(ext, aliveSeats, pctx.events)
-
-    return { claims, masonResult: secondResult ?? firstResult }
+    return claims
   }
 
   /**

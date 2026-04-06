@@ -5,7 +5,7 @@
  * ゲームを生成して trajectory を返す。
  */
 
-import { parentPort } from 'node:worker_threads'
+import { parentPort, threadId } from 'node:worker_threads'
 import type { SystemRole } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Agent } from './agents/agent.ts'
@@ -35,6 +35,11 @@ import {
 } from './parallel.ts'
 
 if (!parentPort) throw new Error('game-worker must be run as a worker thread')
+
+// worker 起動時に一度だけ出力（env 継承確認用）
+if (process.env.DESIGNATION_DEBUG) {
+  console.warn(`[game-worker] DESIGNATION_DEBUG=${process.env.DESIGNATION_DEBUG} (threadId=${threadId})`)
+}
 
 parentPort.on('message', async (req: WorkerRequest) => {
   const results = await runBatch(req)

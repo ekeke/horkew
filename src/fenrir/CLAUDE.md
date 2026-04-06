@@ -134,6 +134,13 @@ npm run train:orchestrate -- \
 プロジェクトルートの `train-status.json` が現在のラン（runId, pid, checkpointBase, gitSha）の道標。
 `train-history.jsonl` がラン履歴（起動・終了）の append-only ログ。
 
+## 環境変数
+
+| 変数 | 値 | 効果 | 設定箇所 |
+|------|---|------|---------|
+| `TF_FORCE_GPU_ALLOW_GROWTH` | `true` | TF.js の GPU VRAM 全取り防止 | `npm run train:orchestrate` で自動設定 |
+| `DESIGNATION_DEBUG` | `1` | 指定→CO シミュレーションのデバッグログ出力。起動時に orchestrate + game-worker が有効状態を表示 | 手動: `DESIGNATION_DEBUG=1 npm run train:orchestrate -- ...` |
+
 ## キーモジュール関係図
 
 ```

@@ -842,6 +842,7 @@ async function main(): Promise<void> {
   log(`Git: ${gitSha}${gitDirty ? ' (dirty)' : ''} | ${new Date().toISOString()}`)
   log(`Architecture: ${config.transformer ? 'Transformer' : 'MLP'}${config.strategyOnly ? ' (strategy-only)' : ''}`)
   log(`Iterations: ${config.iterations}/model, Chunk: ${config.chunkSize}, Batch: ${config.batch}`)
+  log(`DESIGNATION_DEBUG=${process.env.DESIGNATION_DEBUG ?? '(unset)'}`)
 
   // === Run ID + Status + History + Progress ===
   const existingProgress = readTrainProgress(config.checkpointBase)
