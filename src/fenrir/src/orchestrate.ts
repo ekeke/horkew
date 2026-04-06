@@ -121,9 +121,9 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   phase2Only: false,
   resume: false,
   learningRate: 3e-4,
-  workers: -1,
-  transformer: false,
-  strategyOnly: false,
+  workers: 4,
+  transformer: true,
+  strategyOnly: true,
   inspectInterval: 0,
   ppoRestart: false,
   skeleton: false,
@@ -187,7 +187,7 @@ Options:
   --target-winrate <n>     目標勝率の上書き (default: baseline eval から自動算出)
   --resume                 (非推奨) 最新チェックポイントから再開。省略時は対話プロンプトで選択
   --lr <n>                 学習率 (default: ${DEFAULT_CONFIG.learningRate})
-  --workers <n|auto>       ゲーム生成ワーカー数 (auto=CPU-1, default: 直列)
+  --workers <n|auto>       ゲーム生成ワーカー数 (auto=CPU-1, default: 4)
   --transformer            Transformerアーキテクチャを使用 (default: MLP)
   --strategy-only          戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
   --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
