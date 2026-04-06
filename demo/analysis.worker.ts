@@ -107,7 +107,7 @@ function handleAnalysis(msg: any) {
       nekomataClaimingDueDate: 99,
       dayCountFrom: 1,
       hasFirstGhost: false,
-      assumptions: new Map(msg.assumptions ?? []),
+      assumptions: new Map<number, SystemRole>(msg.assumptions ?? []),
       wolfPairDenyals: msg.wolfPairDenyals ?? [],
       hocusPocus: new Map(),
       id: 0,

@@ -7,7 +7,7 @@
     "build": "npm run build:lib && npm run build:demo",
     "build:lib": "tsc",
     "test": "node --experimental-strip-types --test --experimental-test-coverage",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p demo/tsconfig.json && tsc --noEmit -p demo/tsconfig.worker.json",
     "build:wasm": "bash src/retar-rs/build.sh all",
     "build:wasm:node": "bash src/retar-rs/build.sh build",
     "build:wasm:web": "bash src/retar-rs/build.sh build-web",

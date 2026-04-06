@@ -20,7 +20,7 @@ class TimeSeekWidget extends WidgetType {
     const btn = document.createElement('button')
     btn.textContent = `\u25B6 ${this.label}`
     btn.className = 'cm-time-seek'
-    btn.addEventListener('mousedown', (e) => {
+    btn.addEventListener('mousedown', (e: MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
       onSeek?.(Math.max(0, this.seconds - 3), this.line)
