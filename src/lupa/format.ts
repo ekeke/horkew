@@ -226,6 +226,11 @@ export function formatHowl(events: readonly any[], state: GameState, config: Lup
         lines.push(`# [予想] ${playerName(event.actor)}: ${parts.join(', ')}`)
         break
       }
+      case 'vote_decisions': {
+        const parts = event.decisions.map((d: any) => `${playerName(d.seat)}=${d.reason}`)
+        lines.push(`# [投票根拠] ${parts.join(', ')}`)
+        break
+      }
       case 'plan_commit': {
         const parts: string[] = []
         if (event.forward) parts.push(`forward: ${event.forward}`)

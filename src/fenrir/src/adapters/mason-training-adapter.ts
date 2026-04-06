@@ -195,6 +195,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     }
 
     const votes = new Map<number, number>()
+    const decisions: Array<{ seat: number, reason: 'plan' | 'heuristic' | 'wolf' | 'agent' }> = []
     const alive = alivePlayers(state)
     for (const player of alive) {
       // 村陣営 + plan あり → 各自が独立に plan を解決して投票
@@ -222,10 +223,12 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
         const target = planToVote(this.planForwardActions, playerCtx, this.planEndgameActions)
         if (target != null && target !== player.seat) {
           votes.set(player.seat, target)
+          decisions.push({ seat: player.seat, reason: 'plan' })
           continue
         }
         // plan 解決失敗 → heuristic フォールバック
         votes.set(player.seat, this.heuristicFallback.decideVote(playerCtx))
+        decisions.push({ seat: player.seat, reason: 'heuristic' })
         continue
       }
 
@@ -253,12 +256,21 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
       if (player.role === 'werewolf' && this.config.wolfTeamAgent) {
         const teamCtx = this.buildTeamCtx(ctx, state, player.role, player.seat)
         votes.set(player.seat, this.config.wolfTeamAgent.decideVote(teamCtx))
+        decisions.push({ seat: player.seat, reason: 'wolf' })
       } else if (isVillagerAligned(player.role)) {
         // plan なしの村陣営: heuristic で投票（NN の decideVote を避けて二重記録を防ぐ）
         votes.set(player.seat, this.heuristicFallback.decideVote(ctx))
+        decisions.push({ seat: player.seat, reason: 'heuristic' })
       } else {
         votes.set(player.seat, this.getAgent(player.seat).decideVote(ctx))
+        decisions.push({ seat: player.seat, reason: 'agent' })
       }
+    }
+
+    // 投票根拠イベント（howl 出力用）
+    if (isFirstRound && decisions.length > 0) {
+      const events = vctx.events as (GameEvent | FenrirExtEvent)[]
+      events.push({ type: 'vote_decisions', decisions })
     }
 
     this.afterVoteCollection(vctx, ext)

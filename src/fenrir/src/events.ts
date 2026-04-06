@@ -22,5 +22,6 @@ export type FenrirExtEvent =
   | { type: 'proposal', actor: number, proposal: Proposal }
   | { type: 'leadership_response', actor: number, response: LeadershipResponse }
   | { type: 'plan_commit', actor: number, forward: string, endgame: string }
+  | { type: 'vote_decisions', decisions: Array<{ seat: number, reason: 'plan' | 'heuristic' | 'wolf' | 'agent' }> }
 
 export type FenrirEvent = GameEvent | FenrirExtEvent
