@@ -254,19 +254,11 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
           done: step.done,
           ...(step.source ? { source: step.source } : {}),
         }
-        if (step.planForwardActions) {
-          const groups = parsePlanIndices(step.planForwardActions)
-          entry.planForward = {
-            indices: step.planForwardActions,
-            description: step.planForwardActions.map(describePlanIndex).join(' '),
-            groups,
-          }
-        }
-        if (step.planEndgameActions) {
-          const groups = parsePlanIndices(step.planEndgameActions)
-          entry.planEndgame = {
-            indices: step.planEndgameActions,
-            description: step.planEndgameActions.map(describePlanIndex).join(' '),
+        if (step.planActions) {
+          const groups = parsePlanIndices(step.planActions)
+          entry.plan = {
+            indices: step.planActions,
+            description: step.planActions.map(describePlanIndex).join(' '),
             groups,
           }
         }
@@ -517,17 +509,16 @@ function ppoUpdate(
     predictLossCoeff?: number, freezePlan?: boolean,
     klCoeff?: number,
   },
-  precomputedRefLogits?: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }>,
-): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klForwardLoss: number, klEndgameLoss: number } {
-  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
+  precomputedRefLogits?: Map<ProcessedStep, { plan?: Float32Array }>,
+): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klPlanLoss: number } {
+  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
 
   let totalPolicyLoss = 0
   let totalValueLoss = 0
   let totalEntropy = 0
   let totalPredictLoss = 0
   let totalKlLoss = 0
-  let totalKlForwardLoss = 0
-  let totalKlEndgameLoss = 0
+  let totalKlPlanLoss = 0
   // grammarLoss removed — GRU decoder enforces grammar structurally
   let batchCount = 0
 
@@ -541,11 +532,9 @@ function ppoUpdate(
     const miniBatch = batch.slice(start, end)
 
     // Reference logits lookup (precomputed per iteration, not per minibatch)
-    let refFwdLogits: (Float32Array | undefined)[] | undefined
-    let refEgLogits: (Float32Array | undefined)[] | undefined
+    let refPlanLogits: (Float32Array | undefined)[] | undefined
     if (precomputedRefLogits && config.klCoeff && config.klCoeff > 0) {
-      refFwdLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.fwd)
-      refEgLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.eg)
+      refPlanLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.plan)
     }
 
     const result = tfNetwork.trainBatch({
@@ -557,17 +546,14 @@ function ppoUpdate(
       returns: miniBatch.map(s => s.returnValue),
       sigmoidActions: miniBatch.map(s => s.sigmoidActions),
       trueRoles: miniBatch.map(s => s.trueRoles),
-      planForwardActions: miniBatch.map(s => s.planForwardActions),
-      planForwardLogProbs: miniBatch.map(s => s.planForwardLogProbs),
-      planEndgameActions: miniBatch.map(s => s.planEndgameActions),
-      planEndgameLogProbs: miniBatch.map(s => s.planEndgameLogProbs),
+      planActions: miniBatch.map(s => s.planActions),
+      planLogProbs: miniBatch.map(s => s.planLogProbs),
       predictLossCoeff: config.predictLossCoeff ?? 0.1,
       clipEpsilon: config.clipEpsilon,
       valueLossCoeff: config.valueLossCoeff,
       entropyCoeff: config.entropyCoeff,
       freezePlan: config.freezePlan,
-      refPlanForwardLogits: refFwdLogits,
-      refPlanEndgameLogits: refEgLogits,
+      refPlanLogits,
       klCoeff: config.klCoeff,
     })
     totalPolicyLoss += result.policyLoss
@@ -575,8 +561,7 @@ function ppoUpdate(
     totalEntropy += result.entropy
     totalPredictLoss += result.predictLoss
     totalKlLoss += result.klLoss
-    totalKlForwardLoss += result.klForwardLoss
-    totalKlEndgameLoss += result.klEndgameLoss
+    totalKlPlanLoss += result.klPlanLoss
     batchCount++
   }
 
@@ -587,8 +572,7 @@ function ppoUpdate(
     entropy: totalEntropy / n,
     predictLoss: totalPredictLoss / n,
     klLoss: totalKlLoss / n,
-    klForwardLoss: totalKlForwardLoss / n,
-    klEndgameLoss: totalKlEndgameLoss / n,
+    klPlanLoss: totalKlPlanLoss / n,
   }
 }
 
@@ -608,7 +592,7 @@ function klTargetForIter(iter: number): number {
 /** KL 診断ログを checkpointBase/kl_log.jsonl に追記 */
 function appendKlLog(
   checkpointBase: string,
-  entry: { iter: number, klForward: number, klEndgame: number, klTotal: number, beta: number, klTarget: number },
+  entry: { iter: number, klPlan: number, klTotal: number, beta: number, klTarget: number },
 ): void {
   const line = JSON.stringify({ ...entry, ts: new Date().toISOString() })
   appendFileSync(`${checkpointBase}/kl_log.jsonl`, line + '\n')
@@ -1043,11 +1027,11 @@ async function main(): Promise<void> {
 
   // === ファクトリ関数 (MLP / Transformer 切り替え) ===
   const makeNetwork = (): AnyNetwork => config.transformer ? createTransformerNetwork() : createNetwork()
-  const makeTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createTransformerTfNetwork(lr) : createTfNetwork(lr)
+  const makeTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createTransformerTfNetwork(lr) : createTfNetwork(lr) as unknown as AnyTfNetwork
   const makeWolfTeamNetwork = (): AnyNetwork => config.transformer ? createWolfTeamTransformerNetwork() : createWolfTeamNetwork()
-  const makeWolfTeamTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createWolfTeamTransformerTfNetwork(lr) : createWolfTeamTfNetwork(lr)
+  const makeWolfTeamTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createWolfTeamTransformerTfNetwork(lr) : createWolfTeamTfNetwork(lr) as unknown as AnyTfNetwork
   const makeMasonTeamNetwork = (): AnyNetwork => config.transformer ? createMasonTeamTransformerNetwork() : createMasonTeamNetwork()
-  const makeMasonTeamTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createMasonTeamTransformerTfNetwork(lr) : createMasonTeamTfNetwork(lr)
+  const makeMasonTeamTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createMasonTeamTransformerTfNetwork(lr) : createMasonTeamTfNetwork(lr) as unknown as AnyTfNetwork
 
   // === ネットワーク作成 ===
   // 推論用 (Pure JS, CPU): モデルごとに1つ
@@ -1182,12 +1166,9 @@ async function main(): Promise<void> {
       const structSamples = generateStructurePretrainBatch(pretrainBatchSize, epoch + 100000)
       const { loss, accuracy, nextAccuracy, stopAccuracy } = (tfNetwork as any).trainSupervisedPlan({
         observations: structSamples.map(s => s.observation),
-        forwardLabels: structSamples.map(s => s.forwardLabels),
-        forwardMasks: structSamples.map(s => s.forwardMask),
-        endgameLabels: structSamples.map(s => s.endgameLabels),
-        endgameMasks: structSamples.map(s => s.endgameMask),
+        labels: structSamples.map(s => s.forwardLabels),
+        masks: structSamples.map(s => s.forwardMask),
         numTokens: structSamples[0].forwardLabels.length,
-        numEndgameTokens: structSamples[0].endgameLabels.length,
         vocabSize: PLAN_VOCAB.SIZE,
       })
       if (nextAccuracy > b2BestNextAcc) b2BestNextAcc = nextAccuracy
@@ -1226,12 +1207,9 @@ async function main(): Promise<void> {
       const samples = generatePlanTokenTrainingBatch(pretrainBatchSize, epoch, tsumiSamples, tsumiRatio)
       const { loss, accuracy, nextAccuracy, stopAccuracy, seatAccuracy } = (tfNetwork as any).trainSupervisedPlan({
         observations: samples.map(s => s.observation),
-        forwardLabels: samples.map(s => s.forwardLabels),
-        forwardMasks: samples.map(s => s.forwardMask),
-        endgameLabels: samples.map(s => s.endgameLabels),
-        endgameMasks: samples.map(s => s.endgameMask),
+        labels: samples.map(s => s.forwardLabels),
+        masks: samples.map(s => s.forwardMask),
         numTokens: samples[0].forwardLabels.length,
-        numEndgameTokens: samples[0].endgameLabels.length,
         vocabSize: PLAN_VOCAB.SIZE,
       })
       if (accuracy > bestAcc) bestAcc = accuracy
@@ -1485,17 +1463,17 @@ async function main(): Promise<void> {
         const tPpoStart = performance.now()
 
         // PPO update
-        let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
+        let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
         if (allSteps.length > 0) {
           normalizeAdvantages(allSteps)
 
-          let precomputedRefLogits: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }> | undefined
+          let precomputedRefLogits: Map<ProcessedStep, { plan?: Float32Array }> | undefined
           if (masonRefNetwork && masonPpoConfig.klCoeff > 0) {
             precomputedRefLogits = new Map()
             for (const step of allSteps) {
               if (step.actionHead === 'strategy') {
-                const { refFwdLogits, refEgLogits } = computeRefPlanLogits(masonRefNetwork, step.observation)
-                precomputedRefLogits.set(step, { fwd: refFwdLogits, eg: refEgLogits })
+                const { refPlanLogits } = computeRefPlanLogits(masonRefNetwork, step.observation)
+                precomputedRefLogits.set(step, { plan: refPlanLogits })
               }
             }
           }
@@ -1520,7 +1498,7 @@ async function main(): Promise<void> {
           masonPpoConfig.klCoeff = Math.max(0.01, Math.min(3, masonPpoConfig.klCoeff))
         }
         appendKlLog(config.checkpointBase, {
-          iter, klForward: lastPpoResult.klForwardLoss, klEndgame: lastPpoResult.klEndgameLoss,
+          iter, klPlan: lastPpoResult.klPlanLoss,
           klTotal: lastPpoResult.klLoss, beta: masonPpoConfig.klCoeff, klTarget: klTargetForIter(iter),
         })
 
@@ -1750,18 +1728,18 @@ async function main(): Promise<void> {
           const tPpoStart = performance.now()
 
           // PPO update (shared TfNN に重みをスワップ)
-          let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
+          let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
           if (allIndividual.length > 0) {
             normalizeAdvantages(allIndividual)
 
             // Reference logits を iteration あたり1回だけ計算（epoch/minibatch をまたいで再利用）
-            let precomputedRefLogits: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }> | undefined
+            let precomputedRefLogits: Map<ProcessedStep, { plan?: Float32Array }> | undefined
             if (refNetwork && ppoConfig.klCoeff && ppoConfig.klCoeff > 0) {
               precomputedRefLogits = new Map()
               for (const step of allIndividual) {
                 if (step.actionHead === 'strategy') {
-                  const { refFwdLogits, refEgLogits } = computeRefPlanLogits(refNetwork, step.observation)
-                  precomputedRefLogits.set(step, { fwd: refFwdLogits, eg: refEgLogits })
+                  const { refPlanLogits } = computeRefPlanLogits(refNetwork, step.observation)
+                  precomputedRefLogits.set(step, { plan: refPlanLogits })
                 }
               }
             }
@@ -1804,7 +1782,7 @@ async function main(): Promise<void> {
             ppoConfig.klCoeff = Math.max(0.01, Math.min(3, ppoConfig.klCoeff))
           }
           appendKlLog(config.checkpointBase, {
-            iter, klForward: lastPpoResult.klForwardLoss, klEndgame: lastPpoResult.klEndgameLoss,
+            iter, klPlan: lastPpoResult.klPlanLoss,
             klTotal: lastPpoResult.klLoss, beta: ppoConfig.klCoeff, klTarget: klTargetForIter(iter),
           })
 
@@ -2048,7 +2026,7 @@ async function main(): Promise<void> {
         const targetIter = Math.min(currentIter + config.chunkSize, config.iterations)
         const prefix = `${COLORS[name]}[${name.padEnd(16)}]${RESET}`
 
-        let lastPpoResult1p = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
+        let lastPpoResult1p = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
         for (let iter = currentIter + 1; iter <= targetIter; iter++) {
           checkShutdown()
           const iterStart = performance.now()
@@ -2268,7 +2246,7 @@ async function main(): Promise<void> {
           const targetIter = Math.min(currentIter + config.chunkSize, config.phase2Iterations)
           const prefix = `${COLORS[name]}[P2 ${name.padEnd(16)}]${RESET}`
 
-          let lastPpoResult2 = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
+          let lastPpoResult2 = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
           for (let iter = currentIter + 1; iter <= targetIter; iter++) {
             checkShutdown()
             const iterStart = performance.now()

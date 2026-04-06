@@ -52,10 +52,8 @@ export type DecisionContext = {
   revoteCandidates: number[] | null
   /** 処刑プラン (空配列 = プランなし) */
   executionPlans: ExecutionPlan[]
-  /** mason の NN が出力した raw plan token indices (forward 8 tokens) */
-  planForwardIndices: number[] | null
-  /** mason の NN が出力した raw plan token indices (endgame 4 tokens) */
-  planEndgameIndices: number[] | null
+  /** NN が出力した raw plan token indices (unified 12 tokens) */
+  planIndices: number[] | null
   /** 詰み探索: 今日処刑すべき席 (詰みなし or 探索失敗時は null) */
   tsumiTarget: number | null
   /** ゲームルール */

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { OBSERVATION_SIZE, SEATS, NUM_ROLES, encodeObservation, tokenize,
-  NUM_PLAN_FORWARD, NUM_PLAN_ENDGAME, RAW_PLAN_START,
+  NUM_PLAN_TOKENS, RAW_PLAN_START,
   FANATIC_OBSERVATION_SIZE, FANATIC_SEAT_FEATURES, FANATIC_CLS_FEATURES,
   encodeFanaticObservation, type VillageNNOutput } from './observation.ts'
 import type { DecisionContext } from './agents/agent.ts'
@@ -19,7 +19,7 @@ const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
 const GLOBAL_RETAR_SIZE = SEATS * NUM_ROLES  // 154
 const PLAN_APPROVED_SIZE = SEATS  // 14
 const NEW_SIGNALS_SIZE = SEATS * 4  // 56
-const RAW_PLAN_SIZE = NUM_PLAN_FORWARD + NUM_PLAN_ENDGAME  // 12
+const RAW_PLAN_SIZE = NUM_PLAN_TOKENS  // 12
 const TSUMI_SIZE = 1
 
 /** テスト用の最小DecisionContext */
@@ -52,8 +52,7 @@ function makeCtx(overrides: Partial<DecisionContext> = {}): DecisionContext {
     revoteRound: null,
     revoteCandidates: null,
     executionPlans: [],
-    planForwardIndices: null,
-    planEndgameIndices: null,
+    planIndices: null,
     tsumiTarget: null,
     rules: resolveRules(),
     ...overrides,
@@ -77,56 +76,40 @@ describe('encodeObservation', () => {
     assert.equal(obs.length, OBSERVATION_SIZE)
   })
 
-  it('raw plan indices default to STOP (21) when no planForwardIndices', () => {
-    const obs = encodeObservation(makeCtx({ planForwardIndices: null, planEndgameIndices: null }))
-    for (let i = 0; i < NUM_PLAN_FORWARD + NUM_PLAN_ENDGAME; i++) {
+  it('raw plan indices default to STOP (21) when no planIndices', () => {
+    const obs = encodeObservation(makeCtx({ planIndices: null }))
+    for (let i = 0; i < NUM_PLAN_TOKENS; i++) {
       assert.equal(obs[RAW_PLAN_START + i], 21, `obs[RAW_PLAN_START+${i}] should be STOP(21)`)
     }
   })
 
-  it('encodes raw plan forward indices correctly', () => {
-    const indices = [2, 5, 14, 21, 0, 0, 0, 0]
-    const obs = encodeObservation(makeCtx({ planForwardIndices: indices }))
-    for (let i = 0; i < NUM_PLAN_FORWARD; i++) {
-      assert.equal(obs[RAW_PLAN_START + i], indices[i], `forward index ${i}`)
-    }
-  })
-
-  it('encodes raw plan endgame indices correctly', () => {
-    const indices = [3, 10, 0, 0]
-    const obs = encodeObservation(makeCtx({ planEndgameIndices: indices }))
-    for (let i = 0; i < NUM_PLAN_ENDGAME; i++) {
-      assert.equal(obs[RAW_PLAN_START + NUM_PLAN_FORWARD + i], indices[i], `endgame index ${i}`)
+  it('encodes raw plan indices correctly', () => {
+    const indices = [2, 5, 14, 21, 0, 0, 0, 0, 0, 0, 0, 0]
+    const obs = encodeObservation(makeCtx({ planIndices: indices }))
+    for (let i = 0; i < NUM_PLAN_TOKENS; i++) {
+      assert.equal(obs[RAW_PLAN_START + i], indices[i], `plan index ${i}`)
     }
   })
 })
 
 describe('tokenize with raw plan indices', () => {
-  it('extracts planForward and planEndgame from encoded observation', () => {
-    const fwdIndices = [2, 5, 14, 21, 0, 0, 0, 0]
-    const egIndices = [3, 10, 0, 0]
-    const obs = encodeObservation(makeCtx({ planForwardIndices: fwdIndices, planEndgameIndices: egIndices }))
+  it('extracts plan from encoded observation', () => {
+    const planIndices = [2, 5, 14, 21, 3, 10, 0, 0, 0, 0, 0, 0]
+    const obs = encodeObservation(makeCtx({ planIndices }))
     const tok = tokenize(obs, false)
 
-    assert.equal(tok.planForward.length, NUM_PLAN_FORWARD, 'planForward length')
-    assert.equal(tok.planEndgame.length, NUM_PLAN_ENDGAME, 'planEndgame length')
+    assert.equal(tok.plan.length, NUM_PLAN_TOKENS, 'plan length')
 
-    for (let i = 0; i < NUM_PLAN_FORWARD; i++) {
-      assert.equal(tok.planForward[i], fwdIndices[i], `planForward[${i}]`)
-    }
-    for (let i = 0; i < NUM_PLAN_ENDGAME; i++) {
-      assert.equal(tok.planEndgame[i], egIndices[i], `planEndgame[${i}]`)
+    for (let i = 0; i < NUM_PLAN_TOKENS; i++) {
+      assert.equal(tok.plan[i], planIndices[i], `plan[${i}]`)
     }
   })
 
   it('returns STOP (21) plan indices when no plans', () => {
-    const obs = encodeObservation(makeCtx({ planForwardIndices: null, planEndgameIndices: null }))
+    const obs = encodeObservation(makeCtx({ planIndices: null }))
     const tok = tokenize(obs, false)
-    for (let i = 0; i < NUM_PLAN_FORWARD; i++) {
-      assert.equal(tok.planForward[i], 21, `planForward[${i}]`)
-    }
-    for (let i = 0; i < NUM_PLAN_ENDGAME; i++) {
-      assert.equal(tok.planEndgame[i], 21, `planEndgame[${i}]`)
+    for (let i = 0; i < NUM_PLAN_TOKENS; i++) {
+      assert.equal(tok.plan[i], 21, `plan[${i}]`)
     }
   })
 })

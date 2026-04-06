@@ -203,15 +203,12 @@ export class TfTransformerNetwork {
   private gruBr: tf.Variable
   private gruBh: tf.Variable
   private planTokenEmbed: tf.Variable   // [vocabSize+1, dModel] — 22 vocab + START
-  private planInitFwdW: tf.Variable     // [dModel, dModel]
-  private planInitFwdB: tf.Variable     // [dModel]
-  private planInitEgW: tf.Variable
-  private planInitEgB: tf.Variable
+  private planInitW: tf.Variable     // [dModel, dModel]
+  private planInitB: tf.Variable     // [dModel]
 
   // Plan observation embeddings (Strategy Encoder input)
   private planVocabEmbed: tf.Variable       // [22, dModel] vocab index → embedding
-  private forwardPosEmbed: tf.Variable      // [8, dModel] position embeddings
-  private endgamePosEmbed: tf.Variable      // [4, dModel] position embeddings
+  private planPosEmbed: tf.Variable         // [12, dModel] position embeddings for unified plan
 
   // Pointer mechanism
   private pointerQueryW: tf.Variable
@@ -345,30 +342,25 @@ export class TfTransformerNetwork {
     this.planTokenEmbed = tf.variable(
       tf.randomNormal([embedSize, dm], 0, 0.02), true, `${prefix}plan_tok_emb`,
     )
-    this.planInitFwdW = this.makeVar([dm, dm], dm, `${prefix}plan_init_fwd_w`)
-    this.planInitFwdB = this.makeZeroVar([dm], `${prefix}plan_init_fwd_b`)
-    this.planInitEgW = this.makeVar([dm, dm], dm, `${prefix}plan_init_eg_w`)
-    this.planInitEgB = this.makeZeroVar([dm], `${prefix}plan_init_eg_b`)
+    this.planInitW = this.makeVar([dm, dm], dm, `${prefix}plan_init_w`)
+    this.planInitB = this.makeZeroVar([dm], `${prefix}plan_init_b`)
     this.allVariables.push(
       this.gruWz, this.gruWr, this.gruWh,
       this.gruUz, this.gruUr, this.gruUh,
       this.gruBz, this.gruBr, this.gruBh,
       this.planTokenEmbed,
-      this.planInitFwdW, this.planInitFwdB,
-      this.planInitEgW, this.planInitEgB,
+      this.planInitW, this.planInitB,
     )
 
     // Plan observation embeddings (vocab + position → Strategy Encoder)
     this.planVocabEmbed = tf.variable(
       tf.randomNormal([vocabSize, dm], 0, 0.02), true, `${prefix}plan_vocab_emb`,
     )
-    this.forwardPosEmbed = tf.variable(
-      tf.randomNormal([NUM_PLAN_FORWARD, dm], 0, 0.02), true, `${prefix}fwd_pos_emb`,
+    const numPlanTokens = tc.numPlanTokens ?? 12
+    this.planPosEmbed = tf.variable(
+      tf.randomNormal([numPlanTokens, dm], 0, 0.02), true, `${prefix}plan_pos_emb`,
     )
-    this.endgamePosEmbed = tf.variable(
-      tf.randomNormal([NUM_PLAN_ENDGAME, dm], 0, 0.02), true, `${prefix}eg_pos_emb`,
-    )
-    this.allVariables.push(this.planVocabEmbed, this.forwardPosEmbed, this.endgamePosEmbed)
+    this.allVariables.push(this.planVocabEmbed, this.planPosEmbed)
 
     // Pointer mechanism
     this.pointerQueryW = this.makeVar([dm, dm], dm, `${prefix}ptr_q_w`)
@@ -706,23 +698,18 @@ export class TfTransformerNetwork {
     )  // [batch, 20, dm]
 
     // Build plan token embeddings from raw indices in observation
+    const numPlanTokens = this.tConfig.numPlanTokens ?? 12
     const rawPlanStart = NEW_SIGNALS_START + NEW_SIGNALS_SIZE
-    const planRaw = obsTensor.slice([0, rawPlanStart], [-1, NUM_PLAN_FORWARD + NUM_PLAN_ENDGAME])  // [batch, 12]
+    const planRaw = obsTensor.slice([0, rawPlanStart], [-1, numPlanTokens])  // [batch, 12]
     const planInt = planRaw.round().clipByValue(0, (this.tConfig.planVocabSize ?? 22) - 1).cast('int32')
-    const fwdIndices = planInt.slice([0, 0], [-1, NUM_PLAN_FORWARD])  // [batch, 8]
-    const egIndices = planInt.slice([0, NUM_PLAN_FORWARD], [-1, NUM_PLAN_ENDGAME])  // [batch, 4]
 
     // Lookup vocab embeddings + add position embeddings
-    const fwdVocab = tf.gather(this.planVocabEmbed, fwdIndices) as tf.Tensor3D  // [batch, 8, dm]
-    const fwdPos = this.forwardPosEmbed.expandDims(0).tile([batch, 1, 1])  // [batch, 8, dm]
-    const fwdTokens = tf.add(fwdVocab, fwdPos)  // [batch, 8, dm]
+    const planVocab = tf.gather(this.planVocabEmbed, planInt) as tf.Tensor3D  // [batch, 12, dm]
+    const planPos = this.planPosEmbed.expandDims(0).tile([batch, 1, 1])  // [batch, 12, dm]
+    const planTokens = tf.add(planVocab, planPos)  // [batch, 12, dm]
 
-    const egVocab = tf.gather(this.planVocabEmbed, egIndices) as tf.Tensor3D  // [batch, 4, dm]
-    const egPos = this.endgamePosEmbed.expandDims(0).tile([batch, 1, 1])  // [batch, 4, dm]
-    const egTokens = tf.add(egVocab, egPos)  // [batch, 4, dm]
-
-    // Stage 2: Strategy Layer (32 tokens: 20 seat + 8 fwd plan + 4 eg plan)
-    const stratInput = tf.concat([seatEncoded, fwdTokens, egTokens], 1) as tf.Tensor3D  // [batch, 32, dm]
+    // Stage 2: Strategy Layer (32 tokens: 20 seat + 12 plan)
+    const stratInput = tf.concat([seatEncoded, planTokens], 1) as tf.Tensor3D  // [batch, 32, dm]
     const stratEncoded = this.forwardEncoder(
       stratInput, this.stratLayers, this.stratFinalLnScale, this.stratFinalLnBias,
     )  // [batch, 32, dm]
@@ -800,19 +787,16 @@ export class TfTransformerNetwork {
       }
 
       // Plan logits via GRU decoder (greedy, START token input)
-      const numForward = this.tConfig.numForwardTokens ?? 8
-      const numEndgame = this.tConfig.numEndgameTokens ?? 4
+      const numPlan = this.tConfig.numPlanTokens ?? 12
       const vocabSize = this.tConfig.planVocabSize ?? 22
       const startIdx = vocabSize  // START token
 
       // Simple greedy decoding for TF forward (used rarely)
-      const fwdPrev = tf.tensor2d([[startIdx, 0, 0, 0, 0, 0, 0, 0].slice(0, numForward)], [1, numForward], 'int32')
-      const fwdLogits = this.decodePlanTF(clsOut, allKeys, fwdPrev, numForward, this.planInitFwdW, this.planInitFwdB)
-      policies.set('plan_forward', fwdLogits.dataSync() as Float32Array)
-
-      const egPrev = tf.tensor2d([[startIdx, 0, 0, 0].slice(0, numEndgame)], [1, numEndgame], 'int32')
-      const egLogits = this.decodePlanTF(clsOut, allKeys, egPrev, numEndgame, this.planInitEgW, this.planInitEgB)
-      policies.set('plan_endgame', egLogits.dataSync() as Float32Array)
+      const planPrev = new Array(numPlan).fill(0)
+      planPrev[0] = startIdx
+      const planPrevTensor = tf.tensor2d([planPrev], [1, numPlan], 'int32')
+      const planLogits = this.decodePlanTF(clsOut, allKeys, planPrevTensor, numPlan, this.planInitW, this.planInitB)
+      policies.set('plan', planLogits.dataSync() as Float32Array)
 
       const rawValue = tf.add(tf.matMul(clsOut, this.valueW), this.valueB).dataSync()[0]
       value = Math.tanh(rawValue)
@@ -833,25 +817,21 @@ export class TfTransformerNetwork {
     returns: number[]
     sigmoidActions?: (Float32Array | undefined)[]
     trueRoles?: (Float32Array | undefined)[]
-    planForwardActions?: (number[] | undefined)[]
-    planForwardLogProbs?: (number[] | undefined)[]
-    planEndgameActions?: (number[] | undefined)[]
-    planEndgameLogProbs?: (number[] | undefined)[]
+    planActions?: (number[] | undefined)[]
+    planLogProbs?: (number[] | undefined)[]
     predictLossCoeff?: number
     clipEpsilon: number
     valueLossCoeff: number
     entropyCoeff: number
     /** plan head の PPO 更新を凍結 (pretrain 後の知識保持用) */
     freezePlan?: boolean
-    /** Reference policy logits for plan forward tokens [numFwd * vocabSize] per step */
-    refPlanForwardLogits?: (Float32Array | undefined)[]
-    /** Reference policy logits for plan endgame tokens [numEg * vocabSize] per step */
-    refPlanEndgameLogits?: (Float32Array | undefined)[]
+    /** Reference policy logits for unified plan tokens [numPlanTokens * vocabSize] per step */
+    refPlanLogits?: (Float32Array | undefined)[]
     /** KL penalty coefficient (β). >0 で KL(π_new || π_ref) を loss に加算 */
     klCoeff?: number
-  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klForwardLoss: number, klEndgameLoss: number } {
+  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klPlanLoss: number } {
     const n = batch.observations.length
-    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
+    if (n === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
 
     const inputSize = this.config.inputSize
     const sigmoidHeadNames = new Set(Object.keys(this.config.sigmoidHeads ?? {}))
@@ -862,7 +842,7 @@ export class TfTransformerNetwork {
       obsData.set(batch.observations[i], i * inputSize)
     }
 
-    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
+    const result = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
 
     // ヘッド別グループ化
     const headGroups = new Map<string, number[]>()
@@ -895,8 +875,7 @@ export class TfTransformerNetwork {
       const strategyIndices = headGroups.get('strategy')
       if (strategyIndices && strategyIndices.length > 0 && !batch.freezePlan) {
         const tc = this.config.transformer!
-        const numFwd = tc.numForwardTokens ?? 8
-        const numEg = tc.numEndgameTokens ?? 4
+        const numPlan = tc.numPlanTokens ?? 12
         const vocabSize = tc.planVocabSize ?? 22
         const START_IDX = vocabSize  // START token index
 
@@ -987,36 +966,24 @@ export class TfTransformerNetwork {
           return { loss, entropy: ent, kl }
         }
 
-        // Plan PPO loss (forward + endgame) via GRU teacher forcing
+        // Plan PPO loss (unified) via GRU teacher forcing
         const klCoeff = batch.klCoeff ?? 0
-        const getRefFwdLogits = klCoeff > 0 ? (i: number) => batch.refPlanForwardLogits?.[i] : undefined
-        const getRefEgLogits = klCoeff > 0 ? (i: number) => batch.refPlanEndgameLogits?.[i] : undefined
+        const getRefPlanLogits = klCoeff > 0 ? (i: number) => batch.refPlanLogits?.[i] : undefined
 
-        const fwdResult = computePlanLoss(
-          numFwd, this.planInitFwdW, this.planInitFwdB,
-          i => batch.planForwardActions?.[i],
-          i => batch.planForwardLogProbs?.[i],
-          getRefFwdLogits,
+        const planResult = computePlanLoss(
+          numPlan, this.planInitW, this.planInitB,
+          i => batch.planActions?.[i],
+          i => batch.planLogProbs?.[i],
+          getRefPlanLogits,
         )
-        totalPolicyLoss = tf.add(totalPolicyLoss, fwdResult.loss)
-        totalEntropy = tf.add(totalEntropy, fwdResult.entropy)
+        totalPolicyLoss = tf.add(totalPolicyLoss, planResult.loss)
+        totalEntropy = tf.add(totalEntropy, planResult.entropy)
 
-        const egResult = computePlanLoss(
-          numEg, this.planInitEgW, this.planInitEgB,
-          i => batch.planEndgameActions?.[i],
-          i => batch.planEndgameLogProbs?.[i],
-          getRefEgLogits,
-        )
-        totalPolicyLoss = tf.add(totalPolicyLoss, egResult.loss)
-        totalEntropy = tf.add(totalEntropy, egResult.entropy)
-
-        // KL penalty: β * (KL_fwd + KL_eg)
+        // KL penalty: β * KL_plan
         if (klCoeff > 0) {
-          const klTotal = tf.add(fwdResult.kl, egResult.kl) as tf.Scalar
-          totalPolicyLoss = tf.add(totalPolicyLoss, tf.mul(tf.scalar(klCoeff), klTotal))
-          result.klLoss = klTotal.dataSync()[0]
-          result.klForwardLoss = fwdResult.kl.dataSync()[0]
-          result.klEndgameLoss = egResult.kl.dataSync()[0]
+          totalPolicyLoss = tf.add(totalPolicyLoss, tf.mul(tf.scalar(klCoeff), planResult.kl))
+          result.klLoss = planResult.kl.dataSync()[0]
+          result.klPlanLoss = planResult.kl.dataSync()[0]
         }
 
         headGroups.delete('strategy')  // 通常ヘッドループでは処理しない
@@ -1294,12 +1261,9 @@ export class TfTransformerNetwork {
    */
   trainSupervisedPlan(batch: {
     observations: Float32Array[]
-    forwardLabels: number[][]      // [n, numTokens] vocab indices
-    forwardMasks: boolean[][]      // [n, numTokens] which tokens to train on
-    endgameLabels?: number[][]     // [n, numEgTokens] vocab indices
-    endgameMasks?: boolean[][]     // [n, numEgTokens] which tokens to train on
+    labels: number[][]             // [n, numTokens] vocab indices
+    masks: boolean[][]             // [n, numTokens] which tokens to train on
     numTokens: number
-    numEndgameTokens?: number
     vocabSize: number
   }): { loss: number, accuracy: number, nextAccuracy: number, stopAccuracy: number, seatAccuracy: number } {
     const n = batch.observations.length
@@ -1385,13 +1349,8 @@ export class TfTransformerNetwork {
         }
       }
 
-      // Forward plan via GRU teacher forcing
-      computeCE(numTokens, this.planInitFwdW, this.planInitFwdB, batch.forwardLabels, batch.forwardMasks)
-
-      // Endgame plan
-      if (batch.endgameLabels && batch.endgameMasks && batch.numEndgameTokens) {
-        computeCE(batch.numEndgameTokens, this.planInitEgW, this.planInitEgB, batch.endgameLabels, batch.endgameMasks)
-      }
+      // Unified plan via GRU teacher forcing
+      computeCE(numTokens, this.planInitW, this.planInitB, batch.labels, batch.masks)
 
       if (totalMasked > 0) {
         result.accuracy = correct / totalMasked
@@ -1461,14 +1420,11 @@ export class TfTransformerNetwork {
     weights.set('gru_br', this.gruBr.dataSync() as Float32Array)
     weights.set('gru_bh', this.gruBh.dataSync() as Float32Array)
     weights.set('plan_token_embed', this.planTokenEmbed.dataSync() as Float32Array)
-    weights.set('plan_init_fwd_w', this.planInitFwdW.dataSync() as Float32Array)
-    weights.set('plan_init_fwd_b', this.planInitFwdB.dataSync() as Float32Array)
-    weights.set('plan_init_eg_w', this.planInitEgW.dataSync() as Float32Array)
-    weights.set('plan_init_eg_b', this.planInitEgB.dataSync() as Float32Array)
+    weights.set('plan_init_w', this.planInitW.dataSync() as Float32Array)
+    weights.set('plan_init_b', this.planInitB.dataSync() as Float32Array)
 
     weights.set('plan_vocab_embed', this.planVocabEmbed.dataSync() as Float32Array)
-    weights.set('forward_pos_embed', this.forwardPosEmbed.dataSync() as Float32Array)
-    weights.set('endgame_pos_embed', this.endgamePosEmbed.dataSync() as Float32Array)
+    weights.set('plan_pos_embed', this.planPosEmbed.dataSync() as Float32Array)
 
     weights.set('pointer_query_w', this.pointerQueryW.dataSync() as Float32Array)
     weights.set('pointer_query_b', this.pointerQueryB.dataSync() as Float32Array)
@@ -1548,8 +1504,7 @@ export class TfTransformerNetwork {
         ['gru_uz', this.gruUz], ['gru_ur', this.gruUr], ['gru_uh', this.gruUh],
         ['gru_bz', this.gruBz], ['gru_br', this.gruBr], ['gru_bh', this.gruBh],
         ['plan_token_embed', this.planTokenEmbed],
-        ['plan_init_fwd_w', this.planInitFwdW], ['plan_init_fwd_b', this.planInitFwdB],
-        ['plan_init_eg_w', this.planInitEgW], ['plan_init_eg_b', this.planInitEgB],
+        ['plan_init_w', this.planInitW], ['plan_init_b', this.planInitB],
       ]
       for (const [key, variable] of gruMap) {
         const w = weights.get(key)
@@ -1558,10 +1513,8 @@ export class TfTransformerNetwork {
 
       const pve = weights.get('plan_vocab_embed')
       if (pve) this.planVocabEmbed.assign(tf.tensor(pve, this.planVocabEmbed.shape))
-      const fpe = weights.get('forward_pos_embed')
-      if (fpe) this.forwardPosEmbed.assign(tf.tensor(fpe, this.forwardPosEmbed.shape))
-      const epe = weights.get('endgame_pos_embed')
-      if (epe) this.endgamePosEmbed.assign(tf.tensor(epe, this.endgamePosEmbed.shape))
+      const ppe = weights.get('plan_pos_embed')
+      if (ppe) this.planPosEmbed.assign(tf.tensor(ppe, this.planPosEmbed.shape))
 
       this.pointerQueryW.assign(tf.tensor(weights.get('pointer_query_w')!, this.pointerQueryW.shape))
       this.pointerQueryB.assign(tf.tensor(weights.get('pointer_query_b')!, this.pointerQueryB.shape))

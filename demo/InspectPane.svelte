@@ -432,7 +432,7 @@
                     <span class="col-num" class:positive={step.reward > 0} class:negative={step.reward < 0}>
                       {step.reward !== 0 ? step.reward.toFixed(3) : '-'}
                     </span>
-                    <span class="col-num val">{step.value.toFixed(3)}</span>
+                    <span class="col-num val">{step.value != null ? step.value.toFixed(3) : '-'}</span>
                   </button>
                 {/each}
               {/if}
@@ -564,8 +564,8 @@
             <div class="detail-kv">
               <span class="kv-k">Head</span><span>{selectedStep.actionHead}</span>
               <span class="kv-k">Desc</span><span>{selectedStep.actionDescription}</span>
-              <span class="kv-k">logProb</span><span>{selectedStep.logProb.toFixed(4)}</span>
-              <span class="kv-k">Value</span><span>{selectedStep.value.toFixed(4)}</span>
+              <span class="kv-k">logProb</span><span>{selectedStep.logProb != null ? selectedStep.logProb.toFixed(4) : '-'}</span>
+              <span class="kv-k">Value</span><span>{selectedStep.value != null ? selectedStep.value.toFixed(4) : '-'}</span>
             </div>
           </div>
 
@@ -605,7 +605,7 @@
 
           <div class="detail-section">
             <div class="detail-kv">
-              <span class="kv-k">Reward</span><span class:positive={selectedStep.reward > 0} class:negative={selectedStep.reward < 0}>{selectedStep.reward.toFixed(4)}</span>
+              <span class="kv-k">Reward</span><span class:positive={selectedStep.reward > 0} class:negative={selectedStep.reward < 0}>{selectedStep.reward != null ? selectedStep.reward.toFixed(4) : '-'}</span>
             </div>
           </div>
 

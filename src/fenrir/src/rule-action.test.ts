@@ -17,7 +17,7 @@ describe('parsePlanIndices', () => {
 
   it('multiple groups separated by next', () => {
     // seat3, next, seat12, next, grayran, stop
-    const indices = [2, PLAN_VOCAB.NEXT, 11, PLAN_VOCAB.NEXT, PLAN_VOCAB.GRAYRAN, PLAN_VOCAB.STOP]
+    const indices = [2, PLAN_VOCAB.OR, 11, PLAN_VOCAB.OR, PLAN_VOCAB.GRAYRAN, PLAN_VOCAB.STOP]
     const groups = parsePlanIndices(indices)
     assert.equal(groups.length, 3)
     assert.deepEqual(groups[0].targets, [{ type: 'seat', seat: 3 }])
@@ -154,7 +154,7 @@ describe('plan day increment (mason死亡後のplan継続)', () => {
 
   it('mason dies after day 0, plan continues for 2 more days', () => {
     // Plan: seat3, next, seat7, next, seat12, stop
-    const indices = [2, PLAN_VOCAB.NEXT, 6, PLAN_VOCAB.NEXT, 11, PLAN_VOCAB.STOP]
+    const indices = [2, PLAN_VOCAB.OR, 6, PLAN_VOCAB.OR, 11, PLAN_VOCAB.STOP]
     const alive = [
       [1, 3, 5, 7, 9, 12],  // Day 0: mason alive
       [1, 5, 7, 9, 12],     // Day 1: mason dead, seat3 executed
@@ -166,7 +166,7 @@ describe('plan day increment (mason死亡後のplan継続)', () => {
 
   it('cached plan skips dead targets', () => {
     // Plan: seat3, next, seat7, next, seat12, stop
-    const indices = [2, PLAN_VOCAB.NEXT, 6, PLAN_VOCAB.NEXT, 11, PLAN_VOCAB.STOP]
+    const indices = [2, PLAN_VOCAB.OR, 6, PLAN_VOCAB.OR, 11, PLAN_VOCAB.STOP]
     const alive = [
       [1, 3, 5, 7, 12],  // Day 0: mason alive
       [1, 5, 12],         // Day 1: mason dead, seat3 & seat7 both dead
@@ -180,7 +180,7 @@ describe('plan day increment (mason死亡後のplan継続)', () => {
 
   it('grayran in cached plan resolves to first alive', () => {
     // Plan: seat3, next, grayran, stop
-    const indices = [2, PLAN_VOCAB.NEXT, PLAN_VOCAB.GRAYRAN, PLAN_VOCAB.STOP]
+    const indices = [2, PLAN_VOCAB.OR, PLAN_VOCAB.GRAYRAN, PLAN_VOCAB.STOP]
     const alive = [
       [1, 3, 5, 7],  // Day 0: mason alive
       [1, 5, 7],     // Day 1: mason dead
@@ -204,7 +204,7 @@ describe('plan day increment (mason死亡後のplan継続)', () => {
 
   it('mason survives multiple days, cache updates each day', () => {
     // Plan: seat3, next, seat7, next, seat12, stop
-    const indices = [2, PLAN_VOCAB.NEXT, 6, PLAN_VOCAB.NEXT, 11, PLAN_VOCAB.STOP]
+    const indices = [2, PLAN_VOCAB.OR, 6, PLAN_VOCAB.OR, 11, PLAN_VOCAB.STOP]
     const alive = [
       [1, 3, 5, 7, 12],  // Day 0: mason alive
       [1, 5, 7, 12],     // Day 1: mason alive (seat3 executed)

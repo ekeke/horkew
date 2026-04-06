@@ -1,23 +1,19 @@
 /**
- * Plan group 解決 — PlanDayGroup を具体的な seat に変換
- *
- * resolveGroup (旧 rule-action.ts 内部) と resolvePlanGroupSimple を統合。
+ * Plan slot 解決 — PlanSlot を具体的な seat に変換
  */
 
 import type { Rng } from '../../../lupa/random.ts'
-import type { PlanDayGroup } from './plan-vocab.ts'
+import type { PlanSlot } from './plan-vocab.ts'
 
 export type ResolvePlanOptions = {
   /** 自分を除外（投票時） */
   excludeSeat?: number
-  /** 追加の除外席（endgame 保護対象など） */
-  excludeSeats?: ReadonlySet<number>
   /** grayran のランダム選択（なければ先頭） */
   rng?: Rng
 }
 
 /**
- * PlanDayGroup から投票先 seat を解決
+ * PlanSlot から投票先 seat を解決
  *
  * targets を順に試行し、最初に有効な seat を返す。
  * - seat: 生存かつ excludeSeat でなければ採用
@@ -26,18 +22,17 @@ export type ResolvePlanOptions = {
  *
  * @returns 投票先seat (1-indexed) or null
  */
-export function resolvePlanGroup(
-  group: PlanDayGroup,
+export function resolvePlanSlot(
+  slot: PlanSlot,
   aliveSeats: number[],
   events: readonly any[] = [],
   opts?: ResolvePlanOptions,
 ): number | null {
   const aliveSet = new Set(aliveSeats)
   const excludeSeat = opts?.excludeSeat
-  const excludeSeats = opts?.excludeSeats
   const rng = opts?.rng
 
-  const isExcluded = (s: number) => s === excludeSeat || (excludeSeats !== undefined && excludeSeats.has(s))
+  const isExcluded = (s: number) => s === excludeSeat
 
   // CO者を収集（role 解決・grayran 除外用）
   const coClaimed = new Map<string, number[]>()  // role → seats
@@ -55,7 +50,7 @@ export function resolvePlanGroup(
     }
   }
 
-  for (const target of group.targets) {
+  for (const target of slot.targets) {
     if (target.type === 'seat') {
       if (aliveSet.has(target.seat) && !isExcluded(target.seat)) return target.seat
     } else if (target.type === 'role') {
@@ -78,3 +73,6 @@ export function resolvePlanGroup(
   }
   return null
 }
+
+/** @deprecated resolvePlanSlot に置換 */
+export const resolvePlanGroup = resolvePlanSlot

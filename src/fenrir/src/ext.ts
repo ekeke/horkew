@@ -11,9 +11,12 @@ import type { PlanState } from './plan/plan-helpers.ts'
 import type { SignalRecord } from './communication.ts'
 import type { Proposal } from './leadership.ts'
 import type { RetarResult } from './retar-bridge.ts'
+import { PLAN_VOCAB } from './plan/plan-vocab.ts'
+import { NUM_PLAN_TOKENS } from './observation.ts'
 
 // PlanState は plan/plan-helpers.ts で定義済み、ここでは re-export のみ
 export type { PlanState } from './plan/plan-helpers.ts'
+export { NUM_PLAN_TOKENS } from './observation.ts'
 
 /** Retar 解析結果のキャッシュ */
 export type RetarCache = {
@@ -51,10 +54,8 @@ export type FenrirExt = {
   planState: PlanState
   /** 村全体に公開された処刑プラン */
   executionPlans: ExecutionPlan[]
-  /** mason の NN が出力した raw plan token indices (forward 8 tokens, vocab 0-21) */
-  planForwardIndices: number[]
-  /** mason の NN が出力した raw plan token indices (endgame 4 tokens, vocab 0-21) */
-  planEndgameIndices: number[]
+  /** NN が出力した raw plan token indices (unified 12 tokens, vocab 0-21) */
+  planIndices: number[]
   /** Retar 解析結果のキャッシュ */
   retarCache: RetarCache | null
   /** 詰み判定キャッシュ: day → isTsumi */
@@ -69,15 +70,13 @@ export type FenrirExt = {
 export function createFenrirExt(): FenrirExt {
   return {
     planState: {
-      forwardGroups: [],
-      endgameGroups: [],
-      dayIndex: 0,
+      slots: [],
+      initialNooseCount: 0,
       mlMasonSeat: null,
       masonTakeoverDone: false,
     },
     executionPlans: [],
-    planForwardIndices: [21, 21, 21, 21, 21, 21, 21, 21],
-    planEndgameIndices: [21, 21, 21, 21],
+    planIndices: new Array(NUM_PLAN_TOKENS).fill(PLAN_VOCAB.STOP),
     retarCache: null,
     tsumiCache: new Map(),
     tsumiTarget: null,

@@ -1,8 +1,10 @@
 /**
  * StrategyBaseAdapter — strategy-only 系 adapter の基底クラス
  *
- * Plan ライフサイクル（planState → executionPlans 通達・dayIndex 進行）と
+ * Plan ライフサイクル（planState → executionPlans 通達）と
  * 共通の Retar/Tsumi/投票収集ロジックを管理。
+ *
+ * Plan 消費は縄数ベースで暗黙的に決まるため、明示的な dayIndex 進行は不要。
  *
  * onVote はテンプレートメソッドパターンで構成:
  *   1. Retar + Tsumi
@@ -20,7 +22,7 @@ import type { DecisionContext, TeamDecisionContext, Agent, WolfNightAction, Exec
 import type { FenrirExt } from '../ext.ts'
 import type { FenrirExtEvent } from '../events.ts'
 import type { StrategyBaseAdapterConfig, CapturedObservation } from './adapter-types.ts'
-import type { PlanDayGroup } from '../plan/plan-vocab.ts'
+import type { PlanSlot } from '../plan/plan-vocab.ts'
 import type { Proposal } from '../leadership.ts'
 import { createFenrirExt } from '../ext.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
@@ -32,23 +34,23 @@ import {
   lupaRunRetar,
 } from '../retar-bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
-import { resolvePlanGroup } from '../plan/plan-resolve.ts'
-import { parsePlanIndices, stripFirstPlanGroup } from '../plan/plan-vocab.ts'
+import { resolvePlanSlot } from '../plan/plan-resolve.ts'
+import { parsePlanSlots } from '../plan/plan-vocab.ts'
+import { nooseCount } from '../plan/plan-helpers.ts'
 import { collectObservation } from '../observation.ts'
 
-/** PlanDayGroup[] → ExecutionPlan[] に変換（observation 注入用） */
-function planGroupsToExecutionPlans(
-  groups: PlanDayGroup[],
+/** PlanSlot[] → ExecutionPlan[] に変換（observation 注入用） */
+function planSlotsToExecutionPlans(
+  slots: PlanSlot[],
   aliveSeats: number[],
   events: readonly any[],
-  type: 'designated' | 'endgame',
   rng?: Rng,
 ): ExecutionPlan[] {
   const plans: ExecutionPlan[] = []
-  for (const group of groups) {
-    const seat = resolvePlanGroup(group, aliveSeats, events, { rng })
+  for (const slot of slots) {
+    const seat = resolvePlanSlot(slot, aliveSeats, events, { rng })
     if (seat != null) {
-      plans.push({ targets: [seat], type })
+      plans.push({ targets: [seat], type: 'designated' })
     }
   }
   return plans
@@ -62,8 +64,6 @@ export abstract class StrategyBaseAdapter
   protected readonly capturedObservations: CapturedObservation[] = []
   private retarAccMs = 0
   private retarCallCount = 0
-  /** revote での dayIndex 重複 advance 防止 */
-  private lastAdvancedDay = -1
 
   constructor(config: StrategyBaseAdapterConfig) {
     this.config = config
@@ -243,13 +243,11 @@ export abstract class StrategyBaseAdapter
     return []
   }
 
-  /** 投票収集の後に呼ばれる。plan の日送りを行う。 */
+  /** 投票収集の後に呼ばれる。 */
   protected afterVoteCollection(
-    vctx: VoteContext<FenrirExtEvent, FenrirExt>,
-    ext: FenrirExt,
-  ): void {
-    this.advancePlanOnce(ext, vctx.day)
-  }
+    _vctx: VoteContext<FenrirExtEvent, FenrirExt>,
+    _ext: FenrirExt,
+  ): void {}
 
   // ════════════════════════════════════════════
   // Plan distribution (base が所有)
@@ -262,41 +260,22 @@ export abstract class StrategyBaseAdapter
     events: readonly (GameEvent | FenrirExtEvent)[],
   ): void {
     const ps = ext.planState
-    const fwdPlans = ps.forwardGroups.length > 0
-      ? planGroupsToExecutionPlans(ps.forwardGroups, aliveSeats, events, 'designated', this.rng)
-      : []
-    const egPlans = ps.endgameGroups.length > 0
-      ? planGroupsToExecutionPlans(ps.endgameGroups, aliveSeats, events, 'endgame', this.rng)
-      : []
-    if (fwdPlans.length > 0 || egPlans.length > 0) {
-      ext.executionPlans = [...fwdPlans, ...egPlans]
+    if (ps.slots.length > 0) {
+      ext.executionPlans = planSlotsToExecutionPlans(ps.slots, aliveSeats, events, this.rng)
     }
   }
 
   /** NN 出力の plan tokens を ext に保存する（infrastructure） */
   protected commitPlanTokens(
     ext: FenrirExt,
-    forwardActions: number[] | null,
-    endgameActions: number[] | null,
+    planActions: number[] | null,
+    aliveCount: number,
   ): void {
-    if (forwardActions) {
-      ext.planForwardIndices = [...forwardActions]
-      ext.planState.forwardGroups = parsePlanIndices(forwardActions)
+    if (planActions) {
+      ext.planIndices = [...planActions]
+      ext.planState.slots = parsePlanSlots(planActions)
+      ext.planState.initialNooseCount = nooseCount(aliveCount)
     }
-    if (endgameActions) {
-      ext.planEndgameIndices = [...endgameActions]
-      ext.planState.endgameGroups = parsePlanIndices(endgameActions)
-    }
-  }
-
-  /** forward plan を1日分進める（raw indices + parsed groups を同期更新、revote 安全） */
-  protected advancePlanOnce(ext: FenrirExt, day: number): void {
-    if (this.lastAdvancedDay >= day) return
-    this.lastAdvancedDay = day
-
-    ext.planForwardIndices = stripFirstPlanGroup(ext.planForwardIndices, ext.planForwardIndices.length)
-    ext.planState.forwardGroups = ext.planState.forwardGroups.slice(1)
-    ext.planState.dayIndex++
   }
 
   // ════════════════════════════════════════════
@@ -387,8 +366,7 @@ export abstract class StrategyBaseAdapter
       revoteRound: null,
       revoteCandidates: null,
       executionPlans: ext.executionPlans,
-      planForwardIndices: ext.planForwardIndices,
-      planEndgameIndices: ext.planEndgameIndices,
+      planIndices: ext.planIndices,
       tsumiTarget: ext.tsumiTarget,
       rules: pctx.rules,
       ...extra,

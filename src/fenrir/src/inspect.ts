@@ -320,19 +320,11 @@ for (let g = 0; g < count; g++) {
       }
 
       // Plan tokens
-      if (step.planForwardActions) {
-        const groups = parsePlanIndices(step.planForwardActions)
-        entry.planForward = {
-          indices: step.planForwardActions,
-          description: describePlanIndices(step.planForwardActions),
-          groups,
-        }
-      }
-      if (step.planEndgameActions) {
-        const groups = parsePlanIndices(step.planEndgameActions)
-        entry.planEndgame = {
-          indices: step.planEndgameActions,
-          description: describePlanIndices(step.planEndgameActions),
+      if (step.planActions) {
+        const groups = parsePlanIndices(step.planActions)
+        entry.plan = {
+          indices: step.planActions,
+          description: describePlanIndices(step.planActions),
           groups,
         }
       }

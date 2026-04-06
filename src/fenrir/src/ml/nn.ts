@@ -157,11 +157,9 @@ export type TransformerNetworkConfig = {
   seatLayers: number        // e.g. 3
   /** Strategy Layer層数 */
   strategyLayers: number    // e.g. 2
-  /** Forward Plan token数 (Strategy Layerの出力トークン) */
-  numForwardTokens: number  // e.g. 8
-  /** Endgame Plan token数 (Strategy Layerの出力トークン) */
-  numEndgameTokens: number  // e.g. 4
-  /** Pointer語彙サイズ (14席 + 5役職 + grayran + next + stop) */
+  /** Plan token数 (unified: forward + endgame 統合) */
+  numPlanTokens: number     // 12
+  /** Pointer語彙サイズ (14席 + 5役職 + grayran + or + stop) */
   planVocabSize: number     // 22 = PLAN_VOCAB.SIZE
 
   // 旧互換
@@ -176,11 +174,9 @@ export type TransformerNetworkConfig = {
 export type ForwardResult = {
   policies: Map<string, Float32Array>  // head_name → logits (pre-softmax)
   value: number                         // scalar value estimate
-  // Autoregressive plan decoder outputs (populated by TransformerNetwork)
-  planForwardActions?: number[]
-  planForwardLogProbs?: number[]
-  planEndgameActions?: number[]
-  planEndgameLogProbs?: number[]
+  // Autoregressive plan decoder outputs (unified, populated by TransformerNetwork)
+  planActions?: number[]
+  planLogProbs?: number[]
 }
 
 /** Plan decoder に渡す盤面文脈（死亡席・未CO役職の mask 用） */
@@ -215,22 +211,18 @@ export interface AnyTfNetwork {
     returns: number[]
     sigmoidActions?: (Float32Array | undefined)[]
     trueRoles?: (Float32Array | undefined)[]
-    planForwardActions?: (number[] | undefined)[]
-    planForwardLogProbs?: (number[] | undefined)[]
-    planEndgameActions?: (number[] | undefined)[]
-    planEndgameLogProbs?: (number[] | undefined)[]
+    planActions?: (number[] | undefined)[]
+    planLogProbs?: (number[] | undefined)[]
     predictLossCoeff?: number
     clipEpsilon: number
     valueLossCoeff: number
     entropyCoeff: number
     freezePlan?: boolean
-    /** Reference policy logits for plan forward tokens [numFwd * vocabSize] per step */
-    refPlanForwardLogits?: (Float32Array | undefined)[]
-    /** Reference policy logits for plan endgame tokens [numEg * vocabSize] per step */
-    refPlanEndgameLogits?: (Float32Array | undefined)[]
+    /** Reference policy logits for unified plan tokens [numPlanTokens * vocabSize] per step */
+    refPlanLogits?: (Float32Array | undefined)[]
     /** KL penalty coefficient (β). >0 で KL(π_new || π_ref) を loss に加算 */
     klCoeff?: number
-  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klForwardLoss: number, klEndgameLoss: number }
+  }): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klPlanLoss: number }
   cloneWeights(): Map<string, Float32Array>
   loadWeights(weights: Map<string, Float32Array>): void
   get totalParams(): number

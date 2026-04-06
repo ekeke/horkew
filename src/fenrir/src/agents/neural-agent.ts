@@ -17,8 +17,8 @@ import {
 } from '../action.ts'
 import { endgameVoteReward } from '../reward.ts'
 import { sigmoid } from '../ml/nn.ts'
-import { parsePlanIndices } from '../plan/plan-vocab.ts'
-import { planToVote, nightAction, dayClaim, communication, proposal, leadershipResponse } from '../plan/plan-helpers.ts'
+import { parsePlanSlots } from '../plan/plan-vocab.ts'
+import { planToVote, nightAction, dayClaim, communication, proposal, leadershipResponse, nooseCount } from '../plan/plan-helpers.ts'
 import { isVillagerAligned } from '../../../lupa/roles.ts'
 import { RuleBasedAgent } from './rule-based-agent.ts'
 
@@ -236,8 +236,7 @@ export class NeuralAgent implements Agent {
 
   /** 戦略ステップ（plan tokens + predict）を1つのtrajectoryステップとして記録 */
   recordStrategy(
-    forwardActions: number[], forwardLogProbs: number[],
-    endgameActions: number[], endgameLogProbs: number[],
+    planActions: number[], planLogProbs: number[],
     predictActions: Float32Array | undefined,
     value: number, seat: number,
     aliveCount: number,
@@ -245,12 +244,11 @@ export class NeuralAgent implements Agent {
     source?: string,
   ): void {
     let totalLogProb = 0
-    for (const lp of forwardLogProbs) totalLogProb += lp
-    for (const lp of endgameLogProbs) totalLogProb += lp
+    for (const lp of planLogProbs) totalLogProb += lp
 
-    const nawa = Math.floor((aliveCount - 1) / 2)
-    const groups = parsePlanIndices(forwardActions).length
-    const depthReward = nawa > 0 ? Math.max(0, 1 - Math.abs(groups - nawa) / nawa) * PLAN_DEPTH_REWARD_SCALE : 0
+    const nawa = nooseCount(aliveCount)
+    const slots = parsePlanSlots(planActions).length
+    const depthReward = nawa > 0 ? Math.max(0, 1 - Math.abs(slots - nawa) / nawa) * PLAN_DEPTH_REWARD_SCALE : 0
 
     this.trajectory.push({
       seat,
@@ -262,10 +260,8 @@ export class NeuralAgent implements Agent {
       reward: depthReward,
       value,
       done: false,
-      planForwardActions: forwardActions,
-      planForwardLogProbs: forwardLogProbs,
-      planEndgameActions: endgameActions,
-      planEndgameLogProbs: endgameLogProbs,
+      planActions,
+      planLogProbs,
       sigmoidActions: predictActions,
       source,
     })
@@ -338,19 +334,17 @@ export class NeuralAgent implements Agent {
       const predictLogits = result.policies.get('predict')
       const predictActions = predictLogits ? sigmoid(predictLogits) : undefined
 
-      if (result.planForwardActions && result.planEndgameActions) {
+      if (result.planActions) {
         this.recordStrategy(
-          result.planForwardActions, result.planForwardLogProbs!,
-          result.planEndgameActions, result.planEndgameLogProbs!,
+          result.planActions, result.planLogProbs!,
           predictActions, result.value, ctx.mySeat,
           ctx.alivePlayers.length, ctx.day,
           'NeuralAgent.decideVote:strategyOnly',
         )
       }
 
-      const fwdActions = result.planForwardActions
-      if (isVillagerAligned(ctx.myRole) && fwdActions) {
-        const voteSeat = planToVote(fwdActions, ctx, result.planEndgameActions)
+      if (isVillagerAligned(ctx.myRole) && result.planActions) {
+        const voteSeat = planToVote(result.planActions, ctx)
         if (voteSeat && voteSeat !== ctx.mySeat) return voteSeat
       }
       const targets = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
@@ -382,7 +376,7 @@ export class NeuralAgent implements Agent {
     if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideCommunication(ctx)
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
-      return communication(result.planForwardActions ?? null, ctx)
+      return communication(result.planActions ?? null, ctx)
     }
 
     const result = this.infer(ctx)
@@ -414,7 +408,7 @@ export class NeuralAgent implements Agent {
 
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
-      return proposal(result.planForwardActions ?? null, ctx)
+      return proposal(result.planActions ?? null, ctx)
     }
 
     const result = this.infer(ctx)
@@ -475,10 +469,9 @@ export class NeuralAgent implements Agent {
 export function computeRefPlanLogits(
   refNetwork: AnyNetwork,
   observation: Float32Array,
-): { refFwdLogits: Float32Array | undefined, refEgLogits: Float32Array | undefined } {
+): { refPlanLogits: Float32Array | undefined } {
   const result = refNetwork.forward(observation)
   return {
-    refFwdLogits: result.policies.get('plan_forward'),
-    refEgLogits: result.policies.get('plan_endgame'),
+    refPlanLogits: result.policies.get('plan'),
   }
 }

@@ -60,12 +60,10 @@ const PLAN_APPROVED_SIZE = SEATS  // 14
 const NEW_SIGNALS_PER_SEAT = 4
 const NEW_SIGNALS_SIZE = SEATS * NEW_SIGNALS_PER_SEAT  // 56
 
-// Raw plan token indices: forward(8) + endgame(4) vocab indices (0-21)
-/** forward plan token 数 */
-export const NUM_PLAN_FORWARD = 8
-/** endgame plan token 数 */
-export const NUM_PLAN_ENDGAME = 4
-const RAW_PLAN_SIZE = NUM_PLAN_FORWARD + NUM_PLAN_ENDGAME  // 12
+// Raw plan token indices: unified 12 vocab indices (0-21)
+/** Plan token の最大長 (unified) */
+export const NUM_PLAN_TOKENS = 12
+const RAW_PLAN_SIZE = NUM_PLAN_TOKENS  // 12
 
 // 詰み情報: tsumi_target_seat スカラー (0=詰みなし, seat/SEATS=詰み対象席)
 const TSUMI_SIZE = 1
@@ -129,10 +127,8 @@ export type TokenizedObservation = {
   cls: Float32Array
   /** 席トークン [SEATS * seatFeatures] — flat, stride = seatFeatures */
   seats: Float32Array
-  /** Forward plan token raw indices [NUM_PLAN_FORWARD] (vocab 0-21) */
-  planForward: Float32Array
-  /** Endgame plan token raw indices [NUM_PLAN_ENDGAME] (vocab 0-21) */
-  planEndgame: Float32Array
+  /** Unified plan token raw indices [NUM_PLAN_TOKENS] (vocab 0-21) */
+  plan: Float32Array
   /** Role tokens [NUM_ROLE_TOKENS * ROLE_TOKEN_FEATURES] — flat */
   roles: Float32Array
   /** 席特徴量次元 */
@@ -245,10 +241,8 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
   }
 
   // ========== Raw plan indices ==========
-  const planForward = new Float32Array(NUM_PLAN_FORWARD)
-  for (let i = 0; i < NUM_PLAN_FORWARD; i++) planForward[i] = obs[RAW_PLAN_START + i]
-  const planEndgame = new Float32Array(NUM_PLAN_ENDGAME)
-  for (let i = 0; i < NUM_PLAN_ENDGAME; i++) planEndgame[i] = obs[RAW_PLAN_START + NUM_PLAN_FORWARD + i]
+  const plan = new Float32Array(NUM_PLAN_TOKENS)
+  for (let i = 0; i < NUM_PLAN_TOKENS; i++) plan[i] = obs[RAW_PLAN_START + i]
 
   // ========== Role tokens ==========
   // CO可能5役職それぞれについて、seat tokensのclaimed_roleからCO者情報を集約
@@ -272,8 +266,7 @@ export function tokenize(obs: Float32Array, mode: ObservationMode | boolean = 'i
   return {
     cls,
     seats,
-    planForward,
-    planEndgame,
+    plan,
     roles,
     seatFeatures: sf,
     clsFeatures: cf,
@@ -349,8 +342,7 @@ export type CollectedObservation = {
     global: Record<string, SystemRole[]> | null
   }
   plan: {
-    forwardIndices: number[] | null
-    endgameIndices: number[] | null
+    indices: number[] | null
   }
   tsumiTarget: number | null
 }
@@ -571,8 +563,7 @@ export function collectObservation(ctx: DecisionContext): CollectedObservation {
       global: mapOfSetsToRecord(ctx.globalRetarPossibilities),
     },
     plan: {
-      forwardIndices: ctx.planForwardIndices,
-      endgameIndices: ctx.planEndgameIndices,
+      indices: ctx.planIndices,
     },
     tsumiTarget: ctx.tsumiTarget,
   }
@@ -696,10 +687,8 @@ export function packObservation(data: CollectedObservation): Float32Array {
   offset += NEW_SIGNALS_SIZE
 
   // ========== Raw Plan Indices ==========
-  const fwd = data.plan.forwardIndices
-  for (let i = 0; i < NUM_PLAN_FORWARD; i++) obs[offset++] = fwd?.[i] ?? 21
-  const eg = data.plan.endgameIndices
-  for (let i = 0; i < NUM_PLAN_ENDGAME; i++) obs[offset++] = eg?.[i] ?? 21
+  const planIdx = data.plan.indices
+  for (let i = 0; i < NUM_PLAN_TOKENS; i++) obs[offset++] = planIdx?.[i] ?? 21
 
   // ========== Tsumi ==========
   if (data.tsumiTarget !== null && data.tsumiTarget >= 1 && data.tsumiTarget <= SEATS) {

@@ -36,11 +36,9 @@ const STANDARD_CONFIG: GameConfig = {
 
 /** 固定の plan token を返す mock network */
 function createMockNetwork(opts: {
-  forwardActions: number[]
-  endgameActions: number[]
+  planActions: number[]
 }): AnyNetwork {
-  const numForward = opts.forwardActions.length
-  const numEndgame = opts.endgameActions.length
+  const numPlan = opts.planActions.length
   const vocabSize = PLAN_VOCAB.SIZE
 
   return {
@@ -52,8 +50,10 @@ function createMockNetwork(opts: {
       transformer: {
         dModel: 64, numHeads: 4, dFf: 128, seatFeatures: 73, clsFeatures: 26,
         roleFeatures: 15, numRoleTokens: 5, numLayers: 1,
-        strategyLayers: 1, planVocabSize: vocabSize, numForwardTokens: numForward,
-        numEndgameTokens: numEndgame, numPlanEmbeddings: numForward + numEndgame,
+        strategyLayers: 1, planVocabSize: vocabSize, numPlanTokens: numPlan,
+        planFeatures: 20, maxPlanTokens: numPlan, seatLayers: 1,
+        perSeatHeads: ['vote', 'target'],
+        perSeatSigmoidHeads: ['propose', 'predict'],
       },
     } satisfies NetworkConfig,
 
@@ -69,16 +69,13 @@ function createMockNetwork(opts: {
       policies.set('propose', new Float32Array(14))
       policies.set('predict', new Float32Array(154))
       // plan logits (raw, before mask)
-      policies.set('plan_forward', new Float32Array(numForward * vocabSize))
-      policies.set('plan_endgame', new Float32Array(numEndgame * vocabSize))
+      policies.set('plan', new Float32Array(numPlan * vocabSize))
 
       return {
         policies,
         value: 0.0,
-        planForwardActions: [...opts.forwardActions],
-        planForwardLogProbs: opts.forwardActions.map(() => -1.0),
-        planEndgameActions: [...opts.endgameActions],
-        planEndgameLogProbs: opts.endgameActions.map(() => -1.0),
+        planActions: [...opts.planActions],
+        planLogProbs: opts.planActions.map(() => -1.0),
       }
     },
 
@@ -96,14 +93,12 @@ function createMockNetwork(opts: {
 /** 特定 seat に NN mason を配置する adapter を生成 */
 function createTestAdapter(opts: {
   masonSeat: number
-  forwardActions: number[]
-  endgameActions: number[]
+  planActions: number[]
   seed?: number
   enableRetar?: boolean
 }) {
   const network = createMockNetwork({
-    forwardActions: opts.forwardActions,
-    endgameActions: opts.endgameActions,
+    planActions: opts.planActions,
   })
   const agent = new NeuralAgent(network, { explore: false, strategyOnly: true })
   const agents = new Map<number, any>([[opts.masonSeat, agent]])
@@ -147,8 +142,7 @@ describe('MasonTrainingAdapter integration', () => {
     const STOP = PLAN_VOCAB.STOP
     const handlers = createTestAdapter({
       masonSeat: 1,
-      forwardActions: [0, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
-      endgameActions: [STOP, STOP, STOP, STOP],
+      planActions: [0, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
     })
     const result = await runGame(STANDARD_CONFIG, handlers)
     assert.ok(result.state.finished)
@@ -172,8 +166,7 @@ describe('MasonTrainingAdapter integration', () => {
     const STOP = PLAN_VOCAB.STOP
     const handlers = createTestAdapter({
       masonSeat,
-      forwardActions: [targetSeatIdx, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
-      endgameActions: [STOP, STOP, STOP, STOP],
+      planActions: [targetSeatIdx, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
       seed,
     })
 
@@ -196,34 +189,30 @@ describe('MasonTrainingAdapter integration', () => {
     assert.ok(result.state.finished)
   })
 
-  it('multi-step plan with NEXT produces multiple day targets', async () => {
+  it('multi-slot plan with OR produces multiple day targets', async () => {
     const seed = 200
     const roles = await getRoles(seed)
     const masonSeats = [...roles.entries()].filter(([, r]) => r === 'mason').map(([s]) => s)
     const masonSeat = masonSeats[0]
 
-    // 2 つの非 mason 席を multi-step plan に指定
+    // 2 つの非 mason 席を multi-slot plan に指定
     const candidates = [...roles.entries()]
       .filter(([s, r]) => r !== 'mason' && s !== masonSeat)
       .map(([s]) => s)
     const target1 = candidates[0] - 1
     const target2 = candidates[1] - 1
     const STOP = PLAN_VOCAB.STOP
-    const NEXT = PLAN_VOCAB.NEXT
+    const OR_TOKEN = PLAN_VOCAB.OR
 
     const handlers = createTestAdapter({
       masonSeat,
-      forwardActions: [target1, NEXT, target2, STOP, STOP, STOP, STOP, STOP],
-      endgameActions: [STOP, STOP, STOP, STOP],
+      planActions: [target1, OR_TOKEN, target2, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
       seed,
     })
 
     const result = await runGame({ ...STANDARD_CONFIG, seed }, handlers)
     const planCommits = result.events.filter(e => e.type === 'plan_commit')
     assert.ok(planCommits.length > 0, 'should have plan_commit events')
-    // NEXT が含まれている plan が出力されたか
-    const firstCommit = planCommits[0] as any
-    assert.ok(firstCommit.forward.includes('NEXT'), 'plan should contain NEXT separator')
     assert.ok(result.state.finished)
   })
 
@@ -235,19 +224,12 @@ describe('MasonTrainingAdapter integration', () => {
     const STOP = PLAN_VOCAB.STOP
     const handlers = createTestAdapter({
       masonSeat: masonSeats[0],
-      forwardActions: [STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
-      endgameActions: [STOP, STOP, STOP, STOP],
+      planActions: [STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
       seed,
     })
 
     const result = await runGame({ ...STANDARD_CONFIG, seed }, handlers)
     assert.ok(result.state.finished, 'game should complete even with empty plan')
-    // plan_commit はあるが forward が空
-    const planCommits = result.events.filter(e => e.type === 'plan_commit')
-    if (planCommits.length > 0) {
-      const commit = planCommits[0] as any
-      assert.ok(commit.forward.startsWith('STOP'), 'forward plan should be all STOP')
-    }
   })
 
   it('nekomata COs when designated by seat in plan', async () => {
@@ -260,8 +242,7 @@ describe('MasonTrainingAdapter integration', () => {
     // plan: seat2 (nekomata) を直指定
     const handlers = createTestAdapter({
       masonSeat,
-      forwardActions: [nekoSeat - 1, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
-      endgameActions: [STOP, STOP, STOP, STOP],
+      planActions: [nekoSeat - 1, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
       seed,
     })
 
@@ -283,8 +264,7 @@ describe('MasonTrainingAdapter integration', () => {
     const STOP = PLAN_VOCAB.STOP
 
     const network = createMockNetwork({
-      forwardActions: [nekoSeat - 1, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
-      endgameActions: [STOP, STOP, STOP, STOP],
+      planActions: [nekoSeat - 1, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
     })
     const agent = new NeuralAgent(network, { explore: false, strategyOnly: true })
     const agents = new Map<number, any>([[masonSeat, agent]])
@@ -296,7 +276,7 @@ describe('MasonTrainingAdapter integration', () => {
       seed,
       enableRetar: false,
       roles: STANDARD_ROLES,
-      onMasonTakeover: (deadSeat: number, newSeat: number) => {
+      onMasonTakeover: (_deadSeat: number, _newSeat: number) => {
         // game-worker と同じ: 外部 agents マップを更新（ここでは adapter 内部で処理）
       },
     }) as unknown as GameHandlers<FenrirExtEvent, FenrirExt>
@@ -324,14 +304,13 @@ describe('MasonTrainingAdapter integration', () => {
       const roles = await getRoles(seed)
       const masonSeats = [...roles.entries()].filter(([, r]) => r === 'mason').map(([s]) => s)
       const candidates = [...roles.entries()]
-        .filter(([s, r]) => !['mason'].includes(r))
+        .filter(([_s, r]) => !['mason'].includes(r))
         .map(([s]) => s)
       const target = (candidates[0] ?? 1) - 1
 
       const handlers = createTestAdapter({
         masonSeat: masonSeats[0],
-        forwardActions: [target, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
-        endgameActions: [STOP, STOP, STOP, STOP],
+        planActions: [target, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP],
         seed,
       })
       const result = await runGame({ ...STANDARD_CONFIG, seed }, handlers)

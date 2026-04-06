@@ -87,7 +87,7 @@ export function flattenStrategyToLabels(
     if (next.type === 'win') break
 
     if (pos < numTokens - 1) {
-      labels[pos] = PLAN_VOCAB.NEXT
+      labels[pos] = PLAN_VOCAB.OR
       mask[pos++] = true
     }
     node = next
@@ -273,8 +273,7 @@ export function loadTsumiFromDB(
           revoteRound: null,
           revoteCandidates: null,
           executionPlans: [],
-          planForwardIndices: null,
-          planEndgameIndices: null,
+          planIndices: null,
           tsumiTarget: null,  // tsumi masked
           rules: resolveRules(),
         }
@@ -302,7 +301,7 @@ export function loadTsumiFromDB(
           // 前日の処刑席を取得
           const prevCp = checkpoints.find(c => c.day === tsumiInfo.day - 1)
           if (prevCp) {
-            // 一手前のラベル: [前日target, NEXT, 今日のstrategy...]
+            // 一手前のラベル: [前日target, OR, 今日のstrategy...]
             // 簡易版: 前日は strategy の最初のアクション、今日は次のアクション
             // → そのまま depth+1 の strategy として表現
           }

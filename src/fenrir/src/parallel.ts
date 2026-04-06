@@ -194,10 +194,8 @@ export type SerializedStep = {
   done: boolean
   sigmoidActions?: number[]
   trueRoles?: number[]
-  planForwardActions?: number[]
-  planForwardLogProbs?: number[]
-  planEndgameActions?: number[]
-  planEndgameLogProbs?: number[]
+  planActions?: number[]
+  planLogProbs?: number[]
   source?: string
 }
 
@@ -215,10 +213,8 @@ export function serializeStep(step: TrajectoryStep): SerializedStep {
     done: step.done,
     sigmoidActions: step.sigmoidActions ? Array.from(step.sigmoidActions) : undefined,
     trueRoles: step.trueRoles ? Array.from(step.trueRoles) : undefined,
-    planForwardActions: step.planForwardActions,
-    planForwardLogProbs: step.planForwardLogProbs,
-    planEndgameActions: step.planEndgameActions,
-    planEndgameLogProbs: step.planEndgameLogProbs,
+    planActions: step.planActions,
+    planLogProbs: step.planLogProbs,
     source: step.source,
   }
 }
@@ -237,10 +233,8 @@ export function deserializeStep(s: SerializedStep): TrajectoryStep {
     done: s.done,
     sigmoidActions: s.sigmoidActions ? new Float32Array(s.sigmoidActions) : undefined,
     trueRoles: s.trueRoles ? new Float32Array(s.trueRoles) : undefined,
-    planForwardActions: s.planForwardActions,
-    planForwardLogProbs: s.planForwardLogProbs,
-    planEndgameActions: s.planEndgameActions,
-    planEndgameLogProbs: s.planEndgameLogProbs,
+    planActions: s.planActions,
+    planLogProbs: s.planLogProbs,
     source: s.source,
   }
 }

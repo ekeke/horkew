@@ -81,10 +81,10 @@ export function capturePlanSnapshot(
     const result: ForwardResult = villageNetwork.forward(probe.observation, false)
     samples.push({
       forwardLabel: [...probe.forwardLabels],
-      forwardPred: result.planForwardActions ? [...result.planForwardActions] : [],
+      forwardPred: result.planActions ? [...result.planActions.slice(0, 8)] : [],
       forwardMask: [...probe.forwardMask],
       endgameLabel: [...probe.endgameLabels],
-      endgamePred: result.planEndgameActions ? [...result.planEndgameActions] : [],
+      endgamePred: result.planActions ? [...result.planActions.slice(8)] : [],
       endgameMask: [...probe.endgameMask],
     })
   }
@@ -113,7 +113,7 @@ export function captureGameSnapshot(
 
     samples.push({
       forwardLabel: [...probe.forwardLabels],
-      forwardPred: result.planForwardActions ? [...result.planForwardActions] : [],
+      forwardPred: result.planActions ? [...result.planActions.slice(0, 8)] : [],
       forwardMask: [...probe.forwardMask],
       endgameLabel: [],
       endgamePred: [],

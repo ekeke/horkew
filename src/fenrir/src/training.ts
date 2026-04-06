@@ -233,8 +233,7 @@ const TRANSFORMER_COMMON = {
   numRoleTokens: NUM_ROLE_TOKENS,
   seatLayers: 3,
   strategyLayers: 2,
-  numForwardTokens: 8,
-  numEndgameTokens: 4,
+  numPlanTokens: 12,
   planVocabSize: 22,  // 14 seats + 5 roles + grayran + next + stop = PLAN_VOCAB.SIZE
 }
 
@@ -708,17 +707,16 @@ function ppoUpdate(
   tfNetwork: AnyTfNetwork,
   batch: ProcessedStep[],
   config: TrainingConfig,
-  precomputedRefLogits?: Map<ProcessedStep, { fwd?: Float32Array, eg?: Float32Array }>,
-): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klForwardLoss: number, klEndgameLoss: number } {
-  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klForwardLoss: 0, klEndgameLoss: 0 }
+  precomputedRefLogits?: Map<ProcessedStep, { plan?: Float32Array }>,
+): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klPlanLoss: number } {
+  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
 
   let totalPolicyLoss = 0
   let totalValueLoss = 0
   let totalEntropy = 0
   let totalPredictLoss = 0
   let totalKlLoss = 0
-  let totalKlForwardLoss = 0
-  let totalKlEndgameLoss = 0
+  let totalKlPlanLoss = 0
   let batchCount = 0
 
   // Shuffle batch
@@ -733,11 +731,9 @@ function ppoUpdate(
     const miniBatch = batch.slice(start, end)
 
     // Reference logits lookup (precomputed per iteration)
-    let refFwdLogits: (Float32Array | undefined)[] | undefined
-    let refEgLogits: (Float32Array | undefined)[] | undefined
+    let refPlanLogits: (Float32Array | undefined)[] | undefined
     if (precomputedRefLogits && config.klCoeff && config.klCoeff > 0) {
-      refFwdLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.fwd)
-      refEgLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.eg)
+      refPlanLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.plan)
     }
 
     const result = tfNetwork.trainBatch({
@@ -749,16 +745,13 @@ function ppoUpdate(
       returns: miniBatch.map(s => s.returnValue),
       sigmoidActions: miniBatch.map(s => s.sigmoidActions),
       trueRoles: miniBatch.map(s => s.trueRoles),
-      planForwardActions: miniBatch.map(s => s.planForwardActions),
-      planForwardLogProbs: miniBatch.map(s => s.planForwardLogProbs),
-      planEndgameActions: miniBatch.map(s => s.planEndgameActions),
-      planEndgameLogProbs: miniBatch.map(s => s.planEndgameLogProbs),
+      planActions: miniBatch.map(s => s.planActions),
+      planLogProbs: miniBatch.map(s => s.planLogProbs),
       predictLossCoeff: config.predictLossCoeff ?? 0.1,
       clipEpsilon: config.clipEpsilon,
       valueLossCoeff: config.valueLossCoeff,
       entropyCoeff: config.entropyCoeff,
-      refPlanForwardLogits: refFwdLogits,
-      refPlanEndgameLogits: refEgLogits,
+      refPlanLogits: refPlanLogits,
       klCoeff: config.klCoeff,
     })
 
@@ -767,8 +760,7 @@ function ppoUpdate(
     totalEntropy += result.entropy
     totalPredictLoss += result.predictLoss
     totalKlLoss += result.klLoss
-    totalKlForwardLoss += result.klForwardLoss
-    totalKlEndgameLoss += result.klEndgameLoss
+    totalKlPlanLoss += result.klPlanLoss
     batchCount++
   }
 
@@ -779,8 +771,7 @@ function ppoUpdate(
     entropy: totalEntropy / n,
     predictLoss: totalPredictLoss / n,
     klLoss: totalKlLoss / n,
-    klForwardLoss: totalKlForwardLoss / n,
-    klEndgameLoss: totalKlEndgameLoss / n,
+    klPlanLoss: totalKlPlanLoss / n,
   }
 }
 
@@ -1149,11 +1140,11 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
 
   // === ファクトリ関数 (MLP / Transformer 切り替え) ===
   const makeNetwork = (): AnyNetwork => useTransformer ? createTransformerNetwork() : createNetwork()
-  const makeTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createTransformerTfNetwork(lr) : createTfNetwork(lr)
+  const makeTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createTransformerTfNetwork(lr) : createTfNetwork(lr) as unknown as AnyTfNetwork
   const makeWolfTeamNetwork = (): AnyNetwork => useTransformer ? createWolfTeamTransformerNetwork() : createWolfTeamNetwork()
-  const makeWolfTeamTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createWolfTeamTransformerTfNetwork(lr) : createWolfTeamTfNetwork(lr)
+  const makeWolfTeamTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createWolfTeamTransformerTfNetwork(lr) : createWolfTeamTfNetwork(lr) as unknown as AnyTfNetwork
   const makeMasonTeamNetwork = (): AnyNetwork => useTransformer ? createMasonTeamTransformerNetwork() : createMasonTeamNetwork()
-  const makeMasonTeamTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createMasonTeamTransformerTfNetwork(lr) : createMasonTeamTfNetwork(lr)
+  const makeMasonTeamTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createMasonTeamTransformerTfNetwork(lr) : createMasonTeamTfNetwork(lr) as unknown as AnyTfNetwork
 
   // === 個人エージェント (単一モデルモード用) ===
   const network = multiModel ? undefined! as AnyNetwork : makeNetwork()

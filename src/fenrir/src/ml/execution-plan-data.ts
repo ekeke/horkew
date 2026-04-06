@@ -178,8 +178,7 @@ function buildSyntheticContext(params: {
     revoteRound: null,
     revoteCandidates: null,
     executionPlans: [params.plan],
-    planForwardIndices: null,
-    planEndgameIndices: null,
+    planIndices: null,
     tsumiTarget: params.tsumiTarget ?? null,
     rules: resolveRules(),
   }
@@ -288,7 +287,7 @@ const PATTERNS: PatternType[] = [
 ]
 const PATTERN_WEIGHTS = [
   0.06, 0.08, 0.06, 0.06, 0.08, 0.12,  // single-day: 46%
-  0.18, 0.18, 0.18,                      // multi-day (NEXT): 54%
+  0.18, 0.18, 0.18,                      // multi-day (adjacent slots): 54%
 ]
 
 function pickPattern(rng: Rng): PatternType {
@@ -397,7 +396,7 @@ function fillStopPadding(labels: number[], mask: boolean[]): void {
 
 /**
  * パターンからForward plan tokenの教師ラベル列を生成
- * 語彙: 14 seats + 5 roles + grayran + next + stop = 22
+ * 語彙: 14 seats + 5 roles + grayran + or + stop = 22
  */
 function patternToForwardLabels(
   pattern: PatternType,
@@ -429,11 +428,10 @@ function patternToForwardLabels(
       return { labels, mask, tsumiTarget: target }
     }
     case 'roller': {
-      // [role, next, role, stop, ...]
+      // [role, role, stop, ...] — 2スロット（各日1人ずつ処刑）
       if (claimants.length < 2 || roleVocabIdx < 0) return null
       let pos = 0
       labels[pos] = roleVocabIdx; mask[pos++] = true
-      labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
       labels[pos] = roleVocabIdx; mask[pos++] = true
       labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
       fillStopPadding(labels, mask)
@@ -479,7 +477,8 @@ function patternToForwardLabels(
       return { labels, mask }
     }
     case 'multi_day_seats': {
-      // 複数日の異なる席指定: [seat_a, NEXT, seat_b, NEXT, seat_c, STOP, ...]
+      // 複数日の異なる席指定: [seat_a, seat_b, seat_c, STOP, ...]
+      // 隣接ターゲット = 別スロット（各日1つずつ処刑）
       const candidates = aliveSeats.filter((s: number) => s !== mySeat && !confirmedVillage?.has(s))
       if (candidates.length < 2) return null
       const shuffled = shuffleArray(candidates, rng)
@@ -488,9 +487,6 @@ function patternToForwardLabels(
       for (let d = 0; d < numDays && pos < NUM_FORWARD_TOKENS - 1; d++) {
         const target = shuffled[d % shuffled.length]
         labels[pos] = target - 1; mask[pos++] = true
-        if (d < numDays - 1 && pos < NUM_FORWARD_TOKENS - 1) {
-          labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
-        }
       }
       if (pos < NUM_FORWARD_TOKENS) {
         labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
@@ -499,7 +495,8 @@ function patternToForwardLabels(
       return { labels, mask }
     }
     case 'multi_day_mixed': {
-      // 席+役職+グレランの混合: [seat, NEXT, ROLE, NEXT, GRAYRAN, STOP, ...]
+      // 席+役職+グレランの混合: [seat, ROLE, GRAYRAN, STOP, ...]
+      // 隣接ターゲット = 別スロット（各日1つずつ処刑）
       const candidates = aliveSeats.filter((s: number) => s !== mySeat && !confirmedVillage?.has(s))
       if (candidates.length === 0) return null
       const grays = aliveSeats.filter(s => s !== mySeat && !claims.has(s))
@@ -529,9 +526,6 @@ function patternToForwardLabels(
         usedTokens.add(token)
 
         labels[pos] = token; mask[pos++] = true
-        if (d < numDays - 1 && pos < NUM_FORWARD_TOKENS - 1) {
-          labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
-        }
       }
       if (pos < NUM_FORWARD_TOKENS) {
         labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
@@ -540,18 +534,17 @@ function patternToForwardLabels(
       return { labels, mask }
     }
     case 'roller_then_seat': {
-      // ローラー後に席指定: [ROLE, NEXT, ROLE, NEXT, seat, STOP, ...]
+      // ローラー後に席指定: [ROLE, ROLE, seat, STOP, ...]
+      // 3スロット: ローラー2日 + 席指定/グレラン1日
       if (claimants.length < 2 || roleVocabIdx < 0) return null
       const grays = aliveSeats.filter(s => s !== mySeat && !claims.has(s) && !confirmedVillage?.has(s))
       const afterRollerCandidates = grays.length > 0 ? grays : aliveSeats.filter(s => s !== mySeat && !confirmedVillage?.has(s))
       if (afterRollerCandidates.length === 0) return null
 
       let pos = 0
-      // ローラー 2日分
+      // ローラー 2日分（隣接 = 別スロット）
       labels[pos] = roleVocabIdx; mask[pos++] = true
-      labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
       labels[pos] = roleVocabIdx; mask[pos++] = true
-      labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
       // 3日目: 席指定 or グレラン
       if (rng.next() < 0.3 && grays.length > 0) {
         labels[pos] = PLAN_VOCAB.GRAYRAN; mask[pos++] = true
@@ -567,8 +560,9 @@ function patternToForwardLabels(
 }
 
 /**
- * 人外候補を NEXT 区切りで列挙する plan token 列を生成。
+ * 人外候補を隣接配置で列挙する plan token 列を生成。
  * 狐候補を先に、狼候補を後に配置（狐→狼の処刑順序を教える）。
+ * 隣接ターゲット = 別スロット（各日1人ずつ処刑）。
  */
 function buildSuspectLabels(
   foxSeats: number[],
@@ -585,8 +579,8 @@ function buildSuspectLabels(
     return { labels: new Array(numTokens).fill(PLAN_VOCAB.STOP), mask: new Array(numTokens).fill(false) }
   }
 
-  // n席 = n + (n-1) + 1 = 2n トークン → 最大 n = floor(numTokens / 2)
-  const maxTargets = Math.min(ordered.length, Math.floor(numTokens / 2))
+  // n席 = n + 1(STOP) トークン → 最大 n = numTokens - 1
+  const maxTargets = Math.min(ordered.length, numTokens - 1)
   const numTargets = Math.max(1, Math.ceil(rng.next() * maxTargets))
   const targets = ordered.slice(0, numTargets)
 
@@ -595,9 +589,6 @@ function buildSuspectLabels(
   let pos = 0
   for (let i = 0; i < targets.length && pos < numTokens - 1; i++) {
     labels[pos] = targets[i] - 1; mask[pos++] = true
-    if (i < targets.length - 1 && pos < numTokens - 1) {
-      labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
-    }
   }
   if (pos < numTokens) {
     labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true
@@ -685,12 +676,13 @@ export function generatePlanTokenTrainingBatch(
 }
 
 // ============================================================
-// Pretrain B2: Plan 構造 (NEXT 配置) の教師データ生成
+// Pretrain B2: Plan 構造 (スロット数) の教師データ生成
 // ============================================================
 
 /**
- * groups 数 ≈ nawa のラベルを生成。中身はランダム seat、構造だけ教える。
- * grammar 準拠: seat NEXT seat NEXT ... seat STOP STOP ...
+ * スロット数 ≈ nawa のラベルを生成。中身はランダム seat、構造だけ教える。
+ * grammar 準拠: seat seat ... seat STOP STOP ...
+ * 隣接ターゲット = 別スロット（各日1つずつ処刑）。
  */
 function buildStructureLabels(
   aliveSeats: number[],
@@ -699,8 +691,8 @@ function buildStructureLabels(
   rng: Rng,
 ): { labels: number[], mask: boolean[] } {
   const nawa = Math.floor((aliveSeats.length - 1) / 2)
-  const maxGroups = Math.floor((numTokens + 1) / 2)  // seat+NEXT pairs + final seat
-  const numGroups = Math.min(Math.max(1, nawa), maxGroups)
+  const maxSlots = numTokens - 1  // seat 列 + STOP
+  const numSlots = Math.min(Math.max(1, nawa), maxSlots)
 
   const candidates = aliveSeats.filter(s => s !== mySeat)
   if (candidates.length === 0) {
@@ -712,12 +704,9 @@ function buildStructureLabels(
   const shuffled = shuffleArray(candidates, rng)
   let pos = 0
 
-  for (let g = 0; g < numGroups && pos < numTokens; g++) {
+  for (let g = 0; g < numSlots && pos < numTokens - 1; g++) {
     const seat = shuffled[g % shuffled.length]
     labels[pos] = seat - 1; mask[pos++] = true
-    if (g < numGroups - 1 && pos < numTokens) {
-      labels[pos] = PLAN_VOCAB.NEXT; mask[pos++] = true
-    }
   }
   if (pos < numTokens) {
     labels[pos] = PLAN_VOCAB.STOP; mask[pos++] = true

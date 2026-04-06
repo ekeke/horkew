@@ -24,8 +24,8 @@ import { buildPlayerView } from '../../../lupa/player-view.ts'
 import { alivePlayers, isVillagerAligned } from '../../../lupa/roles.ts'
 import { forceTrueRoleCO } from '../../../lupa/engine-utils.ts'
 import { isVillagePowerRole } from '../agents/rule-based-agent.ts'
-import { resolvePlanGroup } from '../plan/plan-resolve.ts'
-import { planToVote } from '../plan/plan-helpers.ts'
+import { resolvePlanSlot } from '../plan/plan-resolve.ts'
+import { planToVote, nooseCount } from '../plan/plan-helpers.ts'
 import { encodeObservation, collectObservation } from '../observation.ts'
 import { describePlanIndices } from '../plan/plan-vocab.ts'
 import { RuleBasedAgent } from '../agents/rule-based-agent.ts'
@@ -49,8 +49,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
   private readonly heuristicFallback = new RuleBasedAgent()
 
   /** onPreVote で取得した plan token（onVote で各エージェントが独立に解決） */
-  private planForwardActions: number[] | null = null
-  private planEndgameActions: number[] | null = null
+  private planActions: number[] | null = null
   /** onPreVote で生成した proposals（onVote に渡す） */
   private dayProposals: Proposal[] = []
 
@@ -76,8 +75,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const aliveMasons = allMasons.filter(p => p.alive)
     this.handleMasonTakeover(state, ext.planState, allMasons, aliveMasons)
 
-    this.planForwardActions = null
-    this.planEndgameActions = null
+    this.planActions = null
     this.dayProposals = []
 
     let masonResult: ForwardResult | null = null
@@ -101,14 +99,13 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
 
     // 5. Plan token 保持 + proposal 生成 + trajectory 記録
     if (masonResult) {
-      this.planForwardActions = masonResult.planForwardActions ?? null
-      this.planEndgameActions = masonResult.planEndgameActions ?? null
+      this.planActions = masonResult.planActions ?? null
 
       // Proposal 用に1回解決（mason 視点）
-      if (this.planForwardActions) {
+      if (this.planActions) {
         const mason = aliveMasons.find(m => this.masonConfig.agents.has(m.seat)) ?? aliveMasons[0]
         const masonCtx = this.buildCtx(pctx, mason, buildPlayerView(state, mason.seat), ext)
-        const target = planToVote(this.planForwardActions, masonCtx, this.planEndgameActions)
+        const target = planToVote(this.planActions, masonCtx, ext.planState)
         if (target != null) {
           this.dayProposals.push({ type: 'execute_order', target })
         }
@@ -122,7 +119,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
         agent.setLastObs(encodeObservation(trajCtx))
         this.recordMasonStrategy(agent, masonResult, nnMason.seat, aliveSeats.length, pctx.day)
       }
-    } else if (allMasons.length > 0 && ext.planState.forwardGroups.length > 0) {
+    } else if (allMasons.length > 0 && ext.planState.slots.length > 0) {
       // Mason 死亡: cached plan から解決（proposal 用）
       const target = this.resolveDeadMasonTarget(pctx, ext)
       if (target != null) {
@@ -131,15 +128,14 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     }
 
     // 6. Plan commit イベント（howl 出力用）
-    if (this.planForwardActions || this.planEndgameActions) {
+    if (this.planActions) {
       const actor = aliveMasons.find(m => this.masonConfig.agents.has(m.seat))?.seat ?? aliveMasons[0]?.seat
       if (actor != null) {
         const events = pctx.events as (GameEvent | FenrirExtEvent)[]
         events.push({
           type: 'plan_commit',
           actor,
-          forward: this.planForwardActions ? describePlanIndices(this.planForwardActions) : '',
-          endgame: this.planEndgameActions ? describePlanIndices(this.planEndgameActions) : '',
+          plan: describePlanIndices(this.planActions),
         })
       }
     }
@@ -165,10 +161,9 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
       predictActions = actions
     }
 
-    if (result.planForwardActions && result.planEndgameActions) {
+    if (result.planActions) {
       agent.recordStrategy(
-        result.planForwardActions, result.planForwardLogProbs!,
-        result.planEndgameActions, result.planEndgameLogProbs!,
+        result.planActions, result.planLogProbs!,
         predictActions, result.value, seat, aliveCount, day,
         'MasonAdapter.onPreVote',
       )
@@ -199,7 +194,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const alive = alivePlayers(state)
     for (const player of alive) {
       // 村陣営 + plan あり → 各自が独立に plan を解決して投票
-      if (isFirstRound && isVillagerAligned(player.role) && this.planForwardActions) {
+      if (isFirstRound && isVillagerAligned(player.role) && this.planActions) {
         const view = buildPlayerView(state, player.seat)
         const playerCtx = this.buildCtx(
           vctx as PhaseContext<FenrirExtEvent, FenrirExt>, player, view, ext, {
@@ -220,7 +215,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
           })
         }
 
-        const target = planToVote(this.planForwardActions, playerCtx, this.planEndgameActions)
+        const target = planToVote(this.planActions, playerCtx, ext.planState)
         if (target != null && target !== player.seat) {
           votes.set(player.seat, target)
           decisions.push({ seat: player.seat, reason: 'plan' })
@@ -341,13 +336,14 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const masonCtx = this.buildCtx(pctx, mason, masonView, ext)
     const result: ForwardResult = agent.getStrategyResult(masonCtx)
 
-    this.commitPlanTokens(ext, result.planForwardActions ?? null, result.planEndgameActions ?? null)
+    const aliveCount = alivePlayers(state).length
+    this.commitPlanTokens(ext, result.planActions ?? null, aliveCount)
     return result
   }
 
   /**
    * Mason 死亡時: cached planState から今日の投票先を解決する。
-   * endgame (≤6人) を優先、なければ forward plan から消費。
+   * 縄数ベースで消費済みスロットを算出し、該当スロットを解決。
    */
   private resolveDeadMasonTarget(
     pctx: PhaseContext<FenrirExtEvent, FenrirExt>,
@@ -356,27 +352,13 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const state = pctx.state as GameState<FenrirExt>
     const planState = ext.planState
     const aliveSeats = alivePlayers(state).map(p => p.seat)
-    const alive = aliveSeats.length
-    let target: number | null = null
+    const aliveCount = aliveSeats.length
 
-    const opts = { rng: this.rng }
+    const consumed = planState.initialNooseCount - nooseCount(aliveCount)
+    const slotIndex = Math.max(0, consumed)
+    if (slotIndex >= planState.slots.length) return null
 
-    // Endgame plan 優先（���6人）
-    if (planState.endgameGroups.length > 0) {
-      if (alive <= 4) {
-        target = resolvePlanGroup(planState.endgameGroups[0], aliveSeats, pctx.events, opts)
-      } else if (alive <= 6 && planState.endgameGroups.length >= 2) {
-        target = resolvePlanGroup(planState.endgameGroups[1], aliveSeats, pctx.events, opts)
-      }
-    }
-
-    // Forward plan フォールバック（groups は afterVoteCollection で日送り済み、[0] が今日）
-    if (target == null && planState.forwardGroups.length > 0) {
-      const group = planState.forwardGroups[0]
-      target = resolvePlanGroup(group, aliveSeats, pctx.events, opts)
-    }
-
-    return target
+    return resolvePlanSlot(planState.slots[slotIndex], aliveSeats, pctx.events, { rng: this.rng })
   }
 
   // ════════════════════════════════════════════
@@ -437,13 +419,18 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     events: (GameEvent | FenrirExtEvent)[],
   ): Map<number, DayClaim> {
     const claims = new Map<number, DayClaim>()
-    const groups = ext.planState.forwardGroups
-    if (groups.length === 0 || groups[0].targets.length === 0) return claims
+    const planState = ext.planState
+    const consumed = planState.initialNooseCount - nooseCount(aliveSeats.length)
+    const slotIndex = Math.max(0, consumed)
+    if (slotIndex >= planState.slots.length) return claims
 
-    const firstTarget = groups[0].targets[0]
+    const slot = planState.slots[slotIndex]
+    if (slot.targets.length === 0) return claims
+
+    const firstTarget = slot.targets[0]
     const designationType: 'seat' | 'grayran' = firstTarget.type === 'grayran' ? 'grayran' : 'seat'
 
-    const designatedSeat = resolvePlanGroup(
+    const designatedSeat = resolvePlanSlot(
       { targets: [firstTarget] }, aliveSeats, events as any[], { rng: this.rng },
     )
     if (designatedSeat == null) return claims

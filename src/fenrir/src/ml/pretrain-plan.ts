@@ -48,8 +48,8 @@ async function main() {
     // Forward pass + cross-entropy on plan_forward logits
     const { loss, accuracy } = tfNet.trainSupervisedPlan({
       observations: samples.map(s => s.observation),
-      forwardLabels: samples.map(s => s.forwardLabels),
-      forwardMasks: samples.map(s => s.forwardMask),
+      labels: samples.map(s => s.forwardLabels),
+      masks: samples.map(s => s.forwardMask),
       numTokens: samples[0].forwardLabels.length,
       vocabSize: PLAN_VOCAB.SIZE,
     })
