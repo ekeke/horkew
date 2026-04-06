@@ -365,10 +365,8 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     if (planState.endgameGroups.length > 0) {
       if (alive <= 4) {
         target = resolvePlanGroup(planState.endgameGroups[0], aliveSeats, pctx.events, opts)
-      } else if (alive <= 6) {
-        const group = planState.endgameGroups.length >= 2
-          ? planState.endgameGroups[1] : planState.endgameGroups[0]
-        target = resolvePlanGroup(group, aliveSeats, pctx.events, opts)
+      } else if (alive <= 6 && planState.endgameGroups.length >= 2) {
+        target = resolvePlanGroup(planState.endgameGroups[1], aliveSeats, pctx.events, opts)
       }
     }
 
@@ -405,7 +403,7 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     }
 
     const firstTarget = groups[0].targets[0]
-    const designationType: 'seat' | 'grayran' = firstTarget.type === 'seat' ? 'seat' : 'grayran'
+    const designationType: 'seat' | 'grayran' = firstTarget.type === 'grayran' ? 'grayran' : 'seat'
 
     // 具体的な seat に解決
     const aliveSeats = alivePlayers(state).map(p => p.seat)

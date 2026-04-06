@@ -64,9 +64,8 @@ export function planToVote(
     if (alive <= 4 && egGroups.length >= 1) {
       const seat = resolvePlanGroup(egGroups[0], ctx.alivePlayers, ctx.publicEvents, { excludeSeat: ctx.mySeat, rng: ctx.rng })
       if (seat) return seat
-    } else if (alive <= 6 && egGroups.length >= 1) {
-      const group = egGroups.length >= 2 ? egGroups[1] : egGroups[0]
-      const seat = resolvePlanGroup(group, ctx.alivePlayers, ctx.publicEvents, { excludeSeat: ctx.mySeat, rng: ctx.rng })
+    } else if (alive <= 6 && egGroups.length >= 2) {
+      const seat = resolvePlanGroup(egGroups[1], ctx.alivePlayers, ctx.publicEvents, { excludeSeat: ctx.mySeat, rng: ctx.rng })
       if (seat) return seat
     }
   }

@@ -151,11 +151,12 @@ describe('planToVote', () => {
     assert.equal(planToVote(forward, ctx, endgame), 5)
   })
 
-  it('uses endgame groups[0] when alive <= 6 and only 1 group', () => {
-    const forward = [2, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const endgame = [6, STOP, STOP, STOP]  // 1 group: [seat7]
+  it('falls back to forward when alive <= 6 but only 1 endgame group', () => {
+    // groups[0] は最終日用（≤4人）なので 6人では使わない
+    const forward = [2, STOP, STOP, STOP, STOP, STOP, STOP, STOP]  // seat3
+    const endgame = [6, STOP, STOP, STOP]  // 1 group: [seat7] (最終日用)
     const ctx = makeCtx({ alivePlayers: [1, 3, 5, 7, 9, 11] })  // 6人
-    assert.equal(planToVote(forward, ctx, endgame), 7)
+    assert.equal(planToVote(forward, ctx, endgame), 3)  // forward にフォールバック
   })
 
   it('falls back to forward when alive > 6 despite endgame', () => {
