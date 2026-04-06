@@ -17,6 +17,8 @@ export type RewardConfig = {
   win: number
   /** 敗北報酬 */
   lose: number
+  /** 敗北報酬 (狐勝ち時、村・狼陣営に適用。未設定時は lose を使用) */
+  loseToFox: number
   /** 引き分け報酬 (村側) */
   drawVillage: number
   /** 引き分け報酬 (狼側) */
@@ -45,11 +47,14 @@ export type RewardConfig = {
   endgameFinalWolfTarget: number
   /** 中間報酬: 最終日に確定狼を処刑 (村陣営) */
   endgameFinalConfirmedWolf: number
+  /** 中間報酬: 最終日到達 (alive <= 4) で村陣営にボーナス */
+  finalDayBonus: number
 }
 
 export const DEFAULT_REWARD_CONFIG: RewardConfig = {
   win: 1.0,
   lose: -1.0,
+  loseToFox: -1.3,
   drawVillage: -0.5,
   drawWolf: -0.5,
   drawHamster: 0.3,
@@ -59,11 +64,12 @@ export const DEFAULT_REWARD_CONFIG: RewardConfig = {
   tsumiWolfPerDay: -0.2,
   guardSuccess: 0,     // TODO: Lupa改修後に正確なイベント判定で有効化
   foxKillReward: 0,    // TODO: 同上
-  endgamePreFinalFoxTarget: 0.08,
+  endgamePreFinalFoxTarget: 0.12,
   endgamePreFinalLWTarget: -0.06,
   endgameFinalFoxTarget: -0.12,
   endgameFinalWolfTarget: 0.08,
   endgameFinalConfirmedWolf: 0.15,
+  finalDayBonus: 0.15,
 }
 
 type Alignment = 'village' | 'wolf' | 'hamster'
@@ -95,7 +101,7 @@ export function terminalReward(
     case 'werewolf_won':
       return alignment === 'wolf' ? config.win : config.lose
     case 'werehamster_won':
-      return alignment === 'hamster' ? config.win : config.lose
+      return alignment === 'hamster' ? config.win : config.loseToFox
     case 'draw':
       switch (alignment) {
         case 'village': return config.drawVillage
@@ -124,6 +130,16 @@ export function intermediateReward(
   const rewards = new Map<number, number>()
 
   if (event.type === 'execution') {
+    // 最終日到達ボーナス: alive <= 4 で村陣営にボーナス（狐候補を潰し切って最終決戦に到達）
+    const aliveCount = state.players.filter(p => p.alive).length
+    if (aliveCount <= 4 && config.finalDayBonus !== 0) {
+      for (const p of state.players) {
+        if (p.alive && getAlignment(p.role) === 'village') {
+          rewards.set(p.seat, (rewards.get(p.seat) ?? 0) + config.finalDayBonus)
+        }
+      }
+    }
+
     // LW生存: 狼が1匹でも生きていれば狼陣営にボーナス
     const hasAliveWolf = state.players.some(p => p.alive && p.role === 'werewolf')
     if (hasAliveWolf) {
