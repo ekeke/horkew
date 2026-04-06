@@ -675,6 +675,45 @@ function deleteAllCheckpoints(checkpointBase: string): void {
 }
 
 /**
+ * train-status.json の gitSha 以降のコミットから [break:*] タグを検出し、推薦モードを返す。
+ * - [break:all] → 'n' (新規)
+ * - [break:ppo] → 'p' (PPO やり直し)
+ * - なし → 'r' (最新から再開)
+ * - gitSha が不明 → null (推薦なし)
+ */
+function detectBreakTag(trainingSha: string | undefined): { recommended: 'n' | 'p' | 'r', breaks: string[] } | null {
+  if (!trainingSha) return null
+  try {
+    const gitLog = execSync(`git log --oneline ${trainingSha}..HEAD`, { encoding: 'utf-8' }).trim()
+    if (!gitLog) return { recommended: 'r', breaks: [] }
+    const lines = gitLog.split('\n')
+    const breakLines = lines.filter(l => /\[break:/.test(l))
+    if (breakLines.length === 0) return { recommended: 'r', breaks: [] }
+    const hasBreakAll = breakLines.some(l => /\[break:all]/.test(l))
+    return {
+      recommended: hasBreakAll ? 'n' : 'p',
+      breaks: breakLines,
+    }
+  } catch {
+    return null  // git コマンド失敗（SHA が見つからない等）
+  }
+}
+
+/** 推薦モードの表示文字列 */
+function formatRecommendation(rec: ReturnType<typeof detectBreakTag>): string {
+  if (!rec) return ''
+  const label = rec.recommended === 'n' ? 'n: 新規' : rec.recommended === 'p' ? 'p: PPO やり直し' : 'r: 再開'
+  if (rec.breaks.length === 0) {
+    return `  ${BOLD}→ 推薦: ${label}${RESET} (break タグなし)\n`
+  }
+  const lines = [`  ${BOLD}→ 推薦: ${label}${RESET} (${rec.breaks.length} 件の break タグ)`]
+  for (const b of rec.breaks) {
+    lines.push(`    ${b}`)
+  }
+  return lines.join('\n') + '\n'
+}
+
+/**
  * 起動モード選択の対話プロンプト。
  * --resume が明示指定されている場合はスキップ（後方互換）。
  * --checkpoint-base が明示指定されている場合はそのベースに対してプロンプトを出す。
@@ -704,17 +743,23 @@ async function selectStartMode(config: OrchestratorConfig): Promise<void> {
     const range = getCheckpointTimeRange(config.checkpointBase)
     if (!range) return  // checkpoint なし → そのまま新規開始
 
+    const statusForSha = readTrainStatus()
+    const rec = detectBreakTag(statusForSha?.gitSha)
+
     log(`${BOLD}既存チェックポイントを検出:${RESET}`)
     log(`  パス: ${config.checkpointBase}/`)
     log(`  ファイル数: ${range.totalFiles}`)
     log(`  学習期間: ${fmtTime(range.oldest)} 〜 ${fmtTime(range.newest)}`)
     log('')
+    const recStr = formatRecommendation(rec)
+    if (recStr) process.stderr.write(`${BOLD}[orch]${RESET} ${recStr}\n`)
     log(`  [n] 全削除して新規学習 (pretrain からやり直し)`)
     log(`  [p] pretrain 後から PPO やり直し`)
     log(`  [r] 最新チェックポイントから再開`)
     log(`  [q] 中止`)
 
-    const choice = await promptChoice(`  選択 (n/p/r/Q): `)
+    const defaultChoice = rec?.recommended ?? 'q'
+    const choice = await promptChoice(`  選択 (n/p/r/Q) [${defaultChoice}]: `) || defaultChoice
     if (choice === 'n') {
       deleteAllCheckpoints(config.checkpointBase)
       log('全チェックポイントを削除しました。')
@@ -741,17 +786,22 @@ async function selectStartMode(config: OrchestratorConfig): Promise<void> {
 
     if (range) {
       // 前回ベースに checkpoint がある
+      const rec = detectBreakTag(status?.gitSha)
+
       log(`${BOLD}前回の学習を検出:${RESET}`)
       log(`  パス: ${previousBase}/`)
       log(`  ファイル数: ${range.totalFiles}`)
       log(`  学習期間: ${fmtTime(range.oldest)} 〜 ${fmtTime(range.newest)}`)
       log('')
+      const recStr = formatRecommendation(rec)
+      if (recStr) process.stderr.write(`${BOLD}[orch]${RESET} ${recStr}\n`)
       log(`  [n] 新しいベースで開始 (pretrain から)`)
       log(`  [p] ${previousBase} — pretrain 後から PPO やり直し`)
       log(`  [r] ${previousBase} — 最新チェックポイントから再開`)
       log(`  [q] 中止`)
 
-      const choice = await promptChoice(`  選択 (n/p/r/Q): `)
+      const defaultChoice = rec?.recommended ?? 'q'
+      const choice = await promptChoice(`  選択 (n/p/r/Q) [${defaultChoice}]: `) || defaultChoice
       if (choice === 'n') {
         config.checkpointBase = nextCheckpointBase()
         log(`New run: ${config.checkpointBase}`)
