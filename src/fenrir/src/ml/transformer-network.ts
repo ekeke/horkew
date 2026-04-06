@@ -283,7 +283,6 @@ export class TransformerNetwork {
     let seenStop = false
     let prevAction = START_IDX
     const groupUsed = new Set<number>()
-    const allUsed = new Set<number>()  // グループ間の重複防止（NEXT でクリアしない）
 
     for (let step = 0; step < numSteps; step++) {
       // Input: embedding of previous token
@@ -330,8 +329,6 @@ export class TransformerNetwork {
           // START or after NEXT: seat, role, grayran only
           stepLogits[NEXT_IDX] = -Infinity
           stepLogits[STOP_IDX] = step === 0 ? stepLogits[STOP_IDX] : -Infinity  // START allows STOP, NEXT does not
-          // 前グループで使った席を禁止（同じ席の連続グループ指定を防止）
-          for (const used of allUsed) stepLogits[used] = -Infinity
         } else if (prevAction >= 0 && prevAction < PLAN_VOCAB.SEAT_END) {
           // After seat: seat (no dup in current group), NEXT, STOP
           for (let t = ROLE_START; t < ROLE_END; t++) stepLogits[t] = -Infinity
@@ -408,7 +405,6 @@ export class TransformerNetwork {
         groupUsed.clear()
       } else {
         groupUsed.add(chosenIdx)
-        allUsed.add(chosenIdx)
       }
       prevAction = chosenIdx
     }
