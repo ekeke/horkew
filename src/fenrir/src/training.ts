@@ -24,7 +24,7 @@ import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
   WOLF_COLLECTIVE_CLS_FEATURES, WOLF_COLLECTIVE_SEAT_FEATURES,
   MASON_COLLECTIVE_CLS_FEATURES, MASON_COLLECTIVE_SEAT_FEATURES,
   FANATIC_CLS_FEATURES, FANATIC_SEAT_FEATURES,
-  ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS } from './observation.ts'
+  ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS, SEATS } from './observation.ts'
 import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
 import { encodeTrueRoles } from './observation.ts'
 import { NeuralAgent } from './agents/neural-agent.ts'
@@ -252,13 +252,14 @@ const TRANSFORMER_NETWORK_CONFIG: NetworkConfig = {
   sigmoidHeads: {
     propose: HEAD_SIZES.propose,
     predict: HEAD_SIZES.predict,
+    trust: SEATS,  // per-seat scalar: frozen村NN出力として wolf/fanatic に注入
   },
   transformer: {
     ...TRANSFORMER_COMMON,
     seatFeatures: SEAT_TOKEN_FEATURES,
     clsFeatures: CLS_FEATURES,
     perSeatHeads: ['vote', 'target'],
-    perSeatSigmoidHeads: ['propose', 'predict'],
+    perSeatSigmoidHeads: ['propose', 'predict', 'trust'],
   },
 }
 
