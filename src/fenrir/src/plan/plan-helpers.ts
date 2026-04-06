@@ -43,12 +43,60 @@ export function createPlanState(): PlanState {
 // ============================================================
 
 /**
+ * endgame groups から保護対象席を抽出
+ *
+ * endgame plan = 「最終日に処刑する対象」= 最終日まで生かすリスト。
+ * forward plan や grayran で投票してはならない席を返す。
+ *
+ * - seat: 直接追加
+ * - role: CO 者を解決して追加
+ * - grayran: 対象不定のためスキップ
+ */
+function collectEndgameProtectedSeats(
+  egGroups: PlanDayGroup[],
+  aliveSeats: number[],
+  events: readonly any[],
+): Set<number> {
+  const protected_ = new Set<number>()
+  const aliveSet = new Set(aliveSeats)
+
+  // CO者を収集（role 解決用）
+  const coClaimed = new Map<string, number[]>()
+  for (const e of events) {
+    if ('actor' in e && typeof e.type === 'string') {
+      for (const prefix of ['seer_claim', 'medium_claim', 'bodyguard_claim', 'mason_claim', 'nekomata_claim']) {
+        if (e.type.startsWith(prefix)) {
+          const role = prefix.replace('_claim', '')
+          if (!coClaimed.has(role)) coClaimed.set(role, [])
+          coClaimed.get(role)!.push(e.actor)
+        }
+      }
+    }
+  }
+
+  for (const group of egGroups) {
+    for (const target of group.targets) {
+      if (target.type === 'seat') {
+        if (aliveSet.has(target.seat)) protected_.add(target.seat)
+      } else if (target.type === 'role') {
+        const claimers = coClaimed.get(target.role) ?? []
+        for (const s of claimers) {
+          if (aliveSet.has(s)) protected_.add(s)
+        }
+      }
+      // grayran: 対象不定 → スキップ
+    }
+  }
+  return protected_
+}
+
+/**
  * plan tokens から今日の投票先 seat を決定
  *
  * 生存者数で endgame に切り替え:
  *   ≤4人: 最終日 → endgame groups[0]
  *   ≤6人: 最終日前日 → endgame groups[1] or groups[0]
- *   それ以外: forward の先頭グループ
+ *   それ以外: forward の先頭グループ（endgame 保護席を除外）
  */
 export function planToVote(
   forwardActions: number[],
@@ -56,11 +104,12 @@ export function planToVote(
   endgameActions?: number[] | null,
 ): number | null {
   const alive = ctx.alivePlayers.length
+  const egGroups = (endgameActions && endgameActions.length > 0)
+    ? parsePlanIndices(endgameActions)
+    : []
 
   // Endgame切り替え判定
-  if (endgameActions && endgameActions.length > 0) {
-    const egGroups = parsePlanIndices(endgameActions)
-
+  if (egGroups.length > 0) {
     if (alive <= 4 && egGroups.length >= 1) {
       const seat = resolvePlanGroup(egGroups[0], ctx.alivePlayers, ctx.publicEvents, { excludeSeat: ctx.mySeat, rng: ctx.rng })
       if (seat) return seat
@@ -70,14 +119,22 @@ export function planToVote(
     }
   }
 
-  // Forward plan
+  // Forward plan（endgame 保護席を除外）
   const groups = parsePlanIndices(forwardActions)
   if (groups.length === 0) return null
 
   const today = groups[0]
   if (today.targets.length === 0) return null
 
-  return resolvePlanGroup(today, ctx.alivePlayers, ctx.publicEvents, { excludeSeat: ctx.mySeat, rng: ctx.rng })
+  const endgameProtected = egGroups.length > 0
+    ? collectEndgameProtectedSeats(egGroups, ctx.alivePlayers, ctx.publicEvents)
+    : undefined
+
+  return resolvePlanGroup(today, ctx.alivePlayers, ctx.publicEvents, {
+    excludeSeat: ctx.mySeat,
+    excludeSeats: endgameProtected,
+    rng: ctx.rng,
+  })
 }
 
 // ============================================================

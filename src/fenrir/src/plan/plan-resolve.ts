@@ -10,6 +10,8 @@ import type { PlanDayGroup } from './plan-vocab.ts'
 export type ResolvePlanOptions = {
   /** 自分を除外（投票時） */
   excludeSeat?: number
+  /** 追加の除外席（endgame 保護対象など） */
+  excludeSeats?: ReadonlySet<number>
   /** grayran のランダム選択（なければ先頭） */
   rng?: Rng
 }
@@ -32,7 +34,10 @@ export function resolvePlanGroup(
 ): number | null {
   const aliveSet = new Set(aliveSeats)
   const excludeSeat = opts?.excludeSeat
+  const excludeSeats = opts?.excludeSeats
   const rng = opts?.rng
+
+  const isExcluded = (s: number) => s === excludeSeat || (excludeSeats !== undefined && excludeSeats.has(s))
 
   // CO者を収集（role 解決・grayran 除外用）
   const coClaimed = new Map<string, number[]>()  // role → seats
@@ -52,20 +57,20 @@ export function resolvePlanGroup(
 
   for (const target of group.targets) {
     if (target.type === 'seat') {
-      if (aliveSet.has(target.seat) && target.seat !== excludeSeat) return target.seat
+      if (aliveSet.has(target.seat) && !isExcluded(target.seat)) return target.seat
     } else if (target.type === 'role') {
       const claimers = coClaimed.get(target.role) ?? []
-      const alive = claimers.filter(s => aliveSet.has(s) && s !== excludeSeat)
+      const alive = claimers.filter(s => aliveSet.has(s) && !isExcluded(s))
       if (alive.length > 0) {
         return rng ? alive[Math.floor(rng.next() * alive.length)] : alive[0]
       }
     } else if (target.type === 'grayran') {
-      const grays = aliveSeats.filter(s => s !== excludeSeat && !allCOSeats.has(s))
+      const grays = aliveSeats.filter(s => !isExcluded(s) && !allCOSeats.has(s))
       if (grays.length > 0) {
         return rng ? grays[Math.floor(rng.next() * grays.length)] : grays[0]
       }
       // グレーがいなければ全生存者から
-      const fallback = aliveSeats.filter(s => s !== excludeSeat)
+      const fallback = aliveSeats.filter(s => !isExcluded(s))
       if (fallback.length > 0) {
         return rng ? fallback[Math.floor(rng.next() * fallback.length)] : fallback[0]
       }

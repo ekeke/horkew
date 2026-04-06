@@ -235,4 +235,78 @@ describe('planToVote', () => {
     const ctx = makeCtx({ alivePlayers: [1, 5, 7] })
     assert.equal(planToVote(forward, ctx), 5)
   })
+
+  // ════════════════════════════════════════════
+  // Endgame 保護（forward が endgame ターゲットを除外）
+  // ════════════════════════════════════════════
+
+  it('forward excludes seat protected by endgame', () => {
+    // forward: seat3, endgame: seat3 → forward で seat3 は保護 → null
+    const forward = [2, STOP, STOP, STOP, STOP, STOP, STOP, STOP]  // seat3
+    const endgame = [2, STOP, STOP, STOP]  // seat3（最終日まで保護）
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] })  // 10人
+    assert.equal(planToVote(forward, ctx, endgame), null)
+  })
+
+  it('forward skips endgame-protected seat and uses next target', () => {
+    // forward: [seat3, seat5], endgame: seat3 → seat3 保護 → seat5
+    const forward = [2, 4, STOP, STOP, STOP, STOP, STOP, STOP]
+    const endgame = [2, STOP, STOP, STOP]  // seat3 保護
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] })
+    assert.equal(planToVote(forward, ctx, endgame), 5)
+  })
+
+  it('endgame protection applies to role tokens', () => {
+    // forward: seer role → seat5 が占いCO、endgame: seat5 → 保護 → null
+    const forward = [ROLE_START, STOP, STOP, STOP, STOP, STOP, STOP, STOP]  // seer
+    const endgame = [4, STOP, STOP, STOP]  // seat5 保護
+    const ctx = makeCtx({
+      alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      publicEvents: [{ type: 'seer_claim', actor: 5, results: [] }],
+    })
+    assert.equal(planToVote(forward, ctx, endgame), null)
+  })
+
+  it('endgame role token protects CO players from forward', () => {
+    // forward: seat5, endgame: seer role → seat5 が占いCO → 保護 → null
+    const forward = [4, STOP, STOP, STOP, STOP, STOP, STOP, STOP]  // seat5
+    const endgame = [ROLE_START, STOP, STOP, STOP]  // seer（seat5 を保護）
+    const ctx = makeCtx({
+      alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      publicEvents: [{ type: 'seer_claim', actor: 5, results: [] }],
+    })
+    assert.equal(planToVote(forward, ctx, endgame), null)
+  })
+
+  it('grayran in forward excludes endgame-protected seats', () => {
+    // forward: grayran, endgame: seat4 → seat4 保護
+    // CO: seat2, seat3。自分: seat1。グレー: seat4, seat5 → seat4 保護 → seat5
+    const forward = [GRAYRAN, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
+    const endgame = [3, STOP, STOP, STOP]  // seat4 保護
+    const ctx = makeCtx({
+      alivePlayers: [1, 2, 3, 4, 5],
+      mySeat: 1,
+      publicEvents: [
+        { type: 'seer_claim', actor: 2, results: [] },
+        { type: 'medium_claim', actor: 3 },
+      ],
+    })
+    assert.equal(planToVote(forward, ctx, endgame), 5)
+  })
+
+  it('endgame protection does NOT apply when in endgame (alive <= 4)', () => {
+    // endgame 発動時は保護不要（endgame 自体がターゲット）
+    const forward = [2, STOP, STOP, STOP, STOP, STOP, STOP, STOP]  // seat3
+    const endgame = [2, STOP, STOP, STOP]  // seat3
+    const ctx = makeCtx({ alivePlayers: [1, 3, 7, 9] })  // 4人 → endgame 発動
+    assert.equal(planToVote(forward, ctx, endgame), 3)
+  })
+
+  it('no protection when endgame is all-STOP', () => {
+    // endgame が空 → 保護なし → forward 通常動作
+    const forward = [2, STOP, STOP, STOP, STOP, STOP, STOP, STOP]  // seat3
+    const endgame = [STOP, STOP, STOP, STOP]
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] })
+    assert.equal(planToVote(forward, ctx, endgame), 3)
+  })
 })
