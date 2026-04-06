@@ -20,8 +20,8 @@
 
 | タグ | 意味 | 必要なアクション |
 |------|------|-----------------|
-| `[break:all]` | pretrain からやり直し | 新しい checkpoint-base で起動 |
-| `[break:ppo]` | PPO のみやり直し | `--resume` で再開（pretrain はスキップ） |
+| `[break:all]` | pretrain からやり直し | 起動時プロンプトで `n`（新規）を選択 |
+| `[break:ppo]` | PPO のみやり直し | 起動時プロンプトで `p`（pretrain 後から再開）を選択 |
 | タグなし | 再起動不要 or 学習に無関係 | そのまま |
 
 確認方法: `bash scripts/check-training-breaks.sh`
@@ -118,9 +118,14 @@ npm run train:orchestrate -- \
   --batch 64             # バッチサイズ
   --mini-batch 512       # PPO ミニバッチ
   --eval-interval 100    # eval 間隔
-  --checkpoint-base tmp/orch-test  # チェックポイント保存先（省略時: 新規=tmp/orch-run-N, resume=前回から自動取得）
-  --resume               # 既存チェックポイントから再開
+  --checkpoint-base tmp/orch-test  # チェックポイント保存先（省略時: 対話プロンプトで選択）
 ```
+
+起動時に対話プロンプトで開始モードを選択:
+- `[n]` 新しいベースで開始（pretrain から）
+- `[p]` 前回ベースで pretrain 後から PPO やり直し
+- `[r]` 前回ベースの最新チェックポイントから再開
+- `[q]` 中止
 
 ### ゲーム生成
 

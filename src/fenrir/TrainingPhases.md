@@ -20,7 +20,7 @@
 | Pretrain D | ヒューリスティック 100 ゲームの行動データを収集し、vote/claim/comm を教師あり BCE | vote, claim, comm（plan は freeze） |
 
 - Pretrain 後に PPO 学習率を `lr × 0.2` に下げる（pretrain 知識保持）
-- checkpoint_0 として保存（`--resume` で復帰可能）
+- checkpoint_0 として保存（起動時プロンプトで `p` を選択すると復帰）
 
 ---
 

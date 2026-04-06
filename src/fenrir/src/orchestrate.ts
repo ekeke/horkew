@@ -144,7 +144,8 @@ function parseArgs(): OrchestratorConfig {
       case '--phase1-only': config.phase1Only = true; break
       case '--phase2-only': config.phase2Only = true; break
       case '--target-winrate': config.targetWinRate = parseFloat(args[++i]); break
-      case '--resume': config.resume = true; break
+      // --resume は廃止（selectStartMode の対話プロンプトに統合）
+      case '--resume': config.resume = true; break  // 後方互換: 指定されたら従来通り動作
       case '--lr': config.learningRate = parseFloat(args[++i]); break
       case '--workers': {
         const val = args[++i]
@@ -180,7 +181,7 @@ Options:
   --phase1-only            Phase 2 をスキップ
   --phase2-only            Phase 1 をスキップ
   --target-winrate <n>     目標勝率の上書き (default: baseline eval から自動算出)
-  --resume                 既存チェックポイントから再開 (base省略時はtrain-status.jsonから自動取得)
+  --resume                 (非推奨) 最新チェックポイントから再開。省略時は対話プロンプトで選択
   --lr <n>                 学習率 (default: ${DEFAULT_CONFIG.learningRate})
   --workers <n|auto>       ゲーム生成ワーカー数 (auto=CPU-1, default: 直列)
   --transformer            Transformerアーキテクチャを使用 (default: MLP)
@@ -645,57 +646,153 @@ function getCheckpointTimeRange(baseDir: string): { oldest: string, newest: stri
   return { oldest, newest, totalFiles }
 }
 
-/** --resume 無しで既存 checkpoint がある場合、削除確認を出す */
-async function checkExistingCheckpoints(config: OrchestratorConfig): Promise<void> {
-  if (config.resume) return
-  const range = getCheckpointTimeRange(config.checkpointBase)
-  if (!range) return
+/** PPO チェックポイントを削除し、pretrain の checkpoint_0 だけ残す */
+function deletePpoCheckpoints(checkpointBase: string): void {
+  for (const name of MODEL_NAMES) {
+    const dir = `${checkpointBase}/ckpt-${name}`
+    if (!existsSync(dir)) continue
+    for (const f of readdirSync(dir)) {
+      const m = f.match(/^(?:checkpoint|wolf_team|mason_team)_(\d+)\.json$/)
+      if (m && parseInt(m[1]) > 0) {
+        try { unlinkSync(`${dir}/${f}`) } catch {}
+      }
+      if (f === 'final.json' || f === 'wolf_team_final.json' || f === 'mason_team_final.json') {
+        try { unlinkSync(`${dir}/${f}`) } catch {}
+      }
+      if (f === 'eval_log.jsonl') {
+        try { unlinkSync(`${dir}/${f}`) } catch {}
+      }
+    }
+  }
+}
+
+/** 全チェックポイントを削除 */
+function deleteAllCheckpoints(checkpointBase: string): void {
+  for (const name of MODEL_NAMES) {
+    const dir = `${checkpointBase}/ckpt-${name}`
+    if (existsSync(dir)) rmSync(dir, { recursive: true })
+  }
+}
+
+/**
+ * 起動モード選択の対話プロンプト。
+ * --resume が明示指定されている場合はスキップ（後方互換）。
+ * --checkpoint-base が明示指定されている場合はそのベースに対してプロンプトを出す。
+ */
+async function selectStartMode(config: OrchestratorConfig): Promise<void> {
+  // --resume が明示指定されている場合は従来動作（後方互換）
+  if (config.resume) {
+    if (!config.checkpointBase) {
+      const status = readTrainStatus()
+      if (!status) {
+        console.error('ERROR: No previous run found (train-status.json missing). Specify --checkpoint-base.')
+        process.exit(1)
+      }
+      config.checkpointBase = status.checkpointBase
+      log(`Resuming from: ${config.checkpointBase} (run: ${status.runId})`)
+    }
+    return
+  }
 
   const fmtTime = (iso: string) => {
     const d = new Date(iso)
     return d.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
   }
 
-  log(`${BOLD}既存チェックポイントを検出:${RESET}`)
-  log(`  パス: ${config.checkpointBase}/`)
-  log(`  ファイル数: ${range.totalFiles}`)
-  log(`  学習期間: ${fmtTime(range.oldest)} 〜 ${fmtTime(range.newest)}`)
-  log('')
-  log(`  [y] 全削除して新規学習 (pretrain からやり直し)`)
-  log(`  [p] PPOチェックポイントだけ削除 (pretrain は残して PPO からやり直し)`)
-  log(`  [n] 中断 (--resume で再開可能)`)
+  // --checkpoint-base が明示指定されている場合
+  if (config.checkpointBase) {
+    const range = getCheckpointTimeRange(config.checkpointBase)
+    if (!range) return  // checkpoint なし → そのまま新規開始
 
-  const choice = await promptChoice(`  選択 (y/p/N): `)
-  if (choice === 'y') {
-    for (const name of MODEL_NAMES) {
-      const dir = `${config.checkpointBase}/ckpt-${name}`
-      if (existsSync(dir)) rmSync(dir, { recursive: true })
+    log(`${BOLD}既存チェックポイントを検出:${RESET}`)
+    log(`  パス: ${config.checkpointBase}/`)
+    log(`  ファイル数: ${range.totalFiles}`)
+    log(`  学習期間: ${fmtTime(range.oldest)} 〜 ${fmtTime(range.newest)}`)
+    log('')
+    log(`  [n] 全削除して新規学習 (pretrain からやり直し)`)
+    log(`  [p] pretrain 後から PPO やり直し`)
+    log(`  [r] 最新チェックポイントから再開`)
+    log(`  [q] 中止`)
+
+    const choice = await promptChoice(`  選択 (n/p/r/Q): `)
+    if (choice === 'n') {
+      deleteAllCheckpoints(config.checkpointBase)
+      log('全チェックポイントを削除しました。')
+    } else if (choice === 'p') {
+      deletePpoCheckpoints(config.checkpointBase)
+      log('PPOチェックポイントを削除しました (pretrain checkpoint_0 は保持)。')
+      config.resume = true
+      config.ppoRestart = true
+    } else if (choice === 'r') {
+      config.resume = true
+    } else {
+      log('中止しました。')
+      process.exit(0)
     }
-    log('全チェックポイントを削除しました。')
-  } else if (choice === 'p') {
-    // checkpoint_0.json (pretrain) だけ残し、iter>0 のチェックポイントを削除
-    for (const name of MODEL_NAMES) {
-      const dir = `${config.checkpointBase}/ckpt-${name}`
-      if (!existsSync(dir)) continue
-      for (const f of readdirSync(dir)) {
-        const m = f.match(/^(?:checkpoint|wolf_team|mason_team)_(\d+)\.json$/)
-        if (m && parseInt(m[1]) > 0) {
-          try { unlinkSync(`${dir}/${f}`) } catch {}
-        }
-        if (f === 'final.json' || f === 'wolf_team_final.json' || f === 'mason_team_final.json') {
-          try { unlinkSync(`${dir}/${f}`) } catch {}
-        }
-        if (f === 'eval_log.jsonl') {
-          try { unlinkSync(`${dir}/${f}`) } catch {}
-        }
+    return
+  }
+
+  // --checkpoint-base 未指定: train-status.json から前回ベースを取得
+  const status = readTrainStatus()
+  const previousBase = status?.checkpointBase
+
+  if (previousBase && existsSync(previousBase)) {
+    const range = getCheckpointTimeRange(previousBase)
+
+    if (range) {
+      // 前回ベースに checkpoint がある
+      log(`${BOLD}前回の学習を検出:${RESET}`)
+      log(`  パス: ${previousBase}/`)
+      log(`  ファイル数: ${range.totalFiles}`)
+      log(`  学習期間: ${fmtTime(range.oldest)} 〜 ${fmtTime(range.newest)}`)
+      log('')
+      log(`  [n] 新しいベースで開始 (pretrain から)`)
+      log(`  [p] ${previousBase} — pretrain 後から PPO やり直し`)
+      log(`  [r] ${previousBase} — 最新チェックポイントから再開`)
+      log(`  [q] 中止`)
+
+      const choice = await promptChoice(`  選択 (n/p/r/Q): `)
+      if (choice === 'n') {
+        config.checkpointBase = nextCheckpointBase()
+        log(`New run: ${config.checkpointBase}`)
+      } else if (choice === 'p') {
+        config.checkpointBase = previousBase
+        deletePpoCheckpoints(previousBase)
+        log('PPOチェックポイントを削除しました (pretrain checkpoint_0 は保持)。')
+        config.resume = true
+        config.ppoRestart = true
+      } else if (choice === 'r') {
+        config.checkpointBase = previousBase
+        config.resume = true
+      } else {
+        log('中止しました。')
+        process.exit(0)
+      }
+    } else {
+      // 前回ベースのディレクトリはあるが checkpoint がない
+      log(`${BOLD}前回のベースを検出 (チェックポイントなし):${RESET}`)
+      log(`  パス: ${previousBase}/`)
+      log('')
+      log(`  [n] 新しいベースで開始`)
+      log(`  [c] ${previousBase} を再利用して開始`)
+      log(`  [q] 中止`)
+
+      const choice = await promptChoice(`  選択 (n/c/Q): `)
+      if (choice === 'n') {
+        config.checkpointBase = nextCheckpointBase()
+        log(`New run: ${config.checkpointBase}`)
+      } else if (choice === 'c') {
+        config.checkpointBase = previousBase
+        log(`Reusing: ${previousBase}`)
+      } else {
+        log('中止しました。')
+        process.exit(0)
       }
     }
-    log('PPOチェックポイントを削除しました (pretrain checkpoint_0 は保持)。')
-    config.resume = true  // pretrain checkpoint から resume
-    config.ppoRestart = true  // iterCounts を 0 にリセット
   } else {
-    log('中断しました。--resume を付けて再実行してください。')
-    process.exit(0)
+    // 初回起動 (train-status.json なし or 前回ベースが存在しない)
+    config.checkpointBase = nextCheckpointBase()
+    log(`New run: ${config.checkpointBase}`)
   }
 }
 
@@ -774,24 +871,6 @@ async function main(): Promise<void> {
   const config = parseArgs()
   validateConfig(config)
 
-  // === checkpointBase の自動決定 ===
-  if (!config.checkpointBase) {
-    if (config.resume) {
-      const status = readTrainStatus()
-      if (!status) {
-        console.error('ERROR: No previous run found (train-status.json missing). Specify --checkpoint-base.')
-        process.exit(1)
-      }
-      config.checkpointBase = status.checkpointBase
-      log(`Resuming from: ${config.checkpointBase} (run: ${status.runId})`)
-    } else {
-      config.checkpointBase = nextCheckpointBase()
-      log(`New run: ${config.checkpointBase}`)
-    }
-  }
-
-  process.title = `fenrir-orch [${config.checkpointBase}]`
-
   // === 重複起動チェック (train-status.json) ===
   const existingStatus = readTrainStatus()
   if (existingStatus && existingStatus.status === 'running') {
@@ -803,6 +882,11 @@ async function main(): Promise<void> {
     }
     log(`Stale train-status.json found (pid=${existingStatus.pid}, status=running but not alive). Overwriting.`)
   }
+
+  // === 起動モード選択 (checkpointBase + resume/ppoRestart を決定) ===
+  await selectStartMode(config)
+
+  process.title = `fenrir-orch [${config.checkpointBase}]`
 
   // === Shutdown handling ===
   let shutdownRequested = 0  // 0=none, >0=exit code
@@ -832,8 +916,6 @@ async function main(): Promise<void> {
   }
   process.on('SIGINT', () => requestShutdown(130))
   process.on('SIGTERM', () => requestShutdown(143))
-
-  await checkExistingCheckpoints(config)
 
   // === Git 情報 ===
   gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
