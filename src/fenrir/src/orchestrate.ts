@@ -969,7 +969,8 @@ async function main(): Promise<void> {
 
   // === Git 情報 ===
   gitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
-  const gitDirty = execSync('git status --porcelain', { encoding: 'utf-8' }).trim() !== ''
+  let gitDirty = false
+  try { execSync('git diff --quiet HEAD', { encoding: 'utf-8' }); gitDirty = false } catch { gitDirty = true }
   log(`${BOLD}Fenrir Training Orchestrator (round-robin)${RESET}`)
   log(`Git: ${gitSha}${gitDirty ? ' (dirty)' : ''} | ${new Date().toISOString()}`)
   log(`Architecture: ${config.transformer ? 'Transformer' : 'MLP'}${config.strategyOnly ? ' (strategy-only)' : ''}`)
