@@ -359,6 +359,11 @@ export class TransformerNetwork {
         if (planContext.mySeat != null) {
           stepLogits[planContext.mySeat] = -Infinity
         }
+        if (planContext.maskedRoles) {
+          for (let r = 0; r < planContext.maskedRoles.length; r++) {
+            if (planContext.maskedRoles[r]) stepLogits[PLAN_VOCAB.ROLE_START + r] = -Infinity
+          }
+        }
       }
 
       // Sample or argmax (from masked logits)

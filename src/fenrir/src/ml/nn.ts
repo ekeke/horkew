@@ -189,6 +189,7 @@ export type PlanContext = {
   claimedRoles: boolean[]  // [5] CO_ROLES の CO 有無
   confirmedVillageSeats?: boolean[]  // [14] 確定白席（Phase 2 で解禁可）
   mySeat?: number          // 0-indexed seat index（自席を処刑対象から除外）
+  maskedRoles?: boolean[]  // [5] CO者が全員除外済み（確定白+自席）の role token を禁止
 }
 
 /** NeuralNetwork / TransformerNetwork 共通インターフェース (推論用) */

@@ -100,7 +100,30 @@ export class NeuralAgent implements Agent {
       }
     }
 
-    return { aliveSeats, claimedRoles, confirmedVillageSeats, mySeat: ctx.mySeat - 1 }
+    // role token マスク: CO者が全員「確定白 or 自席」なら、その role token を禁止
+    // （resolve しても処刑対象にならない role を出力させない）
+    const maskedRoles = new Array(CO_ROLES.length).fill(false)
+    for (let r = 0; r < CO_ROLES.length; r++) {
+      if (!claimedRoles[r]) continue  // CO者なし → 既にマスク（claimedRoles で処理）
+      // この role の生存CO者を収集
+      let allExcluded = true
+      for (const e of ctx.publicEvents) {
+        if ('actor' in e && typeof (e as any).type === 'string'
+          && (e as any).type.startsWith(`${CO_ROLES[r]}_claim`)
+          && aliveSet.has((e as any).actor)) {
+          const seat0 = (e as any).actor - 1
+          const isMySeat = seat0 === ctx.mySeat - 1
+          const isConfirmed = confirmedVillageSeats?.[seat0] ?? false
+          if (!isMySeat && !isConfirmed) {
+            allExcluded = false
+            break
+          }
+        }
+      }
+      if (allExcluded) maskedRoles[r] = true
+    }
+
+    return { aliveSeats, claimedRoles, confirmedVillageSeats, mySeat: ctx.mySeat - 1, maskedRoles }
   }
 
   protected infer(ctx: DecisionContext): ForwardResult {
