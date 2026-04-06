@@ -1139,12 +1139,9 @@ async function main(): Promise<void> {
 
   // === Pretrain: plan tokens の事前学習 (新規学習時のみ、Transformer限定) ===
   if (!anyResumed && config.transformer) {
-    log(`${BOLD}=== Pretrain B: Plan Token Supervised Learning ===${RESET}`)
-    const tB0 = performance.now()
     const pretrainBatchSize = 512
-    const pretrainMaxEpochs = config.skeleton ? 2 : 1000
-    const pretrainTargetAcc = config.skeleton ? 0 : 0.85
     const pretrainLogInterval = 100
+    const pretrainSnapshots: PretrainSnapshot[] = []
 
     // Hati 詰みデータの読み込み: DB → キャッシュ → runtime 収集の優先順
     const totalPlayers = Object.values(trainingConfig.roles).reduce((a: number, b: number) => a + b, 0)
@@ -1170,49 +1167,9 @@ async function main(): Promise<void> {
     }
     const tsumiRatio = tsumiSamples.length > 0 ? 0.3 : 0
 
-    let bestAcc = 0
-    let bestNextAcc = 0
-    const pretrainNextTargetAcc = 0.60
-    const pretrainSnapshots: PretrainSnapshot[] = []
-    // Fixed probe samples for snapshot comparison (same input across all epochs)
-    const probeSamplesB = generatePlanTokenTrainingBatch(8, 99999, tsumiSamples, tsumiRatio)
-    for (let epoch = 1; epoch <= pretrainMaxEpochs; epoch++) {
-      await new Promise(r => setTimeout(r, 0))  // yield to event loop for signal handling
-      checkShutdown()
-      const samples = generatePlanTokenTrainingBatch(pretrainBatchSize, epoch, tsumiSamples, tsumiRatio)
-      const { loss, accuracy, nextAccuracy, stopAccuracy } = (tfNetwork as any).trainSupervisedPlan({
-        observations: samples.map(s => s.observation),
-        forwardLabels: samples.map(s => s.forwardLabels),
-        forwardMasks: samples.map(s => s.forwardMask),
-        endgameLabels: samples.map(s => s.endgameLabels),
-        endgameMasks: samples.map(s => s.endgameMask),
-        numTokens: samples[0].forwardLabels.length,
-        numEndgameTokens: samples[0].endgameLabels.length,
-        vocabSize: PLAN_VOCAB.SIZE,
-      })
-      if (accuracy > bestAcc) bestAcc = accuracy
-      if (nextAccuracy > bestNextAcc) bestNextAcc = nextAccuracy
-      if (epoch % pretrainLogInterval === 0 || epoch === 1) {
-        log(`  epoch=${epoch} loss=${loss.toFixed(4)} acc=${(accuracy * 100).toFixed(1)}% next=${(nextAccuracy * 100).toFixed(1)}% stop=${(stopAccuracy * 100).toFixed(1)}% best=${(bestAcc * 100).toFixed(1)}%`)
-      }
-      if (SNAPSHOT_EPOCHS_B.has(epoch)) {
-        const villageNet = networks.get('village' as ModelName)
-        if (villageNet) pretrainSnapshots.push(capturePlanSnapshot('B', epoch, { loss, accuracy, nextAccuracy, stopAccuracy }, probeSamplesB, villageNet, tfNetwork))
-      }
-      if (accuracy >= pretrainTargetAcc && nextAccuracy >= pretrainNextTargetAcc) {
-        log(`  Target accuracy ${(pretrainTargetAcc * 100).toFixed(0)}% + NEXT ${(pretrainNextTargetAcc * 100).toFixed(0)}% reached at epoch ${epoch}`)
-        break
-      }
-    }
-    // pretrain 済みの重みを village の推論用 NN にコピー
-    const villageNet = networks.get('village' as ModelName)
-    if (villageNet) {
-      villageNet.loadWeights(tfNetwork.cloneWeights())
-      log(`  Pretrained weights → village network`)
-    }
-    log(`  Method B complete: ${(bestAcc * 100).toFixed(1)}% acc, ${(bestNextAcc * 100).toFixed(1)}% NEXT, ${((performance.now() - tB0) / 1000).toFixed(1)}s`)
-
-    // === Pretrain B2: Plan 構造 (NEXT 配置) の教師あり学習 ===
+    // === Pretrain B2 (先): Plan 構造 (NEXT 配置) の教師あり学習 ===
+    // B2 を先に実行して NEXT/STOP 文法を学び、B で席ターゲットを上書きする。
+    // B が最後なので seat logits のマージンが保たれ、explore 時に STOP に負けない。
     log(`${BOLD}=== Pretrain B2: Plan Structure (NEXT placement) ===${RESET}`)
     const tB2_0 = performance.now()
     const b2MaxEpochs = config.skeleton ? 2 : 500
@@ -1248,7 +1205,57 @@ async function main(): Promise<void> {
     }
     log(`  B2 complete: ${(b2BestNextAcc * 100).toFixed(1)}% NEXT, ${((performance.now() - tB2_0) / 1000).toFixed(1)}s`)
 
-    // pretrain 済みの重みを village の推論用 NN にコピー（B + B2 の結果）
+    // === Pretrain B (後): Plan Token 席ターゲットの教師あり学習 ===
+    // B2 の NEXT 構造をベースに、人外の席を指すパターンを学ぶ。
+    // 終了条件に seat accuracy を追加: explore で STOP に負けないマージンを保証。
+    log(`${BOLD}=== Pretrain B: Plan Token Supervised Learning ===${RESET}`)
+    const tB0 = performance.now()
+    const pretrainMaxEpochs = config.skeleton ? 2 : 1000
+    const pretrainTargetAcc = config.skeleton ? 0 : 0.85
+    const pretrainNextTargetAcc = 0.60
+    const pretrainSeatTargetAcc = config.skeleton ? 0 : 0.15
+
+    let bestAcc = 0
+    let bestNextAcc = 0
+    let bestSeatAcc = 0
+    // Fixed probe samples for snapshot comparison (same input across all epochs)
+    const probeSamplesB = generatePlanTokenTrainingBatch(8, 99999, tsumiSamples, tsumiRatio)
+    for (let epoch = 1; epoch <= pretrainMaxEpochs; epoch++) {
+      await new Promise(r => setTimeout(r, 0))  // yield to event loop for signal handling
+      checkShutdown()
+      const samples = generatePlanTokenTrainingBatch(pretrainBatchSize, epoch, tsumiSamples, tsumiRatio)
+      const { loss, accuracy, nextAccuracy, stopAccuracy, seatAccuracy } = (tfNetwork as any).trainSupervisedPlan({
+        observations: samples.map(s => s.observation),
+        forwardLabels: samples.map(s => s.forwardLabels),
+        forwardMasks: samples.map(s => s.forwardMask),
+        endgameLabels: samples.map(s => s.endgameLabels),
+        endgameMasks: samples.map(s => s.endgameMask),
+        numTokens: samples[0].forwardLabels.length,
+        numEndgameTokens: samples[0].endgameLabels.length,
+        vocabSize: PLAN_VOCAB.SIZE,
+      })
+      if (accuracy > bestAcc) bestAcc = accuracy
+      if (nextAccuracy > bestNextAcc) bestNextAcc = nextAccuracy
+      if (seatAccuracy > bestSeatAcc) bestSeatAcc = seatAccuracy
+      if (epoch % pretrainLogInterval === 0 || epoch === 1) {
+        log(`  epoch=${epoch} loss=${loss.toFixed(4)} acc=${(accuracy * 100).toFixed(1)}% next=${(nextAccuracy * 100).toFixed(1)}% stop=${(stopAccuracy * 100).toFixed(1)}% seat=${(seatAccuracy * 100).toFixed(1)}% best=${(bestAcc * 100).toFixed(1)}%`)
+      }
+      if (SNAPSHOT_EPOCHS_B.has(epoch)) {
+        const villageNet = networks.get('village' as ModelName)
+        if (villageNet) pretrainSnapshots.push(capturePlanSnapshot('B', epoch, { loss, accuracy, nextAccuracy, stopAccuracy }, probeSamplesB, villageNet, tfNetwork))
+      }
+      if (accuracy >= pretrainTargetAcc && nextAccuracy >= pretrainNextTargetAcc && seatAccuracy >= pretrainSeatTargetAcc) {
+        log(`  Target acc=${(pretrainTargetAcc * 100).toFixed(0)}% + NEXT=${(pretrainNextTargetAcc * 100).toFixed(0)}% + seat=${(pretrainSeatTargetAcc * 100).toFixed(0)}% reached at epoch ${epoch}`)
+        break
+      }
+    }
+    // pretrain 済みの重みを village の推論用 NN にコピー（B2 + B の結果）
+    const villageNet = networks.get('village' as ModelName)
+    if (villageNet) {
+      villageNet.loadWeights(tfNetwork.cloneWeights())
+      log(`  Pretrained weights → village network`)
+    }
+    log(`  Method B complete: ${(bestAcc * 100).toFixed(1)}% acc, ${(bestNextAcc * 100).toFixed(1)}% NEXT, ${(bestSeatAcc * 100).toFixed(1)}% seat, ${((performance.now() - tB0) / 1000).toFixed(1)}s`)
 
     // === Method D: 実ゲームで predict + value の事前学習 ===
     log(`${BOLD}=== Pretrain D: Heuristic Game Supervised Learning ===${RESET}`)

@@ -1301,20 +1301,21 @@ export class TfTransformerNetwork {
     numTokens: number
     numEndgameTokens?: number
     vocabSize: number
-  }): { loss: number, accuracy: number, nextAccuracy: number, stopAccuracy: number } {
+  }): { loss: number, accuracy: number, nextAccuracy: number, stopAccuracy: number, seatAccuracy: number } {
     const n = batch.observations.length
-    if (n === 0) return { loss: 0, accuracy: 0, nextAccuracy: 0, stopAccuracy: 0 }
+    if (n === 0) return { loss: 0, accuracy: 0, nextAccuracy: 0, stopAccuracy: 0, seatAccuracy: 0 }
 
     const inputSize = this.config.inputSize
     const obsData = new Float32Array(n * inputSize)
     for (let i = 0; i < n; i++) obsData.set(batch.observations[i], i * inputSize)
 
-    const result = { loss: 0, accuracy: 0, nextAccuracy: 0, stopAccuracy: 0 }
+    const result = { loss: 0, accuracy: 0, nextAccuracy: 0, stopAccuracy: 0, seatAccuracy: 0 }
     const numTokens = batch.numTokens
     const vocabSize = batch.vocabSize
     const START_IDX = vocabSize  // START token index
     const NEXT_IDX = vocabSize - 2  // PLAN_VOCAB.NEXT = 20
     const STOP_IDX = vocabSize - 1  // PLAN_VOCAB.STOP = 21
+    const SEAT_END = 14  // PLAN_VOCAB.SEAT_END
     const FOCAL_GAMMA = 2.0
 
     // Build teacher-forcing prevActions from labels: [START, label[0], label[1], ..., label[n-2]]
@@ -1336,6 +1337,7 @@ export class TfTransformerNetwork {
       let totalMasked = 0
       let nextCorrect = 0, nextTotal = 0
       let stopCorrect = 0, stopTotal = 0
+      let seatCorrect = 0, seatTotal = 0
 
       // Helper: compute CE loss for a plan via GRU teacher forcing
       const computeCE = (
@@ -1378,6 +1380,7 @@ export class TfTransformerNetwork {
             if (hit) correct++
             if (lbl === NEXT_IDX) { nextTotal++; if (hit) nextCorrect++ }
             else if (lbl === STOP_IDX) { stopTotal++; if (hit) stopCorrect++ }
+            else if (lbl < SEAT_END) { seatTotal++; if (hit) seatCorrect++ }
           }
         }
       }
@@ -1394,6 +1397,7 @@ export class TfTransformerNetwork {
         result.accuracy = correct / totalMasked
         result.nextAccuracy = nextTotal > 0 ? nextCorrect / nextTotal : 0
         result.stopAccuracy = stopTotal > 0 ? stopCorrect / stopTotal : 0
+        result.seatAccuracy = seatTotal > 0 ? seatCorrect / seatTotal : 0
         const avgLoss = tf.div(totalLoss, tf.scalar(totalMasked))
         result.loss = avgLoss.dataSync()[0]
         return avgLoss as tf.Scalar
