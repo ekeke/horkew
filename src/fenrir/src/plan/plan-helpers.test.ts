@@ -180,6 +180,45 @@ describe('planToVote', () => {
   })
 
   // ════════════════════════════════════════════
+  // Forward 空 (all-STOP) のフォールバック
+  // ════════════════════════════════════════════
+
+  it('returns endgame when forward is all-STOP and alive <= 4', () => {
+    const forward = [STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
+    const endgame = [6, STOP, STOP, STOP]  // seat7
+    const ctx = makeCtx({ alivePlayers: [1, 3, 7, 9] })  // 4人
+    assert.equal(planToVote(forward, ctx, endgame), 7)
+  })
+
+  it('returns endgame when forward is all-STOP and alive <= 6 with 2 groups', () => {
+    const forward = [STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
+    const endgame = [6, NEXT, 4, STOP]  // groups: [seat7], [seat5]
+    const ctx = makeCtx({ alivePlayers: [1, 3, 5, 7, 9, 11] })  // 6人
+    assert.equal(planToVote(forward, ctx, endgame), 5)
+  })
+
+  it('returns null when forward is all-STOP and no endgame', () => {
+    const forward = [STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
+    const ctx = makeCtx({ alivePlayers: [1, 3, 5, 7] })  // 4人
+    assert.equal(planToVote(forward, ctx, null), null)
+  })
+
+  it('returns null when forward is all-STOP and alive > 6', () => {
+    const forward = [STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
+    const endgame = [6, STOP, STOP, STOP]
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7] })  // 7人
+    assert.equal(planToVote(forward, ctx, endgame), null)
+  })
+
+  it('returns null when forward is all-STOP, alive <= 6, only 1 endgame group', () => {
+    // 6人、endgame groups[0] は最終日用 → 使わない → null
+    const forward = [STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
+    const endgame = [6, STOP, STOP, STOP]  // 1 group
+    const ctx = makeCtx({ alivePlayers: [1, 3, 5, 7, 9, 11] })  // 6人
+    assert.equal(planToVote(forward, ctx, endgame), null)
+  })
+
+  // ════════════════════════════════════════════
   // Multi-target group (roller)
   // ════════════════════════════════════════════
 
