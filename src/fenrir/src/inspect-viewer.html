@@ -338,17 +338,11 @@ function renderDetail() {
   html += '</div></div>'
 
   // Plan tokens
-  if (step.planForward) {
+  if (step.plan) {
     html += `<div class="detail-section">
-      <h4>Plan Forward</h4>
-      <div class="plan-tokens">${renderPlanTokens(step.planForward.indices)}</div>
-      <div style="font-size:11px;color:var(--fg2);margin-top:4px">${step.planForward.groups.length} group(s)</div>
-    </div>`
-  }
-  if (step.planEndgame) {
-    html += `<div class="detail-section">
-      <h4>Plan Endgame</h4>
-      <div class="plan-tokens">${renderPlanTokens(step.planEndgame.indices)}</div>
+      <h4>Plan</h4>
+      <div class="plan-tokens">${renderPlanTokens(step.plan.indices)}</div>
+      <div style="font-size:11px;color:var(--fg2);margin-top:4px">${step.plan.slots.length} slot(s)</div>
     </div>`
   }
 

@@ -9,7 +9,7 @@
     seats: Array<{ alive: boolean, claimedRole?: string, blackCount: number, whiteCount: number, voteReceived: number, suspicion: number, trust: number, executeProposal: number, isCommander: boolean, accuseWolf: number, accuseFox: number, voteIntent: number, nominateCommander: number, planApproved: number, confirmHuman: number, confirmWolf: number, voteFor: number, voteAgainst: number }>
     revote: { round: number, candidates: number[] }
     history: number[]
-    plan: { forwardIndices: number[] | null, endgameIndices: number[] | null }
+    plan: { indices: number[] | null }
     tsumiTarget: number | null
   }
   type PlayerStep = {
@@ -44,8 +44,7 @@
     reward: number
     value: number
     done: boolean
-    planForward?: { indices: number[], description: string, groups: any[] }
-    planEndgame?: { indices: number[], description: string, groups: any[] }
+    plan?: { indices: number[], description: string, slots: any[] }
     predict?: Array<{ seat: number, roles: Array<{ role: string, value: number }> }>
   }
 
@@ -180,8 +179,7 @@
     snapshot: DaySnapshot | null
     players: PlayerStep[]
     mlSteps: Array<TimelineStep & { _idx: number }>
-    planForward: TimelineStep['planForward'] | null
-    planEndgame: TimelineStep['planEndgame'] | null
+    plan: TimelineStep['plan'] | null
   }
   let mergedDays = $derived.by((): DayGroup[] => {
     if (!game) return []
@@ -190,7 +188,7 @@
       let g = map.get(day)
       if (!g) {
         const snap = game!.daySnapshots?.[String(day)] ?? null
-        g = { day, snapshot: snap, players: [], mlSteps: [], planForward: null, planEndgame: null }
+        g = { day, snapshot: snap, players: [], mlSteps: [], plan: null }
         map.set(day, g)
       }
       return g
@@ -204,9 +202,8 @@
       const step = game.timeline[i]
       const g = getGroup(step.day)
       g.mlSteps.push({ ...step, _idx: i })
-      if (step.actionHead === 'strategy' && !g.planForward) {
-        g.planForward = step.planForward ?? null
-        g.planEndgame = step.planEndgame ?? null
+      if (step.actionHead === 'strategy' && !g.plan) {
+        g.plan = step.plan ?? null
       }
     }
     for (const g of map.values()) {
@@ -378,30 +375,18 @@
                   {#if snap.tsumiTarget}<span>Tsumi <b class="positive">seat{snap.tsumiTarget}</b></span>{/if}
                   {#if snap.revote.round > 0}<span>Revote <b>R{snap.revote.round}</b></span>{/if}
                 </div>
-                {#if dayGroup.planForward || snap.plan.forwardIndices?.some(v => v !== 21)}
+                {#if dayGroup.plan || snap.plan.indices?.some(v => v !== 21)}
                   <div class="day-plan-section">
-                    {#if dayGroup.planForward}
+                    {#if dayGroup.plan}
                       <div class="day-plan-row">
-                        <span class="day-plan-label">Fwd</span>
-                        <span class="plan-tokens">{#each dayGroup.planForward.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
-                        <span class="plan-groups">{dayGroup.planForward.groups.length}g</span>
+                        <span class="day-plan-label">Plan</span>
+                        <span class="plan-tokens">{#each dayGroup.plan.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                        <span class="plan-groups">{dayGroup.plan.slots.length}s</span>
                       </div>
-                    {:else if snap.plan.forwardIndices}
+                    {:else if snap.plan.indices}
                       <div class="day-plan-row">
-                        <span class="day-plan-label">Fwd</span>
-                        <span class="plan-tokens">{#each snap.plan.forwardIndices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
-                      </div>
-                    {/if}
-                    {#if dayGroup.planEndgame}
-                      <div class="day-plan-row">
-                        <span class="day-plan-label">End</span>
-                        <span class="plan-tokens">{#each dayGroup.planEndgame.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
-                        <span class="plan-groups">{dayGroup.planEndgame.groups.length}g</span>
-                      </div>
-                    {:else if snap.plan.endgameIndices?.some(v => v !== 21)}
-                      <div class="day-plan-row">
-                        <span class="day-plan-label">End</span>
-                        <span class="plan-tokens">{#each snap.plan.endgameIndices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
+                        <span class="day-plan-label">Plan</span>
+                        <span class="plan-tokens">{#each snap.plan.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
                       </div>
                     {/if}
                   </div>
@@ -585,28 +570,16 @@
           </div>
 
           <!-- Plan tokens (output) -->
-          {#if selectedStep.planForward}
+          {#if selectedStep.plan}
             <div class="detail-section">
-              <div class="detail-label">Plan Forward (output)</div>
+              <div class="detail-label">Plan (output)</div>
               <div class="plan-tokens">
-                {#each selectedStep.planForward.indices as idx}
+                {#each selectedStep.plan.indices as idx}
                   {@const pt = planTokenLabel(idx)}
                   <span class="plan-token {pt.cls}">{pt.text}</span>
                 {/each}
               </div>
-              <div class="plan-groups">{selectedStep.planForward.groups.length} group(s)</div>
-            </div>
-          {/if}
-          {#if selectedStep.planEndgame}
-            <div class="detail-section">
-              <div class="detail-label">Plan Endgame (output)</div>
-              <div class="plan-tokens">
-                {#each selectedStep.planEndgame.indices as idx}
-                  {@const pt = planTokenLabel(idx)}
-                  <span class="plan-token {pt.cls}">{pt.text}</span>
-                {/each}
-              </div>
-              <div class="plan-groups">{selectedStep.planEndgame.groups.length} group(s)</div>
+              <div class="plan-groups">{selectedStep.plan.slots.length} slot(s)</div>
             </div>
           {/if}
 
