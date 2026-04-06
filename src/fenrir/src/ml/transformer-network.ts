@@ -333,11 +333,10 @@ export class TransformerNetwork {
           // 前グループで使った席を禁止（同じ席の連続グループ指定を防止）
           for (const used of allUsed) stepLogits[used] = -Infinity
         } else if (prevAction >= 0 && prevAction < PLAN_VOCAB.SEAT_END) {
-          // After seat: seat (no dup across all groups), NEXT, STOP
+          // After seat: seat (no dup in current group), NEXT, STOP
           for (let t = ROLE_START; t < ROLE_END; t++) stepLogits[t] = -Infinity
           stepLogits[GRAYRAN_IDX] = -Infinity
           for (const used of groupUsed) stepLogits[used] = -Infinity
-          for (const used of allUsed) stepLogits[used] = -Infinity
         } else if (isRoleOrGrayran(prevAction)) {
           // After role or grayran: NEXT, STOP only (single-token group)
           for (let t = 0; t < vocabSize; t++) {
