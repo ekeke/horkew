@@ -283,6 +283,8 @@ export class TransformerNetwork {
     let seenStop = false
     let prevAction = START_IDX
     const groupUsed = new Set<number>()
+    const allUsed = new Set<number>()  // グループ間の重複抑制（ソフトペナルティ）
+    const CROSS_GROUP_PENALTY = 5.0
 
     for (let step = 0; step < numSteps; step++) {
       // Input: embedding of previous token
@@ -329,6 +331,8 @@ export class TransformerNetwork {
           // START or after NEXT: seat, role, grayran only
           stepLogits[NEXT_IDX] = -Infinity
           stepLogits[STOP_IDX] = step === 0 ? stepLogits[STOP_IDX] : -Infinity  // START allows STOP, NEXT does not
+          // 前グループで使った席をソフトペナルティ（確率 ~0.7% に抑制、分布は崩さない）
+          for (const used of allUsed) stepLogits[used] -= CROSS_GROUP_PENALTY
         } else if (prevAction >= 0 && prevAction < PLAN_VOCAB.SEAT_END) {
           // After seat: seat (no dup in current group), NEXT, STOP
           for (let t = ROLE_START; t < ROLE_END; t++) stepLogits[t] = -Infinity
@@ -405,6 +409,7 @@ export class TransformerNetwork {
         groupUsed.clear()
       } else {
         groupUsed.add(chosenIdx)
+        allUsed.add(chosenIdx)
       }
       prevAction = chosenIdx
     }
