@@ -90,8 +90,7 @@ StrategyBaseAdapter を継承し、mason 固有の2つの責務を追加:
 2. **村エージェントの投票に plan が 100% 反映される**（executionPlans + Proposal 経由）
 
 - mason takeover: ML mason 死亡時にパートナーへ agent 移譲
-- mason 死亡後: cached planState から��毎消費（`advanceDayIndexOnce`）
-- endgame 切り替え: ≤6人で endgameGroups を優先
+- mason 死亡後: cached planState の slots を nooseCount ベースで消費
 
 ### full-adapter (`adapters/full-adapter.ts`)
 
@@ -167,9 +166,9 @@ orchestrate.ts ─── Phase 0/1/1'/2 の学習ループ管理
   │     ├── fanatic-agent.ts ──── FanaticAgent
   │     └── team-base.ts ──── TeamAgentBase, CollectiveAgentBase
   ├── plan/ ─────── 処刑プラン管理
-  │     ├── plan-vocab.ts ──── PLAN_VOCAB, parsePlanIndices
+  │     ├── plan-vocab.ts ──── PLAN_VOCAB, parsePlanIndices, parsePlanSlots, OR token
   │     ├── plan-resolve.ts ── resolvePlanGroup()
-  │     └── plan-helpers.ts ── planToVote(), nightAction(), dayClaim() 等
+  │     └── plan-helpers.ts ── nooseCount(), planToVote() (unified), nightAction(), dayClaim() 等
   ├── ext.ts ──────── FenrirExt 型定義, createFenrirExt()
   ├── observation.ts ── 盤面 → NN入力エンコード（tokenize含む）
   ├── reward.ts ─────── 報酬設計（terminal, intermediate, predict accuracy）
@@ -183,12 +182,11 @@ Input (1209 dims) → tokenize
   ├── CLS token (26 dims) ─┐
   ├── 14 Seat tokens (73 dims each) ─┤→ proj → Seat Encoder (3 layers, dModel=64)
   └── 5 Role tokens (15 dims each) ──┘          ↓
-                                    ┌── 8 Forward plan embeddings ─┐
-                                    ├── 4 Endgame plan embeddings ─┤→ Strategy Encoder (2 layers)
+                                    ┌── 12 Plan embeddings ─────────┐→ Strategy Encoder (2 layers)
                                     └── 20 Seat Encoder outputs ───┘          ↓
                                                                     Action Heads (vote, comm, night, ...)
                                                                     Value Head (scalar)
-                                                                    Pointer Mechanism (plan tokens)
+                                                                    GRU → plan(12×22) (autoregressive, unified)
 ```
 
 ### 重み命名規則
@@ -198,7 +196,8 @@ Input (1209 dims) → tokenize
 | `proj_cls_*`, `proj_seat_*`, `proj_role_*` | 入力射影 |
 | `seat_*` | Seat Transformer Encoder |
 | `strat_*` | Strategy Layer Encoder |
-| `forward_embeddings`, `endgame_embeddings` | Plan token 学習可能埋め込み |
+| `plan_pos_embed` | Plan token 位置埋め込み (unified 12 tokens) |
+| `plan_init_*` | Plan GRU 初期状態 |
 | `pointer_query_*`, `pointer_key_*`, `special_keys` | Pointer mechanism |
 | `head_{name}_*` | Action heads |
 | `value_*` | Value head |

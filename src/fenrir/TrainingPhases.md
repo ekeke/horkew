@@ -16,7 +16,7 @@
 
 | ステップ | 内容 | 学習対象ヘッド |
 |---------|------|---------------|
-| Pretrain B | Plan token の教師あり学習。正解ラベル付き処刑プランをバッチ生成して supervised cross-entropy | plan_forward, plan_endgame |
+| Pretrain B | Plan token の教師あり学習。正解ラベル付き処刑プランをバッチ生成して supervised cross-entropy。統一12トークンシーケンス | plan |
 | Pretrain D | ヒューリスティック 100 ゲームの行動データを収集し、vote/claim/comm を教師あり BCE | vote, claim, comm（plan は freeze） |
 
 - Pretrain 後に PPO 学習率を `lr × 0.2` に下げる（pretrain 知識保持）
@@ -46,7 +46,7 @@
    - Seed Bank (Day 3 スナップショット) からリプレイ
    - MasonTrainingAdapter が mason の plan → executionPlans に注入
    - ヒューリスティック村人が executionPlans に従って投票
-4. PPO update: strategy action head のみ (plan_forward, plan_endgame, predict)
+4. PPO update: strategy action head のみ (plan, predict)
 5. eval: masonAsIndividual=true (team strategy をバイパス)
 ```
 
@@ -55,9 +55,9 @@
 ```
 mason の NeuralAgent
   → decideVote (strategy-only)
-    → getStrategyResult: plan_forward/plan_endgame logits を推論 (1日1回キャッシュ)
+    → getStrategyResult: unified plan logits を推論 (1日1回キャッシュ)
     → recordStrategy: trajectory に plan token + predict を記録
-    → planToVote: plan logits → 投票先 seat に解決
+    → planToVote: plan logits → nooseCount ベースで投票先 seat に解決
 
 MasonTrainingAdapter (extends StrategyBaseAdapter)
   beforePlanDistribution():
@@ -72,16 +72,16 @@ MasonTrainingAdapter (extends StrategyBaseAdapter)
 
 ### mason 死亡後の plan 継続
 
-mason が噛まれた/吊られた後もキャッシュされた plan の残りグループを日毎に消費する。
+mason が噛まれた/吊られた後もキャッシュされた plan の残りスロットを nooseCount ベースで消費する。
 
 ```
-Plan tokens: [seat3, next, seat7, next, grayran, stop]
-  → groups[0]={seat3}   groups[1]={seat7}   groups[2]={grayran}
+Plan tokens (unified 12): [seat3, next, seat7, next, grayran, stop, ...]
+  → slots[noose5]={seat3}   slots[noose4]={seat7}   slots[noose3]={grayran}
 
-Day 3 (mason 生存): groups[0] → seat3 に execute_order。キャッシュ index=1
-Day 4 (mason 死亡): groups[1] → seat7 に execute_order。index=2
-Day 5 (mason 死亡): groups[2] → grayran → 先頭生存席。index=3
-Day 6: index >= groups.length → キャッシュ切れ → ヒューリスティック投票
+noose=5 (mason 生存): slots[5] → seat3 に execute_order
+noose=4 (mason 死亡): slots[4] → seat7 に execute_order
+noose=3 (mason 死亡): slots[3] → grayran → 先頭生存席
+noose=2: スロットなし → ヒューリスティック投票
 ```
 
 ### Backbone Transfer
