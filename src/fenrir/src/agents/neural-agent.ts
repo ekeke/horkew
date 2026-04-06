@@ -441,7 +441,20 @@ export class NeuralAgent implements Agent {
 
   decideDefensiveClaim(ctx: DecisionContext): DayClaim {
     if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideDefensiveClaim?.(ctx) ?? { type: 'none' }
-    return { type: 'none' }
+    if (this.config.strategyOnly) return dayClaim(ctx)
+
+    const result = this.infer(ctx)
+    const claimLogits = result.policies.get('claim')!
+    const claimMask = maskClaim(ctx)
+    const { action: claimIdx, logProb: claimLogProb } = this.selectAction(claimLogits, claimMask)
+
+    const targetLogits = result.policies.get('target')!
+    const targetMask = maskTarget(ctx)
+    const { action: targetIdx } = this.selectAction(targetLogits, targetMask)
+
+    this.record('claim', claimIdx, claimLogProb, result.value, 0, ctx.mySeat)
+
+    return decodeClaim(claimIdx, targetIdx, ctx)
   }
 
   /** トラジェクトリをリセット */
