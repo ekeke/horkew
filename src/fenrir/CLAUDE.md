@@ -110,7 +110,6 @@ StrategyBaseAdapter を継承し、mason 固有の2つの責務を追加:
 
 ```bash
 npm run train:orchestrate -- \
-  --transformer          # Transformer アーキテクチャ
   --strategy-only        # plan token のみ RL
   --workers 4            # ゲーム生成ワーカー数（デフォルト: auto=CPU-1）
   --iterations 50000     # モデルあたり最大 iter

@@ -1,7 +1,7 @@
 /**
  * tf.js-node-gpu ベースの Transformer Network 実装
  *
- * TfNeuralNetwork と同じインターフェースを維持。
+ * AnyTfNetwork インターフェースを実装。
  * Transformer Encoder で観測をトークン化して処理する。
  */
 

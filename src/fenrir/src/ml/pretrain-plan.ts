@@ -5,7 +5,7 @@
  * 実行: node --experimental-strip-types src/fenrir/src/ml/pretrain-plan.ts [--output PATH] [--lr LR] [--epochs N]
  */
 
-import { createTransformerTfNetwork, createTransformerNetwork } from '../training.ts'
+import { createTfNetwork, createNetwork } from '../training.ts'
 import { generatePlanTokenTrainingBatch } from './execution-plan-data.ts'
 import { saveCheckpoint } from './checkpoint.ts'
 import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
@@ -36,7 +36,7 @@ async function main() {
   console.log(`  vocab_size=${PLAN_VOCAB.SIZE}`)
   console.log()
 
-  const tfNet = createTransformerTfNetwork(LR)
+  const tfNet = createTfNetwork(LR)
   console.log(`  params=${tfNet.totalParams}`)
   console.log()
 
@@ -70,7 +70,7 @@ async function main() {
   console.log()
   console.log('  Saving checkpoint...')
   const weights = tfNet.cloneWeights()
-  const cpNet = createTransformerNetwork()
+  const cpNet = createNetwork()
   cpNet.loadWeights(weights)
   saveCheckpoint(cpNet, OUTPUT_PATH, { iteration: 0, winRate: 0 })
   console.log(`  Saved to ${OUTPUT_PATH}`)

@@ -1,4 +1,4 @@
-/** 軽量ニューラルネットワーク実装（Dense + ReLU + Softmax + Tanh） */
+/** NN共有ユーティリティ（活性化関数・DenseLayer・型定義） */
 
 // ============================================================
 // 活性化関数
@@ -10,14 +10,6 @@ export function relu(x: Float32Array): Float32Array {
     out[i] = x[i] > 0 ? x[i] : 0
   }
   return out
-}
-
-export function reluBackward(x: Float32Array, gradOutput: Float32Array): Float32Array {
-  const grad = new Float32Array(x.length)
-  for (let i = 0; i < x.length; i++) {
-    grad[i] = x[i] > 0 ? gradOutput[i] : 0
-  }
-  return grad
 }
 
 export function softmax(logits: Float32Array): Float32Array {
@@ -43,10 +35,6 @@ export function sigmoid(x: Float32Array): Float32Array {
     out[i] = 1 / (1 + Math.exp(-x[i]))
   }
   return out
-}
-
-export function tanh(x: number): number {
-  return Math.tanh(x)
 }
 
 // ============================================================
@@ -129,16 +117,14 @@ export class DenseLayer {
 }
 
 // ============================================================
-// Multi-Head Neural Network
+// Network Config & Types
 // ============================================================
 
 export type NetworkConfig = {
   inputSize: number
-  hiddenSizes: number[]       // e.g. [512, 256]
   heads: Record<string, number>  // head_name → output_size (softmax heads)
   sigmoidHeads?: Record<string, number>  // head_name → output_size (sigmoid heads)
-  /** Transformer設定 (存在すればMLPの代わりにTransformerをtrunkとして使用) */
-  transformer?: TransformerNetworkConfig
+  transformer: TransformerNetworkConfig
 }
 
 /** Transformerアーキテクチャ設定 */
@@ -188,7 +174,7 @@ export type PlanContext = {
   maskedRoles?: boolean[]  // [5] CO者が全員除外済み（確定白+自席）の role token を禁止
 }
 
-/** NeuralNetwork / TransformerNetwork 共通インターフェース (推論用) */
+/** TransformerNetwork 共通インターフェース (推論用) */
 export interface AnyNetwork {
   readonly config: NetworkConfig
   forward(input: Float32Array, explore?: boolean, planContext?: PlanContext): ForwardResult
@@ -198,7 +184,7 @@ export interface AnyNetwork {
   get totalParams(): number
 }
 
-/** TfNeuralNetwork / TfTransformerNetwork 共通インターフェース (学習用) */
+/** TfTransformerNetwork 共通インターフェース (学習用) */
 export interface AnyTfNetwork {
   readonly config: NetworkConfig
   forward(input: Float32Array, explore?: boolean): ForwardResult
@@ -227,205 +213,6 @@ export interface AnyTfNetwork {
   loadWeights(weights: Map<string, Float32Array>): void
   get totalParams(): number
   dispose(): void
-}
-
-export class NeuralNetwork {
-  readonly config: NetworkConfig
-  readonly trunk: DenseLayer[]
-  readonly heads: Map<string, DenseLayer>          // softmax heads
-  readonly sigmoidHeads: Map<string, DenseLayer>    // sigmoid heads
-  readonly valueHead: DenseLayer
-
-  // ReLU入力キャッシュ（backward用）
-  private _trunkPreActivations: Float32Array[] = []
-
-  constructor(config: NetworkConfig) {
-    this.config = config
-    this.trunk = []
-    this.heads = new Map()
-    this.sigmoidHeads = new Map()
-
-    // Trunk layers
-    let prevSize = config.inputSize
-    for (const hiddenSize of config.hiddenSizes) {
-      this.trunk.push(new DenseLayer(prevSize, hiddenSize))
-      prevSize = hiddenSize
-    }
-
-    // Softmax policy heads
-    for (const [name, outputSize] of Object.entries(config.heads)) {
-      this.heads.set(name, new DenseLayer(prevSize, outputSize))
-    }
-
-    // Sigmoid policy heads
-    for (const [name, outputSize] of Object.entries(config.sigmoidHeads ?? {})) {
-      this.sigmoidHeads.set(name, new DenseLayer(prevSize, outputSize))
-    }
-
-    // Value head (single output, tanh activation)
-    this.valueHead = new DenseLayer(prevSize, 1)
-  }
-
-  forward(input: Float32Array, _explore?: boolean, _planContext?: PlanContext): ForwardResult {
-    this._trunkPreActivations = []
-
-    // Trunk: Dense → ReLU → Dense → ReLU → ...
-    let x = input
-    for (const layer of this.trunk) {
-      const preAct = layer.forward(x)
-      this._trunkPreActivations.push(preAct)
-      x = relu(preAct)
-    }
-
-    // Policy heads (output raw logits — softmax + sigmoid)
-    const policies = new Map<string, Float32Array>()
-    for (const [name, head] of this.heads) {
-      policies.set(name, head.forward(x))
-    }
-    for (const [name, head] of this.sigmoidHeads) {
-      policies.set(name, head.forward(x))
-    }
-
-    // Value head
-    const rawValue = this.valueHead.forward(x)
-    const value = tanh(rawValue[0])
-
-    return { policies, value }
-  }
-
-  /** 全レイヤーの勾配をゼロに */
-  zeroGrad(): void {
-    for (const layer of this.trunk) layer.zeroGrad()
-    for (const head of this.heads.values()) head.zeroGrad()
-    for (const head of this.sigmoidHeads.values()) head.zeroGrad()
-    this.valueHead.zeroGrad()
-  }
-
-  /**
-   * 逆伝播
-   * @param policyGrads head_name → gradients on logits
-   * @param valueGrad gradient on tanh output
-   */
-  backward(policyGrads: Map<string, Float32Array>, valueGrad: number): void {
-    const lastTrunkOutput = relu(this._trunkPreActivations[this._trunkPreActivations.length - 1])
-
-    // Policy heads backward (softmax + sigmoid)
-    let trunkGrad = new Float32Array(lastTrunkOutput.length)
-    for (const [name, head] of this.heads) {
-      const grad = policyGrads.get(name)
-      if (!grad) continue
-      const headGrad = head.backward(grad)
-      for (let i = 0; i < trunkGrad.length; i++) {
-        trunkGrad[i] += headGrad[i]
-      }
-    }
-    for (const [name, head] of this.sigmoidHeads) {
-      const grad = policyGrads.get(name)
-      if (!grad) continue
-      const headGrad = head.backward(grad)
-      for (let i = 0; i < trunkGrad.length; i++) {
-        trunkGrad[i] += headGrad[i]
-      }
-    }
-
-    // Value head backward
-    // d(tanh(x))/dx = 1 - tanh²(x)
-    const rawValue = this.valueHead.lastOutput![0]
-    const tanhVal = tanh(rawValue)
-    const tanhGrad = (1 - tanhVal * tanhVal) * valueGrad
-    const valueHeadGrad = this.valueHead.backward(new Float32Array([tanhGrad]))
-    for (let i = 0; i < trunkGrad.length; i++) {
-      trunkGrad[i] += valueHeadGrad[i]
-    }
-
-    // Trunk backward (reverse order)
-    let grad: Float32Array = trunkGrad
-    for (let l = this.trunk.length - 1; l >= 0; l--) {
-      const preAct = this._trunkPreActivations[l]
-      grad = reluBackward(preAct, grad) as Float32Array<ArrayBuffer>
-      grad = this.trunk[l].backward(grad) as Float32Array<ArrayBuffer>
-    }
-  }
-
-  /** 全パラメータをフラットに取得 */
-  getParams(): Float32Array[] {
-    const params: Float32Array[] = []
-    for (const layer of this.trunk) {
-      params.push(layer.weights, layer.biases)
-    }
-    for (const head of this.heads.values()) {
-      params.push(head.weights, head.biases)
-    }
-    for (const head of this.sigmoidHeads.values()) {
-      params.push(head.weights, head.biases)
-    }
-    params.push(this.valueHead.weights, this.valueHead.biases)
-    return params
-  }
-
-  /** 全勾配をフラットに取得 */
-  getGrads(): Float32Array[] {
-    const grads: Float32Array[] = []
-    for (const layer of this.trunk) {
-      grads.push(layer.weightGrads, layer.biasGrads)
-    }
-    for (const head of this.heads.values()) {
-      grads.push(head.weightGrads, head.biasGrads)
-    }
-    for (const head of this.sigmoidHeads.values()) {
-      grads.push(head.weightGrads, head.biasGrads)
-    }
-    grads.push(this.valueHead.weightGrads, this.valueHead.biasGrads)
-    return grads
-  }
-
-  /** 総パラメータ数 */
-  get totalParams(): number {
-    let total = 0
-    for (const layer of this.trunk) total += layer.paramCount
-    for (const head of this.heads.values()) total += head.paramCount
-    for (const head of this.sigmoidHeads.values()) total += head.paramCount
-    total += this.valueHead.paramCount
-    return total
-  }
-
-  /** 重みのクローン（チェックポイント用） */
-  cloneWeights(): Map<string, Float32Array> {
-    const weights = new Map<string, Float32Array>()
-    for (let i = 0; i < this.trunk.length; i++) {
-      weights.set(`trunk_${i}_w`, new Float32Array(this.trunk[i].weights))
-      weights.set(`trunk_${i}_b`, new Float32Array(this.trunk[i].biases))
-    }
-    for (const [name, head] of this.heads) {
-      weights.set(`head_${name}_w`, new Float32Array(head.weights))
-      weights.set(`head_${name}_b`, new Float32Array(head.biases))
-    }
-    for (const [name, head] of this.sigmoidHeads) {
-      weights.set(`head_${name}_w`, new Float32Array(head.weights))
-      weights.set(`head_${name}_b`, new Float32Array(head.biases))
-    }
-    weights.set('value_w', new Float32Array(this.valueHead.weights))
-    weights.set('value_b', new Float32Array(this.valueHead.biases))
-    return weights
-  }
-
-  /** 重みをロード */
-  loadWeights(weights: Map<string, Float32Array>): void {
-    for (let i = 0; i < this.trunk.length; i++) {
-      this.trunk[i].weights.set(weights.get(`trunk_${i}_w`)!)
-      this.trunk[i].biases.set(weights.get(`trunk_${i}_b`)!)
-    }
-    for (const [name, head] of this.heads) {
-      head.weights.set(weights.get(`head_${name}_w`)!)
-      head.biases.set(weights.get(`head_${name}_b`)!)
-    }
-    for (const [name, head] of this.sigmoidHeads) {
-      head.weights.set(weights.get(`head_${name}_w`)!)
-      head.biases.set(weights.get(`head_${name}_b`)!)
-    }
-    this.valueHead.weights.set(weights.get('value_w')!)
-    this.valueHead.biases.set(weights.get('value_b')!)
-  }
 }
 
 // ============================================================

@@ -3,8 +3,8 @@
  * 学習内容の可視化: ゲームをサンプリングして observation, 展開, 報酬を JSON 出力
  *
  * Usage:
- *   node --experimental-strip-types src/fenrir/src/inspect.ts --seed 42 --count 3 --transformer --strategy-only
- *   node --experimental-strip-types src/fenrir/src/inspect.ts --mldir ./tmp/orch-test5 --seed 42 --transformer --strategy-only
+ *   node --experimental-strip-types src/fenrir/src/inspect.ts --seed 42 --count 3 --strategy-only
+ *   node --experimental-strip-types src/fenrir/src/inspect.ts --mldir ./tmp/orch-test5 --seed 42 --strategy-only
  */
 
 import type { SystemRole } from '../../types/index.ts'
@@ -17,7 +17,6 @@ import { formatHowl } from '../../lupa/format.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from './agents/rule-based-agent.ts'
 import {
   createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
-  createTransformerNetwork, createWolfTeamTransformerNetwork, createMasonTeamTransformerNetwork,
   DEFAULT_TRAINING_CONFIG,
 } from './training.ts'
 import { loadCheckpoint } from './ml/checkpoint.ts'
@@ -60,7 +59,6 @@ function parseArgs() {
   let outdir = 'demo/public/inspect'
   let allMl = false
   let defaultModel: 'ml' | 'heuristic' = 'ml'
-  let transformer = false
   let strategyOnly = false
   const modelOverrides = new Map<string, 'ml' | 'heuristic'>()
 
@@ -79,11 +77,10 @@ function parseArgs() {
         modelOverrides.set(role, model as 'ml' | 'heuristic')
         break
       }
-      case '--transformer': transformer = true; break
       case '--strategy-only': strategyOnly = true; break
     }
   }
-  return { checkpoint, mldir, seed, count, outdir, allMl, defaultModel, modelOverrides, transformer, strategyOnly }
+  return { checkpoint, mldir, seed, count, outdir, allMl, defaultModel, modelOverrides, strategyOnly }
 }
 
 // ============================================================
@@ -139,7 +136,7 @@ function describeAction(actionHead: string, actionIdx: number): string {
 // ============================================================
 
 const config = parseArgs()
-const { checkpoint, mldir, seed, count, outdir, allMl, defaultModel, modelOverrides, transformer, strategyOnly } = config
+const { checkpoint, mldir, seed, count, outdir, allMl, defaultModel, modelOverrides, strategyOnly } = config
 
 // 出力ディレクトリ作成
 mkdirSync(outdir, { recursive: true })
@@ -149,9 +146,9 @@ const roles = new Map(Object.entries(rolesConfig) as [SystemRole, number][])
 const heuristic = new RuleBasedAgent()
 
 // ネットワーク構築
-const makeNet = (): AnyNetwork => transformer ? createTransformerNetwork() : createNetwork()
-const makeWolfTeam = (): AnyNetwork => transformer ? createWolfTeamTransformerNetwork() : createWolfTeamNetwork()
-const makeMasonTeam = (): AnyNetwork => transformer ? createMasonTeamTransformerNetwork() : createMasonTeamNetwork()
+const makeNet = (): AnyNetwork => createNetwork()
+const makeWolfTeam = (): AnyNetwork => createWolfTeamNetwork()
+const makeMasonTeam = (): AnyNetwork => createMasonTeamNetwork()
 
 const groupNets = new Map<string, AnyNetwork>()
 const wolfTeamNet = makeWolfTeam()

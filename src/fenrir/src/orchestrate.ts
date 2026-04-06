@@ -2,7 +2,7 @@
 /**
  * Fenrir Training Orchestrator (シングルプロセス・ラウンドロビン)
  *
- * GPU の TfNeuralNetwork は1セットだけ保持し、3モデルの推論用 NN (Pure JS) を
+ * GPU の TfTransformerNetwork は1セットだけ保持し、3モデルの推論用 NN (Pure JS) を
  * ラウンドロビンで切り替えながら学習する。
  *
  * メモリ:
@@ -20,8 +20,6 @@ import {
   evaluate, appendEvalLog,
   createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
   createTfNetwork, createWolfTeamTfNetwork, createMasonTeamTfNetwork,
-  createTransformerNetwork, createWolfTeamTransformerNetwork, createMasonTeamTransformerNetwork,
-  createTransformerTfNetwork, createWolfTeamTransformerTfNetwork, createMasonTeamTransformerTfNetwork,
   createWolfCollectiveNetwork, createMasonCollectiveNetwork,
   createWolfCollectiveTfNetwork, createMasonCollectiveTfNetwork,
   createFanaticNetwork, createFanaticTfNetwork,
@@ -96,7 +94,6 @@ type OrchestratorConfig = {
   resume: boolean
   learningRate: number
   workers: number
-  transformer: boolean
   strategyOnly: boolean
   miniBatchSize?: number
   /** inspect サンプリング間隔（N ゲームに 1 回、0=無効） */
@@ -122,7 +119,6 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   resume: false,
   learningRate: 3e-4,
   workers: 4,
-  transformer: true,
   strategyOnly: true,
   inspectInterval: 0,
   ppoRestart: false,
@@ -155,7 +151,6 @@ function parseArgs(): OrchestratorConfig {
         config.workers = val === 'auto' ? -1 : parseInt(val)
         break
       }
-      case '--transformer': config.transformer = true; break
       case '--strategy-only': config.strategyOnly = true; break
       case '--mini-batch': config.miniBatchSize = parseInt(args[++i]); break
       case '--inspect-interval': config.inspectInterval = parseInt(args[++i]); break
@@ -188,7 +183,6 @@ Options:
   --resume                 (非推奨) 最新チェックポイントから再開。省略時は対話プロンプトで選択
   --lr <n>                 学習率 (default: ${DEFAULT_CONFIG.learningRate})
   --workers <n|auto>       ゲーム生成ワーカー数 (auto=CPU-1, default: 4)
-  --transformer            Transformerアーキテクチャを使用 (default: MLP)
   --strategy-only          戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
   --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
   --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
@@ -983,7 +977,7 @@ async function main(): Promise<void> {
   try { execSync('git diff --quiet HEAD', { encoding: 'utf-8' }); gitDirty = false } catch { gitDirty = true }
   log(`${BOLD}Fenrir Training Orchestrator (round-robin)${RESET}`)
   log(`Git: ${gitSha}${gitDirty ? ' (dirty)' : ''} | ${new Date().toISOString()}`)
-  log(`Architecture: ${config.transformer ? 'Transformer' : 'MLP'}${config.strategyOnly ? ' (strategy-only)' : ''}`)
+  log(`Architecture: Transformer${config.strategyOnly ? ' (strategy-only)' : ''}`)
   log(`Iterations: ${config.iterations}/model, Chunk: ${config.chunkSize}, Batch: ${config.batch}`)
   log(`DESIGNATION_DEBUG=${process.env.DESIGNATION_DEBUG ?? '(unset)'}`)
 
@@ -997,7 +991,7 @@ async function main(): Promise<void> {
   writeTrainStatus({ status: 'running', runId, checkpointBase: config.checkpointBase, pid: process.pid, gitSha, updated: new Date().toISOString() })
   appendTrainHistory({ event: 'started', time: new Date().toISOString(), runId, checkpointBase: config.checkpointBase, gitSha, pid: process.pid, mode: startMode })
 
-  const arch = `${config.transformer ? 'Transformer' : 'MLP'}${config.strategyOnly ? ' (strategy-only)' : ''}`
+  const arch = `Transformer${config.strategyOnly ? ' (strategy-only)' : ''}`
   const configSummary = `batch=${config.batch}, lr=${config.learningRate}, evalInterval=${config.evalInterval}, chunkSize=${config.chunkSize}, workers=${config.workers}`
   const progress: TrainProgress = {
     runId,
@@ -1020,32 +1014,23 @@ async function main(): Promise<void> {
     enableRetar: !config.noRetar,
     learningRate: config.learningRate,
     rewardConfig: DEFAULT_REWARD_CONFIG,
-    useTransformer: config.transformer,
     strategyOnly: config.strategyOnly,
     miniBatchSize: config.miniBatchSize ?? DEFAULT_TRAINING_CONFIG.miniBatchSize,
   }
 
-  // === ファクトリ関数 (MLP / Transformer 切り替え) ===
-  const makeNetwork = (): AnyNetwork => config.transformer ? createTransformerNetwork() : createNetwork()
-  const makeTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createTransformerTfNetwork(lr) : createTfNetwork(lr) as unknown as AnyTfNetwork
-  const makeWolfTeamNetwork = (): AnyNetwork => config.transformer ? createWolfTeamTransformerNetwork() : createWolfTeamNetwork()
-  const makeWolfTeamTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createWolfTeamTransformerTfNetwork(lr) : createWolfTeamTfNetwork(lr) as unknown as AnyTfNetwork
-  const makeMasonTeamNetwork = (): AnyNetwork => config.transformer ? createMasonTeamTransformerNetwork() : createMasonTeamNetwork()
-  const makeMasonTeamTfNetwork = (lr: number): AnyTfNetwork => config.transformer ? createMasonTeamTransformerTfNetwork(lr) : createMasonTeamTfNetwork(lr) as unknown as AnyTfNetwork
-
   // === ネットワーク作成 ===
   // 推論用 (Pure JS, CPU): モデルごとに1つ
   const networks = new Map<ModelName, AnyNetwork>()
-  for (const name of MODEL_NAMES) networks.set(name, makeNetwork())
+  for (const name of MODEL_NAMES) networks.set(name, createNetwork())
 
   // チーム推論用
-  const wolfTeamNet = makeWolfTeamNetwork()
-  const masonTeamNet = makeMasonTeamNetwork()
+  const wolfTeamNet = createWolfTeamNetwork()
+  const masonTeamNet = createMasonTeamNetwork()
 
   // 学習用 (TF.js GPU): 1セットだけ — 重みをスワップして共有
-  const tfNetwork = makeTfNetwork(config.learningRate)
-  const wolfTeamTf = makeWolfTeamTfNetwork(config.learningRate)
-  const masonTeamTf = makeMasonTeamTfNetwork(config.learningRate)
+  const tfNetwork = createTfNetwork(config.learningRate)
+  const wolfTeamTf = createWolfTeamTfNetwork(config.learningRate)
+  const masonTeamTf = createMasonTeamTfNetwork(config.learningRate)
 
   log(`Individual NN: ${networks.values().next().value!.totalParams} params × 6 (CPU)`)
   log(`TfNN: 1 shared (GPU)`)
@@ -1113,7 +1098,7 @@ async function main(): Promise<void> {
   }
 
   // resume 時も PPO lr を適用（pretrain 後の低 lr）
-  if (anyResumed && config.transformer) {
+  if (anyResumed) {
     const ppoLr = config.learningRate * 0.2
     ;(tfNetwork as any).setLearningRate(ppoLr)
     ;(wolfTeamTf as any).setLearningRate?.(ppoLr)
@@ -1122,7 +1107,7 @@ async function main(): Promise<void> {
   }
 
   // === Pretrain: plan tokens の事前学習 (新規学習時のみ、Transformer限定) ===
-  if (!anyResumed && config.transformer) {
+  if (!anyResumed) {
     const pretrainBatchSize = 512
     const pretrainLogInterval = 100
     const pretrainSnapshots: PretrainSnapshot[] = []
@@ -1311,13 +1296,10 @@ async function main(): Promise<void> {
   // checkpoint_0 (pretrain) ではなく現在重みを使う理由:
   // frozen-plan PPO で trunk が変わっているため、pretrain trunk と現在 trunk で
   // plan logits が大きく異なり、KL が最初から巨大になる。
-  let refNetwork: AnyNetwork | undefined
-  if (config.transformer) {
-    refNetwork = createTransformerNetwork()
-    const villageNet = networks.get('village' as ModelName)
-    if (villageNet) refNetwork.loadWeights(villageNet.cloneWeights())
-    log(`Reference network created from current village weights (KL anchor)`)
-  }
+  const refNetwork: AnyNetwork = createNetwork()
+  const villageNet = networks.get('village' as ModelName)
+  if (villageNet) refNetwork.loadWeights(villageNet.cloneWeights())
+  log(`Reference network created from current village weights (KL anchor)`)
 
   // === Baseline (14D猫 heuristic vs heuristic, ハードコード) ===
   // 100ゲーム × 複数回の測定結果から: village≈55%, hamster≈27%, wolf≈15%, draw≈3%
@@ -1343,7 +1325,7 @@ async function main(): Promise<void> {
       log(`${BOLD}=== Phase 0: Mason Individual (already graduated) ===${RESET}`)
       // Backbone transfer: mason → village
       const villageNet = networks.get('village' as ModelName)!
-      const masonNet = makeNetwork()
+      const masonNet = createNetwork()
       loadCheckpoint(masonNet, masonFinalPath)
       villageNet.loadWeights(masonNet.cloneWeights())
       frozenMasonWeights = packWeights(masonNet)
@@ -1357,8 +1339,8 @@ async function main(): Promise<void> {
       log(`${BOLD}=== Phase 0: Mason Individual ===${RESET}`)
 
       // Mason individual uses the same architecture as village
-      const masonNet = makeNetwork()
-      const masonTf = makeTfNetwork(config.learningRate * 0.2)
+      const masonNet = createNetwork()
+      const masonTf = createTfNetwork(config.learningRate * 0.2)
 
       // Resume support
       let masonIter = 0
@@ -1392,8 +1374,8 @@ async function main(): Promise<void> {
       }
 
       // Mason ref network (KL anchor)
-      // KL reference network（MLP でも使用可能）
-      const masonRefNetwork = makeNetwork()
+      // KL reference network
+      const masonRefNetwork = createNetwork()
       masonRefNetwork.loadWeights(masonNet.cloneWeights())
 
       const masonMlRoles = ['mason'] as SystemRole[]

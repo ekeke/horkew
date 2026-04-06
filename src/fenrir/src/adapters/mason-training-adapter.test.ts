@@ -44,7 +44,7 @@ function createMockNetwork(opts: {
   return {
     config: {
       inputSize: OBSERVATION_SIZE,
-      hiddenSizes: [],
+
       heads: { vote: 14, night: 15, claim: 10, comm: 119, leader: 3, target: 14 },
       sigmoidHeads: { propose: 14, predict: 154 },
       transformer: {

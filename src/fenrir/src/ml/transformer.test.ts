@@ -23,7 +23,6 @@ const MAX_PLAN_TOKENS = 8
 function makeConfig(isTeam = false): NetworkConfig {
   return {
     inputSize: isTeam ? TEAM_OBSERVATION_SIZE : OBSERVATION_SIZE,
-    hiddenSizes: [],  // unused for transformer
     heads: {
       night: SEATS + 1,
       claim: 10,
@@ -361,7 +360,7 @@ describe('TransformerNetwork', () => {
 function makeWolfCollectiveConfig(): NetworkConfig {
   return {
     inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
-    hiddenSizes: [],
+
     heads: {
       attack_target: SEATS,
       attacker: 3,
@@ -399,7 +398,7 @@ function makeWolfCollectiveConfig(): NetworkConfig {
 function makeMasonCollectiveConfig(): NetworkConfig {
   return {
     inputSize: MASON_COLLECTIVE_OBSERVATION_SIZE,
-    hiddenSizes: [],
+
     heads: {
       claim: 10,
       vote: SEATS,
@@ -435,7 +434,7 @@ function makeMasonCollectiveConfig(): NetworkConfig {
 function makeFanaticConfig(): NetworkConfig {
   return {
     inputSize: FANATIC_OBSERVATION_SIZE,
-    hiddenSizes: [],
+
     heads: {
       night: SEATS + 1,
       claim: 10,

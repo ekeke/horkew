@@ -26,7 +26,6 @@ Options:
   --target-winrate <n>      目標勝率 (0-1)。evalでこの勝率を超えたら早期終了
   --target-faction <s>      チェックする陣営 (villageWin/wolfWin/hamsterWin)
   --workers <n|auto>        ゲーム生成の並列ワーカー数 (auto=CPU-1, default: 直列)
-  --transformer             Transformerアーキテクチャを使用 (default: MLP)
   --strategy-only           戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
   --no-retar                Retar論理推論を無効化
   --resume [dir]            チェックポイントから再開 (default: --checkpoint-dir)
@@ -44,9 +43,6 @@ Examples:
 
   # フル学習
   npm run train
-
-  # Transformer で学習
-  npm run train -- --transformer --workers auto
 
   # 前回の続きから再開
   npm run train -- --resume
@@ -91,9 +87,6 @@ function parseArgs(): ParsedArgs {
       case '--help':
       case '-h':
         config.help = true
-        break
-      case '--transformer':
-        config.useTransformer = true
         break
       case '--strategy-only':
         config.strategyOnly = true
@@ -165,9 +158,7 @@ const config: TrainingConfig = { ...DEFAULT_TRAINING_CONFIG, ...overrides }
 
 // checkpoint dir にアーキテクチャサブディレクトリを付与
 if (!overrides.checkpointDir) {
-  config.checkpointDir = config.useTransformer
-    ? './checkpoints/transformer'
-    : './checkpoints/nn'
+  config.checkpointDir = './checkpoints/transformer'
 }
 
 // --phase2-models 指定時: Phase 1 をスキップ
@@ -185,7 +176,7 @@ console.error('Configuration:')
 console.error(`  Total iterations: ${config.totalIterations}`)
 console.error(`  Games per batch: ${config.gamesPerBatch}`)
 console.error(`  Learning rate: ${config.learningRate}`)
-console.error(`  Architecture: ${config.useTransformer ? 'Transformer' : 'MLP'}`)
+console.error(`  Architecture: Transformer`)
 console.error(`  Retar: ${config.enableRetar ? 'enabled' : 'disabled'}`)
 console.error(`  Checkpoint dir: ${config.checkpointDir}`)
 if (resumeDir) console.error(`  Resume from: ${resumeDir}`)

@@ -3,19 +3,19 @@
  *
  * worker_threads でゲーム生成を並列化するための設計:
  *
- * 課題: NeuralAgent は NeuralNetwork インスタンスを保持しており、
+ * 課題: NeuralAgent は TransformerNetwork インスタンスを保持しており、
  * worker_threads 間で共有できない。
  *
  * 解決策: 重みを SharedArrayBuffer で共有し、各workerが独自のNN を構築。
  *
  * アーキテクチャ:
  *   Main thread:
- *     - NeuralNetwork (canonical weights)
+ *     - TransformerNetwork (canonical weights)
  *     - PPO update
  *     - SharedWeights → worker に配布
  *
  *   Worker threads (N個):
- *     - SharedWeights から NeuralNetwork を構築
+ *     - SharedWeights から TransformerNetwork を構築
  *     - generateGame() を実行
  *     - TrajectoryStep[] をメインに返す
  *
@@ -28,7 +28,6 @@ import { availableParallelism } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import type { NetworkConfig, AnyNetwork } from './ml/nn.ts'
-import { NeuralNetwork } from './ml/nn.ts'
 import { TransformerNetwork } from './ml/transformer-network.ts'
 import type { ObservationMode } from './observation.ts'
 import type { TrainingConfig } from './training.ts'
@@ -48,8 +47,7 @@ export type SharedWeights = {
 }
 
 /**
- * ネットワークの重みを SharedArrayBuffer にパック
- * NeuralNetwork / TransformerNetwork 両対応（cloneWeights()経由）
+ * ネットワークの重みを SharedArrayBuffer にパック（cloneWeights()経由）
  */
 export function packWeights(network: AnyNetwork): SharedWeights {
   const namedWeights = network.cloneWeights()
@@ -82,14 +80,9 @@ export function unpackWeights(network: AnyNetwork, shared: SharedWeights): void 
   network.loadWeights(weights)
 }
 
-/** SharedWeightsからネットワークを構築（config.transformerで自動判別） */
+/** SharedWeightsからネットワークを構築 */
 export function buildNetworkFromShared(shared: SharedWeights, mode: ObservationMode | boolean = false): AnyNetwork {
-  let net: AnyNetwork
-  if (shared.config.transformer) {
-    net = new TransformerNetwork(shared.config, mode)
-  } else {
-    net = new NeuralNetwork(shared.config)
-  }
+  const net: AnyNetwork = new TransformerNetwork(shared.config, mode)
   unpackWeights(net, shared)
   return net
 }

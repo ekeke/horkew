@@ -12,9 +12,7 @@ import { formatHowl } from '../../lupa/format.ts'
 import { MasonTrainingAdapter } from './adapters/mason-training-adapter.ts'
 import { fullAdapter } from './adapters/full-adapter.ts'
 import { initRetarWorkerPool, terminateRetarWorkerPool } from './retar-node-bridge.ts'
-import { NeuralNetwork } from './ml/nn.ts'
 import type { NetworkConfig, AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
-import { TfNeuralNetwork } from './ml/nn-tf.ts'
 import { TransformerNetwork } from './ml/transformer-network.ts'
 import { TfTransformerNetwork } from './ml/nn-tf-transformer.ts'
 import { OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
@@ -120,8 +118,6 @@ export type TrainingConfig = {
   numWorkers?: number
   /** Phase 1でMLにする役職（未指定時は偶数seat） */
   mlRoles?: SystemRole[]
-  /** Transformerアーキテクチャを使用 */
-  useTransformer?: boolean
   /** Phase 2マルチモデル: 3モデルのチェックポイントDir (village,wolf,third順) */
   phase2ModelDirs?: string[]
   /** 目標勝率 (0-1)。eval でこの勝率を超えたら早期終了 */
@@ -165,63 +161,6 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
 // Network Configuration
 // ============================================================
 
-const NETWORK_CONFIG = {
-  inputSize: OBSERVATION_SIZE,
-  hiddenSizes: [512, 256],
-  heads: {
-    night: HEAD_SIZES.night,
-    claim: HEAD_SIZES.claim,
-    vote: HEAD_SIZES.vote,
-    comm: HEAD_SIZES.comm,
-    leader: HEAD_SIZES.leader,
-    target: HEAD_SIZES.target,
-  },
-  sigmoidHeads: {
-    propose: HEAD_SIZES.propose,
-    predict: HEAD_SIZES.predict,
-  },
-}
-
-// 狼チームネットワーク: attack_target + attacker + 昼行動ヘッド
-const WOLF_TEAM_NETWORK_CONFIG = {
-  inputSize: TEAM_OBSERVATION_SIZE,
-  hiddenSizes: [512, 256],
-  heads: {
-    attack_target: TEAM_HEAD_SIZES.attack_target,
-    attacker: TEAM_HEAD_SIZES.attacker,
-    claim: HEAD_SIZES.claim,
-    vote: HEAD_SIZES.vote,
-    comm: HEAD_SIZES.comm,
-    leader: HEAD_SIZES.leader,
-    target: HEAD_SIZES.target,
-  },
-  sigmoidHeads: {
-    propose: HEAD_SIZES.propose,
-    predict: HEAD_SIZES.predict,
-  },
-}
-
-// 共有者チームネットワーク: 昼行動ヘッドのみ
-const MASON_TEAM_NETWORK_CONFIG = {
-  inputSize: TEAM_OBSERVATION_SIZE,
-  hiddenSizes: [512, 256],
-  heads: {
-    claim: HEAD_SIZES.claim,
-    vote: HEAD_SIZES.vote,
-    comm: HEAD_SIZES.comm,
-    leader: HEAD_SIZES.leader,
-    target: HEAD_SIZES.target,
-  },
-  sigmoidHeads: {
-    propose: HEAD_SIZES.propose,
-    predict: HEAD_SIZES.predict,
-  },
-}
-
-// ============================================================
-// Transformer Network Configuration
-// ============================================================
-
 /** 戦略NN共通設定 */
 const TRANSFORMER_COMMON = {
   dModel: 64,
@@ -239,7 +178,7 @@ const TRANSFORMER_COMMON = {
 
 const TRANSFORMER_NETWORK_CONFIG: NetworkConfig = {
   inputSize: OBSERVATION_SIZE,
-  hiddenSizes: [],
+
   heads: {
     night: HEAD_SIZES.night,
     claim: HEAD_SIZES.claim,
@@ -264,7 +203,7 @@ const TRANSFORMER_NETWORK_CONFIG: NetworkConfig = {
 
 const WOLF_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
   inputSize: TEAM_OBSERVATION_SIZE,
-  hiddenSizes: [],
+
   heads: {
     attack_target: TEAM_HEAD_SIZES.attack_target,
     attacker: TEAM_HEAD_SIZES.attacker,
@@ -289,7 +228,7 @@ const WOLF_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
 
 const MASON_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
   inputSize: TEAM_OBSERVATION_SIZE,
-  hiddenSizes: [],
+
   heads: {
     claim: HEAD_SIZES.claim,
     vote: HEAD_SIZES.vote,
@@ -316,7 +255,7 @@ const MASON_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
 
 const WOLF_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
   inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
-  hiddenSizes: [],
+
   heads: {
     attack_target: TEAM_HEAD_SIZES.attack_target,
     attacker: TEAM_HEAD_SIZES.attacker,
@@ -342,7 +281,7 @@ const WOLF_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
 
 const MASON_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
   inputSize: MASON_COLLECTIVE_OBSERVATION_SIZE,
-  hiddenSizes: [],
+
   heads: {
     claim: HEAD_SIZES.claim,
     vote: HEAD_SIZES.vote,
@@ -370,7 +309,7 @@ const MASON_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
 
 const FANATIC_TRANSFORMER_CONFIG: NetworkConfig = {
   inputSize: FANATIC_OBSERVATION_SIZE,
-  hiddenSizes: [],
+
   heads: {
     night: HEAD_SIZES.night,
     claim: HEAD_SIZES.claim,
@@ -396,57 +335,29 @@ const FANATIC_TRANSFORMER_CONFIG: NetworkConfig = {
 // Factory Functions
 // ============================================================
 
-/** 推論用（ゲーム内、ピュアJS — 単一forward が速い） */
-export function createNetwork(): NeuralNetwork {
-  return new NeuralNetwork(NETWORK_CONFIG)
-}
-
-export function createWolfTeamNetwork(): NeuralNetwork {
-  return new NeuralNetwork(WOLF_TEAM_NETWORK_CONFIG)
-}
-
-export function createMasonTeamNetwork(): NeuralNetwork {
-  return new NeuralNetwork(MASON_TEAM_NETWORK_CONFIG)
-}
-
-/** 学習用（PPOバッチ更新、tf.js GPU加速） */
-export function createTfNetwork(lr: number = 3e-4): TfNeuralNetwork {
-  return new TfNeuralNetwork(NETWORK_CONFIG, lr)
-}
-
-export function createWolfTeamTfNetwork(lr: number = 3e-4): TfNeuralNetwork {
-  return new TfNeuralNetwork(WOLF_TEAM_NETWORK_CONFIG, lr)
-}
-
-export function createMasonTeamTfNetwork(lr: number = 3e-4): TfNeuralNetwork {
-  return new TfNeuralNetwork(MASON_TEAM_NETWORK_CONFIG, lr)
-}
-
-// ---- Transformer variants ----
-
-/** Transformer推論用（ピュアJS） */
-export function createTransformerNetwork(): TransformerNetwork {
+/** 推論用（ピュアJS） */
+export function createNetwork(): TransformerNetwork {
   return new TransformerNetwork(TRANSFORMER_NETWORK_CONFIG)
 }
 
-export function createWolfTeamTransformerNetwork(): TransformerNetwork {
+export function createWolfTeamNetwork(): TransformerNetwork {
   return new TransformerNetwork(WOLF_TEAM_TRANSFORMER_CONFIG, true)
 }
 
-export function createMasonTeamTransformerNetwork(): TransformerNetwork {
+export function createMasonTeamNetwork(): TransformerNetwork {
   return new TransformerNetwork(MASON_TEAM_TRANSFORMER_CONFIG, true)
 }
 
-/** Transformer学習用（tf.js GPU） */
-export function createTransformerTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+/** 学習用（tf.js GPU） */
+export function createTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
   return new TfTransformerNetwork(TRANSFORMER_NETWORK_CONFIG, lr)
 }
 
-export function createWolfTeamTransformerTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+export function createWolfTeamTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
   return new TfTransformerNetwork(WOLF_TEAM_TRANSFORMER_CONFIG, lr, true)
 }
 
-export function createMasonTeamTransformerTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+export function createMasonTeamTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
   return new TfTransformerNetwork(MASON_TEAM_TRANSFORMER_CONFIG, lr, true)
 }
 
@@ -1128,35 +1039,26 @@ function findLatestCheckpointMulti(dir: string): {
 }
 
 export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, resumeDir?: string): Promise<void> {
-  const useTransformer = config.useTransformer ?? false
   const multiModel = config.phase2ModelDirs != null
 
   log('Fenrir Training Started')
-  log(`Architecture: ${useTransformer ? 'Transformer' : 'MLP'}`)
+  log(`Architecture: Transformer`)
   log(`Observation size: individual=${OBSERVATION_SIZE}, team=${TEAM_OBSERVATION_SIZE}`)
 
   // === マルチモデル用 ===
   const modelGroups = new Map<ModelGroupName, ModelGroup>()
 
-  // === ファクトリ関数 (MLP / Transformer 切り替え) ===
-  const makeNetwork = (): AnyNetwork => useTransformer ? createTransformerNetwork() : createNetwork()
-  const makeTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createTransformerTfNetwork(lr) : createTfNetwork(lr) as unknown as AnyTfNetwork
-  const makeWolfTeamNetwork = (): AnyNetwork => useTransformer ? createWolfTeamTransformerNetwork() : createWolfTeamNetwork()
-  const makeWolfTeamTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createWolfTeamTransformerTfNetwork(lr) : createWolfTeamTfNetwork(lr) as unknown as AnyTfNetwork
-  const makeMasonTeamNetwork = (): AnyNetwork => useTransformer ? createMasonTeamTransformerNetwork() : createMasonTeamNetwork()
-  const makeMasonTeamTfNetwork = (lr: number): AnyTfNetwork => useTransformer ? createMasonTeamTransformerTfNetwork(lr) : createMasonTeamTfNetwork(lr) as unknown as AnyTfNetwork
-
   // === 個人エージェント (単一モデルモード用) ===
-  const network = multiModel ? undefined! as AnyNetwork : makeNetwork()
-  const tfNetwork = multiModel ? undefined! as AnyTfNetwork : makeTfNetwork(config.learningRate)
+  const network = multiModel ? undefined! as AnyNetwork : createNetwork()
+  const tfNetwork = multiModel ? undefined! as AnyTfNetwork : createTfNetwork(config.learningRate)
 
   // === 狼チームエージェント ===
-  const wolfTeamNet = makeWolfTeamNetwork()
-  const wolfTeamTf = makeWolfTeamTfNetwork(config.learningRate)
+  const wolfTeamNet = createWolfTeamNetwork()
+  const wolfTeamTf = createWolfTeamTfNetwork(config.learningRate)
 
   // === 共有者チームエージェント ===
-  const masonTeamNet = makeMasonTeamNetwork()
-  const masonTeamTf = makeMasonTeamTfNetwork(config.learningRate)
+  const masonTeamNet = createMasonTeamNetwork()
+  const masonTeamTf = createMasonTeamTfNetwork(config.learningRate)
 
   if (multiModel) {
     // Phase 2 マルチモデル: 3グループ初期化 + チェックポイント読込
@@ -1170,8 +1072,8 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       // チェックポイント読込
       const ckpt = findLatestCheckpoint(dirs[i])
       if (ckpt) {
-        const net = makeNetwork()
-        const tf = makeTfNetwork(config.learningRate)
+        const net = createNetwork()
+        const tf = createTfNetwork(config.learningRate)
         loadCheckpoint(net, ckpt.individual)
         log(`  ${name}: loaded from ${ckpt.individual} (iter ${ckpt.iteration})`)
         // チームネットワークも読込
@@ -1272,7 +1174,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
       const sharedWolfWeights = (!useHeuristic || multiModel) ? packWeights(wolfTeamNet) : undefined
       const sharedMasonWeights = (!useHeuristic || multiModel) ? packWeights(masonTeamNet) : undefined
       const poolSharedWeights = (usePool && pool.length > 0)
-        ? pool.map(w => { const net = makeNetwork(); net.loadWeights(w); return packWeights(net) })
+        ? pool.map(w => { const net = createNetwork(); net.loadWeights(w); return packWeights(net) })
         : undefined
 
       // マルチモデル: グループ別の重みをパック (heuristicOnly は除外)
@@ -1371,7 +1273,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
 
               if (usePool && pool.length > 0 && seat % 3 === 0) {
                 const pastWeights = pool[Math.floor(Math.random() * pool.length)]
-                const pastNet = makeNetwork()
+                const pastNet = createNetwork()
                 pastNet.loadWeights(pastWeights)
                 neuralAgents.set(seat, new NeuralAgent(pastNet, { explore: true, strategyOnly: config.strategyOnly }))
               } else {

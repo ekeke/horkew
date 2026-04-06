@@ -18,7 +18,6 @@ import { formatHowl } from '../../lupa/format.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from './agents/rule-based-agent.ts'
 import {
   createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
-  createTransformerNetwork, createWolfTeamTransformerNetwork, createMasonTeamTransformerNetwork,
   DEFAULT_TRAINING_CONFIG,
 } from './training.ts'
 import { loadCheckpoint } from './ml/checkpoint.ts'
@@ -58,7 +57,6 @@ function parseArgs() {
   let allMl = false
   let rolesStr: string | undefined
   let defaultModel: 'ml' | 'heuristic' = 'ml'
-  let transformer = false
   let strategyOnly = false
   const modelOverrides = new Map<string, 'ml' | 'heuristic'>()
 
@@ -89,16 +87,13 @@ function parseArgs() {
         modelOverrides.set(role, model as 'ml' | 'heuristic')
         break
       }
-      case '--transformer':
-        transformer = true
-        break
       case '--strategy-only':
         strategyOnly = true
         break
     }
   }
 
-  return { checkpoint, mldir, seed, allMl, rolesStr, defaultModel, modelOverrides, transformer, strategyOnly }
+  return { checkpoint, mldir, seed, allMl, rolesStr, defaultModel, modelOverrides, strategyOnly }
 }
 
 // ============================================================
@@ -136,7 +131,7 @@ function findTeamCheckpoint(dir: string, teamType: 'wolf_team' | 'mason_team'): 
 // Main
 // ============================================================
 
-const { checkpoint, mldir, seed, allMl, rolesStr, defaultModel, modelOverrides, transformer, strategyOnly } = parseArgs()
+const { checkpoint, mldir, seed, allMl, rolesStr, defaultModel, modelOverrides, strategyOnly } = parseArgs()
 
 // 役職構成
 const rolesConfig = rolesStr
@@ -157,9 +152,9 @@ let masonTeamAgent: MasonTeamAgent | MasonTeamRuleAgent | undefined
 
 if (mldir) {
   // === --mldir モード: グループ別にモデルをロード ===
-  const makeNet = (): AnyNetwork => transformer ? createTransformerNetwork() : createNetwork()
-  const makeWolfTeam = (): AnyNetwork => transformer ? createWolfTeamTransformerNetwork() : createWolfTeamNetwork()
-  const makeMasonTeam = (): AnyNetwork => transformer ? createMasonTeamTransformerNetwork() : createMasonTeamNetwork()
+  const makeNet = (): AnyNetwork => createNetwork()
+  const makeWolfTeam = (): AnyNetwork => createWolfTeamNetwork()
+  const makeMasonTeam = (): AnyNetwork => createMasonTeamNetwork()
 
   const groupNets = new Map<string, AnyNetwork>()
   const wolfTeamNet = makeWolfTeam()

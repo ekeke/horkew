@@ -1,6 +1,6 @@
 /**
  * NeuralAgent: MLベースの Agent 実装
- * NeuralNetworkの推論結果をLupaのアクションに変換する。
+ * TransformerNetworkの推論結果をLupaのアクションに変換する。
  */
 
 import type { Agent, DecisionContext } from './agent.ts'
