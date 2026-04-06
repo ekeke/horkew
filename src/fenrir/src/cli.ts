@@ -156,7 +156,7 @@ if (help) showHelp()
 
 const config: TrainingConfig = { ...DEFAULT_TRAINING_CONFIG, ...overrides }
 
-// checkpoint dir にアーキテクチャサブディレクトリを付与
+// checkpoint dir のデフォルト
 if (!overrides.checkpointDir) {
   config.checkpointDir = './checkpoints/transformer'
 }

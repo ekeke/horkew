@@ -1106,7 +1106,7 @@ async function main(): Promise<void> {
     log(`  PPO learning rate: ${ppoLr.toExponential(1)}`)
   }
 
-  // === Pretrain: plan tokens の事前学習 (新規学習時のみ、Transformer限定) ===
+  // === Pretrain: plan tokens の事前学習 (新規学習時のみ) ===
   if (!anyResumed) {
     const pretrainBatchSize = 512
     const pretrainLogInterval = 100

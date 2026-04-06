@@ -161,6 +161,10 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
 // Network Configuration
 // ============================================================
 
+// ============================================================
+// Network Configuration
+// ============================================================
+
 /** 戦略NN共通設定 */
 const TRANSFORMER_COMMON = {
   dModel: 64,
@@ -178,7 +182,6 @@ const TRANSFORMER_COMMON = {
 
 const TRANSFORMER_NETWORK_CONFIG: NetworkConfig = {
   inputSize: OBSERVATION_SIZE,
-
   heads: {
     night: HEAD_SIZES.night,
     claim: HEAD_SIZES.claim,
@@ -203,7 +206,6 @@ const TRANSFORMER_NETWORK_CONFIG: NetworkConfig = {
 
 const WOLF_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
   inputSize: TEAM_OBSERVATION_SIZE,
-
   heads: {
     attack_target: TEAM_HEAD_SIZES.attack_target,
     attacker: TEAM_HEAD_SIZES.attacker,
@@ -228,7 +230,6 @@ const WOLF_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
 
 const MASON_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
   inputSize: TEAM_OBSERVATION_SIZE,
-
   heads: {
     claim: HEAD_SIZES.claim,
     vote: HEAD_SIZES.vote,
@@ -255,7 +256,6 @@ const MASON_TEAM_TRANSFORMER_CONFIG: NetworkConfig = {
 
 const WOLF_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
   inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
-
   heads: {
     attack_target: TEAM_HEAD_SIZES.attack_target,
     attacker: TEAM_HEAD_SIZES.attacker,
@@ -281,7 +281,6 @@ const WOLF_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
 
 const MASON_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
   inputSize: MASON_COLLECTIVE_OBSERVATION_SIZE,
-
   heads: {
     claim: HEAD_SIZES.claim,
     vote: HEAD_SIZES.vote,
@@ -309,7 +308,6 @@ const MASON_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
 
 const FANATIC_TRANSFORMER_CONFIG: NetworkConfig = {
   inputSize: FANATIC_OBSERVATION_SIZE,
-
   heads: {
     night: HEAD_SIZES.night,
     claim: HEAD_SIZES.claim,
@@ -1042,7 +1040,6 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
   const multiModel = config.phase2ModelDirs != null
 
   log('Fenrir Training Started')
-  log(`Architecture: Transformer`)
   log(`Observation size: individual=${OBSERVATION_SIZE}, team=${TEAM_OBSERVATION_SIZE}`)
 
   // === マルチモデル用 ===

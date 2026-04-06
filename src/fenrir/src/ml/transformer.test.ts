@@ -360,7 +360,6 @@ describe('TransformerNetwork', () => {
 function makeWolfCollectiveConfig(): NetworkConfig {
   return {
     inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
-
     heads: {
       attack_target: SEATS,
       attacker: 3,
@@ -398,7 +397,6 @@ function makeWolfCollectiveConfig(): NetworkConfig {
 function makeMasonCollectiveConfig(): NetworkConfig {
   return {
     inputSize: MASON_COLLECTIVE_OBSERVATION_SIZE,
-
     heads: {
       claim: 10,
       vote: SEATS,
@@ -434,7 +432,6 @@ function makeMasonCollectiveConfig(): NetworkConfig {
 function makeFanaticConfig(): NetworkConfig {
   return {
     inputSize: FANATIC_OBSERVATION_SIZE,
-
     heads: {
       night: SEATS + 1,
       claim: 10,
