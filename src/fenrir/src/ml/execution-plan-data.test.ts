@@ -1,7 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { generatePlanTrainingBatch } from './execution-plan-data.ts'
+import { generatePlanTrainingBatch, buildEndgameLabels, generatePlanTokenTrainingBatch } from './execution-plan-data.ts'
+import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
 import { OBSERVATION_SIZE, SEATS } from '../observation.ts'
+import { Rng } from '../../../lupa/random.ts'
 
 describe('generatePlanTrainingBatch', () => {
   it('generates requested number of samples', () => {
@@ -64,5 +66,109 @@ describe('generatePlanTrainingBatch', () => {
     // one-hot (roller/decision/designated) と soft (grayran) の両方が出ること
     assert.ok(oneHot > 0, 'should have one-hot labels (non-grayran)')
     assert.ok(soft > 0, 'should have soft labels (grayran)')
+  })
+})
+
+// ============================================================
+// buildEndgameLabels
+// ============================================================
+
+describe('buildEndgameLabels', () => {
+  it('no fox → all STOP, mask all false', () => {
+    const rng = new Rng(42)
+    const { labels, mask } = buildEndgameLabels([], [3, 5], rng)
+    assert.deepEqual(labels, [PLAN_VOCAB.STOP, PLAN_VOCAB.STOP, PLAN_VOCAB.STOP, PLAN_VOCAB.STOP])
+    assert.deepEqual(mask, [false, false, false, false])
+  })
+
+  it('fox + wolf → [0]=wolf, [1]=fox, [2]=STOP', () => {
+    const rng = new Rng(42)
+    const { labels, mask } = buildEndgameLabels([3], [5], rng)
+    // [0] = wolf seat 5 → index 4, [1] = fox seat 3 → index 2
+    assert.equal(labels[0], 4)   // seat5 (wolf)
+    assert.equal(labels[1], 2)   // seat3 (fox)
+    assert.equal(labels[2], PLAN_VOCAB.STOP)
+    assert.equal(labels[3], PLAN_VOCAB.STOP)
+    assert.deepEqual(mask, [true, true, true, false])
+  })
+
+  it('fox + wolf overlap → both filled from candidates', () => {
+    // fox=[3,5], wolf=[3,5] → wolfOnly is empty, [0] from wolfSeats, [1] from foxSeats
+    const rng = new Rng(42)
+    const { labels, mask } = buildEndgameLabels([3, 5], [3, 5], rng)
+    // [0] should be a wolf seat (3 or 5)
+    assert.ok(labels[0] === 2 || labels[0] === 4, `wolf label should be seat 3 or 5, got index ${labels[0]}`)
+    // [1] should be a fox seat (3 or 5)
+    assert.ok(labels[1] === 2 || labels[1] === 4, `fox label should be seat 3 or 5, got index ${labels[1]}`)
+    assert.deepEqual(mask, [true, true, true, false])
+  })
+
+  it('fox only, no wolf → [0] unmasked, [1]=fox', () => {
+    const rng = new Rng(42)
+    const { labels, mask } = buildEndgameLabels([7], [], rng)
+    // [0] = no wolf candidate → STOP, mask false
+    assert.equal(labels[0], PLAN_VOCAB.STOP)
+    assert.equal(mask[0], false)
+    // [1] = fox seat 7 → index 6
+    assert.equal(labels[1], 6)
+    assert.equal(mask[1], true)
+    // [2] = STOP
+    assert.equal(labels[2], PLAN_VOCAB.STOP)
+    assert.equal(mask[2], true)
+  })
+
+  it('multiple fox + multiple wolf → picks one each', () => {
+    const rng = new Rng(99)
+    const foxSeats = [2, 4, 6]
+    const wolfSeats = [8, 10]
+    const { labels, mask } = buildEndgameLabels(foxSeats, wolfSeats, rng)
+    // [0] = one of wolf seats (8 or 10) → index 7 or 9
+    assert.ok([7, 9].includes(labels[0]), `wolf: got index ${labels[0]}`)
+    // [1] = one of fox seats (2, 4, 6) → index 1, 3, or 5
+    assert.ok([1, 3, 5].includes(labels[1]), `fox: got index ${labels[1]}`)
+    assert.deepEqual(mask, [true, true, true, false])
+  })
+})
+
+// ============================================================
+// generatePlanTokenTrainingBatch — endgame integration
+// ============================================================
+
+describe('generatePlanTokenTrainingBatch endgame', () => {
+  it('generates samples with correct endgame structure', () => {
+    const samples = generatePlanTokenTrainingBatch(50, 12345)
+    assert.equal(samples.length, 50)
+    for (const s of samples) {
+      assert.equal(s.endgameLabels.length, 4)
+      assert.equal(s.endgameMask.length, 4)
+    }
+  })
+
+  it('produces both fox-present and fox-absent endgames', () => {
+    const samples = generatePlanTokenTrainingBatch(200, 777)
+    let foxPresent = 0
+    let foxAbsent = 0
+    for (const s of samples) {
+      if (s.endgameMask.some(m => m)) {
+        foxPresent++
+      } else {
+        foxAbsent++
+      }
+    }
+    assert.ok(foxPresent > 0, `should have fox-present samples, got ${foxPresent}`)
+    assert.ok(foxAbsent > 0, `should have fox-absent samples, got ${foxAbsent}`)
+  })
+
+  it('fox-present endgame: [0]=seat, [1]=seat, [2]=STOP', () => {
+    const samples = generatePlanTokenTrainingBatch(200, 333)
+    const foxSamples = samples.filter(s => s.endgameMask[1] === true)
+    assert.ok(foxSamples.length > 0)
+    for (const s of foxSamples) {
+      // [1] must be a seat token (0-13)
+      assert.ok(s.endgameLabels[1] >= 0 && s.endgameLabels[1] < 14,
+        `endgame[1] should be seat, got ${s.endgameLabels[1]}`)
+      // [2] must be STOP
+      assert.equal(s.endgameLabels[2], PLAN_VOCAB.STOP)
+    }
   })
 })
