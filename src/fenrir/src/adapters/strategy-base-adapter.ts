@@ -243,11 +243,17 @@ export abstract class StrategyBaseAdapter
     return []
   }
 
-  /** 投票収集の後に呼ばれる。 */
+  /** 投票収集の後に呼ばれる。公認プランの forward slot を日送りする。 */
   protected afterVoteCollection(
-    _vctx: VoteContext<FenrirExtEvent, FenrirExt>,
-    _ext: FenrirExt,
-  ): void {}
+    vctx: VoteContext<FenrirExtEvent, FenrirExt>,
+    ext: FenrirExt,
+  ): void {
+    // 公認プラン: 初回投票後に forward slot を1つ消費（日送り）
+    const isFirstRound = vctx.revoteRound === 0 || vctx.revoteRound == null
+    if (isFirstRound && ext.planState.slots.length > 0) {
+      ext.planState.slots.shift()
+    }
+  }
 
   // ════════════════════════════════════════════
   // Plan distribution (base が所有)

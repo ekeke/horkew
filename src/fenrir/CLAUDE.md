@@ -55,6 +55,42 @@
 Pretrain B+D → Phase 0 (Mason Individual) → Phase 1 (Village) → Phase 1' (非村) → Phase 2 (自己対戦)
 ```
 
+## 公認プラン（Official Plan）
+
+村陣営が共有する処刑計画。mason の NN が生成し、村全体が従う。
+
+### 構造
+
+12-token の Dual-direction plan:
+- **Forward** (positions 0-7, L→R): 序盤〜中盤の処刑順序。各スロット = 1回の処刑計画
+- **Endgame** (positions 8-11, R→L): 終盤の処刑対象。position 11 = 最終日
+
+### 日送りルール（StrategyBaseAdapter が管理）
+
+- **Forward slots は毎日自動消費**: 初回投票後に `slots.shift()` で先頭を除去
+  - mason 生存時: 翌日 `commitPlanTokens` が NN 出力で全上書きするため実質無影響
+  - mason 死亡時: cached plan の slots が日ごとに進行し、`slots[0]` が常に「今日の指示」
+- **Endgame slots は消費しない**: 生存人数ベースで参照位置が決まる
+
+### 投票先の決定 (`planToVote`)
+
+| 生存人数 | 参照先 | フォールバック |
+|----------|--------|---------------|
+| > 6 | forwardSlots[0] | null |
+| 5-6 | endgameSlots[1] | → forwardSlots[0] → endgameSlots[0] 除外ランダム |
+| ≤ 4 | endgameSlots[0] | → forwardSlots[0] |
+
+- `endgameSlots[0]` は最終日まで**保護対象**（alive 5-6 では吊らない）
+
+### 関連ファイル
+
+| ファイル | 責務 |
+|---------|------|
+| `plan/plan-vocab.ts` | トークン語彙、`parseDualPlanSlots` |
+| `plan/plan-helpers.ts` | `planToVote`, `PlanState`, `ENDGAME_ALIVE_THRESHOLD` |
+| `plan/plan-resolve.ts` | `resolvePlanSlot`（seat/role/grayran → 具体 seat） |
+| `adapters/strategy-base-adapter.ts` | `commitPlanTokens`, `distributePlans`, `afterVoteCollection`（日送り） |
+
 ## Strategy-Only モード
 
 `--strategy-only` フラグで有効化。NeuralAgent の意思決定を2層に分離。詳細は **[TrainingPhases.md](TrainingPhases.md)** の Strategy-Only セクションおよび **[ActionAndReward.md](ActionAndReward.md)** を参照。

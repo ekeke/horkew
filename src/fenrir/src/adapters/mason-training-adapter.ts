@@ -25,7 +25,7 @@ import { alivePlayers, isVillagerAligned } from '../../../lupa/roles.ts'
 import { forceTrueRoleCO } from '../../../lupa/engine-utils.ts'
 import { isVillagePowerRole } from '../agents/rule-based-agent.ts'
 import { resolvePlanSlot } from '../plan/plan-resolve.ts'
-import { planToVote, nooseCount } from '../plan/plan-helpers.ts'
+import { planToVote } from '../plan/plan-helpers.ts'
 import { encodeObservation, collectObservation } from '../observation.ts'
 import { describePlanIndices } from '../plan/plan-vocab.ts'
 import { RuleBasedAgent } from '../agents/rule-based-agent.ts'
@@ -343,22 +343,17 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
 
   /**
    * Mason 死亡時: cached planState から今日の投票先を解決する。
-   * 縄数ベースで消費済みスロットを算出し、該当スロットを解決。
+   * forward slots は afterVoteCollection で日送り済みなので slots[0] を参照。
    */
   private resolveDeadMasonTarget(
     pctx: PhaseContext<FenrirExtEvent, FenrirExt>,
     ext: FenrirExt,
   ): number | null {
-    const state = pctx.state as GameState<FenrirExt>
     const planState = ext.planState
+    if (planState.slots.length === 0) return null
+    const state = pctx.state as GameState<FenrirExt>
     const aliveSeats = alivePlayers(state).map(p => p.seat)
-    const aliveCount = aliveSeats.length
-
-    const consumed = planState.initialNooseCount - nooseCount(aliveCount)
-    const slotIndex = Math.max(0, consumed)
-    if (slotIndex >= planState.slots.length) return null
-
-    return resolvePlanSlot(planState.slots[slotIndex], aliveSeats, pctx.events, { rng: this.rng })
+    return resolvePlanSlot(planState.slots[0], aliveSeats, pctx.events, { rng: this.rng })
   }
 
   // ════════════════════════════════════════════
@@ -420,11 +415,9 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
   ): Map<number, DayClaim> {
     const claims = new Map<number, DayClaim>()
     const planState = ext.planState
-    const consumed = planState.initialNooseCount - nooseCount(aliveSeats.length)
-    const slotIndex = Math.max(0, consumed)
-    if (slotIndex >= planState.slots.length) return claims
+    if (planState.slots.length === 0) return claims
 
-    const slot = planState.slots[slotIndex]
+    const slot = planState.slots[0]
     if (slot.targets.length === 0) return claims
 
     const firstTarget = slot.targets[0]
