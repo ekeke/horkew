@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { PLAN_VOCAB, parsePlanSlots } from './plan-vocab.ts'
-import { planToVote, nooseCount, type PlanState } from './plan-helpers.ts'
+import { PLAN_VOCAB, parsePlanSlots, parseDualPlanSlots } from './plan-vocab.ts'
+import { planToVote, nooseCount, ENDGAME_ALIVE_THRESHOLD, type PlanState } from './plan-helpers.ts'
 import { Rng } from '../../../lupa/random.ts'
 import type { DecisionContext } from '../agents/agent.ts'
 
@@ -22,11 +22,19 @@ function makeCtx(overrides: {
   } as unknown as DecisionContext
 }
 
-/** planActions から PlanState を構築するヘルパー */
+/** 12-token plan を簡潔に作るヘルパー（残りは STOP 埋め） */
+function plan(...tokens: number[]): number[] {
+  const p = new Array(12).fill(STOP)
+  for (let i = 0; i < tokens.length; i++) p[i] = tokens[i]
+  return p
+}
+
+/** planActions + parseDualPlanSlots から PlanState を構築 */
 function makePlanState(planActions: number[], aliveCount: number): PlanState {
+  const { forwardSlots, endgameSlots } = parseDualPlanSlots(planActions)
   return {
-    slots: parsePlanSlots(planActions),
-    endgameSlots: [],
+    slots: forwardSlots,
+    endgameSlots,
     initialNooseCount: nooseCount(aliveCount),
     mlMasonSeat: null,
     masonTakeoverDone: false,
@@ -35,41 +43,148 @@ function makePlanState(planActions: number[], aliveCount: number): PlanState {
 
 describe('planToVote', () => {
   // ════════════════════════════════════════════
-  // 基本: planState なし（on-the-fly パース）
+  // 閾値確認
   // ════════════════════════════════════════════
 
-  it('resolves single seat token (no planState)', () => {
-    // [seat3, STOP, ...] → seat 3
-    const planActions = [2, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const ctx = makeCtx({})
-    assert.equal(planToVote(planActions, ctx), 3)
+  it('ENDGAME_ALIVE_THRESHOLD is 6', () => {
+    assert.equal(ENDGAME_ALIVE_THRESHOLD, 6)
   })
 
-  it('returns null for all-STOP plan (no planState)', () => {
-    const planActions = [STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const ctx = makeCtx({})
-    assert.equal(planToVote(planActions, ctx), null)
+  // ════════════════════════════════════════════
+  // Forward（alive > 6 → forwardSlots[0]）
+  // ════════════════════════════════════════════
+
+  it('alive > 6: resolves first forward slot', () => {
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] })
+    assert.equal(planToVote(plan(2), ctx), 3)  // seat3
   })
 
-  it('uses first slot only when no planState (ignores tokens after OR)', () => {
-    // [seat3, OR, seat7, STOP, ...] → seat 3 (先頭スロット)
-    const planActions = [2, OR, 6, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const ctx = makeCtx({})
-    assert.equal(planToVote(planActions, ctx), 3)
+  it('alive > 6: uses first slot even with multiple slots', () => {
+    // forward: seat3, seat7 (2 slots)
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8] })  // 8人
+    assert.equal(planToVote(plan(2, 6), ctx), 3)
   })
 
-  it('skips dead seat and returns null if no fallback', () => {
-    // seat5 だが seat5 は死亡
-    const planActions = [4, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 6, 7] })
-    assert.equal(planToVote(planActions, ctx), null)
+  it('alive > 6: all-STOP plan returns null', () => {
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] })
+    assert.equal(planToVote(plan(), ctx), null)
   })
 
-  it('excludes own seat', () => {
-    // seat1 を指定しているが mySeat=1 → 除外 → null
-    const planActions = [0, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const ctx = makeCtx({ mySeat: 1 })
-    assert.equal(planToVote(planActions, ctx), null)
+  it('alive > 6: dead seat returns null', () => {
+    const ctx = makeCtx({ alivePlayers: [1, 2, 4, 6, 7, 8, 9, 10] })  // seat3, seat5 dead
+    assert.equal(planToVote(plan(2), ctx), null)  // seat3 is dead
+  })
+
+  it('alive > 6: excludes own seat', () => {
+    const ctx = makeCtx({ mySeat: 3, alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8] })
+    assert.equal(planToVote(plan(2), ctx), null)  // seat3 = mySeat
+  })
+
+  // ════════════════════════════════════════════
+  // Endgame: alive 5-6 → endgameSlots[1]（末尾-1）
+  // ════════════════════════════════════════════
+
+  it('alive 6: uses endgameSlots[1] (position 10)', () => {
+    // endgame tokens at positions 8-11: [seat10, seat11, seat12, seat13]
+    // reversed → endgameSlots = [seat13(pos11), seat12(pos10), seat11(pos9), seat10(pos8)]
+    // alive 6 → endgameSlots[1] = seat12
+    const p = plan()
+    p[8] = 9    // seat10
+    p[9] = 10   // seat11
+    p[10] = 11  // seat12
+    p[11] = 12  // seat13
+    const ctx = makeCtx({ alivePlayers: [1, 2, 10, 11, 12, 13] })
+    assert.equal(planToVote(p, ctx), 12)  // endgameSlots[1] = seat12
+  })
+
+  it('alive 5: uses endgameSlots[1] (position 10)', () => {
+    const p = plan()
+    p[10] = 11  // seat12 at position 10
+    p[11] = 12  // seat13 at position 11
+    const ctx = makeCtx({ alivePlayers: [1, 2, 11, 12, 13] })
+    assert.equal(planToVote(p, ctx), 12)  // endgameSlots[1] = seat12
+  })
+
+  it('alive 5-6: endgameSlots[1] missing, forward empty → random excluding endgameSlots[0]', () => {
+    // only position 11 has a token → endgameSlots = [seat13], no [1]
+    // forward: all STOP → no forward slots
+    // → random from alive excluding mySeat(1) and protected seat13
+    const p = plan()
+    p[11] = 12  // seat13 at position 11
+    const ctx = makeCtx({ alivePlayers: [1, 2, 11, 12, 13] })
+    const result = planToVote(p, ctx)
+    assert.ok(result !== null, 'should return a seat')
+    assert.ok(result !== 1, 'should exclude mySeat')
+    assert.ok(result !== 13, 'should exclude endgameSlots[0] target (seat13)')
+    assert.ok([2, 11, 12].includes(result!), `expected 2, 11, or 12, got ${result}`)
+  })
+
+  it('alive 5-6: endgameSlots[1] missing, forward available → uses forward', () => {
+    const p = plan(4)  // forward: seat5
+    p[11] = 12  // endgame: seat13 at position 11
+    const ctx = makeCtx({ alivePlayers: [1, 5, 11, 12, 13] })
+    // endgameSlots[1] missing → fallback to forward[0] = seat5
+    assert.equal(planToVote(p, ctx), 5)
+  })
+
+  it('alive 5-6: endgameSlots[1] dead → forward fallback', () => {
+    // endgameSlots[1] = seat12 (dead), endgameSlots[0] = seat13
+    // forward = seat5
+    const p = plan(4)      // forward: seat5
+    p[10] = 11             // endgame pos 10: seat12
+    p[11] = 12             // endgame pos 11: seat13
+    const ctx = makeCtx({ alivePlayers: [1, 5, 11, 13, 14] })  // seat12 dead
+    // endgameSlots[1] = seat12 dead → forward[0] = seat5
+    assert.equal(planToVote(p, ctx), 5)
+  })
+
+  it('alive 5-6: endgameSlots[1] dead, forward dead → random excluding endgameSlots[0]', () => {
+    // endgameSlots[1] = seat12 (dead), forward = seat5 (dead), endgameSlots[0] = seat13
+    const p = plan(4)      // forward: seat5 (dead)
+    p[10] = 11             // endgame pos 10: seat12 (dead)
+    p[11] = 12             // endgame pos 11: seat13 (alive, protected)
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 13, 14], seed: 1 })  // alive=5, seat5/seat12 dead
+    const result = planToVote(p, ctx)
+    assert.ok(result !== null)
+    assert.ok(result !== 1, 'should exclude mySeat')
+    assert.ok(result !== 13, 'should not use protected endgameSlots[0] target')
+    assert.ok([2, 3, 14].includes(result!), `expected 2, 3, or 14, got ${result}`)
+  })
+
+  // ════════════════════════════════════════════
+  // Endgame: alive ≤ 4 → endgameSlots[0]（末尾）
+  // ════════════════════════════════════════════
+
+  it('alive 4: uses endgameSlots[0] (position 11)', () => {
+    const p = plan()
+    p[10] = 11  // seat12
+    p[11] = 12  // seat13
+    const ctx = makeCtx({ alivePlayers: [1, 12, 13, 14] })
+    assert.equal(planToVote(p, ctx), 13)  // endgameSlots[0] = seat13
+  })
+
+  it('alive 3: uses endgameSlots[0] (position 11)', () => {
+    const p = plan()
+    p[11] = 12  // seat13
+    const ctx = makeCtx({ alivePlayers: [1, 12, 13] })
+    assert.equal(planToVote(p, ctx), 13)
+  })
+
+  // ════════════════════════════════════════════
+  // Endgame fallback to forward
+  // ════════════════════════════════════════════
+
+  it('alive ≤ 6 with no endgame tokens: falls back to forward', () => {
+    // forward: seat3, endgame: all STOP
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4] })
+    assert.equal(planToVote(plan(2), ctx), 3)
+  })
+
+  it('alive ≤ 6 with dead endgame target: falls back to forward', () => {
+    const p = plan(2)  // forward: seat3
+    p[11] = 12  // endgame: seat13 (dead)
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4] })  // seat13 is dead
+    assert.equal(planToVote(p, ctx), 3)  // fallback to forward
   })
 
   // ════════════════════════════════════════════
@@ -77,29 +192,23 @@ describe('planToVote', () => {
   // ════════════════════════════════════════════
 
   it('resolves role token to CO player', () => {
-    // role=seer (ROLE_START+0) → seat 5 が占いCO
-    const planActions = [ROLE_START, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
     const ctx = makeCtx({
       publicEvents: [{ type: 'seer_claim', actor: 5, results: [] }],
     })
-    assert.equal(planToVote(planActions, ctx), 5)
+    assert.equal(planToVote(plan(ROLE_START), ctx), 5)
   })
 
   it('returns null when role has no CO player', () => {
-    // role=medium (ROLE_START+1) だが誰も霊能COしていない
-    const planActions = [ROLE_START + 1, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
     const ctx = makeCtx({})
-    assert.equal(planToVote(planActions, ctx), null)
+    assert.equal(planToVote(plan(ROLE_START + 1), ctx), null)
   })
 
   it('excludes dead CO player from role resolution', () => {
-    // seer CO した seat5 が死亡
-    const planActions = [ROLE_START, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
     const ctx = makeCtx({
-      alivePlayers: [1, 2, 3, 4, 6, 7],
+      alivePlayers: [1, 2, 3, 4, 6, 7, 8, 9, 10],
       publicEvents: [{ type: 'seer_claim', actor: 5, results: [] }],
     })
-    assert.equal(planToVote(planActions, ctx), null)
+    assert.equal(planToVote(plan(ROLE_START), ctx), null)
   })
 
   // ════════════════════════════════════════════
@@ -107,8 +216,6 @@ describe('planToVote', () => {
   // ════════════════════════════════════════════
 
   it('resolves grayran to non-CO player', () => {
-    // grayran → CO していない生存者
-    const planActions = [GRAYRAN, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
     const ctx = makeCtx({
       alivePlayers: [1, 2, 3, 4, 5],
       mySeat: 1,
@@ -117,21 +224,16 @@ describe('planToVote', () => {
         { type: 'medium_claim', actor: 3 },
       ],
     })
-    // CO: 2, 3。自分: 1。残り: 4, 5 のどちらか
-    const result = planToVote(planActions, ctx)
+    const result = planToVote(plan(GRAYRAN), ctx)
     assert.ok(result === 4 || result === 5, `expected 4 or 5, got ${result}`)
   })
 
   it('grayran excludes own seat', () => {
-    // 全員 CO なし、mySeat=1
-    const planActions = [GRAYRAN, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
     const ctx = makeCtx({ alivePlayers: [1, 2], mySeat: 1 })
-    assert.equal(planToVote(planActions, ctx), 2)
+    assert.equal(planToVote(plan(GRAYRAN), ctx), 2)
   })
 
   it('grayran falls back to CO players when no grays left', () => {
-    // 全員 CO 済み → フォールバックで CO 者から選択
-    const planActions = [GRAYRAN, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
     const ctx = makeCtx({
       alivePlayers: [1, 2, 3],
       mySeat: 1,
@@ -140,70 +242,58 @@ describe('planToVote', () => {
         { type: 'medium_claim', actor: 3 },
       ],
     })
-    const result = planToVote(planActions, ctx)
+    const result = planToVote(plan(GRAYRAN), ctx)
     assert.ok(result === 2 || result === 3, `expected 2 or 3, got ${result}`)
   })
 
   // ════════════════════════════════════════════
-  // PlanState（縄数ベーススロット消費）
+  // OR（同スロット内代替候補）
   // ════════════════════════════════════════════
 
-  it('uses slot[0] when no noose consumed', () => {
-    // 10人生存: noose=5, initialNooseCount=5 → consumed=0 → slot[0]
-    const planActions = [2, OR, 6, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const planState = makePlanState(planActions, 10)  // initial noose = 5
-    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] })  // 10人 → noose=5
-    assert.equal(planToVote(planActions, ctx, planState), 3)
+  it('uses first alive target in OR slot', () => {
+    const ctx = makeCtx({ alivePlayers: [1, 3, 5, 7] })
+    assert.equal(planToVote(plan(2, OR, 4), ctx), 3)  // seat3 alive
   })
 
-  it('advances to slot[1] after one noose consumed', () => {
-    // plan: seat3, seat7, STOP → 2 slots (隣接 target = 別スロット)
-    // initial 10人(noose=5), now 8人(noose=4) → consumed=1 → slot[1]
-    const planActions = [2, 6, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const planState = makePlanState(planActions, 10)  // initial noose = 5
-    const ctx = makeCtx({ alivePlayers: [1, 2, 4, 5, 6, 7, 8, 9] })  // 8人 → noose=4
-    assert.equal(planToVote(planActions, ctx, planState), 7)
+  it('falls back to second target when first is dead', () => {
+    const ctx = makeCtx({ alivePlayers: [1, 5, 7] })  // seat3 dead
+    assert.equal(planToVote(plan(2, OR, 4), ctx), 5)   // seat5 alive
   })
 
-  it('returns null when all slots consumed', () => {
-    // plan: seat3, STOP → 1 slot
-    // initial 10人(noose=5), now 6人(noose=3) → consumed=2 → slot[2] doesn't exist
-    const planActions = [2, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const planState = makePlanState(planActions, 10)  // initial noose = 5
-    const ctx = makeCtx({ alivePlayers: [1, 2, 4, 5, 6, 7] })  // 6人 → noose=3, consumed=2
-    assert.equal(planToVote(planActions, ctx, planState), null)
-  })
+  // ════════════════════════════════════════════
+  // PlanState ありパス
+  // ════════════════════════════════════════════
 
-  it('returns null with planState but all-STOP plan', () => {
-    const planActions = [STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const planState = makePlanState(planActions, 10)
-    assert.equal(planState.slots.length, 0)
+  it('planState: forward routing (alive > 6)', () => {
+    const p = plan(2, 6)
+    const planState = makePlanState(p, 10)
     const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] })
-    assert.equal(planToVote(planActions, ctx, planState), null)
+    assert.equal(planToVote(p, ctx, planState), 3)
+  })
+
+  it('planState: endgame routing (alive ≤ 4)', () => {
+    const p = plan()
+    p[11] = 12  // seat13
+    const planState = makePlanState(p, 10)
+    const ctx = makeCtx({ alivePlayers: [1, 12, 13, 14] })
+    assert.equal(planToVote(p, ctx, planState), 13)
   })
 
   it('null planState falls back to on-the-fly parse', () => {
-    const planActions = [2, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const ctx = makeCtx({ alivePlayers: [1, 3, 5, 7] })
-    assert.equal(planToVote(planActions, ctx, null), 3)
+    const ctx = makeCtx({ alivePlayers: [1, 3, 5, 7, 8, 9, 10] })
+    assert.equal(planToVote(plan(2), ctx, null), 3)
   })
 
-  // ════════════════════════════════════════════
-  // Multi-target slot (roller)
-  // ════════════════════════════════════════════
-
-  it('resolves multi-target slot: first alive wins', () => {
-    // slot: [seat3, seat5] → seat3 が生存ならそれ
-    const planActions = [2, 4, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const ctx = makeCtx({ alivePlayers: [1, 3, 5, 7] })
-    assert.equal(planToVote(planActions, ctx), 3)
-  })
-
-  it('resolves multi-target slot: skips dead, uses second', () => {
-    // slot: [seat3 OR seat5] → seat3 死亡 → seat5
-    const planActions = [2, OR, 4, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const ctx = makeCtx({ alivePlayers: [1, 5, 7] })
-    assert.equal(planToVote(planActions, ctx), 5)
+  it('planState with empty slots falls back to on-the-fly parse', () => {
+    const emptyState: PlanState = {
+      slots: [],
+      endgameSlots: [],
+      initialNooseCount: 5,
+      mlMasonSeat: null,
+      masonTakeoverDone: false,
+    }
+    const ctx = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8] })
+    assert.equal(planToVote(plan(2), ctx, emptyState), 3)
   })
 
   // ════════════════════════════════════════════
@@ -216,38 +306,5 @@ describe('planToVote', () => {
     assert.equal(nooseCount(7), 3)
     assert.equal(nooseCount(4), 2)
     assert.equal(nooseCount(3), 1)
-  })
-
-  // ════════════════════════════════════════════
-  // 複数スロットの段階的消費
-  // ════════════════════════════════════════════
-
-  it('multi-slot plan consumes correctly over days', () => {
-    // plan: seat3, seat7, seat12, STOP → 3 slots (隣接 target = 別スロット)
-    const planActions = [2, 6, 11, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const planState = makePlanState(planActions, 10)  // initial noose = 5
-    assert.equal(planState.slots.length, 3)
-
-    // Day 1: 10人 → noose=5, consumed=0 → slot[0]=seat3
-    const ctx1 = makeCtx({ alivePlayers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] })
-    assert.equal(planToVote(planActions, ctx1, planState), 3)
-
-    // Day 2: 8人 → noose=4, consumed=1 → slot[1]=seat7
-    const ctx2 = makeCtx({ alivePlayers: [1, 2, 4, 5, 6, 7, 8, 9] })
-    assert.equal(planToVote(planActions, ctx2, planState), 7)
-
-    // Day 3: 6人 → noose=3, consumed=2 → slot[2]=seat12
-    const ctx3 = makeCtx({ alivePlayers: [1, 2, 5, 6, 9, 12] })
-    assert.equal(planToVote(planActions, ctx3, planState), 12)
-  })
-
-  it('skips dead target in later slots', () => {
-    // plan: seat3, OR, seat7, STOP → 2 slots
-    const planActions = [2, OR, 6, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP, STOP]
-    const planState = makePlanState(planActions, 10)
-
-    // Day 2: 8人 → noose=4, consumed=1 → slot[1]=seat7, but seat7 is dead
-    const ctx = makeCtx({ alivePlayers: [1, 2, 4, 5, 6, 8, 9, 10] })
-    assert.equal(planToVote(planActions, ctx, planState), null)
   })
 })

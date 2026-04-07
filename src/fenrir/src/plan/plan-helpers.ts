@@ -3,6 +3,7 @@
  */
 
 import type { NightAction, DayClaim } from '../../../lupa/types.ts'
+import type { Rng } from '../../../lupa/random.ts'
 import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
 import type { DecisionContext } from '../agents/agent.ts'
@@ -14,8 +15,8 @@ import { resolvePlanSlot } from './plan-resolve.ts'
 // PlanState 型 — GameState.ext に格納される plan 状態
 // ============================================================
 
-/** Endgame 切り替え閾値 (noose count ≤ この値で endgame スロットを使用) */
-export const ENDGAME_NOOSE_THRESHOLD = 3
+/** Endgame 切り替え閾値 (alive ≤ この値で endgame スロットを使用) */
+export const ENDGAME_ALIVE_THRESHOLD = 6
 
 export type PlanState = {
   /** パース済みスロット列（各スロット = 1回の処刑計画）— forward 部分 */
@@ -55,52 +56,89 @@ export function nooseCount(aliveCount: number): number {
 // ============================================================
 
 /**
- * plan tokens から今日の投票先 seat を決定（縄数ベース + endgame ルーティング）
+ * plan tokens から今日の投票先 seat を決定（生存人数ベース）
  *
- * noose > ENDGAME_NOOSE_THRESHOLD: forward slots を noose 消化で参照
- * noose ≤ ENDGAME_NOOSE_THRESHOLD: endgame slots を参照
- *   noose=2 → endgameSlots[0] (最終日)
- *   noose=3 → endgameSlots[1] (前日) or [0]
+ * alive > 6:  forward slots[0]（先頭）
+ * alive 5-6:  endgameSlots[1]（末尾から2つ目）, fallback [0]
+ * alive ≤ 4:  endgameSlots[0]（末尾）
  */
 export function planToVote(
   planActions: number[],
   ctx: DecisionContext,
   planState?: PlanState | null,
 ): number | null {
-  const currentNoose = nooseCount(ctx.alivePlayers.length)
+  const alive = ctx.alivePlayers.length
   const resolveOpts = { excludeSeat: ctx.mySeat, rng: ctx.rng }
 
   if (!planState || (planState.slots.length === 0 && planState.endgameSlots.length === 0)) {
     // planState がなければ on-the-fly パース（後方互換）
     const { forwardSlots, endgameSlots } = parseDualPlanSlots(planActions)
-
-    // Endgame routing
-    if (currentNoose <= ENDGAME_NOOSE_THRESHOLD && endgameSlots.length > 0) {
-      const egIndex = ENDGAME_NOOSE_THRESHOLD - currentNoose
-      const slot = egIndex < endgameSlots.length ? endgameSlots[egIndex] : endgameSlots[0]
-      const seat = resolvePlanSlot(slot, ctx.alivePlayers, ctx.publicEvents, resolveOpts)
-      if (seat) return seat
-    }
-
-    if (forwardSlots.length === 0) return null
-    return resolvePlanSlot(forwardSlots[0], ctx.alivePlayers, ctx.publicEvents, resolveOpts)
+    return resolveByAlive(alive, forwardSlots, endgameSlots, ctx, resolveOpts)
   }
 
-  // Endgame routing with planState
-  if (currentNoose <= ENDGAME_NOOSE_THRESHOLD && planState.endgameSlots.length > 0) {
-    const egIndex = ENDGAME_NOOSE_THRESHOLD - currentNoose
-    const slot = egIndex < planState.endgameSlots.length ? planState.endgameSlots[egIndex] : planState.endgameSlots[0]
-    const seat = resolvePlanSlot(slot, ctx.alivePlayers, ctx.publicEvents, resolveOpts)
+  return resolveByAlive(alive, planState.slots, planState.endgameSlots, ctx, resolveOpts)
+}
+
+/**
+ * endgameSlots[0] の保護対象 seat を収集
+ * （最終日用スロットの対象は最終日まで吊らない）
+ */
+function collectProtectedSeats(endgameSlot0: PlanSlot | undefined, ctx: DecisionContext, resolveOpts: { excludeSeat: number, rng: Rng }): Set<number> {
+  const protected_ = new Set<number>()
+  if (!endgameSlot0) return protected_
+  // slot の全 target を仮解決して seat を収集
+  for (const target of endgameSlot0.targets) {
+    if (target.type === 'seat') {
+      protected_.add(target.seat)
+    } else if (target.type === 'role' || target.type === 'grayran') {
+      const resolved = resolvePlanSlot({ targets: [target] }, ctx.alivePlayers, ctx.publicEvents, resolveOpts)
+      if (resolved) protected_.add(resolved)
+    }
+  }
+  return protected_
+}
+
+/** 生存人数に基づいて forward / endgame を選択し resolve */
+function resolveByAlive(
+  alive: number,
+  forwardSlots: PlanSlot[],
+  endgameSlots: PlanSlot[],
+  ctx: DecisionContext,
+  resolveOpts: { excludeSeat: number, rng: Rng },
+): number | null {
+  // 最終日 (alive ≤ 4): endgameSlots[0] を使用
+  if (alive <= 4 && endgameSlots.length > 0) {
+    const seat = resolvePlanSlot(endgameSlots[0], ctx.alivePlayers, ctx.publicEvents, resolveOpts)
     if (seat) return seat
   }
 
-  // Forward routing (noose-based slot consumption)
-  const consumed = planState.initialNooseCount - currentNoose
-  const slotIndex = Math.max(0, consumed)
+  // 最終日前 (alive 5-6): endgameSlots[1] → forward[0] → 保護対象除外ランダム
+  if (alive <= ENDGAME_ALIVE_THRESHOLD && endgameSlots.length > 0) {
+    // 1. endgameSlots[1]（最終日の1つ前）
+    if (endgameSlots[1]) {
+      const seat = resolvePlanSlot(endgameSlots[1], ctx.alivePlayers, ctx.publicEvents, resolveOpts)
+      if (seat) return seat
+    }
+    // 2. forwardSlots[0] にフォールバック
+    if (forwardSlots.length > 0) {
+      const seat = resolvePlanSlot(forwardSlots[0], ctx.alivePlayers, ctx.publicEvents, resolveOpts)
+      if (seat) return seat
+    }
+    // 3. endgameSlots[0] の保護対象を除外してランダム
+    const protected_ = collectProtectedSeats(endgameSlots[0], ctx, resolveOpts)
+    const candidates = ctx.alivePlayers.filter(s => s !== resolveOpts.excludeSeat && !protected_.has(s))
+    if (candidates.length > 0) {
+      return candidates[Math.floor(resolveOpts.rng.next() * candidates.length)]
+    }
+    // 保護対象を除外すると候補なし → 全員から（最終手段）
+    const all = ctx.alivePlayers.filter(s => s !== resolveOpts.excludeSeat)
+    if (all.length > 0) return all[Math.floor(resolveOpts.rng.next() * all.length)]
+    return null
+  }
 
-  if (slotIndex >= planState.slots.length) return null  // スロット切れ → heuristic fallback
-
-  return resolvePlanSlot(planState.slots[slotIndex], ctx.alivePlayers, ctx.publicEvents, resolveOpts)
+  // 通常 (alive > 6): forward を使用
+  if (forwardSlots.length === 0) return null
+  return resolvePlanSlot(forwardSlots[0], ctx.alivePlayers, ctx.publicEvents, resolveOpts)
 }
 
 // ============================================================
