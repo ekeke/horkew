@@ -11,7 +11,16 @@
  */
 
 import type { SystemRole } from '../../types/index.ts'
-import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
+import type { AnyNetwork } from './ml/nn.ts'
+import {
+  MODEL_GROUPS, MODEL_NAMES, ROLE_TO_GROUP, BASELINE_RATES,
+  klTargetForIter,
+  type ModelName,
+} from './curriculum.ts'
+import {
+  ppoUpdate, appendKlLog, findCheckpoint,
+  type TrainProgress,
+} from './phase-runner.ts'
 import { computeRefPlanLogits } from './agents/neural-agent.ts'
 import { DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
@@ -46,27 +55,6 @@ import {
   capturePlanSnapshot, captureGameSnapshot, savePretrainSnapshots,
 } from './pretrain-snapshot.ts'
 // decode-observation.ts は削除済み — CollectedObservation を直接使用
-
-// ============================================================
-// Model Group Definitions
-// ============================================================
-
-const MODEL_GROUPS = {
-  village:          { roles: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata'] as SystemRole[], faction: 'villager_won', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
-  wolf_collective:  { roles: ['werewolf'] as SystemRole[], faction: 'werewolf_won', collective: true, teamType: 'wolf_team' as const },
-  mason_collective: { roles: ['mason'] as SystemRole[], faction: 'villager_won', collective: true, teamType: 'mason_team' as const },
-  fanatic:          { roles: ['fanatic'] as SystemRole[], faction: 'werewolf_won', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
-  third:            { roles: ['werehamster', 'immoralist'] as SystemRole[], faction: 'werehamster_won', collective: false, teamType: undefined as 'wolf_team' | 'mason_team' | undefined },
-}
-
-type ModelName = keyof typeof MODEL_GROUPS
-const MODEL_NAMES = Object.keys(MODEL_GROUPS) as ModelName[]
-
-/** role → モデルグループ名の逆引きマップ (MODEL_GROUPSから自動構築) */
-const ROLE_TO_GROUP: Record<string, ModelName> = {}
-for (const [name, group] of Object.entries(MODEL_GROUPS) as [ModelName, typeof MODEL_GROUPS[ModelName]][]) {
-  for (const role of group.roles) ROLE_TO_GROUP[role] = name
-}
 
 const COLORS: Record<ModelName, string> = {
   village: '\x1b[33m', wolf_collective: '\x1b[31m', mason_collective: '\x1b[36m', fanatic: '\x1b[35m', third: '\x1b[32m',
@@ -429,50 +417,6 @@ function nextCheckpointBase(): string {
 
 // --- Progress (per-checkpointBase) ---
 
-type ProgressEvalEntry = {
-  time: string
-  model: string
-  iter: number
-  winRates: Record<string, number>
-  avgLen: number
-  status: string
-  ppoMetrics?: { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number }
-  baseline?: number
-  target?: number
-  timing?: { gameMs: number, ppoMs: number, iterMs: number }
-}
-
-type ProgressCurriculumEntry = {
-  time: string
-  iter: number
-  mlMaxSeats: number
-  mlStartDay: number
-  event: string
-}
-
-type TrainProgress = {
-  runId: string
-  checkpointBase: string
-  runInfo: {
-    started: string
-    gitSha: string
-    arch: string
-    configSummary: string
-  }
-  curriculum: ProgressCurriculumEntry[]
-  evals: ProgressEvalEntry[]
-  latest: {
-    phase: string
-    model: string
-    iter: number
-    maxIter: number
-    klCoeff?: number
-    mlMaxSeats?: number
-    mlStartDay?: number
-    updated?: string
-  }
-}
-
 function readTrainProgress(checkpointBase: string): TrainProgress | null {
   const path = `${checkpointBase}/train-progress.json`
   if (!existsSync(path)) return null
@@ -489,107 +433,6 @@ function writeTrainProgress(progress: TrainProgress): void {
     status.updated = progress.latest.updated
     writeTrainStatus(status)
   }
-}
-
-// ============================================================
-// PPO Update (training.ts から借用)
-// ============================================================
-
-function ppoUpdate(
-  tfNetwork: AnyTfNetwork,
-  batch: ProcessedStep[],
-  config: {
-    miniBatchSize: number, clipEpsilon: number, valueLossCoeff: number, entropyCoeff: number,
-    predictLossCoeff?: number, freezePlan?: boolean,
-    klCoeff?: number,
-  },
-  precomputedRefLogits?: Map<ProcessedStep, { plan?: Float32Array }>,
-): { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klPlanLoss: number } {
-  if (batch.length === 0) return { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
-
-  let totalPolicyLoss = 0
-  let totalValueLoss = 0
-  let totalEntropy = 0
-  let totalPredictLoss = 0
-  let totalKlLoss = 0
-  let totalKlPlanLoss = 0
-  // grammarLoss removed — GRU decoder enforces grammar structurally
-  let batchCount = 0
-
-  for (let i = batch.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[batch[i], batch[j]] = [batch[j], batch[i]]
-  }
-
-  for (let start = 0; start < batch.length; start += config.miniBatchSize) {
-    const end = Math.min(start + config.miniBatchSize, batch.length)
-    const miniBatch = batch.slice(start, end)
-
-    // Reference logits lookup (precomputed per iteration, not per minibatch)
-    let refPlanLogits: (Float32Array | undefined)[] | undefined
-    if (precomputedRefLogits && config.klCoeff && config.klCoeff > 0) {
-      refPlanLogits = miniBatch.map(s => precomputedRefLogits.get(s)?.plan)
-    }
-
-    const result = tfNetwork.trainBatch({
-      observations: miniBatch.map(s => s.observation),
-      actionHeads: miniBatch.map(s => s.actionHead),
-      actionIndices: miniBatch.map(s => s.actionIdx),
-      oldLogProbs: miniBatch.map(s => s.logProb),
-      advantages: miniBatch.map(s => s.advantage),
-      returns: miniBatch.map(s => s.returnValue),
-      sigmoidActions: miniBatch.map(s => s.sigmoidActions),
-      trueRoles: miniBatch.map(s => s.trueRoles),
-      planActions: miniBatch.map(s => s.planActions),
-      planLogProbs: miniBatch.map(s => s.planLogProbs),
-      predictLossCoeff: config.predictLossCoeff ?? 0.1,
-      clipEpsilon: config.clipEpsilon,
-      valueLossCoeff: config.valueLossCoeff,
-      entropyCoeff: config.entropyCoeff,
-      freezePlan: config.freezePlan,
-      refPlanLogits,
-      klCoeff: config.klCoeff,
-    })
-    totalPolicyLoss += result.policyLoss
-    totalValueLoss += result.valueLoss
-    totalEntropy += result.entropy
-    totalPredictLoss += result.predictLoss
-    totalKlLoss += result.klLoss
-    totalKlPlanLoss += result.klPlanLoss
-    batchCount++
-  }
-
-  const n = Math.max(batchCount, 1)
-  return {
-    policyLoss: totalPolicyLoss / n,
-    valueLoss: totalValueLoss / n,
-    entropy: totalEntropy / n,
-    predictLoss: totalPredictLoss / n,
-    klLoss: totalKlLoss / n,
-    klPlanLoss: totalKlPlanLoss / n,
-  }
-}
-
-
-/** KL target warmup: pretrain→PPO 移行初期は実 KL 付近から開始し、徐々に引き締める
- * 実測初期 KL ≈ 2.0-2.3 のため、target=2.0 で β が floor に張り付かず即座に制御が効く
- * （orch-run-2 で target=3.0 → β=0.01 が 500 iter 続き pretrain 知識が破壊された教訓） */
-const KL_TARGET_INITIAL = 2.0
-const KL_TARGET_FINAL = 0.05
-const KL_WARMUP_ITERS = 2000
-
-function klTargetForIter(iter: number): number {
-  if (iter >= KL_WARMUP_ITERS) return KL_TARGET_FINAL
-  return KL_TARGET_INITIAL + (KL_TARGET_FINAL - KL_TARGET_INITIAL) * (iter / KL_WARMUP_ITERS)
-}
-
-/** KL 診断ログを checkpointBase/kl_log.jsonl に追記 */
-function appendKlLog(
-  checkpointBase: string,
-  entry: { iter: number, klPlan: number, klTotal: number, beta: number, klTarget: number },
-): void {
-  const line = JSON.stringify({ ...entry, ts: new Date().toISOString() })
-  appendFileSync(`${checkpointBase}/kl_log.jsonl`, line + '\n')
 }
 
 // ============================================================
@@ -833,27 +676,6 @@ async function selectStartMode(config: OrchestratorConfig): Promise<void> {
     config.checkpointBase = nextCheckpointBase()
     log(`New run: ${config.checkpointBase}`)
   }
-}
-
-function findCheckpoint(dir: string, prefix: string = 'checkpoint'): { iteration: number, path: string } | null {
-  if (!existsSync(dir)) return null
-  const files = readdirSync(dir)
-  // final variants: prefix_final.json or final.json
-  const finalName = `${prefix}_final.json`
-  for (const candidate of [finalName, 'final.json']) {
-    if (files.includes(candidate)) {
-      const raw = JSON.parse(readFileSync(`${dir}/${candidate}`, 'utf-8'))
-      return { iteration: raw.metadata?.iteration ?? 0, path: `${dir}/${candidate}` }
-    }
-  }
-  let maxIter = -1
-  const regex = new RegExp(`^${prefix}_(\\d+)\\.json$`)
-  for (const f of files) {
-    const m = f.match(regex)
-    if (m) { const n = parseInt(m[1]); if (n > maxIter) maxIter = n }
-  }
-  if (maxIter < 0) return null
-  return { iteration: maxIter, path: `${dir}/${prefix}_${maxIter}.json` }
 }
 
 // ============================================================
@@ -1301,15 +1123,7 @@ async function main(): Promise<void> {
   if (villageNet) refNetwork.loadWeights(villageNet.cloneWeights())
   log(`Reference network created from current village weights (KL anchor)`)
 
-  // === Baseline (14D猫 heuristic vs heuristic, ハードコード) ===
-  // 100ゲーム × 複数回の測定結果から: village≈55%, hamster≈27%, wolf≈15%, draw≈3%
-  const baselineRates: Record<string, number> = {
-    villager_won: 0.55,
-    werehamster_won: 0.27,
-    werewolf_won: 0.15,
-    draw: 0.03,
-  }
-  log(`Baseline (hardcoded): ${Object.entries(baselineRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')}`)
+  log(`Baseline (hardcoded): ${Object.entries(BASELINE_RATES).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')}`)
 
   // === Phase 0: Mason Individual (backbone pre-training) ===
   // 確定白の共有者を個人モデルとして学習。1 ML席で村全体の投票を制御できるため学習シグナルが強い。
@@ -1395,7 +1209,7 @@ async function main(): Promise<void> {
       let masonSnapshotCount = refreshMasonSnapshotCount()
       log(`  Initial masonMlStartDay=${masonMlStartDay}`)
 
-      const masonTargetRate = baselineRates['villager_won'] ?? 0.55
+      const masonTargetRate = BASELINE_RATES['villager_won'] ?? 0.55
       const prefix = `\x1b[36m[mason_ind ]${RESET}`
       mkdirSync(masonDir, { recursive: true })
       let graduated = false
@@ -1643,7 +1457,7 @@ async function main(): Promise<void> {
         const network = networks.get(name)!
         const currentIter = iterCounts.get(name)!
         const targetIter = Math.min(currentIter + config.chunkSize, config.iterations)
-        const targetRate = config.targetWinRate ?? (baselineRates[group.faction] ?? 0.5)
+        const targetRate = config.targetWinRate ?? (BASELINE_RATES[group.faction] ?? 0.5)
 
         const prefix = `${COLORS[name]}[${name.padEnd(10)}]${RESET}`
 
@@ -1826,7 +1640,7 @@ async function main(): Promise<void> {
             progress.evals.push({
               time: new Date().toISOString(), model: name, iter,
               winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: evalStatus,
-              ppoMetrics: { ...lastPpoResult }, baseline: baselineRates[group.faction], target: targetRate,
+              ppoMetrics: { ...lastPpoResult }, baseline: BASELINE_RATES[group.faction], target: targetRate,
               timing: { gameMs, ppoMs, iterMs },
             })
             progress.latest = { phase: '1', model: name, iter, maxIter: config.iterations, klCoeff: ppoConfig.klCoeff, mlMaxSeats, mlStartDay }
@@ -2136,7 +1950,7 @@ async function main(): Promise<void> {
               policyLoss: lastPpoResult1p.policyLoss, valueLoss: lastPpoResult1p.valueLoss, entropy: lastPpoResult1p.entropy,
             })
             const factionRate = evalResult.winRates[group.faction] ?? 0
-            const targetRate = config.targetWinRate ?? (baselineRates[group.faction] ?? 0.5)
+            const targetRate = config.targetWinRate ?? (BASELINE_RATES[group.faction] ?? 0.5)
             log(
               `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
               `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
@@ -2147,7 +1961,7 @@ async function main(): Promise<void> {
             progress.evals.push({
               time: new Date().toISOString(), model: name, iter,
               winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: evalStatus,
-              ppoMetrics: { ...lastPpoResult1p }, baseline: baselineRates[group.faction], target: targetRate,
+              ppoMetrics: { ...lastPpoResult1p }, baseline: BASELINE_RATES[group.faction], target: targetRate,
               timing: { gameMs, ppoMs, iterMs },
             })
             progress.latest = { phase: "1'", model: name, iter, maxIter: config.iterations }
@@ -2353,7 +2167,7 @@ async function main(): Promise<void> {
                 klLoss: lastPpoResult2.klLoss, klCoeff: 0,
                 policyLoss: lastPpoResult2.policyLoss, valueLoss: lastPpoResult2.valueLoss, entropy: lastPpoResult2.entropy,
               })
-              const targetRate = config.targetWinRate ?? (baselineRates[group.faction] ?? 0.5)
+              const targetRate = config.targetWinRate ?? (BASELINE_RATES[group.faction] ?? 0.5)
               log(
                 `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
                 `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
@@ -2362,7 +2176,7 @@ async function main(): Promise<void> {
               progress.evals.push({
                 time: new Date().toISOString(), model: `p2_${name}`, iter,
                 winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: '',
-                ppoMetrics: { ...lastPpoResult2 }, baseline: baselineRates[group.faction], target: targetRate,
+                ppoMetrics: { ...lastPpoResult2 }, baseline: BASELINE_RATES[group.faction], target: targetRate,
                 timing: { gameMs, ppoMs, iterMs },
               })
               progress.latest = { phase: '2', model: name, iter, maxIter: config.phase2Iterations }
