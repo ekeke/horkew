@@ -44,7 +44,7 @@
     reward: number
     value: number
     done: boolean
-    plan?: { indices: number[], description: string, slots: any[] }
+    plan?: { indices: number[], description: string, groups: any[] }
     predict?: Array<{ seat: number, roles: Array<{ role: string, value: number }> }>
   }
 
@@ -381,7 +381,7 @@
                       <div class="day-plan-row">
                         <span class="day-plan-label">Plan</span>
                         <span class="plan-tokens">{#each dayGroup.plan.indices as idx}{@const pt = planTokenLabel(idx)}<span class="plan-token {pt.cls}">{pt.text}</span>{/each}</span>
-                        <span class="plan-groups">{dayGroup.plan.slots.length}s</span>
+                        <span class="plan-groups">{dayGroup.plan.groups.length}s</span>
                       </div>
                     {:else if snap.plan.indices}
                       <div class="day-plan-row">
@@ -579,7 +579,7 @@
                   <span class="plan-token {pt.cls}">{pt.text}</span>
                 {/each}
               </div>
-              <div class="plan-groups">{selectedStep.plan.slots.length} slot(s)</div>
+              <div class="plan-groups">{selectedStep.plan.groups.length} slot(s)</div>
             </div>
           {/if}
 
