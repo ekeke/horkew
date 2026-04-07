@@ -31,6 +31,15 @@ export const PLAN_VOCAB = {
   SIZE: SEATS + NUM_ROLE_TOKENS + 3,     // 22
 } as const
 
+// ============================================================
+// Dual-direction layout constants
+// ============================================================
+
+/** forward plan token 数 */
+export const NUM_FORWARD_TOKENS = 8
+/** endgame plan token 数 */
+export const NUM_ENDGAME_TOKENS = 4
+
 /** Plan token の1スロット（1回の処刑に対応する候補リスト） */
 export type PlanSlot = {
   /** 処刑候補のseat番号 or role名 or 'grayran'（OR で区切られた代替候補） */
@@ -123,6 +132,29 @@ export function parsePlanSlots(indices: number[]): PlanSlot[] {
 
   if (current && current.targets.length > 0) slots.push(current)
   return slots
+}
+
+/**
+ * Dual-direction plan の12-token配列をパースする。
+ *
+ * - positions 0-7: forward (左→右にパース)
+ * - positions 8-11: endgame (右→左にパース — position 11 = 最終日)
+ *
+ * endgameSlots[0] = 最終日のスロット (position 11)
+ * endgameSlots[1] = 最終日前日のスロット (position 10) ...
+ */
+export function parseDualPlanSlots(indices: number[]): { forwardSlots: PlanSlot[], endgameSlots: PlanSlot[] } {
+  // Forward: positions 0-7
+  const forwardSlots = parsePlanSlots(indices.slice(0, NUM_FORWARD_TOKENS))
+
+  // Endgame: positions 8-11, reversed (R→L)
+  const egReversed: number[] = []
+  for (let i = NUM_FORWARD_TOKENS + NUM_ENDGAME_TOKENS - 1; i >= NUM_FORWARD_TOKENS; i--) {
+    egReversed.push(indices[i] ?? PLAN_VOCAB.STOP)
+  }
+  const endgameSlots = parsePlanSlots(egReversed)
+
+  return { forwardSlots, endgameSlots }
 }
 
 /**

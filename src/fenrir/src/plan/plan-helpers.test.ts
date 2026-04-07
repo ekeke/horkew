@@ -26,6 +26,7 @@ function makeCtx(overrides: {
 function makePlanState(planActions: number[], aliveCount: number): PlanState {
   return {
     slots: parsePlanSlots(planActions),
+    endgameSlots: [],
     initialNooseCount: nooseCount(aliveCount),
     mlMasonSeat: null,
     masonTakeoverDone: false,

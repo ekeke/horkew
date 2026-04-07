@@ -14,6 +14,7 @@ import {
   ROLE_TOKEN_FEATURES, NUM_ROLE_TOKENS, ROLE_INDEX, CO_ROLES,
   type ObservationMode,
 } from '../observation.ts'
+import { NUM_FORWARD_TOKENS, NUM_ENDGAME_TOKENS } from '../plan/plan-vocab.ts'
 
 let _tfTransformerId = 0
 
@@ -203,8 +204,10 @@ export class TfTransformerNetwork {
   private gruBr: tf.Variable
   private gruBh: tf.Variable
   private planTokenEmbed: tf.Variable   // [vocabSize+1, dModel] — 22 vocab + START
-  private planInitW: tf.Variable     // [dModel, dModel]
-  private planInitB: tf.Variable     // [dModel]
+  private planInitFwdW: tf.Variable  // [dModel, dModel]
+  private planInitFwdB: tf.Variable  // [dModel]
+  private planInitEgW: tf.Variable   // [dModel, dModel]
+  private planInitEgB: tf.Variable   // [dModel]
 
   // Plan observation embeddings (Strategy Encoder input)
   private planVocabEmbed: tf.Variable       // [22, dModel] vocab index → embedding
@@ -342,14 +345,17 @@ export class TfTransformerNetwork {
     this.planTokenEmbed = tf.variable(
       tf.randomNormal([embedSize, dm], 0, 0.02), true, `${prefix}plan_tok_emb`,
     )
-    this.planInitW = this.makeVar([dm, dm], dm, `${prefix}plan_init_w`)
-    this.planInitB = this.makeZeroVar([dm], `${prefix}plan_init_b`)
+    this.planInitFwdW = this.makeVar([dm, dm], dm, `${prefix}plan_init_fwd_w`)
+    this.planInitFwdB = this.makeZeroVar([dm], `${prefix}plan_init_fwd_b`)
+    this.planInitEgW = this.makeVar([dm, dm], dm, `${prefix}plan_init_eg_w`)
+    this.planInitEgB = this.makeZeroVar([dm], `${prefix}plan_init_eg_b`)
     this.allVariables.push(
       this.gruWz, this.gruWr, this.gruWh,
       this.gruUz, this.gruUr, this.gruUh,
       this.gruBz, this.gruBr, this.gruBh,
       this.planTokenEmbed,
-      this.planInitW, this.planInitB,
+      this.planInitFwdW, this.planInitFwdB,
+      this.planInitEgW, this.planInitEgB,
     )
 
     // Plan observation embeddings (vocab + position → Strategy Encoder)
@@ -786,17 +792,37 @@ export class TfTransformerNetwork {
         policies.set(name, logits.dataSync() as Float32Array)
       }
 
-      // Plan logits via GRU decoder (greedy, START token input)
+      // Plan logits via GRU decoder (2-phase: forward + endgame)
       const numPlan = this.tConfig.numPlanTokens ?? 12
+      const numFwd = NUM_FORWARD_TOKENS   // 8
+      const numEg = NUM_ENDGAME_TOKENS    // 4
       const vocabSize = this.tConfig.planVocabSize ?? 22
       const startIdx = vocabSize  // START token
 
-      // Simple greedy decoding for TF forward (used rarely)
-      const planPrev = new Array(numPlan).fill(0)
-      planPrev[0] = startIdx
-      const planPrevTensor = tf.tensor2d([planPrev], [1, numPlan], 'int32')
-      const planLogits = this.decodePlanTF(clsOut, allKeys, planPrevTensor, numPlan, this.planInitW, this.planInitB)
-      policies.set('plan', planLogits.dataSync() as Float32Array)
+      // Forward phase (positions 0-7)
+      const fwdPrev = new Array(numFwd).fill(0)
+      fwdPrev[0] = startIdx
+      const fwdPrevTensor = tf.tensor2d([fwdPrev], [1, numFwd], 'int32')
+      const fwdLogits = this.decodePlanTF(clsOut, allKeys, fwdPrevTensor, numFwd, this.planInitFwdW, this.planInitFwdB)
+
+      // Endgame phase (positions 8-11, decoded in reverse order: 11,10,9,8)
+      const egPrev = new Array(numEg).fill(0)
+      egPrev[0] = startIdx
+      const egPrevTensor = tf.tensor2d([egPrev], [1, numEg], 'int32')
+      const egLogits = this.decodePlanTF(clsOut, allKeys, egPrevTensor, numEg, this.planInitEgW, this.planInitEgB)
+
+      // Assemble: forward logits [0..7] + endgame logits reversed [11,10,9,8] → [8,9,10,11]
+      const fwdData = fwdLogits.dataSync() as Float32Array  // [numFwd * vocabSize]
+      const egData = egLogits.dataSync() as Float32Array     // [numEg * vocabSize]
+      const combined = new Float32Array(numPlan * vocabSize)
+      combined.set(fwdData, 0)
+      // Reverse endgame logits: GRU decoded [pos11, pos10, pos9, pos8] → need [pos8, pos9, pos10, pos11]
+      for (let i = 0; i < numEg; i++) {
+        const srcOffset = (numEg - 1 - i) * vocabSize
+        const dstOffset = (numFwd + i) * vocabSize
+        combined.set(egData.subarray(srcOffset, srcOffset + vocabSize), dstOffset)
+      }
+      policies.set('plan', combined)
 
       const rawValue = tf.add(tf.matMul(clsOut, this.valueW), this.valueB).dataSync()[0]
       value = Math.tanh(rawValue)
@@ -875,7 +901,6 @@ export class TfTransformerNetwork {
       const strategyIndices = headGroups.get('strategy')
       if (strategyIndices && strategyIndices.length > 0 && !batch.freezePlan) {
         const tc = this.config.transformer!
-        const numPlan = tc.numPlanTokens ?? 12
         const vocabSize = tc.planVocabSize ?? 22
         const START_IDX = vocabSize  // START token index
 
@@ -966,24 +991,68 @@ export class TfTransformerNetwork {
           return { loss, entropy: ent, kl }
         }
 
-        // Plan PPO loss (unified) via GRU teacher forcing
+        // Plan PPO loss (2-phase: forward + endgame) via GRU teacher forcing
         const klCoeff = batch.klCoeff ?? 0
-        const getRefPlanLogits = klCoeff > 0 ? (i: number) => batch.refPlanLogits?.[i] : undefined
+        const numFwd = NUM_FORWARD_TOKENS   // 8
+        const numEg = NUM_ENDGAME_TOKENS    // 4
 
-        const planResult = computePlanLoss(
-          numPlan, this.planInitW, this.planInitB,
-          i => batch.planActions?.[i],
-          i => batch.planLogProbs?.[i],
-          getRefPlanLogits,
+        // Forward phase: actions[0:8], logProbs[0:8]
+        const getRefFwdLogits = klCoeff > 0 ? (i: number) => {
+          const rl = batch.refPlanLogits?.[i]
+          if (!rl) return undefined
+          return rl.subarray(0, numFwd * vocabSize) as Float32Array
+        } : undefined
+
+        const fwdResult = computePlanLoss(
+          numFwd, this.planInitFwdW, this.planInitFwdB,
+          i => batch.planActions?.[i]?.slice(0, numFwd),
+          i => batch.planLogProbs?.[i]?.slice(0, numFwd),
+          getRefFwdLogits,
         )
-        totalPolicyLoss = tf.add(totalPolicyLoss, planResult.loss)
-        totalEntropy = tf.add(totalEntropy, planResult.entropy)
 
-        // KL penalty: β * KL_plan
+        // Endgame phase: actions reversed from [11,10,9,8], logProbs reversed
+        const getRefEgLogits = klCoeff > 0 ? (i: number) => {
+          const rl = batch.refPlanLogits?.[i]
+          if (!rl) return undefined
+          // Extract endgame positions [8..11] and reverse to decode order [11,10,9,8]
+          const egRef = new Float32Array(numEg * vocabSize)
+          for (let k = 0; k < numEg; k++) {
+            const srcPos = numFwd + (numEg - 1 - k)  // 11,10,9,8
+            egRef.set(rl.subarray(srcPos * vocabSize, (srcPos + 1) * vocabSize), k * vocabSize)
+          }
+          return egRef
+        } : undefined
+
+        const egResult = computePlanLoss(
+          numEg, this.planInitEgW, this.planInitEgB,
+          i => {
+            const actions = batch.planActions?.[i]
+            if (!actions) return undefined
+            // Reverse endgame: [11,10,9,8] → decode order
+            const egActions = new Array(numEg)
+            for (let k = 0; k < numEg; k++) egActions[k] = actions[numFwd + (numEg - 1 - k)]
+            return egActions
+          },
+          i => {
+            const lp = batch.planLogProbs?.[i]
+            if (!lp) return undefined
+            // Reverse endgame logprobs
+            const egLp = new Array(numEg)
+            for (let k = 0; k < numEg; k++) egLp[k] = lp[numFwd + (numEg - 1 - k)]
+            return egLp
+          },
+          getRefEgLogits,
+        )
+
+        totalPolicyLoss = tf.add(totalPolicyLoss, tf.add(fwdResult.loss, egResult.loss))
+        totalEntropy = tf.add(totalEntropy, tf.add(fwdResult.entropy, egResult.entropy))
+
+        // KL penalty: β * (KL_fwd + KL_eg)
         if (klCoeff > 0) {
-          totalPolicyLoss = tf.add(totalPolicyLoss, tf.mul(tf.scalar(klCoeff), planResult.kl))
-          result.klLoss = planResult.kl.dataSync()[0]
-          result.klPlanLoss = planResult.kl.dataSync()[0]
+          const klSum = tf.add(fwdResult.kl, egResult.kl) as tf.Scalar
+          totalPolicyLoss = tf.add(totalPolicyLoss, tf.mul(tf.scalar(klCoeff), klSum))
+          result.klLoss = klSum.dataSync()[0]
+          result.klPlanLoss = klSum.dataSync()[0]
         }
 
         headGroups.delete('strategy')  // 通常ヘッドループでは処理しない
@@ -1261,8 +1330,10 @@ export class TfTransformerNetwork {
    */
   trainSupervisedPlan(batch: {
     observations: Float32Array[]
-    labels: number[][]             // [n, numTokens] vocab indices
-    masks: boolean[][]             // [n, numTokens] which tokens to train on
+    labels: number[][]             // [n, numTokens] vocab indices (forward)
+    masks: boolean[][]             // [n, numTokens] which tokens to train on (forward)
+    endgameLabels?: number[][]     // [n, numEndgameTokens] vocab indices (endgame, in decode order)
+    endgameMasks?: boolean[][]     // [n, numEndgameTokens] which tokens to train on (endgame)
     numTokens: number
     vocabSize: number
   }): { loss: number, accuracy: number, nextAccuracy: number, stopAccuracy: number, seatAccuracy: number } {
@@ -1349,8 +1420,14 @@ export class TfTransformerNetwork {
         }
       }
 
-      // Unified plan via GRU teacher forcing
-      computeCE(numTokens, this.planInitW, this.planInitB, batch.labels, batch.masks)
+      // Forward plan via GRU teacher forcing
+      computeCE(numTokens, this.planInitFwdW, this.planInitFwdB, batch.labels, batch.masks)
+
+      // Endgame plan via GRU teacher forcing (labels already in decode order)
+      if (batch.endgameLabels && batch.endgameMasks) {
+        const egNumTokens = batch.endgameLabels[0]?.length ?? NUM_ENDGAME_TOKENS
+        computeCE(egNumTokens, this.planInitEgW, this.planInitEgB, batch.endgameLabels, batch.endgameMasks)
+      }
 
       if (totalMasked > 0) {
         result.accuracy = correct / totalMasked
@@ -1420,8 +1497,10 @@ export class TfTransformerNetwork {
     weights.set('gru_br', this.gruBr.dataSync() as Float32Array)
     weights.set('gru_bh', this.gruBh.dataSync() as Float32Array)
     weights.set('plan_token_embed', this.planTokenEmbed.dataSync() as Float32Array)
-    weights.set('plan_init_w', this.planInitW.dataSync() as Float32Array)
-    weights.set('plan_init_b', this.planInitB.dataSync() as Float32Array)
+    weights.set('plan_init_fwd_w', this.planInitFwdW.dataSync() as Float32Array)
+    weights.set('plan_init_fwd_b', this.planInitFwdB.dataSync() as Float32Array)
+    weights.set('plan_init_eg_w', this.planInitEgW.dataSync() as Float32Array)
+    weights.set('plan_init_eg_b', this.planInitEgB.dataSync() as Float32Array)
 
     weights.set('plan_vocab_embed', this.planVocabEmbed.dataSync() as Float32Array)
     weights.set('plan_pos_embed', this.planPosEmbed.dataSync() as Float32Array)
@@ -1504,11 +1583,17 @@ export class TfTransformerNetwork {
         ['gru_uz', this.gruUz], ['gru_ur', this.gruUr], ['gru_uh', this.gruUh],
         ['gru_bz', this.gruBz], ['gru_br', this.gruBr], ['gru_bh', this.gruBh],
         ['plan_token_embed', this.planTokenEmbed],
-        ['plan_init_w', this.planInitW], ['plan_init_b', this.planInitB],
+        ['plan_init_fwd_w', this.planInitFwdW], ['plan_init_fwd_b', this.planInitFwdB],
+        ['plan_init_eg_w', this.planInitEgW], ['plan_init_eg_b', this.planInitEgB],
       ]
       for (const [key, variable] of gruMap) {
         const w = weights.get(key)
         if (w) variable.assign(tf.tensor(w, variable.shape))
+      }
+      // Backward compat: if old plan_init_w exists but new plan_init_fwd_w doesn't, use old for forward init
+      if (weights.has('plan_init_w') && !weights.has('plan_init_fwd_w')) {
+        this.planInitFwdW.assign(tf.tensor(weights.get('plan_init_w')!, this.planInitFwdW.shape))
+        this.planInitFwdB.assign(tf.tensor(weights.get('plan_init_b')!, this.planInitFwdB.shape))
       }
 
       const pve = weights.get('plan_vocab_embed')

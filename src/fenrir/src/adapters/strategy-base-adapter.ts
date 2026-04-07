@@ -35,7 +35,7 @@ import {
 } from '../retar-bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../../hati/index.ts'
 import { resolvePlanSlot } from '../plan/plan-resolve.ts'
-import { parsePlanSlots } from '../plan/plan-vocab.ts'
+import { parseDualPlanSlots } from '../plan/plan-vocab.ts'
 import { nooseCount } from '../plan/plan-helpers.ts'
 import { collectObservation } from '../observation.ts'
 
@@ -273,7 +273,9 @@ export abstract class StrategyBaseAdapter
   ): void {
     if (planActions) {
       ext.planIndices = [...planActions]
-      ext.planState.slots = parsePlanSlots(planActions)
+      const { forwardSlots, endgameSlots } = parseDualPlanSlots(planActions)
+      ext.planState.slots = forwardSlots
+      ext.planState.endgameSlots = endgameSlots
       ext.planState.initialNooseCount = nooseCount(aliveCount)
     }
   }

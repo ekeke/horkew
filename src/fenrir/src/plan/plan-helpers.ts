@@ -7,16 +7,21 @@ import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
 import type { DecisionContext } from '../agents/agent.ts'
 import type { PlanSlot } from './plan-vocab.ts'
-import { parsePlanSlots } from './plan-vocab.ts'
+import { parseDualPlanSlots } from './plan-vocab.ts'
 import { resolvePlanSlot } from './plan-resolve.ts'
 
 // ============================================================
 // PlanState 型 — GameState.ext に格納される plan 状態
 // ============================================================
 
+/** Endgame 切り替え閾値 (noose count ≤ この値で endgame スロットを使用) */
+export const ENDGAME_NOOSE_THRESHOLD = 3
+
 export type PlanState = {
-  /** パース済みスロット列（各スロット = 1回の処刑計画） */
+  /** パース済みスロット列（各スロット = 1回の処刑計画）— forward 部分 */
   slots: PlanSlot[]
+  /** endgame スロット列: [0]=最終日, [1]=前日, ... */
+  endgameSlots: PlanSlot[]
   /** Plan 生成時点の縄数（消費計算の基準） */
   initialNooseCount: number
   /** ML mason の seat（引き継ぎ追跡用） */
@@ -29,6 +34,7 @@ export type PlanState = {
 export function createPlanState(): PlanState {
   return {
     slots: [],
+    endgameSlots: [],
     initialNooseCount: 0,
     mlMasonSeat: null,
     masonTakeoverDone: false,
@@ -49,37 +55,52 @@ export function nooseCount(aliveCount: number): number {
 // ============================================================
 
 /**
- * plan tokens から今日の投票先 seat を決定（縄数ベース）
+ * plan tokens から今日の投票先 seat を決定（縄数ベース + endgame ルーティング）
  *
- * consumed = initialNooseCount - currentNooseCount
- * → slots[consumed] を解決
+ * noose > ENDGAME_NOOSE_THRESHOLD: forward slots を noose 消化で参照
+ * noose ≤ ENDGAME_NOOSE_THRESHOLD: endgame slots を参照
+ *   noose=2 → endgameSlots[0] (最終日)
+ *   noose=3 → endgameSlots[1] (前日) or [0]
  */
 export function planToVote(
   planActions: number[],
   ctx: DecisionContext,
   planState?: PlanState | null,
 ): number | null {
-  if (!planState || planState.slots.length === 0) {
+  const currentNoose = nooseCount(ctx.alivePlayers.length)
+  const resolveOpts = { excludeSeat: ctx.mySeat, rng: ctx.rng }
+
+  if (!planState || (planState.slots.length === 0 && planState.endgameSlots.length === 0)) {
     // planState がなければ on-the-fly パース（後方互換）
-    const slots = parsePlanSlots(planActions)
-    if (slots.length === 0) return null
-    // initialNooseCount 不明時は先頭スロットを使用
-    return resolvePlanSlot(slots[0], ctx.alivePlayers, ctx.publicEvents, {
-      excludeSeat: ctx.mySeat,
-      rng: ctx.rng,
-    })
+    const { forwardSlots, endgameSlots } = parseDualPlanSlots(planActions)
+
+    // Endgame routing
+    if (currentNoose <= ENDGAME_NOOSE_THRESHOLD && endgameSlots.length > 0) {
+      const egIndex = ENDGAME_NOOSE_THRESHOLD - currentNoose
+      const slot = egIndex < endgameSlots.length ? endgameSlots[egIndex] : endgameSlots[0]
+      const seat = resolvePlanSlot(slot, ctx.alivePlayers, ctx.publicEvents, resolveOpts)
+      if (seat) return seat
+    }
+
+    if (forwardSlots.length === 0) return null
+    return resolvePlanSlot(forwardSlots[0], ctx.alivePlayers, ctx.publicEvents, resolveOpts)
   }
 
-  const currentNoose = nooseCount(ctx.alivePlayers.length)
+  // Endgame routing with planState
+  if (currentNoose <= ENDGAME_NOOSE_THRESHOLD && planState.endgameSlots.length > 0) {
+    const egIndex = ENDGAME_NOOSE_THRESHOLD - currentNoose
+    const slot = egIndex < planState.endgameSlots.length ? planState.endgameSlots[egIndex] : planState.endgameSlots[0]
+    const seat = resolvePlanSlot(slot, ctx.alivePlayers, ctx.publicEvents, resolveOpts)
+    if (seat) return seat
+  }
+
+  // Forward routing (noose-based slot consumption)
   const consumed = planState.initialNooseCount - currentNoose
   const slotIndex = Math.max(0, consumed)
 
   if (slotIndex >= planState.slots.length) return null  // スロット切れ → heuristic fallback
 
-  return resolvePlanSlot(planState.slots[slotIndex], ctx.alivePlayers, ctx.publicEvents, {
-    excludeSeat: ctx.mySeat,
-    rng: ctx.rng,
-  })
+  return resolvePlanSlot(planState.slots[slotIndex], ctx.alivePlayers, ctx.publicEvents, resolveOpts)
 }
 
 // ============================================================

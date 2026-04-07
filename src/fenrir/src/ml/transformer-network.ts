@@ -26,7 +26,7 @@ import { DenseLayer, gaussianRandom } from './nn.ts'
 import { TransformerEncoder, linearBatchedPublic } from './transformer.ts'
 import { tokenize, SEATS, NUM_ROLE_TOKENS, type ObservationMode } from '../observation.ts'
 import { NUM_PLAN_TOKENS } from '../ext.ts'
-import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
+import { PLAN_VOCAB, NUM_FORWARD_TOKENS, NUM_ENDGAME_TOKENS } from '../plan/plan-vocab.ts'
 
 export class TransformerNetwork {
   readonly config: NetworkConfig
@@ -53,7 +53,8 @@ export class TransformerNetwork {
   private gruBr: Float32Array
   private gruBh: Float32Array
   private planTokenEmbed: Float32Array   // [(vocabSize+1) * dModel] — 22 vocab + START
-  private planInit: DenseLayer           // CLS → initial hidden (unified)
+  private planInitFwd: DenseLayer        // CLS → forward initial hidden
+  private planInitEg: DenseLayer         // CLS → endgame initial hidden
 
   // Plan observation embeddings (Strategy Encoder input)
   private planVocabEmbed: Float32Array       // [22 * dModel] vocab index �� embedding
@@ -160,7 +161,8 @@ export class TransformerNetwork {
     }
 
     // Init projection: CLS → initial hidden state (unified)
-    this.planInit = new DenseLayer(dm, dm)
+    this.planInitFwd = new DenseLayer(dm, dm)
+    this.planInitEg = new DenseLayer(dm, dm)
 
     // Plan observation embeddings (vocab + position → Strategy Encoder)
     const vocabEmbedSize = (tc.planVocabSize ?? 22) * dm
@@ -253,12 +255,17 @@ export class TransformerNetwork {
     return newHidden
   }
 
-  /** Autoregressive plan token decoding with grammar masking */
+  /**
+   * Single-phase autoregressive plan token decoding with grammar masking.
+   * Called twice for dual-direction: forward (L→R) and endgame (R→L).
+   * allUsed carries across phases for cross-phase soft penalty.
+   */
   private decodePlan(
     numSteps: number, vocabSize: number, dm: number,
     keys: Float32Array, invSqrtD: number,
     clsOut: Float32Array, initLayer: DenseLayer,
     explore: boolean,
+    allUsed: Set<number>,
     planContext?: PlanContext,
   ): { logits: Float32Array, actions: number[], logProbs: number[] } {
     const START_IDX = vocabSize  // START token is at index vocabSize (=22)
@@ -278,7 +285,6 @@ export class TransformerNetwork {
     let seenStop = false
     let prevAction = START_IDX
     const slotUsed = new Set<number>()   // スロット内の seat 重複防止
-    const allUsed = new Set<number>()    // スロット間の重複抑制（ソフトペナルティ）
     const CROSS_SLOT_PENALTY = 5.0
 
     const isTarget = (t: number) =>
@@ -419,7 +425,7 @@ export class TransformerNetwork {
     const tc = this.tConfig
     const dm = tc.dModel
     const numRoles = tc.numRoleTokens ?? NUM_ROLE_TOKENS
-    const numPlanTokens = tc.numPlanTokens ?? 12
+    // numPlanTokens used by strategy encoder via NUM_PLAN_TOKENS import
     const seatSeqLen = 1 + SEATS + numRoles
 
     // Tokenize
@@ -545,10 +551,40 @@ export class TransformerNetwork {
     }
     keys.set(this.specialKeys, numTargetTokens * dm)
 
-    // Decode unified plan autoregressively
+    // Decode dual-direction plan: forward (L→R) + endgame (R→L)
     const doExplore = explore ?? true
-    const plan = this.decodePlan(numPlanTokens, vocabSize, dm, keys, invSqrtD, clsOut, this.planInit, doExplore, planContext)
-    policies.set('plan', plan.logits)
+    const allUsed = new Set<number>()
+
+    // Phase 1: Forward plan (8 steps, positions 0-7)
+    const fwd = this.decodePlan(NUM_FORWARD_TOKENS, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitFwd, doExplore, allUsed, planContext)
+
+    // Phase 2: Endgame plan (4 steps, R→L, positions 11→8)
+    // allUsed carries over for cross-phase soft penalty
+    const eg = this.decodePlan(NUM_ENDGAME_TOKENS, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitEg, doExplore, allUsed, planContext)
+
+    // Assemble unified 12-token plan
+    const planActions = new Array(NUM_PLAN_TOKENS).fill(PLAN_VOCAB.STOP)
+    const planLogProbs = new Array(NUM_PLAN_TOKENS).fill(0)
+    const planLogits = new Float32Array(NUM_PLAN_TOKENS * vocabSize)
+
+    // Forward: direct copy to positions 0-7
+    for (let i = 0; i < NUM_FORWARD_TOKENS; i++) {
+      planActions[i] = fwd.actions[i]
+      planLogProbs[i] = fwd.logProbs[i]
+    }
+    planLogits.set(fwd.logits, 0)
+
+    // Endgame: reverse into positions 8-11 (step 0→pos 11, step 1→pos 10, ...)
+    for (let step = 0; step < NUM_ENDGAME_TOKENS; step++) {
+      const pos = NUM_PLAN_TOKENS - 1 - step
+      planActions[pos] = eg.actions[step]
+      planLogProbs[pos] = eg.logProbs[step]
+      const srcOff = step * vocabSize
+      const dstOff = pos * vocabSize
+      for (let v = 0; v < vocabSize; v++) planLogits[dstOff + v] = eg.logits[srcOff + v]
+    }
+
+    policies.set('plan', planLogits)
 
     // Value head
     const rawValue = this.valueHead.forward(clsOut)
@@ -556,8 +592,8 @@ export class TransformerNetwork {
 
     return {
       policies, value,
-      planActions: plan.actions,
-      planLogProbs: plan.logProbs,
+      planActions,
+      planLogProbs,
     }
   }
 
@@ -598,8 +634,10 @@ export class TransformerNetwork {
     weights.set('gru_br', new Float32Array(this.gruBr))
     weights.set('gru_bh', new Float32Array(this.gruBh))
     weights.set('plan_token_embed', new Float32Array(this.planTokenEmbed))
-    weights.set('plan_init_w', new Float32Array(this.planInit.weights))
-    weights.set('plan_init_b', new Float32Array(this.planInit.biases))
+    weights.set('plan_init_fwd_w', new Float32Array(this.planInitFwd.weights))
+    weights.set('plan_init_fwd_b', new Float32Array(this.planInitFwd.biases))
+    weights.set('plan_init_eg_w', new Float32Array(this.planInitEg.weights))
+    weights.set('plan_init_eg_b', new Float32Array(this.planInitEg.biases))
 
     // Plan observation embeddings
     weights.set('plan_vocab_embed', new Float32Array(this.planVocabEmbed))
@@ -683,8 +721,10 @@ export class TransformerNetwork {
       const w = weights.get(key)
       if (w) target.set(w)
     }
-    const piW = weights.get('plan_init_w')
-    if (piW) { this.planInit.weights.set(piW); this.planInit.biases.set(weights.get('plan_init_b')!) }
+    const pifW = weights.get('plan_init_fwd_w') ?? weights.get('plan_init_w')
+    if (pifW) { this.planInitFwd.weights.set(pifW); this.planInitFwd.biases.set(weights.get('plan_init_fwd_b') ?? weights.get('plan_init_b')!) }
+    const pieW = weights.get('plan_init_eg_w')
+    if (pieW) { this.planInitEg.weights.set(pieW); this.planInitEg.biases.set(weights.get('plan_init_eg_b')!) }
 
     // Plan observation embeddings
     const pve = weights.get('plan_vocab_embed')
@@ -738,7 +778,7 @@ export class TransformerNetwork {
     total += this.strategyEncoder.paramCount
     total += this.gruWz.length * 6 + this.gruBz.length * 3  // GRU gates
     total += this.planTokenEmbed.length  // token embeddings
-    total += this.planInit.paramCount  // init projection
+    total += this.planInitFwd.paramCount + this.planInitEg.paramCount  // init projections
     total += this.planVocabEmbed.length + this.planPosEmbed.length  // plan obs embeddings
     total += this.pointerQueryProj.paramCount + this.pointerKeyProj.paramCount
     total += this.specialKeys.length
@@ -784,7 +824,8 @@ export class TransformerNetwork {
     params.push(this.gruUz, this.gruUr, this.gruUh)
     params.push(this.gruBz, this.gruBr, this.gruBh)
     params.push(this.planTokenEmbed)
-    params.push(this.planInit.weights, this.planInit.biases)
+    params.push(this.planInitFwd.weights, this.planInitFwd.biases)
+    params.push(this.planInitEg.weights, this.planInitEg.biases)
 
     // Plan observation embeddings
     params.push(this.planVocabEmbed, this.planPosEmbed)

@@ -71,6 +71,7 @@ export function createFenrirExt(): FenrirExt {
   return {
     planState: {
       slots: [],
+      endgameSlots: [],
       initialNooseCount: 0,
       mlMasonSeat: null,
       masonTakeoverDone: false,
