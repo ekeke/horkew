@@ -32,6 +32,7 @@ import { TransformerNetwork } from './ml/transformer-network.ts'
 import type { ObservationMode } from './observation.ts'
 import type { TrainingConfig } from './training.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
+import { WinrateNetwork, type WinrateNetworkConfig } from './ml/winrate-network.ts'
 
 // ============================================================
 // 共有重みフォーマット
@@ -88,6 +89,36 @@ export function buildNetworkFromShared(shared: SharedWeights, mode: ObservationM
 }
 
 // ============================================================
+// WRE (Win-Rate Estimator) 共有重み — 軽量 JSON-safe 形式
+// ============================================================
+
+/** WRE用の共有重み（~84KB、JSON-serializable） */
+export type WreSharedWeights = {
+  config: WinrateNetworkConfig
+  weights: Record<string, number[]>
+}
+
+/** WinrateNetwork → WreSharedWeights */
+export function packWreWeights(net: WinrateNetwork): WreSharedWeights {
+  const weights: Record<string, number[]> = {}
+  for (const [name, arr] of net.cloneWeights()) {
+    weights[name] = Array.from(arr)
+  }
+  return { config: net.config, weights }
+}
+
+/** WreSharedWeights → WinrateNetwork */
+export function unpackWreWeights(shared: WreSharedWeights): WinrateNetwork {
+  const net = new WinrateNetwork(shared.config)
+  const map = new Map<string, Float32Array>()
+  for (const [name, arr] of Object.entries(shared.weights)) {
+    map.set(name, new Float32Array(arr))
+  }
+  net.loadWeights(map)
+  return net
+}
+
+// ============================================================
 // Worker メッセージ型
 // ============================================================
 
@@ -130,6 +161,8 @@ export type WorkerRequest = {
   inspectSeeds?: number[]
   /** Mason takeover: ML mason 死亡時に生存パートナーに strategy を移す */
   enableMasonTakeover?: boolean
+  /** WRE PBRS: frozen勝率NNの重み（有効時のみ） */
+  wreWeights?: WreSharedWeights
 }
 
 /** 1ゲーム分のタイミング情報 */

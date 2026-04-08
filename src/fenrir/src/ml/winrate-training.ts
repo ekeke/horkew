@@ -23,7 +23,7 @@ async function importTfWinrateNetwork() {
 // Checkpoint (WRE専用: AnyNetworkに依存しない)
 // ============================================================
 
-type WinrateCheckpointData = {
+export type WinrateCheckpointData = {
   version: number
   config: WinrateNetworkConfig
   weights: Record<string, string>
@@ -45,7 +45,7 @@ function base64ToFloat32(b64: string): Float32Array {
   return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4)
 }
 
-function saveWinrateCheckpoint(
+export function saveWinrateCheckpoint(
   network: { cloneWeights(): Map<string, Float32Array> },
   config: WinrateNetworkConfig,
   path: string,
@@ -66,7 +66,7 @@ function saveWinrateCheckpoint(
   writeFileSync(path, JSON.stringify(data))
 }
 
-function loadWinrateCheckpoint(
+export function loadWinrateCheckpoint(
   network: { loadWeights(w: Map<string, Float32Array>): void },
   path: string,
 ): WinrateCheckpointData {

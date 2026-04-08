@@ -27,6 +27,7 @@ import { DEFAULT_RETAR_OPTIONS } from './retar-bridge.ts'
 import { encodeTrueRoles } from './observation.ts'
 import {
   buildNetworkFromShared,
+  unpackWreWeights,
   serializeStep,
   type WorkerRequest,
   type WorkerResult,
@@ -67,6 +68,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
   const masonTeamNet = req.masonTeamWeights ? buildNetwork(req.masonTeamWeights, true) : undefined
   const frozenVillageNet = req.villageFrozenWeights ? buildNetwork(req.villageFrozenWeights) : undefined
   const frozenMasonNet = req.frozenMasonWeights ? buildNetwork(req.frozenMasonWeights) : undefined
+  const wreNet = req.wreWeights ? unpackWreWeights(req.wreWeights) : undefined
   const mlRolesSet = req.mlRoles ? new Set(req.mlRoles) : null
   const useHeuristic = req.phase === 1
   const usePool = req.phase === 3
@@ -448,6 +450,39 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     const tTsumiEnd = performance.now()
 
+    // WRE Potential-Based Reward Shaping
+    if (wreNet) {
+      const gamma = config.gamma ?? 0.99
+      // Individual agents (SerializedStep[] — observation is number[])
+      for (const entry of individualSteps) {
+        if (entry.steps.length < 2) continue
+        const fIdx = wreFactionIndex(entry.role)
+        const potentials = entry.steps.map(s =>
+          wreNet.forward(new Float32Array(s.observation))[fIdx]
+        )
+        for (let t = 0; t < entry.steps.length - 1; t++) {
+          entry.steps[t].reward += gamma * potentials[t + 1] - potentials[t]
+        }
+        entry.steps[entry.steps.length - 1].reward += -potentials[potentials.length - 1]
+      }
+      // Wolf collective (TrajectoryStep[] — observation is Float32Array)
+      if (wSteps.length >= 2) {
+        const potentials = wSteps.map((s: { observation: Float32Array }) => wreNet.forward(s.observation)[1])
+        for (let t = 0; t < wSteps.length - 1; t++) {
+          wSteps[t].reward += gamma * potentials[t + 1] - potentials[t]
+        }
+        wSteps[wSteps.length - 1].reward += -potentials[potentials.length - 1]
+      }
+      // Mason collective (TrajectoryStep[] — village faction)
+      if (mSteps.length >= 2) {
+        const potentials = mSteps.map((s: { observation: Float32Array }) => wreNet.forward(s.observation)[0])
+        for (let t = 0; t < mSteps.length - 1; t++) {
+          mSteps[t].reward += gamma * potentials[t + 1] - potentials[t]
+        }
+        mSteps[mSteps.length - 1].reward += -potentials[potentials.length - 1]
+      }
+    }
+
     // NN推論時間・回数の集計
     let totalInferMs = 0
     let totalInferCount = 0
@@ -500,4 +535,11 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
   }
 
   return results
+}
+
+/** 役職 → WRE出力のインデックス (0=village_win, 1=wolf_win, 2=fox_win) */
+function wreFactionIndex(role: string): number {
+  if (role === 'werewolf' || role === 'fanatic') return 1
+  if (role === 'werehamster' || role === 'immoralist') return 2
+  return 0
 }

@@ -8,7 +8,7 @@
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import type { TrainingConfig } from './training.ts'
 import type { ProcessedStep } from './ml/trajectory.ts'
-import type { SharedWeights, SerializedGameResult } from './parallel.ts'
+import type { SharedWeights, SerializedGameResult, WreSharedWeights } from './parallel.ts'
 import type { TrainingStep, ModelName } from './curriculum.ts'
 import {
   MODEL_GROUPS, MODEL_NAMES, ROLE_TO_GROUP, BASELINE_RATES,
@@ -45,6 +45,9 @@ export type PhaseRunnerContext = {
   frozenWeights: Map<string, SharedWeights>
   /** frozen 推論用ネットワーク (eval で使用) */
   frozenNets: Map<string, AnyNetwork>
+
+  /** WRE PBRS: frozen 勝率NNの共有重み（--wre 有効時のみ） */
+  wreSharedWeights?: WreSharedWeights
 
   checkShutdown: () => void
   log: (msg: string) => void
@@ -423,6 +426,7 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
             trainingConfig,
             phase: step.workerPhase,
             inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
+            wreWeights: ctx.wreSharedWeights,
           }, seeds)
           if (inspectSeeds.length > 0) ctx.saveInspectGames(serializedResults, `${phase === '2' ? 'phase2_' : 'phase1p_'}${name}`, iter)
 

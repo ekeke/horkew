@@ -48,7 +48,10 @@ import { PLAN_VOCAB, parsePlanIndices, describePlanIndex } from './plan/plan-voc
 import {
   packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
   generateGamesParallel, deserializeStep,
+  packWreWeights, type WreSharedWeights,
 } from './parallel.ts'
+import { WinrateNetwork } from './ml/winrate-network.ts'
+import { loadWinrateCheckpoint } from './ml/winrate-training.ts'
 import { loadRandomSnapshots, countSnapshots } from './seed-bank.ts'
 import { Rng } from '../../lupa/random.ts'
 import {
@@ -92,6 +95,8 @@ type OrchestratorConfig = {
   ppoRestart: boolean
   /** 最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用) */
   skeleton: boolean
+  /** WRE PBRS: 勝率NNチェックポイントパス (undefined=無効) */
+  wre?: string
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -145,6 +150,11 @@ function parseArgs(): OrchestratorConfig {
       case '--mini-batch': config.miniBatchSize = parseInt(args[++i]); break
       case '--inspect-interval': config.inspectInterval = parseInt(args[++i]); break
       case '--skeleton': config.skeleton = true; break
+      case '--wre': {
+        const next = args[i + 1]
+        config.wre = (next && !next.startsWith('-')) ? args[++i] : 'tmp/winrate/checkpoints/winrate-final.json'
+        break
+      }
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -177,6 +187,7 @@ Options:
   --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
   --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
   --skeleton               最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用)
+  --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
   --help, -h               このヘルプを表示`)
   process.exit(0)
 }
@@ -864,6 +875,19 @@ async function main(): Promise<void> {
     initGameWorkerPool(config.workers === -1 ? undefined : config.workers)
   }
 
+  // === WRE PBRS ===
+  let wreSharedWeights: WreSharedWeights | undefined
+  if (config.wre) {
+    if (!existsSync(config.wre)) {
+      log(`WRE checkpoint not found: ${config.wre}`)
+      process.exit(1)
+    }
+    const wreNet = new WinrateNetwork()
+    loadWinrateCheckpoint(wreNet, config.wre)
+    wreSharedWeights = packWreWeights(wreNet)
+    log(`WRE PBRS enabled: ${wreNet.totalParams} params from ${config.wre}`)
+  }
+
   // === Resume ===
   const iterCounts = new Map<ModelName, number>()
   let anyResumed = false
@@ -1246,6 +1270,7 @@ async function main(): Promise<void> {
           snapshots: batchSnapshots,
           inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
           enableMasonTakeover: true,
+          wreWeights: wreSharedWeights,
         }, seeds)
         if (inspectSeeds.length > 0) saveInspectGames(serializedResults, 'mason_individual', masonIter, { gitSha, runId, checkpointBase: config.checkpointBase })
 
@@ -1505,6 +1530,7 @@ async function main(): Promise<void> {
             snapshots: batchSnapshots,
             frozenMasonWeights: name === 'village' ? frozenMasonWeights : undefined,
             inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
+            wreWeights: wreSharedWeights,
           }, seeds)
           if (inspectSeeds.length > 0) saveInspectGames(serializedResults, name, iter, { gitSha, runId, checkpointBase: config.checkpointBase })
 
@@ -1848,6 +1874,7 @@ async function main(): Promise<void> {
               trainingConfig,
               phase: 1,
               inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
+              wreWeights: wreSharedWeights,
             }, seeds)
             if (inspectSeeds.length > 0) saveInspectGames(serializedResults, `phase1p_${name}`, iter, { gitSha, runId, checkpointBase: config.checkpointBase })
 
@@ -2033,6 +2060,7 @@ async function main(): Promise<void> {
         pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
         saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
         saveEvalHowl,
+        wreSharedWeights,
       }
       await runTrainingPhase(phase2Step, phaseCtx)
     }
