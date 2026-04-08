@@ -577,7 +577,7 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
           progress.latest = { phase, model: name, iter, maxIter, klCoeff: klCoeff > 0 ? klCoeff : undefined }
           ctx.writeTrainProgress(progress)
 
-          // Graduation check (faction_winrate)
+          // Graduation check
           if (step.graduation.type === 'faction_winrate') {
             const graduationTarget = config.targetWinRate ?? (BASELINE_RATES[step.graduation.faction || group.faction] ?? step.graduation.defaultTarget)
             if (factionRate >= graduationTarget) {
@@ -587,6 +587,12 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
                 graduated.add(name)
                 break
               }
+            }
+          } else if (step.graduation.type === 'min_iter') {
+            if (iter >= step.graduation.minIter) {
+              ctx.log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${step.graduation.minIter})`)
+              graduated.add(name)
+              break
             }
           }
         }

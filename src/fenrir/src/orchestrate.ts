@@ -1460,7 +1460,7 @@ async function main(): Promise<void> {
           progress.latest = { phase: '0', model: 'mason_individual', iter, maxIter: config.iterations, klCoeff: masonPpoConfig.klCoeff, mlStartDay: masonMlStartDay }
           writeTrainProgress(progress)
 
-          const MASON_MIN_ITER = 1000
+          const MASON_MIN_ITER = 300
           // Day カリキュラム: 勝率達成で Day をデクリメント
           if (iter >= MASON_MIN_ITER && factionRate >= masonTargetRate * 0.9) {
             if (masonMlStartDay > ML_START_DAY_MIN_MASON) {
@@ -1470,10 +1470,11 @@ async function main(): Promise<void> {
               progress.curriculum.push({ time: new Date().toISOString(), iter, mlMaxSeats: 1, mlStartDay: masonMlStartDay, event: `mason day ${prevDay}→${masonMlStartDay}` })
               masonSnapshotCount = refreshMasonSnapshotCount()
             }
-            if (masonMlStartDay <= ML_START_DAY_MIN_MASON && factionRate >= masonTargetRate) {
-              log(`${prefix} ${BOLD}GRADUATED${RESET} (villager_won=${(factionRate * 100).toFixed(0)}% >= ${(masonTargetRate * 100).toFixed(0)}%, day=${masonMlStartDay})`)
-              graduated = true
-            }
+          }
+          // minIter 到達で卒業
+          if (iter >= MASON_MIN_ITER) {
+            log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${MASON_MIN_ITER})`)
+            graduated = true
           }
         }
 
@@ -1771,8 +1772,9 @@ async function main(): Promise<void> {
 
             writeTrainProgress(progress)
 
-            if (factionRate >= targetRate) {
-              log(`${prefix} ${BOLD}GRADUATED${RESET} (${group.faction}=${(factionRate * 100).toFixed(0)}% >= ${(targetRate * 100).toFixed(0)}%)`)
+            const VILLAGE_MIN_ITER = 300
+            if (iter >= VILLAGE_MIN_ITER) {
+              log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${VILLAGE_MIN_ITER})`)
               graduated.add(name)
               break
             }
@@ -2072,8 +2074,9 @@ async function main(): Promise<void> {
             progress.latest = { phase: "1'", model: name, iter, maxIter: config.iterations }
             writeTrainProgress(progress)
 
-            if (factionRate >= targetRate) {
-              log(`${prefix} ${BOLD}GRADUATED${RESET} (${group.faction}=${(factionRate * 100).toFixed(0)}% >= ${(targetRate * 100).toFixed(0)}%)`)
+            const PHASE1P_MIN_ITER = 300
+            if (iter >= PHASE1P_MIN_ITER) {
+              log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${PHASE1P_MIN_ITER})`)
               phase1PrimeGraduated.add(name)
               break
             }

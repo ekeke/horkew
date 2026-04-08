@@ -109,6 +109,7 @@ export type CurriculumConfig = {
 
 export type GraduationConfig =
   | { type: 'faction_winrate', faction: string, defaultTarget: number, minIter?: number, requireMinDay?: boolean }
+  | { type: 'min_iter', minIter: number }
   | { type: 'none' }
 
 // ============================================================
@@ -251,11 +252,8 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
         advanceThreshold: 0.9,
       },
       graduation: {
-        type: 'faction_winrate',
-        faction: 'villager_won',
-        defaultTarget: BASELINE_RATES['villager_won'],  // 0.55
-        minIter: 1000,
-        requireMinDay: true,
+        type: 'min_iter',
+        minIter: 300,
       },
       gameGen: {
         mode: 'single_model',
@@ -295,10 +293,8 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
         advanceThreshold: 0.9,
       },
       graduation: {
-        type: 'faction_winrate',
-        faction: 'villager_won',
-        // Phase 1 uses targetWinRate ?? (baselineRates[faction] ?? 0.5)
-        defaultTarget: 0.5,
+        type: 'min_iter',
+        minIter: 300,
       },
       frozen: {
         frozenModels: ['mason_individual'],
@@ -325,9 +321,8 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
         freezePlan: false,
       },
       graduation: {
-        type: 'faction_winrate',
-        faction: '',  // per-model — runner resolves from MODEL_GROUPS
-        defaultTarget: 0.5,
+        type: 'min_iter',
+        minIter: 300,
       },
       frozen: {
         frozenModels: ['village'],
