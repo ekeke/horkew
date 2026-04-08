@@ -1344,7 +1344,6 @@ async function main(): Promise<void> {
           wreWeights: wreSharedWeights,
         }, seeds)
         if (inspectSeeds.length > 0) saveInspectGames(serializedResults, 'mason_individual', masonIter, { gitSha, runId, checkpointBase: config.checkpointBase })
-        await maybeRefreshWre(serializedResults)
 
         for (const game of serializedResults) {
           const stepsMap = new Map<number, TrajectoryStep[]>()
@@ -1606,7 +1605,6 @@ async function main(): Promise<void> {
             wreWeights: wreSharedWeights,
           }, seeds)
           if (inspectSeeds.length > 0) saveInspectGames(serializedResults, name, iter, { gitSha, runId, checkpointBase: config.checkpointBase })
-          await maybeRefreshWre(serializedResults)
 
           for (const game of serializedResults) {
             const stepsMap = new Map<number, TrajectoryStep[]>()
@@ -1952,7 +1950,6 @@ async function main(): Promise<void> {
               wreWeights: wreSharedWeights,
             }, seeds)
             if (inspectSeeds.length > 0) saveInspectGames(serializedResults, `phase1p_${name}`, iter, { gitSha, runId, checkpointBase: config.checkpointBase })
-            await maybeRefreshWre(serializedResults)
 
             for (const game of serializedResults) {
               // 個人steps: fanatic/third のみ収集 (village は frozen)
