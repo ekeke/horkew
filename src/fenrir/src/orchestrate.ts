@@ -51,7 +51,8 @@ import {
   packWreWeights, type WreSharedWeights,
 } from './parallel.ts'
 import { WinrateNetwork } from './ml/winrate-network.ts'
-import { loadWinrateCheckpoint } from './ml/winrate-training.ts'
+import { loadWinrateCheckpoint, saveWinrateCheckpoint } from './ml/winrate-training.ts'
+import { extractWreSamplesFromGameResults } from './ml/winrate-data.ts'
 import { loadRandomSnapshots, countSnapshots } from './seed-bank.ts'
 import { Rng } from '../../lupa/random.ts'
 import {
@@ -97,6 +98,8 @@ type OrchestratorConfig = {
   skeleton: boolean
   /** WRE PBRS: 勝率NNチェックポイントパス (undefined=無効) */
   wre?: string
+  /** WRE再学習間隔 (iteration数、0=再学習無効) */
+  wreRefresh: number
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -118,6 +121,7 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   inspectInterval: 0,
   ppoRestart: false,
   skeleton: false,
+  wreRefresh: 0,
 }
 
 function parseArgs(): OrchestratorConfig {
@@ -155,6 +159,7 @@ function parseArgs(): OrchestratorConfig {
         config.wre = (next && !next.startsWith('-')) ? args[++i] : 'tmp/winrate/checkpoints/winrate-final.json'
         break
       }
+      case '--wre-refresh': config.wreRefresh = parseInt(args[++i]); break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -188,6 +193,7 @@ Options:
   --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
   --skeleton               最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用)
   --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
+  --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled, e.g. 500)
   --help, -h               このヘルプを表示`)
   process.exit(0)
 }
@@ -888,6 +894,71 @@ async function main(): Promise<void> {
     log(`WRE PBRS enabled: ${wreNet.totalParams} params from ${config.wre}`)
   }
 
+  // WRE再学習: PPOゲーム結果からWREを更新する関数
+  const wreRefreshBuffer: Array<{ individualSteps: Array<{ role: string, steps: Array<{ observation: number[] }> }>, result: string }> = []
+  let wreRefreshCounter = 0
+  async function maybeRefreshWre(
+    gameResults: Array<{ individualSteps: Array<{ role: string, steps: Array<{ observation: number[] }> }>, result: string }>,
+  ): Promise<void> {
+    if (!wreSharedWeights || config.wreRefresh <= 0) return
+    wreRefreshBuffer.push(...gameResults)
+    wreRefreshCounter++
+    if (wreRefreshCounter < config.wreRefresh) return
+
+    // 再学習サイクル実行
+    wreRefreshCounter = 0
+    const { observations, labels } = extractWreSamplesFromGameResults(wreRefreshBuffer)
+    wreRefreshBuffer.length = 0
+
+    if (observations.length < 100) {
+      log(`WRE refresh skipped: only ${observations.length} samples (need ≥100)`)
+      return
+    }
+
+    log(`WRE refresh: ${observations.length} samples from ${gameResults.length} recent games...`)
+    const { TfWinrateNetwork } = await import('./ml/nn-tf-winrate.ts')
+    const tfWre = new TfWinrateNetwork(wreSharedWeights!.config, 3e-4)
+    // 現在の重みをロードして fine-tune (warm start)
+    const currentWeights = new Map<string, Float32Array>()
+    for (const [name, arr] of Object.entries(wreSharedWeights!.weights)) {
+      currentWeights.set(name, new Float32Array(arr))
+    }
+    tfWre.loadWeights(currentWeights)
+
+    // 5 epochs の fine-tune
+    const batchSize = 256
+    const epochs = 5
+    for (let e = 0; e < epochs; e++) {
+      let totalLoss = 0, batches = 0
+      for (let i = 0; i < observations.length; i += batchSize) {
+        const end = Math.min(i + batchSize, observations.length)
+        const { loss } = tfWre.trainBatch(
+          observations.slice(i, end),
+          labels.slice(i, end),
+          2.0,
+        )
+        totalLoss += loss
+        batches++
+      }
+      if (e === epochs - 1) log(`  WRE refresh epoch ${e + 1}: loss=${(totalLoss / batches).toFixed(4)}`)
+    }
+
+    // 更新された重みをpackして配布
+    const updatedNet = new WinrateNetwork(wreSharedWeights!.config)
+    const cloned = tfWre.cloneWeights()
+    updatedNet.loadWeights(cloned)
+    wreSharedWeights = packWreWeights(updatedNet)
+
+    // チェックポイント保存
+    const wreCkptPath = `${config.checkpointBase}/wre-latest.json`
+    saveWinrateCheckpoint(updatedNet, wreSharedWeights!.config, wreCkptPath, {
+      epoch: 0, brierScore: 0, trainGames: observations.length,
+    })
+
+    tfWre.dispose()
+    log(`WRE refresh done: weights updated, saved to ${wreCkptPath}`)
+  }
+
   // === Resume ===
   const iterCounts = new Map<ModelName, number>()
   let anyResumed = false
@@ -1273,6 +1344,7 @@ async function main(): Promise<void> {
           wreWeights: wreSharedWeights,
         }, seeds)
         if (inspectSeeds.length > 0) saveInspectGames(serializedResults, 'mason_individual', masonIter, { gitSha, runId, checkpointBase: config.checkpointBase })
+        await maybeRefreshWre(serializedResults)
 
         for (const game of serializedResults) {
           const stepsMap = new Map<number, TrajectoryStep[]>()
@@ -1533,6 +1605,7 @@ async function main(): Promise<void> {
             wreWeights: wreSharedWeights,
           }, seeds)
           if (inspectSeeds.length > 0) saveInspectGames(serializedResults, name, iter, { gitSha, runId, checkpointBase: config.checkpointBase })
+          await maybeRefreshWre(serializedResults)
 
           for (const game of serializedResults) {
             const stepsMap = new Map<number, TrajectoryStep[]>()
@@ -1877,6 +1950,7 @@ async function main(): Promise<void> {
               wreWeights: wreSharedWeights,
             }, seeds)
             if (inspectSeeds.length > 0) saveInspectGames(serializedResults, `phase1p_${name}`, iter, { gitSha, runId, checkpointBase: config.checkpointBase })
+            await maybeRefreshWre(serializedResults)
 
             for (const game of serializedResults) {
               // 個人steps: fanatic/third のみ収集 (village は frozen)
@@ -2061,6 +2135,10 @@ async function main(): Promise<void> {
         saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
         saveEvalHowl,
         wreSharedWeights,
+        onWreRefresh: wreSharedWeights && config.wreRefresh > 0 ? async (games) => {
+          await maybeRefreshWre(games)
+          return wreSharedWeights
+        } : undefined,
       }
       await runTrainingPhase(phase2Step, phaseCtx)
     }

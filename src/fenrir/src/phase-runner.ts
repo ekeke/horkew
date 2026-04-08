@@ -48,6 +48,8 @@ export type PhaseRunnerContext = {
 
   /** WRE PBRS: frozen 勝率NNの共有重み（--wre 有効時のみ） */
   wreSharedWeights?: WreSharedWeights
+  /** WRE再学習コールバック（orchestratorが提供） */
+  onWreRefresh?: (games: SerializedGameResult[]) => Promise<WreSharedWeights | undefined>
 
   checkShutdown: () => void
   log: (msg: string) => void
@@ -429,6 +431,12 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
             wreWeights: ctx.wreSharedWeights,
           }, seeds)
           if (inspectSeeds.length > 0) ctx.saveInspectGames(serializedResults, `${phase === '2' ? 'phase2_' : 'phase1p_'}${name}`, iter)
+
+          // WRE refresh (if callback provided)
+          if (ctx.onWreRefresh) {
+            const updated = await ctx.onWreRefresh(serializedResults)
+            if (updated) ctx.wreSharedWeights = updated
+          }
 
           // Collect trajectories for current model
           for (const game of serializedResults) {

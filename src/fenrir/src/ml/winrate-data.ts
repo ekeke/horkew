@@ -184,3 +184,38 @@ export const DEFAULT_14D_NEKO_CONFIG: WinrateDataConfig = {
   },
   hasFirstGhost: true,
 }
+
+// ============================================================
+// PPO game results → WRE training samples
+// ============================================================
+
+/**
+ * SerializedGameResult[] からWRE学習サンプルを抽出
+ * PPOのゲーム生成結果をそのまま流用し、追加のゲーム生成なしで再学習データを得る
+ */
+export function extractWreSamplesFromGameResults(
+  games: Array<{ individualSteps: Array<{ role: string, steps: Array<{ observation: number[] }> }>, result: string }>,
+): { observations: Float32Array[], labels: Float32Array[] } {
+  const observations: Float32Array[] = []
+  const labels: Float32Array[] = []
+
+  for (const game of games) {
+    const result = game.result
+    if (result === 'draw' || result === 'unknown') continue
+
+    const label = new Float32Array(3)
+    if (result === 'villager_won') label[0] = 1
+    else if (result === 'werewolf_won') label[1] = 1
+    else if (result === 'werehamster_won') label[2] = 1
+    else continue
+
+    for (const entry of game.individualSteps) {
+      for (const step of entry.steps) {
+        observations.push(new Float32Array(step.observation))
+        labels.push(label)
+      }
+    }
+  }
+
+  return { observations, labels }
+}
