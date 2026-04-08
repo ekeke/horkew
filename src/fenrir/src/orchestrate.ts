@@ -1954,11 +1954,12 @@ async function main(): Promise<void> {
           const allIndividual: ProcessedStep[] = []
           const allWolfCollective: ProcessedStep[] = []
           const allMasonCollective: ProcessedStep[] = []
+          let serializedResults: import('./parallel.ts').SerializedGameResult[] = []
 
           if (gameWorkerPoolSize() > 0) {
             const modelGroupWeights = packAllModelWeights()
             const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
-            const serializedResults = await generateGamesParallel({
+            serializedResults = await generateGamesParallel({
               weights: frozenVillageWeights,  // fallback
               modelGroupWeights,
               villageFrozenWeights: frozenVillageWeights,
@@ -2026,10 +2027,17 @@ async function main(): Promise<void> {
           const totalSteps = allIndividual.length + allWolfCollective.length + allMasonCollective.length
           const gameMs = tGameEnd - tGameStart
           const ppoMs = tPpoEnd - tPpoStart
+          // per-game timing from worker results
+          const timings = serializedResults.filter(g => g.timing).map(g => g.timing!)
+          const avgGameMs = timings.length > 0 ? timings.reduce((s, t) => s + t.gameMs, 0) / timings.length : 0
+          const avgRetarMs = timings.length > 0 ? timings.reduce((s, t) => s + t.retarMs, 0) / timings.length : 0
+          const avgInferMs = timings.length > 0 ? timings.reduce((s, t) => s + t.inferMs, 0) / timings.length : 0
+          const avgTsumiMs = timings.length > 0 ? timings.reduce((s, t) => s + t.tsumiMs, 0) / timings.length : 0
           process.stderr.write(
             `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} ` +
-            `${iterMs.toFixed(0)}ms (game${(gameMs / iterMs * 100).toFixed(0)}% ppo${(ppoMs / iterMs * 100).toFixed(0)}%) ` +
-            `steps=${totalSteps}`
+            `${(iterMs / 1000).toFixed(1)}s (game${(gameMs / iterMs * 100).toFixed(0)}% ppo${(ppoMs / iterMs * 100).toFixed(0)}%) ` +
+            `steps=${totalSteps}` +
+            (timings.length > 0 ? ` | avg/game: ${avgGameMs.toFixed(0)}ms (retar=${avgRetarMs.toFixed(0)} infer=${avgInferMs.toFixed(0)} tsumi=${avgTsumiMs.toFixed(0)})` : '')
           )
 
           // Checkpoint
