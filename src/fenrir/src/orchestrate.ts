@@ -1541,10 +1541,18 @@ async function main(): Promise<void> {
     }
 
     // Phase 1: village のみ学習（wolf/third は strategy-only 未対応）
+    const VILLAGE_MIN_ITER = 300
     const phase1Models: ModelName[] = ['village']
     // wolf/third は即 graduated 扱い
     for (const name of MODEL_NAMES) {
       if (!phase1Models.includes(name)) graduated.add(name)
+    }
+    // Resume: minIter 到達済みなら即卒業
+    for (const name of phase1Models) {
+      if (iterCounts.get(name)! >= VILLAGE_MIN_ITER) {
+        log(`  ${COLORS[name]}${name}${RESET}: already at iter ${iterCounts.get(name)!} >= ${VILLAGE_MIN_ITER}, skipping`)
+        graduated.add(name)
+      }
     }
 
     let round = 0
@@ -1770,7 +1778,6 @@ async function main(): Promise<void> {
 
             writeTrainProgress(progress)
 
-            const VILLAGE_MIN_ITER = 300
             if (iter >= VILLAGE_MIN_ITER) {
               log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${VILLAGE_MIN_ITER})`)
               graduated.add(name)
@@ -1892,6 +1899,14 @@ async function main(): Promise<void> {
         for (const name of phase1PrimeModels) {
           const iter = phase1PrimeIterCounts.get(name)!
           log(`  ${COLORS[name]}${name.padEnd(16)}${RESET} iter ${iter}${phase1PrimeGraduated.has(name) ? ' (graduated)' : ''}`)
+        }
+      }
+      // minIter 到達済みなら即卒業
+      const PHASE1P_MIN_ITER_RESUME = 300
+      for (const name of phase1PrimeModels) {
+        if (!phase1PrimeGraduated.has(name) && phase1PrimeIterCounts.get(name)! >= PHASE1P_MIN_ITER_RESUME) {
+          log(`  ${COLORS[name]}${name}${RESET}: already at iter ${phase1PrimeIterCounts.get(name)!} >= ${PHASE1P_MIN_ITER_RESUME}, skipping`)
+          phase1PrimeGraduated.add(name)
         }
       }
     }
