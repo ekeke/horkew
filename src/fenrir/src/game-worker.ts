@@ -122,12 +122,12 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     let wolfTeamAgent: WolfTeamAgent | WolfCollective | WolfTeamRuleAgent | undefined
     let masonTeamAgent: MasonTeamAgent | MasonCollective | MasonTeamRuleAgent | undefined
-    if (config.strategyOnly) {
-      // strategy-only: チーム戦略はheuristicにフォールバック（チームNNはstrategy-only未対応）
-      if (req.useTeamStrategy === 'wolf_team' || (!req.useTeamStrategy && (!useHeuristic || multiModel))) {
+    if (config.strategyOnly && !multiModel) {
+      // strategy-only (単一モデル): チーム戦略はheuristicにフォールバック
+      if (req.useTeamStrategy === 'wolf_team' || (!req.useTeamStrategy && !useHeuristic)) {
         wolfTeamAgent = new WolfTeamRuleAgent()
       }
-      if (req.useTeamStrategy === 'mason_team' || (!req.useTeamStrategy && (!useHeuristic || multiModel))) {
+      if (req.useTeamStrategy === 'mason_team' || (!req.useTeamStrategy && !useHeuristic)) {
         masonTeamAgent = new MasonTeamRuleAgent()
       }
     } else if (req.useTeamStrategy) {

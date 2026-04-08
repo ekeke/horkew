@@ -315,8 +315,8 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
       name: 'non_village',
       displayName: "Phase 1': Non-Village",
       activeModels: ['wolf_collective', 'mason_collective', 'fanatic', 'third'],
-      strategyOnly: false,
-      adapter: 'full',
+      strategyOnly: true,
+      adapter: 'mason-training',
       ppo: {
         freezePlan: false,
       },
@@ -344,8 +344,8 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
       name: 'self_play',
       displayName: 'Phase 2: Self-Play',
       activeModels: ['village', 'wolf_collective', 'mason_collective', 'fanatic', 'third'],
-      strategyOnly: false,
-      adapter: 'full',
+      strategyOnly: true,
+      adapter: 'mason-training',
       ppo: {
         freezePlan: false,
       },

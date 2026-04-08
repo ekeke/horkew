@@ -1918,9 +1918,6 @@ async function main(): Promise<void> {
       entropyCoeff: trainingConfig.entropyCoeff,
     }
 
-    // Phase 1' は full game (strategyOnly=false)
-    const phase1PrimeTrainingConfig = { ...trainingConfig, strategyOnly: false }
-
     // 全5モデルの weights を modelGroupWeights として pack
     const packAllModelWeights = (): Record<string, import('./parallel.ts').SharedWeights> => {
       const result: Record<string, import('./parallel.ts').SharedWeights> = {}
@@ -1963,7 +1960,7 @@ async function main(): Promise<void> {
               weights: frozenVillageWeights,  // fallback
               modelGroupWeights,
               villageFrozenWeights: frozenVillageWeights,
-              trainingConfig: phase1PrimeTrainingConfig,
+              trainingConfig,
               phase: 1,
               inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
               wreWeights: wreSharedWeights,
