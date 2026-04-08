@@ -14,7 +14,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import {
   MODEL_GROUPS, MODEL_NAMES, ROLE_TO_GROUP, BASELINE_RATES,
-  klTargetForIter,
+  klTargetForIter, DEFAULT_KL_CONFIG,
   type ModelName,
 } from './curriculum.ts'
 import {
@@ -1285,15 +1285,16 @@ async function main(): Promise<void> {
           masonNet.loadWeights(masonTf.cloneWeights())
         }
 
-        // Adaptive KL (warmup: target 0.5→0.05 over 300 iters)
+        // Adaptive KL
         if (masonPpoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
           const klTarget = klTargetForIter(iter)
-          if (lastPpoResult.klLoss > klTarget * 1.2) {
-            masonPpoConfig.klCoeff *= 1.5
-          } else if (lastPpoResult.klLoss < klTarget / 1.2) {
-            masonPpoConfig.klCoeff /= 1.5
+          const { band, adjustRate, range: [klMin, klMax] } = DEFAULT_KL_CONFIG
+          if (lastPpoResult.klLoss > klTarget * band) {
+            masonPpoConfig.klCoeff *= adjustRate
+          } else if (lastPpoResult.klLoss < klTarget / band) {
+            masonPpoConfig.klCoeff /= adjustRate
           }
-          masonPpoConfig.klCoeff = Math.max(0.01, Math.min(3, masonPpoConfig.klCoeff))
+          masonPpoConfig.klCoeff = Math.max(klMin, Math.min(klMax, masonPpoConfig.klCoeff))
         }
         appendKlLog(config.checkpointBase, {
           iter, klPlan: lastPpoResult.klPlanLoss,
@@ -1569,15 +1570,16 @@ async function main(): Promise<void> {
             masonTeamNet.loadWeights(masonTeamTf.cloneWeights())
           }
 
-          // Adaptive KL (warmup: target 0.5→0.05 over 300 iters)
+          // Adaptive KL
           if (ppoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
             const klTarget = klTargetForIter(iter)
-            if (lastPpoResult.klLoss > klTarget * 1.2) {
-              ppoConfig.klCoeff *= 1.5
-            } else if (lastPpoResult.klLoss < klTarget / 1.2) {
-              ppoConfig.klCoeff /= 1.5
+            const { band, adjustRate, range: [klMin, klMax] } = DEFAULT_KL_CONFIG
+            if (lastPpoResult.klLoss > klTarget * band) {
+              ppoConfig.klCoeff *= adjustRate
+            } else if (lastPpoResult.klLoss < klTarget / band) {
+              ppoConfig.klCoeff /= adjustRate
             }
-            ppoConfig.klCoeff = Math.max(0.01, Math.min(3, ppoConfig.klCoeff))
+            ppoConfig.klCoeff = Math.max(klMin, Math.min(klMax, ppoConfig.klCoeff))
           }
           appendKlLog(config.checkpointBase, {
             iter, klPlan: lastPpoResult.klPlanLoss,

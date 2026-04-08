@@ -67,11 +67,11 @@ export type KLConfig = {
 export const DEFAULT_KL_CONFIG: KLConfig = {
   initialBeta: 0.2,
   warmupFrom: 2.0,
-  warmupTarget: 0.05,
+  warmupTarget: 0.15,
   warmupIters: 2000,
   band: 1.2,
   adjustRate: 1.5,
-  range: [0.01, 3],
+  range: [0.01, 1.5],
 }
 
 /** Compute KL target for a given iteration (linear warmup decay) */
