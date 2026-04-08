@@ -229,10 +229,10 @@ export function generateSyntheticRetar(
   const remaining = aliveSeats.filter(s => !confirmedWhites.has(s))
   const shuffled = shuffleArray(remaining, rng)
 
-  // 20% 狐不在、25% 狐/狼分離あり、55% 全員 ALL_ROLES
+  // 20% 狐不在、55% 狐/狼分離あり、25% 全員 ALL_ROLES
   const roll = rng.next()
   const noFox = roll < 0.2 && shuffled.length >= 2
-  const hasFoxWolfSplit = !noFox && roll < 0.45 && shuffled.length >= 3
+  const hasFoxWolfSplit = !noFox && roll < 0.75 && shuffled.length >= 3
 
   if (noFox) {
     // 狐可能席ゼロ — 全員 WOLF_NO_FOX or VILLAGE_ONLY
@@ -252,7 +252,7 @@ export function generateSyntheticRetar(
       if (i < numFoxOnly) {
         possibilities.set(seat, new Set(FOX_NO_WOLF))
         foxSeats.push(seat)
-      } else if (rng.next() < 0.3) {
+      } else if (rng.next() < 0.5) {
         // 一部を狼可能(狐不可)に
         possibilities.set(seat, new Set(WOLF_NO_FOX))
         wolfSeats.push(seat)
@@ -612,35 +612,37 @@ function buildSuspectLabels(
 /**
  * Endgame ラベル生成 — planToVote の消費順に対応
  *
- * endgameLabels[0]（alive ≤ 4, 最終日）= 狼候補（狐と重複しない）
+ * endgameLabels[0]（alive ≤ 4, 最終日）= wolfOnly 候補（狐でない狼）
  * endgameLabels[1]（alive 5-6, 前日）= 狐候補
- * 狐候補なし → 全 STOP（endgame 不要、forward で狼処理）
+ *
+ * 正解が明確なケースのみラベルを生成:
+ * - 狐候補なし → 空（forward で狼処理）
+ * - wolfOnly（狼∩非狐）なし → 空（狐と狼の区別不能）
+ * - wolfOnly あり → [0]=wolfOnly, [1]=fox
  */
 export function buildEndgameLabels(
   foxSeats: number[],
   wolfSeats: number[],
   rng: Rng,
-): { labels: number[], mask: boolean[] } {
+): { labels: number[], mask: boolean[], wolfOnly: number[] } {
   const labels = new Array(NUM_ENDGAME_TOKENS).fill(PLAN_VOCAB.STOP)
   const mask = new Array(NUM_ENDGAME_TOKENS).fill(false)
 
   // 狐候補なし → endgame 空
-  if (foxSeats.length === 0) return { labels, mask }
+  if (foxSeats.length === 0) return { labels, mask, wolfOnly: [] }
 
-  // [0] = 狼候補（最終日）— 狐と重複しない狼を優先
+  // wolfOnly = 狼候補 ∩ 非狐候補（最終日に吊るべき明確な対象）
   const foxSet = new Set(foxSeats)
   const wolfOnly = wolfSeats.filter(s => !foxSet.has(s))
-  if (wolfOnly.length > 0) {
-    labels[0] = wolfOnly[Math.floor(rng.next() * wolfOnly.length)] - 1
-    mask[0] = true
-  } else if (wolfSeats.length > 0) {
-    // 全狼候補が狐候補と重複 → 狼候補から1つ（狐と同一席も許容）
-    labels[0] = wolfSeats[Math.floor(rng.next() * wolfSeats.length)] - 1
-    mask[0] = true
-  }
-  // 狼候補もゼロ → [0] は STOP のまま（mask false）
 
-  // [1] = 狐候補（前日）
+  // wolfOnly なし → 狐と狼の区別不能 → endgame 空（ノイズを教えない）
+  if (wolfOnly.length === 0) return { labels, mask, wolfOnly }
+
+  // [0] = wolfOnly から1席（最終日）
+  labels[0] = wolfOnly[Math.floor(rng.next() * wolfOnly.length)] - 1
+  mask[0] = true
+
+  // [1] = 狐候補から1席（前日）
   labels[1] = foxSeats[Math.floor(rng.next() * foxSeats.length)] - 1
   mask[1] = true
 
@@ -648,7 +650,7 @@ export function buildEndgameLabels(
   labels[2] = PLAN_VOCAB.STOP
   mask[2] = true
 
-  return { labels, mask }
+  return { labels, mask, wolfOnly }
 }
 
 /**

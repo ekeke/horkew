@@ -48,6 +48,7 @@ type Sample = {
   possibilities: Map<number, Set<SystemRole>>
   foxSeats: number[]
   wolfSeats: number[]
+  wolfOnly: number[]
   labels: number[]
   mask: boolean[]
 }
@@ -72,7 +73,7 @@ function generateSample(rng: Rng): Sample {
   return {
     aliveSeats, mySeat, claims,
     possibilities: retar.possibilities,
-    foxSeats, wolfSeats,
+    foxSeats, wolfSeats, wolfOnly: eg.wolfOnly,
     labels: eg.labels, mask: eg.mask,
   }
 }
@@ -96,14 +97,17 @@ function printBoard(s: Sample, showCandidates: boolean = true) {
 function mySeat(s: Sample): number { return s.mySeat }
 
 function printAnswer(s: Sample) {
-  const hasFox = s.foxSeats.length > 0
+  const hasEndgame = s.mask.some(m => m)
+  console.log(`Wolf-only (狼∩非狐): [${s.wolfOnly.map(v => `seat${v}`).join(', ') || 'なし'}]`)
   console.log(`Endgame labels: [${s.labels.map(tokenLabel).join(', ')}]`)
   console.log(`Endgame mask:   [${s.mask.map(m => m ? '✓' : '·').join(', ')}]`)
-  if (hasFox) {
-    console.log(`  → [0] 最終日(alive≤4): ${s.mask[0] ? tokenLabel(s.labels[0]) + ' (wolf)' : 'なし'}`)
+  if (hasEndgame) {
+    console.log(`  → [0] 最終日(alive≤4): ${tokenLabel(s.labels[0])} (wolfOnly)`)
     console.log(`  → [1] 前日(alive5-6):  ${tokenLabel(s.labels[1])} (fox)`)
+  } else if (s.foxSeats.length === 0) {
+    console.log(`  → endgame 空 — 狐候補なし`)
   } else {
-    console.log(`  → endgame 空 — forward で狼処理`)
+    console.log(`  → endgame 空 — wolfOnly なし（区別不能）`)
   }
 }
 
@@ -114,22 +118,33 @@ function printAnswer(s: Sample) {
 function runDump() {
   const NUM_SAMPLES = 20
   const rng = new Rng(42)
-  let foxPresent = 0
-  let foxAbsent = 0
+  let endgameActive = 0
+  let endgameEmpty = 0
+  let noFox = 0
+  let noWolfOnly = 0
 
   for (let i = 0; i < NUM_SAMPLES; i++) {
     const s = generateSample(rng)
-    const hasFox = s.foxSeats.length > 0
-    if (hasFox) foxPresent++; else foxAbsent++
+    const hasEndgame = s.mask.some(m => m)
+    if (hasEndgame) {
+      endgameActive++
+    } else {
+      endgameEmpty++
+      if (s.foxSeats.length === 0) noFox++
+      else noWolfOnly++
+    }
 
-    console.log(`\n=== Sample ${i + 1}: ${hasFox ? '狐あり' : '狐なし'} ===`)
+    const tag = hasEndgame ? 'endgame あり' : s.foxSeats.length === 0 ? '狐なし' : 'wolfOnly なし'
+    console.log(`\n=== Sample ${i + 1}: ${tag} ===`)
     printBoard(s)
     printAnswer(s)
   }
 
   console.log(`\n=== 分布 ===`)
-  console.log(`狐あり: ${foxPresent}/${NUM_SAMPLES} (${(foxPresent / NUM_SAMPLES * 100).toFixed(0)}%)`)
-  console.log(`狐なし: ${foxAbsent}/${NUM_SAMPLES} (${(foxAbsent / NUM_SAMPLES * 100).toFixed(0)}%)`)
+  console.log(`endgame あり:   ${endgameActive}/${NUM_SAMPLES} (${(endgameActive / NUM_SAMPLES * 100).toFixed(0)}%)`)
+  console.log(`endgame 空:     ${endgameEmpty}/${NUM_SAMPLES}`)
+  console.log(`  狐なし:       ${noFox}`)
+  console.log(`  wolfOnly なし: ${noWolfOnly}`)
 }
 
 // ============================================================
@@ -160,9 +175,12 @@ async function runQuiz() {
   console.log('║ 4トークンを出力してください。                          ║')
   console.log('║                                                        ║')
   console.log('║ ルール:                                                ║')
-  console.log('║   [0] = 最終日（alive≤4）に処刑する狼候補              ║')
-  console.log('║   [1] = 前日（alive5-6）に処刑する狐候補               ║')
-  console.log('║   狐候補がいなければ endgame は空（全 STOP）           ║')
+  console.log('║  [0] = 狼だけの候補 (wolf_no_fox) から1つ              ║')
+  console.log('║  [1] = 狐候補から1つ                                   ║')
+  console.log('║  [2],[3] = STOP                                        ║')
+  console.log('║  狐候補なし or 狼だけの候補なし → 全 STOP              ║')
+  console.log('║                                                        ║')
+  console.log('║ 候補のどれかに一致すれば正解（手順が合っていればOK）   ║')
   console.log('║                                                        ║')
   console.log('║ 入力: seat番号(例: 5 or seat5) / stop / Enter=STOP     ║')
   console.log('║ q で終了                                               ║')
@@ -200,47 +218,57 @@ async function runQuiz() {
       }
     }
 
-    // 採点
+    // 採点（手順として正しければ正解）
+    // [0]: wolfOnly のどれかに一致 → 正解
+    // [1]: foxSeats のどれかに一致 → 正解
+    // [2]: STOP → 正解
+    // mask が false のトークン → STOP なら正解
+    const wolfOnlyIndices = new Set(s.wolfOnly.map(seat => seat - 1))
+    const foxIndices = new Set(s.foxSeats.map(seat => seat - 1))
+    const hasEndgame = s.mask.some(m => m)
+
     console.log('\n  ── 結果 ──')
     let roundCorrect = 0
     let roundTotal = 0
     for (let t = 0; t < 4; t++) {
-      if (!s.mask[t]) continue  // マスクされたトークンは採点対象外
-      roundTotal++
-      total++
-      const ok = answers[t] === s.labels[t]
-      if (ok) { correct++; roundCorrect++ }
       const yours = tokenLabel(answers[t])
-      const expected = tokenLabel(s.labels[t])
+      total++
+      roundTotal++
+
+      let ok: boolean
+      let expected: string
+      if (!hasEndgame) {
+        // endgame 空 → 全トークン STOP が正解
+        ok = answers[t] === PLAN_VOCAB.STOP
+        expected = 'STOP (endgame 空)'
+      } else if (t === 0) {
+        ok = wolfOnlyIndices.has(answers[t])
+        expected = `wolfOnly のどれか: [${s.wolfOnly.map(s => `seat${s}`).join(', ')}]`
+      } else if (t === 1) {
+        ok = foxIndices.has(answers[t])
+        expected = `fox のどれか: [${s.foxSeats.map(s => `seat${s}`).join(', ')}]`
+      } else {
+        ok = answers[t] === PLAN_VOCAB.STOP
+        expected = 'STOP'
+      }
+
+      if (ok) { correct++; roundCorrect++ }
       const mark = ok ? '✓' : '✗'
       console.log(`  [${t}] ${mark}  あなた: ${yours}  正解: ${expected}`)
     }
 
-    // マスクされたトークンの回答も表示（参考）
-    for (let t = 0; t < 4; t++) {
-      if (s.mask[t]) continue
-      const yours = tokenLabel(answers[t])
-      const isStop = answers[t] === PLAN_VOCAB.STOP
-      console.log(`  [${t}] ${isStop ? '·' : '?'}  あなた: ${yours}  (採点対象外)`)
-    }
-
-    if (roundCorrect === roundTotal && roundTotal > 0) perfectRounds++
+    if (roundCorrect === roundTotal) perfectRounds++
 
     // 正解の背景を表示
     console.log(`\n  ── 解説 ──`)
-    console.log(`  Fox candidates: [${s.foxSeats.join(', ')}]`)
-    console.log(`  Wolf candidates: [${s.wolfSeats.join(', ')}]`)
-    if (hasFox) {
-      const foxSet = new Set(s.foxSeats)
-      const wolfOnly = s.wolfSeats.filter(w => !foxSet.has(w))
-      if (wolfOnly.length > 0) {
-        console.log(`  Wolf-only (狐と重複しない狼): [${wolfOnly.join(', ')}]`)
-      } else {
-        console.log(`  Wolf-only: なし（全狼候補が狐候補と重複）`)
-      }
-      console.log(`  → [0] 狼候補から1つ、[1] 狐候補から1つ、[2] STOP`)
-    } else {
+    console.log(`  Fox candidates: [${s.foxSeats.map(v => `seat${v}`).join(', ') || 'なし'}]`)
+    console.log(`  Wolf-only (狼∩非狐): [${s.wolfOnly.map(v => `seat${v}`).join(', ') || 'なし'}]`)
+    if (hasEndgame) {
+      console.log(`  → [0] wolfOnly から1つ、[1] fox から1つ、[2] STOP`)
+    } else if (s.foxSeats.length === 0) {
       console.log(`  → 狐候補なし → endgame 空（全 STOP）`)
+    } else {
+      console.log(`  → wolfOnly なし（狐と狼が区別不能）→ endgame 空（全 STOP）`)
     }
 
     console.log(`\n  累計: ${correct}/${total} (${total > 0 ? (correct / total * 100).toFixed(0) : 0}%)`)

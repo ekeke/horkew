@@ -92,29 +92,29 @@ describe('buildEndgameLabels', () => {
     assert.deepEqual(mask, [true, true, true, false])
   })
 
-  it('fox + wolf overlap → both filled from candidates', () => {
-    // fox=[3,5], wolf=[3,5] → wolfOnly is empty, [0] from wolfSeats, [1] from foxSeats
+  it('fox + wolf full overlap → empty (indistinguishable)', () => {
+    // fox=[3,5], wolf=[3,5] → wolfOnly is empty → can't distinguish → empty
     const rng = new Rng(42)
-    const { labels, mask } = buildEndgameLabels([3, 5], [3, 5], rng)
-    // [0] should be a wolf seat (3 or 5)
-    assert.ok(labels[0] === 2 || labels[0] === 4, `wolf label should be seat 3 or 5, got index ${labels[0]}`)
-    // [1] should be a fox seat (3 or 5)
-    assert.ok(labels[1] === 2 || labels[1] === 4, `fox label should be seat 3 or 5, got index ${labels[1]}`)
-    assert.deepEqual(mask, [true, true, true, false])
+    const { labels, mask, wolfOnly } = buildEndgameLabels([3, 5], [3, 5], rng)
+    assert.equal(wolfOnly.length, 0)
+    assert.deepEqual(mask, [false, false, false, false])
   })
 
-  it('fox only, no wolf → [0] unmasked, [1]=fox', () => {
+  it('fox only, no wolf → empty (no wolfOnly)', () => {
     const rng = new Rng(42)
-    const { labels, mask } = buildEndgameLabels([7], [], rng)
-    // [0] = no wolf candidate → STOP, mask false
-    assert.equal(labels[0], PLAN_VOCAB.STOP)
-    assert.equal(mask[0], false)
-    // [1] = fox seat 7 → index 6
-    assert.equal(labels[1], 6)
-    assert.equal(mask[1], true)
-    // [2] = STOP
-    assert.equal(labels[2], PLAN_VOCAB.STOP)
-    assert.equal(mask[2], true)
+    const { labels, mask, wolfOnly } = buildEndgameLabels([7], [], rng)
+    assert.equal(wolfOnly.length, 0)
+    assert.deepEqual(mask, [false, false, false, false])
+  })
+
+  it('partial overlap → wolfOnly used for [0]', () => {
+    // fox=[3,5], wolf=[3,5,8] → wolfOnly=[8]
+    const rng = new Rng(42)
+    const { labels, mask, wolfOnly } = buildEndgameLabels([3, 5], [3, 5, 8], rng)
+    assert.deepEqual(wolfOnly, [8])
+    assert.equal(labels[0], 7)  // seat8 → index 7
+    assert.ok([2, 4].includes(labels[1]), `fox: got index ${labels[1]}`)  // seat3 or seat5
+    assert.deepEqual(mask, [true, true, true, false])
   })
 
   it('multiple fox + multiple wolf → picks one each', () => {
