@@ -366,4 +366,7 @@ async function main() {
   }
 }
 
-main().catch(console.error)
+// CLIとして直接実行された場合のみmain()を呼ぶ
+// import時（orchestrate.ts等）は実行しない
+const isDirectRun = process.argv[1]?.replace(/\\/g, '/').endsWith('winrate-training.ts')
+if (isDirectRun) main().catch(console.error)
