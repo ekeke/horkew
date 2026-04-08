@@ -6,7 +6,7 @@
  */
 
 import { parentPort, threadId } from 'node:worker_threads'
-import type { SystemRole } from '../../types/index.ts'
+import { type SystemRole, systemRoles } from '../../types/index.ts'
 import type { LupaConfig } from '../../lupa/types.ts'
 import type { Agent } from './agents/agent.ts'
 import { runGame, resumeGame } from '../../lupa/engine.ts'
@@ -243,7 +243,13 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     } : undefined
 
     if (snapshot) {
-      // Seed Bank リプレイ: スナップショットから resumeGame
+      // Seed Bank リプレイ: inspect時は名前を role+seat 形式に上書き
+      if (isInspectGame) {
+        for (const p of snapshot.state.players) {
+          const shortName = systemRoles.get(p.role as SystemRole)?.shortName ?? p.role
+          p.name = `${shortName}${p.seat}`
+        }
+      }
       const handlers = config.strategyOnly
         ? new MasonTrainingAdapter({
             agents: agentsMap,
