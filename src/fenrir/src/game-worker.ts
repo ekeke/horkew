@@ -139,8 +139,23 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: true })
       }
     } else if (!useHeuristic || multiModel) {
-      if (wolfTeamNet) wolfTeamAgent = new WolfTeamAgent(wolfTeamNet, { explore: true })
-      if (masonTeamNet) masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: true })
+      if (multiModel) {
+        // マルチモデル: groupNets から集団エージェントを事前構築
+        // adapter に渡す前に作る必要がある（adapter はコンストラクタ時にキャプチャするため）
+        const wolfNet = groupNets.get('wolf_collective')
+        if (wolfNet) {
+          const ws = new WolfCollective(wolfNet, { explore: true })
+          if (frozenVillageNet) ws.frozenVillageNetwork = frozenVillageNet
+          wolfTeamAgent = ws
+        }
+        const masonNet = groupNets.get('mason_collective')
+        if (masonNet) {
+          masonTeamAgent = new MasonCollective(masonNet, { explore: true })
+        }
+      } else {
+        if (wolfTeamNet) wolfTeamAgent = new WolfTeamAgent(wolfTeamNet, { explore: true })
+        if (masonTeamNet) masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: true })
+      }
     }
 
     const defaultAgent = (useHeuristic || multiModel) ? new RuleBasedAgent() : undefined
@@ -153,19 +168,8 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
         seatRoleMap = seatRoles
 
-        // 集団 strategy の構築
-        const wolfNet = groupNets.get('wolf_collective')
-        if (wolfNet) {
-          const ws = new WolfCollective(wolfNet, { explore: true })
-          if (frozenVillageNet) ws.frozenVillageNetwork = frozenVillageNet
-          wolfTeamAgent = ws
-        }
-        const masonNet = groupNets.get('mason_collective')
-        if (masonNet) {
-          masonTeamAgent = new MasonCollective(masonNet, { explore: true })
-        }
-
         // 個人NN の割り当て (collective roles はチーム strategy 経由なのでスキップ)
+        // 集団NN (wolf_collective, mason_collective) は adapter 作成前に構築済み
         for (const [seat, role] of seatRoles) {
           const groupName = ROLE_TO_GROUP[role]
           if (groupName === 'wolf_collective' || groupName === 'mason_collective') continue
