@@ -497,18 +497,20 @@ function deletePpoCheckpoints(checkpointBase: string): void {
     const dir = `${checkpointBase}/ckpt-${name}`
     if (!existsSync(dir)) continue
     for (const f of readdirSync(dir)) {
-      const m = f.match(/^(?:checkpoint|wolf_team|mason_team)_(\d+)\.json$/)
-      if (m && parseInt(m[1]) > 0) {
-        try { unlinkSync(`${dir}/${f}`) } catch {}
-      }
-      if (f === 'final.json' || f === 'wolf_team_final.json' || f === 'mason_team_final.json') {
-        try { unlinkSync(`${dir}/${f}`) } catch {}
-      }
-      if (f === 'eval_log.jsonl') {
+      // checkpoint_0.json (pretrain) だけ保持、他の .json/.jsonl は全削除
+      if (f === 'checkpoint_0.json') continue
+      if (f.endsWith('.json') || f.endsWith('.jsonl')) {
         try { unlinkSync(`${dir}/${f}`) } catch {}
       }
     }
   }
+  // eval-howl, inspect, kl_log も削除（PPO の成果物）
+  const evalHowlDir = `${checkpointBase}/eval-howl`
+  if (existsSync(evalHowlDir)) rmSync(evalHowlDir, { recursive: true })
+  const inspectDir = `${checkpointBase}/inspect`
+  if (existsSync(inspectDir)) rmSync(inspectDir, { recursive: true })
+  const klLog = `${checkpointBase}/kl_log.jsonl`
+  if (existsSync(klLog)) unlinkSync(klLog)
 }
 
 /** 全チェックポイントを削除 */
