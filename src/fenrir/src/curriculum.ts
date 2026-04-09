@@ -160,7 +160,7 @@ export type FrozenConfig = {
  * - ModelName ('village', 'wolf_collective', ...) — MODEL_GROUPS のキー
  * - 'mason_individual' — Phase 0 専用。village と同一アーキテクチャの独立ネットワーク
  */
-export type NetworkName = ModelName | 'mason_individual'
+export type NetworkName = ModelName | 'mason_individual' | 'wolf_brain'
 
 export type PretrainStep = {
   type: 'pretrain'
@@ -191,7 +191,7 @@ export type TrainingStep = {
   /** Whether to use strategy-only mode (plan tokens only) */
   strategyOnly: boolean
   /** Which adapter to use for game generation */
-  adapter: 'mason-training' | 'full'
+  adapter: 'mason-training' | 'full' | 'brain-battle'
   /** PPO configuration overrides */
   ppo: { klConfig?: KLConfig, freezePlan?: boolean }
   /** Progressive difficulty curriculum (optional) */
@@ -364,6 +364,37 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
       workerPhase: 1,
     })
   }
+
+    // --- Phase BB: Brain Battle (wolf brain vs mason brain) ---
+    steps.push({
+      type: 'training',
+      name: 'brain_battle',
+      displayName: 'Phase BB: Brain Battle',
+      activeModels: ['wolf_brain'],
+      strategyOnly: false,
+      adapter: 'brain-battle',
+      ppo: { freezePlan: false },
+      graduation: {
+        type: 'min_iter',
+        minIter: 300,
+      },
+      frozen: {
+        frozenModels: ['mason_collective'],
+      },
+      gameGen: {
+        mode: 'multi_model',
+        seedOffsetBase: 40000,
+      },
+      agentAssignment: {
+        village: 'heuristic',
+        wolf_collective: 'heuristic',
+        mason_collective: 'frozen',
+        fanatic: 'heuristic',
+        third: 'heuristic',
+      },
+      maxIterations: 'iterations',
+      workerPhase: 3,
+    })
 
   // --- Phase 2: Self-Play (all 5 models) ---
   if (!phase1Only) {

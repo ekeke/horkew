@@ -46,6 +46,10 @@ export type PhaseRunnerContext = {
   /** frozen 推論用ネットワーク (eval で使用) */
   frozenNets: Map<string, AnyNetwork>
 
+  /** Wolf brain ネットワーク (Brain Battle phase 用) */
+  wolfBrainNetwork?: AnyNetwork
+  wolfBrainTfNetwork?: AnyTfNetwork
+
   /** WRE PBRS: frozen 勝率NNの共有重み（--wre 有効時のみ） */
   wreSharedWeights?: WreSharedWeights
   /** WRE再学習コールバック（orchestratorが提供） */
@@ -131,6 +135,7 @@ export type ProgressCurriculumEntry = {
 const COLORS: Record<string, string> = {
   village: '\x1b[33m', wolf_collective: '\x1b[31m', mason_collective: '\x1b[36m',
   fanatic: '\x1b[35m', third: '\x1b[32m', mason_individual: '\x1b[36m',
+  wolf_brain: '\x1b[31m',
 }
 const RESET = '\x1b[0m'
 const BOLD = '\x1b[1m'
@@ -321,6 +326,7 @@ function checkpointPrefix(step: TrainingStep, name: string): { save: string, fin
 /** Phase display label for progress */
 function phaseLabel(step: TrainingStep): string {
   if (step.name === 'self_play') return '2'
+  if (step.name === 'brain_battle') return 'BB'
   if (step.name === 'non_village') return "1'"
   if (step.name === 'village') return '1'
   if (step.name === 'mason_individual') return '0'
@@ -338,6 +344,11 @@ function phaseLabel(step: TrainingStep): string {
  * TODO: single-model phases (Phase 0, Phase 1)
  */
 export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerContext): Promise<void> {
+  // Brain Battle: wolf_brain は MODEL_GROUPS に属さないため専用ループで処理
+  if (step.adapter === 'brain-battle') {
+    return runBrainBattlePhase(step, ctx)
+  }
+
   const { config, trainingConfig, progress } = ctx
   const maxIter = config[step.maxIterations]
   const phase = phaseLabel(step)
@@ -629,5 +640,158 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
 
   ctx.log(`${BOLD}=== ${step.displayName} Complete ===${RESET}`)
   progress.latest = { phase: `${phase} (complete)`, model: '-', iter: maxIter, maxIter }
+  ctx.writeTrainProgress(progress)
+}
+
+// ============================================================
+// Brain Battle Phase (wolf_brain 専用ループ)
+// ============================================================
+
+async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext): Promise<void> {
+  const { config, trainingConfig, progress } = ctx
+  const maxIter = config[step.maxIterations]
+  const phase = phaseLabel(step)
+
+  if (!ctx.wolfBrainNetwork || !ctx.wolfBrainTfNetwork) {
+    throw new Error('Brain Battle requires wolfBrainNetwork and wolfBrainTfNetwork in PhaseRunnerContext')
+  }
+
+  ctx.log(`${BOLD}=== ${step.displayName} ===${RESET}`)
+  ctx.log(`  Agent assignment: ${formatAssignment(step.agentAssignment)}`)
+
+  const prefix = `${COLORS.wolf_brain}[BB wolf_brain    ]${RESET}`
+  let iter = 0
+
+  // --- Resume ---
+  if (config.resume) {
+    const dir = checkpointDir(config, step, 'wolf_brain')
+    const ckpt = findCheckpoint(dir, 'wolf_brain')
+    if (ckpt) {
+      try {
+        loadCheckpoint(ctx.wolfBrainNetwork, ckpt.path)
+        iter = ckpt.iteration
+        ctx.log(`  wolf_brain: resumed from iter ${iter}`)
+      } catch (e) {
+        ctx.log(`  wolf_brain: checkpoint incompatible, starting fresh (${(e as Error).message})`)
+      }
+    }
+    if (existsSync(`${dir}/wolf_brain_final.json`)) {
+      ctx.log(`  wolf_brain: already graduated`)
+      return
+    }
+  }
+
+  // --- PPO config ---
+  const ppoConfig = {
+    miniBatchSize: trainingConfig.miniBatchSize,
+    clipEpsilon: trainingConfig.clipEpsilon,
+    valueLossCoeff: trainingConfig.valueLossCoeff,
+    entropyCoeff: trainingConfig.entropyCoeff,
+    freezePlan: false,
+    klCoeff: 0,
+  }
+
+  // --- Frozen mason weights ---
+  const frozenMasonWeights = ctx.frozenWeights.get('mason_collective')
+    ?? (ctx.networks.has('mason_collective') ? packWeights(ctx.networks.get('mason_collective')!) : undefined)
+
+  let lastPpoResult: PpoResult = { ...ZERO_PPO }
+  let gameMs = 0, ppoMs = 0, iterMs = 0
+
+  while (iter < maxIter) {
+    iter++
+    ctx.checkShutdown()
+    const iterStart = performance.now()
+    const seedOffset = step.gameGen.mode === 'multi_model' ? step.gameGen.seedOffsetBase : 0
+    const seeds = Array.from({ length: config.batch }, (_, g) => (seedOffset + iter) * config.batch + g)
+
+    // === Game generation (Brain Battle) ===
+    const tGameStart = performance.now()
+    const allWolfBrainSteps: ProcessedStep[] = []
+
+    if (gameWorkerPoolSize() > 0) {
+      const { assignment, modelGroupWeights } = buildAssignmentAndWeights(ctx, step)
+      const inspectSeeds = ctx.pickInspectSeeds(seeds)
+      const serializedResults = await generateGamesParallel({
+        weights: packWeights(ctx.wolfBrainNetwork),  // fallback
+        agentAssignment: assignment,
+        modelGroupWeights: { ...modelGroupWeights, mason_collective: frozenMasonWeights! },
+        trainingConfig,
+        phase: step.workerPhase,
+        brainBattle: true,
+        wolfBrainWeights: packWeights(ctx.wolfBrainNetwork),
+        inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
+      }, seeds)
+      if (inspectSeeds.length > 0) ctx.saveInspectGames(serializedResults, 'brain_battle', iter)
+
+      // Collect wolf brain trajectories from wolfTeamSteps
+      for (const game of serializedResults) {
+        if (game.wolfTeamSteps.length > 0) {
+          allWolfBrainSteps.push(...computeGAE(game.wolfTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
+        }
+      }
+    }
+    const tGameEnd = performance.now()
+
+    // === PPO update ===
+    const tPpoStart = performance.now()
+    if (allWolfBrainSteps.length > 0) {
+      normalizeAdvantages(allWolfBrainSteps)
+      ctx.wolfBrainTfNetwork.loadWeights(ctx.wolfBrainNetwork.cloneWeights())
+      for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
+        lastPpoResult = ppoUpdate(ctx.wolfBrainTfNetwork, allWolfBrainSteps, ppoConfig)
+      }
+      ctx.wolfBrainNetwork.loadWeights(ctx.wolfBrainTfNetwork.cloneWeights())
+    }
+    const tPpoEnd = performance.now()
+    iterMs = performance.now() - iterStart
+    gameMs = tGameEnd - tGameStart
+    ppoMs = tPpoEnd - tPpoStart
+
+    // === Progress display ===
+    process.stderr.write(
+      `\r\x1b[K  ${prefix} iter ${iter}/${maxIter} ` +
+      `${iterMs.toFixed(0)}ms (game${(gameMs / iterMs * 100).toFixed(0)}% ppo${(ppoMs / iterMs * 100).toFixed(0)}%) ` +
+      `steps=${allWolfBrainSteps.length}`
+    )
+
+    // === Checkpoint ===
+    if (iter % config.checkpointInterval === 0) {
+      const dir = checkpointDir(config, step, 'wolf_brain')
+      saveCheckpoint(ctx.wolfBrainNetwork, `${dir}/wolf_brain_${iter}.json`, { iteration: iter, winRate: 0 })
+    }
+
+    // === Eval (simplified: log PPO metrics) ===
+    if (iter % config.evalInterval === 0) {
+      process.stderr.write('\r\x1b[K')
+      ctx.log(
+        `${prefix} [${iter}] pLoss=${lastPpoResult.policyLoss.toFixed(4)} vLoss=${lastPpoResult.valueLoss.toFixed(4)} ent=${lastPpoResult.entropy.toFixed(4)} ` +
+        `steps=${allWolfBrainSteps.length}`
+      )
+      progress.evals.push({
+        time: new Date().toISOString(), model: 'wolf_brain', iter,
+        winRates: {}, avgLen: 0, status: '',
+        ppoMetrics: { ...lastPpoResult },
+        timing: { gameMs, ppoMs, iterMs },
+      })
+      progress.latest = { phase, model: 'wolf_brain', iter, maxIter }
+      ctx.writeTrainProgress(progress)
+
+      // Graduation check
+      if (step.graduation.type === 'min_iter' && iter >= step.graduation.minIter) {
+        ctx.log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${step.graduation.minIter})`)
+        break
+      }
+    }
+  }
+
+  process.stderr.write('\r\x1b[K')
+
+  // Final save
+  const dir = checkpointDir(config, step, 'wolf_brain')
+  saveCheckpoint(ctx.wolfBrainNetwork, `${dir}/wolf_brain_final.json`, { iteration: iter, winRate: 0 })
+
+  ctx.log(`${BOLD}=== ${step.displayName} Complete ===${RESET}`)
+  progress.latest = { phase: `${phase} (complete)`, model: 'wolf_brain', iter, maxIter }
   ctx.writeTrainProgress(progress)
 }

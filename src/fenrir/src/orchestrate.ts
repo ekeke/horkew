@@ -34,6 +34,7 @@ import {
   createWolfCollectiveNetwork, createMasonCollectiveNetwork,
   createWolfCollectiveTfNetwork, createMasonCollectiveTfNetwork,
   createFanaticNetwork, createFanaticTfNetwork,
+  createWolfBrainNetwork, createWolfBrainTfNetwork,
   DEFAULT_TRAINING_CONFIG,
   type TrainingConfig,
 } from './training.ts'
@@ -2076,6 +2077,34 @@ async function main(): Promise<void> {
     log(`${BOLD}=== Phase 1' Complete ===${RESET}`)
     progress.latest = { phase: "1' (complete)", model: '-', iter: config.iterations, maxIter: config.iterations }
     writeTrainProgress(progress)
+
+    // === Phase BB: Brain Battle (wolf brain vs mason brain) — delegated to phase-runner ===
+    {
+      const bbStep = buildCurriculum().find(s => s.type === 'training' && s.name === 'brain_battle') as TrainingStep | undefined
+      if (bbStep) {
+        const wolfBrainNet = createWolfBrainNetwork()
+        const wolfBrainTf = createWolfBrainTfNetwork(config.learningRate)
+        const bbCtx: PhaseRunnerContext = {
+          config, trainingConfig, progress, runId, gitSha,
+          networks: new Map<string, AnyNetwork>([
+            ['mason_collective', masonCollectiveNet],
+          ]),
+          tfNetworks: new Map<string, AnyTfNetwork>(),
+          frozenWeights: new Map([['mason_collective', packWeights(masonCollectiveNet)]]),
+          frozenNets: new Map([['mason_collective', masonCollectiveNet]]),
+          wolfBrainNetwork: wolfBrainNet,
+          wolfBrainTfNetwork: wolfBrainTf,
+          checkShutdown,
+          log,
+          writeTrainProgress,
+          pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
+          saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
+          saveEvalHowl,
+        }
+        await runTrainingPhase(bbStep, bbCtx)
+        wolfBrainTf.dispose()
+      }
+    }
 
     // === Phase 2: Self-Play (全5モデル同時学習) — delegated to phase-runner ===
     if (!config.phase1Only) {
