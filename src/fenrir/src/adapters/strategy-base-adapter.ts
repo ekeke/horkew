@@ -296,7 +296,6 @@ export abstract class StrategyBaseAdapter
 
   protected runRetar(pctx: PhaseContext<FenrirExtEvent, FenrirExt>, ext: FenrirExt): void {
     if (!this.config.enableRetar) return
-    if (this.config.retarStartDay && pctx.day < this.config.retarStartDay) return
     const t0 = performance.now()
     const state = pctx.state as GameState<FenrirExt>
     const events = [...pctx.events] as GameEvent[]

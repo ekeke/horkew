@@ -100,7 +100,6 @@ tfNetwork.loadWeights(masonNet.cloneWeights())    // TF.js GPU network
 
 | パラメータ | 値 | 説明 |
 |-----------|---|------|
-| mlStartDay | 4 | Day 3 スナップショットからリプレイ |
 | mlMaxSeats | 1 | mason 2 席中 1 席のみ ML |
 | MASON_MIN_ITER | 1000 | 最低学習 iter（早期卒業防止） |
 | 卒業条件 | villager_won >= 55% | baseline と同値 |
@@ -119,8 +118,6 @@ tfNetwork.loadWeights(masonNet.cloneWeights())    // TF.js GPU network
 2. ゲーム生成:
    - mlRoles=['villager','seer','medium','bodyguard','nekomata']
    - mlMaxSeats=1 → 2 → ... → 6 (カリキュラム)
-   - mlStartDay=3 → 2 → 1 (カリキュラム)
-   - Seed Bank からリプレイ (mlStartDay > 1 の場合)
 3. PPO update: strategy action head
 4. KL penalty: mason backbone からの発散を抑制 (adaptive β, target=0.05)
 ```
@@ -130,9 +127,6 @@ tfNetwork.loadWeights(masonNet.cloneWeights())    // TF.js GPU network
 | パラメータ | 初期値 | 進行条件 | 上限 |
 |-----------|-------|---------|------|
 | mlMaxSeats | 1 | villager_won >= baseline × 0.9 | 6 (村2+占1+霊1+狩1+猫1) |
-| mlStartDay | 3 | villager_won >= baseline × 0.9 | 1 (全日ML) |
-
-卒業条件で mlMaxSeats と mlStartDay の両方が同時に進行する。mlStartDay が変わるとスナップショットの Day も変わる。
 
 ### 報酬
 
@@ -140,16 +134,9 @@ tfNetwork.loadWeights(masonNet.cloneWeights())    // TF.js GPU network
 - **Intermediate reward**: 投票先の Retar 可能性に基づく評価 (endgameVoteReward)
 - **Predict accuracy reward**: 配役予想の正解率
 
-### Seed Bank 連携
+### Seed Bank
 
-```
-mlStartDay=3 → countSnapshots(day=2, villageRoles, mlMaxSeats)
-  → tmp/snapshots/day2/village-3/ から読み込み
-  → loadRandomSnapshots(day=2, count=64, Rng(iter))
-  → resumeGame(snapshot, handlers) で Day 3 からリプレイ
-```
-
-スナップショットなし（mlStartDay=1 or スナップショット不足）の場合は Day 1 からフルゲーム実行。
+Phase 1 では Day 1 からフルゲームを実行する（mlStartDay は廃止済み）。
 
 ---
 

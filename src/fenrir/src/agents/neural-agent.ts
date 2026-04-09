@@ -20,7 +20,7 @@ import { sigmoid } from '../ml/nn.ts'
 import { parsePlanSlots } from '../plan/plan-vocab.ts'
 import { planToVote, nightAction, dayClaim, communication, proposal, leadershipResponse, nooseCount } from '../plan/plan-helpers.ts'
 import { isVillagerAligned } from '../../../lupa/roles.ts'
-import { RuleBasedAgent } from './rule-based-agent.ts'
+
 
 /** plan depth 報酬の最大値（groups == nawa のとき） */
 const PLAN_DEPTH_REWARD_SCALE = 0.1
@@ -30,14 +30,11 @@ export type NeuralAgentConfig = {
   explore: boolean
   /** trueなら戦略NNのみ使用、行動はルールベース (Step 1 bootstrap) */
   strategyOnly?: boolean
-  /** このDay以降でML動作、それ以前はheuristicフォールバック（カリキュラム用） */
-  activeFromDay?: number
 }
 
 export class NeuralAgent implements Agent {
   readonly network: AnyNetwork
   readonly config: NeuralAgentConfig
-  private heuristicFallback?: RuleBasedAgent
 
   /** 学習時にトラジェクトリを収集するバッファ */
   trajectory: TrajectoryStep[] = []
@@ -52,13 +49,6 @@ export class NeuralAgent implements Agent {
   constructor(network: AnyNetwork, config?: Partial<NeuralAgentConfig>) {
     this.network = network
     this.config = { explore: true, ...config }
-    if (this.config.activeFromDay && this.config.activeFromDay >= 1) {
-      this.heuristicFallback = new RuleBasedAgent()
-    }
-  }
-
-  private isActive(day: number): boolean {
-    return !this.config.activeFromDay || day >= this.config.activeFromDay
   }
 
   protected lastObs: Float32Array | null = null
@@ -272,7 +262,7 @@ export class NeuralAgent implements Agent {
   // ============================================================
 
   decideNightAction(ctx: DecisionContext): NightAction {
-    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideNightAction(ctx)
+
     if (this.config.strategyOnly) return nightAction(ctx)
 
     const result = this.infer(ctx)
@@ -286,7 +276,7 @@ export class NeuralAgent implements Agent {
   }
 
   decideDayClaim(ctx: DecisionContext): DayClaim {
-    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideDayClaim(ctx)
+
     if (this.config.strategyOnly) return dayClaim(ctx)
 
     const result = this.infer(ctx)
@@ -304,7 +294,7 @@ export class NeuralAgent implements Agent {
   }
 
   decideForecast(ctx: DecisionContext): DayClaim {
-    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideForecast?.(ctx) ?? { type: 'none' }
+
     if (this.config.strategyOnly) return { type: 'none' }
 
     const result = this.infer(ctx)
@@ -326,7 +316,7 @@ export class NeuralAgent implements Agent {
   }
 
   decideVote(ctx: DecisionContext): number {
-    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideVote(ctx)
+
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
       this.lastObs = encodeObservation(ctx)
@@ -373,7 +363,7 @@ export class NeuralAgent implements Agent {
   }
 
   decideCommunication(ctx: DecisionContext): CommunicationAction {
-    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideCommunication(ctx)
+
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
       return communication(result.planActions ?? null, ctx)
@@ -403,7 +393,7 @@ export class NeuralAgent implements Agent {
   }
 
   decideProposal(ctx: DecisionContext): Proposal | null {
-    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideProposal?.(ctx) ?? null
+
     if (ctx.commander !== ctx.mySeat) return null
 
     if (this.config.strategyOnly) {
@@ -420,7 +410,7 @@ export class NeuralAgent implements Agent {
   }
 
   decideLeadershipResponse(ctx: DecisionContext, _proposal: Proposal): LeadershipResponse {
-    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideLeadershipResponse?.(ctx, _proposal) ?? { type: 'follow' }
+
     if (this.config.strategyOnly) return leadershipResponse()
 
     const result = this.infer(ctx)
@@ -434,7 +424,7 @@ export class NeuralAgent implements Agent {
   }
 
   decideDefensiveClaim(ctx: DecisionContext): DayClaim {
-    if (!this.isActive(ctx.day)) return this.heuristicFallback!.decideDefensiveClaim?.(ctx) ?? { type: 'none' }
+
     if (this.config.strategyOnly) return dayClaim(ctx)
 
     const result = this.infer(ctx)

@@ -100,7 +100,6 @@ export type TrainProgress = {
     maxIter: number
     klCoeff?: number
     mlMaxSeats?: number
-    mlStartDay?: number
     updated?: string
   }
 }
@@ -122,7 +121,6 @@ export type ProgressCurriculumEntry = {
   time: string
   iter: number
   mlMaxSeats: number
-  mlStartDay: number
   event: string
 }
 

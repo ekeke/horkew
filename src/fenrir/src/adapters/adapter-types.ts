@@ -28,8 +28,6 @@ export type StrategyBaseAdapterConfig = {
   enableRetar?: boolean
   /** 詰み探索を有効化（デフォルトfalse） */
   enableTsumi?: boolean
-  /** Retarを有効にする開始Day */
-  retarStartDay?: number
   /** enableRetar時に必要 */
   roles?: Map<SystemRole, number>
   /** enableRetar時に必要 */
@@ -57,7 +55,6 @@ export type FullAdapterConfig = {
   masonTeamAgent?: TeamAgent
   enableRetar?: boolean
   enableTsumi?: boolean
-  retarStartDay?: number
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   seed?: number
   roles: Map<SystemRole, number>

@@ -152,7 +152,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
               if (frozenVillageNet) fs.frozenVillageNetwork = frozenVillageNet
               neuralAgents.set(seat, fs)
             } else {
-              neuralAgents.set(seat, new NeuralAgent(net, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+              neuralAgents.set(seat, new NeuralAgent(net, { explore: true, strategyOnly: config.strategyOnly }))
             }
           }
         }
@@ -179,7 +179,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
             }
             const limit = req.mlMaxSeats ?? candidates.length
             for (let i = 0; i < Math.min(limit, candidates.length); i++) {
-              neuralAgents.set(candidates[i][0], new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+              neuralAgents.set(candidates[i][0], new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly }))
             }
           }
         }
@@ -276,7 +276,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         seed,
         enableRetar: config.enableRetar,
         enableTsumi: true,
-        retarStartDay: req.mlStartDay,
+
         roles,
         rules: config.rules,
         captureObservations: isInspectGame,
@@ -302,7 +302,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         masonTeamAgent: masonTeamAgent,
         enableRetar: config.enableRetar,
         enableTsumi: true,
-        retarStartDay: req.mlStartDay,
+
         onRolesAssigned: onRolesAssignedWrapped,
         seed,
         roles,

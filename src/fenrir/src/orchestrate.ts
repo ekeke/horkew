@@ -53,8 +53,6 @@ import {
 import { WinrateNetwork } from './ml/winrate-network.ts'
 import { loadWinrateCheckpoint, saveWinrateCheckpoint } from './ml/winrate-training.ts'
 import { extractWreSamplesFromGameResults } from './ml/winrate-data.ts'
-import { loadRandomSnapshots, countSnapshots } from './seed-bank.ts'
-import { Rng } from '../../lupa/random.ts'
 import {
   type PretrainSnapshot,
   SNAPSHOT_EPOCHS_B, SNAPSHOT_EPOCHS_B2, SNAPSHOT_EPOCHS_D,
@@ -1313,21 +1311,6 @@ async function main(): Promise<void> {
       masonRefNetwork.loadWeights(masonNet.cloneWeights())
 
       const masonMlRoles = ['mason'] as SystemRole[]
-      let masonMlStartDay = 1  // Day 1 からフルゲーム（snapshot に mason 生存保証がないため）
-      const ML_START_DAY_MIN_MASON = 1
-
-      function refreshMasonSnapshotCount() {
-        if (masonMlStartDay <= ML_START_DAY_MIN_MASON) return 0
-        let count = countSnapshots(masonMlStartDay - 1, MODEL_GROUPS.village.roles as string[], 1)
-        if (count > 0) {
-          log(`  Seed bank: ${count} snapshots at Day ${masonMlStartDay - 1}`)
-        } else {
-          log(`  ⚠ No snapshots at Day ${masonMlStartDay - 1}. Falling back to full games.`)
-        }
-        return count
-      }
-      let masonSnapshotCount = refreshMasonSnapshotCount()
-      log(`  Initial masonMlStartDay=${masonMlStartDay}`)
 
       const masonTargetRate = BASELINE_RATES['villager_won'] ?? 0.55
       const prefix = `\x1b[36m[mason_ind ]${RESET}`
@@ -1345,13 +1328,6 @@ async function main(): Promise<void> {
         const allSteps: ProcessedStep[] = []
 
         const sharedWeights = packWeights(masonNet)
-        const aliveRoles = MODEL_GROUPS.village.roles as string[]
-        const batchSnapshots = masonSnapshotCount > 0
-          ? loadRandomSnapshots(masonMlStartDay - 1, seeds.length, new Rng(iter), {
-              aliveRoles,
-              minAlive: 1,
-            })
-          : undefined
 
         const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
         const serializedResults = await generateGamesParallel({
@@ -1364,8 +1340,6 @@ async function main(): Promise<void> {
           phase: 1,
           mlRoles: masonMlRoles,
           mlMaxSeats: 1,
-          mlStartDay: (!batchSnapshots) ? masonMlStartDay : undefined,
-          snapshots: batchSnapshots,
           inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
           enableMasonTakeover: true,
           wreWeights: wreSharedWeights,
@@ -1445,25 +1419,17 @@ async function main(): Promise<void> {
         process.stderr.write(
           `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
           `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
-          `steps=${allSteps.length} day=${masonMlStartDay}${lossStr}${entStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
+          `steps=${allSteps.length}${lossStr}${entStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
         )
 
         // Eval
         if (iter % config.evalInterval === 0) {
           process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
 
-          const aliveRoles = MODEL_GROUPS.village.roles as string[]
-          const evalSnapshots = masonSnapshotCount > 0
-            ? loadRandomSnapshots(masonMlStartDay - 1, config.evalGames, new Rng(42), {
-                aliveRoles,
-                minAlive: 1,
-                forEval: true,
-              })
-            : undefined
           const evalResult = await evaluate(
             masonNet, { ...trainingConfig, mlRoles: masonMlRoles }, config.evalGames,
             wolfTeamNet, masonTeamNet, 1,
-            { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), masonAsIndividual: true, evalIter: iter, saveHowl: true },
+            { masonAsIndividual: true, evalIter: iter, saveHowl: true },
           )
           process.stderr.write('\r\x1b[K')
           if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
@@ -1483,20 +1449,10 @@ async function main(): Promise<void> {
             ppoMetrics: { ...lastPpoResult }, baseline: masonTargetRate, target: masonTargetRate * 0.9,
             timing: { gameMs, ppoMs, iterMs },
           })
-          progress.latest = { phase: '0', model: 'mason_individual', iter, maxIter: config.iterations, klCoeff: masonPpoConfig.klCoeff, mlStartDay: masonMlStartDay }
+          progress.latest = { phase: '0', model: 'mason_individual', iter, maxIter: config.iterations, klCoeff: masonPpoConfig.klCoeff }
           writeTrainProgress(progress)
 
           const MASON_MIN_ITER = 300
-          // Day カリキュラム: 勝率達成で Day をデクリメント
-          if (iter >= MASON_MIN_ITER && factionRate >= masonTargetRate * 0.9) {
-            if (masonMlStartDay > ML_START_DAY_MIN_MASON) {
-              const prevDay = masonMlStartDay
-              masonMlStartDay--
-              log(`${prefix} Curriculum: masonMlStartDay ${prevDay} → ${masonMlStartDay}`)
-              progress.curriculum.push({ time: new Date().toISOString(), iter, mlMaxSeats: 1, mlStartDay: masonMlStartDay, event: `mason day ${prevDay}→${masonMlStartDay}` })
-              masonSnapshotCount = refreshMasonSnapshotCount()
-            }
-          }
           // minIter 到達で卒業
           if (iter >= MASON_MIN_ITER) {
             log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${MASON_MIN_ITER})`)
@@ -1541,10 +1497,7 @@ async function main(): Promise<void> {
     // カリキュラム: NN 席数を徐々に増やす (village のみ)
     let mlMaxSeats = 1
     const ML_MAX_SEATS_CAP = 6  // 村役職の最大席数 (村2+占1+霊1+狩1+猫1、共有は集団NNなので除外)
-    // カリキュラム: ML/Retar開始Dayを徐々に前に (序盤Retarコスト回避)
-    let mlStartDay = 3
-    const ML_START_DAY_MIN = 1  // 全日ML
-    log(`  Initial mlMaxSeats=${mlMaxSeats} mlStartDay=${mlStartDay}`)
+    log(`  Initial mlMaxSeats=${mlMaxSeats}`)
 
     const ppoConfig = {
       miniBatchSize: trainingConfig.miniBatchSize,
@@ -1553,19 +1506,6 @@ async function main(): Promise<void> {
       entropyCoeff: trainingConfig.entropyCoeff,
       freezePlan: false,  // plan 解凍 + KL penalty で pretrain 知識を保護
       klCoeff: refNetwork ? 0.2 : 0,
-    }
-
-    // Seed Bank: ディスクからスナップショットを読み込み
-    const villageRoles = MODEL_GROUPS.village.roles as string[]
-    let snapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay - 1, villageRoles, mlMaxSeats) : 0
-    const evalSnapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay - 1, villageRoles, mlMaxSeats, true) : 0
-    if (mlStartDay > ML_START_DAY_MIN && snapshotCount === 0) {
-      log(`  ⚠ No snapshots at Day ${mlStartDay - 1} (run: npm run generate-snapshots -- --day ${mlStartDay - 1} --alive village --min-alive ${mlMaxSeats}). Falling back to full games.`)
-    } else if (snapshotCount > 0) {
-      log(`  Seed bank: ${snapshotCount} train + ${evalSnapshotCount} eval snapshots at Day ${mlStartDay - 1}`)
-    }
-    if (mlStartDay > ML_START_DAY_MIN && evalSnapshotCount === 0) {
-      log(`  ⚠ No eval snapshots (run: npm run generate-snapshots -- --day ${mlStartDay - 1} --alive village --min-alive ${mlMaxSeats} --for-eval)`)
     }
 
     // Phase 1: village のみ学習（wolf/third は strategy-only 未対応）
@@ -1616,14 +1556,6 @@ async function main(): Promise<void> {
           const sharedWolfWeights = group.teamType === 'wolf_team' ? packWeights(wolfTeamNet) : undefined
           const sharedMasonWeights = group.teamType === 'mason_team' ? packWeights(masonTeamNet) : undefined
 
-          // Seed Bank: ディスクからランダムにスナップショットを読み込み
-          const batchSnapshots = (snapshotCount > 0 && name === 'village')
-            ? loadRandomSnapshots(mlStartDay - 1, seeds.length, new Rng(iter), {
-                aliveRoles: group.roles,
-                minAlive: mlMaxSeats,
-              })
-            : undefined
-
           const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
           const serializedResults = await generateGamesParallel({
             weights: sharedWeights,
@@ -1637,8 +1569,6 @@ async function main(): Promise<void> {
             phase: 1,
             mlRoles: group.roles,
             mlMaxSeats: name === 'village' ? mlMaxSeats : undefined,
-            mlStartDay: (!batchSnapshots && name === 'village') ? mlStartDay : undefined,
-            snapshots: batchSnapshots,
             frozenMasonWeights: name === 'village' ? frozenMasonWeights : undefined,
             inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
             wreWeights: wreSharedWeights,
@@ -1741,7 +1671,7 @@ async function main(): Promise<void> {
           const avgIterMs = (iterElapsed / iterCount / 1000).toFixed(1)
           const remaining = ((targetIter - iter) * iterElapsed / iterCount / 1000).toFixed(0)
           const timingStr = formatTimingStr(lastBatchTimings)
-          const mlInfo = name === 'village' ? ` ml=${mlMaxSeats}/${ML_MAX_SEATS_CAP} day=${mlStartDay}` : ''
+          const mlInfo = name === 'village' ? ` ml=${mlMaxSeats}/${ML_MAX_SEATS_CAP}` : ''
           const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
           const entStr = lastPpoResult.entropy ? ` ent=${lastPpoResult.entropy.toFixed(4)}` : ''
           const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${ppoConfig.klCoeff.toFixed(3)})` : ''
@@ -1756,14 +1686,7 @@ async function main(): Promise<void> {
             process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
             const evalConfig = { ...trainingConfig, mlRoles: group.roles }
             const evalMlMax = name === 'village' ? mlMaxSeats : undefined
-            const evalSnapshots = (snapshotCount > 0 && name === 'village')
-              ? loadRandomSnapshots(mlStartDay - 1, config.evalGames, new Rng(42), {
-                  aliveRoles: group.roles,
-                  minAlive: mlMaxSeats,
-                  forEval: true,
-                })
-              : undefined
-            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, { ...(evalSnapshots ? { snapshots: evalSnapshots } : {}), evalIter: iter, frozenMasonNet: name === 'village' ? frozenMasonNet : undefined, saveHowl: true })
+            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, { evalIter: iter, frozenMasonNet: name === 'village' ? frozenMasonNet : undefined, saveHowl: true })
             process.stderr.write('\r\x1b[K')
             if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
             appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name, {
@@ -1784,27 +1707,14 @@ async function main(): Promise<void> {
               ppoMetrics: { ...lastPpoResult }, baseline: BASELINE_RATES[group.faction], target: targetRate,
               timing: { gameMs, ppoMs, iterMs },
             })
-            progress.latest = { phase: '1', model: name, iter, maxIter: config.iterations, klCoeff: ppoConfig.klCoeff, mlMaxSeats, mlStartDay }
+            progress.latest = { phase: '1', model: name, iter, maxIter: config.iterations, klCoeff: ppoConfig.klCoeff, mlMaxSeats }
 
-            // カリキュラム: 勝率がベースラインの90%に達したら NN 席数を増やす / 開始Dayを前に
+            // カリキュラム: 勝率がベースラインの90%に達したら NN 席数を増やす
             if (name === 'village' && mlMaxSeats < ML_MAX_SEATS_CAP && factionRate >= targetRate * 0.9) {
               const prevSeats = mlMaxSeats
               mlMaxSeats = Math.min(mlMaxSeats + 1, ML_MAX_SEATS_CAP)
               log(`${prefix} Curriculum: mlMaxSeats → ${mlMaxSeats}`)
-              progress.curriculum.push({ time: new Date().toISOString(), iter, mlMaxSeats, mlStartDay, event: `mlMaxSeats ${prevSeats}→${mlMaxSeats}` })
-            }
-            if (name === 'village' && mlStartDay > ML_START_DAY_MIN && factionRate >= targetRate * 0.9) {
-              const prevDay = mlStartDay
-              mlStartDay = Math.max(mlStartDay - 1, ML_START_DAY_MIN)
-              log(`${prefix} Curriculum: mlStartDay → ${mlStartDay}`)
-              progress.curriculum.push({ time: new Date().toISOString(), iter, mlMaxSeats, mlStartDay, event: `mlStartDay ${prevDay}→${mlStartDay}` })
-              // Seed Bank: 新しい Day のスナップショット数を確認
-              snapshotCount = mlStartDay > ML_START_DAY_MIN ? countSnapshots(mlStartDay - 1, villageRoles, mlMaxSeats) : 0
-              if (mlStartDay > ML_START_DAY_MIN && snapshotCount === 0) {
-                log(`${prefix} ⚠ No snapshots at Day ${mlStartDay - 1} (run: npm run generate-snapshots -- --day ${mlStartDay - 1} --alive village --min-alive ${mlMaxSeats}). Falling back to full games.`)
-              } else if (snapshotCount > 0) {
-                log(`${prefix} Seed bank: ${snapshotCount} snapshots at Day ${mlStartDay}`)
-              }
+              progress.curriculum.push({ time: new Date().toISOString(), iter, mlMaxSeats, event: `mlMaxSeats ${prevSeats}→${mlMaxSeats}` })
             }
 
             writeTrainProgress(progress)

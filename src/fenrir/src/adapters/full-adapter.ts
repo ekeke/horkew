@@ -139,7 +139,6 @@ export function fullAdapter(adapterConfig: FullAdapterConfig): GameHandlers<Fenr
 
   function runRetar(pctx: PhaseContext<FenrirExtEvent>): void {
     if (adapterConfig.enableRetar === false) return
-    if (adapterConfig.retarStartDay && pctx.day < adapterConfig.retarStartDay) return
     const t0 = performance.now()
     const state = pctx.state as GameState
     const events = [...pctx.events] as GameEvent[]

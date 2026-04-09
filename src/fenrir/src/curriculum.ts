@@ -101,19 +101,12 @@ export function klTargetForIter(iter: number, config: KLConfig = DEFAULT_KL_CONF
 // Curriculum Configuration (progressive difficulty)
 // ============================================================
 
-export type DayCurriculum = {
-  initial: number
-  min: number
-}
-
 export type SeatCurriculum = {
   initial: number
   cap: number
 }
 
 export type CurriculumConfig = {
-  /** ML start day — decrements as model graduates each day level */
-  startDay?: DayCurriculum
   /** Max NN-controlled seats (village only); advances when win rate hits threshold */
   maxSeats?: SeatCurriculum
   /** Win-rate fraction of target required to advance curriculum (e.g. 0.9 = 90% of target) */
@@ -266,10 +259,6 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
         klConfig: { ...DEFAULT_KL_CONFIG },
         freezePlan: false,
       },
-      curriculum: {
-        startDay: { initial: 1, min: 1 },
-        advanceThreshold: 0.9,
-      },
       graduation: {
         type: 'min_iter',
         minIter: 300,
@@ -314,7 +303,6 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
         freezePlan: false,
       },
       curriculum: {
-        startDay: { initial: 3, min: 1 },
         maxSeats: { initial: 1, cap: 6 },
         advanceThreshold: 0.9,
       },
