@@ -20,11 +20,12 @@ import type { FenrirExtEvent } from '../events.ts'
 import type { StrategyBaseAdapterConfig } from './adapter-types.ts'
 import type { WolfBrainAgent, WolfFormation } from '../agents/wolf-brain.ts'
 import type { MasonCollective } from '../agents/mason-collective.ts'
+import type { GameEvent } from '../../../lupa/types.ts'
 import { StrategyBaseAdapter } from './strategy-base-adapter.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
 import { alivePlayers } from '../../../lupa/roles.ts'
 import { planToVote } from '../plan/plan-helpers.ts'
-import { parseDualPlanSlots } from '../plan/plan-vocab.ts'
+import { parseDualPlanSlots, describePlanIndices } from '../plan/plan-vocab.ts'
 
 // ============================================================
 // Config
@@ -55,6 +56,12 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     this.turnOwner = this.rng.next() < 0.5 ? 'mason' : 'wolf'
   }
 
+  /** コメントイベントを events に追加 */
+  private emitComment(pctx: PhaseContext<FenrirExtEvent, FenrirExt>, text: string): void {
+    const events = pctx.events as (GameEvent | FenrirExtEvent)[]
+    events.push({ type: 'comment', text })
+  }
+
   override onSetup(
     roles: Map<number, SystemRole>,
     state: GameState<FenrirExt>,
@@ -82,10 +89,20 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     this.runRetar(pctx, ext)
     const claims = new Map<number, DayClaim>()
 
+    // Emit turn info
+    this.emitComment(pctx, `[BB] Day ${pctx.day}: ${this.turnOwner} turn`)
+
     // Wolf brain: get formation for this day
     const wolfCtx = this.buildWolfBrainCtx(pctx, state, ext)
     if (wolfCtx) {
       this.cachedFormation = this.wolfBrain.getFormation(wolfCtx)
+      // Emit formation details
+      for (const w of this.cachedFormation.wolves) {
+        const detail = w.claimRole === 'lurk' || w.claimRole === 'villager_co'
+          ? w.claimRole
+          : `${w.claimRole} → seat${w.fakeTarget}${w.claimRole === 'seer' || w.claimRole === 'medium' ? ` ${w.fakeResult}` : ''}`
+        this.emitComment(pctx, `[BB] wolf seat${w.wolfSeat} (slot${w.wolfSlot}): ${detail}`)
+      }
     }
 
     const wolfSeatSet = new Set(this.wolfSeats)
@@ -127,8 +144,10 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
 
     if (this.turnOwner === 'mason') {
       target = this.getMasonTarget(pctx, state, ext)
+      this.emitComment(pctx, `[BB] mason brain → execute seat${target ?? '?'}`)
     } else {
       target = this.getWolfTarget(pctx, state, ext)
+      this.emitComment(pctx, `[BB] wolf brain → execute seat${target ?? '?'}`)
     }
 
     // Flip turn for next day
@@ -139,6 +158,7 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     // Fallback: if no valid target, pick first alive non-self
     const alive = vctx.alivePlayers
     if (target == null || !alive.includes(target)) {
+      this.emitComment(pctx, `[BB] fallback: target seat${target} invalid, using seat${alive[0]}`)
       target = alive[0]
     }
 
@@ -171,6 +191,7 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
       const wolfCtx = this.buildWolfBrainCtx(pctx, state, ext)
       if (wolfCtx) {
         const wolfAction = this.wolfBrain.decideNightAction(wolfCtx)
+        this.emitComment(pctx, `[BB] wolf attack: seat${wolfAction.attacker} → seat${wolfAction.target}`)
         for (const wolf of aliveWolves) {
           if (wolf.seat === wolfAction.attacker) {
             actions.set(wolf.seat, { type: 'attack', target: wolfAction.target })
@@ -218,7 +239,14 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
 
     // Mason brain generates plan via getOrInfer → plan tokens
     const result = this.masonBrain.getOrInfer(teamCtx)
-    if (!result.planActions || result.planActions.length === 0) return null
+    if (!result.planActions || result.planActions.length === 0) {
+      this.emitComment(pctx, `[BB] mason plan: (empty)`)
+      return null
+    }
+
+    // Emit plan details
+    const masonAlive = allMasons.some(p => p.alive)
+    this.emitComment(pctx, `[BB] mason plan: ${describePlanIndices(result.planActions)}${masonAlive ? '' : ' (mason dead, ghost inference)'}`)
 
     // Resolve plan[0] to a target seat
     const { forwardSlots } = parseDualPlanSlots(result.planActions)
