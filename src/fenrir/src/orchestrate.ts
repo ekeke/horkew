@@ -871,8 +871,9 @@ async function main(): Promise<void> {
     const bbStep = steps.find(s => s.type === 'training' && s.name === 'brain_battle') as TrainingStep
     if (!bbStep) throw new Error('brain_battle step not found in brain-battle curriculum')
 
-    // Mason frozen weights: checkpoint-base から mason_collective をロード
+    // Mason collective: 推論用 + 学習用
     const masonCollectiveNet = createMasonCollectiveNetwork()
+    const masonCollectiveTf = createMasonCollectiveTfNetwork(config.learningRate)
     const masonDir = `${config.checkpointBase}/ckpt-mason_collective`
     const masonCkpt = findCheckpoint(masonDir, 'collective')
     if (masonCkpt) {
@@ -886,6 +887,7 @@ async function main(): Promise<void> {
     const wolfBrainNet = createWolfBrainNetwork()
     const wolfBrainTf = createWolfBrainTfNetwork(config.learningRate)
     log(`Wolf Brain NN: ${wolfBrainNet.totalParams} params`)
+    log(`Mason Brain NN: ${masonCollectiveNet.totalParams} params`)
 
     // Worker pool
     if (config.workers !== 0) {
@@ -895,9 +897,9 @@ async function main(): Promise<void> {
     const bbCtx: PhaseRunnerContext = {
       config, trainingConfig, progress, runId, gitSha,
       networks: new Map<string, AnyNetwork>([['mason_collective', masonCollectiveNet]]),
-      tfNetworks: new Map<string, AnyTfNetwork>(),
-      frozenWeights: new Map([['mason_collective', packWeights(masonCollectiveNet)]]),
-      frozenNets: new Map([['mason_collective', masonCollectiveNet]]),
+      tfNetworks: new Map<string, AnyTfNetwork>([['mason_collective', masonCollectiveTf]]),
+      frozenWeights: new Map(),
+      frozenNets: new Map(),
       wolfBrainNetwork: wolfBrainNet,
       wolfBrainTfNetwork: wolfBrainTf,
       checkShutdown,
@@ -910,6 +912,7 @@ async function main(): Promise<void> {
     await runTrainingPhase(bbStep, bbCtx)
 
     wolfBrainTf.dispose()
+    masonCollectiveTf.dispose()
     terminateGameWorkerPool()
     log(`${BOLD}Brain Battle training complete!${RESET}`)
     return

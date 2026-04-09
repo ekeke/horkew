@@ -417,16 +417,13 @@ function buildBrainBattleCurriculum(): PhaseStep[] {
     type: 'training',
     name: 'brain_battle',
     displayName: 'Phase BB: Brain Battle',
-    activeModels: ['wolf_brain'],
+    activeModels: ['wolf_brain', 'mason_collective'],
     strategyOnly: false,
     adapter: 'brain-battle',
     ppo: { freezePlan: false },
     graduation: {
       type: 'min_iter',
       minIter: 300,
-    },
-    frozen: {
-      frozenModels: ['mason_collective'],
     },
     gameGen: {
       mode: 'multi_model',
@@ -435,7 +432,7 @@ function buildBrainBattleCurriculum(): PhaseStep[] {
     agentAssignment: {
       village: 'heuristic',
       wolf_collective: 'heuristic',
-      mason_collective: 'frozen',
+      mason_collective: 'neural',
       fanatic: 'heuristic',
       third: 'heuristic',
     },
