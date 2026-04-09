@@ -222,7 +222,8 @@ export abstract class CollectiveAgentBase extends TeamAgentBase {
   private cachedResult: ForwardResult | null = null
   private cachedDay = -1
 
-  protected getOrInfer(ctx: TeamDecisionContext): ForwardResult {
+  /** Day-cached inference. Public for external access (e.g., BrainBattleAdapter). */
+  getOrInfer(ctx: TeamDecisionContext): ForwardResult {
     if (this.cachedDay === ctx.day && this.cachedResult) {
       return this.cachedResult
     }
