@@ -828,11 +828,10 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
         return { winRates, avgLen, count: results.length }
       }
 
-      const [altResult, masonResult, wolfResult] = await Promise.all([
-        runBBEval('alternate', evalGames),
-        runBBEval('mason_only', halfEval),
-        runBBEval('wolf_only', halfEval),
-      ])
+      // Sequential eval (worker pool cannot handle concurrent generateGamesParallel calls)
+      const altResult = await runBBEval('alternate', evalGames)
+      const masonResult = await runBBEval('mason_only', halfEval)
+      const wolfResult = await runBBEval('wolf_only', halfEval)
 
       process.stderr.write('\r\x1b[K')
 
