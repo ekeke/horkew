@@ -3,7 +3,7 @@
   const ROLE_SHORT: Record<string, string> = {villager:'村',seer:'占',medium:'霊',bodyguard:'狩',mason:'共',nekomata:'猫',werewolf:'狼',possessed:'狂',fanatic:'信',werehamster:'狐',immoralist:'背'}
   const ROLE_COLORS: Record<string, string> = {villager:'var(--color-village)',seer:'var(--ctp-sapphire)',medium:'var(--ctp-lavender)',bodyguard:'var(--ctp-peach)',mason:'var(--ctp-green)',nekomata:'var(--ctp-pink)',werewolf:'var(--color-wolf)',possessed:'var(--ctp-maroon)',fanatic:'var(--ctp-flamingo)',werehamster:'var(--color-fox)',immoralist:'var(--ctp-rosewater)'}
 
-  type IndexEntry = { file: string, seed: number, result: string, gameLength: number, model?: string, iteration?: number }
+  type IndexEntry = { file: string, seed: number, result: string, gameLength: number, model?: string, iteration?: number, gitSha?: string, runId?: string }
   type DaySnapshot = {
     global: { aliveCount: number, commander: number | null, demandWolfCoCount: number, aliveParity: number }
     seats: Array<{ alive: boolean, claimedRole?: string, blackCount: number, whiteCount: number, voteReceived: number, suspicion: number, trust: number, executeProposal: number, isCommander: boolean, accuseWolf: number, accuseFox: number, voteIntent: number, nominateCommander: number, planApproved: number, confirmHuman: number, confirmWolf: number, voteFor: number, voteAgainst: number }>
@@ -31,6 +31,9 @@
     timeline: Array<TimelineStep>
     daySnapshots?: Record<string, DaySnapshot>
     playerSteps?: PlayerStep[]
+    model?: string
+    iteration?: number
+    gitSha?: string
   }
   type TimelineStep = {
     seat: number
@@ -73,7 +76,16 @@
     try {
       const res = await fetch(`${base}inspect/index.json`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`${res.status}`)
-      const newIndex = await res.json()
+      const newIndex = (await res.json()) as IndexEntry[]
+      // 時系列ソート: タイムスタンプ形式ファイル名の降順（新しい順）、それ以外は seed 昇順
+      newIndex.sort((a, b) => {
+        const aTs = a.file.match(/^\d{14}\.json$/)
+        const bTs = b.file.match(/^\d{14}\.json$/)
+        if (aTs && bTs) return b.file.localeCompare(a.file)
+        if (aTs) return -1
+        if (bTs) return 1
+        return a.seed - b.seed
+      })
       // 選択中のゲームを維持
       const prevSeed = selectedGameIdx >= 0 ? index[selectedGameIdx]?.seed : null
       index = newIndex
@@ -124,6 +136,16 @@
     } finally {
       gameLoading = false
     }
+  }
+
+  /** model フィールドからフェーズ短縮名を抽出 (phase1p_wolf_collective → P1' wolf) */
+  function phaseTag(model?: string): string {
+    if (!model) return ''
+    if (model.startsWith('phase2_')) return 'P2'
+    if (model.startsWith('phase1p_')) return "P1'"
+    if (model === 'mason_individual') return 'P0'
+    // Phase 1 models: village, wolf_collective, etc.
+    return 'P1'
   }
 
   function formatEntryLabel(entry: IndexEntry): string {
@@ -293,6 +315,7 @@
             class:active={i === selectedGameIdx}
             onclick={() => selectGame(i)}
           >
+            {#if entry.model}<span class="inspect-phase-tag">{phaseTag(entry.model)}</span>{/if}
             <span class="inspect-seed">{formatEntryLabel(entry)}</span>
             <span class="inspect-result {resultClass(entry.result)}">{resultShort(entry.result)}</span>
             <span class="inspect-days">{entry.gameLength}d</span>
@@ -305,6 +328,15 @@
         {#if gameLoading}
           <div class="inspect-msg">読み込み中...</div>
         {:else if game}
+          <!-- Phase info bar -->
+          {#if game.model || game.iteration != null}
+            <div class="inspect-phase-bar">
+              {#if game.model}<span class="inspect-phase-tag">{phaseTag(game.model)}</span> <span class="inspect-phase-model">{game.model}</span>{/if}
+              {#if game.iteration != null}<span class="inspect-phase-iter">iter {game.iteration}</span>{/if}
+              {#if game.gitSha}<span class="inspect-phase-sha">{game.gitSha}</span>{/if}
+              <span class="inspect-phase-result">seed={game.seed} {game.result} {game.gameLength}d</span>
+            </div>
+          {/if}
           <!-- Players bar -->
           <div class="inspect-players">
             {#each game.players as p}
@@ -728,12 +760,37 @@
   }
   .inspect-game-item:hover { background: var(--ctp-surface0); }
   .inspect-game-item.active { background: var(--ctp-surface1); }
+  .inspect-phase-tag {
+    font-size: 0.7rem;
+    font-weight: bold;
+    padding: 0 3px;
+    border-radius: 3px;
+    background: var(--ctp-surface1);
+    color: var(--ctp-mauve);
+    flex-shrink: 0;
+  }
   .inspect-seed { color: var(--ctp-sapphire); font-weight: bold; }
   .inspect-days { color: var(--ctp-subtext0); margin-left: auto; }
   .result-village { color: var(--color-village); }
   .result-wolf { color: var(--color-wolf); }
   .result-fox { color: var(--color-fox); }
   .result-draw { color: var(--ctp-subtext0); }
+
+  /* --- Center: Phase info bar --- */
+  .inspect-phase-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 4px 8px;
+    background: var(--ctp-mantle);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+  .inspect-phase-model { color: var(--ctp-text); font-weight: 500; }
+  .inspect-phase-iter { color: var(--ctp-yellow); }
+  .inspect-phase-sha { color: var(--ctp-overlay1); font-family: 'Consolas', 'Menlo', monospace; font-size: 0.75rem; }
+  .inspect-phase-result { color: var(--ctp-subtext0); margin-left: auto; }
 
   /* --- Center: Timeline --- */
   .inspect-center {

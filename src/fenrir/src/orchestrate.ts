@@ -22,7 +22,7 @@ import {
   runTrainingPhase,
   type TrainProgress, type PhaseRunnerContext,
 } from './phase-runner.ts'
-import { buildCurriculum, type TrainingStep } from './curriculum.ts'
+import { buildCurriculum, formatAssignment, type TrainingStep } from './curriculum.ts'
 import { computeRefPlanLogits } from './agents/neural-agent.ts'
 import { DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
@@ -895,27 +895,47 @@ async function main(): Promise<void> {
   }
 
   // WRE再学習: PPOゲーム結果からWREを更新する関数
-  const wreRefreshBuffer: Array<{ individualSteps: Array<{ role: string, steps: Array<{ observation: number[] }> }>, result: string }> = []
+  // ゲーム結果全体ではなく抽出済みサンプル (observation + label) のみバッファに蓄積
+  // ゲーム結果をそのまま溜めると observation の number[] が 43MB/iter 蓄積して OOM になる
+  const MAX_WRE_BUFFER_MB = 1024  // バッファ上限 1GB
+  if (config.wreRefresh > 0 && wreSharedWeights) {
+    // 1 iter あたり推定サンプル数: batch × seats × ~5 steps
+    const estimatedSamplesPerIter = config.batch * 14 * 5
+    const bytesPerSample = 1209 * 4 + 3 * 4  // Float32Array(observation) + Float32Array(label)
+    const estimatedBufferMB = (config.wreRefresh * estimatedSamplesPerIter * bytesPerSample) / (1024 * 1024)
+    if (estimatedBufferMB > MAX_WRE_BUFFER_MB) {
+      const maxRefresh = Math.floor(MAX_WRE_BUFFER_MB / (estimatedSamplesPerIter * bytesPerSample / (1024 * 1024)))
+      throw new Error(
+        `--wre-refresh ${config.wreRefresh} would accumulate ~${estimatedBufferMB.toFixed(0)}MB in WRE sample buffer (limit: ${MAX_WRE_BUFFER_MB}MB). ` +
+        `Reduce to --wre-refresh ${maxRefresh} or less.`,
+      )
+    }
+  }
+  const wreSampleBuffer: { observations: Float32Array[], labels: Float32Array[] } = { observations: [], labels: [] }
   let wreRefreshCounter = 0
   async function maybeRefreshWre(
     gameResults: Array<{ individualSteps: Array<{ role: string, steps: Array<{ observation: number[] }> }>, result: string }>,
   ): Promise<void> {
     if (!wreSharedWeights || config.wreRefresh <= 0) return
-    wreRefreshBuffer.push(...gameResults)
+    const { observations, labels } = extractWreSamplesFromGameResults(gameResults)
+    wreSampleBuffer.observations.push(...observations)
+    wreSampleBuffer.labels.push(...labels)
     wreRefreshCounter++
     if (wreRefreshCounter < config.wreRefresh) return
 
     // 再学習サイクル実行
     wreRefreshCounter = 0
-    const { observations, labels } = extractWreSamplesFromGameResults(wreRefreshBuffer)
-    wreRefreshBuffer.length = 0
+    const bufObs = wreSampleBuffer.observations
+    const bufLabels = wreSampleBuffer.labels
+    wreSampleBuffer.observations = []
+    wreSampleBuffer.labels = []
 
-    if (observations.length < 100) {
-      log(`WRE refresh skipped: only ${observations.length} samples (need ≥100)`)
+    if (bufObs.length < 100) {
+      log(`WRE refresh skipped: only ${bufObs.length} samples (need ≥100)`)
       return
     }
 
-    log(`WRE refresh: ${observations.length} samples from ${gameResults.length} recent games...`)
+    log(`WRE refresh: ${bufObs.length} samples from recent games...`)
     const { TfWinrateNetwork } = await import('./ml/nn-tf-winrate.ts')
     const tfWre = new TfWinrateNetwork(wreSharedWeights!.config, 3e-4)
     // 現在の重みをロードして fine-tune (warm start)
@@ -930,11 +950,11 @@ async function main(): Promise<void> {
     const epochs = 5
     for (let e = 0; e < epochs; e++) {
       let totalLoss = 0, batches = 0
-      for (let i = 0; i < observations.length; i += batchSize) {
-        const end = Math.min(i + batchSize, observations.length)
+      for (let i = 0; i < bufObs.length; i += batchSize) {
+        const end = Math.min(i + batchSize, bufObs.length)
         const { loss } = tfWre.trainBatch(
-          observations.slice(i, end),
-          labels.slice(i, end),
+          bufObs.slice(i, end),
+          bufLabels.slice(i, end),
           2.0,
         )
         totalLoss += loss
@@ -952,7 +972,7 @@ async function main(): Promise<void> {
     // チェックポイント保存
     const wreCkptPath = `${config.checkpointBase}/wre-latest.json`
     saveWinrateCheckpoint(updatedNet, wreSharedWeights!.config, wreCkptPath, {
-      epoch: 0, brierScore: 0, trainGames: observations.length,
+      epoch: 0, brierScore: 0, trainGames: bufObs.length,
     })
 
     tfWre.dispose()
@@ -1248,6 +1268,7 @@ async function main(): Promise<void> {
       }
     } else {
       log(`${BOLD}=== Phase 0: Mason Individual ===${RESET}`)
+      log(`  Agent assignment: ${formatAssignment({ village: 'heuristic', wolf_collective: 'heuristic', mason_collective: 'heuristic', fanatic: 'heuristic', third: 'heuristic' })}`)
 
       // Mason individual uses the same architecture as village
       const masonNet = createNetwork()
@@ -1333,6 +1354,10 @@ async function main(): Promise<void> {
         const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
         const serializedResults = await generateGamesParallel({
           weights: sharedWeights,
+          agentAssignment: {
+            village: 'heuristic', wolf_collective: 'heuristic',
+            mason_collective: 'heuristic', fanatic: 'heuristic', third: 'heuristic',
+          },
           trainingConfig,
           phase: 1,
           mlRoles: masonMlRoles,
@@ -1508,6 +1533,7 @@ async function main(): Promise<void> {
   // === Phase 1: ラウンドロビン ===
   if (!config.phase2Only) {
     log(`${BOLD}=== Phase 1: Round-Robin Training ===${RESET}`)
+    log(`  Agent assignment: ${formatAssignment({ village: 'neural', wolf_collective: 'heuristic', mason_collective: 'frozen', fanatic: 'heuristic', third: 'heuristic' })}`)
 
     const graduated = new Set<ModelName>()
     // カリキュラム: NN 席数を徐々に増やす (village のみ)
@@ -1599,9 +1625,12 @@ async function main(): Promise<void> {
           const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
           const serializedResults = await generateGamesParallel({
             weights: sharedWeights,
+            agentAssignment: {
+              village: 'neural', wolf_collective: 'heuristic',
+              mason_collective: 'frozen', fanatic: 'heuristic', third: 'heuristic',
+            },
             wolfTeamWeights: sharedWolfWeights,
             masonTeamWeights: sharedMasonWeights,
-            useTeamStrategy: group.teamType,
             trainingConfig,
             phase: 1,
             mlRoles: group.roles,
@@ -1843,6 +1872,7 @@ async function main(): Promise<void> {
   // === Phase 1': 集団NN + 狂信者 + 第三勢力の学習 (frozen村NN注入) ===
   if (!config.phase2Only) {
     log(`${BOLD}=== Phase 1': Collective + Non-Village Training ===${RESET}`)
+    log(`  Agent assignment: ${formatAssignment({ village: 'frozen', wolf_collective: 'neural', mason_collective: 'neural', fanatic: 'neural', third: 'neural' })}`)
     progress.latest = { phase: "1'", model: '-', iter: 0, maxIter: config.iterations }
     writeTrainProgress(progress)
 
@@ -1958,6 +1988,10 @@ async function main(): Promise<void> {
             const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
             serializedResults = await generateGamesParallel({
               weights: frozenVillageWeights,  // fallback
+              agentAssignment: {
+                village: 'frozen', wolf_collective: 'neural',
+                mason_collective: 'neural', fanatic: 'neural', third: 'neural',
+              },
               modelGroupWeights,
               villageFrozenWeights: frozenVillageWeights,
               trainingConfig,

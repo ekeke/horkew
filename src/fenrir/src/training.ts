@@ -1176,27 +1176,41 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
 
       // マルチモデル: グループ別の重みをパック (heuristicOnly は除外)
       let modelGroupWeights: Record<string, SharedWeights> | undefined
-      let heuristicGroups: string[] | undefined
       if (multiModel) {
         modelGroupWeights = {}
-        heuristicGroups = []
         for (const [name, group] of modelGroups) {
-          if (group.heuristicOnly) {
-            heuristicGroups.push(name)
-          } else {
+          if (!group.heuristicOnly) {
             modelGroupWeights[name] = packWeights(group.network)
           }
+        }
+      }
+
+      // agentAssignment を構築
+      const agentAssignment: import('./curriculum.ts').AgentAssignment = {
+        village: 'heuristic', wolf_collective: 'heuristic',
+        mason_collective: 'heuristic', fanatic: 'heuristic', third: 'heuristic',
+      }
+      if (multiModel) {
+        for (const [name, group] of modelGroups) {
+          const key = name as import('./curriculum.ts').ModelName
+          agentAssignment[key] = group.heuristicOnly ? 'heuristic' : 'neural'
+        }
+      } else if (config.mlRoles) {
+        // single-model: mlRoles に含まれるグループを neural に
+        for (const role of config.mlRoles) {
+          const groupName = ROLE_TO_GROUP_NAME.get(role as import('../../types/index.ts').SystemRole)
+          if (groupName) agentAssignment[groupName as import('./curriculum.ts').ModelName] = 'neural'
         }
       }
 
       const serializedResults = await generateGamesParallel(
         {
           weights: sharedWeights,
+          agentAssignment,
           wolfTeamWeights: sharedWolfWeights,
           masonTeamWeights: sharedMasonWeights,
           poolWeights: poolSharedWeights,
           modelGroupWeights,
-          heuristicGroups,
           trainingConfig: config,
           phase,
           mlRoles: config.mlRoles,

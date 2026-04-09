@@ -125,6 +125,8 @@ export function unpackWreWeights(shared: WreSharedWeights): WinrateNetwork {
 /** メインスレッド → Worker */
 export type WorkerRequest = {
   type: 'generate'
+  /** 各モデルグループのエージェント種別 (宣言的割り当て) */
+  agentAssignment: import('./curriculum.ts').AgentAssignment
   /** 個人エージェントの重み（単一モデルモード） */
   weights: SharedWeights
   /** 狼チームの重み (Phase 2+) */
@@ -135,8 +137,6 @@ export type WorkerRequest = {
   poolWeights?: SharedWeights[]
   /** モデルグループ別の重み (Phase 2 マルチモデルモード、heuristicOnly グループは含まない) */
   modelGroupWeights?: Record<string, SharedWeights>
-  /** heuristic フォールバックするグループ名リスト */
-  heuristicGroups?: string[]
   /** ゲーム設定 (JSON-safe) */
   trainingConfig: TrainingConfig
   /** このバッチの seed 範囲 */
@@ -145,8 +145,6 @@ export type WorkerRequest = {
   phase: number
   /** Phase 1でMLにする役職 */
   mlRoles?: string[]
-  /** チーム戦略の選択制御 (orchestrator用: 指定チームだけML、残りはheuristic) */
-  useTeamStrategy?: 'wolf_team' | 'mason_team'
   /** MLにする最大席数 (カリキュラム学習用、未指定=制限なし) */
   mlMaxSeats?: number
   /** ML/Retarを有効にする開始Day (カリキュラム用、未指定=Day1=全日) */

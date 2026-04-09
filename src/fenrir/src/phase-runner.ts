@@ -9,10 +9,10 @@ import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import type { TrainingConfig } from './training.ts'
 import type { ProcessedStep } from './ml/trajectory.ts'
 import type { SharedWeights, SerializedGameResult, WreSharedWeights } from './parallel.ts'
-import type { TrainingStep, ModelName } from './curriculum.ts'
+import type { TrainingStep, ModelName, AgentAssignment } from './curriculum.ts'
 import {
   MODEL_GROUPS, MODEL_NAMES, ROLE_TO_GROUP, BASELINE_RATES,
-  klTargetForIter,
+  klTargetForIter, formatAssignment,
 } from './curriculum.ts'
 import { computeRefPlanLogits } from './agents/neural-agent.ts'
 import { normalizeAdvantages, computeGAE } from './ml/trajectory.ts'
@@ -254,19 +254,29 @@ export function appendKlLog(
 type PpoResult = { policyLoss: number, valueLoss: number, entropy: number, predictLoss: number, klLoss: number, klPlanLoss: number }
 const ZERO_PPO: PpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
 
-/** Pack weights for all MODEL_GROUPS models from context networks */
-function packAllModelWeights(ctx: PhaseRunnerContext, frozenModels?: Set<string>): Record<string, SharedWeights> {
-  const result: Record<string, SharedWeights> = {}
+/** Build agentAssignment and modelGroupWeights from step definition and frozen state */
+function buildAssignmentAndWeights(
+  ctx: PhaseRunnerContext,
+  step: TrainingStep,
+  frozenModels?: Set<string>,
+): { assignment: AgentAssignment, modelGroupWeights: Record<string, SharedWeights> } {
+  const assignment = { ...step.agentAssignment }
+  const modelGroupWeights: Record<string, SharedWeights> = {}
   for (const name of MODEL_NAMES) {
+    // frozen override: step 定義が neural でも frozenModels に含まれていれば frozen
+    if (frozenModels?.has(name) && assignment[name] !== 'heuristic') {
+      assignment[name] = 'frozen'
+    }
+    if (assignment[name] === 'heuristic') continue
+    // neural / frozen → weights を pack
     if (frozenModels?.has(name)) {
-      // Use pre-packed frozen weights
       const fw = ctx.frozenWeights.get(name)
-      if (fw) { result[name] = fw; continue }
+      if (fw) { modelGroupWeights[name] = fw; continue }
     }
     const net = ctx.networks.get(name)
-    if (net) result[name] = packWeights(net)
+    if (net) modelGroupWeights[name] = packWeights(net)
   }
-  return result
+  return { assignment, modelGroupWeights }
 }
 
 /** Build EvaluateOptions from context */
@@ -335,6 +345,7 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
   const phase = phaseLabel(step)
 
   ctx.log(`${BOLD}=== ${step.displayName} ===${RESET}`)
+  ctx.log(`  Agent assignment: ${formatAssignment(step.agentAssignment)}`)
 
   // Only MODEL_GROUPS models are trained (mason_individual handled separately in future)
   const activeModels = step.activeModels.filter(n => n in MODEL_GROUPS) as ModelName[]
@@ -416,13 +427,14 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
         const allMasonCollective: ProcessedStep[] = []
 
         if (gameWorkerPoolSize() > 0 && step.gameGen.mode === 'multi_model') {
-          const modelGroupWeights = packAllModelWeights(ctx, frozenModelSet)
+          const { assignment, modelGroupWeights } = buildAssignmentAndWeights(ctx, step, frozenModelSet)
           const villageFrozenWeights = frozenModelSet.has('village')
             ? (ctx.frozenWeights.get('village') ?? packWeights(ctx.networks.get('village')!))
             : undefined
           const inspectSeeds = ctx.pickInspectSeeds(seeds)
           const serializedResults = await generateGamesParallel({
             weights: packWeights(ctx.networks.get('village')!),  // fallback
+            agentAssignment: assignment,
             modelGroupWeights,
             villageFrozenWeights,
             trainingConfig,

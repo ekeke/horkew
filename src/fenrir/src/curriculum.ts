@@ -22,6 +22,23 @@ export const MODEL_GROUPS = {
 export type ModelName = keyof typeof MODEL_GROUPS
 export const MODEL_NAMES = Object.keys(MODEL_GROUPS) as ModelName[]
 
+// ============================================================
+// Agent Assignment (declarative per-group agent type)
+// ============================================================
+
+/** エージェント種別: neural=学習対象NN, heuristic=ルールベース, frozen=固定重みNN */
+export type AgentMode = 'neural' | 'heuristic' | 'frozen'
+
+/** 各モデルグループのエージェント種別を宣言的に指定 */
+export type AgentAssignment = Record<ModelName, AgentMode>
+
+const MODE_SYMBOL: Record<AgentMode, string> = { neural: 'NN', heuristic: 'heu', frozen: 'frz' }
+
+/** assignment を1行の読みやすい文字列にフォーマット */
+export function formatAssignment(assignment: AgentAssignment): string {
+  return MODEL_NAMES.map(name => `${name}=${MODE_SYMBOL[assignment[name]]}`).join('  ')
+}
+
 /** role → モデルグループ名の逆引きマップ (MODEL_GROUPSから自動構築) */
 export const ROLE_TO_GROUP: Record<string, ModelName> = (() => {
   const map: Record<string, ModelName> = {}
@@ -192,6 +209,8 @@ export type TrainingStep = {
   frozen?: FrozenConfig
   /** Game generation configuration */
   gameGen: SingleModelGen | MultiModelGen
+  /** 各モデルグループのエージェント種別 (宣言的割り当て) */
+  agentAssignment: AgentAssignment
   /** Enable mason takeover (partner inherits agent on death) */
   enableMasonTakeover?: boolean
   /** Which config field controls max iterations for this phase */
@@ -260,6 +279,13 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
         mlRoles: ['mason'],
         seedOffsetBase: 0,
       },
+      agentAssignment: {
+        village: 'heuristic',
+        wolf_collective: 'heuristic',
+        mason_collective: 'heuristic',
+        fanatic: 'heuristic',
+        third: 'heuristic',
+      },
       enableMasonTakeover: true,
       maxIterations: 'iterations',
       workerPhase: 1,
@@ -305,6 +331,13 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
         mlRoles: VILLAGE_ROLES,
         seedOffsetBase: 0,
       },
+      agentAssignment: {
+        village: 'neural',
+        wolf_collective: 'heuristic',
+        mason_collective: 'frozen',
+        fanatic: 'heuristic',
+        third: 'heuristic',
+      },
       maxIterations: 'iterations',
       workerPhase: 1,
     })
@@ -332,6 +365,13 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
         mode: 'multi_model',
         seedOffsetBase: 10000,
       },
+      agentAssignment: {
+        village: 'frozen',
+        wolf_collective: 'neural',
+        mason_collective: 'neural',
+        fanatic: 'neural',
+        third: 'neural',
+      },
       maxIterations: 'iterations',
       workerPhase: 1,
     })
@@ -353,6 +393,13 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
       gameGen: {
         mode: 'multi_model',
         seedOffsetBase: 20000,
+      },
+      agentAssignment: {
+        village: 'neural',
+        wolf_collective: 'neural',
+        mason_collective: 'neural',
+        fanatic: 'neural',
+        third: 'neural',
       },
       maxIterations: 'phase2Iterations',
       workerPhase: 2,
