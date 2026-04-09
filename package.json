@@ -21,7 +21,7 @@
     "verify:hati": "node --experimental-strip-types src/hati/verify.ts",
     "train": "node --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/cli.ts",
     "play": "node --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/play.ts",
-    "train:orchestrate": "TF_FORCE_GPU_ALLOW_GROWTH=true node --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/orchestrate.ts",
+    "train:orchestrate": "TF_FORCE_GPU_ALLOW_GROWTH=true node --max-old-space-size=8192 --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/orchestrate.ts",
     "generate-snapshots": "node --experimental-strip-types src/fenrir/src/generate-snapshots.ts",
     "inspect": "node --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/inspect.ts",
     "eval-summary": "node --experimental-strip-types src/howl/scripts/eval-summary.ts",

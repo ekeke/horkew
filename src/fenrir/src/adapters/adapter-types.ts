@@ -42,6 +42,8 @@ export type StrategyBaseAdapterConfig = {
 export type MasonTrainingAdapterConfig = StrategyBaseAdapterConfig & {
   /** Mason takeover: ML mason 死亡時に生存パートナーに agent を移す */
   onMasonTakeover?: (deadSeat: number, newSeat: number) => void
+  /** Phase 2 自己対戦モード: 村エージェントの trajectory 記録 + mason は teamAgent で投票 */
+  selfPlayMode?: boolean
 }
 
 /** 後方互換エイリアス */

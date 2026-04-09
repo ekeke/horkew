@@ -27,6 +27,7 @@ import { isVillagePowerRole } from '../agents/rule-based-agent.ts'
 import { resolvePlanSlot } from '../plan/plan-resolve.ts'
 import { planToVote } from '../plan/plan-helpers.ts'
 import { encodeObservation, collectObservation } from '../observation.ts'
+import { sigmoid } from '../ml/nn.ts'
 import { describePlanIndices } from '../plan/plan-vocab.ts'
 import { RuleBasedAgent } from '../agents/rule-based-agent.ts'
 
@@ -192,7 +193,31 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
     const votes = new Map<number, number>()
     const decisions: Array<{ seat: number, reason: 'plan' | 'heuristic' | 'wolf' | 'agent' }> = []
     const alive = alivePlayers(state)
+    const selfPlay = this.masonConfig.selfPlayMode
     for (const player of alive) {
+      // selfPlay + mason + teamAgent → mason_collective で投票（trajectory 記録もここ）
+      if (selfPlay && player.role === 'mason' && this.config.masonTeamAgent) {
+        const view = buildPlayerView(state, player.seat)
+        const ctx = this.buildCtx(
+          vctx as PhaseContext<FenrirExtEvent, FenrirExt>, player, view, ext, {
+            revoteRound: vctx.revoteRound,
+            revoteCandidates: vctx.candidates,
+            proposals: this.dayProposals,
+          },
+        )
+        if (this.config.captureObservations && isFirstRound) {
+          this.capturedObservations.push({
+            seat: player.seat, role: player.role, day: ctx.day,
+            observation: collectObservation(ctx),
+            proposals: this.dayProposals.map(p => ({ type: p.type, target: p.target })),
+          })
+        }
+        const teamCtx = this.buildTeamCtx(ctx, state, player.role, player.seat)
+        votes.set(player.seat, this.config.masonTeamAgent.decideVote(teamCtx))
+        decisions.push({ seat: player.seat, reason: 'agent' })
+        continue
+      }
+
       // 村陣営 + plan あり → 各自が独立に plan を解決して投票
       if (isFirstRound && isVillagerAligned(player.role) && this.planActions) {
         const view = buildPlayerView(state, player.seat)
@@ -213,6 +238,11 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
             observation: collectObservation(playerCtx),
             proposals: this.dayProposals.map(p => ({ type: p.type, target: p.target })),
           })
+        }
+
+        // selfPlay: 村エージェントの自前 strategy trajectory を記録
+        if (selfPlay) {
+          this.recordVillageStrategy(player.seat, playerCtx, alive.length, vctx.day)
         }
 
         const target = planToVote(this.planActions, playerCtx, ext.planState)
@@ -270,6 +300,26 @@ export class MasonTrainingAdapter extends StrategyBaseAdapter {
 
     this.afterVoteCollection(vctx, ext)
     return votes
+  }
+
+  /** selfPlay: 非 mason 村エージェントの strategy trajectory を記録する */
+  private recordVillageStrategy(
+    seat: number, ctx: import('../agents/agent.ts').DecisionContext,
+    aliveCount: number, day: number,
+  ): void {
+    const agent = this.getAgent(seat) as any
+    if (typeof agent.getStrategyResult !== 'function') return
+    const na = agent as NeuralAgent
+    const result = na.getStrategyResult(ctx)
+    na.setLastObs(encodeObservation(ctx))
+    if (!result.planActions) return
+    const predictLogits = result.policies.get('predict')
+    const predictActions = predictLogits ? sigmoid(predictLogits) : undefined
+    na.recordStrategy(
+      result.planActions, result.planLogProbs!,
+      predictActions, result.value, seat, aliveCount, day,
+      'MasonAdapter.onVote:selfPlay',
+    )
   }
 
   // ════════════════════════════════════════════

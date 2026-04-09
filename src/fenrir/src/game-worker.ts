@@ -105,76 +105,61 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     // seat → role マッピング (role フィールド出力用)
     let seatRoleMap: Map<number, SystemRole> | undefined
 
-    if (multiModel) {
-      // マルチモデルモード: onRolesAssigned で割り当てるので事前には何もしない
-    } else if (!useHeuristic || !mlRolesSet) {
-      for (let seat = 1; seat <= totalPlayers; seat++) {
-        if (useHeuristic && seat % 2 !== 0) continue
-
-        if (usePool && poolNets.length > 0 && seat % 3 === 0) {
-          const pastNet = poolNets[Math.floor(Math.random() * poolNets.length)]
-          neuralAgents.set(seat, new NeuralAgent(pastNet, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
-        } else {
-          neuralAgents.set(seat, new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
-        }
-      }
-    }
-
     let wolfTeamAgent: WolfTeamAgent | WolfCollective | WolfTeamRuleAgent | undefined
     let masonTeamAgent: MasonTeamAgent | MasonCollective | MasonTeamRuleAgent | undefined
-    if (config.strategyOnly && !multiModel) {
-      // strategy-only (単一モデル): チーム戦略はheuristicにフォールバック
-      if (req.useTeamStrategy === 'wolf_team' || (!req.useTeamStrategy && !useHeuristic)) {
-        wolfTeamAgent = new WolfTeamRuleAgent()
-      }
-      if (req.useTeamStrategy === 'mason_team' || (!req.useTeamStrategy && !useHeuristic)) {
-        masonTeamAgent = new MasonTeamRuleAgent()
-      }
-    } else if (req.useTeamStrategy) {
-      // orchestrator: 指定チームだけML
-      if (req.useTeamStrategy === 'wolf_team' && wolfTeamNet) {
-        wolfTeamAgent = new WolfTeamAgent(wolfTeamNet, { explore: true })
-      }
-      if (req.useTeamStrategy === 'mason_team' && masonTeamNet) {
-        masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: true })
-      }
-    } else if (!useHeuristic || multiModel) {
-      if (multiModel) {
-        // マルチモデル: groupNets から集団エージェントを事前構築
-        // adapter に渡す前に作る必要がある（adapter はコンストラクタ時にキャプチャするため）
-        const wolfNet = groupNets.get('wolf_collective')
-        if (wolfNet) {
-          const ws = new WolfCollective(wolfNet, { explore: true })
-          if (frozenVillageNet) ws.frozenVillageNetwork = frozenVillageNet
-          wolfTeamAgent = ws
-        }
-        const masonNet = groupNets.get('mason_collective')
-        if (masonNet) {
-          masonTeamAgent = new MasonCollective(masonNet, { explore: true })
-        }
-      } else {
-        if (wolfTeamNet) wolfTeamAgent = new WolfTeamAgent(wolfTeamNet, { explore: true })
-        if (masonTeamNet) masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: true })
-      }
-    }
-
-    const defaultAgent = (useHeuristic || multiModel) ? new RuleBasedAgent() : undefined
-
+    let defaultAgent: RuleBasedAgent | undefined
     let onRolesAssigned: ((seatRoles: Map<number, SystemRole>) => void) | undefined
 
-    if (multiModel) {
-      // マルチモデル: role に応じたグループの network を割り当て
-      // 集団NN (wolf_collective, mason_collective) は team strategy として設定
-      onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
-        seatRoleMap = seatRoles
+    if (req.agentAssignment) {
+      // === Assignment-based agent selection ===
+      const assignment = req.agentAssignment
+      const hasMultiModelWeights = req.modelGroupWeights != null
 
-        // 個人NN の割り当て (collective roles はチーム strategy 経由なのでスキップ)
-        // 集団NN (wolf_collective, mason_collective) は adapter 作成前に構築済み
-        for (const [seat, role] of seatRoles) {
-          const groupName = ROLE_TO_GROUP[role]
-          if (groupName === 'wolf_collective' || groupName === 'mason_collective') continue
-          const net = groupName ? groupNets.get(groupName) : undefined
-          if (net) {
+      // Collective team agents: only for 'neural' groups
+      if (assignment.wolf_collective === 'neural') {
+        if (hasMultiModelWeights) {
+          const wolfNet = groupNets.get('wolf_collective')
+          if (wolfNet) {
+            const ws = new WolfCollective(wolfNet, { explore: true })
+            if (frozenVillageNet) ws.frozenVillageNetwork = frozenVillageNet
+            wolfTeamAgent = ws
+          }
+        } else if (wolfTeamNet) {
+          wolfTeamAgent = new WolfTeamAgent(wolfTeamNet, { explore: true })
+        }
+      }
+
+      if (assignment.mason_collective === 'neural') {
+        if (hasMultiModelWeights) {
+          const masonNet = groupNets.get('mason_collective')
+          if (masonNet) {
+            masonTeamAgent = new MasonCollective(masonNet, { explore: true })
+          }
+        } else if (masonTeamNet) {
+          masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: true })
+        }
+      }
+
+      defaultAgent = new RuleBasedAgent()
+
+      if (hasMultiModelWeights) {
+        // Multi-model: role → group → assignment mode で個人エージェントを割り当て
+        onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
+          seatRoleMap = seatRoles
+          for (const [seat, role] of seatRoles) {
+            const groupName = ROLE_TO_GROUP[role]
+            if (!groupName || groupName === 'wolf_collective') continue
+            // mason: village NN でシャドウエージェント作成（commitMasonPlans の plan 生成用）
+            if (groupName === 'mason_collective') {
+              const villageNet = groupNets.get('village')
+              if (villageNet) {
+                neuralAgents.set(seat, new NeuralAgent(villageNet, { explore: true, strategyOnly: config.strategyOnly }))
+              }
+              continue
+            }
+            if (assignment[groupName as import('./curriculum.ts').ModelName] !== 'neural') continue
+            const net = groupNets.get(groupName)
+            if (!net) continue
             if (groupName === 'fanatic') {
               const fs = new FanaticAgent(net, { explore: true, strategyOnly: config.strategyOnly })
               if (frozenVillageNet) fs.frozenVillageNetwork = frozenVillageNet
@@ -183,30 +168,123 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
               neuralAgents.set(seat, new NeuralAgent(net, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
             }
           }
-          // groupName が無い (possessed等) → defaultAgent にフォールバック
         }
-      }
-    } else if (useHeuristic && mlRolesSet) {
-      onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
-        seatRoleMap = seatRoles
-        // frozen mason NN: mason 席に frozen 戦略を注入（trajectory は記録しない）
-        if (frozenMasonNet) {
-          for (const [seat, role] of seatRoles) {
-            if (role === 'mason') {
-              neuralAgents.set(seat, new NeuralAgent(frozenMasonNet, { explore: false, strategyOnly: config.strategyOnly }))
+      } else {
+        // Single-model: mlRoles + mlMaxSeats + frozen injection
+        const mlRolesLocal = req.mlRoles ? new Set(req.mlRoles) : null
+        onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
+          seatRoleMap = seatRoles
+          // Frozen mason injection (assignment says 'frozen')
+          if (frozenMasonNet && assignment.mason_collective === 'frozen') {
+            for (const [seat, role] of seatRoles) {
+              if (role === 'mason') {
+                neuralAgents.set(seat, new NeuralAgent(frozenMasonNet, { explore: false, strategyOnly: config.strategyOnly }))
+              }
+            }
+          }
+          // Neural seats from mlRoles, limited by mlMaxSeats
+          if (mlRolesLocal) {
+            const candidates = [...seatRoles].filter(([_, role]) => mlRolesLocal.has(role))
+            // seed ベースでシャッフル（再現性）
+            for (let i = candidates.length - 1; i > 0; i--) {
+              const j = (seed * 7 + i * 13) % (i + 1)
+              ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
+            }
+            const limit = req.mlMaxSeats ?? candidates.length
+            for (let i = 0; i < Math.min(limit, candidates.length); i++) {
+              neuralAgents.set(candidates[i][0], new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
             }
           }
         }
-        // mlMaxSeats で NN 席数を制限（カリキュラム学習）
-        const candidates = [...seatRoles].filter(([_, role]) => mlRolesSet.has(role))
-        // seed ベースでシャッフル（再現性）
-        for (let i = candidates.length - 1; i > 0; i--) {
-          const j = (seed * 7 + i * 13) % (i + 1)
-          ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
+      }
+    } else {
+      // === Legacy flag-based agent selection ===
+      if (multiModel) {
+        // マルチモデルモード: onRolesAssigned で割り当てるので事前には何もしない
+      } else if (!useHeuristic || !mlRolesSet) {
+        for (let seat = 1; seat <= totalPlayers; seat++) {
+          if (useHeuristic && seat % 2 !== 0) continue
+
+          if (usePool && poolNets.length > 0 && seat % 3 === 0) {
+            const pastNet = poolNets[Math.floor(Math.random() * poolNets.length)]
+            neuralAgents.set(seat, new NeuralAgent(pastNet, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+          } else {
+            neuralAgents.set(seat, new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+          }
         }
-        const limit = req.mlMaxSeats ?? candidates.length
-        for (let i = 0; i < Math.min(limit, candidates.length); i++) {
-          neuralAgents.set(candidates[i][0], new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+      }
+
+      if (config.strategyOnly && !multiModel) {
+        if (req.useTeamStrategy === 'wolf_team' || (!req.useTeamStrategy && !useHeuristic)) {
+          wolfTeamAgent = new WolfTeamRuleAgent()
+        }
+        if (req.useTeamStrategy === 'mason_team' || (!req.useTeamStrategy && !useHeuristic)) {
+          masonTeamAgent = new MasonTeamRuleAgent()
+        }
+      } else if (req.useTeamStrategy) {
+        if (req.useTeamStrategy === 'wolf_team' && wolfTeamNet) {
+          wolfTeamAgent = new WolfTeamAgent(wolfTeamNet, { explore: true })
+        }
+        if (req.useTeamStrategy === 'mason_team' && masonTeamNet) {
+          masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: true })
+        }
+      } else if (!useHeuristic || multiModel) {
+        if (multiModel) {
+          const wolfNet = groupNets.get('wolf_collective')
+          if (wolfNet) {
+            const ws = new WolfCollective(wolfNet, { explore: true })
+            if (frozenVillageNet) ws.frozenVillageNetwork = frozenVillageNet
+            wolfTeamAgent = ws
+          }
+          const masonNet = groupNets.get('mason_collective')
+          if (masonNet) {
+            masonTeamAgent = new MasonCollective(masonNet, { explore: true })
+          }
+        } else {
+          if (wolfTeamNet) wolfTeamAgent = new WolfTeamAgent(wolfTeamNet, { explore: true })
+          if (masonTeamNet) masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: true })
+        }
+      }
+
+      defaultAgent = (useHeuristic || multiModel) ? new RuleBasedAgent() : undefined
+
+      if (multiModel) {
+        onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
+          seatRoleMap = seatRoles
+          for (const [seat, role] of seatRoles) {
+            const groupName = ROLE_TO_GROUP[role]
+            if (groupName === 'wolf_collective' || groupName === 'mason_collective') continue
+            const net = groupName ? groupNets.get(groupName) : undefined
+            if (net) {
+              if (groupName === 'fanatic') {
+                const fs = new FanaticAgent(net, { explore: true, strategyOnly: config.strategyOnly })
+                if (frozenVillageNet) fs.frozenVillageNetwork = frozenVillageNet
+                neuralAgents.set(seat, fs)
+              } else {
+                neuralAgents.set(seat, new NeuralAgent(net, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+              }
+            }
+          }
+        }
+      } else if (useHeuristic && mlRolesSet) {
+        onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
+          seatRoleMap = seatRoles
+          if (frozenMasonNet) {
+            for (const [seat, role] of seatRoles) {
+              if (role === 'mason') {
+                neuralAgents.set(seat, new NeuralAgent(frozenMasonNet, { explore: false, strategyOnly: config.strategyOnly }))
+              }
+            }
+          }
+          const candidates = [...seatRoles].filter(([_, role]) => mlRolesSet.has(role))
+          for (let i = candidates.length - 1; i > 0; i--) {
+            const j = (seed * 7 + i * 13) % (i + 1)
+            ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
+          }
+          const limit = req.mlMaxSeats ?? candidates.length
+          for (let i = 0; i < Math.min(limit, candidates.length); i++) {
+            neuralAgents.set(candidates[i][0], new NeuralAgent(network, { explore: true, strategyOnly: config.strategyOnly, activeFromDay: req.mlStartDay }))
+          }
         }
       }
     }
@@ -304,6 +382,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         rules: config.rules,
         captureObservations: isInspectGame,
         onMasonTakeover,
+        selfPlayMode: req.phase >= 2,
       })
       tsumiCacheGetter = () => handlers.getTsumiCache!()
       if (isInspectGame && handlers.getCapturedObservations) observationGetter = () => handlers.getCapturedObservations!()
@@ -343,6 +422,16 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     const tGameEnd = performance.now()
 
     // Collect trajectories
+    // mason シャドウエージェント (village NN) の trajectory をクリア
+    // mason 個人 trajectory は village 用 observation エンコーディングで記録されるが、
+    // ROLE_TO_GROUP['mason'] = 'mason_collective' のため mason_collective の PPO に混入する。
+    // mason_collective の trajectory は masonTeamAgent から別途収集する。
+    if (multiModel) {
+      for (const [seat, agent] of neuralAgents) {
+        const role = seatRoleMap?.get(seat)
+        if (role === 'mason') agent.trajectory = []
+      }
+    }
     const individualSteps: SerializedGameResult['individualSteps'] = []
     for (const [seat, agent] of neuralAgents) {
       const steps = agent.trajectory
