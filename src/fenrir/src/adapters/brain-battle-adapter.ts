@@ -149,14 +149,20 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     this.runRetar(pctx, ext)
 
     // Determine execution target based on whose turn it is
-    let target: number | null = null
+    let target = this.decideBrainTarget(pctx, state, ext)
+    this.emitComment(pctx, `[BB] ${this.turnOwner} brain → execute seat${target ?? '?'}`)
 
-    if (this.turnOwner === 'mason') {
-      target = this.getMasonTarget(pctx, state, ext)
-      this.emitComment(pctx, `[BB] mason brain → execute seat${target ?? '?'}`)
-    } else {
-      target = this.getWolfTarget(pctx, state, ext)
-      this.emitComment(pctx, `[BB] wolf brain → execute seat${target ?? '?'}`)
+    // Defensive CO: if target is unclaimed bodyguard/nekomata, they CO and brain re-decides
+    if (target != null && this.tryDefensiveCO(target, state, pctx)) {
+      // Clear brain cache and re-infer with updated game state
+      if (this.turnOwner === 'mason') {
+        this.masonBrain.clearDayCache()
+      } else {
+        this.wolfBrain.clearDayCache()
+      }
+      const newTarget = this.decideBrainTarget(pctx, state, ext)
+      this.emitComment(pctx, `[BB] retarget after CCO → seat${newTarget ?? '?'}`)
+      target = newTarget
     }
 
     // Fallback: if no valid target, pick first alive non-self
@@ -268,6 +274,55 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     const wolfCtx = this.buildWolfBrainCtx(pctx, state, ext)
     if (!wolfCtx) return null
     return this.wolfBrain.decideExecution(wolfCtx)
+  }
+
+  /** Dispatch to mason or wolf brain based on current turn */
+  private decideBrainTarget(
+    pctx: PhaseContext<FenrirExtEvent, FenrirExt>,
+    state: Readonly<GameState<FenrirExt>>,
+    ext: FenrirExt,
+  ): number | null {
+    if (this.turnOwner === 'mason') {
+      return this.getMasonTarget(pctx, state, ext)
+    } else {
+      return this.getWolfTarget(pctx, state, ext)
+    }
+  }
+
+  /**
+   * 防御CO: 処刑対象が未CO の狩人/猫又なら CO を発動し、state に反映。
+   * Returns true if defensive CO occurred.
+   */
+  private tryDefensiveCO(
+    target: number,
+    state: Readonly<GameState<FenrirExt>>,
+    pctx: PhaseContext<FenrirExtEvent, FenrirExt>,
+  ): boolean {
+    const player = state.players.find(p => p.seat === target)
+    if (!player || !player.alive) return false
+    if (player.claimedRole != null) return false  // already CO'd
+
+    const role = player.role as SystemRole
+    let claim: DayClaim | null = null
+    if (role === 'bodyguard') {
+      claim = { type: 'bodyguard_co', targets: [] }
+    } else if (role === 'nekomata') {
+      claim = { type: 'nekomata_co' }
+    }
+    if (!claim) return false
+
+    // Emit defensive CO as game events (visible in howl + observation)
+    this.emitComment(pctx, `[BB] defensive CO: seat${target} (${role}) → ${claim.type}`)
+    const events = pctx.events as (GameEvent | FenrirExtEvent)[]
+    if (role === 'bodyguard') {
+      events.push({ type: 'bodyguard_claim', actor: target, targets: [] })
+    } else {
+      events.push({ type: 'nekomata_claim', actor: target })
+    }
+    // Update player state so observation reflects the CO
+    ;(player as PlayerState).claimedRole = role
+
+    return true
   }
 
   // ============================================================

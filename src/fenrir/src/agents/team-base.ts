@@ -233,6 +233,12 @@ export abstract class CollectiveAgentBase extends TeamAgentBase {
     return result
   }
 
+  /** Clear day cache to force re-inference (e.g., after defensive CO changes game state) */
+  clearDayCache(): void {
+    this.cachedResult = null
+    this.cachedDay = -1
+  }
+
   resetTrajectory(): void {
     super.resetTrajectory()
     this.cachedResult = null

@@ -149,18 +149,39 @@ export class WolfBrainAgent extends CollectiveAgentBase {
   decideExecution(ctx: TeamDecisionContext): number {
     const result = this.getOrInfer(ctx)
     const logits = result.policies.get('vote')!
-    // Mask: alive non-wolf seats
+    // Mask: alive non-wolf, non-confirmed-village seats
     const mask = new Float32Array(SEATS).fill(-Infinity)
     const teamSet = new Set(ctx.teamSeats)
+    const confirmedVillage = this.findConfirmedVillage(ctx)
     for (const seat of ctx.alivePlayers) {
-      if (!teamSet.has(seat) && seat <= SEATS) {
+      if (!teamSet.has(seat) && !confirmedVillage.has(seat) && seat <= SEATS) {
         mask[seat - 1] = 0
+      }
+    }
+    // Fallback: if all masked (e.g., only confirmed village remains), open all non-wolf
+    if (mask.every(v => v === -Infinity)) {
+      for (const seat of ctx.alivePlayers) {
+        if (!teamSet.has(seat) && seat <= SEATS) mask[seat - 1] = 0
       }
     }
     const primarySeat = ctx.teamSeats[0]
     const { action, logProb } = this.selectAction(logits, mask)
     this.record('vote', action, logProb, result.value, 0, primarySeat)
     return action + 1  // 0-indexed → 1-indexed seat
+  }
+
+  /** Retar から確定村陣営の席を抽出 */
+  private findConfirmedVillage(ctx: TeamDecisionContext): Set<number> {
+    const confirmed = new Set<number>()
+    const villageRoles = new Set(['seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'villager'])
+    const retar = ctx.retarPossibilities
+    if (!retar) return confirmed
+    for (const [seat, roles] of retar) {
+      if (roles.size === 1 && villageRoles.has([...roles][0])) {
+        confirmed.add(seat)
+      }
+    }
+    return confirmed
   }
 
   /**
