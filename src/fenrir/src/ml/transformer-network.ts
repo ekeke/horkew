@@ -42,28 +42,28 @@ export class TransformerNetwork {
   private seatEncoder: TransformerEncoder   // N layers, 20 tokens
   private strategyEncoder: TransformerEncoder  // M layers, 32 tokens
 
-  // GRU autoregressive decoder for plan tokens
-  private gruWz: Float32Array    // [dModel * dModel]
-  private gruWr: Float32Array
-  private gruWh: Float32Array
-  private gruUz: Float32Array    // [dModel * dModel]
-  private gruUr: Float32Array
-  private gruUh: Float32Array
-  private gruBz: Float32Array    // [dModel]
-  private gruBr: Float32Array
-  private gruBh: Float32Array
-  private planTokenEmbed: Float32Array   // [(vocabSize+1) * dModel] — 22 vocab + START
-  private planInitFwd: DenseLayer        // CLS → forward initial hidden
-  private planInitEg: DenseLayer         // CLS → endgame initial hidden
+  // GRU autoregressive decoder for plan tokens (null when numPlanTokens === 0)
+  private gruWz: Float32Array | null    // [dModel * dModel]
+  private gruWr: Float32Array | null
+  private gruWh: Float32Array | null
+  private gruUz: Float32Array | null    // [dModel * dModel]
+  private gruUr: Float32Array | null
+  private gruUh: Float32Array | null
+  private gruBz: Float32Array | null    // [dModel]
+  private gruBr: Float32Array | null
+  private gruBh: Float32Array | null
+  private planTokenEmbed: Float32Array | null   // [(vocabSize+1) * dModel] — 22 vocab + START
+  private planInitFwd: DenseLayer | null        // CLS → forward initial hidden
+  private planInitEg: DenseLayer | null         // CLS → endgame initial hidden
 
   // Plan observation embeddings (Strategy Encoder input)
-  private planVocabEmbed: Float32Array       // [22 * dModel] vocab index �� embedding
-  private planPosEmbed: Float32Array         // [12 * dModel] position embeddings for unified plan
+  private planVocabEmbed: Float32Array | null       // [22 * dModel] vocab index �� embedding
+  private planPosEmbed: Float32Array | null         // [12 * dModel] position embeddings for unified plan
 
   // Pointer mechanism for plan tokens
-  private pointerQueryProj: DenseLayer       // dModel → dModel (GRU hidden → query)
-  private pointerKeyProj: DenseLayer         // dModel → dModel (target token → key)
-  private specialKeys: Float32Array          // [3 * dModel] learnable keys for grayran/or/stop
+  private pointerQueryProj: DenseLayer | null       // dModel → dModel (GRU hidden → query)
+  private pointerKeyProj: DenseLayer | null         // dModel → dModel (target token → key)
+  private specialKeys: Float32Array | null          // [3 * dModel] learnable keys for grayran/or/stop
 
   // Head layers (same structure as before for backward compat)
   private perSeatHeads: Map<string, DenseLayer>     // dModel → 1
@@ -122,9 +122,9 @@ export class TransformerNetwork {
       maxSeqLen: seatSeqLen,
     })
 
-    // Strategy Layer (M layers) — 20 seat tokens + 12 unified plan = 32 tokens
-    const numPlanTokens = NUM_PLAN_TOKENS  // 12
-    const stratSeqLen = seatSeqLen + numPlanTokens  // 32
+    // Strategy Layer (M layers) — 20 seat tokens + N unified plan tokens
+    const numPlanTokens = tc.numPlanTokens ?? NUM_PLAN_TOKENS
+    const stratSeqLen = seatSeqLen + numPlanTokens
     const strategyLayers = tc.strategyLayers ?? 2
     this.strategyEncoder = new TransformerEncoder({
       dModel: dm,
@@ -134,50 +134,62 @@ export class TransformerNetwork {
       maxSeqLen: stratSeqLen,
     })
 
-    // GRU autoregressive decoder for plan tokens
-    const vocabSize = tc.planVocabSize ?? 22
-    const embedSize = vocabSize + 1  // +1 for START token
-    const scale = 0.02
-    const gruScale = Math.sqrt(2 / dm)
+    // GRU autoregressive decoder for plan tokens (skip when numPlanTokens === 0)
+    if (numPlanTokens > 0) {
+      const vocabSize = tc.planVocabSize ?? 22
+      const embedSize = vocabSize + 1  // +1 for START token
+      const scale = 0.02
+      const gruScale = Math.sqrt(2 / dm)
 
-    // GRU gate weights (Xavier init)
-    this.gruWz = new Float32Array(dm * dm)
-    this.gruWr = new Float32Array(dm * dm)
-    this.gruWh = new Float32Array(dm * dm)
-    this.gruUz = new Float32Array(dm * dm)
-    this.gruUr = new Float32Array(dm * dm)
-    this.gruUh = new Float32Array(dm * dm)
-    for (const w of [this.gruWz, this.gruWr, this.gruWh, this.gruUz, this.gruUr, this.gruUh]) {
-      for (let i = 0; i < w.length; i++) w[i] = gaussianRandom() * gruScale
-    }
-    this.gruBz = new Float32Array(dm)
-    this.gruBr = new Float32Array(dm)
-    this.gruBh = new Float32Array(dm)
+      // GRU gate weights (Xavier init)
+      this.gruWz = new Float32Array(dm * dm)
+      this.gruWr = new Float32Array(dm * dm)
+      this.gruWh = new Float32Array(dm * dm)
+      this.gruUz = new Float32Array(dm * dm)
+      this.gruUr = new Float32Array(dm * dm)
+      this.gruUh = new Float32Array(dm * dm)
+      for (const w of [this.gruWz, this.gruWr, this.gruWh, this.gruUz, this.gruUr, this.gruUh]) {
+        for (let i = 0; i < w.length; i++) w[i] = gaussianRandom() * gruScale
+      }
+      this.gruBz = new Float32Array(dm)
+      this.gruBr = new Float32Array(dm)
+      this.gruBh = new Float32Array(dm)
 
-    // Plan token embeddings: vocabSize + START
-    this.planTokenEmbed = new Float32Array(embedSize * dm)
-    for (let i = 0; i < this.planTokenEmbed.length; i++) {
-      this.planTokenEmbed[i] = (Math.random() - 0.5) * scale
-    }
+      // Plan token embeddings: vocabSize + START
+      this.planTokenEmbed = new Float32Array(embedSize * dm)
+      for (let i = 0; i < this.planTokenEmbed.length; i++) {
+        this.planTokenEmbed[i] = (Math.random() - 0.5) * scale
+      }
 
-    // Init projection: CLS → initial hidden state (unified)
-    this.planInitFwd = new DenseLayer(dm, dm)
-    this.planInitEg = new DenseLayer(dm, dm)
+      // Init projection: CLS → initial hidden state (unified)
+      this.planInitFwd = new DenseLayer(dm, dm)
+      this.planInitEg = new DenseLayer(dm, dm)
 
-    // Plan observation embeddings (vocab + position → Strategy Encoder)
-    const vocabEmbedSize = (tc.planVocabSize ?? 22) * dm
-    this.planVocabEmbed = new Float32Array(vocabEmbedSize)
-    for (let i = 0; i < vocabEmbedSize; i++) this.planVocabEmbed[i] = (Math.random() - 0.5) * scale
-    this.planPosEmbed = new Float32Array(NUM_PLAN_TOKENS * dm)
-    for (let i = 0; i < this.planPosEmbed.length; i++) this.planPosEmbed[i] = (Math.random() - 0.5) * scale
+      // Plan observation embeddings (vocab + position → Strategy Encoder)
+      const vocabEmbedSize = vocabSize * dm
+      this.planVocabEmbed = new Float32Array(vocabEmbedSize)
+      for (let i = 0; i < vocabEmbedSize; i++) this.planVocabEmbed[i] = (Math.random() - 0.5) * scale
+      this.planPosEmbed = new Float32Array(numPlanTokens * dm)
+      for (let i = 0; i < this.planPosEmbed.length; i++) this.planPosEmbed[i] = (Math.random() - 0.5) * scale
 
-    // Pointer mechanism
-    this.pointerQueryProj = new DenseLayer(dm, dm)
-    this.pointerKeyProj = new DenseLayer(dm, dm)
-    // 3 special keys: grayran, or, stop
-    this.specialKeys = new Float32Array(3 * dm)
-    for (let i = 0; i < this.specialKeys.length; i++) {
-      this.specialKeys[i] = (Math.random() - 0.5) * scale
+      // Pointer mechanism
+      this.pointerQueryProj = new DenseLayer(dm, dm)
+      this.pointerKeyProj = new DenseLayer(dm, dm)
+      // 3 special keys: grayran, or, stop
+      this.specialKeys = new Float32Array(3 * dm)
+      for (let i = 0; i < this.specialKeys.length; i++) {
+        this.specialKeys[i] = (Math.random() - 0.5) * scale
+      }
+    } else {
+      // No GRU decoder
+      this.gruWz = this.gruWr = this.gruWh = null
+      this.gruUz = this.gruUr = this.gruUh = null
+      this.gruBz = this.gruBr = this.gruBh = null
+      this.planTokenEmbed = null
+      this.planInitFwd = this.planInitEg = null
+      this.planVocabEmbed = this.planPosEmbed = null
+      this.pointerQueryProj = this.pointerKeyProj = null
+      this.specialKeys = null
     }
 
     // Head layers
@@ -212,7 +224,7 @@ export class TransformerNetwork {
 
     // Scratch buffers
     this._seatTokens = new Float32Array(seatSeqLen * dm)
-    this._stratTokens = new Float32Array(stratSeqLen * dm)  // 32 tokens (20 seat + 12 plan)
+    this._stratTokens = new Float32Array(stratSeqLen * dm)  // 20 seat tokens + numPlanTokens plan tokens
     this._seatMask = new Array(seatSeqLen).fill(true)
     this._stratMask = new Array(stratSeqLen).fill(true)
     this._seatProjected = new Float32Array(SEATS * dm)
@@ -228,12 +240,12 @@ export class TransformerNetwork {
 
     // z = sigmoid(input @ Wz + hidden @ Uz + bz)
     for (let j = 0; j < dm; j++) {
-      let sumZ = this.gruBz[j]
-      let sumR = this.gruBr[j]
+      let sumZ = this.gruBz![j]
+      let sumR = this.gruBr![j]
       for (let i = 0; i < dm; i++) {
         const idx = i * dm + j
-        sumZ += input[i] * this.gruWz[idx] + hidden[i] * this.gruUz[idx]
-        sumR += input[i] * this.gruWr[idx] + hidden[i] * this.gruUr[idx]
+        sumZ += input[i] * this.gruWz![idx] + hidden[i] * this.gruUz![idx]
+        sumR += input[i] * this.gruWr![idx] + hidden[i] * this.gruUr![idx]
       }
       z[j] = 1 / (1 + Math.exp(-sumZ))
       r[j] = 1 / (1 + Math.exp(-sumR))
@@ -241,9 +253,9 @@ export class TransformerNetwork {
 
     // h_candidate = tanh(input @ Wh + (r * hidden) @ Uh + bh)
     for (let j = 0; j < dm; j++) {
-      let sum = this.gruBh[j]
+      let sum = this.gruBh![j]
       for (let i = 0; i < dm; i++) {
-        sum += input[i] * this.gruWh[i * dm + j] + (r[i] * hidden[i]) * this.gruUh[i * dm + j]
+        sum += input[i] * this.gruWh![i * dm + j] + (r[i] * hidden[i]) * this.gruUh![i * dm + j]
       }
       hCandidate[j] = Math.tanh(sum)
     }
@@ -295,13 +307,13 @@ export class TransformerNetwork {
     for (let step = 0; step < numSteps; step++) {
       // Input: embedding of previous token
       const embedOff = prevAction * dm
-      const input = this.planTokenEmbed.slice(embedOff, embedOff + dm)
+      const input = this.planTokenEmbed!.slice(embedOff, embedOff + dm)
 
       // GRU step
       hidden = this.gruCell(input, hidden, dm) as Float32Array<ArrayBuffer>
 
       // Pointer: query from hidden state
-      const query = this.pointerQueryProj.forward(hidden)
+      const query = this.pointerQueryProj!.forward(hidden)
       const stepLogits = new Float32Array(vocabSize)
       for (let t = 0; t < totalKeys; t++) {
         let dot = 0
@@ -456,23 +468,26 @@ export class TransformerNetwork {
     // Run Seat Transformer
     this.seatEncoder.forward(this._seatTokens, seatSeqLen, this._seatMask)
 
-    // ========== Stage 2: Strategy Layer (32 tokens: 20 seat + 12 unified plan) ==========
-    const stratSeqLen = seatSeqLen + NUM_PLAN_TOKENS
+    // ========== Stage 2: Strategy Layer ==========
+    const numPlanTokens = tc.numPlanTokens ?? NUM_PLAN_TOKENS
+    const stratSeqLen = seatSeqLen + numPlanTokens
 
     // Copy seat encoder output → first 20 tokens
     this._stratTokens.fill(0)
     this._stratTokens.set(this._seatTokens.subarray(0, seatSeqLen * dm), 0)
 
-    // Append unified plan tokens: posEmbed + vocabEmbed[index]
-    let planOff = seatSeqLen * dm
-    for (let i = 0; i < NUM_PLAN_TOKENS; i++) {
-      const vocabIdx = Math.min(Math.max(0, Math.round(tok.plan[i])), (tc.planVocabSize ?? 22) - 1)
-      const posBase = i * dm
-      const vocabBase = vocabIdx * dm
-      for (let d = 0; d < dm; d++) {
-        this._stratTokens[planOff + d] = this.planPosEmbed[posBase + d] + this.planVocabEmbed[vocabBase + d]
+    // Append unified plan tokens: posEmbed + vocabEmbed[index] (skip when numPlanTokens === 0)
+    if (numPlanTokens > 0 && this.planPosEmbed && this.planVocabEmbed) {
+      let planOff = seatSeqLen * dm
+      for (let i = 0; i < numPlanTokens; i++) {
+        const vocabIdx = Math.min(Math.max(0, Math.round(tok.plan[i])), (tc.planVocabSize ?? 22) - 1)
+        const posBase = i * dm
+        const vocabBase = vocabIdx * dm
+        for (let d = 0; d < dm; d++) {
+          this._stratTokens[planOff + d] = this.planPosEmbed[posBase + d] + this.planVocabEmbed[vocabBase + d]
+        }
+        planOff += dm
       }
-      planOff += dm
     }
 
     this.strategyEncoder.forward(this._stratTokens, stratSeqLen, this._stratMask)
@@ -536,55 +551,60 @@ export class TransformerNetwork {
     }
 
     // ========== GRU autoregressive decoder for plan tokens ==========
-    const vocabSize = tc.planVocabSize ?? 22
-    const numTargetTokens = SEATS + numRoles  // 14 + 5 = 19 tokens provide keys
-    const numSpecial = 3  // grayran, or, stop
-    const invSqrtD = 1 / Math.sqrt(dm)
+    let planActions: number[] | undefined
+    let planLogProbs: number[] | undefined
 
-    // Compute pointer keys from seat + role tokens
-    const keys = new Float32Array((numTargetTokens + numSpecial) * dm)
-    for (let t = 0; t < numTargetTokens; t++) {
-      const tokenOff = (1 + t) * dm  // skip CLS
-      const raw = this._stratTokens.subarray(tokenOff, tokenOff + dm)
-      const projected = this.pointerKeyProj.forward(raw)
-      keys.set(projected, t * dm)
+    if (numPlanTokens > 0 && this.pointerKeyProj && this.planInitFwd && this.planInitEg && this.specialKeys) {
+      const vocabSize = tc.planVocabSize ?? 22
+      const numTargetTokens = SEATS + numRoles  // 14 + 5 = 19 tokens provide keys
+      const numSpecial = 3  // grayran, or, stop
+      const invSqrtD = 1 / Math.sqrt(dm)
+
+      // Compute pointer keys from seat + role tokens
+      const keys = new Float32Array((numTargetTokens + numSpecial) * dm)
+      for (let t = 0; t < numTargetTokens; t++) {
+        const tokenOff = (1 + t) * dm  // skip CLS
+        const raw = this._stratTokens.subarray(tokenOff, tokenOff + dm)
+        const projected = this.pointerKeyProj.forward(raw)
+        keys.set(projected, t * dm)
+      }
+      keys.set(this.specialKeys, numTargetTokens * dm)
+
+      // Decode dual-direction plan: forward (L→R) + endgame (R→L)
+      const doExplore = explore ?? true
+      const allUsed = new Set<number>()
+
+      // Phase 1: Forward plan (8 steps, positions 0-7)
+      const fwd = this.decodePlan(NUM_FORWARD_TOKENS, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitFwd, doExplore, allUsed, planContext)
+
+      // Phase 2: Endgame plan (4 steps, R→L, positions 11→8)
+      // allUsed carries over for cross-phase soft penalty
+      const eg = this.decodePlan(NUM_ENDGAME_TOKENS, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitEg, doExplore, allUsed, planContext)
+
+      // Assemble unified 12-token plan
+      planActions = new Array(numPlanTokens).fill(PLAN_VOCAB.STOP)
+      planLogProbs = new Array(numPlanTokens).fill(0)
+      const planLogits = new Float32Array(numPlanTokens * vocabSize)
+
+      // Forward: direct copy to positions 0-7
+      for (let i = 0; i < NUM_FORWARD_TOKENS; i++) {
+        planActions[i] = fwd.actions[i]
+        planLogProbs[i] = fwd.logProbs[i]
+      }
+      planLogits.set(fwd.logits, 0)
+
+      // Endgame: reverse into positions 8-11 (step 0→pos 11, step 1→pos 10, ...)
+      for (let step = 0; step < NUM_ENDGAME_TOKENS; step++) {
+        const pos = numPlanTokens - 1 - step
+        planActions[pos] = eg.actions[step]
+        planLogProbs[pos] = eg.logProbs[step]
+        const srcOff = step * vocabSize
+        const dstOff = pos * vocabSize
+        for (let v = 0; v < vocabSize; v++) planLogits[dstOff + v] = eg.logits[srcOff + v]
+      }
+
+      policies.set('plan', planLogits)
     }
-    keys.set(this.specialKeys, numTargetTokens * dm)
-
-    // Decode dual-direction plan: forward (L→R) + endgame (R→L)
-    const doExplore = explore ?? true
-    const allUsed = new Set<number>()
-
-    // Phase 1: Forward plan (8 steps, positions 0-7)
-    const fwd = this.decodePlan(NUM_FORWARD_TOKENS, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitFwd, doExplore, allUsed, planContext)
-
-    // Phase 2: Endgame plan (4 steps, R→L, positions 11→8)
-    // allUsed carries over for cross-phase soft penalty
-    const eg = this.decodePlan(NUM_ENDGAME_TOKENS, vocabSize, dm, keys, invSqrtD, clsOut, this.planInitEg, doExplore, allUsed, planContext)
-
-    // Assemble unified 12-token plan
-    const planActions = new Array(NUM_PLAN_TOKENS).fill(PLAN_VOCAB.STOP)
-    const planLogProbs = new Array(NUM_PLAN_TOKENS).fill(0)
-    const planLogits = new Float32Array(NUM_PLAN_TOKENS * vocabSize)
-
-    // Forward: direct copy to positions 0-7
-    for (let i = 0; i < NUM_FORWARD_TOKENS; i++) {
-      planActions[i] = fwd.actions[i]
-      planLogProbs[i] = fwd.logProbs[i]
-    }
-    planLogits.set(fwd.logits, 0)
-
-    // Endgame: reverse into positions 8-11 (step 0→pos 11, step 1→pos 10, ...)
-    for (let step = 0; step < NUM_ENDGAME_TOKENS; step++) {
-      const pos = NUM_PLAN_TOKENS - 1 - step
-      planActions[pos] = eg.actions[step]
-      planLogProbs[pos] = eg.logProbs[step]
-      const srcOff = step * vocabSize
-      const dstOff = pos * vocabSize
-      for (let v = 0; v < vocabSize; v++) planLogits[dstOff + v] = eg.logits[srcOff + v]
-    }
-
-    policies.set('plan', planLogits)
 
     // Value head
     const rawValue = this.valueHead.forward(clsOut)
@@ -623,32 +643,34 @@ export class TransformerNetwork {
       weights.set(`strat_${name}`, new Float32Array(w))
     }
 
-    // GRU decoder weights
-    weights.set('gru_wz', new Float32Array(this.gruWz))
-    weights.set('gru_wr', new Float32Array(this.gruWr))
-    weights.set('gru_wh', new Float32Array(this.gruWh))
-    weights.set('gru_uz', new Float32Array(this.gruUz))
-    weights.set('gru_ur', new Float32Array(this.gruUr))
-    weights.set('gru_uh', new Float32Array(this.gruUh))
-    weights.set('gru_bz', new Float32Array(this.gruBz))
-    weights.set('gru_br', new Float32Array(this.gruBr))
-    weights.set('gru_bh', new Float32Array(this.gruBh))
-    weights.set('plan_token_embed', new Float32Array(this.planTokenEmbed))
-    weights.set('plan_init_fwd_w', new Float32Array(this.planInitFwd.weights))
-    weights.set('plan_init_fwd_b', new Float32Array(this.planInitFwd.biases))
-    weights.set('plan_init_eg_w', new Float32Array(this.planInitEg.weights))
-    weights.set('plan_init_eg_b', new Float32Array(this.planInitEg.biases))
+    // GRU decoder weights (only when plan tokens are enabled)
+    if (this.gruWz) {
+      weights.set('gru_wz', new Float32Array(this.gruWz))
+      weights.set('gru_wr', new Float32Array(this.gruWr!))
+      weights.set('gru_wh', new Float32Array(this.gruWh!))
+      weights.set('gru_uz', new Float32Array(this.gruUz!))
+      weights.set('gru_ur', new Float32Array(this.gruUr!))
+      weights.set('gru_uh', new Float32Array(this.gruUh!))
+      weights.set('gru_bz', new Float32Array(this.gruBz!))
+      weights.set('gru_br', new Float32Array(this.gruBr!))
+      weights.set('gru_bh', new Float32Array(this.gruBh!))
+      weights.set('plan_token_embed', new Float32Array(this.planTokenEmbed!))
+      weights.set('plan_init_fwd_w', new Float32Array(this.planInitFwd!.weights))
+      weights.set('plan_init_fwd_b', new Float32Array(this.planInitFwd!.biases))
+      weights.set('plan_init_eg_w', new Float32Array(this.planInitEg!.weights))
+      weights.set('plan_init_eg_b', new Float32Array(this.planInitEg!.biases))
 
-    // Plan observation embeddings
-    weights.set('plan_vocab_embed', new Float32Array(this.planVocabEmbed))
-    weights.set('plan_pos_embed', new Float32Array(this.planPosEmbed))
+      // Plan observation embeddings
+      weights.set('plan_vocab_embed', new Float32Array(this.planVocabEmbed!))
+      weights.set('plan_pos_embed', new Float32Array(this.planPosEmbed!))
 
-    // Pointer mechanism
-    weights.set('pointer_query_w', new Float32Array(this.pointerQueryProj.weights))
-    weights.set('pointer_query_b', new Float32Array(this.pointerQueryProj.biases))
-    weights.set('pointer_key_w', new Float32Array(this.pointerKeyProj.weights))
-    weights.set('pointer_key_b', new Float32Array(this.pointerKeyProj.biases))
-    weights.set('special_keys', new Float32Array(this.specialKeys))
+      // Pointer mechanism
+      weights.set('pointer_query_w', new Float32Array(this.pointerQueryProj!.weights))
+      weights.set('pointer_query_b', new Float32Array(this.pointerQueryProj!.biases))
+      weights.set('pointer_key_w', new Float32Array(this.pointerKeyProj!.weights))
+      weights.set('pointer_key_b', new Float32Array(this.pointerKeyProj!.biases))
+      weights.set('special_keys', new Float32Array(this.specialKeys!))
+    }
 
     // Heads
     for (const [name, head] of this.perSeatHeads) {
@@ -710,35 +732,37 @@ export class TransformerNetwork {
     }
     this.strategyEncoder.loadWeights(stratWeights)
 
-    // GRU decoder weights (optional for backward compat)
-    const gruKeys: [string, Float32Array][] = [
-      ['gru_wz', this.gruWz], ['gru_wr', this.gruWr], ['gru_wh', this.gruWh],
-      ['gru_uz', this.gruUz], ['gru_ur', this.gruUr], ['gru_uh', this.gruUh],
-      ['gru_bz', this.gruBz], ['gru_br', this.gruBr], ['gru_bh', this.gruBh],
-      ['plan_token_embed', this.planTokenEmbed],
-    ]
-    for (const [key, target] of gruKeys) {
-      const w = weights.get(key)
-      if (w) target.set(w)
+    // GRU decoder weights (only when plan tokens are enabled)
+    if (this.gruWz) {
+      const gruKeys: [string, Float32Array][] = [
+        ['gru_wz', this.gruWz], ['gru_wr', this.gruWr!], ['gru_wh', this.gruWh!],
+        ['gru_uz', this.gruUz!], ['gru_ur', this.gruUr!], ['gru_uh', this.gruUh!],
+        ['gru_bz', this.gruBz!], ['gru_br', this.gruBr!], ['gru_bh', this.gruBh!],
+        ['plan_token_embed', this.planTokenEmbed!],
+      ]
+      for (const [key, target] of gruKeys) {
+        const w = weights.get(key)
+        if (w) target.set(w)
+      }
+      const pifW = weights.get('plan_init_fwd_w') ?? weights.get('plan_init_w')
+      if (pifW) { this.planInitFwd!.weights.set(pifW); this.planInitFwd!.biases.set(weights.get('plan_init_fwd_b') ?? weights.get('plan_init_b')!) }
+      const pieW = weights.get('plan_init_eg_w')
+      if (pieW) { this.planInitEg!.weights.set(pieW); this.planInitEg!.biases.set(weights.get('plan_init_eg_b')!) }
+
+      // Plan observation embeddings
+      const pve = weights.get('plan_vocab_embed')
+      if (pve) this.planVocabEmbed!.set(pve)
+      const ppe = weights.get('plan_pos_embed')
+      if (ppe) this.planPosEmbed!.set(ppe)
+
+      // Pointer mechanism
+      this.pointerQueryProj!.weights.set(weights.get('pointer_query_w')!)
+      this.pointerQueryProj!.biases.set(weights.get('pointer_query_b')!)
+      this.pointerKeyProj!.weights.set(weights.get('pointer_key_w')!)
+      this.pointerKeyProj!.biases.set(weights.get('pointer_key_b')!)
+      const sk = weights.get('special_keys')
+      if (sk) this.specialKeys!.set(sk)
     }
-    const pifW = weights.get('plan_init_fwd_w') ?? weights.get('plan_init_w')
-    if (pifW) { this.planInitFwd.weights.set(pifW); this.planInitFwd.biases.set(weights.get('plan_init_fwd_b') ?? weights.get('plan_init_b')!) }
-    const pieW = weights.get('plan_init_eg_w')
-    if (pieW) { this.planInitEg.weights.set(pieW); this.planInitEg.biases.set(weights.get('plan_init_eg_b')!) }
-
-    // Plan observation embeddings
-    const pve = weights.get('plan_vocab_embed')
-    if (pve) this.planVocabEmbed.set(pve)
-    const ppe = weights.get('plan_pos_embed')
-    if (ppe) this.planPosEmbed.set(ppe)
-
-    // Pointer mechanism
-    this.pointerQueryProj.weights.set(weights.get('pointer_query_w')!)
-    this.pointerQueryProj.biases.set(weights.get('pointer_query_b')!)
-    this.pointerKeyProj.weights.set(weights.get('pointer_key_w')!)
-    this.pointerKeyProj.biases.set(weights.get('pointer_key_b')!)
-    const sk = weights.get('special_keys')
-    if (sk) this.specialKeys.set(sk)
 
     // Heads
     for (const [name, head] of this.perSeatHeads) {
@@ -776,12 +800,14 @@ export class TransformerNetwork {
     total += this.projRole.paramCount
     total += this.seatEncoder.paramCount
     total += this.strategyEncoder.paramCount
-    total += this.gruWz.length * 6 + this.gruBz.length * 3  // GRU gates
-    total += this.planTokenEmbed.length  // token embeddings
-    total += this.planInitFwd.paramCount + this.planInitEg.paramCount  // init projections
-    total += this.planVocabEmbed.length + this.planPosEmbed.length  // plan obs embeddings
-    total += this.pointerQueryProj.paramCount + this.pointerKeyProj.paramCount
-    total += this.specialKeys.length
+    if (this.gruWz) {
+      total += this.gruWz.length * 6 + this.gruBz!.length * 3  // GRU gates
+      total += this.planTokenEmbed!.length  // token embeddings
+      total += this.planInitFwd!.paramCount + this.planInitEg!.paramCount  // init projections
+      total += this.planVocabEmbed!.length + this.planPosEmbed!.length  // plan obs embeddings
+      total += this.pointerQueryProj!.paramCount + this.pointerKeyProj!.paramCount
+      total += this.specialKeys!.length
+    }
     for (const head of this.perSeatHeads.values()) total += head.paramCount
     if (this.nightSeatHead) total += this.nightSeatHead.paramCount + this.nightClsHead!.paramCount
     for (const head of this.perSeatSigmoidHeads.values()) total += head.paramCount
@@ -819,21 +845,23 @@ export class TransformerNetwork {
     }
     params.push(this.strategyEncoder.finalLN.scale, this.strategyEncoder.finalLN.bias)
 
-    // GRU decoder weights
-    params.push(this.gruWz, this.gruWr, this.gruWh)
-    params.push(this.gruUz, this.gruUr, this.gruUh)
-    params.push(this.gruBz, this.gruBr, this.gruBh)
-    params.push(this.planTokenEmbed)
-    params.push(this.planInitFwd.weights, this.planInitFwd.biases)
-    params.push(this.planInitEg.weights, this.planInitEg.biases)
+    // GRU decoder weights (only when plan tokens are enabled)
+    if (this.gruWz) {
+      params.push(this.gruWz, this.gruWr!, this.gruWh!)
+      params.push(this.gruUz!, this.gruUr!, this.gruUh!)
+      params.push(this.gruBz!, this.gruBr!, this.gruBh!)
+      params.push(this.planTokenEmbed!)
+      params.push(this.planInitFwd!.weights, this.planInitFwd!.biases)
+      params.push(this.planInitEg!.weights, this.planInitEg!.biases)
 
-    // Plan observation embeddings
-    params.push(this.planVocabEmbed, this.planPosEmbed)
+      // Plan observation embeddings
+      params.push(this.planVocabEmbed!, this.planPosEmbed!)
 
-    // Pointer mechanism
-    params.push(this.pointerQueryProj.weights, this.pointerQueryProj.biases)
-    params.push(this.pointerKeyProj.weights, this.pointerKeyProj.biases)
-    params.push(this.specialKeys)
+      // Pointer mechanism
+      params.push(this.pointerQueryProj!.weights, this.pointerQueryProj!.biases)
+      params.push(this.pointerKeyProj!.weights, this.pointerKeyProj!.biases)
+      params.push(this.specialKeys!)
+    }
 
     // Heads
     for (const head of this.perSeatHeads.values()) params.push(head.weights, head.biases)
