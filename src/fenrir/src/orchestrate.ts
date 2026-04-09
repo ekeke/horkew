@@ -99,6 +99,7 @@ type OrchestratorConfig = {
   wre?: string
   /** WRE再学習間隔 (iteration数、0=再学習無効)。サンプルバッファが batch×14×5×n×4.8KB 蓄積するため batch=64 なら n≤40 推奨 */
   wreRefresh: number
+  curriculum: 'default' | 'brain-battle'
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -121,6 +122,7 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   ppoRestart: false,
   skeleton: false,
   wreRefresh: 0,
+  curriculum: 'default' as const,
 }
 
 function parseArgs(): OrchestratorConfig {
@@ -159,6 +161,7 @@ function parseArgs(): OrchestratorConfig {
         break
       }
       case '--wre-refresh': config.wreRefresh = parseInt(args[++i]); break
+      case '--curriculum': config.curriculum = args[++i] as 'default' | 'brain-battle'; break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -190,6 +193,7 @@ Options:
   --strategy-only          戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
   --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
   --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
+  --curriculum <name>      カリキュラム選択: default | brain-battle (default: default)
   --skeleton               最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用)
   --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
   --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled)
@@ -859,6 +863,56 @@ async function main(): Promise<void> {
     rewardConfig: DEFAULT_REWARD_CONFIG,
     strategyOnly: config.strategyOnly,
     miniBatchSize: config.miniBatchSize ?? DEFAULT_TRAINING_CONFIG.miniBatchSize,
+  }
+
+  // === Brain Battle カリキュラム: 専用パスで早期分岐 ===
+  if (config.curriculum === 'brain-battle') {
+    const steps = buildCurriculum({ curriculum: 'brain-battle' })
+    const bbStep = steps.find(s => s.type === 'training' && s.name === 'brain_battle') as TrainingStep
+    if (!bbStep) throw new Error('brain_battle step not found in brain-battle curriculum')
+
+    // Mason frozen weights: checkpoint-base から mason_collective をロード
+    const masonCollectiveNet = createMasonCollectiveNetwork()
+    const masonDir = `${config.checkpointBase}/ckpt-mason_collective`
+    const masonCkpt = findCheckpoint(masonDir, 'collective')
+    if (masonCkpt) {
+      loadCheckpoint(masonCollectiveNet, masonCkpt.path)
+      log(`Mason collective loaded from ${masonCkpt.path} (iter ${masonCkpt.iteration})`)
+    } else {
+      log(`No mason_collective checkpoint found in ${masonDir}, using random weights`)
+    }
+
+    // Wolf brain networks
+    const wolfBrainNet = createWolfBrainNetwork()
+    const wolfBrainTf = createWolfBrainTfNetwork(config.learningRate)
+    log(`Wolf Brain NN: ${wolfBrainNet.totalParams} params`)
+
+    // Worker pool
+    if (config.workers !== 0) {
+      initGameWorkerPool(config.workers === -1 ? undefined : config.workers)
+    }
+
+    const bbCtx: PhaseRunnerContext = {
+      config, trainingConfig, progress, runId, gitSha,
+      networks: new Map<string, AnyNetwork>([['mason_collective', masonCollectiveNet]]),
+      tfNetworks: new Map<string, AnyTfNetwork>(),
+      frozenWeights: new Map([['mason_collective', packWeights(masonCollectiveNet)]]),
+      frozenNets: new Map([['mason_collective', masonCollectiveNet]]),
+      wolfBrainNetwork: wolfBrainNet,
+      wolfBrainTfNetwork: wolfBrainTf,
+      checkShutdown,
+      log,
+      writeTrainProgress,
+      pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
+      saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
+      saveEvalHowl,
+    }
+    await runTrainingPhase(bbStep, bbCtx)
+
+    wolfBrainTf.dispose()
+    terminateGameWorkerPool()
+    log(`${BOLD}Brain Battle training complete!${RESET}`)
+    return
   }
 
   // === ネットワーク作成 ===
@@ -2077,34 +2131,6 @@ async function main(): Promise<void> {
     log(`${BOLD}=== Phase 1' Complete ===${RESET}`)
     progress.latest = { phase: "1' (complete)", model: '-', iter: config.iterations, maxIter: config.iterations }
     writeTrainProgress(progress)
-
-    // === Phase BB: Brain Battle (wolf brain vs mason brain) — delegated to phase-runner ===
-    {
-      const bbStep = buildCurriculum().find(s => s.type === 'training' && s.name === 'brain_battle') as TrainingStep | undefined
-      if (bbStep) {
-        const wolfBrainNet = createWolfBrainNetwork()
-        const wolfBrainTf = createWolfBrainTfNetwork(config.learningRate)
-        const bbCtx: PhaseRunnerContext = {
-          config, trainingConfig, progress, runId, gitSha,
-          networks: new Map<string, AnyNetwork>([
-            ['mason_collective', masonCollectiveNet],
-          ]),
-          tfNetworks: new Map<string, AnyTfNetwork>(),
-          frozenWeights: new Map([['mason_collective', packWeights(masonCollectiveNet)]]),
-          frozenNets: new Map([['mason_collective', masonCollectiveNet]]),
-          wolfBrainNetwork: wolfBrainNet,
-          wolfBrainTfNetwork: wolfBrainTf,
-          checkShutdown,
-          log,
-          writeTrainProgress,
-          pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
-          saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
-          saveEvalHowl,
-        }
-        await runTrainingPhase(bbStep, bbCtx)
-        wolfBrainTf.dispose()
-      }
-    }
 
     // === Phase 2: Self-Play (全5モデル同時学習) — delegated to phase-runner ===
     if (!config.phase1Only) {

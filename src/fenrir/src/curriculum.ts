@@ -220,23 +220,34 @@ export type PhaseStep = PretrainStep | TransferStep | TrainingStep
 // Curriculum Builder
 // ============================================================
 
+/** カリキュラム名: 'default' = 本流 (village→self-play), 'brain-battle' = Wolf Brain 専用 */
+export type CurriculumName = 'default' | 'brain-battle'
+
 export type CurriculumOptions = {
   phase1Only?: boolean
   phase2Only?: boolean
   skeleton?: boolean
+  curriculum?: CurriculumName
 }
 
 const VILLAGE_ROLES: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'nekomata']
 
 /**
- * Build the full training curriculum as a flat list of PhaseSteps.
+ * Build the training curriculum as a flat list of PhaseSteps.
  *
- * The sequence mirrors orchestrate.ts phases:
+ * curriculum='default':
  *   Pretrain B2+B+D → Phase 0 (mason) → transfer → Phase 1 (village)
  *   → Phase 1' (non-village) → Phase 2 (self-play)
+ *
+ * curriculum='brain-battle':
+ *   Phase BB: Brain Battle (wolf brain vs frozen mason)
  */
 export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
-  const { phase1Only = false, phase2Only = false } = options
+  const { phase1Only = false, phase2Only = false, curriculum = 'default' } = options
+
+  if (curriculum === 'brain-battle') {
+    return buildBrainBattleCurriculum()
+  }
 
   const steps: PhaseStep[] = []
 
@@ -365,37 +376,6 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
     })
   }
 
-    // --- Phase BB: Brain Battle (wolf brain vs mason brain) ---
-    steps.push({
-      type: 'training',
-      name: 'brain_battle',
-      displayName: 'Phase BB: Brain Battle',
-      activeModels: ['wolf_brain'],
-      strategyOnly: false,
-      adapter: 'brain-battle',
-      ppo: { freezePlan: false },
-      graduation: {
-        type: 'min_iter',
-        minIter: 300,
-      },
-      frozen: {
-        frozenModels: ['mason_collective'],
-      },
-      gameGen: {
-        mode: 'multi_model',
-        seedOffsetBase: 40000,
-      },
-      agentAssignment: {
-        village: 'heuristic',
-        wolf_collective: 'heuristic',
-        mason_collective: 'frozen',
-        fanatic: 'heuristic',
-        third: 'heuristic',
-      },
-      maxIterations: 'iterations',
-      workerPhase: 3,
-    })
-
   // --- Phase 2: Self-Play (all 5 models) ---
   if (!phase1Only) {
     steps.push({
@@ -426,4 +406,40 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
   }
 
   return steps
+}
+
+// ============================================================
+// Brain Battle Curriculum
+// ============================================================
+
+function buildBrainBattleCurriculum(): PhaseStep[] {
+  return [{
+    type: 'training',
+    name: 'brain_battle',
+    displayName: 'Phase BB: Brain Battle',
+    activeModels: ['wolf_brain'],
+    strategyOnly: false,
+    adapter: 'brain-battle',
+    ppo: { freezePlan: false },
+    graduation: {
+      type: 'min_iter',
+      minIter: 300,
+    },
+    frozen: {
+      frozenModels: ['mason_collective'],
+    },
+    gameGen: {
+      mode: 'multi_model',
+      seedOffsetBase: 40000,
+    },
+    agentAssignment: {
+      village: 'heuristic',
+      wolf_collective: 'heuristic',
+      mason_collective: 'frozen',
+      fanatic: 'heuristic',
+      third: 'heuristic',
+    },
+    maxIterations: 'iterations',
+    workerPhase: 3,
+  }]
 }
