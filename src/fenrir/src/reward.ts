@@ -72,6 +72,33 @@ export const DEFAULT_REWARD_CONFIG: RewardConfig = {
   finalDayBonus: 0.15,
 }
 
+/**
+ * Brain Battle 用報酬設定
+ * - 狐勝利を大きくペナルティ: 両ブレインとも狐勝ちを防ぐインセンティブ
+ * - 中間報酬なし: 終端報酬のみでシンプルに
+ * - 引き分けは Brain Battle ルール上発生しない
+ */
+export const BRAIN_BATTLE_REWARD_CONFIG: RewardConfig = {
+  win: 1.0,
+  lose: -1.0,
+  loseToFox: -3.0,
+  drawVillage: 0,
+  drawWolf: 0,
+  drawHamster: 0,
+  lwSurvival: 0,
+  foxSurvival: 0,
+  tsumiVillagePerDay: 0,
+  tsumiWolfPerDay: 0,
+  guardSuccess: 0,
+  foxKillReward: 0,
+  endgamePreFinalFoxTarget: 0,
+  endgamePreFinalLWTarget: 0,
+  endgameFinalFoxTarget: 0,
+  endgameFinalWolfTarget: 0,
+  endgameFinalConfirmedWolf: 0,
+  finalDayBonus: 0,
+}
+
 type Alignment = 'village' | 'wolf' | 'hamster'
 
 function getAlignment(role: string): Alignment {

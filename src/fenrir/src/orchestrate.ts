@@ -24,7 +24,7 @@ import {
 } from './phase-runner.ts'
 import { buildCurriculum, formatAssignment, type TrainingStep } from './curriculum.ts'
 import { computeRefPlanLogits } from './agents/neural-agent.ts'
-import { DEFAULT_REWARD_CONFIG } from './reward.ts'
+import { DEFAULT_REWARD_CONFIG, BRAIN_BATTLE_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import {
@@ -867,6 +867,9 @@ async function main(): Promise<void> {
 
   // === Brain Battle カリキュラム: 専用パスで早期分岐 ===
   if (config.curriculum === 'brain-battle') {
+    // Brain Battle 専用報酬: 狐勝利 -3.0、中間報酬なし
+    const bbTrainingConfig: TrainingConfig = { ...trainingConfig, rewardConfig: BRAIN_BATTLE_REWARD_CONFIG }
+
     const steps = buildCurriculum({ curriculum: 'brain-battle' })
     const bbStep = steps.find(s => s.type === 'training' && s.name === 'brain_battle') as TrainingStep
     if (!bbStep) throw new Error('brain_battle step not found in brain-battle curriculum')
@@ -895,7 +898,7 @@ async function main(): Promise<void> {
     }
 
     const bbCtx: PhaseRunnerContext = {
-      config, trainingConfig, progress, runId, gitSha,
+      config, trainingConfig: bbTrainingConfig, progress, runId, gitSha,
       networks: new Map<string, AnyNetwork>([['mason_collective', masonCollectiveNet]]),
       tfNetworks: new Map<string, AnyTfNetwork>([['mason_collective', masonCollectiveTf]]),
       frozenWeights: new Map(),
