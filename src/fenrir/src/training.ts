@@ -303,6 +303,45 @@ const MASON_COLLECTIVE_TRANSFORMER_CONFIG: NetworkConfig = {
 }
 
 // ============================================================
+// Wolf Brain Network Configuration (Brain Battle, no GRU)
+// ============================================================
+
+/** Formation options for wolf brain (6 categories) */
+export const FORMATION_SIZE = 6  // seer_co, medium_co, bodyguard_co, nekomata_co, lurk, villager_co
+
+const WOLF_BRAIN_TRANSFORMER_CONFIG: NetworkConfig = {
+  inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
+  heads: {
+    // Formation: per-wolf role claim
+    formation_0: FORMATION_SIZE,
+    formation_1: FORMATION_SIZE,
+    formation_2: FORMATION_SIZE,
+    // Fake result: per-wolf white/black
+    fake_result_0: 2,
+    fake_result_1: 2,
+    fake_result_2: 2,
+    // Execution & attack
+    vote: SEATS,
+    attack_target: SEATS,
+    attacker: TEAM_HEAD_SIZES.attacker,
+    // Fake target: per-wolf target seat
+    fake_target_0: SEATS,
+    fake_target_1: SEATS,
+    fake_target_2: SEATS,
+  },
+  sigmoidHeads: {},
+  transformer: {
+    ...TRANSFORMER_COMMON,
+    numPlanTokens: 0,    // No GRU decoder
+    planVocabSize: 0,
+    seatFeatures: WOLF_COLLECTIVE_SEAT_FEATURES,
+    clsFeatures: WOLF_COLLECTIVE_CLS_FEATURES,
+    perSeatHeads: ['vote', 'attack_target', 'fake_target_0', 'fake_target_1', 'fake_target_2'],
+    perSeatSigmoidHeads: [],
+  },
+}
+
+// ============================================================
 // Fanatic Network Configuration (Transformer only)
 // ============================================================
 
@@ -375,6 +414,16 @@ export function createWolfCollectiveTfNetwork(lr: number = 3e-4): TfTransformerN
 
 export function createMasonCollectiveTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
   return new TfTransformerNetwork(MASON_COLLECTIVE_TRANSFORMER_CONFIG, lr, 'mason_collective')
+}
+
+// ---- Wolf Brain variants (Brain Battle, no GRU) ----
+
+export function createWolfBrainNetwork(): TransformerNetwork {
+  return new TransformerNetwork(WOLF_BRAIN_TRANSFORMER_CONFIG, 'wolf_collective')
+}
+
+export function createWolfBrainTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+  return new TfTransformerNetwork(WOLF_BRAIN_TRANSFORMER_CONFIG, lr, 'wolf_collective')
 }
 
 // ---- Fanatic variants (Transformer only) ----
