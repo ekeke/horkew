@@ -50,9 +50,10 @@
 ## 学習パイプライン
 
 各フェーズの詳細は **[TrainingPhases.md](TrainingPhases.md)** を参照。
+Brain Battle の設計は **[BrainBattle.md](BrainBattle.md)** を参照。
 
 ```
-Pretrain B+D → Phase 0 (Mason Individual) → Phase 1 (Village) → Phase 1' (非村) → Phase 2 (自己対戦)
+Pretrain B+D → Phase 0 (Mason Individual) → Phase 1 (Village) → Phase 1' (非村) → Phase BB (Brain Battle) → Phase 2 (自己対戦)
 ```
 
 ## 公認プラン（Official Plan）
