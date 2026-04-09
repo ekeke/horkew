@@ -96,7 +96,7 @@ type OrchestratorConfig = {
   skeleton: boolean
   /** WRE PBRS: 勝率NNチェックポイントパス (undefined=無効) */
   wre?: string
-  /** WRE再学習間隔 (iteration数、0=再学習無効) */
+  /** WRE再学習間隔 (iteration数、0=再学習無効)。サンプルバッファが batch×14×5×n×4.8KB 蓄積するため batch=64 なら n≤40 推奨 */
   wreRefresh: number
 }
 
@@ -191,7 +191,8 @@ Options:
   --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
   --skeleton               最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用)
   --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
-  --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled, e.g. 500)
+  --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled)
+                           ⚠ batch×14×5×n×4.8KB がメモリに蓄積。batch=64 なら n≤40 推奨 (≈1GB)
   --help, -h               このヘルプを表示`)
   process.exit(0)
 }
