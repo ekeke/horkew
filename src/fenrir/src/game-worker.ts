@@ -18,6 +18,8 @@ import { FanaticAgent } from './agents/fanatic-agent.ts'
 import { WolfTeamAgent, WolfCollective } from './agents/wolf-collective.ts'
 import { MasonTeamAgent, MasonCollective } from './agents/mason-collective.ts'
 import { RuleBasedAgent } from './agents/rule-based-agent.ts'
+import { WolfBrainAgent } from './agents/wolf-brain.ts'
+import { BrainBattleAdapter } from './adapters/brain-battle-adapter.ts'
 import { terminalReward, intermediateReward, tsumiReward } from './reward.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { parse } from '../../howl/parser.ts'
@@ -223,7 +225,40 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       }
     } : undefined
 
-    if (snapshot) {
+    if (req.brainBattle && req.wolfBrainWeights) {
+      // Brain Battle mode: wolf brain vs mason brain
+      const wolfBrainNet = buildNetwork(req.wolfBrainWeights, 'wolf_collective')
+      const masonNet = req.modelGroupWeights?.mason_collective
+        ? buildNetwork(req.modelGroupWeights.mason_collective, 'mason_collective')
+        : buildNetwork(req.weights, 'mason_collective')
+      const wolfBrain = new WolfBrainAgent(wolfBrainNet, { explore: true })
+      const masonBrain = new MasonCollective(masonNet, { explore: true })
+
+      // Use these as the team agents for trajectory collection
+      wolfTeamAgent = wolfBrain as any
+      masonTeamAgent = masonBrain
+
+      const handlers = new BrainBattleAdapter({
+        wolfBrain,
+        masonBrain,
+        agents: agentsMap,
+        defaultAgent: defaultAgent ?? new RuleBasedAgent(),
+        seed,
+        enableRetar: config.enableRetar,
+        enableTsumi: true,
+        roles,
+        rules: config.rules,
+      })
+      tsumiCacheGetter = () => handlers.getTsumiCache!()
+      const result = await runGame(
+        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: isInspectGame ? 'seat' as const : undefined },
+        handlers,
+      )
+      state = result.state
+      events = result.events
+      gameRetarMs = result.timing?.retarMs ?? 0
+      gameRetarCount = result.timing?.retarCount ?? 0
+    } else if (snapshot) {
       // Seed Bank リプレイ: inspect時は名前を role+seat 形式に上書き
       if (isInspectGame) {
         for (const p of snapshot.state.players) {

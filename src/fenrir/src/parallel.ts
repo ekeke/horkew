@@ -159,6 +159,10 @@ export type WorkerRequest = {
   enableMasonTakeover?: boolean
   /** WRE PBRS: frozen勝率NNの重み（有効時のみ） */
   wreWeights?: WreSharedWeights
+  /** Brain Battle mode: wolf brain vs mason brain alternating execution */
+  brainBattle?: boolean
+  /** Wolf brain weights for Brain Battle mode (different NetworkConfig from wolf_collective) */
+  wolfBrainWeights?: SharedWeights
 }
 
 /** 1ゲーム分のタイミング情報 */
