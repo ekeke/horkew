@@ -56,8 +56,8 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     this.wolfBrain = config.wolfBrain
     this.masonBrain = config.masonBrain
     this.fixedTurnOwner = config.fixedTurnOwner
-    // Fixed turn or random first turn based on seed
-    this.turnOwner = config.fixedTurnOwner ?? (this.rng.next() < 0.5 ? 'mason' : 'wolf')
+    // Initial turn (will be re-rolled each day in onDayClaims)
+    this.turnOwner = config.fixedTurnOwner ?? (this.rng.next() < 0.75 ? 'mason' : 'wolf')
   }
 
   /** コメントイベントを events に追加 */
@@ -92,6 +92,11 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     const ext = state.ext
     this.runRetar(pctx, ext)
     const claims = new Map<number, DayClaim>()
+
+    // Roll turn for this day (75% mason, 25% wolf) — skip if fixed
+    if (!this.fixedTurnOwner) {
+      this.turnOwner = this.rng.next() < 0.75 ? 'mason' : 'wolf'
+    }
 
     // Emit turn info
     this.emitComment(pctx, `[BB] Day ${pctx.day}: ${this.turnOwner} turn`)
@@ -152,11 +157,6 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     } else {
       target = this.getWolfTarget(pctx, state, ext)
       this.emitComment(pctx, `[BB] wolf brain → execute seat${target ?? '?'}`)
-    }
-
-    // Flip turn for next day (skip when turn is fixed)
-    if (!this.fixedTurnOwner && (vctx.revoteRound === 0 || vctx.revoteRound == null)) {
-      this.turnOwner = this.turnOwner === 'mason' ? 'wolf' : 'mason'
     }
 
     // Fallback: if no valid target, pick first alive non-self
