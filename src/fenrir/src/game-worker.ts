@@ -238,6 +238,9 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       wolfTeamAgent = wolfBrain as any
       masonTeamAgent = masonBrain
 
+      const fixedTurn = req.brainBattleTurnMode === 'mason_only' ? 'mason' as const
+        : req.brainBattleTurnMode === 'wolf_only' ? 'wolf' as const
+        : undefined
       const handlers = new BrainBattleAdapter({
         wolfBrain,
         masonBrain,
@@ -248,6 +251,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         enableTsumi: true,
         roles,
         rules: config.rules,
+        fixedTurnOwner: fixedTurn,
       })
       tsumiCacheGetter = () => handlers.getTsumiCache!()
       const result = await runGame(

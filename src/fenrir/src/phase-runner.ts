@@ -796,25 +796,73 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
       saveCheckpoint(masonNet, `${masonDir}/collective_${iter}.json`, { iteration: iter, winRate: 0 })
     }
 
-    // === Eval (simplified: log PPO metrics for both brains) ===
+    // === Eval: 3-mode Brain Battle (alternate + mason_only + wolf_only) ===
     if (iter % config.evalInterval === 0) {
+      process.stderr.write(`\r\x1b[K  ${wolfPrefix} iter ${iter} evaluating...`)
+
+      const evalGames = config.evalGames
+      const halfEval = Math.max(Math.floor(evalGames / 2), 10)
+
+      // Helper: run eval games with a specific turn mode
+      const runBBEval = async (turnMode: 'alternate' | 'mason_only' | 'wolf_only', count: number) => {
+        const evalSeeds = Array.from({ length: count }, (_, i) => 900000 + iter * 1000 + (turnMode === 'mason_only' ? 300 : turnMode === 'wolf_only' ? 600 : 0) + i)
+        const { assignment, modelGroupWeights } = buildAssignmentAndWeights(ctx, step)
+        const results = await generateGamesParallel({
+          weights: packWeights(ctx.wolfBrainNetwork!),
+          agentAssignment: assignment,
+          modelGroupWeights,
+          trainingConfig,
+          phase: step.workerPhase,
+          brainBattle: true,
+          wolfBrainWeights: packWeights(ctx.wolfBrainNetwork!),
+          brainBattleTurnMode: turnMode,
+        }, evalSeeds)
+        const winRates: Record<string, number> = {}
+        let totalDays = 0
+        for (const game of results) {
+          winRates[game.result] = (winRates[game.result] ?? 0) + 1
+          totalDays += game.timing?.totalMs ? 1 : 1  // count games
+        }
+        for (const key of Object.keys(winRates)) winRates[key] /= results.length
+        const avgLen = results.reduce((sum, g) => sum + (g.timing?.totalMs ?? 0), 0) / results.length
+        return { winRates, avgLen, count: results.length }
+      }
+
+      const [altResult, masonResult, wolfResult] = await Promise.all([
+        runBBEval('alternate', evalGames),
+        runBBEval('mason_only', halfEval),
+        runBBEval('wolf_only', halfEval),
+      ])
+
       process.stderr.write('\r\x1b[K')
+
+      const fmtWr = (wr: Record<string, number>) =>
+        Object.entries(wr).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')
+
       ctx.log(
-        `${wolfPrefix} [${iter}] pLoss=${lastWolfPpo.policyLoss.toFixed(4)} vLoss=${lastWolfPpo.valueLoss.toFixed(4)} ent=${lastWolfPpo.entropy.toFixed(4)} steps=${allWolfBrainSteps.length}`
+        `${wolfPrefix} [${iter}] ppo: pL=${lastWolfPpo.policyLoss.toFixed(4)} vL=${lastWolfPpo.valueLoss.toFixed(4)} ent=${lastWolfPpo.entropy.toFixed(4)}`
       )
       ctx.log(
-        `${masonPrefix} [${iter}] pLoss=${lastMasonPpo.policyLoss.toFixed(4)} vLoss=${lastMasonPpo.valueLoss.toFixed(4)} ent=${lastMasonPpo.entropy.toFixed(4)} steps=${allMasonSteps.length}`
+        `${masonPrefix} [${iter}] ppo: pL=${lastMasonPpo.policyLoss.toFixed(4)} vL=${lastMasonPpo.valueLoss.toFixed(4)} ent=${lastMasonPpo.entropy.toFixed(4)}`
       )
+      ctx.log(`  [eval alternate ${altResult.count}g] ${fmtWr(altResult.winRates)}`)
+      ctx.log(`  [eval mason_only ${masonResult.count}g] ${fmtWr(masonResult.winRates)}`)
+      ctx.log(`  [eval wolf_only ${wolfResult.count}g] ${fmtWr(wolfResult.winRates)}`)
+
       progress.evals.push({
-        time: new Date().toISOString(), model: 'wolf_brain', iter,
-        winRates: {}, avgLen: 0, status: '',
+        time: new Date().toISOString(), model: 'bb_alternate', iter,
+        winRates: altResult.winRates, avgLen: 0, status: '',
         ppoMetrics: { ...lastWolfPpo },
         timing: { gameMs, ppoMs, iterMs },
       })
       progress.evals.push({
-        time: new Date().toISOString(), model: 'bb_mason', iter,
-        winRates: {}, avgLen: 0, status: '',
+        time: new Date().toISOString(), model: 'bb_mason_only', iter,
+        winRates: masonResult.winRates, avgLen: 0, status: '',
         ppoMetrics: { ...lastMasonPpo },
+      })
+      progress.evals.push({
+        time: new Date().toISOString(), model: 'bb_wolf_only', iter,
+        winRates: wolfResult.winRates, avgLen: 0, status: '',
       })
       progress.latest = { phase, model: 'wolf_brain+mason', iter, maxIter }
       ctx.writeTrainProgress(progress)

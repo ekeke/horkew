@@ -34,6 +34,8 @@ import { parseDualPlanSlots, describePlanIndices } from '../plan/plan-vocab.ts'
 export type BrainBattleAdapterConfig = StrategyBaseAdapterConfig & {
   wolfBrain: WolfBrainAgent
   masonBrain: MasonCollective
+  /** ターン固定: 'mason_only' or 'wolf_only' で常に一方のターン。省略時は交互 */
+  fixedTurnOwner?: 'mason' | 'wolf'
 }
 
 // ============================================================
@@ -43,6 +45,7 @@ export type BrainBattleAdapterConfig = StrategyBaseAdapterConfig & {
 export class BrainBattleAdapter extends StrategyBaseAdapter {
   private readonly wolfBrain: WolfBrainAgent
   private readonly masonBrain: MasonCollective
+  private readonly fixedTurnOwner: 'mason' | 'wolf' | undefined
   private turnOwner: 'mason' | 'wolf'
   private masonPrimarySeat = 0
   private wolfSeats: number[] = []
@@ -52,8 +55,9 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     super(config)
     this.wolfBrain = config.wolfBrain
     this.masonBrain = config.masonBrain
-    // Random first turn based on seed (rng is initialized in super)
-    this.turnOwner = this.rng.next() < 0.5 ? 'mason' : 'wolf'
+    this.fixedTurnOwner = config.fixedTurnOwner
+    // Fixed turn or random first turn based on seed
+    this.turnOwner = config.fixedTurnOwner ?? (this.rng.next() < 0.5 ? 'mason' : 'wolf')
   }
 
   /** コメントイベントを events に追加 */
@@ -150,8 +154,8 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
       this.emitComment(pctx, `[BB] wolf brain → execute seat${target ?? '?'}`)
     }
 
-    // Flip turn for next day
-    if (vctx.revoteRound === 0 || vctx.revoteRound == null) {
+    // Flip turn for next day (skip when turn is fixed)
+    if (!this.fixedTurnOwner && (vctx.revoteRound === 0 || vctx.revoteRound == null)) {
       this.turnOwner = this.turnOwner === 'mason' ? 'wolf' : 'mason'
     }
 

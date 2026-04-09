@@ -163,6 +163,8 @@ export type WorkerRequest = {
   brainBattle?: boolean
   /** Wolf brain weights for Brain Battle mode (different NetworkConfig from wolf_collective) */
   wolfBrainWeights?: SharedWeights
+  /** Brain Battle turn mode: 'alternate' (default), 'mason_only', 'wolf_only' */
+  brainBattleTurnMode?: 'alternate' | 'mason_only' | 'wolf_only'
 }
 
 /** 1ゲーム分のタイミング情報 */
