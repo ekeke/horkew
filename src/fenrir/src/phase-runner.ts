@@ -8,20 +8,21 @@
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import type { TrainingConfig } from './training.ts'
 import type { ProcessedStep } from './ml/trajectory.ts'
-import type { SharedWeights, SerializedGameResult, WreSharedWeights } from './parallel.ts'
-import type { TrainingStep, ModelName, AgentAssignment } from './curriculum.ts'
+import type { SharedWeights, SerializedGameResult, WreSharedWeights, GameTiming } from './parallel.ts'
+import type { TrainingStep, ModelName, AgentAssignment, SingleModelGen } from './curriculum.ts'
 import {
   MODEL_GROUPS, MODEL_NAMES, ROLE_TO_GROUP, BASELINE_RATES,
   klTargetForIter, formatAssignment,
 } from './curriculum.ts'
 import { computeRefPlanLogits } from './agents/neural-agent.ts'
-import { normalizeAdvantages, computeGAE } from './ml/trajectory.ts'
+import { normalizeAdvantages, computeGAE, processTrajectories } from './ml/trajectory.ts'
+import type { TrajectoryStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import { evaluate, appendEvalLog } from './training.ts'
 import {
   packWeights, generateGamesParallel, deserializeStep, gameWorkerPoolSize,
 } from './parallel.ts'
-import { existsSync, readdirSync, readFileSync, appendFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, appendFileSync, unlinkSync } from 'node:fs'
 
 // ============================================================
 // Types
@@ -49,6 +50,9 @@ export type PhaseRunnerContext = {
   /** Wolf brain ネットワーク (Brain Battle phase 用) */
   wolfBrainNetwork?: AnyNetwork
   wolfBrainTfNetwork?: AnyTfNetwork
+
+  /** カリキュラム: 現在の NN 最大席数 (single_model phases で使用) */
+  currentMlMaxSeats?: number
 
   /** WRE PBRS: frozen 勝率NNの共有重み（--wre 有効時のみ） */
   wreSharedWeights?: WreSharedWeights
@@ -284,7 +288,18 @@ function buildAssignmentAndWeights(
 }
 
 /** Build EvaluateOptions from context */
-function buildEvalOptions(ctx: PhaseRunnerContext, _step: TrainingStep, iter: number) {
+function buildEvalOptions(ctx: PhaseRunnerContext, step: TrainingStep, iter: number) {
+  // Single-model phases: simpler eval setup
+  if (step.gameGen.mode === 'single_model') {
+    return {
+      masonAsIndividual: step.evalConfig?.masonAsIndividual,
+      frozenMasonNet: ctx.frozenNets.get('mason_individual'),
+      evalIter: iter,
+      saveHowl: true,
+    }
+  }
+
+  // Multi-model phases: full eval with all model networks
   const individualNets = new Map<string, AnyNetwork>()
   for (const [name, group] of Object.entries(MODEL_GROUPS) as [ModelName, (typeof MODEL_GROUPS)[ModelName]][]) {
     if (!group.collective) {
@@ -311,8 +326,8 @@ function checkpointDir(config: OrchestratorConfig, step: TrainingStep, name: str
 /** Checkpoint file prefix for a model */
 function checkpointPrefix(step: TrainingStep, name: string): { save: string, find: string } {
   const isPhase2 = step.name === 'self_play'
-  const group = MODEL_GROUPS[name as ModelName]
-  if (group?.collective) {
+  const info = name in MODEL_GROUPS ? MODEL_GROUPS[name as ModelName] : null
+  if (info?.collective) {
     return {
       save: isPhase2 ? `phase2_collective` : 'collective',
       find: isPhase2 ? 'phase2_collective' : 'collective',
@@ -324,6 +339,15 @@ function checkpointPrefix(step: TrainingStep, name: string): { save: string, fin
   }
 }
 
+/** Resolve model info for names that may not be in MODEL_GROUPS (e.g. mason_individual) */
+type ModelInfo = { faction: string, collective: boolean, roles: string[] }
+function resolveModelInfo(name: string): ModelInfo {
+  if (name === 'mason_individual') return { faction: 'villager_won', collective: false, roles: ['mason'] }
+  const group = MODEL_GROUPS[name as ModelName]
+  if (!group) throw new Error(`Unknown model: ${name}`)
+  return { faction: group.faction, collective: group.collective, roles: group.roles }
+}
+
 /** Phase display label for progress */
 function phaseLabel(step: TrainingStep): string {
   if (step.name === 'self_play') return '2'
@@ -332,6 +356,24 @@ function phaseLabel(step: TrainingStep): string {
   if (step.name === 'village') return '1'
   if (step.name === 'mason_individual') return '0'
   return step.name
+}
+
+/** Format per-game timing breakdown for progress display */
+function formatTimingStr(timings: GameTiming[]): string {
+  if (timings.length === 0) return ''
+  const n = timings.length
+  const avgGame = timings.reduce((a, t) => a + t.gameMs, 0) / n
+  const avgInfer = timings.reduce((a, t) => a + t.inferMs, 0) / n
+  const avgInferCount = timings.reduce((a, t) => a + t.inferCount, 0) / n
+  const avgRetar = timings.reduce((a, t) => a + t.retarMs, 0) / n
+  const avgRetarCount = timings.reduce((a, t) => a + t.retarCount, 0) / n
+  const avgTsumi = timings.reduce((a, t) => a + t.tsumiMs, 0) / n
+  const avgTsumiCount = timings.reduce((a, t) => a + t.tsumiCount, 0) / n
+  const fmt = (totalMs: number, count: number) => {
+    if (count === 0) return `${totalMs.toFixed(0)}ms`
+    return `${(totalMs / count).toFixed(1)}ms×${count.toFixed(0)}=${totalMs.toFixed(0)}ms`
+  }
+  return `${avgGame.toFixed(0)}ms/game (infer ${fmt(avgInfer, avgInferCount)} retar ${fmt(avgRetar, avgRetarCount)} tsumi ${fmt(avgTsumi, avgTsumiCount)}) `
 }
 
 // ============================================================
@@ -357,19 +399,19 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
   ctx.log(`${BOLD}=== ${step.displayName} ===${RESET}`)
   ctx.log(`  Agent assignment: ${formatAssignment(step.agentAssignment)}`)
 
-  // Only MODEL_GROUPS models are trained (mason_individual handled separately in future)
-  const activeModels = step.activeModels.filter(n => n in MODEL_GROUPS) as ModelName[]
+  // Resolve active models: supports both MODEL_GROUPS keys and special names like mason_individual
+  const activeModels: string[] = step.activeModels.filter(n => n in MODEL_GROUPS || n === 'mason_individual')
   const frozenModelSet = new Set(step.frozen?.frozenModels ?? [])
 
   // --- Per-model state ---
-  const graduated = new Set<ModelName>()
-  const iterCounts = new Map<ModelName, number>()
+  const graduated = new Set<string>()
+  const iterCounts = new Map<string, number>()
   for (const name of activeModels) iterCounts.set(name, 0)
 
   // --- Resume ---
   if (config.resume) {
     for (const name of activeModels) {
-      const group = MODEL_GROUPS[name]
+      const group = resolveModelInfo(name)
       const dir = checkpointDir(config, step, name)
       const prefix = checkpointPrefix(step, name)
       const ckpt = findCheckpoint(dir, prefix.find)
@@ -396,6 +438,21 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
     }
   }
 
+  // --- Curriculum state (mlMaxSeats progression) ---
+  const mlMaxSeatsCap = step.curriculum?.maxSeats?.cap
+  if (step.curriculum?.maxSeats) {
+    ctx.currentMlMaxSeats = step.curriculum.maxSeats.initial
+    // Resume: restore from last curriculum entry
+    if (config.resume && progress.curriculum.length > 0) {
+      const last = progress.curriculum[progress.curriculum.length - 1]
+      if (last.mlMaxSeats !== undefined) {
+        ctx.currentMlMaxSeats = last.mlMaxSeats
+        ctx.log(`  Curriculum resumed: mlMaxSeats=${ctx.currentMlMaxSeats}`)
+      }
+    }
+    ctx.log(`  mlMaxSeats=${ctx.currentMlMaxSeats}/${mlMaxSeatsCap}`)
+  }
+
   // --- PPO config ---
   const basePpoConfig = {
     miniBatchSize: trainingConfig.miniBatchSize,
@@ -416,13 +473,15 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
     for (const name of activeModels) {
       if (graduated.has(name)) continue
 
-      const group = MODEL_GROUPS[name]
+      const group = resolveModelInfo(name)
       const currentIter = iterCounts.get(name)!
       const targetIter = Math.min(currentIter + config.chunkSize, maxIter)
       const prefix = `${COLORS[name] ?? ''}[${(step.name === 'self_play' ? `P2 ${name}` : name).padEnd(16)}]${RESET}`
 
       let lastPpoResult: PpoResult = { ...ZERO_PPO }
       let gameMs = 0, ppoMs = 0, iterMs = 0
+      let cumulativeIterMs = 0, cumulativeIterCount = 0
+      let lastBatchTimings: GameTiming[] = []
 
       for (let iter = currentIter + 1; iter <= targetIter; iter++) {
         ctx.checkShutdown()
@@ -436,13 +495,43 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
         const allWolfCollective: ProcessedStep[] = []
         const allMasonCollective: ProcessedStep[] = []
 
-        if (gameWorkerPoolSize() > 0 && step.gameGen.mode === 'multi_model') {
+        let serializedResults: SerializedGameResult[] = []
+
+        if (gameWorkerPoolSize() > 0 && step.gameGen.mode === 'single_model') {
+          // --- Single-model mode (Phase 0/1): one NN controls mlRoles seats ---
+          const singleGen = step.gameGen as SingleModelGen
+          const network = ctx.networks.get(name)!
+          const inspectSeeds = ctx.pickInspectSeeds(seeds)
+          serializedResults = await generateGamesParallel({
+            weights: packWeights(network),
+            agentAssignment: step.agentAssignment,
+            trainingConfig,
+            phase: step.workerPhase,
+            mlRoles: singleGen.mlRoles as string[],
+            mlMaxSeats: ctx.currentMlMaxSeats,
+            frozenMasonWeights: ctx.frozenWeights.get('mason_individual'),
+            inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
+            enableMasonTakeover: step.enableMasonTakeover,
+            wreWeights: ctx.wreSharedWeights,
+          }, seeds)
+          if (inspectSeeds.length > 0) ctx.saveInspectGames(serializedResults, name, iter)
+
+          // Collect ALL individual steps (single model owns all NN-controlled seats)
+          for (const game of serializedResults) {
+            const stepsMap = new Map<number, TrajectoryStep[]>()
+            for (const { seat, steps } of game.individualSteps) {
+              stepsMap.set(seat, steps.map(deserializeStep))
+            }
+            allIndividual.push(...processTrajectories(stepsMap, trainingConfig.gamma, trainingConfig.lambda))
+          }
+        } else if (gameWorkerPoolSize() > 0 && step.gameGen.mode === 'multi_model') {
+          // --- Multi-model mode (Phase 1'/2): each model group has its own NN ---
           const { assignment, modelGroupWeights } = buildAssignmentAndWeights(ctx, step, frozenModelSet)
           const villageFrozenWeights = frozenModelSet.has('village')
             ? (ctx.frozenWeights.get('village') ?? packWeights(ctx.networks.get('village')!))
             : undefined
           const inspectSeeds = ctx.pickInspectSeeds(seeds)
-          const serializedResults = await generateGamesParallel({
+          serializedResults = await generateGamesParallel({
             weights: packWeights(ctx.networks.get('village')!),  // fallback
             agentAssignment: assignment,
             modelGroupWeights,
@@ -453,12 +542,6 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
             wreWeights: ctx.wreSharedWeights,
           }, seeds)
           if (inspectSeeds.length > 0) ctx.saveInspectGames(serializedResults, `${phase === '2' ? 'phase2_' : 'phase1p_'}${name}`, iter)
-
-          // WRE refresh (if callback provided)
-          if (ctx.onWreRefresh) {
-            const updated = await ctx.onWreRefresh(serializedResults)
-            if (updated) ctx.wreSharedWeights = updated
-          }
 
           // Collect trajectories for current model
           for (const game of serializedResults) {
@@ -477,6 +560,14 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
             }
           }
         }
+
+        // WRE refresh (if callback provided) — shared by both modes
+        if (serializedResults.length > 0 && ctx.onWreRefresh) {
+          const updated = await ctx.onWreRefresh(serializedResults)
+          if (updated) ctx.wreSharedWeights = updated
+        }
+
+        lastBatchTimings = serializedResults.filter(g => g.timing).map(g => g.timing!)
         const tGameEnd = performance.now()
 
         // === PPO update ===
@@ -498,6 +589,11 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
           }
         }
 
+        // KL early stop threshold (break epoch loop if KL diverges too far)
+        const klEarlyStopThreshold = step.ppo.klConfig
+          ? klTargetForIter(iter, step.ppo.klConfig) * 2
+          : Infinity
+
         if (group.collective) {
           const steps = name === 'wolf_collective' ? allWolfCollective : allMasonCollective
           if (steps.length > 0) {
@@ -507,6 +603,7 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
             collectiveTf.loadWeights(collectiveNet.cloneWeights())
             for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
               lastPpoResult = ppoUpdate(collectiveTf, steps, ppoConfig, precomputedRefLogits)
+              if (lastPpoResult.klLoss > klEarlyStopThreshold) break
             }
             collectiveNet.loadWeights(collectiveTf.cloneWeights())
           }
@@ -518,6 +615,7 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
             tf.loadWeights(network.cloneWeights())
             for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
               lastPpoResult = ppoUpdate(tf, allIndividual, ppoConfig, precomputedRefLogits)
+              if (lastPpoResult.klLoss > klEarlyStopThreshold) break
             }
             network.loadWeights(tf.cloneWeights())
           }
@@ -527,6 +625,8 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
         iterMs = performance.now() - iterStart
         gameMs = tGameEnd - tGameStart
         ppoMs = tPpoEnd - tPpoStart
+        cumulativeIterMs += iterMs
+        cumulativeIterCount++
         iterCounts.set(name, iter)
 
         // === KL adaptive β (when KL config is set) ===
@@ -551,10 +651,22 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
 
         // === Progress display ===
         const totalSteps = allIndividual.length + allWolfCollective.length + allMasonCollective.length
+        const pct = (iter / maxIter * 100).toFixed(1)
+        const gamePct = (gameMs / iterMs * 100).toFixed(0)
+        const ppoPct = (ppoMs / iterMs * 100).toFixed(0)
+        const timingStr = formatTimingStr(lastBatchTimings)
+        const mlInfo = ctx.currentMlMaxSeats !== undefined && mlMaxSeatsCap !== undefined
+          ? ` ml=${ctx.currentMlMaxSeats}/${mlMaxSeatsCap}`
+          : ''
+        const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
+        const entStr = lastPpoResult.entropy ? ` ent=${lastPpoResult.entropy.toFixed(4)}` : ''
+        const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${klCoeff.toFixed(3)})` : ''
+        const avgIterMs = (cumulativeIterMs / cumulativeIterCount / 1000).toFixed(1)
+        const remaining = ((targetIter - iter) * cumulativeIterMs / cumulativeIterCount / 1000).toFixed(0)
         process.stderr.write(
-          `\r\x1b[K  ${prefix} iter ${iter}/${maxIter} ` +
-          `${iterMs.toFixed(0)}ms (game${(gameMs / iterMs * 100).toFixed(0)}% ppo${(ppoMs / iterMs * 100).toFixed(0)}%) ` +
-          `steps=${totalSteps}`
+          `\r\x1b[K  ${prefix} iter ${iter}/${maxIter} (${pct}%) ` +
+          `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
+          `steps=${totalSteps}${mlInfo}${lossStr}${entStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
         )
 
         // === Checkpoint ===
@@ -562,16 +674,36 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
           const dir = checkpointDir(config, step, name)
           const cpPrefix = checkpointPrefix(step, name)
           saveCheckpoint(ctx.networks.get(name)!, `${dir}/${cpPrefix.save}_${iter}.json`, { iteration: iter, winRate: 0 })
+
+          // Prune old checkpoints (keep eval milestones)
+          if (existsSync(dir)) {
+            for (const f of readdirSync(dir)) {
+              const m = f.match(/^(?:checkpoint|collective|phase2_checkpoint|phase2_collective)_(\d+)\.json$/)
+              if (!m) continue
+              const ckptIter = parseInt(m[1])
+              if (ckptIter >= iter) continue
+              if (ckptIter % config.evalInterval === 0) continue  // keep milestones
+              try { unlinkSync(`${dir}/${f}`) } catch {}
+            }
+          }
         }
 
         // === Eval ===
         if (iter % config.evalInterval === 0) {
           process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
-          const allMlRoles = Object.values(MODEL_GROUPS).flatMap(g => g.roles)
-          const evalConfig = { ...trainingConfig, mlRoles: allMlRoles }
+          const evalMlRoles = step.gameGen.mode === 'single_model'
+            ? (step.gameGen as SingleModelGen).mlRoles
+            : Object.values(MODEL_GROUPS).flatMap(g => g.roles)
+          const evalConfig = { ...trainingConfig, mlRoles: evalMlRoles }
+          const evalNetwork = step.gameGen.mode === 'single_model'
+            ? ctx.networks.get(name)!
+            : ctx.networks.get('village')!
+          const evalMlMaxSeats = step.gameGen.mode === 'single_model'
+            ? ctx.currentMlMaxSeats
+            : undefined
           const evalResult = await evaluate(
-            ctx.networks.get('village')!, evalConfig, config.evalGames,
-            undefined, undefined, undefined,
+            evalNetwork, evalConfig, config.evalGames,
+            undefined, undefined, evalMlMaxSeats,
             buildEvalOptions(ctx, step, iter),
           )
           process.stderr.write('\r\x1b[K')
@@ -596,8 +728,23 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
             ppoMetrics: { ...lastPpoResult }, baseline: BASELINE_RATES[group.faction], target: targetRate,
             timing: { gameMs, ppoMs, iterMs },
           })
-          progress.latest = { phase, model: name, iter, maxIter, klCoeff: klCoeff > 0 ? klCoeff : undefined }
+          progress.latest = { phase, model: name, iter, maxIter, klCoeff: klCoeff > 0 ? klCoeff : undefined, mlMaxSeats: ctx.currentMlMaxSeats }
           ctx.writeTrainProgress(progress)
+
+          // Curriculum: advance mlMaxSeats when win rate approaches target
+          if (step.curriculum?.maxSeats && ctx.currentMlMaxSeats !== undefined && mlMaxSeatsCap !== undefined) {
+            const advanceThreshold = step.curriculum.advanceThreshold
+            if (ctx.currentMlMaxSeats < mlMaxSeatsCap && factionRate >= targetRate * advanceThreshold) {
+              const prevSeats = ctx.currentMlMaxSeats
+              ctx.currentMlMaxSeats = Math.min(ctx.currentMlMaxSeats + 1, mlMaxSeatsCap)
+              ctx.log(`${prefix} Curriculum: mlMaxSeats ${prevSeats}→${ctx.currentMlMaxSeats}`)
+              progress.curriculum.push({
+                time: new Date().toISOString(), iter, mlMaxSeats: ctx.currentMlMaxSeats,
+                event: `mlMaxSeats ${prevSeats}→${ctx.currentMlMaxSeats}`,
+              })
+              ctx.writeTrainProgress(progress)
+            }
+          }
 
           // Graduation check
           if (step.graduation.type === 'faction_winrate') {
@@ -631,7 +778,7 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
       // Final save
       if (graduated.has(name)) {
         const dir = checkpointDir(config, step, name)
-        const finalSuffix = step.name === 'self_play' ? 'phase2_final' : (MODEL_GROUPS[name].collective ? 'collective_final' : 'final')
+        const finalSuffix = step.name === 'self_play' ? 'phase2_final' : (resolveModelInfo(name).collective ? 'collective_final' : 'final')
         saveCheckpoint(ctx.networks.get(name)!, `${dir}/${finalSuffix}.json`, { iteration: iterCounts.get(name)!, winRate: 0 })
       }
     }

@@ -212,6 +212,11 @@ export type TrainingStep = {
   workerPhase: number
   /** Checkpoint subdirectory override (default: ckpt-{name}) */
   checkpointDir?: string
+  /** Eval configuration overrides for phase-runner */
+  evalConfig?: {
+    /** Phase 0: mason を個人戦略で eval する */
+    masonAsIndividual?: boolean
+  }
 }
 
 export type PhaseStep = PretrainStep | TransferStep | TrainingStep
@@ -290,6 +295,7 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
       maxIterations: 'iterations',
       workerPhase: 1,
       checkpointDir: 'ckpt-mason-individual',
+      evalConfig: { masonAsIndividual: true },
     })
 
     // --- Backbone transfer: mason_individual → village ---
