@@ -165,6 +165,10 @@ export type WorkerRequest = {
   wolfBrainWeights?: SharedWeights
   /** Brain Battle turn mode: 'alternate' (default), 'mason_only', 'wolf_only' */
   brainBattleTurnMode?: 'alternate' | 'mason_only' | 'wolf_only'
+  /** BB+ 個別エージェント重み: model group name → SharedWeights */
+  bbPlusWeights?: Record<string, SharedWeights>
+  /** BB+ frozen village NN（fanatic の observation 注入用） */
+  bbPlusFrozenVillageWeights?: SharedWeights
 }
 
 /** 1ゲーム分のタイミング情報 */

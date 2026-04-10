@@ -241,6 +241,36 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       wolfTeamAgent = wolfBrain as any
       masonTeamAgent = masonBrain
 
+      // BB+ individual agents: seer/bodyguard/fanatic/third learn non-voting skills
+      let bbPlusRolesCallback: ((seatRoles: Map<number, SystemRole>) => void) | undefined
+      if (req.bbPlusWeights) {
+        const bbPlusFrozenVillageNet = req.bbPlusFrozenVillageWeights
+          ? buildNetwork(req.bbPlusFrozenVillageWeights) : undefined
+
+        bbPlusRolesCallback = (seatRoles: Map<number, SystemRole>) => {
+          seatRoleMap = seatRoles
+          for (const [seat, role] of seatRoles) {
+            const group = ROLE_TO_GROUP[role]
+            if (!group || group === 'wolf_collective' || group === 'mason_collective') continue
+            const sw = req.bbPlusWeights![group]
+            if (!sw) continue
+
+            const net = buildNetwork(sw, group === 'fanatic' ? 'fanatic' : false)
+            if (group === 'fanatic') {
+              const fa = new FanaticAgent(net, { explore: true, strategyOnly: false })
+              if (bbPlusFrozenVillageNet) fa.frozenVillageNetwork = bbPlusFrozenVillageNet
+              neuralAgents.set(seat, fa)
+            } else {
+              neuralAgents.set(seat, new NeuralAgent(net, { explore: true, strategyOnly: false }))
+            }
+          }
+          // agentsMap に反映
+          for (const [seat, agent] of neuralAgents) {
+            if (!agentsMap.has(seat)) agentsMap.set(seat, agent)
+          }
+        }
+      }
+
       const fixedTurn = req.brainBattleTurnMode === 'mason_only' ? 'mason' as const
         : req.brainBattleTurnMode === 'wolf_only' ? 'wolf' as const
         : undefined
@@ -256,6 +286,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         rules: config.rules,
         fixedTurnOwner: fixedTurn,
         captureObservations: isInspectGame,
+        onRolesAssigned: bbPlusRolesCallback,
       })
       tsumiCacheGetter = () => handlers.getTsumiCache!()
       if (isInspectGame && handlers.getCapturedObservations) observationGetter = () => handlers.getCapturedObservations!()

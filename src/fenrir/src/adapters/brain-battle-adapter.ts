@@ -34,6 +34,8 @@ export type BrainBattleAdapterConfig = StrategyBaseAdapterConfig & {
   masonBrain: MasonBrainAgent
   /** ターン固定: 'mason_only' or 'wolf_only' で常に一方のターン。省略時は交互 */
   fixedTurnOwner?: 'mason' | 'wolf'
+  /** BB+ 個別エージェント生成用: 役職割り当て通知コールバック */
+  onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
 }
 
 // ============================================================
@@ -79,6 +81,9 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
         this.wolfSeats.push(seat)
       }
     }
+
+    // BB+ 個別エージェント生成を通知
+    this.config.onRolesAssigned?.(roles)
   }
 
   // ============================================================
