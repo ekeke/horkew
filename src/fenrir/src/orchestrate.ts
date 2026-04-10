@@ -291,6 +291,34 @@ function saveInspectGames(results: import('./parallel.ts').SerializedGameResult[
       }
     }
 
+    // Wolf/mason team trajectory → timeline
+    const addTeamSteps = (steps: typeof game.wolfTeamSteps, label: string) => {
+      for (const step of steps) {
+        const entry: Record<string, unknown> = {
+          seat: step.seat, role: label,
+          day: step.day,
+          phase: 'day',
+          actionHead: step.actionHead,
+          actionDescription: describeAction(step.actionHead, step.actionIdx),
+          actionIdx: step.actionIdx,
+          logProb: step.logProb,
+          reward: step.reward,
+          value: step.value,
+          done: step.done,
+        }
+        if (step.planActions) {
+          entry.plan = {
+            indices: step.planActions,
+            description: step.planActions.map(describePlanIndex).join(' '),
+            groups: parsePlanIndices(step.planActions),
+          }
+        }
+        timeline.push(entry)
+      }
+    }
+    addTeamSteps(game.wolfTeamSteps, 'wolf_team')
+    addTeamSteps(game.masonTeamSteps, 'mason_team')
+
     timeline.sort((a, b) => {
       const da = a.day as number, db = b.day as number
       if (da !== db) return da - db
