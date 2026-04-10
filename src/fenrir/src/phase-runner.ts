@@ -1268,7 +1268,37 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
 
       ctx.log(`  [eval alternate ${evalResults.length}g] ${Object.entries(winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')}`)
 
+      // mason_only eval: mason brain が全日の処刑を決定
+      const masonOnlySeeds = Array.from({ length: Math.max(Math.floor(config.evalGames / 2), 10) }, (_, i) => 900000 + iter * 1000 + 300 + i)
+      const masonOnlyResults = await generateGamesParallel({
+        weights: packWeights(ctx.wolfBrainNetwork!),
+        agentAssignment: evalAssignment,
+        modelGroupWeights: evalModelGroupWeights,
+        trainingConfig,
+        phase: step.workerPhase,
+        brainBattle: true,
+        wolfBrainWeights: packWeights(ctx.wolfBrainNetwork!),
+        agentSpecs: evalAgentSpecs,
+        specWeights: evalSpecWeights,
+        brainBattleTurnMode: 'mason_only',
+      }, masonOnlySeeds)
+      const masonOnlyWinRates: Record<string, number> = {}
+      for (const game of masonOnlyResults) {
+        masonOnlyWinRates[game.result] = (masonOnlyWinRates[game.result] ?? 0) + 1
+      }
+      for (const key of Object.keys(masonOnlyWinRates)) masonOnlyWinRates[key] /= masonOnlyResults.length
+
+      ctx.log(`  [eval mason_only ${masonOnlyResults.length}g] ${Object.entries(masonOnlyWinRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')}`)
+
       // Update progress
+      progress.evals.push({
+        time: new Date().toISOString(),
+        model: 'bbplus_mason_only',
+        iter,
+        winRates: masonOnlyWinRates,
+        avgLen: 0,
+        status: '',
+      })
       for (const [name, ppo] of lastPpo) {
         progress.evals.push({
           time: new Date().toISOString(),
