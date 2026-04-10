@@ -1063,16 +1063,16 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
     throw new Error('BB+ requires mason_collective in networks (frozen mason brain)')
   }
 
-  // Individual agent networks
-  const bbPlusModels = ['village', 'fanatic', 'third'] as const
+  // Individual agent networks (keys: group name or role name e.g. 'village', 'fanatic', 'werehamster', 'immoralist')
   const individualNets = new Map<string, AnyNetwork>()
   const individualTfs = new Map<string, AnyTfNetwork>()
-  for (const name of bbPlusModels) {
-    const net = ctx.bbPlusNetworks?.get(name)
-    const tf = ctx.bbPlusTfNetworks?.get(name)
-    if (net && tf) {
-      individualNets.set(name, net)
-      individualTfs.set(name, tf)
+  if (ctx.bbPlusNetworks && ctx.bbPlusTfNetworks) {
+    for (const [name, net] of ctx.bbPlusNetworks) {
+      const tf = ctx.bbPlusTfNetworks.get(name)
+      if (tf) {
+        individualNets.set(name, net)
+        individualTfs.set(name, tf)
+      }
     }
   }
   if (individualNets.size === 0) {
@@ -1098,9 +1098,7 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
 
   // --- Resume ---
   if (config.resume) {
-    for (const name of bbPlusModels) {
-      const net = individualNets.get(name)
-      if (!net) continue
+    for (const [name, net] of individualNets) {
       const dir = `${config.checkpointBase}/ckpt-bbplus-${name}`
       const ckpt = findCheckpoint(dir, name)
       if (ckpt) {
@@ -1126,7 +1124,7 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
     // === Game generation ===
     const tGameStart = performance.now()
     const perModelSteps = new Map<string, ProcessedStep[]>(
-      bbPlusModels.map(n => [n, []])
+      [...individualNets.keys()].map(n => [n, []])
     )
 
     if (gameWorkerPoolSize() > 0) {
@@ -1148,16 +1146,19 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
         wolfBrainWeights: packWeights(ctx.wolfBrainNetwork),
         bbPlusWeights,
         bbPlusFrozenVillageWeights: ctx.frozenWeights.get('village'),
+        bbPlusVillageMaxSeats: step.name.includes('village_1') ? 1 : undefined,
         inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
       }, seeds)
       if (inspectSeeds.length > 0) ctx.saveInspectGames(serializedResults, 'bb_plus', iter)
 
-      // Collect individual trajectories grouped by model
+      // Collect individual trajectories grouped by model key
+      // Key resolution: role name first (werehamster, immoralist), then group name (village, third)
       for (const game of serializedResults) {
         for (const { role, steps } of game.individualSteps) {
           const group = ROLE_TO_GROUP[role as string]
-          if (!group || !perModelSteps.has(group) || steps.length === 0) continue
-          perModelSteps.get(group)!.push(
+          const modelKey = perModelSteps.has(role as string) ? role as string : group
+          if (!modelKey || !perModelSteps.has(modelKey) || steps.length === 0) continue
+          perModelSteps.get(modelKey)!.push(
             ...computeGAE(steps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0)
           )
         }
@@ -1188,7 +1189,7 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
     ppoMs = tPpoEnd - tPpoStart
 
     // === Progress display ===
-    const stepCounts = bbPlusModels.map(n => `${n}=${perModelSteps.get(n)?.length ?? 0}`).join(' ')
+    const stepCounts = [...individualNets.keys()].map(n => `${n}=${perModelSteps.get(n)?.length ?? 0}`).join(' ')
     process.stderr.write(
       `\r\x1b[K  [BB+] iter ${iter}/${noMaxIter ? '∞' : maxIter} ` +
       `${iterMs.toFixed(0)}ms (game${(gameMs / iterMs * 100).toFixed(0)}% ppo${(ppoMs / iterMs * 100).toFixed(0)}%) ` +
@@ -1227,6 +1228,7 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
         wolfBrainWeights: packWeights(ctx.wolfBrainNetwork!),
         bbPlusWeights,
         bbPlusFrozenVillageWeights: ctx.frozenWeights.get('village'),
+        bbPlusVillageMaxSeats: step.name.includes('village_1') ? 1 : undefined,
       }, evalSeeds)
 
       const winRates: Record<string, number> = {}

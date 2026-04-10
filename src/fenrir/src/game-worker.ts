@@ -242,6 +242,8 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       masonTeamAgent = masonBrain
 
       // BB+ individual agents: seer/bodyguard/fanatic/third learn non-voting skills
+      // BB+ individual agents: role-specific skills learning
+      // bbPlusWeights keys: role name ('werehamster') or group name ('village')
       let bbPlusRolesCallback: ((seatRoles: Map<number, SystemRole>) => void) | undefined
       if (req.bbPlusWeights) {
         const bbPlusFrozenVillageNet = req.bbPlusFrozenVillageWeights
@@ -249,13 +251,26 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
         bbPlusRolesCallback = (seatRoles: Map<number, SystemRole>) => {
           seatRoleMap = seatRoles
+          // Village seat count limiter (e.g. Stage 1 = 1 seat only)
+          let villageNNCount = 0
+          const villageMaxSeats = req.bbPlusVillageMaxSeats ?? Infinity
+
           for (const [seat, role] of seatRoles) {
             const group = ROLE_TO_GROUP[role]
             if (!group || group === 'wolf_collective' || group === 'mason_collective') continue
-            const sw = req.bbPlusWeights![group]
+
+            // Village seat count limit
+            if (group === 'village') {
+              if (villageNNCount >= villageMaxSeats) continue
+              villageNNCount++
+            }
+
+            // Key resolution: role name first (werehamster, immoralist), then group name (village, third)
+            const sw = req.bbPlusWeights![role] ?? req.bbPlusWeights![group]
             if (!sw) continue
 
-            const net = buildNetwork(sw, group === 'fanatic' ? 'fanatic' : false)
+            const obsMode = group === 'fanatic' ? 'fanatic' as const : false
+            const net = buildNetwork(sw, obsMode)
             if (group === 'fanatic') {
               const fa = new FanaticAgent(net, { explore: true, strategyOnly: false })
               if (bbPlusFrozenVillageNet) fa.frozenVillageNetwork = bbPlusFrozenVillageNet
@@ -264,7 +279,6 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
               neuralAgents.set(seat, new NeuralAgent(net, { explore: true, strategyOnly: false }))
             }
           }
-          // agentsMap に反映
           for (const [seat, agent] of neuralAgents) {
             if (!agentsMap.has(seat)) agentsMap.set(seat, agent)
           }

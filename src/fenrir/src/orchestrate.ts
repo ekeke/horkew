@@ -931,34 +931,24 @@ async function main(): Promise<void> {
     return
   }
 
-  // === BB+ カリキュラム: frozen brains + 個別役職学習 ===
+  // === BB+ カリキュラム: frozen brains + 4段階 個別役職学習 ===
   if (config.curriculum === 'bb-plus') {
     const bbPlusTrainingConfig: TrainingConfig = { ...trainingConfig, rewardConfig: BRAIN_BATTLE_REWARD_CONFIG }
 
     const steps = buildCurriculum({ curriculum: 'bb-plus' })
-    const bbPlusStep = steps.find(s => s.type === 'training' && s.name === 'bb_plus') as TrainingStep
-    if (!bbPlusStep) throw new Error('bb_plus step not found in bb-plus curriculum')
+      .filter((s): s is TrainingStep => s.type === 'training')
 
     // Frozen BB brains (mason_brain + wolf_brain)
     const masonBrainNet = createMasonBrainNetwork()
     const wolfBrainNet = createWolfBrainNetwork()
-    const wolfBrainTf = createWolfBrainTfNetwork(config.learningRate)  // dummy TF for PhaseRunnerContext
+    const wolfBrainTf = createWolfBrainTfNetwork(config.learningRate)
 
-    // Load frozen BB brain checkpoints
     const bbBase = config.bbCheckpoint
     if (bbBase) {
-      const wolfDir = `${bbBase}/ckpt-wolf_brain`
-      const wolfCkpt = findCheckpoint(wolfDir, 'wolf_brain')
-      if (wolfCkpt) {
-        loadCheckpoint(wolfBrainNet, wolfCkpt.path)
-        log(`Frozen wolf_brain loaded from ${wolfCkpt.path} (iter ${wolfCkpt.iteration})`)
-      }
-      const masonDir = `${bbBase}/ckpt-mason_collective`
-      const masonCkpt = findCheckpoint(masonDir, 'collective')
-      if (masonCkpt) {
-        loadCheckpoint(masonBrainNet, masonCkpt.path)
-        log(`Frozen mason_brain loaded from ${masonCkpt.path} (iter ${masonCkpt.iteration})`)
-      }
+      const wolfCkpt = findCheckpoint(`${bbBase}/ckpt-wolf_brain`, 'wolf_brain')
+      if (wolfCkpt) { loadCheckpoint(wolfBrainNet, wolfCkpt.path); log(`Frozen wolf_brain: ${wolfCkpt.path} (iter ${wolfCkpt.iteration})`) }
+      const masonCkpt = findCheckpoint(`${bbBase}/ckpt-mason_collective`, 'collective')
+      if (masonCkpt) { loadCheckpoint(masonBrainNet, masonCkpt.path); log(`Frozen mason_brain: ${masonCkpt.path} (iter ${masonCkpt.iteration})`) }
     } else {
       log(`WARNING: --bb-checkpoint not specified, using random brain weights`)
     }
@@ -968,43 +958,76 @@ async function main(): Promise<void> {
     const villageTf = createTfNetwork(config.learningRate)
     const fanaticNet = createFanaticNetwork()
     const fanaticTf = createFanaticTfNetwork(config.learningRate)
-    const thirdNet = createNetwork()
-    const thirdTf = createTfNetwork(config.learningRate)
+    const werehamsterNet = createNetwork()
+    const werehamsterTf = createTfNetwork(config.learningRate)
+    const immoralistNet = createNetwork()
+    const immoralistTf = createTfNetwork(config.learningRate)
 
     log(`Frozen wolf_brain: ${wolfBrainNet.totalParams} params`)
     log(`Frozen mason_brain: ${masonBrainNet.totalParams} params`)
-    log(`BB+ village: ${villageNet.totalParams} params`)
-    log(`BB+ fanatic: ${fanaticNet.totalParams} params`)
-    log(`BB+ third: ${thirdNet.totalParams} params`)
+    log(`BB+ village: ${villageNet.totalParams}, fanatic: ${fanaticNet.totalParams}, werehamster: ${werehamsterNet.totalParams}, immoralist: ${immoralistNet.totalParams}`)
 
-    // Worker pool
     if (config.workers !== 0) {
       initGameWorkerPool(config.workers === -1 ? undefined : config.workers)
     }
 
-    const bbPlusCtx: PhaseRunnerContext = {
-      config, trainingConfig: bbPlusTrainingConfig, progress, runId, gitSha,
-      networks: new Map<string, AnyNetwork>([['mason_collective', masonBrainNet]]),
-      tfNetworks: new Map<string, AnyTfNetwork>(),
-      frozenWeights: new Map<string, SharedWeights>([['village', packWeights(villageNet)]]),
-      frozenNets: new Map(),
-      wolfBrainNetwork: wolfBrainNet,
-      wolfBrainTfNetwork: wolfBrainTf,
-      bbPlusNetworks: new Map([['village', villageNet], ['fanatic', fanaticNet], ['third', thirdNet]]),
-      bbPlusTfNetworks: new Map([['village', villageTf], ['fanatic', fanaticTf], ['third', thirdTf]]),
-      checkShutdown,
-      log,
-      writeTrainProgress,
-      pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
-      saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
-      saveEvalHowl,
+    // Run each stage sequentially
+    for (const step of steps) {
+      checkShutdown()
+
+      // Build bbPlusNetworks/TfNetworks for this stage based on step.activeModels
+      const bbPlusNets = new Map<string, AnyNetwork>()
+      const bbPlusTfs = new Map<string, AnyTfNetwork>()
+      const frozenWeightsMap = new Map<string, SharedWeights>()
+
+      if (step.name.includes('village')) {
+        bbPlusNets.set('village', villageNet)
+        bbPlusTfs.set('village', villageTf)
+      }
+      if (step.name.includes('fanatic')) {
+        bbPlusNets.set('fanatic', fanaticNet)
+        bbPlusTfs.set('fanatic', fanaticTf)
+        // frozen village for fanatic observation injection
+        frozenWeightsMap.set('village', packWeights(villageNet))
+      }
+      if (step.name.includes('third')) {
+        bbPlusNets.set('werehamster', werehamsterNet)
+        bbPlusTfs.set('werehamster', werehamsterTf)
+        bbPlusNets.set('immoralist', immoralistNet)
+        bbPlusTfs.set('immoralist', immoralistTf)
+        frozenWeightsMap.set('village', packWeights(villageNet))
+      }
+
+      // Stage 3+: frozen village for CO stability
+      if (step.agentAssignment.village === 'frozen') {
+        frozenWeightsMap.set('village', packWeights(villageNet))
+      }
+
+      const stageCtx: PhaseRunnerContext = {
+        config, trainingConfig: bbPlusTrainingConfig, progress, runId, gitSha,
+        networks: new Map<string, AnyNetwork>([['mason_collective', masonBrainNet]]),
+        tfNetworks: new Map<string, AnyTfNetwork>(),
+        frozenWeights: frozenWeightsMap,
+        frozenNets: new Map(),
+        wolfBrainNetwork: wolfBrainNet,
+        wolfBrainTfNetwork: wolfBrainTf,
+        bbPlusNetworks: bbPlusNets,
+        bbPlusTfNetworks: bbPlusTfs,
+        checkShutdown,
+        log,
+        writeTrainProgress,
+        pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
+        saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
+        saveEvalHowl,
+      }
+      await runTrainingPhase(step, stageCtx)
     }
-    await runTrainingPhase(bbPlusStep, bbPlusCtx)
 
     wolfBrainTf.dispose()
     villageTf.dispose()
     fanaticTf.dispose()
-    thirdTf.dispose()
+    werehamsterTf.dispose()
+    immoralistTf.dispose()
     terminateGameWorkerPool()
     log(`${BOLD}BB+ training complete!${RESET}`)
     return

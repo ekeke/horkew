@@ -422,29 +422,88 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
 // ============================================================
 
 function buildBBPlusCurriculum(): PhaseStep[] {
-  return [{
-    type: 'training',
-    name: 'bb_plus',
-    displayName: 'Phase BB+: Individual Role Training',
-    activeModels: ['village', 'fanatic', 'third'],
-    strategyOnly: false,  // night/claim head を学習するため false
-    adapter: 'brain-battle',
+  // 4-stage curriculum: village → village(full) → fanatic → werehamster + immoralist
+  // Each stage freezes previous models and adds new NN agents
+  const bbPlusBase = {
+    type: 'training' as const,
+    strategyOnly: false,
+    adapter: 'brain-battle' as const,
     ppo: { freezePlan: false },
-    graduation: { type: 'none' },
-    gameGen: {
-      mode: 'multi_model',
-      seedOffsetBase: 50000,
-    },
-    agentAssignment: {
-      village: 'neural',
-      wolf_collective: 'heuristic',
-      mason_collective: 'neural',
-      fanatic: 'neural',
-      third: 'neural',
-    },
-    maxIterations: 'iterations',
+    gameGen: { mode: 'multi_model' as const, seedOffsetBase: 50000 },
+    maxIterations: 'iterations' as const,
     workerPhase: 4,
-  }]
+  }
+
+  return [
+    // Stage 1: village NN × 1席 (seer 優先) — 占い先・CO 学習
+    {
+      ...bbPlusBase,
+      name: 'bb_plus_village_1',
+      displayName: 'Phase BB+ Stage 1: Village (1 seat)',
+      activeModels: ['village'],
+      graduation: { type: 'min_iter' as const, minIter: 300 },
+      agentAssignment: {
+        village: 'neural',
+        wolf_collective: 'heuristic',
+        mason_collective: 'neural',  // frozen mason_brain
+        fanatic: 'heuristic',
+        third: 'heuristic',
+      },
+    },
+    // Stage 2: village NN × 全席 — 全村役職の夜行動・CO
+    {
+      ...bbPlusBase,
+      name: 'bb_plus_village_full',
+      displayName: 'Phase BB+ Stage 2: Village (full)',
+      activeModels: ['village'],
+      graduation: { type: 'min_iter' as const, minIter: 300 },
+      agentAssignment: {
+        village: 'neural',
+        wolf_collective: 'heuristic',
+        mason_collective: 'neural',
+        fanatic: 'heuristic',
+        third: 'heuristic',
+      },
+    },
+    // Stage 3: fanatic NN — 村 frozen, 騙り戦略学習
+    {
+      ...bbPlusBase,
+      name: 'bb_plus_fanatic',
+      displayName: 'Phase BB+ Stage 3: Fanatic',
+      activeModels: ['fanatic'],
+      graduation: { type: 'min_iter' as const, minIter: 300 },
+      agentAssignment: {
+        village: 'frozen',
+        wolf_collective: 'heuristic',
+        mason_collective: 'neural',
+        fanatic: 'neural',
+        third: 'heuristic',
+      },
+      frozen: {
+        frozenModels: ['village'],
+        injectVillageNN: true,
+      },
+    },
+    // Stage 4: werehamster + immoralist NN — 狐/背徳の生存・護衛戦略
+    {
+      ...bbPlusBase,
+      name: 'bb_plus_third',
+      displayName: 'Phase BB+ Stage 4: Werehamster + Immoralist',
+      activeModels: ['third'],  // trajectory keys: 'werehamster', 'immoralist'
+      graduation: { type: 'none' as const },
+      agentAssignment: {
+        village: 'frozen',
+        wolf_collective: 'heuristic',
+        mason_collective: 'neural',
+        fanatic: 'frozen',
+        third: 'neural',
+      },
+      frozen: {
+        frozenModels: ['village'],
+        injectVillageNN: true,
+      },
+    },
+  ]
 }
 
 // ============================================================
