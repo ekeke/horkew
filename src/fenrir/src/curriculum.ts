@@ -490,7 +490,7 @@ function buildBBPlusCurriculum(): PhaseStep[] {
       name: 'bb_plus_third',
       displayName: 'Phase BB+ Stage 4: Werehamster + Immoralist',
       activeModels: ['third'],  // trajectory keys: 'werehamster', 'immoralist'
-      graduation: { type: 'none' as const },
+      graduation: { type: 'min_iter' as const, minIter: 300 },
       agentAssignment: {
         village: 'frozen',
         wolf_collective: 'heuristic',
@@ -500,6 +500,25 @@ function buildBBPlusCurriculum(): PhaseStep[] {
       },
       frozen: {
         frozenModels: ['village'],
+        injectVillageNN: true,
+      },
+    },
+    // Stage 5: 全個別エージェント NN — 共進化
+    {
+      ...bbPlusBase,
+      name: 'bb_plus_all',
+      displayName: 'Phase BB+ Stage 5: All Individual Agents',
+      activeModels: ['village', 'fanatic', 'third'],
+      graduation: { type: 'none' as const },
+      agentAssignment: {
+        village: 'neural',
+        wolf_collective: 'heuristic',
+        mason_collective: 'neural',
+        fanatic: 'neural',
+        third: 'neural',
+      },
+      frozen: {
+        frozenModels: [],
         injectVillageNN: true,
       },
     },

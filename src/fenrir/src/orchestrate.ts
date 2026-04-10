@@ -980,17 +980,16 @@ async function main(): Promise<void> {
       const bbPlusTfs = new Map<string, AnyTfNetwork>()
       const frozenWeightsMap = new Map<string, SharedWeights>()
 
-      if (step.name.includes('village')) {
+      if (step.name.includes('village') || step.name.includes('all')) {
         bbPlusNets.set('village', villageNet)
         bbPlusTfs.set('village', villageTf)
       }
-      if (step.name.includes('fanatic')) {
+      if (step.name.includes('fanatic') || step.name.includes('all')) {
         bbPlusNets.set('fanatic', fanaticNet)
         bbPlusTfs.set('fanatic', fanaticTf)
-        // frozen village for fanatic observation injection
         frozenWeightsMap.set('village', packWeights(villageNet))
       }
-      if (step.name.includes('third')) {
+      if (step.name.includes('third') || step.name.includes('all')) {
         bbPlusNets.set('werehamster', werehamsterNet)
         bbPlusTfs.set('werehamster', werehamsterTf)
         bbPlusNets.set('immoralist', immoralistNet)
