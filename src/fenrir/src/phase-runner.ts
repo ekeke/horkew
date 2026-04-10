@@ -361,6 +361,11 @@ function phaseLabel(step: TrainingStep): string {
   if (step.name === 'non_village') return "1'"
   if (step.name === 'village') return '1'
   if (step.name === 'mason_individual') return '0'
+  if (step.name === 'bb_plus_village_1') return 'BB+1'
+  if (step.name === 'bb_plus_village_full') return 'BB+2'
+  if (step.name === 'bb_plus_fanatic') return 'BB+3'
+  if (step.name === 'bb_plus_third') return 'BB+4'
+  if (step.name === 'bb_plus_all') return 'BB+5'
   return step.name
 }
 
@@ -1083,6 +1088,10 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
   ctx.log(`${BOLD}=== ${step.displayName} ===${RESET}`)
   ctx.log(`  Frozen brains: wolf_brain (${ctx.wolfBrainNetwork.totalParams} params), mason_brain (${masonNet.totalParams} params)`)
   ctx.log(`  Individual models: ${[...individualNets.keys()].map(n => `${n} (${individualNets.get(n)!.totalParams})`).join(', ')}`)
+
+  // Update latest immediately so stage is visible before first eval
+  progress.latest = { phase, model: [...individualNets.keys()].join('+'), iter: 0, maxIter }
+  ctx.writeTrainProgress(progress)
 
   const ppoConfig = {
     miniBatchSize: trainingConfig.miniBatchSize,
