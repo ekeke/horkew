@@ -57,7 +57,7 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     this.masonBrain = config.masonBrain
     this.fixedTurnOwner = config.fixedTurnOwner
     // Initial turn (will be re-rolled each day in onDayClaims)
-    this.turnOwner = config.fixedTurnOwner ?? (this.rng.next() < 0.75 ? 'mason' : 'wolf')
+    this.turnOwner = config.fixedTurnOwner ?? (this.rng.next() < 0.92 ? 'mason' : 'wolf')
   }
 
   /** コメントイベントを events に追加 */
@@ -93,9 +93,9 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     this.runRetar(pctx, ext)
     const claims = new Map<number, DayClaim>()
 
-    // Roll turn for this day (75% mason, 25% wolf) — skip if fixed
+    // Roll turn for this day (92% mason, 8% wolf) — skip if fixed
     if (!this.fixedTurnOwner) {
-      this.turnOwner = this.rng.next() < 0.75 ? 'mason' : 'wolf'
+      this.turnOwner = this.rng.next() < 0.92 ? 'mason' : 'wolf'
     }
 
     // Emit turn info
