@@ -36,6 +36,7 @@ import {
   type WorkerResult,
   type SerializedGameResult,
   type SharedWeights,
+  type AgentSpec,
 } from './parallel.ts'
 
 if (!parentPort) throw new Error('game-worker must be run as a worker thread')
@@ -61,6 +62,34 @@ const ROLE_TO_GROUP: Record<string, string> = {
   mason: 'mason_collective',
   fanatic: 'fanatic',
   werehamster: 'third', immoralist: 'third',
+}
+
+/**
+ * AgentSpec からエージェントを生成するファクトリ。
+ * 構造的知識（どの role にどの Agent クラスを使うか）をここに集約。
+ */
+function createAgentFromSpec(
+  spec: AgentSpec,
+  specWeights: Record<string, SharedWeights>,
+): NeuralAgent | WolfBrainAgent | MasonBrainAgent | RuleBasedAgent {
+  if (spec.type === 'rule-based') return new RuleBasedAgent()
+
+  const sw = specWeights[spec.weightsKey]
+  if (!sw) throw new Error(`specWeights missing key '${spec.weightsKey}' for agent type '${spec.type}'`)
+  const net = buildNetwork(sw, spec.observationMode ?? false)
+
+  switch (spec.type) {
+    case 'neural': return new NeuralAgent(net, { explore: true, strategyOnly: spec.strategyOnly })
+    case 'fanatic': {
+      const fa = new FanaticAgent(net, { explore: true, strategyOnly: spec.strategyOnly })
+      if (spec.frozenVillageKey && specWeights[spec.frozenVillageKey]) {
+        fa.frozenVillageNetwork = buildNetwork(specWeights[spec.frozenVillageKey])
+      }
+      return fa
+    }
+    case 'wolf-brain': return new WolfBrainAgent(net, { explore: true })
+    case 'mason-brain': return new MasonBrainAgent(net, { explore: true })
+  }
 }
 
 async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
@@ -241,42 +270,34 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       wolfTeamAgent = wolfBrain as any
       masonTeamAgent = masonBrain
 
-      // BB+ individual agents: seer/bodyguard/fanatic/third learn non-voting skills
-      // BB+ individual agents: role-specific skills learning
-      // bbPlusWeights keys: role name ('werehamster') or group name ('village')
+      // BB+ 個別エージェント: agentSpecs で宣言的に構築
       let bbPlusRolesCallback: ((seatRoles: Map<number, SystemRole>) => void) | undefined
-      if (req.bbPlusWeights) {
-        const bbPlusFrozenVillageNet = req.bbPlusFrozenVillageWeights
-          ? buildNetwork(req.bbPlusFrozenVillageWeights) : undefined
+      if (req.agentSpecs && req.specWeights) {
+        const specs = req.agentSpecs
+        const weights = req.specWeights
+        const seatCounts = new Map<string, number>()  // spec key → 生成済み席数
 
         bbPlusRolesCallback = (seatRoles: Map<number, SystemRole>) => {
           seatRoleMap = seatRoles
-          // Village seat count limiter (e.g. Stage 1 = 1 seat only)
-          let villageNNCount = 0
-          const villageMaxSeats = req.bbPlusVillageMaxSeats ?? Infinity
-
           for (const [seat, role] of seatRoles) {
+            // role 名 → group 名 の順で spec を探す
             const group = ROLE_TO_GROUP[role]
-            if (!group || group === 'wolf_collective' || group === 'mason_collective') continue
+            const spec = specs[role] ?? (group ? specs[group] : undefined)
+            if (!spec || spec.type === 'rule-based') continue
+            // wolf-brain / mason-brain は BB adapter が管理するのでスキップ
+            if (spec.type === 'wolf-brain' || spec.type === 'mason-brain') continue
 
-            // Village seat count limit
-            if (group === 'village') {
-              if (villageNNCount >= villageMaxSeats) continue
-              villageNNCount++
+            // 席数制限
+            const specKey = specs[role] ? role : group
+            if (spec.maxSeats != null) {
+              const count = seatCounts.get(specKey) ?? 0
+              if (count >= spec.maxSeats) continue
+              seatCounts.set(specKey, count + 1)
             }
 
-            // Key resolution: role name first (werehamster, immoralist), then group name (village, third)
-            const sw = req.bbPlusWeights![role] ?? req.bbPlusWeights![group]
-            if (!sw) continue
-
-            const obsMode = group === 'fanatic' ? 'fanatic' as const : false
-            const net = buildNetwork(sw, obsMode)
-            if (group === 'fanatic') {
-              const fa = new FanaticAgent(net, { explore: true, strategyOnly: false })
-              if (bbPlusFrozenVillageNet) fa.frozenVillageNetwork = bbPlusFrozenVillageNet
-              neuralAgents.set(seat, fa)
-            } else {
-              neuralAgents.set(seat, new NeuralAgent(net, { explore: true, strategyOnly: false }))
+            const agent = createAgentFromSpec(spec, weights)
+            if (agent instanceof NeuralAgent) {
+              neuralAgents.set(seat, agent)
             }
           }
           for (const [seat, agent] of neuralAgents) {

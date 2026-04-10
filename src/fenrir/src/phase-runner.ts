@@ -21,6 +21,7 @@ import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import { evaluate, appendEvalLog } from './training.ts'
 import {
   packWeights, generateGamesParallel, deserializeStep, gameWorkerPoolSize,
+  type AgentSpec,
 } from './parallel.ts'
 import { existsSync, readdirSync, readFileSync, appendFileSync, unlinkSync } from 'node:fs'
 
@@ -1128,25 +1129,38 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
     )
 
     if (gameWorkerPoolSize() > 0) {
-      // Pack individual agent weights
-      const bbPlusWeights: Record<string, SharedWeights> = {}
+      // Build agent specs + weights from bbPlusNetworks
+      const agentSpecs: Record<string, AgentSpec> = {}
+      const specWeights: Record<string, SharedWeights> = {}
+
       for (const [name, net] of individualNets) {
-        bbPlusWeights[name] = packWeights(net)
+        specWeights[name] = packWeights(net)
+        const isFanatic = name === 'fanatic'
+        agentSpecs[name] = {
+          type: isFanatic ? 'fanatic' : 'neural',
+          weightsKey: name,
+          strategyOnly: false,
+          observationMode: isFanatic ? 'fanatic' : undefined,
+          frozenVillageKey: isFanatic ? 'frozen_village' : undefined,
+          maxSeats: step.name.includes('village_1') && name === 'village' ? 1 : undefined,
+        }
       }
+      // Frozen village NN for fanatic injection
+      const frozenVillageWeights = ctx.frozenWeights.get('village')
+      if (frozenVillageWeights) specWeights['frozen_village'] = frozenVillageWeights
 
       const { assignment, modelGroupWeights } = buildAssignmentAndWeights(ctx, step)
       const inspectSeeds = ctx.pickInspectSeeds(seeds)
       const serializedResults = await generateGamesParallel({
-        weights: packWeights(ctx.wolfBrainNetwork),  // fallback
+        weights: packWeights(ctx.wolfBrainNetwork),
         agentAssignment: assignment,
         modelGroupWeights,
         trainingConfig,
         phase: step.workerPhase,
         brainBattle: true,
         wolfBrainWeights: packWeights(ctx.wolfBrainNetwork),
-        bbPlusWeights,
-        bbPlusFrozenVillageWeights: ctx.frozenWeights.get('village'),
-        bbPlusVillageMaxSeats: step.name.includes('village_1') ? 1 : undefined,
+        agentSpecs,
+        specWeights,
         inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
       }, seeds)
       if (inspectSeeds.length > 0) ctx.saveInspectGames(serializedResults, 'bb_plus', iter)
@@ -1215,20 +1229,35 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
 
       // Run eval games (alternate mode only)
       const evalSeeds = Array.from({ length: config.evalGames }, (_, i) => 900000 + iter * 1000 + i)
-      const { assignment, modelGroupWeights } = buildAssignmentAndWeights(ctx, step)
-      const bbPlusWeights: Record<string, SharedWeights> = {}
-      for (const [name, net] of individualNets) bbPlusWeights[name] = packWeights(net)
+      // Reuse same agentSpecs/specWeights as training
+      const evalAgentSpecs: Record<string, AgentSpec> = {}
+      const evalSpecWeights: Record<string, SharedWeights> = {}
+      for (const [name, net] of individualNets) {
+        evalSpecWeights[name] = packWeights(net)
+        const isFanatic = name === 'fanatic'
+        evalAgentSpecs[name] = {
+          type: isFanatic ? 'fanatic' : 'neural',
+          weightsKey: name,
+          strategyOnly: false,
+          observationMode: isFanatic ? 'fanatic' : undefined,
+          frozenVillageKey: isFanatic ? 'frozen_village' : undefined,
+          maxSeats: step.name.includes('village_1') && name === 'village' ? 1 : undefined,
+        }
+      }
+      const evalFrozenVillage = ctx.frozenWeights.get('village')
+      if (evalFrozenVillage) evalSpecWeights['frozen_village'] = evalFrozenVillage
+
+      const { assignment: evalAssignment, modelGroupWeights: evalModelGroupWeights } = buildAssignmentAndWeights(ctx, step)
       const evalResults = await generateGamesParallel({
         weights: packWeights(ctx.wolfBrainNetwork!),
-        agentAssignment: assignment,
-        modelGroupWeights,
+        agentAssignment: evalAssignment,
+        modelGroupWeights: evalModelGroupWeights,
         trainingConfig,
         phase: step.workerPhase,
         brainBattle: true,
         wolfBrainWeights: packWeights(ctx.wolfBrainNetwork!),
-        bbPlusWeights,
-        bbPlusFrozenVillageWeights: ctx.frozenWeights.get('village'),
-        bbPlusVillageMaxSeats: step.name.includes('village_1') ? 1 : undefined,
+        agentSpecs: evalAgentSpecs,
+        specWeights: evalSpecWeights,
       }, evalSeeds)
 
       const winRates: Record<string, number> = {}

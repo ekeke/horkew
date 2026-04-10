@@ -171,6 +171,37 @@ export type WorkerRequest = {
   bbPlusFrozenVillageWeights?: SharedWeights
   /** BB+ village NN の最大席数制限 (省略=全席) */
   bbPlusVillageMaxSeats?: number
+
+  /**
+   * 宣言的エージェント構築レシピ（role or group → spec）。
+   * game-worker はこれを解釈してエージェントを生成する。
+   * allWeights にネットワーク重みを名前で格納し、spec.weightsKey で参照。
+   */
+  agentSpecs?: Record<string, AgentSpec>
+  /** agentSpecs が参照する重み群 */
+  specWeights?: Record<string, SharedWeights>
+}
+
+// ============================================================
+// Agent Spec — 宣言的エージェント構築レシピ
+// ============================================================
+
+/** エージェントの種類 */
+export type AgentType = 'neural' | 'fanatic' | 'mason-brain' | 'wolf-brain' | 'rule-based'
+
+/** 1エージェントの構築仕様 */
+export type AgentSpec = {
+  type: AgentType
+  /** specWeights 内のキー */
+  weightsKey: string
+  /** strategy-only モード（plan token のみ学習、night/claim はヒューリスティック） */
+  strategyOnly: boolean
+  /** observation mode (fanatic 等) */
+  observationMode?: import('./observation.ts').ObservationMode
+  /** frozen village NN 注入用の重みキー（fanatic 用） */
+  frozenVillageKey?: string
+  /** 最大席数制限（village 等で1席だけ NN にする場合） */
+  maxSeats?: number
 }
 
 /** 1ゲーム分のタイミング情報 */
