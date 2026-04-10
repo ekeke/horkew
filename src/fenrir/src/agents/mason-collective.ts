@@ -58,6 +58,25 @@ export class MasonCollective extends CollectiveAgentBase implements TeamAgent {
     return result
   }
 
+  /** Record plan tokens as a trajectory step (for Brain Battle PPO) */
+  recordPlan(result: ForwardResult, seat: number): void {
+    if (!result.planActions || !result.planLogProbs || !this.lastObs) return
+    let totalLogProb = 0
+    for (const lp of result.planLogProbs) totalLogProb += lp
+    this.trajectory.push({
+      seat,
+      observation: this.lastObs,
+      actionHead: 'strategy',
+      actionIdx: -1,
+      logProb: totalLogProb,
+      reward: 0,
+      value: result.value,
+      done: false,
+      planActions: result.planActions,
+      planLogProbs: result.planLogProbs,
+    })
+  }
+
   decideNightAction(_ctx: TeamDecisionContext): NightAction {
     return { type: 'none' }
   }

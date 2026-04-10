@@ -249,6 +249,8 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
 
     // Mason brain generates plan via getOrInfer → plan tokens
     const result = this.masonBrain.getOrInfer(teamCtx)
+    // Record plan trajectory for PPO
+    this.masonBrain.recordPlan(result, this.masonPrimarySeat)
     if (!result.planActions || result.planActions.length === 0) {
       this.emitComment(pctx, `[BB] mason plan: (empty)`)
       return null
