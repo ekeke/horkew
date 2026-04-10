@@ -694,7 +694,7 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
         ctx.log(`  mason_collective: checkpoint incompatible, starting fresh (${(e as Error).message})`)
       }
     }
-    if (existsSync(`${wolfDir}/wolf_brain_final.json`)) {
+    if (step.graduation.type !== 'none' && existsSync(`${wolfDir}/wolf_brain_final.json`)) {
       ctx.log(`  wolf_brain: already graduated`)
       return
     }
@@ -877,11 +877,13 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
 
   process.stderr.write('\r\x1b[K')
 
-  // Final save (both brains)
-  const wolfDir = checkpointDir(config, step, 'wolf_brain')
-  saveCheckpoint(ctx.wolfBrainNetwork, `${wolfDir}/wolf_brain_final.json`, { iteration: iter, winRate: 0 })
-  const masonDir = checkpointDir(config, step, 'mason_collective')
-  saveCheckpoint(masonNet, `${masonDir}/collective_final.json`, { iteration: iter, winRate: 0 })
+  // Final save (both brains) — skip for graduation: none (stopped by shutdown, not graduation)
+  if (step.graduation.type !== 'none') {
+    const wolfDir = checkpointDir(config, step, 'wolf_brain')
+    saveCheckpoint(ctx.wolfBrainNetwork, `${wolfDir}/wolf_brain_final.json`, { iteration: iter, winRate: 0 })
+    const masonDir = checkpointDir(config, step, 'mason_collective')
+    saveCheckpoint(masonNet, `${masonDir}/collective_final.json`, { iteration: iter, winRate: 0 })
+  }
 
   ctx.log(`${BOLD}=== ${step.displayName} Complete ===${RESET}`)
   progress.latest = { phase: `${phase} (complete)`, model: 'wolf_brain+mason', iter, maxIter }
