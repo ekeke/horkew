@@ -394,7 +394,7 @@ function formatTimingStr(timings: GameTiming[]): string {
 export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerContext): Promise<void> {
   // Brain Battle / BB+: 専用ループで処理
   if (step.adapter === 'brain-battle') {
-    if (step.name === 'bb_plus') {
+    if (step.name.startsWith('bb_plus')) {
       return runBBPlusPhase(step, ctx)
     }
     return runBrainBattlePhase(step, ctx)
