@@ -252,8 +252,10 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
         roles,
         rules: config.rules,
         fixedTurnOwner: fixedTurn,
+        captureObservations: isInspectGame,
       })
       tsumiCacheGetter = () => handlers.getTsumiCache!()
+      if (isInspectGame && handlers.getCapturedObservations) observationGetter = () => handlers.getCapturedObservations!()
       const result = await runGame(
         { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: isInspectGame ? 'seat' as const : undefined },
         handlers,
