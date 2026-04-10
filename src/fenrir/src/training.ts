@@ -426,6 +426,33 @@ export function createWolfBrainTfNetwork(lr: number = 3e-4): TfTransformerNetwor
   return new TfTransformerNetwork(WOLF_BRAIN_TRANSFORMER_CONFIG, lr, 'wolf_collective')
 }
 
+// ---- Mason Brain variants (Brain Battle, no GRU — direct vote head) ----
+
+const MASON_BRAIN_TRANSFORMER_CONFIG: NetworkConfig = {
+  inputSize: MASON_COLLECTIVE_OBSERVATION_SIZE,
+  heads: {
+    vote: HEAD_SIZES.vote,
+  },
+  sigmoidHeads: {},
+  transformer: {
+    ...TRANSFORMER_COMMON,
+    numPlanTokens: 0,
+    planVocabSize: 0,
+    seatFeatures: MASON_COLLECTIVE_SEAT_FEATURES,
+    clsFeatures: MASON_COLLECTIVE_CLS_FEATURES,
+    perSeatHeads: ['vote'],
+    perSeatSigmoidHeads: [],
+  },
+}
+
+export function createMasonBrainNetwork(): TransformerNetwork {
+  return new TransformerNetwork(MASON_BRAIN_TRANSFORMER_CONFIG, 'mason_collective')
+}
+
+export function createMasonBrainTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+  return new TfTransformerNetwork(MASON_BRAIN_TRANSFORMER_CONFIG, lr, 'mason_collective')
+}
+
 // ---- Fanatic variants (Transformer only) ----
 
 export function createFanaticNetwork(): TransformerNetwork {

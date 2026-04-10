@@ -19,6 +19,7 @@ import { WolfTeamAgent, WolfCollective } from './agents/wolf-collective.ts'
 import { MasonTeamAgent, MasonCollective } from './agents/mason-collective.ts'
 import { RuleBasedAgent } from './agents/rule-based-agent.ts'
 import { WolfBrainAgent } from './agents/wolf-brain.ts'
+import { MasonBrainAgent } from './agents/mason-brain.ts'
 import { BrainBattleAdapter } from './adapters/brain-battle-adapter.ts'
 import { terminalReward, intermediateReward, tsumiReward } from './reward.ts'
 import { formatHowl } from '../../lupa/format.ts'
@@ -226,13 +227,15 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     } : undefined
 
     if (req.brainBattle && req.wolfBrainWeights) {
-      // Brain Battle mode: wolf brain vs mason brain
+      // Brain Battle mode: wolf brain vs mason brain (direct vote head)
       const wolfBrainNet = buildNetwork(req.wolfBrainWeights, 'wolf_collective')
-      const masonNet = req.modelGroupWeights?.mason_collective
-        ? buildNetwork(req.modelGroupWeights.mason_collective, 'mason_collective')
-        : buildNetwork(req.weights, 'mason_collective')
+      const masonBrainNet = buildNetwork(
+        req.modelGroupWeights?.mason_collective
+          ?? req.weights,
+        'mason_collective',
+      )
+      const masonBrain = new MasonBrainAgent(masonBrainNet, { explore: true })
       const wolfBrain = new WolfBrainAgent(wolfBrainNet, { explore: true })
-      const masonBrain = new MasonCollective(masonNet, { explore: true })
 
       // Use these as the team agents for trajectory collection
       wolfTeamAgent = wolfBrain as any

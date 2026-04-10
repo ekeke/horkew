@@ -4,7 +4,7 @@
  * 通常の人狼ゲームから個人の投票を排除し、2つのブレインが
  * 交互に処刑先を決定する。
  *
- * - 共有ブレイン: 既存 MasonCollective (plan token)
+ * - 共有ブレイン: MasonBrainAgent (direct vote head)
  * - 狼ブレイン: WolfBrainAgent (formation + vote + attack)
  * - ターン交代: 日ごとに mason/wolf が交代（先手はランダム）
  * - CO: 狼ブレインの formation に基づく。非狼はヒューリスティック
@@ -19,13 +19,11 @@ import type { FenrirExt } from '../ext.ts'
 import type { FenrirExtEvent } from '../events.ts'
 import type { StrategyBaseAdapterConfig } from './adapter-types.ts'
 import type { WolfBrainAgent, WolfFormation } from '../agents/wolf-brain.ts'
-import type { MasonCollective } from '../agents/mason-collective.ts'
+import type { MasonBrainAgent } from '../agents/mason-brain.ts'
 import type { GameEvent } from '../../../lupa/types.ts'
 import { StrategyBaseAdapter } from './strategy-base-adapter.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
 import { alivePlayers } from '../../../lupa/roles.ts'
-import { planToVote } from '../plan/plan-helpers.ts'
-import { parseDualPlanSlots, describePlanIndices } from '../plan/plan-vocab.ts'
 
 // ============================================================
 // Config
@@ -33,7 +31,7 @@ import { parseDualPlanSlots, describePlanIndices } from '../plan/plan-vocab.ts'
 
 export type BrainBattleAdapterConfig = StrategyBaseAdapterConfig & {
   wolfBrain: WolfBrainAgent
-  masonBrain: MasonCollective
+  masonBrain: MasonBrainAgent
   /** ターン固定: 'mason_only' or 'wolf_only' で常に一方のターン。省略時は交互 */
   fixedTurnOwner?: 'mason' | 'wolf'
 }
@@ -44,7 +42,7 @@ export type BrainBattleAdapterConfig = StrategyBaseAdapterConfig & {
 
 export class BrainBattleAdapter extends StrategyBaseAdapter {
   private readonly wolfBrain: WolfBrainAgent
-  private readonly masonBrain: MasonCollective
+  private readonly masonBrain: MasonBrainAgent
   private readonly fixedTurnOwner: 'mason' | 'wolf' | undefined
   private turnOwner: 'mason' | 'wolf'
   private masonPrimarySeat = 0
@@ -247,25 +245,11 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
       teamPlayers: allMasons,
     }
 
-    // Mason brain generates plan via getOrInfer → plan tokens
-    const result = this.masonBrain.getOrInfer(teamCtx)
-    // Record plan trajectory for PPO
-    this.masonBrain.recordPlan(result, this.masonPrimarySeat)
-    if (!result.planActions || result.planActions.length === 0) {
-      this.emitComment(pctx, `[BB] mason plan: (empty)`)
-      return null
-    }
-
-    // Emit plan details
+    // Direct vote head: MasonBrainAgent selects execution target
+    const target = this.masonBrain.decideExecution(teamCtx)
     const masonAlive = allMasons.some(p => p.alive)
-    this.emitComment(pctx, `[BB] mason plan: ${describePlanIndices(result.planActions)}${masonAlive ? '' : ' (mason dead, ghost inference)'}`)
-
-    // Resolve plan[0] to a target seat
-    const { forwardSlots } = parseDualPlanSlots(result.planActions)
-    if (forwardSlots.length === 0) return null
-
-    // Use planToVote for resolution
-    return planToVote(result.planActions, ctx)
+    this.emitComment(pctx, `[BB] mason brain → seat${target}${masonAlive ? '' : ' (ghost)'}`)
+    return target
   }
 
   private getWolfTarget(
