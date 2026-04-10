@@ -51,6 +51,10 @@ export type PhaseRunnerContext = {
   wolfBrainNetwork?: AnyNetwork
   wolfBrainTfNetwork?: AnyTfNetwork
 
+  /** BB+ 個別エージェントネットワーク (village, fanatic, third) */
+  bbPlusNetworks?: Map<string, AnyNetwork>
+  bbPlusTfNetworks?: Map<string, AnyTfNetwork>
+
   /** カリキュラム: 現在の NN 最大席数 (single_model phases で使用) */
   currentMlMaxSeats?: number
 
@@ -88,7 +92,8 @@ export type OrchestratorConfig = {
   inspectInterval: number
   ppoRestart: boolean
   skeleton: boolean
-  curriculum: 'default' | 'brain-battle'
+  curriculum: 'default' | 'brain-battle' | 'bb-plus'
+  bbCheckpoint?: string
 }
 
 export type TrainProgress = {
@@ -387,8 +392,11 @@ function formatTimingStr(timings: GameTiming[]): string {
  * TODO: single-model phases (Phase 0, Phase 1)
  */
 export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerContext): Promise<void> {
-  // Brain Battle: wolf_brain は MODEL_GROUPS に属さないため専用ループで処理
+  // Brain Battle / BB+: 専用ループで処理
   if (step.adapter === 'brain-battle') {
+    if (step.name === 'bb_plus') {
+      return runBBPlusPhase(step, ctx)
+    }
     return runBrainBattlePhase(step, ctx)
   }
 
@@ -1035,4 +1043,223 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   ctx.log(`${BOLD}=== ${step.displayName} Complete ===${RESET}`)
   progress.latest = { phase: `${phase} (complete)`, model: 'wolf_brain+mason', iter, maxIter }
   ctx.writeTrainProgress(progress)
+}
+
+// ============================================================
+// BB+ Phase (frozen brains + individual role agents)
+// ============================================================
+
+async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Promise<void> {
+  const { config, trainingConfig, progress } = ctx
+  const maxIter = config[step.maxIterations]
+  const phase = phaseLabel(step)
+
+  // Frozen BB brains (required)
+  if (!ctx.wolfBrainNetwork || !ctx.wolfBrainTfNetwork) {
+    throw new Error('BB+ requires wolfBrainNetwork in PhaseRunnerContext (frozen)')
+  }
+  const masonNet = ctx.networks.get('mason_collective')
+  if (!masonNet) {
+    throw new Error('BB+ requires mason_collective in networks (frozen mason brain)')
+  }
+
+  // Individual agent networks
+  const bbPlusModels = ['village', 'fanatic', 'third'] as const
+  const individualNets = new Map<string, AnyNetwork>()
+  const individualTfs = new Map<string, AnyTfNetwork>()
+  for (const name of bbPlusModels) {
+    const net = ctx.bbPlusNetworks?.get(name)
+    const tf = ctx.bbPlusTfNetworks?.get(name)
+    if (net && tf) {
+      individualNets.set(name, net)
+      individualTfs.set(name, tf)
+    }
+  }
+  if (individualNets.size === 0) {
+    throw new Error('BB+ requires at least one individual model in bbPlusNetworks')
+  }
+
+  ctx.log(`${BOLD}=== ${step.displayName} ===${RESET}`)
+  ctx.log(`  Frozen brains: wolf_brain (${ctx.wolfBrainNetwork.totalParams} params), mason_brain (${masonNet.totalParams} params)`)
+  ctx.log(`  Individual models: ${[...individualNets.keys()].map(n => `${n} (${individualNets.get(n)!.totalParams})`).join(', ')}`)
+
+  const ppoConfig = {
+    miniBatchSize: trainingConfig.miniBatchSize,
+    clipEpsilon: trainingConfig.clipEpsilon,
+    valueLossCoeff: trainingConfig.valueLossCoeff,
+    entropyCoeff: trainingConfig.entropyCoeff,
+    freezePlan: false,
+    klCoeff: 0,
+  }
+
+  let iter = 0
+  let lastPpo = new Map<string, PpoResult>()
+  let gameMs = 0, ppoMs = 0, iterMs = 0
+
+  // --- Resume ---
+  if (config.resume) {
+    for (const name of bbPlusModels) {
+      const net = individualNets.get(name)
+      if (!net) continue
+      const dir = `${config.checkpointBase}/ckpt-bbplus-${name}`
+      const ckpt = findCheckpoint(dir, name)
+      if (ckpt) {
+        try {
+          loadCheckpoint(net, ckpt.path)
+          iter = Math.max(iter, ckpt.iteration)
+          ctx.log(`  ${name}: resumed from iter ${ckpt.iteration}`)
+        } catch (e) {
+          ctx.log(`  ${name}: checkpoint incompatible, starting fresh (${(e as Error).message})`)
+        }
+      }
+    }
+  }
+
+  const noMaxIter = step.graduation.type === 'none'
+  while (noMaxIter || iter < maxIter) {
+    iter++
+    ctx.checkShutdown()
+    const iterStart = performance.now()
+    const seedOffset = step.gameGen.mode === 'multi_model' ? step.gameGen.seedOffsetBase : 0
+    const seeds = Array.from({ length: config.batch }, (_, g) => (seedOffset + iter) * config.batch + g)
+
+    // === Game generation ===
+    const tGameStart = performance.now()
+    const perModelSteps = new Map<string, ProcessedStep[]>(
+      bbPlusModels.map(n => [n, []])
+    )
+
+    if (gameWorkerPoolSize() > 0) {
+      // Pack individual agent weights
+      const bbPlusWeights: Record<string, SharedWeights> = {}
+      for (const [name, net] of individualNets) {
+        bbPlusWeights[name] = packWeights(net)
+      }
+
+      const { assignment, modelGroupWeights } = buildAssignmentAndWeights(ctx, step)
+      const inspectSeeds = ctx.pickInspectSeeds(seeds)
+      const serializedResults = await generateGamesParallel({
+        weights: packWeights(ctx.wolfBrainNetwork),  // fallback
+        agentAssignment: assignment,
+        modelGroupWeights,
+        trainingConfig,
+        phase: step.workerPhase,
+        brainBattle: true,
+        wolfBrainWeights: packWeights(ctx.wolfBrainNetwork),
+        bbPlusWeights,
+        bbPlusFrozenVillageWeights: ctx.frozenWeights.get('village'),
+        inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
+      }, seeds)
+      if (inspectSeeds.length > 0) ctx.saveInspectGames(serializedResults, 'bb_plus', iter)
+
+      // Collect individual trajectories grouped by model
+      for (const game of serializedResults) {
+        for (const { role, steps } of game.individualSteps) {
+          const group = ROLE_TO_GROUP[role as string]
+          if (!group || !perModelSteps.has(group) || steps.length === 0) continue
+          perModelSteps.get(group)!.push(
+            ...computeGAE(steps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0)
+          )
+        }
+      }
+    }
+    const tGameEnd = performance.now()
+
+    // === PPO update per individual model ===
+    const tPpoStart = performance.now()
+    for (const [name, steps] of perModelSteps) {
+      if (steps.length === 0) continue
+      const net = individualNets.get(name)
+      const tf = individualTfs.get(name)
+      if (!net || !tf) continue
+
+      normalizeAdvantages(steps)
+      tf.loadWeights(net.cloneWeights())
+      let ppoResult: PpoResult = { ...ZERO_PPO }
+      for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
+        ppoResult = ppoUpdate(tf, steps, ppoConfig)
+      }
+      net.loadWeights(tf.cloneWeights())
+      lastPpo.set(name, ppoResult)
+    }
+    const tPpoEnd = performance.now()
+    iterMs = performance.now() - iterStart
+    gameMs = tGameEnd - tGameStart
+    ppoMs = tPpoEnd - tPpoStart
+
+    // === Progress display ===
+    const stepCounts = bbPlusModels.map(n => `${n}=${perModelSteps.get(n)?.length ?? 0}`).join(' ')
+    process.stderr.write(
+      `\r\x1b[K  [BB+] iter ${iter}/${noMaxIter ? '∞' : maxIter} ` +
+      `${iterMs.toFixed(0)}ms (game${(gameMs / iterMs * 100).toFixed(0)}% ppo${(ppoMs / iterMs * 100).toFixed(0)}%) ` +
+      stepCounts
+    )
+
+    // === Checkpoint ===
+    if (iter % config.checkpointInterval === 0) {
+      for (const [name, net] of individualNets) {
+        const dir = `${config.checkpointBase}/ckpt-bbplus-${name}`
+        saveCheckpoint(net, `${dir}/${name}_${iter}.json`, { iteration: iter, winRate: 0 })
+      }
+    }
+
+    // === Eval ===
+    if (iter % config.evalInterval === 0) {
+      process.stderr.write(`\r\x1b[K  [BB+] iter ${iter} evaluating...`)
+
+      // Log PPO metrics
+      for (const [name, ppo] of lastPpo) {
+        ctx.log(`[BB+ ${name.padEnd(10)}] [${iter}] ppo: pL=${ppo.policyLoss.toFixed(4)} vL=${ppo.valueLoss.toFixed(4)} ent=${ppo.entropy.toFixed(4)} steps=${perModelSteps.get(name)?.length ?? 0}`)
+      }
+
+      // Run eval games (alternate mode only)
+      const evalSeeds = Array.from({ length: config.evalGames }, (_, i) => 900000 + iter * 1000 + i)
+      const { assignment, modelGroupWeights } = buildAssignmentAndWeights(ctx, step)
+      const bbPlusWeights: Record<string, SharedWeights> = {}
+      for (const [name, net] of individualNets) bbPlusWeights[name] = packWeights(net)
+      const evalResults = await generateGamesParallel({
+        weights: packWeights(ctx.wolfBrainNetwork!),
+        agentAssignment: assignment,
+        modelGroupWeights,
+        trainingConfig,
+        phase: step.workerPhase,
+        brainBattle: true,
+        wolfBrainWeights: packWeights(ctx.wolfBrainNetwork!),
+        bbPlusWeights,
+        bbPlusFrozenVillageWeights: ctx.frozenWeights.get('village'),
+      }, evalSeeds)
+
+      const winRates: Record<string, number> = {}
+      for (const game of evalResults) {
+        winRates[game.result] = (winRates[game.result] ?? 0) + 1
+      }
+      for (const key of Object.keys(winRates)) winRates[key] /= evalResults.length
+
+      ctx.log(`  [eval alternate ${evalResults.length}g] ${Object.entries(winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')}`)
+
+      // Update progress
+      for (const [name, ppo] of lastPpo) {
+        progress.evals.push({
+          time: new Date().toISOString(),
+          model: `bbplus_${name}`,
+          iter,
+          winRates,
+          avgLen: 0,
+          status: '',
+          ppoMetrics: {
+            policyLoss: ppo.policyLoss,
+            valueLoss: ppo.valueLoss,
+            entropy: ppo.entropy,
+            predictLoss: ppo.predictLoss ?? 0,
+            klLoss: 0,
+          },
+          timing: { gameMs, ppoMs, iterMs },
+        })
+      }
+      progress.latest = { phase, model: [...individualNets.keys()].join('+'), iter, maxIter, updated: new Date().toISOString() }
+      ctx.writeTrainProgress(progress)
+    }
+  }
+
+  ctx.log(`${BOLD}=== ${step.displayName} Complete ===${RESET}`)
 }

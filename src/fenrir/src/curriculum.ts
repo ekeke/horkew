@@ -225,8 +225,8 @@ export type PhaseStep = PretrainStep | TransferStep | TrainingStep
 // Curriculum Builder
 // ============================================================
 
-/** カリキュラム名: 'default' = 本流 (village→self-play), 'brain-battle' = Wolf Brain 専用 */
-export type CurriculumName = 'default' | 'brain-battle'
+/** カリキュラム名: 'default' = 本流, 'brain-battle' = BB, 'bb-plus' = BB+個別役職学習 */
+export type CurriculumName = 'default' | 'brain-battle' | 'bb-plus'
 
 export type CurriculumOptions = {
   phase1Only?: boolean
@@ -252,6 +252,9 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
 
   if (curriculum === 'brain-battle') {
     return buildBrainBattleCurriculum()
+  }
+  if (curriculum === 'bb-plus') {
+    return buildBBPlusCurriculum()
   }
 
   const steps: PhaseStep[] = []
@@ -412,6 +415,36 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
   }
 
   return steps
+}
+
+// ============================================================
+// Brain Battle Curriculum
+// ============================================================
+
+function buildBBPlusCurriculum(): PhaseStep[] {
+  return [{
+    type: 'training',
+    name: 'bb_plus',
+    displayName: 'Phase BB+: Individual Role Training',
+    activeModels: ['village', 'fanatic', 'third'],
+    strategyOnly: false,  // night/claim head を学習するため false
+    adapter: 'brain-battle',
+    ppo: { freezePlan: false },
+    graduation: { type: 'none' },
+    gameGen: {
+      mode: 'multi_model',
+      seedOffsetBase: 50000,
+    },
+    agentAssignment: {
+      village: 'neural',
+      wolf_collective: 'heuristic',
+      mason_collective: 'neural',
+      fanatic: 'neural',
+      third: 'neural',
+    },
+    maxIterations: 'iterations',
+    workerPhase: 4,
+  }]
 }
 
 // ============================================================
