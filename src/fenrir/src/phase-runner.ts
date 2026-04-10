@@ -846,7 +846,7 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   ctx.writeTrainProgress(progress)
 
   const wolfPrefix = `${COLORS.wolf_brain}[BB wolf_brain    ]${RESET}`
-  const prefix = hasBBPlus ? '  [BB+]' : `  ${wolfPrefix}`
+  const prefix = hasBBPlus ? `  [${phase}]` : `  ${wolfPrefix}`
   let iter = 0
 
   // --- Resume ---
