@@ -421,10 +421,7 @@ function buildBrainBattleCurriculum(): PhaseStep[] {
     strategyOnly: false,
     adapter: 'brain-battle',
     ppo: { freezePlan: false },
-    graduation: {
-      type: 'min_iter',
-      minIter: 300,
-    },
+    graduation: { type: 'none' },
     gameGen: {
       mode: 'multi_model',
       seedOffsetBase: 40000,

@@ -714,7 +714,8 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   let lastMasonPpo: PpoResult = { ...ZERO_PPO }
   let gameMs = 0, ppoMs = 0, iterMs = 0
 
-  while (iter < maxIter) {
+  const noMaxIter = step.graduation.type === 'none'
+  while (noMaxIter || iter < maxIter) {
     iter++
     ctx.checkShutdown()
     const iterStart = performance.now()
@@ -783,7 +784,7 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
 
     // === Progress display ===
     process.stderr.write(
-      `\r\x1b[K  ${wolfPrefix} iter ${iter}/${maxIter} ` +
+      `\r\x1b[K  ${wolfPrefix} iter ${iter}/${noMaxIter ? '∞' : maxIter} ` +
       `${iterMs.toFixed(0)}ms (game${(gameMs / iterMs * 100).toFixed(0)}% ppo${(ppoMs / iterMs * 100).toFixed(0)}%) ` +
       `wolf=${allWolfBrainSteps.length} mason=${allMasonSteps.length}`
     )
