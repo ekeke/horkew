@@ -68,6 +68,17 @@ const ROLE_TO_GROUP: Record<string, string> = {
  * AgentSpec からエージェントを生成するファクトリ。
  * 構造的知識（どの role にどの Agent クラスを使うか）をここに集約。
  */
+/**
+ * SharedWeights のバッファをコピーして独立した重みを生成。
+ * 同じ specWeights から複数ネットワークを作る場合に必須
+ * （SharedArrayBuffer のビューを共有すると重みが干渉する）。
+ */
+function cloneSharedWeights(sw: SharedWeights): SharedWeights {
+  const newBuffer = new SharedArrayBuffer(sw.buffer.byteLength)
+  new Uint8Array(newBuffer).set(new Uint8Array(sw.buffer))
+  return { ...sw, buffer: newBuffer }
+}
+
 function createAgentFromSpec(
   spec: AgentSpec,
   specWeights: Record<string, SharedWeights>,
@@ -76,7 +87,7 @@ function createAgentFromSpec(
 
   const sw = specWeights[spec.weightsKey]
   if (!sw) throw new Error(`specWeights missing key '${spec.weightsKey}' for agent type '${spec.type}'`)
-  const net = buildNetwork(sw, spec.observationMode ?? false)
+  const net = buildNetwork(cloneSharedWeights(sw), spec.observationMode ?? false)
 
   switch (spec.type) {
     case 'neural': return new NeuralAgent(net, { explore: true, strategyOnly: spec.strategyOnly })
@@ -256,7 +267,9 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     } : undefined
 
     if (req.brainBattle && req.wolfBrainWeights) {
-      // Brain Battle mode: wolf brain vs mason brain (direct vote head)
+      // Brain Battle mode: BB brains handle voting; assignment-based agent creation is not used
+      onRolesAssigned = undefined
+
       const wolfBrainNet = buildNetwork(req.wolfBrainWeights, 'wolf_collective')
       const masonBrainNet = buildNetwork(
         req.modelGroupWeights?.mason_collective

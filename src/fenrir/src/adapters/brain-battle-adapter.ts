@@ -46,7 +46,6 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
   private readonly wolfBrain: WolfBrainAgent
   private readonly masonBrain: MasonBrainAgent
   private readonly fixedTurnOwner: 'mason' | 'wolf' | undefined
-  private readonly onRolesAssignedCallback?: (seatRoles: Map<number, SystemRole>) => void
   private turnOwner: 'mason' | 'wolf'
   private masonPrimarySeat = 0
   private wolfSeats: number[] = []
@@ -57,7 +56,6 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     this.wolfBrain = config.wolfBrain
     this.masonBrain = config.masonBrain
     this.fixedTurnOwner = config.fixedTurnOwner
-    this.onRolesAssignedCallback = config.onRolesAssigned
     // Initial turn (will be re-rolled each day in onDayClaims)
     this.turnOwner = config.fixedTurnOwner ?? (this.rng.next() < 0.92 ? 'mason' : 'wolf')
   }
@@ -84,8 +82,8 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
       }
     }
 
-    // BB+ 個別エージェント生成を通知
-    this.onRolesAssignedCallback?.(roles)
+    // BB+ 個別エージェント生成は super.onSetup() 内の
+    // this.config.onRolesAssigned?.(roles) で発火する（二重呼び出し防止）
   }
 
   // ============================================================
