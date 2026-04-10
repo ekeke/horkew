@@ -1319,6 +1319,17 @@ async function runBBPlusPhase(step: TrainingStep, ctx: PhaseRunnerContext): Prom
       }
       progress.latest = { phase, model: [...individualNets.keys()].join('+'), iter, maxIter, updated: new Date().toISOString() }
       ctx.writeTrainProgress(progress)
+
+      // Graduation check
+      if (step.graduation.type === 'min_iter' && iter >= step.graduation.minIter) {
+        ctx.log(`  [BB+] ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${step.graduation.minIter})`)
+        // Save final checkpoints
+        for (const [name, net] of individualNets) {
+          const dir = `${config.checkpointBase}/ckpt-bbplus-${name}`
+          saveCheckpoint(net, `${dir}/${name}_final.json`, { iteration: iter, winRate: 0 })
+        }
+        break
+      }
     }
   }
 
