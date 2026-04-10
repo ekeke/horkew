@@ -10,31 +10,27 @@
  *   CPU: Pure JS NN × 3 (推論用)
  */
 
-import type { SystemRole } from '../../types/index.ts'
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import {
-  MODEL_GROUPS, MODEL_NAMES, ROLE_TO_GROUP, BASELINE_RATES,
-  klTargetForIter, DEFAULT_KL_CONFIG,
+  MODEL_NAMES, BASELINE_RATES,
   type ModelName,
 } from './curriculum.ts'
 import {
-  ppoUpdate, appendKlLog, findCheckpoint,
+  findCheckpoint,
   runTrainingPhase,
   type TrainProgress, type PhaseRunnerContext,
 } from './phase-runner.ts'
-import { buildCurriculum, formatAssignment, type TrainingStep } from './curriculum.ts'
-import { computeRefPlanLogits } from './agents/neural-agent.ts'
+import { buildCurriculum, type TrainingStep } from './curriculum.ts'
 import { DEFAULT_REWARD_CONFIG, BRAIN_BATTLE_REWARD_CONFIG } from './reward.ts'
-import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import {
-  evaluate, appendEvalLog,
   createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
   createTfNetwork, createWolfTeamTfNetwork, createMasonTeamTfNetwork,
   createWolfCollectiveNetwork, createMasonCollectiveNetwork,
   createWolfCollectiveTfNetwork, createMasonCollectiveTfNetwork,
   createFanaticNetwork, createFanaticTfNetwork,
   createWolfBrainNetwork, createWolfBrainTfNetwork,
+  createMasonBrainNetwork, createMasonBrainTfNetwork,
   DEFAULT_TRAINING_CONFIG,
   type TrainingConfig,
 } from './training.ts'
@@ -47,9 +43,8 @@ import { collectBatchGameData } from './ml/pretrain-game-data.ts'
 import { collectTsumiBatch, saveTsumiCache, loadTsumiCache, loadTsumiFromDB } from './ml/pretrain-tsumi-data.ts'
 import { PLAN_VOCAB, parsePlanIndices, describePlanIndex } from './plan/plan-vocab.ts'
 import {
-  packWeights, initGameWorkerPool, terminateGameWorkerPool, gameWorkerPoolSize,
-  generateGamesParallel, deserializeStep,
-  packWreWeights, type WreSharedWeights,
+  packWeights, initGameWorkerPool, terminateGameWorkerPool,
+  packWreWeights, type WreSharedWeights, type SharedWeights,
 } from './parallel.ts'
 import { WinrateNetwork } from './ml/winrate-network.ts'
 import { loadWinrateCheckpoint, saveWinrateCheckpoint } from './ml/winrate-training.ts'
@@ -739,23 +734,6 @@ function log(msg: string): void {
   process.stderr.write(`${BOLD}[orch]${RESET} ${msg}\n`)
 }
 
-function formatTimingStr(timings: import('./parallel.ts').GameTiming[]): string {
-  if (timings.length === 0) return ''
-  const n = timings.length
-  const avgGame = timings.reduce((a, t) => a + t.gameMs, 0) / n
-  const avgInfer = timings.reduce((a, t) => a + t.inferMs, 0) / n
-  const avgInferCount = timings.reduce((a, t) => a + t.inferCount, 0) / n
-  const avgRetar = timings.reduce((a, t) => a + t.retarMs, 0) / n
-  const avgRetarCount = timings.reduce((a, t) => a + t.retarCount, 0) / n
-  const avgTsumi = timings.reduce((a, t) => a + t.tsumiMs, 0) / n
-  const avgTsumiCount = timings.reduce((a, t) => a + t.tsumiCount, 0) / n
-  const fmt = (totalMs: number, count: number) => {
-    if (count === 0) return `${totalMs.toFixed(0)}ms`
-    return `${(totalMs / count).toFixed(1)}ms×${count.toFixed(0)}=${totalMs.toFixed(0)}ms`
-  }
-  return `${avgGame.toFixed(0)}ms/game (infer ${fmt(avgInfer, avgInferCount)} retar ${fmt(avgRetar, avgRetarCount)} tsumi ${fmt(avgTsumi, avgTsumiCount)}) `
-}
-
 // ============================================================
 // Main
 // ============================================================
@@ -902,14 +880,14 @@ async function main(): Promise<void> {
     const bbStep = steps.find(s => s.type === 'training' && s.name === 'brain_battle') as TrainingStep
     if (!bbStep) throw new Error('brain_battle step not found in brain-battle curriculum')
 
-    // Mason collective: 推論用 + 学習用
-    const masonCollectiveNet = createMasonCollectiveNetwork()
-    const masonCollectiveTf = createMasonCollectiveTfNetwork(config.learningRate)
+    // Mason brain: direct vote head (Brain Battle 専用)
+    const masonNet = createMasonBrainNetwork()
+    const masonTf = createMasonBrainTfNetwork(config.learningRate)
     const masonDir = `${config.checkpointBase}/ckpt-mason_collective`
     const masonCkpt = findCheckpoint(masonDir, 'collective')
     if (masonCkpt) {
-      loadCheckpoint(masonCollectiveNet, masonCkpt.path)
-      log(`Mason collective loaded from ${masonCkpt.path} (iter ${masonCkpt.iteration})`)
+      loadCheckpoint(masonNet, masonCkpt.path)
+      log(`Mason brain loaded from ${masonCkpt.path} (iter ${masonCkpt.iteration})`)
     } else {
       log(`No mason_collective checkpoint found in ${masonDir}, using random weights`)
     }
@@ -918,7 +896,7 @@ async function main(): Promise<void> {
     const wolfBrainNet = createWolfBrainNetwork()
     const wolfBrainTf = createWolfBrainTfNetwork(config.learningRate)
     log(`Wolf Brain NN: ${wolfBrainNet.totalParams} params`)
-    log(`Mason Brain NN: ${masonCollectiveNet.totalParams} params`)
+    log(`Mason Brain NN: ${masonNet.totalParams} params (vote-head)`)
 
     // Worker pool
     if (config.workers !== 0) {
@@ -927,8 +905,8 @@ async function main(): Promise<void> {
 
     const bbCtx: PhaseRunnerContext = {
       config, trainingConfig: bbTrainingConfig, progress, runId, gitSha,
-      networks: new Map<string, AnyNetwork>([['mason_collective', masonCollectiveNet]]),
-      tfNetworks: new Map<string, AnyTfNetwork>([['mason_collective', masonCollectiveTf]]),
+      networks: new Map<string, AnyNetwork>([['mason_collective', masonNet]]),
+      tfNetworks: new Map<string, AnyTfNetwork>([['mason_collective', masonTf]]),
       frozenWeights: new Map(),
       frozenNets: new Map(),
       wolfBrainNetwork: wolfBrainNet,
@@ -943,7 +921,7 @@ async function main(): Promise<void> {
     await runTrainingPhase(bbStep, bbCtx)
 
     wolfBrainTf.dispose()
-    masonCollectiveTf.dispose()
+    masonTf.dispose()
     terminateGameWorkerPool()
     log(`${BOLD}Brain Battle training complete!${RESET}`)
     return
@@ -1332,10 +1310,30 @@ async function main(): Promise<void> {
 
   log(`Baseline (hardcoded): ${Object.entries(BASELINE_RATES).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')}`)
 
-  // === Phase 0: Mason Individual (backbone pre-training) ===
-  // 確定白の共有者を個人モデルとして学習。1 ML席で村全体の投票を制御できるため学習シグナルが強い。
-  // 卒業後に全重みを village モデルに転送して Phase 1 を warm start する。
-  let frozenMasonWeights: import('./parallel.ts').SharedWeights | undefined
+  // === Shared PhaseRunnerContext builder ===
+  const curriculum = buildCurriculum()
+  const buildCtx = (overrides?: Partial<PhaseRunnerContext>): PhaseRunnerContext => ({
+    config, trainingConfig, progress, runId, gitSha,
+    networks: new Map<string, AnyNetwork>(),
+    tfNetworks: new Map<string, AnyTfNetwork>(),
+    frozenWeights: new Map<string, SharedWeights>(),
+    frozenNets: new Map<string, AnyNetwork>(),
+    checkShutdown,
+    log,
+    writeTrainProgress,
+    pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
+    saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
+    saveEvalHowl,
+    wreSharedWeights,
+    onWreRefresh: wreSharedWeights && config.wreRefresh > 0 ? async (games) => {
+      await maybeRefreshWre(games)
+      return wreSharedWeights
+    } : undefined,
+    ...overrides,
+  })
+
+  // === Phase 0: Mason Individual (backbone pre-training) — delegated to phase-runner ===
+  let frozenMasonWeights: SharedWeights | undefined
   let frozenMasonNet: AnyNetwork | undefined
   if (!config.phase2Only) {
     const masonDir = `${config.checkpointBase}/ckpt-mason_individual`
@@ -1344,7 +1342,6 @@ async function main(): Promise<void> {
 
     if (phase0Done) {
       log(`${BOLD}=== Phase 0: Mason Individual (already graduated) ===${RESET}`)
-      // Backbone transfer: mason → village
       const villageNet = networks.get('village' as ModelName)!
       const masonNet = createNetwork()
       loadCheckpoint(masonNet, masonFinalPath)
@@ -1357,212 +1354,29 @@ async function main(): Promise<void> {
         log(`  Reference network updated from mason weights`)
       }
     } else {
-      log(`${BOLD}=== Phase 0: Mason Individual ===${RESET}`)
-      log(`  Agent assignment: ${formatAssignment({ village: 'heuristic', wolf_collective: 'heuristic', mason_collective: 'heuristic', fanatic: 'heuristic', third: 'heuristic' })}`)
-
-      // Mason individual uses the same architecture as village
+      // Create mason_individual networks
       const masonNet = createNetwork()
       const masonTf = createTfNetwork(config.learningRate * 0.2)
 
-      // Resume support
-      let masonIter = 0
-      if (config.resume) {
-        const ckpt = findCheckpoint(masonDir)
-        if (ckpt) {
-          try {
-            loadCheckpoint(masonNet, ckpt.path)
-            masonIter = ckpt.iteration
-            log(`  Resumed from ${ckpt.path} (iter ${masonIter})`)
-          } catch (e) {
-            log(`  Checkpoint incompatible, starting fresh (${(e as Error).message})`)
-          }
-        }
-      }
-
-      // Pretrain: mason も village の pretrain 重みを使う（同一アーキテクチャ）
-      if (masonIter === 0) {
+      // Initialize from village pretrain weights (if not resuming)
+      if (!config.resume || !findCheckpoint(masonDir)) {
         const villageNet = networks.get('village' as ModelName)!
         masonNet.loadWeights(villageNet.cloneWeights())
-        log(`  Mason initialized from village pretrain weights`)
       }
 
-      const masonPpoConfig = {
-        miniBatchSize: trainingConfig.miniBatchSize,
-        clipEpsilon: trainingConfig.clipEpsilon,
-        valueLossCoeff: trainingConfig.valueLossCoeff,
-        entropyCoeff: trainingConfig.entropyCoeff,
-        freezePlan: false,
-        klCoeff: refNetwork ? 0.2 : 0,
-      }
-
-      // Mason ref network (KL anchor)
-      // KL reference network
+      // Mason-specific KL reference (frozen copy of initial weights)
       const masonRefNetwork = createNetwork()
       masonRefNetwork.loadWeights(masonNet.cloneWeights())
 
-      const masonMlRoles = ['mason'] as SystemRole[]
+      const masonStep = curriculum.find(s => s.type === 'training' && s.name === 'mason_individual') as TrainingStep
+      const phase0Ctx = buildCtx({
+        networks: new Map([['mason_individual', masonNet]]),
+        tfNetworks: new Map([['mason_individual', masonTf]]),
+        refNetwork: masonRefNetwork,
+      })
+      await runTrainingPhase(masonStep, phase0Ctx)
 
-      const masonTargetRate = BASELINE_RATES['villager_won'] ?? 0.55
-      const prefix = `\x1b[36m[mason_ind ]${RESET}`
-      mkdirSync(masonDir, { recursive: true })
-      let graduated = false
-      let iterElapsed = 0
-      let iterCount = 0
-
-      for (let iter = masonIter + 1; iter <= config.iterations && !graduated; iter++) {
-        checkShutdown()
-        const iterStart = performance.now()
-        const seeds = Array.from({ length: config.batch }, (_, g) => iter * config.batch + g)
-
-        // ゲーム生成
-        const allSteps: ProcessedStep[] = []
-
-        const sharedWeights = packWeights(masonNet)
-
-        const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
-        const serializedResults = await generateGamesParallel({
-          weights: sharedWeights,
-          agentAssignment: {
-            village: 'heuristic', wolf_collective: 'heuristic',
-            mason_collective: 'heuristic', fanatic: 'heuristic', third: 'heuristic',
-          },
-          trainingConfig,
-          phase: 1,
-          mlRoles: masonMlRoles,
-          mlMaxSeats: 1,
-          inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
-          enableMasonTakeover: true,
-          wreWeights: wreSharedWeights,
-        }, seeds)
-        if (inspectSeeds.length > 0) saveInspectGames(serializedResults, 'mason_individual', masonIter, { gitSha, runId, checkpointBase: config.checkpointBase })
-
-        for (const game of serializedResults) {
-          const stepsMap = new Map<number, TrajectoryStep[]>()
-          for (const { seat, steps } of game.individualSteps) {
-            stepsMap.set(seat, steps.map(deserializeStep))
-          }
-          allSteps.push(...processTrajectories(stepsMap, trainingConfig.gamma, trainingConfig.lambda))
-        }
-        const lastBatchTimings = serializedResults.filter(g => g.timing).map(g => g.timing!)
-        const tGameEnd = performance.now()
-        const tPpoStart = performance.now()
-
-        // PPO update
-        let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
-        if (allSteps.length > 0) {
-          normalizeAdvantages(allSteps)
-
-          let precomputedRefLogits: Map<ProcessedStep, { plan?: Float32Array }> | undefined
-          if (masonRefNetwork && masonPpoConfig.klCoeff > 0) {
-            precomputedRefLogits = new Map()
-            for (const step of allSteps) {
-              if (step.actionHead === 'strategy') {
-                const { refPlanLogits } = computeRefPlanLogits(masonRefNetwork, step.observation)
-                precomputedRefLogits.set(step, { plan: refPlanLogits })
-              }
-            }
-          }
-
-          masonTf.loadWeights(masonNet.cloneWeights())
-          const klEarlyStopThreshold = klTargetForIter(iter) * 2
-          for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
-            lastPpoResult = ppoUpdate(masonTf, allSteps, masonPpoConfig, precomputedRefLogits)
-            if (lastPpoResult.klLoss > klEarlyStopThreshold) break
-          }
-          masonNet.loadWeights(masonTf.cloneWeights())
-        }
-
-        // Adaptive KL
-        if (masonPpoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
-          const klTarget = klTargetForIter(iter)
-          const { band, adjustRate, range: [klMin, klMax] } = DEFAULT_KL_CONFIG
-          if (lastPpoResult.klLoss > klTarget * band) {
-            masonPpoConfig.klCoeff *= adjustRate
-          } else if (lastPpoResult.klLoss < klTarget / band) {
-            masonPpoConfig.klCoeff /= adjustRate
-          }
-          masonPpoConfig.klCoeff = Math.max(klMin, Math.min(klMax, masonPpoConfig.klCoeff))
-        }
-        appendKlLog(config.checkpointBase, {
-          iter, klPlan: lastPpoResult.klPlanLoss,
-          klTotal: lastPpoResult.klLoss, beta: masonPpoConfig.klCoeff, klTarget: klTargetForIter(iter),
-        })
-
-        const tPpoEnd = performance.now()
-        const iterMs = performance.now() - iterStart
-        iterElapsed += iterMs
-        iterCount++
-        const gameMs = tGameEnd - iterStart
-        const ppoMs = tPpoEnd - tPpoStart
-        const gamePct = (gameMs / iterMs * 100).toFixed(0)
-        const ppoPct = (ppoMs / iterMs * 100).toFixed(0)
-        const pct = (iter / config.iterations * 100).toFixed(1)
-        const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
-        const entStr = lastPpoResult.entropy ? ` ent=${lastPpoResult.entropy.toFixed(4)}` : ''
-        const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${masonPpoConfig.klCoeff.toFixed(3)})` : ''
-        const avgIterMs = (iterElapsed / iterCount / 1000).toFixed(1)
-        const remaining = ((config.iterations - iter) * iterElapsed / iterCount / 1000).toFixed(0)
-
-        // timing breakdown (same as Phase 1)
-        const timingStr = formatTimingStr(lastBatchTimings)
-
-        process.stderr.write(
-          `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
-          `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
-          `steps=${allSteps.length}${lossStr}${entStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
-        )
-
-        // Eval
-        if (iter % config.evalInterval === 0) {
-          process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
-
-          const evalResult = await evaluate(
-            masonNet, { ...trainingConfig, mlRoles: masonMlRoles }, config.evalGames,
-            wolfTeamNet, masonTeamNet, 1,
-            { masonAsIndividual: true, evalIter: iter, saveHowl: true },
-          )
-          process.stderr.write('\r\x1b[K')
-          if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
-          appendEvalLog(masonDir, iter, evalResult, 'mason_individual', {
-            klLoss: lastPpoResult.klLoss, klCoeff: masonPpoConfig.klCoeff,
-            policyLoss: lastPpoResult.policyLoss, valueLoss: lastPpoResult.valueLoss, entropy: lastPpoResult.entropy,
-          })
-          const factionRate = evalResult.winRates['villager_won'] ?? 0
-          log(
-            `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
-            `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
-          )
-
-          progress.evals.push({
-            time: new Date().toISOString(), model: 'mason_individual' as any, iter,
-            winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: factionRate >= masonTargetRate ? 'GRADUATED' : '',
-            ppoMetrics: { ...lastPpoResult }, baseline: masonTargetRate, target: masonTargetRate * 0.9,
-            timing: { gameMs, ppoMs, iterMs },
-          })
-          progress.latest = { phase: '0', model: 'mason_individual', iter, maxIter: config.iterations, klCoeff: masonPpoConfig.klCoeff }
-          writeTrainProgress(progress)
-
-          const MASON_MIN_ITER = 300
-          // minIter 到達で卒業
-          if (iter >= MASON_MIN_ITER) {
-            log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${MASON_MIN_ITER})`)
-            graduated = true
-          }
-        }
-
-        // Checkpoint
-        if (iter % config.checkpointInterval === 0) {
-          saveCheckpoint(masonNet, `${masonDir}/checkpoint_${iter}.json`, { iteration: iter, winRate: 0 })
-        }
-      }
-
-      process.stderr.write('\r\x1b[K')
-
-      // Final save
-      saveCheckpoint(masonNet, masonFinalPath, { iteration: config.iterations, winRate: 0 })
-      log(`Phase 0 complete. Mason individual checkpoint → ${masonFinalPath}`)
-
-      // Backbone transfer: mason → village
+      // Post-phase: backbone transfer mason → village
       const villageNet = networks.get('village' as ModelName)!
       villageNet.loadWeights(masonNet.cloneWeights())
       frozenMasonWeights = packWeights(masonNet)
@@ -1572,610 +1386,67 @@ async function main(): Promise<void> {
         refNetwork.loadWeights(masonNet.cloneWeights())
         log(`Reference network updated from mason weights`)
       }
-
-      // TfNetwork も更新
       tfNetwork.loadWeights(masonNet.cloneWeights())
     }
   }
 
-  // === Phase 1: ラウンドロビン ===
+  // === Phase 1: Village Training — delegated to phase-runner ===
   if (!config.phase2Only) {
-    log(`${BOLD}=== Phase 1: Round-Robin Training ===${RESET}`)
-    log(`  Agent assignment: ${formatAssignment({ village: 'neural', wolf_collective: 'heuristic', mason_collective: 'frozen', fanatic: 'heuristic', third: 'heuristic' })}`)
+    const villageStep = curriculum.find(s => s.type === 'training' && s.name === 'village') as TrainingStep
+    const phase1Ctx = buildCtx({
+      networks: new Map([['village', networks.get('village' as ModelName)!]]),
+      tfNetworks: new Map([['village', tfNetwork]]),
+      refNetwork,
+      frozenWeights: frozenMasonWeights ? new Map([['mason_individual', frozenMasonWeights]]) : new Map(),
+      frozenNets: frozenMasonNet ? new Map([['mason_individual', frozenMasonNet]]) : new Map(),
+    })
 
-    const graduated = new Set<ModelName>()
-    // カリキュラム: NN 席数を徐々に増やす (village のみ)
-    let mlMaxSeats = 1
-    const ML_MAX_SEATS_CAP = 6  // 村役職の最大席数 (村2+占1+霊1+狩1+猫1、共有は集団NNなので除外)
-    log(`  Initial mlMaxSeats=${mlMaxSeats}`)
-
-    const ppoConfig = {
-      miniBatchSize: trainingConfig.miniBatchSize,
-      clipEpsilon: trainingConfig.clipEpsilon,
-      valueLossCoeff: trainingConfig.valueLossCoeff,
-      entropyCoeff: trainingConfig.entropyCoeff,
-      freezePlan: false,  // plan 解凍 + KL penalty で pretrain 知識を保護
-      klCoeff: refNetwork ? 0.2 : 0,
-    }
-
-    // Phase 1: village のみ学習（wolf/third は strategy-only 未対応）
-    const VILLAGE_MIN_ITER = 300
-    const phase1Models: ModelName[] = ['village']
-    // wolf/third は即 graduated 扱い
-    for (const name of MODEL_NAMES) {
-      if (!phase1Models.includes(name)) graduated.add(name)
-    }
-    // Resume: minIter 到達済みなら即卒業
-    for (const name of phase1Models) {
-      if (iterCounts.get(name)! >= VILLAGE_MIN_ITER) {
-        log(`  ${COLORS[name]}${name}${RESET}: already at iter ${iterCounts.get(name)!} >= ${VILLAGE_MIN_ITER}, skipping`)
-        graduated.add(name)
-      }
-    }
-
-    let round = 0
-    while (graduated.size < MODEL_NAMES.length) {
-      round++
-      for (const name of phase1Models) {
-        if (graduated.has(name)) continue
-
-        const group = MODEL_GROUPS[name]
-        const network = networks.get(name)!
-        const currentIter = iterCounts.get(name)!
-        const targetIter = Math.min(currentIter + config.chunkSize, config.iterations)
-        const targetRate = config.targetWinRate ?? (BASELINE_RATES[group.faction] ?? 0.5)
-
-        const prefix = `${COLORS[name]}[${name.padEnd(10)}]${RESET}`
-
-        // チャンク学習
-        let iterElapsed = 0
-        let iterCount = 0
-
-        for (let iter = currentIter + 1; iter <= targetIter; iter++) {
-          checkShutdown()
-          const iterStart = performance.now()
-          const seeds = Array.from({ length: config.batch }, (_, g) => iter * config.batch + g)
-
-          // ゲーム生成
-          const tGameStart = performance.now()
-          const allIndividual: ProcessedStep[] = []
-          const allWolfTeam: ProcessedStep[] = []
-          const allMasonTeam: ProcessedStep[] = []
-
-          const sharedWeights = packWeights(network)
-          const sharedWolfWeights = group.teamType === 'wolf_team' ? packWeights(wolfTeamNet) : undefined
-          const sharedMasonWeights = group.teamType === 'mason_team' ? packWeights(masonTeamNet) : undefined
-
-          const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
-          const serializedResults = await generateGamesParallel({
-            weights: sharedWeights,
-            agentAssignment: {
-              village: 'neural', wolf_collective: 'heuristic',
-              mason_collective: 'frozen', fanatic: 'heuristic', third: 'heuristic',
-            },
-            wolfTeamWeights: sharedWolfWeights,
-            masonTeamWeights: sharedMasonWeights,
-            trainingConfig,
-            phase: 1,
-            mlRoles: group.roles,
-            mlMaxSeats: name === 'village' ? mlMaxSeats : undefined,
-            frozenMasonWeights: name === 'village' ? frozenMasonWeights : undefined,
-            inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
-            wreWeights: wreSharedWeights,
-          }, seeds)
-          if (inspectSeeds.length > 0) saveInspectGames(serializedResults, name, iter, { gitSha, runId, checkpointBase: config.checkpointBase })
-
-          for (const game of serializedResults) {
-            const stepsMap = new Map<number, TrajectoryStep[]>()
-            for (const { seat, steps } of game.individualSteps) {
-              stepsMap.set(seat, steps.map(deserializeStep))
-            }
-            allIndividual.push(...processTrajectories(stepsMap, trainingConfig.gamma, trainingConfig.lambda))
-
-            if (game.wolfTeamSteps.length > 0 && group.teamType === 'wolf_team') {
-              allWolfTeam.push(...computeGAE(game.wolfTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
-            }
-            if (game.masonTeamSteps.length > 0 && group.teamType === 'mason_team') {
-              allMasonTeam.push(...computeGAE(game.masonTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
-            }
-          }
-          const lastBatchTimings = serializedResults.filter(g => g.timing).map(g => g.timing!)
-          const tGameEnd = performance.now()
-          const tPpoStart = performance.now()
-
-          // PPO update (shared TfNN に重みをスワップ)
-          let lastPpoResult = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
-          if (allIndividual.length > 0) {
-            normalizeAdvantages(allIndividual)
-
-            // Reference logits を iteration あたり1回だけ計算（epoch/minibatch をまたいで再利用）
-            let precomputedRefLogits: Map<ProcessedStep, { plan?: Float32Array }> | undefined
-            if (refNetwork && ppoConfig.klCoeff && ppoConfig.klCoeff > 0) {
-              precomputedRefLogits = new Map()
-              for (const step of allIndividual) {
-                if (step.actionHead === 'strategy') {
-                  const { refPlanLogits } = computeRefPlanLogits(refNetwork, step.observation)
-                  precomputedRefLogits.set(step, { plan: refPlanLogits })
-                }
-              }
-            }
-
-            tfNetwork.loadWeights(network.cloneWeights())
-            const klEarlyStopThreshold = klTargetForIter(iter) * 2
-            for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
-              lastPpoResult = ppoUpdate(tfNetwork, allIndividual, ppoConfig, precomputedRefLogits)
-              if (lastPpoResult.klLoss > klEarlyStopThreshold) break
-            }
-            network.loadWeights(tfNetwork.cloneWeights())
-          }
-
-          if (allWolfTeam.length > 0) {
-            normalizeAdvantages(allWolfTeam)
-            wolfTeamTf.loadWeights(wolfTeamNet.cloneWeights())
-            for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
-              ppoUpdate(wolfTeamTf, allWolfTeam, ppoConfig)
-            }
-            wolfTeamNet.loadWeights(wolfTeamTf.cloneWeights())
-          }
-
-          if (allMasonTeam.length > 0) {
-            normalizeAdvantages(allMasonTeam)
-            masonTeamTf.loadWeights(masonTeamNet.cloneWeights())
-            for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
-              ppoUpdate(masonTeamTf, allMasonTeam, ppoConfig)
-            }
-            masonTeamNet.loadWeights(masonTeamTf.cloneWeights())
-          }
-
-          // Adaptive KL
-          if (ppoConfig.klCoeff > 0 && lastPpoResult.klLoss > 0) {
-            const klTarget = klTargetForIter(iter)
-            const { band, adjustRate, range: [klMin, klMax] } = DEFAULT_KL_CONFIG
-            if (lastPpoResult.klLoss > klTarget * band) {
-              ppoConfig.klCoeff *= adjustRate
-            } else if (lastPpoResult.klLoss < klTarget / band) {
-              ppoConfig.klCoeff /= adjustRate
-            }
-            ppoConfig.klCoeff = Math.max(klMin, Math.min(klMax, ppoConfig.klCoeff))
-          }
-          appendKlLog(config.checkpointBase, {
-            iter, klPlan: lastPpoResult.klPlanLoss,
-            klTotal: lastPpoResult.klLoss, beta: ppoConfig.klCoeff, klTarget: klTargetForIter(iter),
-          })
-
-          const tPpoEnd = performance.now()
-
-          const iterMs = performance.now() - iterStart
-          iterElapsed += iterMs
-          iterCount++
-
-          iterCounts.set(name, iter)
-
-          // Progress
-          const pct = (iter / config.iterations * 100).toFixed(1)
-          const gameMs = tGameEnd - tGameStart
-          const ppoMs = tPpoEnd - tPpoStart
-          const gamePct = (gameMs / iterMs * 100).toFixed(0)
-          const ppoPct = (ppoMs / iterMs * 100).toFixed(0)
-          const totalSteps = allIndividual.length + allWolfTeam.length + allMasonTeam.length
-          const avgIterMs = (iterElapsed / iterCount / 1000).toFixed(1)
-          const remaining = ((targetIter - iter) * iterElapsed / iterCount / 1000).toFixed(0)
-          const timingStr = formatTimingStr(lastBatchTimings)
-          const mlInfo = name === 'village' ? ` ml=${mlMaxSeats}/${ML_MAX_SEATS_CAP}` : ''
-          const lossStr = lastPpoResult.policyLoss ? ` pol=${lastPpoResult.policyLoss.toFixed(4)}` : ''
-          const entStr = lastPpoResult.entropy ? ` ent=${lastPpoResult.entropy.toFixed(4)}` : ''
-          const klStr = lastPpoResult.klLoss ? ` kl=${lastPpoResult.klLoss.toFixed(4)}(β=${ppoConfig.klCoeff.toFixed(3)})` : ''
-          process.stderr.write(
-            `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} (${pct}%) ` +
-            `${iterMs.toFixed(0)}ms (game${gamePct}% ppo${ppoPct}%) ${timingStr}` +
-            `steps=${totalSteps}${mlInfo}${lossStr}${entStr}${klStr} ${avgIterMs}s/iter ETA ${remaining}s`
-          )
-
-          // Eval
-          if (iter % config.evalInterval === 0) {
-            process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
-            const evalConfig = { ...trainingConfig, mlRoles: group.roles }
-            const evalMlMax = name === 'village' ? mlMaxSeats : undefined
-            const evalResult = await evaluate(network, evalConfig, config.evalGames, wolfTeamNet, masonTeamNet, evalMlMax, { evalIter: iter, frozenMasonNet: name === 'village' ? frozenMasonNet : undefined, saveHowl: true })
-            process.stderr.write('\r\x1b[K')
-            if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
-            appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name, {
-              klLoss: lastPpoResult.klLoss, klCoeff: ppoConfig.klCoeff,
-              policyLoss: lastPpoResult.policyLoss, valueLoss: lastPpoResult.valueLoss, entropy: lastPpoResult.entropy,
-            })
-            const factionRate = evalResult.winRates[group.faction] ?? 0
-            log(
-              `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
-              `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
-            )
-
-            // Progress log: eval
-            const evalStatus = factionRate >= targetRate ? 'GRADUATED' : ''
-            progress.evals.push({
-              time: new Date().toISOString(), model: name, iter,
-              winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: evalStatus,
-              ppoMetrics: { ...lastPpoResult }, baseline: BASELINE_RATES[group.faction], target: targetRate,
-              timing: { gameMs, ppoMs, iterMs },
-            })
-            progress.latest = { phase: '1', model: name, iter, maxIter: config.iterations, klCoeff: ppoConfig.klCoeff, mlMaxSeats }
-
-            // カリキュラム: 勝率がベースラインの90%に達したら NN 席数を増やす
-            if (name === 'village' && mlMaxSeats < ML_MAX_SEATS_CAP && factionRate >= targetRate * 0.9) {
-              const prevSeats = mlMaxSeats
-              mlMaxSeats = Math.min(mlMaxSeats + 1, ML_MAX_SEATS_CAP)
-              log(`${prefix} Curriculum: mlMaxSeats → ${mlMaxSeats}`)
-              progress.curriculum.push({ time: new Date().toISOString(), iter, mlMaxSeats, event: `mlMaxSeats ${prevSeats}→${mlMaxSeats}` })
-            }
-
-            writeTrainProgress(progress)
-
-            if (iter >= VILLAGE_MIN_ITER) {
-              log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${VILLAGE_MIN_ITER})`)
-              graduated.add(name)
-              break
-            }
-          }
-
-          // Checkpoint
-          if (iter % config.checkpointInterval === 0) {
-            const dir = `${config.checkpointBase}/ckpt-${name}`
-            saveCheckpoint(network, `${dir}/checkpoint_${iter}.json`, { iteration: iter, winRate: 0 })
-            if (group.teamType === 'wolf_team') {
-              saveCheckpoint(wolfTeamNet, `${dir}/wolf_team_${iter}.json`, { iteration: iter, winRate: 0 })
-            }
-            if (group.teamType === 'mason_team') {
-              saveCheckpoint(masonTeamNet, `${dir}/mason_team_${iter}.json`, { iteration: iter, winRate: 0 })
-            }
-
-            // マイルストーン (eval タイミング) 以外の古いチェックポイントを削除
-            if (existsSync(dir)) {
-              for (const f of readdirSync(dir)) {
-                const m = f.match(/^(?:checkpoint|wolf_team|mason_team)_(\d+)\.json$/)
-                if (!m) continue
-                const ckptIter = parseInt(m[1])
-                if (ckptIter >= iter) continue  // 今回保存分は残す
-                if (ckptIter % config.evalInterval === 0) continue  // マイルストーンは残す
-                try { unlinkSync(`${dir}/${f}`) } catch {}
-              }
-            }
-          }
-        }
-
-        process.stderr.write('\r\x1b[K')
-
-        // 上限到達チェック
-        if (!graduated.has(name) && iterCounts.get(name)! >= config.iterations) {
-          log(`${COLORS[name]}[${name}]${RESET} reached max iterations (${config.iterations})`)
-          graduated.add(name)
-        }
-
-        // Final save
-        if (graduated.has(name)) {
-          const dir = `${config.checkpointBase}/ckpt-${name}`
-          saveCheckpoint(network, `${dir}/final.json`, { iteration: iterCounts.get(name)!, winRate: 0 })
-          if (group.teamType === 'wolf_team') {
-            saveCheckpoint(wolfTeamNet, `${dir}/wolf_team_final.json`, { iteration: iterCounts.get(name)!, winRate: 0 })
-          }
-          if (group.teamType === 'mason_team') {
-            saveCheckpoint(masonTeamNet, `${dir}/mason_team_final.json`, { iteration: iterCounts.get(name)!, winRate: 0 })
-          }
-        }
-      }
-
-      // ラウンドサマリ
-      log(`Round ${round}: ${graduated.size}/${MODEL_NAMES.length} graduated [${MODEL_NAMES.map(n => graduated.has(n) ? `${COLORS[n]}OK${RESET}` : `${COLORS[n]}..${RESET}`).join(' ')}]`)
-    }
-
-    log(`${BOLD}=== Phase 1 Complete ===${RESET}`)
-    progress.latest = { phase: '1 (complete)', model: '-', iter: config.iterations, maxIter: config.iterations }
-    writeTrainProgress(progress)
+    await runTrainingPhase(villageStep, phase1Ctx)
   }
 
-  // === Phase 1': 集団NN + 狂信者 + 第三勢力の学習 (frozen村NN注入) ===
+  // === Phase 1': Collective + Non-Village — delegated to phase-runner ===
   if (!config.phase2Only) {
-    log(`${BOLD}=== Phase 1': Collective + Non-Village Training ===${RESET}`)
-    log(`  Agent assignment: ${formatAssignment({ village: 'frozen', wolf_collective: 'neural', mason_collective: 'neural', fanatic: 'neural', third: 'neural' })}`)
-    progress.latest = { phase: "1'", model: '-', iter: 0, maxIter: config.iterations }
-    writeTrainProgress(progress)
-
-    // 集団NN用の推論/学習ネットワーク (config が異なるため専用インスタンスが必要)
+    // Create collective/fanatic-specific networks (different NN configs)
     const wolfCollectiveNet = createWolfCollectiveNetwork()
     const masonCollectiveNet = createMasonCollectiveNetwork()
     const wolfCollectiveTf = createWolfCollectiveTfNetwork(config.learningRate)
     const masonCollectiveTf = createMasonCollectiveTfNetwork(config.learningRate)
-
-    // 狂信者専用NN (村NN注入のため個人NNとは config が異なる)
     const fanaticNet = createFanaticNetwork()
     const fanaticTf = createFanaticTfNetwork(config.learningRate)
-    networks.set('fanatic', fanaticNet)  // 汎用個人NNを狂信者専用に置き換え
+    networks.set('fanatic', fanaticNet)  // Replace generic with fanatic-specific
 
-    // frozen村NNの重み (Phase 1 で学習済み)
-    const frozenVillageWeights = packWeights(networks.get('village')!)
+    const frozenVillageWeights = packWeights(networks.get('village' as ModelName)!)
 
-    // Phase 1' の学習対象
-    const phase1PrimeModels: ModelName[] = ['wolf_collective', 'mason_collective', 'fanatic', 'third']
-    const phase1PrimeGraduated = new Set<ModelName>()
-    const phase1PrimeIterCounts = new Map<ModelName, number>()
-    for (const name of phase1PrimeModels) phase1PrimeIterCounts.set(name, 0)
-
-    // === Phase 1' Resume ===
-    if (config.resume) {
-      let anyResumedPrime = false
-      for (const name of phase1PrimeModels) {
-        const group = MODEL_GROUPS[name]
-        const dir = `${config.checkpointBase}/ckpt-${name}`
-        const prefix = group.collective ? 'collective' : 'checkpoint'
-        const ckpt = findCheckpoint(dir, prefix)
-        if (ckpt) {
-          try {
-            const net = group.collective
-              ? (name === 'wolf_collective' ? wolfCollectiveNet : masonCollectiveNet)
-              : networks.get(name)!
-            loadCheckpoint(net, ckpt.path)
-            phase1PrimeIterCounts.set(name, ckpt.iteration)
-            anyResumedPrime = true
-            log(`  ${COLORS[name]}${name}${RESET}: resumed from iter ${ckpt.iteration}`)
-          } catch (e) {
-            log(`  ${COLORS[name]}${name}${RESET}: checkpoint incompatible, starting fresh (${(e as Error).message})`)
-          }
-        }
-        // final checkpoint → graduated
-        const finalName = group.collective ? 'collective_final.json' : 'final.json'
-        if (existsSync(`${dir}/${finalName}`)) {
-          phase1PrimeGraduated.add(name)
-          log(`  ${COLORS[name]}${name}${RESET}: already graduated`)
-        }
-      }
-      if (anyResumedPrime) {
-        log('Phase 1\' Resume:')
-        for (const name of phase1PrimeModels) {
-          const iter = phase1PrimeIterCounts.get(name)!
-          log(`  ${COLORS[name]}${name.padEnd(16)}${RESET} iter ${iter}${phase1PrimeGraduated.has(name) ? ' (graduated)' : ''}`)
-        }
-      }
-      // minIter 到達済みなら即卒業
-      const PHASE1P_MIN_ITER_RESUME = 300
-      for (const name of phase1PrimeModels) {
-        if (!phase1PrimeGraduated.has(name) && phase1PrimeIterCounts.get(name)! >= PHASE1P_MIN_ITER_RESUME) {
-          log(`  ${COLORS[name]}${name}${RESET}: already at iter ${phase1PrimeIterCounts.get(name)!} >= ${PHASE1P_MIN_ITER_RESUME}, skipping`)
-          phase1PrimeGraduated.add(name)
-        }
-      }
-    }
-
-    const ppoConfig = {
-      miniBatchSize: trainingConfig.miniBatchSize,
-      clipEpsilon: trainingConfig.clipEpsilon,
-      valueLossCoeff: trainingConfig.valueLossCoeff,
-      entropyCoeff: trainingConfig.entropyCoeff,
-    }
-
-    // 全5モデルの weights を modelGroupWeights として pack
-    const packAllModelWeights = (): Record<string, import('./parallel.ts').SharedWeights> => {
-      const result: Record<string, import('./parallel.ts').SharedWeights> = {}
-      result['village'] = frozenVillageWeights
-      result['wolf_collective'] = packWeights(wolfCollectiveNet)
-      result['mason_collective'] = packWeights(masonCollectiveNet)
-      result['fanatic'] = packWeights(networks.get('fanatic')!)
-      result['third'] = packWeights(networks.get('third')!)
-      return result
-    }
-
-    let round = 0
-    while (phase1PrimeGraduated.size < phase1PrimeModels.length) {
-      round++
-      for (const name of phase1PrimeModels) {
-        if (phase1PrimeGraduated.has(name)) continue
-
-        const group = MODEL_GROUPS[name]
-        const currentIter = phase1PrimeIterCounts.get(name)!
-        const targetIter = Math.min(currentIter + config.chunkSize, config.iterations)
-        const prefix = `${COLORS[name]}[${name.padEnd(16)}]${RESET}`
-
-        let lastPpoResult1p = { policyLoss: 0, valueLoss: 0, entropy: 0, predictLoss: 0, klLoss: 0, klPlanLoss: 0 }
-        for (let iter = currentIter + 1; iter <= targetIter; iter++) {
-          checkShutdown()
-          const iterStart = performance.now()
-          const seeds = Array.from({ length: config.batch }, (_, g) => (10000 + iter) * config.batch + g)
-
-          // ゲーム生成 (マルチモデルモード)
-          const tGameStart = performance.now()
-          const allIndividual: ProcessedStep[] = []
-          const allWolfCollective: ProcessedStep[] = []
-          const allMasonCollective: ProcessedStep[] = []
-          let serializedResults: import('./parallel.ts').SerializedGameResult[] = []
-
-          if (gameWorkerPoolSize() > 0) {
-            const modelGroupWeights = packAllModelWeights()
-            const inspectSeeds = pickInspectSeeds(seeds, config.inspectInterval)
-            serializedResults = await generateGamesParallel({
-              weights: frozenVillageWeights,  // fallback
-              agentAssignment: {
-                village: 'frozen', wolf_collective: 'neural',
-                mason_collective: 'neural', fanatic: 'neural', third: 'neural',
-              },
-              modelGroupWeights,
-              villageFrozenWeights: frozenVillageWeights,
-              trainingConfig,
-              phase: 1,
-              inspectSeeds: inspectSeeds.length > 0 ? inspectSeeds : undefined,
-              wreWeights: wreSharedWeights,
-            }, seeds)
-            if (inspectSeeds.length > 0) saveInspectGames(serializedResults, `phase1p_${name}`, iter, { gitSha, runId, checkpointBase: config.checkpointBase })
-
-            for (const game of serializedResults) {
-              // 個人steps: fanatic/third のみ収集 (village は frozen)
-              for (const { role, steps } of game.individualSteps) {
-                const groupName = ROLE_TO_GROUP[role]
-                if (groupName === name && steps.length > 0) {
-                  const deserialized = steps.map(deserializeStep)
-                  allIndividual.push(...computeGAE(deserialized, trainingConfig.gamma, trainingConfig.lambda, 0))
-                }
-              }
-              // 集団steps
-              if (game.wolfTeamSteps.length > 0 && name === 'wolf_collective') {
-                allWolfCollective.push(...computeGAE(game.wolfTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
-              }
-              if (game.masonTeamSteps.length > 0 && name === 'mason_collective') {
-                allMasonCollective.push(...computeGAE(game.masonTeamSteps.map(deserializeStep), trainingConfig.gamma, trainingConfig.lambda, 0))
-              }
-            }
-          }
-          const tGameEnd = performance.now()
-          const tPpoStart = performance.now()
-
-          // PPO update
-          if (group.collective) {
-            // 集団NN の PPO
-            const steps = name === 'wolf_collective' ? allWolfCollective : allMasonCollective
-            if (steps.length > 0) {
-              normalizeAdvantages(steps)
-              const collectiveNet = name === 'wolf_collective' ? wolfCollectiveNet : masonCollectiveNet
-              const collectiveTf = name === 'wolf_collective' ? wolfCollectiveTf : masonCollectiveTf
-              collectiveTf.loadWeights(collectiveNet.cloneWeights())
-              for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
-                lastPpoResult1p = ppoUpdate(collectiveTf, steps, ppoConfig)
-              }
-              collectiveNet.loadWeights(collectiveTf.cloneWeights())
-            }
-          } else {
-            // 個人NN (fanatic, third) の PPO
-            if (allIndividual.length > 0) {
-              normalizeAdvantages(allIndividual)
-              const network = networks.get(name)!
-              const tf = name === 'fanatic' ? fanaticTf : tfNetwork
-              tf.loadWeights(network.cloneWeights())
-              for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++) {
-                lastPpoResult1p = ppoUpdate(tf, allIndividual, ppoConfig)
-              }
-              network.loadWeights(tf.cloneWeights())
-            }
-          }
-
-          const tPpoEnd = performance.now()
-          const iterMs = performance.now() - iterStart
-          phase1PrimeIterCounts.set(name, iter)
-
-          // Progress
-          const totalSteps = allIndividual.length + allWolfCollective.length + allMasonCollective.length
-          const gameMs = tGameEnd - tGameStart
-          const ppoMs = tPpoEnd - tPpoStart
-          // per-game timing from worker results
-          const timings = serializedResults.filter(g => g.timing).map(g => g.timing!)
-          const avgGameMs = timings.length > 0 ? timings.reduce((s, t) => s + t.gameMs, 0) / timings.length : 0
-          const avgRetarMs = timings.length > 0 ? timings.reduce((s, t) => s + t.retarMs, 0) / timings.length : 0
-          const avgInferMs = timings.length > 0 ? timings.reduce((s, t) => s + t.inferMs, 0) / timings.length : 0
-          const avgTsumiMs = timings.length > 0 ? timings.reduce((s, t) => s + t.tsumiMs, 0) / timings.length : 0
-          process.stderr.write(
-            `\r\x1b[K  ${prefix} iter ${iter}/${config.iterations} ` +
-            `${(iterMs / 1000).toFixed(1)}s (game${(gameMs / iterMs * 100).toFixed(0)}% ppo${(ppoMs / iterMs * 100).toFixed(0)}%) ` +
-            `steps=${totalSteps}` +
-            (timings.length > 0 ? ` | avg/game: ${avgGameMs.toFixed(0)}ms (retar=${avgRetarMs.toFixed(0)} infer=${avgInferMs.toFixed(0)} tsumi=${avgTsumiMs.toFixed(0)})` : '')
-          )
-
-          // Checkpoint
-          if (iter % config.checkpointInterval === 0) {
-            const dir = `${config.checkpointBase}/ckpt-${name}`
-            if (group.collective) {
-              const collectiveNet = name === 'wolf_collective' ? wolfCollectiveNet : masonCollectiveNet
-              saveCheckpoint(collectiveNet, `${dir}/collective_${iter}.json`, { iteration: iter, winRate: 0 })
-            } else {
-              saveCheckpoint(networks.get(name)!, `${dir}/checkpoint_${iter}.json`, { iteration: iter, winRate: 0 })
-            }
-          }
-
-          // Eval (全5モデル同時評価)
-          if (iter % config.evalInterval === 0) {
-            process.stderr.write(`\r\x1b[K  ${prefix} iter ${iter} evaluating (${config.evalGames} games)...`)
-            // 全役職をMLで動かすため、全モデルの roles を集約
-            const allMlRoles = Object.values(MODEL_GROUPS).flatMap(g => g.roles)
-            const evalConfig = { ...trainingConfig, mlRoles: allMlRoles }
-            const individualNets = new Map<string, AnyNetwork>()
-            for (const role of MODEL_GROUPS.village.roles) individualNets.set(role, networks.get('village')!)
-            for (const role of MODEL_GROUPS.third.roles) individualNets.set(role, networks.get('third')!)
-            const evalResult = await evaluate(
-              networks.get('village')!, evalConfig, config.evalGames,
-              undefined, undefined, undefined,
-              {
-                wolfCollectiveNet,
-                masonCollectiveNet,
-                fanaticNet: networks.get('fanatic')!,
-                frozenVillageNet: networks.get('village')!,
-                individualNets,
-                evalIter: iter,
-                saveHowl: true,
-              },
-            )
-            process.stderr.write('\r\x1b[K')
-            if (evalResult.howlGames) saveEvalHowl(config.checkpointBase, iter, evalResult.howlGames)
-            appendEvalLog(`${config.checkpointBase}/ckpt-${name}`, iter, evalResult, name, {
-              klLoss: lastPpoResult1p.klLoss, klCoeff: 0,
-              policyLoss: lastPpoResult1p.policyLoss, valueLoss: lastPpoResult1p.valueLoss, entropy: lastPpoResult1p.entropy,
-            })
-            const factionRate = evalResult.winRates[group.faction] ?? 0
-            const targetRate = config.targetWinRate ?? (BASELINE_RATES[group.faction] ?? 0.5)
-            log(
-              `${prefix} [${iter}] ${Object.entries(evalResult.winRates).map(([k, v]) => `${k}=${(v * 100).toFixed(0)}%`).join(' ')} ` +
-              `avgLen=${evalResult.avgGameLength.toFixed(1)} ${evalResult.avgElapsedMs.toFixed(0)}ms/eval`
-            )
-
-            // Progress log: Phase 1' eval
-            const evalStatus = factionRate >= targetRate ? 'GRADUATED' : ''
-            progress.evals.push({
-              time: new Date().toISOString(), model: name, iter,
-              winRates: { ...evalResult.winRates }, avgLen: evalResult.avgGameLength, status: evalStatus,
-              ppoMetrics: { ...lastPpoResult1p }, baseline: BASELINE_RATES[group.faction], target: targetRate,
-              timing: { gameMs, ppoMs, iterMs },
-            })
-            progress.latest = { phase: "1'", model: name, iter, maxIter: config.iterations }
-            writeTrainProgress(progress)
-
-            const PHASE1P_MIN_ITER = 300
-            if (iter >= PHASE1P_MIN_ITER) {
-              log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${PHASE1P_MIN_ITER})`)
-              phase1PrimeGraduated.add(name)
-              break
-            }
-          }
-        }
-
-        process.stderr.write('\r\x1b[K')
-
-        // 上限到達チェック
-        if (!phase1PrimeGraduated.has(name) && phase1PrimeIterCounts.get(name)! >= config.iterations) {
-          log(`${prefix} reached max iterations (${config.iterations})`)
-          phase1PrimeGraduated.add(name)
-        }
-
-        // Final save
-        if (phase1PrimeGraduated.has(name)) {
-          const dir = `${config.checkpointBase}/ckpt-${name}`
-          if (group.collective) {
-            const collectiveNet = name === 'wolf_collective' ? wolfCollectiveNet : masonCollectiveNet
-            saveCheckpoint(collectiveNet, `${dir}/collective_final.json`, { iteration: phase1PrimeIterCounts.get(name)!, winRate: 0 })
-          } else {
-            saveCheckpoint(networks.get(name)!, `${dir}/final.json`, { iteration: phase1PrimeIterCounts.get(name)!, winRate: 0 })
-          }
-        }
-      }
-
-      log(`Round ${round}: ${phase1PrimeGraduated.size}/${phase1PrimeModels.length} graduated [${phase1PrimeModels.map(n => phase1PrimeGraduated.has(n) ? `${COLORS[n]}OK${RESET}` : `${COLORS[n]}..${RESET}`).join(' ')}]`)
-    }
-
-    log(`${BOLD}=== Phase 1' Complete ===${RESET}`)
-    progress.latest = { phase: "1' (complete)", model: '-', iter: config.iterations, maxIter: config.iterations }
-    writeTrainProgress(progress)
+    const phase1PrimeStep = curriculum.find(s => s.type === 'training' && s.name === 'non_village') as TrainingStep
+    const phase1PrimeCtx = buildCtx({
+      networks: new Map<string, AnyNetwork>([
+        ['village', networks.get('village' as ModelName)!],
+        ['wolf_collective', wolfCollectiveNet],
+        ['mason_collective', masonCollectiveNet],
+        ['fanatic', fanaticNet],
+        ['third', networks.get('third' as ModelName)!],
+      ]),
+      tfNetworks: new Map<string, AnyTfNetwork>([
+        ['village', tfNetwork],
+        ['wolf_collective', wolfCollectiveTf],
+        ['mason_collective', masonCollectiveTf],
+        ['fanatic', fanaticTf],
+        ['third', tfNetwork],
+      ]),
+      frozenWeights: new Map([['village', frozenVillageWeights]]),
+      frozenNets: new Map([['village', networks.get('village' as ModelName)!]]),
+    })
+    await runTrainingPhase(phase1PrimeStep, phase1PrimeCtx)
 
     // === Phase 2: Self-Play (全5モデル同時学習) — delegated to phase-runner ===
     if (!config.phase1Only) {
-      const phase2Step = buildCurriculum().find(s => s.type === 'training' && s.name === 'self_play') as TrainingStep
-      const phaseCtx: PhaseRunnerContext = {
-        config, trainingConfig, progress, runId, gitSha,
+      const phase2Step = curriculum.find(s => s.type === 'training' && s.name === 'self_play') as TrainingStep
+      const phase2Ctx = buildCtx({
         networks: new Map<string, AnyNetwork>([
           ['village', networks.get('village' as ModelName)!],
           ['wolf_collective', wolfCollectiveNet],
           ['mason_collective', masonCollectiveNet],
-          ['fanatic', networks.get('fanatic' as ModelName)!],
+          ['fanatic', fanaticNet],
           ['third', networks.get('third' as ModelName)!],
         ]),
         tfNetworks: new Map<string, AnyTfNetwork>([
@@ -2185,21 +1456,8 @@ async function main(): Promise<void> {
           ['fanatic', fanaticTf],
           ['third', tfNetwork],
         ]),
-        frozenWeights: new Map(),
-        frozenNets: new Map(),
-        checkShutdown,
-        log,
-        writeTrainProgress,
-        pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
-        saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
-        saveEvalHowl,
-        wreSharedWeights,
-        onWreRefresh: wreSharedWeights && config.wreRefresh > 0 ? async (games) => {
-          await maybeRefreshWre(games)
-          return wreSharedWeights
-        } : undefined,
-      }
-      await runTrainingPhase(phase2Step, phaseCtx)
+      })
+      await runTrainingPhase(phase2Step, phase2Ctx)
     }
 
     // === Cleanup GPU (Phase 1' + Phase 2 共用) ===
