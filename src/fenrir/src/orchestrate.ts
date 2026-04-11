@@ -997,27 +997,28 @@ async function main(): Promise<void> {
         const bbPlusTfs = new Map<string, AnyTfNetwork>()
         const frozenWeightsMap = new Map<string, SharedWeights>()
 
-        if (step.name.includes('village') || step.name.includes('all')) {
-          for (const [role, net] of villageRoleNets) {
-            bbPlusNets.set(role, net)
-            bbPlusTfs.set(role, villageRoleTfs.get(role)!)
-          }
+        // Village per-role: 常に agentSpecs に含める（ゲーム内で NN agent として動作）
+        // TfNetworks は学習対象ステージのみ含める（PPO 更新の有無を制御）
+        const villageIsLearning = step.name.includes('village') || step.name.includes('all')
+        for (const [role, net] of villageRoleNets) {
+          bbPlusNets.set(role, net)
+          if (villageIsLearning) bbPlusTfs.set(role, villageRoleTfs.get(role)!)
         }
-        if (step.name.includes('fanatic') || step.name.includes('all')) {
-          bbPlusNets.set('fanatic', fanaticNet)
-          bbPlusTfs.set('fanatic', fanaticTf)
-          frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
-        }
-        if (step.name.includes('third') || step.name.includes('all')) {
-          bbPlusNets.set('werehamster', werehamsterNet)
+
+        const fanaticIsLearning = step.name.includes('fanatic') || step.name.includes('all')
+        bbPlusNets.set('fanatic', fanaticNet)
+        if (fanaticIsLearning) bbPlusTfs.set('fanatic', fanaticTf)
+
+        const thirdIsLearning = step.name.includes('third') || step.name.includes('all')
+        bbPlusNets.set('werehamster', werehamsterNet)
+        bbPlusNets.set('immoralist', immoralistNet)
+        if (thirdIsLearning) {
           bbPlusTfs.set('werehamster', werehamsterTf)
-          bbPlusNets.set('immoralist', immoralistNet)
           bbPlusTfs.set('immoralist', immoralistTf)
-          frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
         }
-        if (step.agentAssignment.village === 'frozen') {
-          frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
-        }
+
+        // frozen village NN for fanatic observation injection
+        frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
 
         const stageCtx: PhaseRunnerContext = {
           config, trainingConfig: bbTrainingConfig, progress, runId, gitSha,

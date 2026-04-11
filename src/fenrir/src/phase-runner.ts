@@ -823,12 +823,15 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   const trainBrains = masonTf != null  // BB: train both brains, BB+: brains frozen
 
   // BB+ individual agent networks
+  // individualNets: 全 BB+ モデル（agentSpecs 構築 + ゲーム参加用）
+  // individualTfs: 学習対象のみ（PPO 更新用）— TfNetwork がないモデルは frozen
   const individualNets = new Map<string, AnyNetwork>()
   const individualTfs = new Map<string, AnyTfNetwork>()
-  if (ctx.bbPlusNetworks && ctx.bbPlusTfNetworks) {
+  if (ctx.bbPlusNetworks) {
     for (const [name, net] of ctx.bbPlusNetworks) {
-      const tf = ctx.bbPlusTfNetworks.get(name)
-      if (tf) { individualNets.set(name, net); individualTfs.set(name, tf) }
+      individualNets.set(name, net)
+      const tf = ctx.bbPlusTfNetworks?.get(name)
+      if (tf) individualTfs.set(name, tf)
     }
   }
   const hasBBPlus = individualNets.size > 0
