@@ -202,6 +202,8 @@ export type AgentSpec = {
   frozenVillageKey?: string
   /** 最大席数制限（village 等で1席だけ NN にする場合） */
   maxSeats?: number
+  /** CO マスク: この役職の CO のみ許可（村陣営の偽 CO 防止） */
+  truthfulRole?: import('../../types/index.ts').SystemRole
 }
 
 /** 1ゲーム分のタイミング情報 */

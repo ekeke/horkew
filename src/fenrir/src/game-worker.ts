@@ -90,7 +90,7 @@ function createAgentFromSpec(
   const net = buildNetwork(cloneSharedWeights(sw), spec.observationMode ?? false)
 
   switch (spec.type) {
-    case 'neural': return new NeuralAgent(net, { explore: true, strategyOnly: spec.strategyOnly })
+    case 'neural': return new NeuralAgent(net, { explore: true, strategyOnly: spec.strategyOnly, truthfulRole: spec.truthfulRole })
     case 'fanatic': {
       const fa = new FanaticAgent(net, { explore: true, strategyOnly: spec.strategyOnly })
       if (spec.frozenVillageKey && specWeights[spec.frozenVillageKey]) {
@@ -247,7 +247,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     let gameRetarCount = 0
 
     const onRolesAssignedWrapped = onRolesAssigned ? (seatRoles: Map<number, SystemRole>) => {
-      onRolesAssigned(seatRoles)
+      onRolesAssigned?.(seatRoles)
       for (const [seat, s] of neuralAgents) {
         if (!agentsMap.has(seat)) agentsMap.set(seat, s)
       }

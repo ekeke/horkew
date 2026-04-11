@@ -919,18 +919,21 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
       const inspectSeeds = ctx.pickInspectSeeds(seeds)
 
       // BB+ agent specs
+      const VILLAGE_ROLE_SET = new Set(['seer', 'medium', 'bodyguard', 'nekomata', 'villager'])
       if (hasBBPlus) {
         agentSpecs = {}; specWeights = {}
         for (const [name, net] of individualNets) {
           specWeights[name] = packWeights(net)
           const isFanatic = name === 'fanatic'
+          const isVillageRole = VILLAGE_ROLE_SET.has(name)
           agentSpecs[name] = {
             type: isFanatic ? 'fanatic' : 'neural',
             weightsKey: name,
             strategyOnly: false,
             observationMode: isFanatic ? 'fanatic' : undefined,
             frozenVillageKey: isFanatic ? 'frozen_village' : undefined,
-            maxSeats: step.name.includes('village_1') && name === 'village' ? 1 : undefined,
+            maxSeats: undefined,
+            truthfulRole: isVillageRole ? name as any : undefined,
           }
         }
         const frozenVillage = ctx.frozenWeights.get('village')

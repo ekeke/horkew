@@ -11,7 +11,7 @@ import type { AnyNetwork, ForwardResult, PlanContext } from '../ml/nn.ts'
 import type { TrajectoryStep } from '../ml/trajectory.ts'
 import { encodeObservation, SEATS, CO_ROLES } from '../observation.ts'
 import {
-  maskNightAction, maskClaim, maskVote, maskComm, maskPropose, maskPredict, maskLeader, maskTarget,
+  maskNightAction, maskClaim, applyTruthfulClaimMask, maskVote, maskComm, maskPropose, maskPredict, maskLeader, maskTarget,
   sampleMasked,
   decodeNightActionWithRole, decodeClaim, decodeComm, decodePropose, decodePredict, decodeLeader,
 } from '../action.ts'
@@ -30,6 +30,8 @@ export type NeuralAgentConfig = {
   explore: boolean
   /** trueなら戦略NNのみ使用、行動はルールベース (Step 1 bootstrap) */
   strategyOnly?: boolean
+  /** CO マスク: この役職の CO のみ許可（村陣営の偽 CO 防止） */
+  truthfulRole?: import('../../../types/index.ts').SystemRole
 }
 
 export class NeuralAgent implements Agent {
@@ -282,6 +284,7 @@ export class NeuralAgent implements Agent {
     const result = this.infer(ctx)
     const claimLogits = result.policies.get('claim')!
     const claimMask = maskClaim(ctx)
+    if (this.config.truthfulRole) applyTruthfulClaimMask(claimMask, this.config.truthfulRole)
     const { action: claimIdx, logProb: claimLogProb } = this.selectAction(claimLogits, claimMask)
 
     const targetLogits = result.policies.get('target')!

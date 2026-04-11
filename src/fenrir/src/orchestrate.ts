@@ -953,9 +953,14 @@ async function main(): Promise<void> {
       log(`WARNING: --bb-checkpoint not specified, using random brain weights`)
     }
 
-    // Individual agent networks (random init)
-    const villageNet = createNetwork()
-    const villageTf = createTfNetwork(config.learningRate)
+    // Individual agent networks: per-role (random init)
+    const VILLAGE_ROLES = ['seer', 'medium', 'bodyguard', 'nekomata', 'villager'] as const
+    const villageRoleNets = new Map<string, AnyNetwork>()
+    const villageRoleTfs = new Map<string, AnyTfNetwork>()
+    for (const role of VILLAGE_ROLES) {
+      villageRoleNets.set(role, createNetwork())
+      villageRoleTfs.set(role, createTfNetwork(config.learningRate))
+    }
     const fanaticNet = createFanaticNetwork()
     const fanaticTf = createFanaticTfNetwork(config.learningRate)
     const werehamsterNet = createNetwork()
@@ -965,7 +970,8 @@ async function main(): Promise<void> {
 
     log(`Frozen wolf_brain: ${wolfBrainNet.totalParams} params`)
     log(`Frozen mason_brain: ${masonBrainNet.totalParams} params`)
-    log(`BB+ village: ${villageNet.totalParams}, fanatic: ${fanaticNet.totalParams}, werehamster: ${werehamsterNet.totalParams}, immoralist: ${immoralistNet.totalParams}`)
+    log(`BB+ village roles: ${VILLAGE_ROLES.map(r => r).join(',')} (${villageRoleNets.get('seer')!.totalParams} each)`)
+    log(`BB+ fanatic: ${fanaticNet.totalParams}, werehamster: ${werehamsterNet.totalParams}, immoralist: ${immoralistNet.totalParams}`)
 
     if (config.workers !== 0) {
       initGameWorkerPool(config.workers === -1 ? undefined : config.workers)
@@ -981,25 +987,28 @@ async function main(): Promise<void> {
       const frozenWeightsMap = new Map<string, SharedWeights>()
 
       if (step.name.includes('village') || step.name.includes('all')) {
-        bbPlusNets.set('village', villageNet)
-        bbPlusTfs.set('village', villageTf)
+        for (const [role, net] of villageRoleNets) {
+          bbPlusNets.set(role, net)
+          bbPlusTfs.set(role, villageRoleTfs.get(role)!)
+        }
       }
       if (step.name.includes('fanatic') || step.name.includes('all')) {
         bbPlusNets.set('fanatic', fanaticNet)
         bbPlusTfs.set('fanatic', fanaticTf)
-        frozenWeightsMap.set('village', packWeights(villageNet))
+        // frozen village for fanatic observation injection (use seer NN as representative)
+        frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
       }
       if (step.name.includes('third') || step.name.includes('all')) {
         bbPlusNets.set('werehamster', werehamsterNet)
         bbPlusTfs.set('werehamster', werehamsterTf)
         bbPlusNets.set('immoralist', immoralistNet)
         bbPlusTfs.set('immoralist', immoralistTf)
-        frozenWeightsMap.set('village', packWeights(villageNet))
+        frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
       }
 
       // Stage 3+: frozen village for CO stability
       if (step.agentAssignment.village === 'frozen') {
-        frozenWeightsMap.set('village', packWeights(villageNet))
+        frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
       }
 
       const stageCtx: PhaseRunnerContext = {
@@ -1023,7 +1032,7 @@ async function main(): Promise<void> {
     }
 
     wolfBrainTf.dispose()
-    villageTf.dispose()
+    for (const tf of villageRoleTfs.values()) tf.dispose()
     fanaticTf.dispose()
     werehamsterTf.dispose()
     immoralistTf.dispose()

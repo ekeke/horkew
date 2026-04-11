@@ -147,6 +147,30 @@ export function maskClaim(ctx: DecisionContext): Float32Array {
   return mask
 }
 
+/** 役職ベース CO マスク: truthfulRole の CO のみ許可（村陣営の偽 CO 防止） */
+const ROLE_TO_CLAIM: Record<string, number> = {
+  seer: CLAIM.SEER_CO,
+  medium: CLAIM.MEDIUM_CO,
+  bodyguard: CLAIM.BODYGUARD_CO,
+  mason: CLAIM.MASON_CO,
+  nekomata: CLAIM.NEKOMATA_CO,
+}
+const ROLE_TO_RESULT: Record<string, number[]> = {
+  seer: [CLAIM.SEER_RESULT, CLAIM.FORECAST],
+  medium: [CLAIM.MEDIUM_RESULT],
+}
+
+export function applyTruthfulClaimMask(mask: Float32Array, role: import('../../types/index.ts').SystemRole): void {
+  const allowedCo = ROLE_TO_CLAIM[role]
+  const allowedResults = ROLE_TO_RESULT[role] ?? []
+  for (let i = 0; i < mask.length; i++) {
+    if (i === CLAIM.NONE) continue
+    if (i === allowedCo) continue
+    if (allowedResults.includes(i)) continue
+    mask[i] = -Infinity
+  }
+}
+
 export function maskVote(ctx: DecisionContext): Float32Array {
   const mask = new Float32Array(HEAD_SIZES.vote).fill(-Infinity)
   for (const seat of ctx.alivePlayers) {
