@@ -94,7 +94,6 @@ export type OrchestratorConfig = {
   ppoRestart: boolean
   skeleton: boolean
   curriculum: 'default' | 'brain-battle' | 'bb-plus'
-  bbCheckpoint?: string
 }
 
 export type TrainProgress = {

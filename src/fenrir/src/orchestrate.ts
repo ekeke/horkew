@@ -95,8 +95,6 @@ type OrchestratorConfig = {
   /** WRE再学習間隔 (iteration数、0=再学習無効)。サンプルバッファが batch×14×5×n×4.8KB 蓄積するため batch=64 なら n≤40 推奨 */
   wreRefresh: number
   curriculum: 'default' | 'brain-battle' | 'bb-plus'
-  /** BB+ frozen brain チェックポイントベース (e.g. tmp/orch-run-30) */
-  bbCheckpoint?: string
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -159,7 +157,6 @@ function parseArgs(): OrchestratorConfig {
       }
       case '--wre-refresh': config.wreRefresh = parseInt(args[++i]); break
       case '--curriculum': config.curriculum = args[++i] as 'default' | 'brain-battle' | 'bb-plus'; break
-      case '--bb-checkpoint': config.bbCheckpoint = args[++i]; break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -192,7 +189,6 @@ Options:
   --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
   --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
   --curriculum <name>      カリキュラム選択: default | brain-battle | bb-plus (default: default)
-  --bb-checkpoint <path>   BB+ frozen brain チェックポイントベース (e.g. tmp/orch-run-30)
   --skeleton               最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用)
   --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
   --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled)
@@ -931,29 +927,26 @@ async function main(): Promise<void> {
     return
   }
 
-  // === BB+ カリキュラム: frozen brains + 4段階 個別役職学習 ===
+  // === BB+ カリキュラム: BB (brains) → BB+1..5 (個別役職) 統合パイプライン ===
   if (config.curriculum === 'bb-plus') {
-    const bbPlusTrainingConfig: TrainingConfig = { ...trainingConfig, rewardConfig: BRAIN_BATTLE_REWARD_CONFIG }
+    const bbTrainingConfig: TrainingConfig = { ...trainingConfig, rewardConfig: BRAIN_BATTLE_REWARD_CONFIG }
 
     const steps = buildCurriculum({ curriculum: 'bb-plus' })
       .filter((s): s is TrainingStep => s.type === 'training')
 
-    // Frozen BB brains (mason_brain + wolf_brain)
+    // BB brains — BB フェーズで学習、BB+ フェーズで frozen
     const masonBrainNet = createMasonBrainNetwork()
+    const masonBrainTf = createMasonBrainTfNetwork(config.learningRate)
     const wolfBrainNet = createWolfBrainNetwork()
     const wolfBrainTf = createWolfBrainTfNetwork(config.learningRate)
 
-    const bbBase = config.bbCheckpoint
-    if (bbBase) {
-      const wolfCkpt = findCheckpoint(`${bbBase}/ckpt-wolf_brain`, 'wolf_brain')
-      if (wolfCkpt) { loadCheckpoint(wolfBrainNet, wolfCkpt.path); log(`Frozen wolf_brain: ${wolfCkpt.path} (iter ${wolfCkpt.iteration})`) }
-      const masonCkpt = findCheckpoint(`${bbBase}/ckpt-mason_collective`, 'collective')
-      if (masonCkpt) { loadCheckpoint(masonBrainNet, masonCkpt.path); log(`Frozen mason_brain: ${masonCkpt.path} (iter ${masonCkpt.iteration})`) }
-    } else {
-      log(`WARNING: --bb-checkpoint not specified, using random brain weights`)
-    }
+    // BB brain チェックポイントを同一 checkpointBase から読み込み
+    const wolfCkpt = findCheckpoint(`${config.checkpointBase}/ckpt-wolf_brain`, 'wolf_brain')
+    if (wolfCkpt) { loadCheckpoint(wolfBrainNet, wolfCkpt.path); log(`wolf_brain: ${wolfCkpt.path} (iter ${wolfCkpt.iteration})`) }
+    const masonCkpt = findCheckpoint(`${config.checkpointBase}/ckpt-mason_collective`, 'collective')
+    if (masonCkpt) { loadCheckpoint(masonBrainNet, masonCkpt.path); log(`mason_brain: ${masonCkpt.path} (iter ${masonCkpt.iteration})`) }
 
-    // Individual agent networks: per-role (random init)
+    // BB+ individual agent networks: per-role (random init)
     const VILLAGE_ROLES = ['seer', 'medium', 'bodyguard', 'nekomata', 'villager'] as const
     const villageRoleNets = new Map<string, AnyNetwork>()
     const villageRoleTfs = new Map<string, AnyTfNetwork>()
@@ -968,70 +961,85 @@ async function main(): Promise<void> {
     const immoralistNet = createNetwork()
     const immoralistTf = createTfNetwork(config.learningRate)
 
-    log(`Frozen wolf_brain: ${wolfBrainNet.totalParams} params`)
-    log(`Frozen mason_brain: ${masonBrainNet.totalParams} params`)
-    log(`BB+ village roles: ${VILLAGE_ROLES.map(r => r).join(',')} (${villageRoleNets.get('seer')!.totalParams} each)`)
+    log(`Wolf Brain: ${wolfBrainNet.totalParams} params, Mason Brain: ${masonBrainNet.totalParams} params`)
+    log(`BB+ village roles: ${VILLAGE_ROLES.join(',')} (${villageRoleNets.get('seer')!.totalParams} each)`)
     log(`BB+ fanatic: ${fanaticNet.totalParams}, werehamster: ${werehamsterNet.totalParams}, immoralist: ${immoralistNet.totalParams}`)
 
     if (config.workers !== 0) {
       initGameWorkerPool(config.workers === -1 ? undefined : config.workers)
     }
 
-    // Run each stage sequentially
+    // Run each phase/stage sequentially
     for (const step of steps) {
       checkShutdown()
 
-      // Build bbPlusNetworks/TfNetworks for this stage based on step.activeModels
-      const bbPlusNets = new Map<string, AnyNetwork>()
-      const bbPlusTfs = new Map<string, AnyTfNetwork>()
-      const frozenWeightsMap = new Map<string, SharedWeights>()
+      const isBBPhase = step.name === 'brain_battle'
 
-      if (step.name.includes('village') || step.name.includes('all')) {
-        for (const [role, net] of villageRoleNets) {
-          bbPlusNets.set(role, net)
-          bbPlusTfs.set(role, villageRoleTfs.get(role)!)
+      if (isBBPhase) {
+        // Phase BB: train wolf_brain + mason_brain
+        const bbCtx: PhaseRunnerContext = {
+          config, trainingConfig: bbTrainingConfig, progress, runId, gitSha,
+          networks: new Map<string, AnyNetwork>([['mason_collective', masonBrainNet]]),
+          tfNetworks: new Map<string, AnyTfNetwork>([['mason_collective', masonBrainTf]]),
+          frozenWeights: new Map(),
+          frozenNets: new Map(),
+          wolfBrainNetwork: wolfBrainNet,
+          wolfBrainTfNetwork: wolfBrainTf,
+          checkShutdown, log, writeTrainProgress,
+          pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
+          saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
+          saveEvalHowl,
         }
-      }
-      if (step.name.includes('fanatic') || step.name.includes('all')) {
-        bbPlusNets.set('fanatic', fanaticNet)
-        bbPlusTfs.set('fanatic', fanaticTf)
-        // frozen village for fanatic observation injection (use seer NN as representative)
-        frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
-      }
-      if (step.name.includes('third') || step.name.includes('all')) {
-        bbPlusNets.set('werehamster', werehamsterNet)
-        bbPlusTfs.set('werehamster', werehamsterTf)
-        bbPlusNets.set('immoralist', immoralistNet)
-        bbPlusTfs.set('immoralist', immoralistTf)
-        frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
-      }
+        await runTrainingPhase(step, bbCtx)
+      } else {
+        // Phase BB+: frozen brains + individual agents
+        const bbPlusNets = new Map<string, AnyNetwork>()
+        const bbPlusTfs = new Map<string, AnyTfNetwork>()
+        const frozenWeightsMap = new Map<string, SharedWeights>()
 
-      // Stage 3+: frozen village for CO stability
-      if (step.agentAssignment.village === 'frozen') {
-        frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
-      }
+        if (step.name.includes('village') || step.name.includes('all')) {
+          for (const [role, net] of villageRoleNets) {
+            bbPlusNets.set(role, net)
+            bbPlusTfs.set(role, villageRoleTfs.get(role)!)
+          }
+        }
+        if (step.name.includes('fanatic') || step.name.includes('all')) {
+          bbPlusNets.set('fanatic', fanaticNet)
+          bbPlusTfs.set('fanatic', fanaticTf)
+          frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
+        }
+        if (step.name.includes('third') || step.name.includes('all')) {
+          bbPlusNets.set('werehamster', werehamsterNet)
+          bbPlusTfs.set('werehamster', werehamsterTf)
+          bbPlusNets.set('immoralist', immoralistNet)
+          bbPlusTfs.set('immoralist', immoralistTf)
+          frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
+        }
+        if (step.agentAssignment.village === 'frozen') {
+          frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
+        }
 
-      const stageCtx: PhaseRunnerContext = {
-        config, trainingConfig: bbPlusTrainingConfig, progress, runId, gitSha,
-        networks: new Map<string, AnyNetwork>([['mason_collective', masonBrainNet]]),
-        tfNetworks: new Map<string, AnyTfNetwork>(),
-        frozenWeights: frozenWeightsMap,
-        frozenNets: new Map(),
-        wolfBrainNetwork: wolfBrainNet,
-        wolfBrainTfNetwork: wolfBrainTf,
-        bbPlusNetworks: bbPlusNets,
-        bbPlusTfNetworks: bbPlusTfs,
-        checkShutdown,
-        log,
-        writeTrainProgress,
-        pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
-        saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
-        saveEvalHowl,
+        const stageCtx: PhaseRunnerContext = {
+          config, trainingConfig: bbTrainingConfig, progress, runId, gitSha,
+          networks: new Map<string, AnyNetwork>([['mason_collective', masonBrainNet]]),
+          tfNetworks: new Map<string, AnyTfNetwork>(),
+          frozenWeights: frozenWeightsMap,
+          frozenNets: new Map(),
+          wolfBrainNetwork: wolfBrainNet,
+          wolfBrainTfNetwork: wolfBrainTf,
+          bbPlusNetworks: bbPlusNets,
+          bbPlusTfNetworks: bbPlusTfs,
+          checkShutdown, log, writeTrainProgress,
+          pickInspectSeeds: (seeds) => pickInspectSeeds(seeds, config.inspectInterval),
+          saveInspectGames: (results, modelName, iteration) => saveInspectGames(results, modelName, iteration, { gitSha, runId, checkpointBase: config.checkpointBase }),
+          saveEvalHowl,
+        }
+        await runTrainingPhase(step, stageCtx)
       }
-      await runTrainingPhase(step, stageCtx)
     }
 
     wolfBrainTf.dispose()
+    masonBrainTf.dispose()
     for (const tf of villageRoleTfs.values()) tf.dispose()
     fanaticTf.dispose()
     werehamsterTf.dispose()

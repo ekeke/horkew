@@ -422,8 +422,8 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
 // ============================================================
 
 function buildBBPlusCurriculum(): PhaseStep[] {
-  // 4-stage curriculum: village → village(full) → fanatic → werehamster + immoralist
-  // Each stage freezes previous models and adds new NN agents
+  // BB → BB+1..5 unified curriculum
+  // BB trains wolf_brain + mason_brain; BB+ trains individual role agents on frozen brains
   const bbPlusBase = {
     type: 'training' as const,
     strategyOnly: false,
@@ -435,7 +435,28 @@ function buildBBPlusCurriculum(): PhaseStep[] {
   }
 
   return [
-    // Stage 1: village NN × 1席 (seer 優先) — 占い先・CO 学習
+    // Phase BB: Brain Battle (wolf_brain + mason_brain 学習)
+    {
+      type: 'training' as const,
+      name: 'brain_battle',
+      displayName: 'Phase BB: Brain Battle',
+      activeModels: ['wolf_brain', 'mason_collective'],
+      strategyOnly: false,
+      adapter: 'brain-battle' as const,
+      ppo: { freezePlan: false },
+      graduation: { type: 'min_iter' as const, minIter: 500 },
+      gameGen: { mode: 'multi_model' as const, seedOffsetBase: 40000 },
+      agentAssignment: {
+        village: 'heuristic',
+        wolf_collective: 'heuristic',
+        mason_collective: 'neural',
+        fanatic: 'heuristic',
+        third: 'heuristic',
+      },
+      maxIterations: 'iterations' as const,
+      workerPhase: 3,
+    },
+    // BB+ Stage 1: per-role village — 占い先・CO 学習
     {
       ...bbPlusBase,
       name: 'bb_plus_village_1',
