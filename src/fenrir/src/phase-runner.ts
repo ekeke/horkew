@@ -810,8 +810,8 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   const maxIter = config[step.maxIterations]
   const phase = phaseLabel(step)
 
-  if (!ctx.wolfBrainNetwork || !ctx.wolfBrainTfNetwork) {
-    throw new Error('Brain Battle requires wolfBrainNetwork and wolfBrainTfNetwork in PhaseRunnerContext')
+  if (!ctx.wolfBrainNetwork) {
+    throw new Error('Brain Battle requires wolfBrainNetwork in PhaseRunnerContext')
   }
 
   // Mason network (BB: mason_collective with TF, BB+: frozen mason_brain without TF)
@@ -821,6 +821,10 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   }
   const masonTf = ctx.tfNetworks.get('mason_collective')  // null in BB+ (frozen)
   const trainBrains = masonTf != null  // BB: train both brains, BB+: brains frozen
+
+  if (trainBrains && !ctx.wolfBrainTfNetwork) {
+    throw new Error('Brain Battle BB phase requires wolfBrainTfNetwork when training brains')
+  }
 
   // BB+ individual agent networks
   // individualNets: 全 BB+ モデル（agentSpecs 構築 + ゲーム参加用）
@@ -979,12 +983,13 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
     const tPpoStart = performance.now()
 
     if (trainBrains) {
+      const wolfBrainTf = ctx.wolfBrainTfNetwork!  // validated by guard: trainBrains && !wolfBrainTfNetwork → throw
       if (allWolfBrainSteps.length > 0) {
         normalizeAdvantages(allWolfBrainSteps)
-        ctx.wolfBrainTfNetwork.loadWeights(ctx.wolfBrainNetwork.cloneWeights())
+        wolfBrainTf.loadWeights(ctx.wolfBrainNetwork.cloneWeights())
         for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++)
-          lastWolfPpo = ppoUpdate(ctx.wolfBrainTfNetwork, allWolfBrainSteps, ppoConfig)
-        ctx.wolfBrainNetwork.loadWeights(ctx.wolfBrainTfNetwork.cloneWeights())
+          lastWolfPpo = ppoUpdate(wolfBrainTf, allWolfBrainSteps, ppoConfig)
+        ctx.wolfBrainNetwork.loadWeights(wolfBrainTf.cloneWeights())
       }
       if (allMasonSteps.length > 0) {
         normalizeAdvantages(allMasonSteps)
