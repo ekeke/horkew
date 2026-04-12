@@ -1,0 +1,12 @@
+{
+  "name": "Horkew Overlay",
+  "short_name": "Overlay",
+  "start_url": "overlay.html",
+  "display": "standalone",
+  "display_override": ["minimal-ui"],
+  "background_color": "#1e1e2e",
+  "theme_color": "#1e1e2e",
+  "icons": [
+    { "src": "overlay-icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
-import { join, extname } from 'node:path'
+import { join, extname, resolve } from 'node:path'
 
 const scenariosSrc = 'src/retar/scenarios'
 const orchBase = 'tmp'
@@ -125,10 +125,47 @@ function serveInspect(): Plugin {
   }
 }
 
+/** demo/public/ の静的ファイルを SPA フォールバックより先に配信 */
+function servePublicEarly(): Plugin {
+  let base = '/horkew/'
+  const publicDir = 'demo/public'
+  const mimeTypes: Record<string, string> = {
+    '.json': 'application/json',
+    '.webmanifest': 'application/manifest+json',
+    '.svg': 'image/svg+xml',
+    '.js': 'application/javascript',
+  }
+
+  return {
+    name: 'serve-public-early',
+    configResolved(config) { base = config.base },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith(base)) return next()
+        const relative = decodeURIComponent(req.url.slice(base.length))
+        const filePath = join(publicDir, relative)
+        const ext = extname(filePath)
+        if (!ext || !existsSync(filePath) || statSync(filePath).isDirectory()) return next()
+        const content = readFileSync(filePath)
+        res.setHeader('Content-Type', mimeTypes[ext] ?? 'application/octet-stream')
+        res.end(content)
+      })
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [svelte({ configFile: '../svelte.config.js' }), serveScenarios(), servePretrainSnapshots(), serveInspect()],
+  plugins: [svelte({ configFile: '../svelte.config.js' }), servePublicEarly(), serveScenarios(), servePretrainSnapshots(), serveInspect()],
   root: 'demo',
   base: '/horkew/',
   server: { port: 5375, strictPort: true },
-  build: { chunkSizeWarningLimit: 600 },
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'demo/index.html'),
+        overlay: resolve(__dirname, 'demo/overlay.html'),
+      },
+    },
+  },
 })

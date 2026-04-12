@@ -42,6 +42,8 @@
     "@codemirror/commands": "^6.10.3",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.40.0",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "partykit": "^0.0.115",
+    "partysocket": "^1.1.16"
   }
 }

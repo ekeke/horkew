@@ -172,6 +172,53 @@
 
   let entries = $state(fileEntries())
   let activeKey = $state(settings.active)
+  const overlayChannel = new BroadcastChannel('horkew-overlay')
+  let obsRoom: string | null = $state(null)
+  let obsSocket: WebSocket | null = $state(null)
+  let obsConnected = $state(false)
+
+  function generateRoomCode(): string {
+    const chars = 'abcdefghijkmnpqrstuvwxyz23456789'
+    return Array.from(crypto.getRandomValues(new Uint8Array(8)), b => chars[b % chars.length]).join('')
+  }
+
+  function obsPartyHost(): string {
+    return import.meta.env.DEV ? 'localhost:1999' : 'horkew-relay.ekeke.partykit.dev'
+  }
+
+  function overlayUrl(room: string): string {
+    const base = import.meta.env.DEV
+      ? `http://localhost:5375/horkew/overlay.html`
+      : `${window.location.origin}/horkew/overlay.html`
+    return `${base}?room=${room}`
+  }
+
+  function toggleObs() {
+    if (obsSocket) {
+      obsSocket.close()
+      obsSocket = null
+      obsRoom = null
+      obsConnected = false
+      return
+    }
+    const room = generateRoomCode()
+    obsRoom = room
+    const protocol = import.meta.env.DEV ? 'ws' : 'wss'
+    const ws = new WebSocket(`${protocol}://${obsPartyHost()}/party/${room}`)
+    ws.onopen = () => {
+      obsConnected = true
+      if (input) ws.send(input)
+    }
+    ws.onclose = () => { obsConnected = false }
+    ws.onerror = () => { obsConnected = false }
+    obsSocket = ws
+    navigator.clipboard.writeText(overlayUrl(room))
+  }
+
+  function copyObsUrl() {
+    if (obsRoom) navigator.clipboard.writeText(overlayUrl(obsRoom))
+  }
+
   let input = $state(activeKey ? loadText(activeKey) : '')
   let rawStatements = $state('')
   let analyzerJson = $state('')
@@ -1091,6 +1138,8 @@
       playerShortNames = shortNamesMap
       villageStatus = vs
       currentSetup = setup
+      overlayChannel.postMessage({ type: 'howl', text: input, cursorLine: effectiveCursorLine })
+      if (obsSocket?.readyState === WebSocket.OPEN) obsSocket.send(input)
       const alive = [...vs.statuses.values()].filter(s => s.surviving).length
       survivorInfo = { alive, total: vs.statuses.size }
       deadSeats = new Set([...vs.statuses.entries()].filter(([, s]) => !s.surviving).map(([seat]) => seat))
@@ -1300,6 +1349,11 @@
     >{{ off: 'DEBUG OFF', debug: 'DEBUG', fenrir: 'FENRIR' }[debugMode]}</button>
     {/if}
 
+    {#if obsRoom}
+    <button class="header-btn obs-btn obs-connected" onclick={copyObsUrl} title="OBS URLを再コピー（クリックで切断はダブルクリック）" ondblclick={toggleObs}>OBS{obsConnected ? '' : '…'}</button>
+    {:else}
+    <button class="header-btn obs-btn" onclick={toggleObs} title="OBS連携を開始（URLがクリップボードにコピーされます）">OBS</button>
+    {/if}
     <button class="header-btn help-btn" onclick={() => showHelp = true} title="Howl記法ヘルプ">?</button>
   </header>
 
@@ -1792,6 +1846,13 @@
     cursor: default;
   }
 
+  .obs-btn {
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .obs-connected {
+    color: var(--ctp-green, #a6e3a1);
+  }
   .help-btn {
     font-weight: 700;
     font-size: 13px;
