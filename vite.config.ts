@@ -155,7 +155,7 @@ function servePublicEarly(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [svelte({ configFile: '../svelte.config.js' }), servePublicEarly(), serveScenarios(), servePretrainSnapshots(), serveInspect()],
+  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), servePublicEarly(), serveScenarios(), servePretrainSnapshots()],
   root: 'demo',
   base: '/horkew/',
   server: { port: 5375, strictPort: true },
