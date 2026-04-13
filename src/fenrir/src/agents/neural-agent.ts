@@ -12,9 +12,10 @@ import type { TrajectoryStep } from '../ml/trajectory.ts'
 import { encodeObservation, SEATS, CO_ROLES } from '../observation.ts'
 import {
   maskNightAction, maskClaim, applyTruthfulClaimMask, maskVote, maskComm, maskPropose, maskPredict, maskLeader, maskTarget,
-  sampleMasked,
+  sampleMasked, CLAIM,
   decodeNightActionWithRole, decodeClaim, decodeComm, decodePropose, decodePredict, decodeLeader,
 } from '../action.ts'
+import { generateStrategicFakeResult, revalidateFakeDivineHistory, reportFakeMediumResult } from './rule-based-agent.ts'
 import { endgameVoteReward } from '../reward.ts'
 import { sigmoid } from '../ml/nn.ts'
 import { parsePlanSlots } from '../plan/plan-vocab.ts'
@@ -277,6 +278,32 @@ export class NeuralAgent implements Agent {
     return decodeNightActionWithRole(action, ctx.myRole)
   }
 
+  /**
+   * decodeClaim を呼ぶ前に、人外（非 villager-aligned）が seer/medium 騙りを選んだ場合に
+   * fakeDivineHistory を生成する。MEDIUM_RESULT は decodeClaim が none を返す仕様なので
+   * 直接 reportFakeMediumResult を呼んで結果を組み立てる。
+   */
+  private decodeClaimWithFakeGen(claimIdx: number, targetIdx: number, ctx: DecisionContext): DayClaim {
+    const role = ctx.myRole
+    const isFakingSeer = role !== 'seer'
+    const isFakingMedium = role !== 'medium'
+    const myPlayer = ctx.myPlayer
+
+    if (claimIdx === CLAIM.SEER_CO && isFakingSeer) {
+      for (let n = 0; n < ctx.day; n++) {
+        generateStrategicFakeResult(ctx.gameState, myPlayer, n, ctx)
+      }
+      revalidateFakeDivineHistory(myPlayer, ctx)
+    } else if (claimIdx === CLAIM.SEER_RESULT && isFakingSeer) {
+      const night = ctx.day - 1
+      if (night >= 0) generateStrategicFakeResult(ctx.gameState, myPlayer, night, ctx)
+    } else if (claimIdx === CLAIM.MEDIUM_RESULT && isFakingMedium) {
+      return reportFakeMediumResult(ctx.lastExecutedSeat, ctx.rng, ctx)
+    }
+
+    return decodeClaim(claimIdx, targetIdx, ctx)
+  }
+
   decideDayClaim(ctx: DecisionContext): DayClaim {
 
     if (this.config.strategyOnly) return dayClaim(ctx)
@@ -293,7 +320,7 @@ export class NeuralAgent implements Agent {
 
     this.record('claim', claimIdx, claimLogProb, result.value, 0, ctx.mySeat)
 
-    return decodeClaim(claimIdx, targetIdx, ctx)
+    return this.decodeClaimWithFakeGen(claimIdx, targetIdx, ctx)
   }
 
   decideForecast(ctx: DecisionContext): DayClaim {
@@ -441,7 +468,7 @@ export class NeuralAgent implements Agent {
 
     this.record('claim', claimIdx, claimLogProb, result.value, 0, ctx.mySeat)
 
-    return decodeClaim(claimIdx, targetIdx, ctx)
+    return this.decodeClaimWithFakeGen(claimIdx, targetIdx, ctx)
   }
 
   /** トラジェクトリをリセット */

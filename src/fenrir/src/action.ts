@@ -39,7 +39,7 @@ export const HEAD_SIZES = {
 } as const
 
 // Claim indices
-const CLAIM = {
+export const CLAIM = {
   SEER_CO: 0,
   MEDIUM_CO: 1,
   BODYGUARD_CO: 2,

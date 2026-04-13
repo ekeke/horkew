@@ -1228,7 +1228,7 @@ function trySetFakeResult(
  * CO時に過去の偽結果を現在のpublicEventsで再検証。
  * 当時は通ったが状況変化（共有CO等）で矛盾する結果を白に差し替える。
  */
-function revalidateFakeDivineHistory(player: PlayerState, ctx: DecisionContext): void {
+export function revalidateFakeDivineHistory(player: PlayerState, ctx: DecisionContext): void {
   const entries = Array.from(player.fakeDivineHistory.entries())
     .sort((a, b) => a[0] - b[0])
   // 一度クリアして順番に再追加
@@ -1249,7 +1249,7 @@ function revalidateFakeDivineHistory(player: PlayerState, ctx: DecisionContext):
   }
 }
 
-function generateStrategicFakeResult(
+export function generateStrategicFakeResult(
   state: GameState, player: PlayerState, night: number, ctx: DecisionContext,
 ): void {
   if (player.fakeDivineHistory.has(night)) return
@@ -1304,7 +1304,7 @@ function reportFakeSeerResult(
   return { type: 'seer_result', target: latest.target, result: latest.result }
 }
 
-function reportFakeMediumResult(lastExecutedSeat: number | null, rng: Rng, ctx: DecisionContext): DayClaim {
+export function reportFakeMediumResult(lastExecutedSeat: number | null, rng: Rng, ctx: DecisionContext): DayClaim {
   if (lastExecutedSeat === null) return { type: 'none' }
   const preferred: EnumSpecies = rng.next() < 0.5 ? 'human' : 'wolf'
 

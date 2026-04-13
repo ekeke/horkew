@@ -151,6 +151,11 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     // Run Retar (needed for mason brain's observation)
     this.runRetar(pctx, ext)
 
+    // Per-phase forward: clear day-cache so vote decision sees post-CO state
+    // (real-game sequencing: brains decide execution after seeing today's claims)
+    this.wolfBrain.clearDayCache()
+    this.masonBrain.clearDayCache()
+
     // Determine execution target based on whose turn it is
     let target = this.decideBrainTarget(pctx, state, ext)
     this.emitComment(pctx, `[BB] ${this.turnOwner} brain → execute seat${target ?? '?'}`)
@@ -197,6 +202,9 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     const state = pctx.state as GameState<FenrirExt>
     const ext = state.ext
     const actions = new Map<number, NightAction>()
+
+    // Per-phase forward: clear day-cache so attack decision sees post-execution state
+    this.wolfBrain.clearDayCache()
 
     // Wolf brain attack
     const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
