@@ -10,14 +10,18 @@
  * 「いつ・誰が・どのメソッドを呼んだか」を時系列で stdout へ出す。
  */
 
-const enabled = process.env.FENRIR_TRACE === '1' || process.env.FENRIR_TRACE === 'true'
+// ブラウザバンドルでも安全なように process アクセスをガード
+const env: Record<string, string | undefined> =
+  (typeof process !== 'undefined' && process.env) ? process.env : {}
 
-const seatFilter: Set<number> | null = process.env.FENRIR_TRACE_SEAT
-  ? new Set(process.env.FENRIR_TRACE_SEAT.split(',').map(s => Number(s.trim())).filter(n => !isNaN(n)))
+const enabled = env.FENRIR_TRACE === '1' || env.FENRIR_TRACE === 'true'
+
+const seatFilter: Set<number> | null = env.FENRIR_TRACE_SEAT
+  ? new Set(env.FENRIR_TRACE_SEAT.split(',').map(s => Number(s.trim())).filter(n => !isNaN(n)))
   : null
 
-const catFilter: Set<string> | null = process.env.FENRIR_TRACE_CAT
-  ? new Set(process.env.FENRIR_TRACE_CAT.split(',').map(s => s.trim()))
+const catFilter: Set<string> | null = env.FENRIR_TRACE_CAT
+  ? new Set(env.FENRIR_TRACE_CAT.split(',').map(s => s.trim()))
   : null
 
 export const traceEnabled: boolean = enabled
