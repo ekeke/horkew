@@ -18,6 +18,7 @@ import type { Rng } from '../../../lupa/random.ts'
 import { searchTsumiFromEvents, checkRetarConsistency } from '../retar-bridge.ts'
 import type { VillageAction } from '../../../hati/types.ts'
 import { forceTrueRoleCO } from '../../../lupa/engine-utils.ts'
+import { trace } from '../trace.ts'
 
 // ============================================================
 // 定数
@@ -380,6 +381,7 @@ function tryTsumi(ctx: DecisionContext): number | null {
 
 export class RuleBasedAgent implements Agent {
   decideNightAction(ctx: DecisionContext): NightAction {
+    trace('agent', ctx.day, ctx.mySeat, ctx.myRole, 'RuleBasedAgent.decideNightAction')
     switch (ctx.myRole) {
       case 'seer': return decideSeerNight(ctx)
       case 'bodyguard': return decideBodyguardNight(ctx)
@@ -389,6 +391,7 @@ export class RuleBasedAgent implements Agent {
   }
 
   decideDayClaim(ctx: DecisionContext): DayClaim {
+    trace('agent', ctx.day, ctx.mySeat, ctx.myRole, `RuleBasedAgent.decideDayClaim claimedRole=${ctx.myPlayer.claimedRole ?? 'null'}`)
     switch (ctx.myRole) {
       case 'seer': return decideSeerClaim(ctx)
       case 'medium': return decideMediumClaim(ctx)
@@ -433,6 +436,7 @@ export class RuleBasedAgent implements Agent {
   }
 
   decideVote(ctx: DecisionContext): number {
+    trace('agent', ctx.day, ctx.mySeat, ctx.myRole, 'RuleBasedAgent.decideVote')
     // 1. Hati詰み（村側、最優先）
     if (!isWerewolfAligned(ctx.myRole) && ctx.myRole !== 'werehamster' && ctx.myRole !== 'immoralist') {
       const tsumiTarget = tryTsumi(ctx)

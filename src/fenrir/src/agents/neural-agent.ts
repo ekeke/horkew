@@ -16,6 +16,7 @@ import {
   decodeNightActionWithRole, decodeClaim, decodeComm, decodePropose, decodePredict, decodeLeader,
 } from '../action.ts'
 import { generateStrategicFakeResult, revalidateFakeDivineHistory, reportFakeMediumResult } from './rule-based-agent.ts'
+import { trace } from '../trace.ts'
 import { endgameVoteReward } from '../reward.ts'
 import { sigmoid } from '../ml/nn.ts'
 import { parsePlanSlots } from '../plan/plan-vocab.ts'
@@ -265,6 +266,7 @@ export class NeuralAgent implements Agent {
   // ============================================================
 
   decideNightAction(ctx: DecisionContext): NightAction {
+    trace('agent', ctx.day, ctx.mySeat, ctx.myRole, `NeuralAgent.decideNightAction strategyOnly=${this.config.strategyOnly}`)
 
     if (this.config.strategyOnly) return nightAction(ctx)
 
@@ -305,6 +307,7 @@ export class NeuralAgent implements Agent {
   }
 
   decideDayClaim(ctx: DecisionContext): DayClaim {
+    trace('agent', ctx.day, ctx.mySeat, ctx.myRole, `NeuralAgent.decideDayClaim claimedRole=${ctx.myPlayer.claimedRole ?? 'null'} truthful=${this.config.truthfulRole ?? '-'}`)
 
     if (this.config.strategyOnly) return dayClaim(ctx)
 
@@ -346,6 +349,7 @@ export class NeuralAgent implements Agent {
   }
 
   decideVote(ctx: DecisionContext): number {
+    trace('agent', ctx.day, ctx.mySeat, ctx.myRole, 'NeuralAgent.decideVote')
 
     if (this.config.strategyOnly) {
       const result = this.getStrategyResult(ctx)
@@ -454,6 +458,7 @@ export class NeuralAgent implements Agent {
   }
 
   decideDefensiveClaim(ctx: DecisionContext): DayClaim {
+    trace('agent', ctx.day, ctx.mySeat, ctx.myRole, 'NeuralAgent.decideDefensiveClaim')
 
     if (this.config.strategyOnly) return dayClaim(ctx)
 

@@ -14,6 +14,7 @@ import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
 import { encodeCollectiveMasonObservation, SEATS } from '../observation.ts'
 import { CollectiveAgentBase } from './team-base.ts'
+import { trace } from '../trace.ts'
 
 export class MasonBrainAgent extends CollectiveAgentBase implements TeamAgent {
   constructor(network: AnyNetwork, config?: Partial<NeuralAgentConfig>) {
@@ -35,6 +36,7 @@ export class MasonBrainAgent extends CollectiveAgentBase implements TeamAgent {
    * Returns seat number (1-based).
    */
   decideExecution(ctx: TeamDecisionContext): number {
+    trace('agent', ctx.day, ctx.teamSeats[0] ?? null, 'mason', 'MasonBrainAgent.decideExecution')
     const result = this.getOrInfer(ctx)
     const logits = result.policies.get('vote')!
     // Mask: dead + mason team を除外

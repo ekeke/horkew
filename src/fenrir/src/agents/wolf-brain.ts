@@ -15,6 +15,7 @@ import { SEATS } from '../observation.ts'
 import { CollectiveAgentBase } from './team-base.ts'
 import { FORMATION_SIZE } from '../training.ts'
 import { MAX_WOLVES } from '../action.ts'
+import { trace } from '../trace.ts'
 
 // ============================================================
 // Types
@@ -105,6 +106,7 @@ export class WolfBrainAgent extends CollectiveAgentBase {
    * Called once per day by BrainBattleAdapter.
    */
   getFormation(ctx: TeamDecisionContext): WolfFormation {
+    trace('agent', ctx.day, ctx.teamSeats[0] ?? null, 'werewolf', 'WolfBrainAgent.getFormation')
     const result = this.getOrInfer(ctx)
     const wolves: WolfFormationEntry[] = []
     const primarySeat = ctx.teamSeats[0]
@@ -147,6 +149,7 @@ export class WolfBrainAgent extends CollectiveAgentBase {
    * Returns seat number (1-based).
    */
   decideExecution(ctx: TeamDecisionContext): number {
+    trace('agent', ctx.day, ctx.teamSeats[0] ?? null, 'werewolf', 'WolfBrainAgent.decideExecution')
     const result = this.getOrInfer(ctx)
     const logits = result.policies.get('vote')!
     // Mask: alive non-wolf, non-confirmed-village seats
@@ -188,6 +191,7 @@ export class WolfBrainAgent extends CollectiveAgentBase {
    * Decide night action (attack target + attacker).
    */
   decideNightAction(ctx: TeamDecisionContext): WolfNightAction {
+    trace('agent', ctx.day, ctx.teamSeats[0] ?? null, 'werewolf', 'WolfBrainAgent.decideNightAction')
     const result = this.getOrInfer(ctx)
 
     const attackLogits = result.policies.get('attack_target')!

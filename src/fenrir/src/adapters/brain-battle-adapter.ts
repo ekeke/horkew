@@ -24,6 +24,7 @@ import type { GameEvent } from '../../../lupa/types.ts'
 import { StrategyBaseAdapter } from './strategy-base-adapter.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
 import { alivePlayers } from '../../../lupa/roles.ts'
+import { trace } from '../trace.ts'
 
 // ============================================================
 // Config
@@ -70,6 +71,7 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     roles: Map<number, SystemRole>,
     state: GameState<FenrirExt>,
   ): void {
+    trace('adapter', 0, null, null, `BrainBattleAdapter.onSetup roles=${[...roles].map(([s, r]) => `${s}:${r}`).join(',')}`)
     super.onSetup(roles, state)
 
     // Track mason and wolf seats
@@ -93,6 +95,7 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
   override onDayClaims(pctx: PhaseContext<FenrirExtEvent, FenrirExt>): Map<number, DayClaim> {
     const state = pctx.state as GameState<FenrirExt>
     const ext = state.ext
+    trace('adapter', pctx.day, null, null, 'BrainBattleAdapter.onDayClaims')
     this.runRetar(pctx, ext)
     const claims = new Map<number, DayClaim>()
 
@@ -132,7 +135,9 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
         // Non-wolf: heuristic
         const view = buildPlayerView(state, player.seat)
         const ctx = this.buildCtx(pctx, player, view, ext)
-        claims.set(player.seat, this.getAgent(player.seat).decideDayClaim(ctx))
+        const agent = this.getAgent(player.seat)
+        trace('adapter', pctx.day, player.seat, player.role, `dispatch decideDayClaim → ${agent.constructor.name}`)
+        claims.set(player.seat, agent.decideDayClaim(ctx))
       }
     }
 
@@ -147,6 +152,7 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     const state = vctx.state as GameState<FenrirExt>
     const ext = state.ext
     const pctx = vctx as PhaseContext<FenrirExtEvent, FenrirExt>
+    trace('adapter', pctx.day, null, null, `BrainBattleAdapter.onVote turn=${this.turnOwner}`)
 
     // Run Retar (needed for mason brain's observation)
     this.runRetar(pctx, ext)
@@ -202,6 +208,7 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     const state = pctx.state as GameState<FenrirExt>
     const ext = state.ext
     const actions = new Map<number, NightAction>()
+    trace('adapter', pctx.day, null, null, 'BrainBattleAdapter.onNight')
 
     // Per-phase forward: clear day-cache so attack decision sees post-execution state
     this.wolfBrain.clearDayCache()
@@ -228,7 +235,9 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
       if (actions.has(player.seat)) continue
       const view = buildPlayerView(state, player.seat)
       const ctx = this.buildCtx(pctx, player, view, ext)
-      actions.set(player.seat, this.getAgent(player.seat).decideNightAction(ctx))
+      const agent = this.getAgent(player.seat)
+      trace('adapter', pctx.day, player.seat, player.role, `dispatch decideNightAction → ${agent.constructor.name}`)
+      actions.set(player.seat, agent.decideNightAction(ctx))
     }
 
     return actions
