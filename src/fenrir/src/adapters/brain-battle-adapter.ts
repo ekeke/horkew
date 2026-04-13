@@ -24,7 +24,6 @@ import type { GameEvent } from '../../../lupa/types.ts'
 import { StrategyBaseAdapter } from './strategy-base-adapter.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
 import { alivePlayers } from '../../../lupa/roles.ts'
-import { generateStrategicFakeResult, reportFakeMediumResult } from '../agents/rule-based-agent.ts'
 
 // ============================================================
 // Config
@@ -137,55 +136,7 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
       }
     }
 
-    // Safety net: per-role NN agents only fire decideDayClaim sparsely in BB+,
-    // so a CO'd seer/medium often returns 'none' and stays silent on day 2+.
-    // Force-fill the result when the player has data to report.
-    this.fillMissingResults(pctx, state, claims)
-
     return claims
-  }
-
-  private fillMissingResults(
-    pctx: PhaseContext<FenrirExtEvent, FenrirExt>,
-    state: GameState<FenrirExt>,
-    claims: Map<number, DayClaim>,
-  ): void {
-    if (pctx.day < 2) return
-    for (const player of alivePlayers(state)) {
-      const c = claims.get(player.seat)
-      if (c && c.type !== 'none') continue
-
-      if (player.claimedRole === 'seer') {
-        const night = pctx.day - 1
-        if (player.role !== 'seer' && !player.fakeDivineHistory.has(night)) {
-          // Fake seer (NN didn't populate): generate one
-          const view = buildPlayerView(state, player.seat)
-          const ctx = this.buildCtx(pctx, player, view, state.ext)
-          generateStrategicFakeResult(ctx.gameState, player, night, ctx)
-        }
-        const latest = player.divineHistory.get(night) ?? player.fakeDivineHistory.get(night)
-        if (latest) {
-          claims.set(player.seat, { type: 'seer_result', target: latest.target, result: latest.result })
-        }
-      } else if (player.claimedRole === 'medium') {
-        const lastExec = state.executionHistory.get(pctx.day - 1) ?? null
-        if (lastExec == null) continue
-        if (player.role === 'medium') {
-          // Real medium: emit truth based on executed player's role
-          const exec = state.players.find(p => p.seat === lastExec)
-          if (exec) {
-            const result = exec.role === 'werewolf' ? 'wolf' : 'human'
-            claims.set(player.seat, { type: 'medium_result', result })
-          }
-        } else {
-          // Fake medium
-          const view = buildPlayerView(state, player.seat)
-          const ctx = this.buildCtx(pctx, player, view, state.ext)
-          const claim = reportFakeMediumResult(lastExec, ctx.rng, ctx)
-          if (claim.type !== 'none') claims.set(player.seat, claim)
-        }
-      }
-    }
   }
 
   // ============================================================
