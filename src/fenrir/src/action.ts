@@ -132,7 +132,8 @@ export function maskClaim(ctx: DecisionContext): Float32Array {
 
   if (player.claimedRole === 'seer') {
     mask[CLAIM.SEER_RESULT] = 0
-    mask[CLAIM.FORECAST] = 0
+    // FORECAST は lupa engine が event を emit しない（applyClaim で no-op）ため
+    // 選んでも howl に出ず学習も無意味。当面マスクで封じる。
     // Day 2+ は CO 後に必ず結果報告 — NN が NONE を学習して沈黙するのを禁止
     if (ctx.day >= 2) mask[CLAIM.NONE] = -Infinity
   } else if (player.claimedRole === 'medium') {

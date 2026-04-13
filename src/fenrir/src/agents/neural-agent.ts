@@ -148,9 +148,11 @@ export class NeuralAgent implements Agent {
     head: string, actionIdx: number,
     logProb: number, value: number, reward: number,
     seat: number,
+    day?: number,
   ): void {
     this.trajectory.push({
       seat,
+      day,
       observation: this.lastObs!,
       actionHead: head,
       actionIdx,
@@ -275,7 +277,7 @@ export class NeuralAgent implements Agent {
     const mask = maskNightAction(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
 
-    this.record('night', action, logProb, result.value, 0, ctx.mySeat)
+    this.record('night', action, logProb, result.value, 0, ctx.mySeat, ctx.day)
 
     return decodeNightActionWithRole(action, ctx.myRole)
   }
@@ -321,7 +323,7 @@ export class NeuralAgent implements Agent {
     const targetMask = maskTarget(ctx)
     const { action: targetIdx } = this.selectAction(targetLogits, targetMask)
 
-    this.record('claim', claimIdx, claimLogProb, result.value, 0, ctx.mySeat)
+    this.record('claim', claimIdx, claimLogProb, result.value, 0, ctx.mySeat, ctx.day)
 
     return this.decodeClaimWithFakeGen(claimIdx, targetIdx, ctx)
   }
@@ -389,7 +391,7 @@ export class NeuralAgent implements Agent {
       )
     }
 
-    this.record('vote', action, logProb, result.value, reward, ctx.mySeat)
+    this.record('vote', action, logProb, result.value, reward, ctx.mySeat, ctx.day)
 
     // predict は BCE auxiliary loss のみで学習（RL action ではない）
 
@@ -408,7 +410,7 @@ export class NeuralAgent implements Agent {
     const commLogits = result.policies.get('comm')!
     const commMask = maskComm(ctx)
     const { action: commAction, logProb: commLogProb } = this.selectAction(commLogits, commMask)
-    this.record('comm', commAction, commLogProb, result.value, 0, ctx.mySeat)
+    this.record('comm', commAction, commLogProb, result.value, 0, ctx.mySeat, ctx.day)
     const signal = decodeComm(commAction)
 
     const proposeLogits = result.policies.get('propose')!
@@ -452,7 +454,7 @@ export class NeuralAgent implements Agent {
     const mask = maskLeader(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
 
-    this.record('leader', action, logProb, result.value, 0, ctx.mySeat)
+    this.record('leader', action, logProb, result.value, 0, ctx.mySeat, ctx.day)
 
     return decodeLeader(action)
   }
@@ -471,7 +473,7 @@ export class NeuralAgent implements Agent {
     const targetMask = maskTarget(ctx)
     const { action: targetIdx } = this.selectAction(targetLogits, targetMask)
 
-    this.record('claim', claimIdx, claimLogProb, result.value, 0, ctx.mySeat)
+    this.record('claim', claimIdx, claimLogProb, result.value, 0, ctx.mySeat, ctx.day)
 
     return this.decodeClaimWithFakeGen(claimIdx, targetIdx, ctx)
   }
