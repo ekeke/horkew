@@ -1048,7 +1048,9 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
       const evalGames = config.evalGames
       const halfEval = Math.max(Math.floor(evalGames / 2), 10)
 
-      const runBBEval = async (turnMode: 'alternate' | 'mason_only' | 'wolf_only', count: number) => {
+      const runBBEval = async (
+        turnMode: 'alternate' | 'mason_only' | 'wolf_only', count: number, collectHowl = false,
+      ) => {
         const evalSeeds = Array.from({ length: count }, (_, i) => 900000 + iter * 1000 + (turnMode === 'mason_only' ? 300 : turnMode === 'wolf_only' ? 600 : 0) + i)
         const { assignment: ea, modelGroupWeights: emgw } = buildAssignmentAndWeights(ctx, step)
         const results = await generateGamesParallel({
@@ -1058,14 +1060,24 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
           wolfBrainWeights: packWeights(ctx.wolfBrainNetwork!),
           agentSpecs, specWeights,
           brainBattleTurnMode: turnMode,
+          collectHowl,
         }, evalSeeds)
         const winRates: Record<string, number> = {}
         for (const game of results) winRates[game.result] = (winRates[game.result] ?? 0) + 1
         for (const key of Object.keys(winRates)) winRates[key] /= results.length
-        return { winRates, count: results.length }
+        const howlGames = collectHowl
+          ? results
+              .filter(g => g.howl != null)
+              .map(g => ({ seed: g.seed!, howl: g.howl!, result: g.result, gameLength: g.gameLength ?? 0 }))
+          : []
+        return { winRates, count: results.length, howlGames }
       }
 
-      const altResult = await runBBEval('alternate', evalGames)
+      // alternate のみ howl 収集して eval-howl/iter_N/ に保存
+      const altResult = await runBBEval('alternate', evalGames, true)
+      if (altResult.howlGames.length > 0) {
+        ctx.saveEvalHowl(config.checkpointBase, iter, altResult.howlGames)
+      }
       const masonResult = await runBBEval('mason_only', halfEval)
 
       process.stderr.write('\r\x1b[K')

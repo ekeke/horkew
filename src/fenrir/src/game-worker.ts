@@ -255,6 +255,8 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
 
     let tsumiCacheGetter: (() => Map<number, boolean>) | undefined
     const isInspectGame = req.inspectSeeds != null && req.inspectSeeds.includes(seed)
+    /** howl を最終結果に乗せるか（inspect サンプル or eval-howl 収集モード） */
+    const wantHowl = isInspectGame || !!req.collectHowl
     let observationGetter: (() => import('./adapters/adapter-types.ts').CapturedObservation[]) | undefined
 
     // Mason takeover callback: ML mason 死亡時に neuralAgents マップを更新
@@ -339,7 +341,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       tsumiCacheGetter = () => handlers.getTsumiCache!()
       if (isInspectGame && handlers.getCapturedObservations) observationGetter = () => handlers.getCapturedObservations!()
       const result = await runGame(
-        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: isInspectGame ? 'seat' as const : undefined },
+        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: wantHowl ? 'seat' as const : undefined },
         handlers,
       )
       state = result.state
@@ -409,7 +411,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       tsumiCacheGetter = () => handlers.getTsumiCache!()
       if (isInspectGame && handlers.getCapturedObservations) observationGetter = () => handlers.getCapturedObservations!()
       const result = await runGame(
-        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: isInspectGame ? 'seat' as const : undefined },
+        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: wantHowl ? 'seat' as const : undefined },
         handlers,
       )
       state = result.state
@@ -433,7 +435,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       })
       tsumiCacheGetter = () => handlers.getTsumiCache!()
       const result = await runGame(
-        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: isInspectGame ? 'seat' as const : undefined },
+        { roles, seed, hasFirstGhost: config.hasFirstGhost, revoteConfig: config.revoteConfig, rules: config.rules, nameStyle: wantHowl ? 'seat' as const : undefined },
         handlers,
       )
       state = result.state
@@ -637,13 +639,13 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       },
     }
 
-    // inspect サンプリング: 対象 seed のゲームは howl + players + 全員の observation も返す
-    if (isInspectGame) {
+    // howl 乗せ: inspect サンプル or eval-howl 収集モード。observation は inspect のみ
+    if (wantHowl) {
       gameResult.seed = seed
       gameResult.gameLength = state.day
       gameResult.howl = formatHowl(events as import('../../lupa/types.ts').GameEvent[], state, lupaConfig)
       gameResult.players = state.players.map(p => ({ seat: p.seat, role: p.role, alive: p.alive }))
-      if (observationGetter) {
+      if (isInspectGame && observationGetter) {
         gameResult.allObservations = observationGetter().map(o => ({
           seat: o.seat, role: o.role, day: o.day,
           observation: o.observation,

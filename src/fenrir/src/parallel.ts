@@ -155,6 +155,8 @@ export type WorkerRequest = {
   frozenMasonWeights?: SharedWeights
   /** inspect サンプリング対象の seed リスト */
   inspectSeeds?: number[]
+  /** eval-howl 収集モード: 全ゲームで howl を生成して result に乗せる（observation は取らない） */
+  collectHowl?: boolean
   /** Mason takeover: ML mason 死亡時に生存パートナーに strategy を移す */
   enableMasonTakeover?: boolean
   /** WRE PBRS: frozen勝率NNの重み（有効時のみ） */
