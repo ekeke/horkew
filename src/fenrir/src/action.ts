@@ -331,8 +331,16 @@ export function decodeClaim(
       return { type: 'seer_result', target: latest.target, result: latest.result }
     }
     case CLAIM.MEDIUM_RESULT: {
-      // MLは霊能結果の真偽を直接は知らない
-      return { type: 'none' }
+      // 真霊媒なら直近処刑者の実 role から結果を計算。
+      // 偽霊媒（人外）の MEDIUM_RESULT は decodeClaimWithFakeGen 側で
+      // reportFakeMediumResult を呼んで処理しているのでここには来ない。
+      if (player.role !== 'medium') return { type: 'none' }
+      const lastExec = ctx.lastExecutedSeat
+      if (lastExec == null) return { type: 'none' }
+      const exec = ctx.gameState.players.find(p => p.seat === lastExec)
+      if (!exec) return { type: 'none' }
+      const result: import('../../types/index.ts').EnumSpecies = exec.role === 'werewolf' ? 'wolf' : 'human'
+      return { type: 'medium_result', result }
     }
     case CLAIM.FORECAST:
       return { type: 'forecast', target: targetSeat }
