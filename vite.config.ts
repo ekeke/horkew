@@ -1,6 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { join, extname, resolve } from 'node:path'
 
 const scenariosSrc = 'src/retar/scenarios'
@@ -125,6 +126,87 @@ function serveInspect(): Plugin {
   }
 }
 
+/**
+ * Stats CLI を CGI 風に spawn して JSON を返す（dev only）
+ *
+ * GET /horkew/stats/day1-formation.json[?base=<path>]
+ *   - base 省略時は train-status.json の checkpointBase を使用
+ *   - eval-howl/ の最新 mtime でキャッシュキーを作り、同一ならキャッシュ返却
+ */
+function serveStats(): Plugin {
+  let base = '/horkew/'
+  const cache = new Map<string, { key: string, body: string }>()
+
+  return {
+    name: 'serve-stats',
+
+    configResolved(config) { base = config.base },
+
+    configureServer(server) {
+      const prefix = `${base}stats/`
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith(prefix)) return next()
+        try {
+          const url = new URL(req.url, 'http://localhost')
+          const filename = decodeURIComponent(url.pathname.slice(prefix.length))
+          if (filename !== 'day1-formation.json') return next()
+
+          // base 解決: ?base=... 優先、なければ train-status.json
+          let ckptBase = url.searchParams.get('base') ?? ''
+          if (!ckptBase) {
+            const statusPath = 'train-status.json'
+            if (!existsSync(statusPath)) {
+              res.statusCode = 404
+              res.end('No train-status.json and no ?base=... provided')
+              return
+            }
+            ckptBase = JSON.parse(readFileSync(statusPath, 'utf-8')).checkpointBase
+          }
+          const evalDir = join(ckptBase, 'eval-howl')
+          if (!existsSync(evalDir)) {
+            res.statusCode = 404
+            res.end(`eval-howl/ not found in ${ckptBase}`)
+            return
+          }
+
+          // キャッシュキー = base + 直下 iter_* ディレクトリの mtime 合計
+          let mtimeSum = 0
+          for (const d of readdirSync(evalDir)) {
+            if (!d.startsWith('iter_')) continue
+            mtimeSum += statSync(join(evalDir, d)).mtimeMs
+          }
+          const cacheKey = `${ckptBase}|${mtimeSum}`
+          const hit = cache.get(filename)
+          if (hit && hit.key === cacheKey) {
+            res.setHeader('Content-Type', 'application/json')
+            res.setHeader('X-Stats-Cache', 'hit')
+            res.end(hit.body)
+            return
+          }
+
+          const cli = spawnSync(
+            process.execPath,
+            ['--experimental-strip-types', 'src/fenrir/src/stats/cli.ts', '--base', ckptBase],
+            { encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 },
+          )
+          if (cli.status !== 0) {
+            res.statusCode = 500
+            res.end(`stats CLI failed: ${cli.stderr || cli.error}`)
+            return
+          }
+          cache.set(filename, { key: cacheKey, body: cli.stdout })
+          res.setHeader('Content-Type', 'application/json')
+          res.setHeader('X-Stats-Cache', 'miss')
+          res.end(cli.stdout)
+        } catch (e) {
+          res.statusCode = 500
+          res.end(`stats middleware error: ${e}`)
+        }
+      })
+    },
+  }
+}
+
 /** demo/public/ の静的ファイルを SPA フォールバックより先に配信 */
 function servePublicEarly(): Plugin {
   let base = '/horkew/'
@@ -155,7 +237,7 @@ function servePublicEarly(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), servePublicEarly(), serveScenarios(), servePretrainSnapshots()],
+  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), serveStats(), servePublicEarly(), serveScenarios(), servePretrainSnapshots()],
   root: 'demo',
   base: '/horkew/',
   server: { port: 5375, strictPort: true },
