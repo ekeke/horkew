@@ -276,17 +276,4 @@
     color: var(--color-text);
   }
 
-  .co-timing {
-    position: relative;
-  }
-
-  .co-timing::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    border-style: solid;
-    border-width: 5px 5px 0 0;
-    border-color: var(--color-co) transparent transparent transparent;
-  }
 </style>
