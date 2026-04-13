@@ -133,8 +133,11 @@ export function maskClaim(ctx: DecisionContext): Float32Array {
   if (player.claimedRole === 'seer') {
     mask[CLAIM.SEER_RESULT] = 0
     mask[CLAIM.FORECAST] = 0
+    // Day 2+ は CO 後に必ず結果報告 — NN が NONE を学習して沈黙するのを禁止
+    if (ctx.day >= 2) mask[CLAIM.NONE] = -Infinity
   } else if (player.claimedRole === 'medium') {
     mask[CLAIM.MEDIUM_RESULT] = 0
+    if (ctx.day >= 2 && ctx.lastExecutedSeat != null) mask[CLAIM.NONE] = -Infinity
   } else if (player.claimedRole === null) {
     // まだCOしていない → CO可能
     mask[CLAIM.SEER_CO] = 0
