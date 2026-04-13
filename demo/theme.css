@@ -79,6 +79,12 @@
   --color-fox:            var(--ctp-yellow);     /* 妖狐陣営 */
   --color-unknown-team:   var(--ctp-mauve);      /* 陣営不明 */
 
+  /* 陣営の背景色（暗めの同系統色、テキストを読みやすく） */
+  --color-village-bg:     #3d6b3a;              /* 村人陣営 背景（緑） */
+  --color-wolf-bg:        #6b2540;              /* 人狼陣営 背景（赤） */
+  --color-fox-bg:         #6b5a1a;              /* 妖狐陣営 背景（黄） */
+  --color-unknown-team-bg:#4a3a78;              /* 陣営不明 背景（マウブ） */
+
   /* --- Domain: 判定結果 --- */
   --color-human-result:   var(--ctp-green);      /* ○ 白判定 */
   --color-wolf-result:    var(--ctp-red);        /* ● 黒判定 */

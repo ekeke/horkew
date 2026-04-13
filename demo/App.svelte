@@ -2507,11 +2507,11 @@
     font-size: 0.85em;
   }
 
-  .analysis-name-col.village { color: var(--color-village); }
-  .analysis-name-col.wolf { color: var(--color-wolf); }
-  .analysis-name-col.fox { color: var(--color-fox); }
-  .analysis-name-col.not-village { color: var(--color-unknown-team); }
-  .analysis-name-col.role-fixed { font-weight: 700; }
+  .analysis-name-col { font-weight: 700; }
+  .analysis-name-col.village { background: var(--color-village-bg); }
+  .analysis-name-col.wolf { background: var(--color-wolf-bg); }
+  .analysis-name-col.fox { background: var(--color-fox-bg); }
+  .analysis-name-col.not-village { background: var(--color-unknown-team-bg); }
 
   /* dead player opacity is handled by PlayerName component */
 
