@@ -94,6 +94,11 @@ export function maskNightAction(ctx: DecisionContext): Float32Array {
       }
       break
     case 'bodyguard':
+      // Night 0（Day 1 前）は誰が誰か分からないので護衛しない
+      if (ctx.day === 0) {
+        mask[SEATS] = 0  // none
+        break
+      }
       for (const seat of ctx.alivePlayers) {
         if (seat !== ctx.mySeat && seat <= SEATS) {
           mask[seat - 1] = 0
@@ -139,6 +144,11 @@ export function maskClaim(ctx: DecisionContext): Float32Array {
   } else if (player.claimedRole === 'medium') {
     mask[CLAIM.MEDIUM_RESULT] = 0
     if (ctx.day >= 2 && ctx.lastExecutedSeat != null) mask[CLAIM.NONE] = -Infinity
+  } else if (player.claimedRole === 'bodyguard') {
+    // 狩人は専用 result event がないので、再 CO で guard 履歴を毎日更新報告する。
+    // decodeClaim BODYGUARD_CO は guardHistory 全件を targets に詰めて返す。
+    mask[CLAIM.BODYGUARD_CO] = 0
+    if (ctx.day >= 2) mask[CLAIM.NONE] = -Infinity
   } else if (player.claimedRole === null) {
     // まだCOしていない → CO可能
     mask[CLAIM.SEER_CO] = 0
