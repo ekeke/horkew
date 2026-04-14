@@ -898,6 +898,14 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   const trainMasonBrain = masonTf != null
   const trainWolfBrain = ctx.wolfBrainTfNetwork != null
 
+  // BB mason freeze cycle: 狼の学習シグナルを mason に上書きされないよう定期フリーズ
+  // [0, MASON_LEARN_ITERS): mason+wolf 両方学習
+  // [MASON_LEARN_ITERS, MASON_FREEZE_CYCLE): mason 更新スキップ（wolf のみ学習）
+  const MASON_LEARN_ITERS = 100
+  const MASON_FREEZE_CYCLE = 300
+  const isMasonFrozenAtIter = (iter: number): boolean =>
+    trainMasonBrain && step.name === 'brain_battle' && (iter % MASON_FREEZE_CYCLE) >= MASON_LEARN_ITERS
+
   // BB+ individual agent networks
   // individualNets: 全 BB+ モデル（agentSpecs 構築 + ゲーム参加用）
   // individualTfs: 学習対象のみ（PPO 更新用）— TfNetwork がないモデルは frozen
@@ -1065,7 +1073,8 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
         lastWolfPpo = ppoUpdate(wolfBrainTf, allWolfBrainSteps, ppoConfig)
       ctx.wolfBrainNetwork.loadWeights(wolfBrainTf.cloneWeights())
     }
-    if (trainMasonBrain && allMasonSteps.length > 0) {
+    const masonFrozenThisIter = isMasonFrozenAtIter(iter)
+    if (trainMasonBrain && !masonFrozenThisIter && allMasonSteps.length > 0) {
       normalizeAdvantages(allMasonSteps)
       masonTf!.loadWeights(masonNet.cloneWeights())
       for (let epoch = 0; epoch < trainingConfig.ppoEpochs; epoch++)
@@ -1165,6 +1174,10 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
         const wolfResult = await runBBEval('wolf_only', halfEval)
         ctx.log(`  [eval wolf_only ${wolfResult.count}g] ${fmtWr(wolfResult.winRates)}`)
         progress.evals.push({ time: new Date().toISOString(), model: 'bb_wolf_only', iter, winRates: wolfResult.winRates, avgLen: 0, status: '' })
+      }
+      if (trainMasonBrain) {
+        const masonStatus = masonFrozenThisIter ? 'frozen' : 'learning'
+        ctx.log(`  [mason ${masonStatus}] [${iter}] ppo: pL=${lastMasonPpo.policyLoss.toFixed(4)} vL=${lastMasonPpo.valueLoss.toFixed(4)} ent=${lastMasonPpo.entropy.toFixed(4)}`)
       }
       for (const [name, ppo] of lastIndividualPpo) {
         ctx.log(`  [BB+ ${name.padEnd(12)}] [${iter}] ppo: pL=${ppo.policyLoss.toFixed(4)} vL=${ppo.valueLoss.toFixed(4)} ent=${ppo.entropy.toFixed(4)} steps=${perModelSteps.get(name)?.length ?? 0}`)

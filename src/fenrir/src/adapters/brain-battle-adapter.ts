@@ -15,6 +15,7 @@ import type { SystemRole } from '../../../types/index.ts'
 import type { GameState, NightAction, DayClaim, PlayerState } from '../../../lupa/types.ts'
 import type { PhaseContext, VoteContext } from '../../../lupa/handlers.ts'
 import type { TeamDecisionContext } from '../agents/agent.ts'
+import type { Proposal } from '../leadership.ts'
 import type { FenrirExt } from '../ext.ts'
 import type { FenrirExtEvent } from '../events.ts'
 import type { StrategyBaseAdapterConfig } from './adapter-types.ts'
@@ -46,7 +47,6 @@ export type BrainBattleAdapterConfig = StrategyBaseAdapterConfig & {
 export class BrainBattleAdapter extends StrategyBaseAdapter {
   private readonly wolfBrain: WolfBrainAgent
   private readonly masonBrain: MasonBrainAgent
-  private readonly fixedTurnOwner: 'mason' | 'wolf' | undefined
   private turnOwner: 'mason' | 'wolf'
   private masonPrimarySeat = 0
   private wolfSeats: number[] = []
@@ -56,9 +56,7 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     super(config)
     this.wolfBrain = config.wolfBrain
     this.masonBrain = config.masonBrain
-    this.fixedTurnOwner = config.fixedTurnOwner
-    // Initial turn (will be re-rolled each day in onDayClaims)
-    this.turnOwner = config.fixedTurnOwner ?? (this.rng.next() < 0.92 ? 'mason' : 'wolf')
+    this.turnOwner = config.fixedTurnOwner ?? 'mason'
   }
 
   /** コメントイベントを events に追加 */
@@ -98,11 +96,6 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     trace('adapter', pctx.day, null, null, 'BrainBattleAdapter.onDayClaims')
     this.runRetar(pctx, ext)
     const claims = new Map<number, DayClaim>()
-
-    // Roll turn for this day (92% mason, 8% wolf) — skip if fixed
-    if (!this.fixedTurnOwner) {
-      this.turnOwner = this.rng.next() < 0.92 ? 'mason' : 'wolf'
-    }
 
     // Emit turn info
     this.emitComment(pctx, `[BB] Day ${pctx.day}: ${this.turnOwner} turn`)
@@ -195,6 +188,21 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
       } else {
         votes.set(seat, target)
       }
+    }
+
+    // inspect 用 observation キャプチャ
+    // BB は brain による一致投票のため、brain が決めた target を proposal として記録
+    const bbProposals: Proposal[] = target != null
+      ? [{ type: 'execute_order', target }]
+      : []
+    for (const player of alivePlayers(state)) {
+      const view = buildPlayerView(state, player.seat)
+      const ctx = this.buildCtx(pctx, player, view, ext, {
+        revoteRound: vctx.revoteRound,
+        revoteCandidates: vctx.candidates,
+        proposals: bbProposals,
+      })
+      this.captureVoteObservation(vctx, player, ctx, bbProposals)
     }
 
     return votes

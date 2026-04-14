@@ -17,8 +17,10 @@ export type RewardConfig = {
   win: number
   /** 敗北報酬 */
   lose: number
-  /** 敗北報酬 (狐勝ち時、村・狼陣営に適用。未設定時は lose を使用) */
+  /** 敗北報酬 (狐勝ち時、村陣営に適用。未設定時は lose を使用) */
   loseToFox: number
+  /** 敗北報酬 (狐勝ち時、狼陣営に適用。未設定時は loseToFox を使用) */
+  wolfLoseToFox?: number
   /** 引き分け報酬 (村側) */
   drawVillage: number
   /** 引き分け報酬 (狼側) */
@@ -74,7 +76,8 @@ export const DEFAULT_REWARD_CONFIG: RewardConfig = {
 
 /**
  * Brain Battle 用報酬設定
- * - 狐勝利を大きくペナルティ: 両ブレインとも狐勝ちを防ぐインセンティブ
+ * - 村は狐勝ちを大きくペナルティ (-3): 狐を吊り残さないインセンティブ
+ * - 狼は狐勝ちを村負けと同程度 (-1.5): 村を削る本来の学習に集中させる
  * - 中間報酬なし: 終端報酬のみでシンプルに
  * - 引き分けは Brain Battle ルール上発生しない
  */
@@ -82,6 +85,7 @@ export const BRAIN_BATTLE_REWARD_CONFIG: RewardConfig = {
   win: 1.0,
   lose: -1.0,
   loseToFox: -3.0,
+  wolfLoseToFox: -1.5,
   drawVillage: 0,
   drawWolf: 0,
   drawHamster: 0,
@@ -128,7 +132,9 @@ export function terminalReward(
     case 'werewolf_won':
       return alignment === 'wolf' ? config.win : config.lose
     case 'werehamster_won':
-      return alignment === 'hamster' ? config.win : config.loseToFox
+      if (alignment === 'hamster') return config.win
+      if (alignment === 'wolf') return config.wolfLoseToFox ?? config.loseToFox
+      return config.loseToFox
     case 'draw':
       switch (alignment) {
         case 'village': return config.drawVillage
