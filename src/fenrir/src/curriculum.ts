@@ -34,18 +34,12 @@ export type AgentAssignment = Record<ModelName, AgentMode>
 
 const MODE_SYMBOL: Record<AgentMode, string> = { neural: 'NN', heuristic: 'heu', frozen: 'frz' }
 
-/** assignment を1行の読みやすい文字列にフォーマット
+/** assignment を1行の読みやすい文字列にフォーマット（declared config をそのまま表示）
  *
- * @param wolfBrainMode BB フェーズなど wolf_brain 独立経路で狼を制御するとき、
- *   wolf_collective スロットの代わりに wolf_brain=<mode> を表示する
- */
-export function formatAssignment(assignment: AgentAssignment, wolfBrainMode?: AgentMode): string {
-  return MODEL_NAMES.map(name => {
-    if (name === 'wolf_collective' && wolfBrainMode != null) {
-      return `wolf_brain=${MODE_SYMBOL[wolfBrainMode]}`
-    }
-    return `${name}=${MODE_SYMBOL[assignment[name]]}`
-  }).join('  ')
+ * NOTE: BB 系フェーズでは declared config と実効 assignment がずれるため、
+ * phase-runner.ts の describeBBAssignment を使うこと。 */
+export function formatAssignment(assignment: AgentAssignment): string {
+  return MODEL_NAMES.map(name => `${name}=${MODE_SYMBOL[assignment[name]]}`).join('  ')
 }
 
 /** role → モデルグループ名の逆引きマップ (MODEL_GROUPSから自動構築) */

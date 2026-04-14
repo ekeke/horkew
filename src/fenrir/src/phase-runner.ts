@@ -810,6 +810,51 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
 // Brain Battle Phase (BB: brains のみ / BB+: brains + 個別エージェント)
 // ============================================================
 
+/**
+ * BB フェーズの実効 agent 配線を ctx から直接導出する。
+ * declared config (step.agentAssignment) ではなく、実際にセットアップされた
+ * ネットワーク・TF ネットワークの有無を見る。
+ *
+ * 各グループの状態:
+ * - NN : 推論用ネットワークがあり、かつ学習用 TF もある（PPO 更新対象）
+ * - frz: 推論用ネットワークはあるが TF がない（frozen 参加）
+ * - heu: 推論用ネットワークもない（ヒューリスティック）
+ */
+function describeBBAssignment(
+  ctx: PhaseRunnerContext,
+  trainWolfBrain: boolean,
+  trainMasonBrain: boolean,
+): string {
+  const status = (present: boolean, learning: boolean): string =>
+    learning ? 'NN' : present ? 'frz' : 'heu'
+
+  // village: BB+ per-role NN (seer/medium/bodyguard/nekomata/villager)
+  const VILLAGE_ROLES = ['seer', 'medium', 'bodyguard', 'nekomata', 'villager']
+  const villagePresent = VILLAGE_ROLES.some(r => ctx.bbPlusNetworks?.has(r) ?? false)
+  const villageLearning = VILLAGE_ROLES.some(r => ctx.bbPlusTfNetworks?.has(r) ?? false)
+
+  // wolf_brain: ctx.wolfBrainNetwork (常に BB 経路で存在) + TF 有無で判定
+  const wolfBrainPresent = ctx.wolfBrainNetwork != null
+  // mason_collective: ctx.networks の 'mason_collective'
+  const masonPresent = ctx.networks.has('mason_collective')
+  // fanatic
+  const fanaticPresent = ctx.bbPlusNetworks?.has('fanatic') ?? false
+  const fanaticLearning = ctx.bbPlusTfNetworks?.has('fanatic') ?? false
+  // third (werehamster + immoralist, どちらか一方でもあれば)
+  const thirdPresent = (ctx.bbPlusNetworks?.has('werehamster') ?? false)
+    || (ctx.bbPlusNetworks?.has('immoralist') ?? false)
+  const thirdLearning = (ctx.bbPlusTfNetworks?.has('werehamster') ?? false)
+    || (ctx.bbPlusTfNetworks?.has('immoralist') ?? false)
+
+  return [
+    `village=${status(villagePresent, villageLearning)}`,
+    `wolf_brain=${status(wolfBrainPresent, trainWolfBrain)}`,
+    `mason_collective=${status(masonPresent, trainMasonBrain)}`,
+    `fanatic=${status(fanaticPresent, fanaticLearning)}`,
+    `third=${status(thirdPresent, thirdLearning)}`,
+  ].join('  ')
+}
+
 async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext): Promise<void> {
   const { config, trainingConfig, progress } = ctx
   const maxIter = config[step.maxIterations]
@@ -843,8 +888,8 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   const hasBBPlus = individualNets.size > 0
 
   ctx.log(`${BOLD}=== ${step.displayName} ===${RESET}`)
-  // BB 経路では wolf_collective スロットの代わりに wolf_brain を表示
-  ctx.log(`  Agent assignment: ${formatAssignment(step.agentAssignment, trainWolfBrain ? 'neural' : 'frozen')}`)
+  // declared config ではなく実行時 ctx から導出した実効 assignment を表示
+  ctx.log(`  Agent assignment: ${describeBBAssignment(ctx, trainWolfBrain, trainMasonBrain)}`)
   if (hasBBPlus) {
     ctx.log(`  Individual models: ${[...individualNets.keys()].map(n => `${n} (${individualNets.get(n)!.totalParams})`).join(', ')}`)
   }
