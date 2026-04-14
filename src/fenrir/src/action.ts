@@ -86,13 +86,25 @@ export function maskNightAction(ctx: DecisionContext): Float32Array {
   const mask = new Float32Array(HEAD_SIZES.night).fill(-Infinity)
 
   switch (ctx.myRole) {
-    case 'seer':
+    case 'seer': {
+      // Exclude seats already divined — re-divining is pure information waste
+      // and was observed to cause night-head collapse onto a single seat.
+      const alreadyDivined = new Set<number>()
+      for (const [, d] of ctx.myPlayer.divineHistory) alreadyDivined.add(d.target)
       for (const seat of ctx.alivePlayers) {
-        if (seat !== ctx.mySeat && seat <= SEATS) {
+        if (seat !== ctx.mySeat && seat <= SEATS && !alreadyDivined.has(seat)) {
           mask[seat - 1] = 0
         }
       }
+      // Fallback: if every alive non-self seat has been divined (late game),
+      // re-open the standard mask so the head still has a valid action.
+      if (mask.every(v => v === -Infinity)) {
+        for (const seat of ctx.alivePlayers) {
+          if (seat !== ctx.mySeat && seat <= SEATS) mask[seat - 1] = 0
+        }
+      }
       break
+    }
     case 'bodyguard':
       // Night 0（Day 1 前）は誰が誰か分からないので護衛しない
       if (ctx.day === 0) {
