@@ -503,6 +503,28 @@
     }
   })
 
+  let copyCompressedStatus: 'idle' | 'done' | 'error' = $state('idle')
+  let copyCompressedTimer: ReturnType<typeof setTimeout> | undefined
+
+  async function copyCompressed() {
+    if (!editorView) return
+    try {
+      const text = editorView.state.doc.toString()
+      const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))
+      const buf = await new Response(stream).arrayBuffer()
+      let binary = ''
+      const bytes = new Uint8Array(buf)
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+      const b64 = btoa(binary)
+      await navigator.clipboard.writeText(b64)
+      copyCompressedStatus = 'done'
+    } catch {
+      copyCompressedStatus = 'error'
+    }
+    if (copyCompressedTimer) clearTimeout(copyCompressedTimer)
+    copyCompressedTimer = setTimeout(() => { copyCompressedStatus = 'idle' }, 1500)
+  }
+
   function setEditorContent(text: string) {
     if (editorView) {
       editorView.dispatch({
@@ -750,7 +772,33 @@
         onCursorChange(_line) {
           onCursorMove()
         },
-        extensions: [],
+        extensions: [
+          mod.EditorView.domEventHandlers({
+            paste(event, view) {
+              const clip = event.clipboardData?.getData('text')
+              if (!clip) return false
+              const sel = view.state.selection.main
+              const fullSelection = sel.from === 0 && sel.to === view.state.doc.length
+              if (!fullSelection) return false
+              const trimmed = clip.trim()
+              if (!/^[A-Za-z0-9+/=\s]+$/.test(trimmed)) return false
+              let binary: string
+              try { binary = atob(trimmed) } catch { return false }
+              if (binary.length < 2 || binary.charCodeAt(0) !== 0x1f || binary.charCodeAt(1) !== 0x8b) return false
+              event.preventDefault()
+              const bytes = new Uint8Array(binary.length)
+              for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+              const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
+              new Response(stream).text().then(text => {
+                view.dispatch({
+                  changes: { from: 0, to: view.state.doc.length, insert: text },
+                  selection: { anchor: text.length },
+                })
+              }).catch(() => {})
+              return true
+            },
+          }),
+        ],
       })
     })
     return () => {
@@ -1364,6 +1412,12 @@
       <div class="pane-header">Input</div>
       <div class="pane-body pane-body-input">
         {#if activeKey || trialMode}
+          <div class="editor-toolbar">
+            <button class="editor-toolbar-btn" onclick={copyCompressed} title="エディタ内容を gzip+Base64 でクリップボードにコピー">
+              {#if copyCompressedStatus === 'done'}コピー済み{:else if copyCompressedStatus === 'error'}失敗{:else}圧縮コピー{/if}
+            </button>
+            <span class="editor-toolbar-hint">全選択して圧縮テキストを貼り付けると自動展開</span>
+          </div>
           <div class="input-editor" bind:this={editorParent}></div>
         {:else}
           <div class="pane-placeholder"><span>新規作成ボタンから開始してください</span></div>
@@ -2325,11 +2379,45 @@
 
   .pane-body-input {
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-bg-elevated);
+    flex-shrink: 0;
+  }
+
+  .editor-toolbar-btn {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-family: system-ui, -apple-system, sans-serif;
+    cursor: pointer;
+  }
+
+  .editor-toolbar-btn:hover {
+    background: var(--color-surface-hover);
+  }
+
+  .editor-toolbar-hint {
+    color: var(--color-text-faint);
+    font-size: 10px;
+    font-family: system-ui, -apple-system, sans-serif;
   }
 
   .input-editor {
     width: 100%;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
   }
 
