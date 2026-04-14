@@ -444,7 +444,7 @@ function buildBBPlusCurriculum(): PhaseStep[] {
       strategyOnly: false,
       adapter: 'brain-battle' as const,
       ppo: { freezePlan: false },
-      graduation: { type: 'min_iter' as const, minIter: 500 },
+      graduation: { type: 'min_iter' as const, minIter: 1500 },
       gameGen: { mode: 'multi_model' as const, seedOffsetBase: 40000 },
       agentAssignment: {
         village: 'heuristic',
@@ -524,12 +524,32 @@ function buildBBPlusCurriculum(): PhaseStep[] {
         injectVillageNN: true,
       },
     },
-    // Stage 5: 全個別エージェント NN — 共進化
+    // Stage 5: wolf_brain 追学習 — village/fanatic/third/mason を全部 neural (frozen) で回し、
+    //          強くなった相手の中で wolf_brain だけ PPO 更新
+    {
+      ...bbPlusBase,
+      name: 'bb_plus_wolf',
+      displayName: 'Phase BB+ Stage 5: Wolf Brain Refinement',
+      activeModels: ['wolf_brain'],
+      graduation: { type: 'min_iter' as const, minIter: 500 },
+      agentAssignment: {
+        village: 'neural',
+        wolf_collective: 'heuristic',
+        mason_collective: 'neural',
+        fanatic: 'neural',
+        third: 'neural',
+      },
+      frozen: {
+        frozenModels: ['village'],
+        injectVillageNN: true,
+      },
+    },
+    // Stage 6: 全個別エージェント NN — 共進化（wolf_brain も含む）
     {
       ...bbPlusBase,
       name: 'bb_plus_all',
-      displayName: 'Phase BB+ Stage 5: All Individual Agents',
-      activeModels: ['village', 'fanatic', 'third'],
+      displayName: 'Phase BB+ Stage 6: All Individual Agents',
+      activeModels: ['wolf_brain', 'village', 'fanatic', 'third'],
       graduation: { type: 'none' as const },
       agentAssignment: {
         village: 'neural',

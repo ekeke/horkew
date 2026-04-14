@@ -842,7 +842,7 @@ async function main(): Promise<void> {
 
   const startMode = config.ppoRestart ? 'ppo_restart' : config.resume ? 'resumed' : 'new'
   writeTrainStatus({ status: 'running', runId, checkpointBase: config.checkpointBase, pid: process.pid, gitSha, updated: new Date().toISOString() })
-  appendTrainHistory({ event: 'started', time: new Date().toISOString(), runId, checkpointBase: config.checkpointBase, gitSha, pid: process.pid, mode: startMode })
+  appendTrainHistory({ event: 'started', time: new Date().toISOString(), runId, checkpointBase: config.checkpointBase, gitSha, pid: process.pid, mode: startMode, command: process.argv, cwd: process.cwd() })
 
   const arch = `Transformer${config.strategyOnly ? ' (strategy-only)' : ''}`
   const configSummary = `batch=${config.batch}, lr=${config.learningRate}, evalInterval=${config.evalInterval}, chunkSize=${config.chunkSize}, workers=${config.workers}`
@@ -939,7 +939,17 @@ async function main(): Promise<void> {
     const wolfBrainNet = createWolfBrainNetwork()
 
     // BB brain チェックポイントを同一 checkpointBase から読み込み
-    const wolfCkpt = findCheckpoint(`${config.checkpointBase}/ckpt-wolf_brain`, 'wolf_brain')
+    // wolf_brain はステージごとにサブディレクトリを切るため優先順で探す（最新ステージ → 古いステージ）
+    const wolfStagePriority = ['bb_plus_all', 'bb_plus_wolf', 'brain_battle']
+    let wolfCkpt = null as ReturnType<typeof findCheckpoint>
+    for (const stageName of wolfStagePriority) {
+      wolfCkpt = findCheckpoint(`${config.checkpointBase}/ckpt-wolf_brain/${stageName}`, 'wolf_brain')
+      if (wolfCkpt) break
+    }
+    if (!wolfCkpt) {
+      // Legacy fallback: old runs kept checkpoints directly under ckpt-wolf_brain/
+      wolfCkpt = findCheckpoint(`${config.checkpointBase}/ckpt-wolf_brain`, 'wolf_brain')
+    }
     if (wolfCkpt) { loadCheckpoint(wolfBrainNet, wolfCkpt.path); log(`wolf_brain: ${wolfCkpt.path} (iter ${wolfCkpt.iteration})`) }
     const masonCkpt = findCheckpoint(`${config.checkpointBase}/ckpt-mason_collective`, 'collective')
     if (masonCkpt) { loadCheckpoint(masonBrainNet, masonCkpt.path); log(`mason_brain: ${masonCkpt.path} (iter ${masonCkpt.iteration})`) }
@@ -1033,6 +1043,14 @@ async function main(): Promise<void> {
         // frozen village NN for fanatic observation injection
         frozenWeightsMap.set('village', packWeights(villageRoleNets.get('seer')!))
 
+        // wolf_brain を学習対象に含むステージ（bb_plus_wolf, bb_plus_all）では TF を作る
+        const wolfBrainIsLearning = step.activeModels.includes('wolf_brain' as any)
+        let wolfBrainTfStage: AnyTfNetwork | undefined
+        if (wolfBrainIsLearning) {
+          wolfBrainTfStage = createWolfBrainTfNetwork(config.learningRate)
+          stageTfs.push(wolfBrainTfStage)
+        }
+
         try {
           const stageCtx: PhaseRunnerContext = {
             config, trainingConfig: bbTrainingConfig, progress, runId, gitSha,
@@ -1041,7 +1059,7 @@ async function main(): Promise<void> {
             frozenWeights: frozenWeightsMap,
             frozenNets: new Map(),
             wolfBrainNetwork: wolfBrainNet,
-            wolfBrainTfNetwork: undefined,
+            wolfBrainTfNetwork: wolfBrainTfStage,
             bbPlusNetworks: bbPlusNets,
             bbPlusTfNetworks: bbPlusTfs,
             checkShutdown, log, writeTrainProgress,
@@ -1610,4 +1628,10 @@ async function main(): Promise<void> {
   log(`${BOLD}All training complete!${RESET}`)
 }
 
-main().catch(e => { console.error(e); process.exit(1) })
+main().catch(e => {
+  console.error('Fatal error:', e)
+  if (e && typeof e === 'object') {
+    console.error('Error details:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2))
+  }
+  process.exit(1)
+})
