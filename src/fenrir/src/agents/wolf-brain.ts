@@ -40,14 +40,39 @@ export type WolfFormation = {
 // Masking
 // ============================================================
 
-/** Formation mask: dead wolf → all masked */
+/**
+ * Formation mask.
+ * - Dead wolf → all masked
+ * - Alive wolf without a committed CO → all options open (including `lurk` as pending)
+ * - Alive wolf with a committed CO → locked to the matching FORMATION_ROLES entry
+ *   (prevents day-to-day role slides that would contradict past CO, e.g. seer CO → medium_result)
+ */
 function maskFormation(ctx: TeamDecisionContext, wolfSlot: number): Float32Array {
   const mask = new Float32Array(FORMATION_SIZE).fill(-Infinity)
   const aliveSet = new Set(ctx.alivePlayers)
-  if (wolfSlot < ctx.teamSeats.length && aliveSet.has(ctx.teamSeats[wolfSlot])) {
-    // Alive wolf: all formation options available
-    mask.fill(0)
+  if (wolfSlot >= ctx.teamSeats.length || !aliveSet.has(ctx.teamSeats[wolfSlot])) {
+    return mask
   }
+
+  const player = ctx.teamPlayers[wolfSlot]
+  const committed = player?.claimedRole ?? null
+  if (committed != null) {
+    const lockedIdx = FORMATION_ROLES.indexOf(committed as FormationRole)
+    if (lockedIdx >= 0) {
+      mask[lockedIdx] = 0
+      return mask
+    }
+    // Committed to 'villager' (no real role) → lock to villager_co slot
+    if (committed === 'villager') {
+      const villagerCoIdx = FORMATION_ROLES.indexOf('villager_co')
+      mask[villagerCoIdx] = 0
+      return mask
+    }
+    // Unknown committed role — fall through to full open (shouldn't happen)
+  }
+
+  // Not committed yet: all options available (lurk acts as "pending / stay quiet")
+  mask.fill(0)
   return mask
 }
 

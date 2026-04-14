@@ -372,6 +372,19 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     // Check if wolf already has an active CO from a previous day
     const alreadyClaimed = player.claimedRole != null
 
+    // Safety net: committed wolves must stay consistent with their past CO.
+    // maskFormation in wolf-brain.ts should already enforce this; this is an
+    // assert-level guard against role slides that would emit e.g. medium_result
+    // from a wolf who CO'd nekomata.
+    if (alreadyClaimed) {
+      const committed = player.claimedRole
+      const formationRoleForCommitted =
+        committed === 'villager' ? 'villager_co' : committed
+      if (role !== formationRoleForCommitted) {
+        return { type: 'none' }
+      }
+    }
+
     switch (role) {
       case 'seer': {
         if (!alreadyClaimed) {
