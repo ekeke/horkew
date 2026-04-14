@@ -811,48 +811,73 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
 // ============================================================
 
 /**
- * BB フェーズの実効 agent 配線を ctx から直接導出する。
- * declared config (step.agentAssignment) ではなく、実際にセットアップされた
- * ネットワーク・TF ネットワークの有無を見る。
+ * BB フェーズの実効 agent 配線を ctx から直接導出する。役職ごとに1行で
+ * エージェント実装クラスと NN 状態を表示する。
  *
- * 各グループの状態:
- * - NN : 推論用ネットワークがあり、かつ学習用 TF もある（PPO 更新対象）
- * - frz: 推論用ネットワークはあるが TF がない（frozen 参加）
- * - heu: 推論用ネットワークもない（ヒューリスティック）
+ * 状態表記:
+ * - NN : ネットワーク + 学習用 TF あり（PPO 更新対象）
+ * - frz: ネットワークあり、TF なし（frozen 参加）
+ * - heu: ネットワークなし、ヒューリスティック（RuleBasedAgent）
  */
 function describeBBAssignment(
   ctx: PhaseRunnerContext,
   trainWolfBrain: boolean,
   trainMasonBrain: boolean,
-): string {
-  const status = (present: boolean, learning: boolean): string =>
-    learning ? 'NN' : present ? 'frz' : 'heu'
+): string[] {
+  type RoleRow = { role: string, agent: string, status: 'NN' | 'frz' | 'heu' }
+  const rows: RoleRow[] = []
 
-  // village: BB+ per-role NN (seer/medium/bodyguard/nekomata/villager)
-  const VILLAGE_ROLES = ['seer', 'medium', 'bodyguard', 'nekomata', 'villager']
-  const villagePresent = VILLAGE_ROLES.some(r => ctx.bbPlusNetworks?.has(r) ?? false)
-  const villageLearning = VILLAGE_ROLES.some(r => ctx.bbPlusTfNetworks?.has(r) ?? false)
+  const bbPlusHas = (key: string) => ctx.bbPlusNetworks?.has(key) ?? false
+  const bbPlusLearning = (key: string) => ctx.bbPlusTfNetworks?.has(key) ?? false
 
-  // wolf_brain: ctx.wolfBrainNetwork (常に BB 経路で存在) + TF 有無で判定
-  const wolfBrainPresent = ctx.wolfBrainNetwork != null
-  // mason_collective: ctx.networks の 'mason_collective'
+  // 各役職をどのエージェント実装が動かすか、ctx から実測して判定
+  const addBBPlusRole = (role: string, neuralClass: string) => {
+    const present = bbPlusHas(role)
+    rows.push({
+      role,
+      agent: present ? neuralClass : 'RuleBasedAgent',
+      status: bbPlusLearning(role) ? 'NN' : present ? 'frz' : 'heu',
+    })
+  }
+
+  // 村陣営 per-role NN (BB+ stage で NeuralAgent)
+  addBBPlusRole('villager', 'NeuralAgent')
+  addBBPlusRole('seer', 'NeuralAgent')
+  addBBPlusRole('medium', 'NeuralAgent')
+  addBBPlusRole('bodyguard', 'NeuralAgent')
+  addBBPlusRole('nekomata', 'NeuralAgent')
+
+  // mason: BB 経路では MasonBrainAgent、frozen 時も参照は残る
   const masonPresent = ctx.networks.has('mason_collective')
-  // fanatic
-  const fanaticPresent = ctx.bbPlusNetworks?.has('fanatic') ?? false
-  const fanaticLearning = ctx.bbPlusTfNetworks?.has('fanatic') ?? false
-  // third (werehamster + immoralist, どちらか一方でもあれば)
-  const thirdPresent = (ctx.bbPlusNetworks?.has('werehamster') ?? false)
-    || (ctx.bbPlusNetworks?.has('immoralist') ?? false)
-  const thirdLearning = (ctx.bbPlusTfNetworks?.has('werehamster') ?? false)
-    || (ctx.bbPlusTfNetworks?.has('immoralist') ?? false)
+  rows.push({
+    role: 'mason',
+    agent: masonPresent ? 'MasonBrainAgent' : 'RuleBasedAgent',
+    status: trainMasonBrain ? 'NN' : masonPresent ? 'frz' : 'heu',
+  })
 
-  return [
-    `village=${status(villagePresent, villageLearning)}`,
-    `wolf_brain=${status(wolfBrainPresent, trainWolfBrain)}`,
-    `mason_collective=${status(masonPresent, trainMasonBrain)}`,
-    `fanatic=${status(fanaticPresent, fanaticLearning)}`,
-    `third=${status(thirdPresent, thirdLearning)}`,
-  ].join('  ')
+  // werewolf: BB 経路では WolfBrainAgent
+  const wolfPresent = ctx.wolfBrainNetwork != null
+  rows.push({
+    role: 'werewolf',
+    agent: wolfPresent ? 'WolfBrainAgent' : 'RuleBasedAgent',
+    status: trainWolfBrain ? 'NN' : wolfPresent ? 'frz' : 'heu',
+  })
+
+  // fanatic: FanaticAgent (frozen village NN を注入)
+  addBBPlusRole('fanatic', 'FanaticAgent')
+
+  // 第三勢力
+  addBBPlusRole('werehamster', 'NeuralAgent')
+  addBBPlusRole('immoralist', 'NeuralAgent')
+
+  // possessed: 現状学習対象外、常に heuristic
+  rows.push({ role: 'possessed', agent: 'RuleBasedAgent', status: 'heu' })
+
+  const maxRole = Math.max(...rows.map(r => r.role.length))
+  const maxAgent = Math.max(...rows.map(r => r.agent.length))
+  return rows.map(r =>
+    `    ${r.role.padEnd(maxRole)} : ${r.agent.padEnd(maxAgent)}  (${r.status})`
+  )
 }
 
 async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext): Promise<void> {
@@ -888,8 +913,11 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   const hasBBPlus = individualNets.size > 0
 
   ctx.log(`${BOLD}=== ${step.displayName} ===${RESET}`)
-  // declared config ではなく実行時 ctx から導出した実効 assignment を表示
-  ctx.log(`  Agent assignment: ${describeBBAssignment(ctx, trainWolfBrain, trainMasonBrain)}`)
+  // declared config ではなく実行時 ctx から導出した実効 assignment を役職ごとに表示
+  ctx.log(`  Agent assignment (per role):`)
+  for (const line of describeBBAssignment(ctx, trainWolfBrain, trainMasonBrain)) {
+    ctx.log(line)
+  }
   if (hasBBPlus) {
     ctx.log(`  Individual models: ${[...individualNets.keys()].map(n => `${n} (${individualNets.get(n)!.totalParams})`).join(', ')}`)
   }
