@@ -843,7 +843,8 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   const hasBBPlus = individualNets.size > 0
 
   ctx.log(`${BOLD}=== ${step.displayName} ===${RESET}`)
-  ctx.log(`  Agent assignment: ${formatAssignment(step.agentAssignment)}`)
+  // BB 経路では wolf_collective スロットの代わりに wolf_brain を表示
+  ctx.log(`  Agent assignment: ${formatAssignment(step.agentAssignment, trainWolfBrain ? 'neural' : 'frozen')}`)
   if (hasBBPlus) {
     ctx.log(`  Individual models: ${[...individualNets.keys()].map(n => `${n} (${individualNets.get(n)!.totalParams})`).join(', ')}`)
   }
