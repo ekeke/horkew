@@ -1,6 +1,8 @@
 export { parse } from './parser.ts'
 export { preprocess } from './preprocess.ts'
 export type { Line, PreprocessResult } from './preprocess.ts'
+export { parseFrontmatter, buildFrontmatter } from './frontmatter.ts'
+export type { FrontmatterResult } from './frontmatter.ts'
 export { parseStatement, parseJoinMultiStatement } from './statement.ts'
 export type {
   StatementType,

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
-  import { parse } from '../src/howl/index.ts'
+  import { parse, parseFrontmatter, buildFrontmatter } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import { systemRoles } from '../src/types/index.ts'
   import { stringifyStatements, type StringifiedLine } from './stringify.ts'
@@ -509,7 +509,12 @@
   async function copyCompressed() {
     if (!editorView) return
     try {
-      const text = editorView.state.doc.toString()
+      const body = editorView.state.doc.toString()
+      const entry = activeKey ? fileIndex[activeKey] : undefined
+      const existing = parseFrontmatter(body)
+      const meta = { ...existing.meta }
+      if (entry && !meta.title) meta.title = displayName(entry)
+      const text = buildFrontmatter(meta, existing.body)
       const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))
       const buf = await new Response(stream).arrayBuffer()
       let binary = ''
@@ -523,6 +528,32 @@
     }
     if (copyCompressedTimer) clearTimeout(copyCompressedTimer)
     copyCompressedTimer = setTimeout(() => { copyCompressedStatus = 'idle' }, 1500)
+  }
+
+  function importCompressedText(title: string, body: string) {
+    if (trialMode) trialMode = false
+    const now = Date.now()
+    const baseKey = title.trim() || ('_' + now.toString(36))
+    let key = baseKey
+    let n = 1
+    while (fileIndex[key]) {
+      key = `${baseKey}_${n++}`
+    }
+    fileIndex[key] = { title: title || undefined, createdAt: now, updatedAt: now }
+    saveIndex(fileIndex)
+    activeKey = key
+    input = body
+    saveText(key, body)
+    entries = fileEntries()
+    updateSettings({ active: key })
+    setEditorContent(body)
+    rawStatements = ''
+    analyzerJson = ''
+    parsedLines = []
+    analysisSeats = []
+    analysisColumns = []
+    analysisError = ''
+    assumptions = new Map()
   }
 
   function setEditorContent(text: string) {
@@ -790,10 +821,16 @@
               for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
               const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
               new Response(stream).text().then(text => {
-                view.dispatch({
-                  changes: { from: 0, to: view.state.doc.length, insert: text },
-                  selection: { anchor: text.length },
-                })
+                const fm = parseFrontmatter(text)
+                const title = typeof fm.meta.title === 'string' ? fm.meta.title : ''
+                if (title) {
+                  importCompressedText(title, fm.body)
+                } else {
+                  view.dispatch({
+                    changes: { from: 0, to: view.state.doc.length, insert: text },
+                    selection: { anchor: text.length },
+                  })
+                }
               }).catch(() => {})
               return true
             },

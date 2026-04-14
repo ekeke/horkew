@@ -1,4 +1,4 @@
-import yaml from 'js-yaml'
+import { parseFrontmatter } from './frontmatter.ts'
 
 export type Line = {
   number: number  // 元のテキストの行番号
@@ -10,18 +10,8 @@ export interface PreprocessResult {
   lines: Line[]
 }
 
-function extractFrontmatter(content: string): { meta: Record<string, any>; numLines: number, content: string } {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n/)
-  if (frontmatterMatch) {
-    const frontmatterRaw = frontmatterMatch[1]
-    const meta = yaml.load(frontmatterRaw) as Record<string, any>
-    return { meta, numLines: frontmatterMatch[0].split('\n').length, content: content.slice(frontmatterMatch[0].length) }
-  }
-  return { meta: {}, numLines: 1, content }
-}
-
 export function preprocess(input: string, cursorLine?: number): PreprocessResult {
-  const { meta, numLines, content } = extractFrontmatter(input)
+  const { meta, numLines, body: content } = parseFrontmatter(input)
   const lines: Line[] = []
 
   // フロントマター後の内容を行単位で処理
