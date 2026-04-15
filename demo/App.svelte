@@ -252,6 +252,7 @@
       : new Map()
   )
   let assumptions: Map<number, SystemRole> = $state(new Map())
+  let hocusPocusSeats: Set<number> = $state(new Set())
   let denyWolfGroups: number[][] = $state([])
   let showDenyWolfDialog = $state(false)
   let denyWolfSelection: Set<number> = $state(new Set())
@@ -296,6 +297,11 @@
         h ^= seat * 37
         h = Math.imul(h, 0x01000193)
       }
+    }
+    // hocusPocus をハッシュに混ぜる
+    for (const seat of hocusPocusSeats) {
+      h ^= seat * 41
+      h = Math.imul(h, 0x01000193)
     }
     return { key: effectiveLines, hash: (h >>> 0).toString(36) }
   }
@@ -920,7 +926,18 @@
   function clearAssumptions() {
     assumptions = new Map()
     denyWolfGroups = []
+    hocusPocusSeats = new Set()
     gmorkResult = ''
+    run()
+  }
+
+  function toggleHocusPocus(seat: number) {
+    if (hocusPocusSeats.has(seat)) {
+      hocusPocusSeats.delete(seat)
+    } else {
+      hocusPocusSeats.add(seat)
+    }
+    hocusPocusSeats = new Set(hocusPocusSeats)
     run()
   }
 
@@ -1255,6 +1272,7 @@
         players: [...playersMap],
         assumptions: [...assumptions],
         wolfPairDenyals: denyWolfGroups.map(g => [g[0], g[1]] as [number, number]),
+        hocusPocus: [...hocusPocusSeats],
       }
       analyzerJson = JSON.stringify({ vs: JSON.parse(vsJson), setup: JSON.parse(setupJson) }, null, 2)
 
@@ -1510,6 +1528,12 @@
                           onclick={() => toggleAssumption(seat, role)}
                         >{roleToShort(role)}</td>
                       {/each}
+                      <td class="hocuspocus-spacer"></td>
+                      <td
+                        class="hocuspocus-cell{hocusPocusSeats.has(seat) ? ' hocuspocus-on' : ''}"
+                        title="HocusPocus: この席のCOを無視して解析"
+                        onclick={() => toggleHocusPocus(seat)}
+                      >?</td>
                     </tr>
                   {/each}
                 </tbody>
@@ -1527,7 +1551,7 @@
                   {#if (currentSetup.get('werewolf') ?? 0) >= 2}
                     <button class="assumption-add" onclick={openDenyWolfDialog}>追加</button>
                   {/if}
-                  {#if assumptions.size > 0 || denyWolfGroups.length > 0}
+                  {#if assumptions.size > 0 || denyWolfGroups.length > 0 || hocusPocusSeats.size > 0}
                     <button class="assumption-clear" onclick={() => clearAssumptions()}>全削除</button>
                   {/if}
                 </div>
@@ -2646,6 +2670,31 @@
     background: var(--color-accent);
     color: var(--color-bg);
     font-weight: 600;
+  }
+
+  .hocuspocus-spacer {
+    border: none !important;
+    background: transparent !important;
+    width: 16px;
+    padding: 0 !important;
+  }
+
+  .hocuspocus-cell {
+    cursor: pointer;
+    background: var(--color-bg-sunken);
+    color: var(--color-border);
+    font-weight: 700;
+    user-select: none;
+  }
+
+  .hocuspocus-cell:hover {
+    outline: 1px solid var(--color-accent);
+    outline-offset: -1px;
+  }
+
+  .hocuspocus-cell.hocuspocus-on {
+    background: var(--color-accent);
+    color: var(--color-bg);
   }
 
   .analysis-label {

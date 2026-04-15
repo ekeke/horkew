@@ -10,6 +10,7 @@ export type RetarRequest = {
   players: [number, string][]
   assumptions: [number, SystemRole][]
   wolfPairDenyals?: [number, number][]
+  hocusPocus?: number[]
   batches?: number
   batch?: number
 }
@@ -53,7 +54,7 @@ function handleAnalysis(msg: any) {
       hasFirstGhost: false,
       assumptions: Object.fromEntries(msg.assumptions ?? []),
       wolfPairDenyals: msg.wolfPairDenyals ?? [],
-      hocusPocus: {},
+      hocusPocus: Object.fromEntries((msg.hocusPocus ?? []).map((s: number) => [s, true])),
       id: 0,
       batches: msg.batches ?? 1,
       batch: msg.batch ?? 0,
@@ -109,7 +110,7 @@ function handleAnalysis(msg: any) {
       hasFirstGhost: false,
       assumptions: new Map<number, SystemRole>(msg.assumptions ?? []),
       wolfPairDenyals: msg.wolfPairDenyals ?? [],
-      hocusPocus: new Map(),
+      hocusPocus: new Map<number, boolean>((msg.hocusPocus ?? []).map((s: number) => [s, true])),
       id: 0,
       batches: msg.batches ?? 1,
       batch: msg.batch ?? 0,
