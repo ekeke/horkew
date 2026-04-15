@@ -366,6 +366,93 @@ describe('lynch statement', () => {
   })
 })
 
+describe('suddenDeath statement', () => {
+  test('basic without reason', () => {
+    assert.deepEqual(S.parseSuddenDeathStatement('John突然死', 1), {
+      type: 'suddenDeath', line: 1, target: 'John', reason: '',
+    })
+  })
+
+  test('with full-width parenthesized reason', () => {
+    assert.deepEqual(S.parseSuddenDeathStatement('太郎突然死（回線落ち）', 1), {
+      type: 'suddenDeath', line: 1, target: '太郎', reason: '回線落ち',
+    })
+  })
+
+  test('with half-width parenthesized reason', () => {
+    assert.deepEqual(S.parseSuddenDeathStatement('Alice突然死(disconnected)', 1), {
+      type: 'suddenDeath', line: 1, target: 'Alice', reason: 'disconnected',
+    })
+  })
+
+  test('empty full-width parens', () => {
+    assert.deepEqual(S.parseSuddenDeathStatement('太郎突然死（）', 1), {
+      type: 'suddenDeath', line: 1, target: '太郎', reason: '',
+    })
+  })
+
+  test('empty half-width parens', () => {
+    assert.deepEqual(S.parseSuddenDeathStatement('太郎突然死()', 1), {
+      type: 'suddenDeath', line: 1, target: '太郎', reason: '',
+    })
+  })
+
+  test('ASCII keyword suddenDeath', () => {
+    assert.deepEqual(S.parseSuddenDeathStatement('John suddenDeath', 1), {
+      type: 'suddenDeath', line: 1, target: 'John', reason: '',
+    })
+  })
+
+  test('ASCII keyword with reason', () => {
+    assert.deepEqual(S.parseSuddenDeathStatement('John suddenDeath(network issue)', 1), {
+      type: 'suddenDeath', line: 1, target: 'John', reason: 'network issue',
+    })
+  })
+
+  test('reason with symbols and mixed characters', () => {
+    assert.deepEqual(S.parseSuddenDeathStatement('花子突然死(理由に 記号! も?含む)', 1), {
+      type: 'suddenDeath', line: 1, target: '花子', reason: '理由に 記号! も?含む',
+    })
+  })
+
+  test('surrounding whitespace', () => {
+    assert.deepEqual(S.parseSuddenDeathStatement('　　太郎突然死　', 1), {
+      type: 'suddenDeath', line: 1, target: '太郎', reason: '',
+    })
+  })
+
+  test('missing player name returns null', () => {
+    assert.equal(S.parseSuddenDeathStatement('突然死', 1), null)
+  })
+
+  test('missing player name with reason returns null', () => {
+    assert.equal(S.parseSuddenDeathStatement('突然死（回線落ち）', 1), null)
+  })
+
+  test('unclosed paren returns null', () => {
+    assert.equal(S.parseSuddenDeathStatement('太郎突然死（回線落ち', 1), null)
+  })
+
+  test('empty string returns null', () => {
+    assert.equal(S.parseSuddenDeathStatement('', 1), null)
+  })
+
+  test('does not match attack-style 死亡', () => {
+    // 「Alice死亡」is an attack statement, not suddenDeath
+    assert.equal(S.parseSuddenDeathStatement('Alice死亡', 1), null)
+  })
+
+  test('parseStatement routes 突然死 to suddenDeath, not attack', () => {
+    const result = S.parseStatement('Alice突然死', 1)
+    assert.equal(result.type, 'suddenDeath')
+  })
+
+  test('parseStatement still routes 死亡 to attack', () => {
+    const result = S.parseStatement('Alice死亡', 1)
+    assert.equal(result.type, 'attack')
+  })
+})
+
 describe('revote statement', () => {
   test('valid revote statement', () => {
     const result = S.parseRevoteStatement('再投票　　John, Bob, Charlie', 1)

@@ -1,6 +1,6 @@
 import * as V from './vocabulary.ts'
 
-export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'videoSource' | 'timestamp' | 'unknown'
+export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'videoSource' | 'timestamp' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf'
@@ -55,6 +55,12 @@ export type AttackStatement = Statement & {
 export type LynchStatement = Statement & {
     type: 'lynch'  // Type of statement (e.g., 'lynch')
     target: string | null  // Target player's name, null if no execution
+}
+
+export type SuddenDeathStatement = Statement & {
+    type: 'suddenDeath'
+    target: string
+    reason: string
 }
 
 export type RevoteStatement = Statement & {
@@ -299,6 +305,18 @@ export function parseLynchStatement(text: string, line: number): LynchStatement 
   const reverseMatch = reverseRegex.exec(text)
   if (!reverseMatch) return null
   return { type: 'lynch', line, target: reverseMatch[1].trim() }
+}
+
+export function parseSuddenDeathStatement(text: string, line: number): SuddenDeathStatement | null {
+  const suddenDeathRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})${V.optionalSpace}${V.suddenDeath}(?:[（(]([^）)\\n]*)[）)])?${V.optionalSpace}$`)
+  const match = suddenDeathRegex.exec(text)
+  if (!match) return null
+  return {
+    type: 'suddenDeath',
+    line,
+    target: match[1].trim(),
+    reason: (match[2] ?? '').trim(),
+  }
 }
 
 export function parseCurseStatement(text: string, line: number): CurseStatement | null {
@@ -584,6 +602,7 @@ export function parseStatement (text: string, line: number): Statement {
     parseJoinStatement,
     parseVoteStatement,
     parseMultiVoteStatement,
+    parseSuddenDeathStatement,
     parseAttackStatement,
     parseGrelanStatement,
     parseLynchStatement,

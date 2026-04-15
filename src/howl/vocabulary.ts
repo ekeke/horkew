@@ -24,6 +24,7 @@ export const equal  = `(?:=|＝)`
 
 export const attack = `(?:襲撃|噛み?|死亡)`
 export const lynch  = `(?:吊り?|処刑)`
+export const suddenDeath = `(?:突然死|suddenDeath)`
 export const revote = `(?:再投票|\-\-+|==+|ーー+|＝＝+)`
 export const guard  = `(?:護衛?|ガード)`
 export const peace  = `(?:平和)`

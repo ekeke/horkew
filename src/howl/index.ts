@@ -17,6 +17,7 @@ export type {
   MultiVoteStatement,
   AttackStatement,
   LynchStatement,
+  SuddenDeathStatement,
   RevoteStatement,
   OverStatement,
   AssertStatement,
