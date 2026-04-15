@@ -447,7 +447,7 @@ function buildBBPlusCurriculum(): PhaseStep[] {
       strategyOnly: false,
       adapter: 'brain-battle' as const,
       ppo: { freezePlan: false },
-      graduation: { type: 'min_iter' as const, minIter: 1500 },
+      graduation: { type: 'min_iter' as const, minIter: 500 },
       gameGen: { mode: 'multi_model' as const, seedOffsetBase: 40000 },
       agentAssignment: {
         village: 'heuristic',
