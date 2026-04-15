@@ -16,6 +16,7 @@ import type {
   MultiVoteStatement,
   AttackStatement,
   LynchStatement,
+  SuddenDeathStatement,
   CurseStatement,
   FollowStatement,
   ForecastStatement,
@@ -249,6 +250,28 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         voteOrderCounter = 0
         revoteTargets = new Set()
         hasMultiVote = false
+        break
+      }
+
+      case 'suddenDeath': {
+        const s = stmt as SuddenDeathStatement
+        const targetSeat = resolveSeat(s.target)
+        if (targetSeat === null) break
+        const status = statuses.get(targetSeat)!
+        status.surviving = false
+        status.causeOfDeath = 'sudden_death'
+        if (lastDeathEvent === 'execution') {
+          status.diedDay = day
+          const currentExec = executions.get(day) || []
+          currentExec.push(targetSeat)
+          executions.set(day, currentExec)
+        } else {
+          status.diedDay = day - 1
+          const deathDay = status.diedDay
+          const currentKills = kills.get(deathDay) || []
+          currentKills.push(targetSeat)
+          kills.set(deathDay, currentKills)
+        }
         break
       }
 

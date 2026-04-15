@@ -80,6 +80,63 @@ describe('bridge: follow statement', () => {
   })
 })
 
+describe('bridge: suddenDeath statement', () => {
+  test('suddenDeath at execution timing goes to executions with diedDay=day', () => {
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
+
+吊り アリス
+ボブ突然死（回線落ち）`
+
+    const { statements, meta } = parse(howl)
+    const { vs, players } = buildVillageStatus(statements, meta)
+
+    const bobSeat = [...players.entries()].find(([, n]) => n === 'ボブ')![0]
+    const bobStatus = vs.statuses.get(bobSeat)!
+
+    assert.strictEqual(bobStatus.surviving, false)
+    assert.strictEqual(bobStatus.causeOfDeath, 'sudden_death')
+    assert.strictEqual(bobStatus.diedDay, 1)
+    assert.ok((vs.executions.get(1) ?? []).includes(bobSeat))
+  })
+
+  test('suddenDeath at night kill timing goes to kills with diedDay=day-1', () => {
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
+
+吊り アリス
+
+噛み ボブ
+チャーリー突然死`
+
+    const { statements, meta } = parse(howl)
+    const { vs, players } = buildVillageStatus(statements, meta)
+
+    const charSeat = [...players.entries()].find(([, n]) => n === 'チャーリー')![0]
+    const charStatus = vs.statuses.get(charSeat)!
+
+    assert.strictEqual(charStatus.surviving, false)
+    assert.strictEqual(charStatus.causeOfDeath, 'sudden_death')
+    assert.strictEqual(charStatus.diedDay, 1)
+    assert.ok((vs.kills.get(1) ?? []).includes(charSeat))
+  })
+
+  test('suddenDeath at game start (no prior death) treated as execution timing', () => {
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
+
+アリス突然死`
+
+    const { statements, meta } = parse(howl)
+    const { vs, players } = buildVillageStatus(statements, meta)
+
+    const aliceSeat = [...players.entries()].find(([, n]) => n === 'アリス')![0]
+    const aliceStatus = vs.statuses.get(aliceSeat)!
+
+    assert.strictEqual(aliceStatus.surviving, false)
+    assert.strictEqual(aliceStatus.causeOfDeath, 'sudden_death')
+    assert.strictEqual(aliceStatus.diedDay, 1)
+    assert.ok((vs.executions.get(1) ?? []).includes(aliceSeat))
+  })
+})
+
 describe('bridge: curse/follow in kills map', () => {
   test('curse and follow victims appear in kills map', () => {
     const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー、フランク

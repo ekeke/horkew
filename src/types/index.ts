@@ -12,6 +12,7 @@ export type CauseOfDeath =
   | 'follow_killed_hamster'
   | 'cursed_by_executed_nekomata'
   | 'cursed_by_killed_nekomata'
+  | 'sudden_death'
 
 export type VillageResult = 'werewolf_won' | 'villager_won' | 'werehamster_won' | 'draw' | undefined
 

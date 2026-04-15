@@ -438,5 +438,6 @@ export function causeOfDeathLabel(cause: CauseOfDeath): string {
     case 'follow_killed_hamster': return '後追い'
     case 'cursed_by_executed_nekomata': return '道連れ'
     case 'cursed_by_killed_nekomata': return '道連れ'
+    case 'sudden_death': return '突然死'
   }
 }
