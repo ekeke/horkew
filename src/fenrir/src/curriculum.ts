@@ -213,8 +213,9 @@ export type TrainingStep = {
   maxIterations: 'phase2Iterations' | 'iterations'
   /** Worker phase number sent to game-worker */
   workerPhase: number
-  /** Checkpoint subdirectory override (default: ckpt-{name}) */
-  checkpointDir?: string
+  /** Phase index (0-based), assigned by buildCurriculum based on array position.
+   *  Used for phases/NN-<name>/ directory layout. */
+  phaseIndex?: number
   /** Eval configuration overrides for phase-runner */
   evalConfig?: {
     /** Phase 0: mason を個人戦略で eval する */
@@ -254,10 +255,10 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
   const { phase1Only = false, phase2Only = false, curriculum = 'default' } = options
 
   if (curriculum === 'brain-battle') {
-    return buildBrainBattleCurriculum()
+    return assignPhaseIndices(buildBrainBattleCurriculum())
   }
   if (curriculum === 'bb-plus') {
-    return buildBBPlusCurriculum()
+    return assignPhaseIndices(buildBBPlusCurriculum())
   }
 
   const steps: PhaseStep[] = []
@@ -300,7 +301,6 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
       enableMasonTakeover: true,
       maxIterations: 'iterations',
       workerPhase: 1,
-      checkpointDir: 'ckpt-mason-individual',
       evalConfig: { masonAsIndividual: true },
     })
 
@@ -417,7 +417,48 @@ export function buildCurriculum(options: CurriculumOptions = {}): PhaseStep[] {
     })
   }
 
+  return assignPhaseIndices(steps)
+}
+
+// ============================================================
+// Phase Index & Directory Layout
+// ============================================================
+
+/** Assign phaseIndex to each training step based on array position. */
+export function assignPhaseIndices(steps: PhaseStep[]): PhaseStep[] {
+  let idx = 0
+  for (const step of steps) {
+    if (step.type === 'training') {
+      step.phaseIndex = idx++
+    }
+  }
   return steps
+}
+
+/** Zero-padded phase directory name (e.g. '03-bb_plus_village_1') */
+export function phaseDirName(step: TrainingStep): string {
+  const idx = step.phaseIndex ?? 0
+  return `${String(idx).padStart(2, '0')}-${step.name}`
+}
+
+/** Absolute phase directory: `<checkpointBase>/phases/NN-<name>/` */
+export function phaseDir(checkpointBase: string, step: TrainingStep): string {
+  return `${checkpointBase}/phases/${phaseDirName(step)}`
+}
+
+/** Per-model checkpoint directory inside a phase. */
+export function phaseCheckpointDir(checkpointBase: string, step: TrainingStep, modelName: string): string {
+  return `${phaseDir(checkpointBase, step)}/ckpt-${modelName}`
+}
+
+/** Marker file written when a phase graduates. */
+export function phaseDoneFile(checkpointBase: string, step: TrainingStep): string {
+  return `${phaseDir(checkpointBase, step)}/phase.done`
+}
+
+/** Pretrain checkpoint directory (outside phases/, shared across training runs of the same checkpointBase). */
+export function pretrainCheckpointDir(checkpointBase: string, modelName: string): string {
+  return `${checkpointBase}/pretrain/ckpt-${modelName}`
 }
 
 // ============================================================

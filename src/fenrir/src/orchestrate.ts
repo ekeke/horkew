@@ -12,7 +12,7 @@
 
 import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import {
-  MODEL_NAMES, BASELINE_RATES,
+  MODEL_NAMES, MODEL_GROUPS, BASELINE_RATES,
   type ModelName,
 } from './curriculum.ts'
 import {
@@ -20,11 +20,18 @@ import {
   runTrainingPhase,
   type TrainProgress, type PhaseRunnerContext,
 } from './phase-runner.ts'
-import { buildCurriculum, type TrainingStep } from './curriculum.ts'
+import { buildCurriculum, type TrainingStep, type PhaseStep } from './curriculum.ts'
 import { DEFAULT_REWARD_CONFIG, BRAIN_BATTLE_REWARD_CONFIG } from './reward.ts'
 import { saveCheckpoint, loadCheckpoint } from './ml/checkpoint.ts'
 import {
-  createNetwork, createWolfTeamNetwork, createMasonTeamNetwork,
+  phaseDir as phaseDirPath,
+  phaseCheckpointDir,
+  pretrainCheckpointDir,
+  phaseDirName,
+} from './curriculum.ts'
+import { isPhaseDone, findLatestModelCheckpoint } from './phase-runner.ts'
+import {
+  createNetwork,
   createTfNetwork, createWolfTeamTfNetwork, createMasonTeamTfNetwork,
   createWolfCollectiveNetwork, createMasonCollectiveNetwork,
   createWolfCollectiveTfNetwork, createMasonCollectiveTfNetwork,
@@ -499,39 +506,44 @@ function promptChoice(question: string): Promise<string> {
 function getCheckpointTimeRange(baseDir: string): { oldest: string, newest: string, totalFiles: number } | null {
   let oldest = '', newest = ''
   let totalFiles = 0
-  for (const name of MODEL_NAMES) {
-    const dir = `${baseDir}/ckpt-${name}`
-    if (!existsSync(dir)) continue
+  const scanDir = (dir: string) => {
+    if (!existsSync(dir)) return
     for (const f of readdirSync(dir)) {
       if (!f.endsWith('.json')) continue
       try {
         const data = JSON.parse(readFileSync(`${dir}/${f}`, 'utf-8'))
         const ts = data.metadata?.timestamp as string | undefined
-        if (!ts) continue
+        if (!ts) return
         totalFiles++
         if (!oldest || ts < oldest) oldest = ts
         if (!newest || ts > newest) newest = ts
       } catch { /* corrupt file */ }
     }
   }
+  // Pretrain
+  const pretrainDir = `${baseDir}/pretrain`
+  if (existsSync(pretrainDir)) {
+    for (const sub of readdirSync(pretrainDir)) scanDir(`${pretrainDir}/${sub}`)
+  }
+  // Phases
+  const phasesDir = `${baseDir}/phases`
+  if (existsSync(phasesDir)) {
+    for (const phase of readdirSync(phasesDir)) {
+      const pDir = `${phasesDir}/${phase}`
+      if (!existsSync(pDir)) continue
+      try {
+        for (const sub of readdirSync(pDir)) scanDir(`${pDir}/${sub}`)
+      } catch {}
+    }
+  }
   if (totalFiles === 0) return null
   return { oldest, newest, totalFiles }
 }
 
-/** PPO チェックポイントを削除し、pretrain の checkpoint_0 だけ残す */
+/** PPO チェックポイントを削除し、pretrain だけ残す */
 function deletePpoCheckpoints(checkpointBase: string): void {
-  for (const name of MODEL_NAMES) {
-    const dir = `${checkpointBase}/ckpt-${name}`
-    if (!existsSync(dir)) continue
-    for (const f of readdirSync(dir)) {
-      // checkpoint_0.json (pretrain) だけ保持、他の .json/.jsonl は全削除
-      if (f === 'checkpoint_0.json') continue
-      if (f.endsWith('.json') || f.endsWith('.jsonl')) {
-        try { unlinkSync(`${dir}/${f}`) } catch {}
-      }
-    }
-  }
-  // eval-howl, inspect, kl_log も削除（PPO の成果物）
+  const phasesDir = `${checkpointBase}/phases`
+  if (existsSync(phasesDir)) rmSync(phasesDir, { recursive: true })
   const evalHowlDir = `${checkpointBase}/eval-howl`
   if (existsSync(evalHowlDir)) rmSync(evalHowlDir, { recursive: true })
   const inspectDir = `${checkpointBase}/inspect`
@@ -540,12 +552,42 @@ function deletePpoCheckpoints(checkpointBase: string): void {
   if (existsSync(klLog)) unlinkSync(klLog)
 }
 
-/** 全チェックポイントを削除 */
+/** 全チェックポイントを削除 (pretrain 含む) */
 function deleteAllCheckpoints(checkpointBase: string): void {
-  for (const name of MODEL_NAMES) {
-    const dir = `${checkpointBase}/ckpt-${name}`
-    if (existsSync(dir)) rmSync(dir, { recursive: true })
+  deletePpoCheckpoints(checkpointBase)
+  const pretrainDir = `${checkpointBase}/pretrain`
+  if (existsSync(pretrainDir)) rmSync(pretrainDir, { recursive: true })
+  // Legacy cleanup: old flat ckpt-<name>/ dirs
+  for (const f of (existsSync(checkpointBase) ? readdirSync(checkpointBase) : [])) {
+    if (f.startsWith('ckpt-')) {
+      try { rmSync(`${checkpointBase}/${f}`, { recursive: true }) } catch {}
+    }
   }
+}
+
+/** 指定 phase 以降のフェーズを削除（任意フェーズからの再実行用） */
+function deletePhasesFrom(checkpointBase: string, steps: PhaseStep[], fromIdx: number): string[] {
+  const removed: string[] = []
+  const trainingSteps = steps.filter((s): s is TrainingStep => s.type === 'training')
+  for (const step of trainingSteps) {
+    const idx = step.phaseIndex ?? 0
+    if (idx < fromIdx) continue
+    const dir = phaseDirPath(checkpointBase, step)
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true })
+      removed.push(phaseDirName(step))
+    }
+  }
+  return removed
+}
+
+/** 旧レイアウト (<base>/ckpt-*) を検出 */
+function hasLegacyLayout(checkpointBase: string): boolean {
+  if (!existsSync(checkpointBase)) return false
+  for (const f of readdirSync(checkpointBase)) {
+    if (f.startsWith('ckpt-')) return true
+  }
+  return false
 }
 
 /**
@@ -587,6 +629,151 @@ function formatRecommendation(rec: ReturnType<typeof detectBreakTag>): string {
   return lines.join('\n') + '\n'
 }
 
+/** Build the step list for a curriculum name (without running it). */
+function listCurriculumPhases(curriculum: OrchestratorConfig['curriculum']): TrainingStep[] {
+  const steps = buildCurriculum({ curriculum })
+  return steps.filter((s): s is TrainingStep => s.type === 'training')
+}
+
+type PhaseStatus = {
+  step: TrainingStep
+  index: number
+  done: boolean
+  latestIter: number
+  hasCheckpoint: boolean
+}
+
+function getPhaseStatuses(checkpointBase: string, curriculum: OrchestratorConfig['curriculum']): PhaseStatus[] {
+  const trainingSteps = listCurriculumPhases(curriculum)
+  return trainingSteps.map((step, i) => {
+    const idx = step.phaseIndex ?? i
+    const done = isPhaseDone(checkpointBase, step)
+    // Scan the phase dir for any model checkpoint iter
+    let latestIter = 0
+    let hasCheckpoint = false
+    const pDir = phaseDirPath(checkpointBase, step)
+    if (existsSync(pDir)) {
+      for (const sub of readdirSync(pDir)) {
+        if (!sub.startsWith('ckpt-')) continue
+        const dir = `${pDir}/${sub}`
+        if (!existsSync(dir)) continue
+        for (const f of readdirSync(dir)) {
+          const m = f.match(/_(\d+)\.json$/)
+          if (m) {
+            hasCheckpoint = true
+            const n = parseInt(m[1])
+            if (n > latestIter) latestIter = n
+          } else if (f.endsWith('.json')) {
+            hasCheckpoint = true
+          }
+        }
+      }
+    }
+    return { step, index: idx, done, latestIter, hasCheckpoint }
+  })
+}
+
+function formatPhaseList(statuses: PhaseStatus[]): string[] {
+  const lines: string[] = []
+  const maxName = Math.max(...statuses.map(s => s.step.name.length), 12)
+  for (const s of statuses) {
+    const idxStr = String(s.index).padStart(2, '0')
+    let status = ''
+    if (s.done) status = `${BOLD}\x1b[32m[done]${RESET}`
+    else if (s.hasCheckpoint) status = `\x1b[33m[in-progress iter ${s.latestIter}]${RESET}`
+    else status = '\x1b[90m[not started]${RESET}'.replace('${RESET}', RESET)
+    lines.push(`    [${idxStr}] ${s.step.name.padEnd(maxName)}  ${status}`)
+  }
+  return lines
+}
+
+/** Show status + interactive prompt. Returns nothing; mutates config. */
+async function promptForCheckpointAction(config: OrchestratorConfig, checkpointBase: string): Promise<void> {
+  const fmtTime = (iso: string) => new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
+
+  // Legacy layout detection
+  if (hasLegacyLayout(checkpointBase)) {
+    log(`${BOLD}\x1b[31m旧レイアウトを検出:${RESET} ${checkpointBase}/ に ckpt-* ディレクトリが直置きされています`)
+    log(`  新レイアウト (phases/NN-name/) に移行するには全削除が必要です。`)
+    log('')
+    log(`  [n] 全削除して新規学習 (pretrain からやり直し)`)
+    log(`  [N] 新しいベースで開始`)
+    log(`  [q] 中止`)
+    const choice = (await promptChoice(`  選択 (n/N/Q): `)).toLowerCase()
+    if (choice === 'n') {
+      deleteAllCheckpoints(checkpointBase)
+      config.checkpointBase = checkpointBase
+      log('全チェックポイントを削除しました。')
+    } else if (choice === 'N'.toLowerCase()) {
+      config.checkpointBase = nextCheckpointBase()
+      log(`New run: ${config.checkpointBase}`)
+    } else {
+      log('中止しました。'); process.exit(0)
+    }
+    return
+  }
+
+  const range = getCheckpointTimeRange(checkpointBase)
+  if (!range) {
+    config.checkpointBase = checkpointBase
+    return
+  }
+
+  const statuses = getPhaseStatuses(checkpointBase, config.curriculum)
+  const statusForSha = readTrainStatus()
+  const rec = detectBreakTag(statusForSha?.gitSha)
+
+  log(`${BOLD}既存ランを検出:${RESET} ${checkpointBase}/`)
+  log(`  ファイル数: ${range.totalFiles}`)
+  log(`  学習期間: ${fmtTime(range.oldest)} 〜 ${fmtTime(range.newest)}`)
+  log(`  curriculum: ${config.curriculum}`)
+  log('')
+  log(`  ${BOLD}フェーズ状況:${RESET}`)
+  for (const line of formatPhaseList(statuses)) log(line)
+  log('')
+  const recStr = formatRecommendation(rec)
+  if (recStr) process.stderr.write(`${BOLD}[orch]${RESET} ${recStr}\n`)
+
+  const latestPhase = [...statuses].reverse().find(s => s.hasCheckpoint || s.done)
+  const latestLabel = latestPhase ? `フェーズ ${String(latestPhase.index).padStart(2, '0')}-${latestPhase.step.name}` : '(なし)'
+
+  log(`  [n] 全削除して新規学習 (pretrain からやり直し)`)
+  log(`  [p] pretrain 後から PPO やり直し`)
+  log(`  [r] 最新チェックポイントから再開 (${latestLabel})`)
+  log(`  [NN] 指定フェーズから再実行 (以降のフェーズを削除)`)
+  log(`  [q] 中止`)
+
+  const defaultChoice = rec?.recommended ?? 'q'
+  const choice = (await promptChoice(`  選択 (n/p/r/NN/Q) [${defaultChoice}]: `) || defaultChoice).trim()
+  config.checkpointBase = checkpointBase
+
+  if (choice === 'n') {
+    deleteAllCheckpoints(checkpointBase)
+    log('全チェックポイントを削除しました。')
+    return
+  }
+  if (choice === 'p') {
+    deletePpoCheckpoints(checkpointBase)
+    log('PPOチェックポイントを削除しました (pretrain は保持)。')
+    config.resume = true
+    config.ppoRestart = true
+    return
+  }
+  if (choice === 'r') {
+    config.resume = true
+    return
+  }
+  if (/^\d+$/.test(choice)) {
+    const fromIdx = parseInt(choice, 10)
+    const allSteps = buildCurriculum({ curriculum: config.curriculum })
+    const removed = deletePhasesFrom(checkpointBase, allSteps, fromIdx)
+    log(`フェーズ ${fromIdx} 以降を削除: ${removed.length > 0 ? removed.join(', ') : '(対象なし)'}`)
+    config.resume = true
+    return
+  }
+  log('中止しました。'); process.exit(0)
+}
+
 /**
  * 起動モード選択の対話プロンプト。
  * --resume が明示指定されている場合はスキップ（後方互換）。
@@ -613,47 +800,9 @@ async function selectStartMode(config: OrchestratorConfig): Promise<void> {
     return
   }
 
-  const fmtTime = (iso: string) => {
-    const d = new Date(iso)
-    return d.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
-  }
-
   // --checkpoint-base が明示指定されている場合
   if (config.checkpointBase) {
-    const range = getCheckpointTimeRange(config.checkpointBase)
-    if (!range) return  // checkpoint なし → そのまま新規開始
-
-    const statusForSha = readTrainStatus()
-    const rec = detectBreakTag(statusForSha?.gitSha)
-
-    log(`${BOLD}既存チェックポイントを検出:${RESET}`)
-    log(`  パス: ${config.checkpointBase}/`)
-    log(`  ファイル数: ${range.totalFiles}`)
-    log(`  学習期間: ${fmtTime(range.oldest)} 〜 ${fmtTime(range.newest)}`)
-    log('')
-    const recStr = formatRecommendation(rec)
-    if (recStr) process.stderr.write(`${BOLD}[orch]${RESET} ${recStr}\n`)
-    log(`  [n] 全削除して新規学習 (pretrain からやり直し)`)
-    log(`  [p] pretrain 後から PPO やり直し`)
-    log(`  [r] 最新チェックポイントから再開`)
-    log(`  [q] 中止`)
-
-    const defaultChoice = rec?.recommended ?? 'q'
-    const choice = await promptChoice(`  選択 (n/p/r/Q) [${defaultChoice}]: `) || defaultChoice
-    if (choice === 'n') {
-      deleteAllCheckpoints(config.checkpointBase)
-      log('全チェックポイントを削除しました。')
-    } else if (choice === 'p') {
-      deletePpoCheckpoints(config.checkpointBase)
-      log('PPOチェックポイントを削除しました (pretrain checkpoint_0 は保持)。')
-      config.resume = true
-      config.ppoRestart = true
-    } else if (choice === 'r') {
-      config.resume = true
-    } else {
-      log('中止しました。')
-      process.exit(0)
-    }
+    await promptForCheckpointAction(config, config.checkpointBase)
     return
   }
 
@@ -662,63 +811,7 @@ async function selectStartMode(config: OrchestratorConfig): Promise<void> {
   const previousBase = status?.checkpointBase
 
   if (previousBase && existsSync(previousBase)) {
-    const range = getCheckpointTimeRange(previousBase)
-
-    if (range) {
-      // 前回ベースに checkpoint がある
-      const rec = detectBreakTag(status?.gitSha)
-
-      log(`${BOLD}前回の学習を検出:${RESET}`)
-      log(`  パス: ${previousBase}/`)
-      log(`  ファイル数: ${range.totalFiles}`)
-      log(`  学習期間: ${fmtTime(range.oldest)} 〜 ${fmtTime(range.newest)}`)
-      log('')
-      const recStr = formatRecommendation(rec)
-      if (recStr) process.stderr.write(`${BOLD}[orch]${RESET} ${recStr}\n`)
-      log(`  [n] 新しいベースで開始 (pretrain から)`)
-      log(`  [p] ${previousBase} — pretrain 後から PPO やり直し`)
-      log(`  [r] ${previousBase} — 最新チェックポイントから再開`)
-      log(`  [q] 中止`)
-
-      const defaultChoice = rec?.recommended ?? 'q'
-      const choice = await promptChoice(`  選択 (n/p/r/Q) [${defaultChoice}]: `) || defaultChoice
-      if (choice === 'n') {
-        config.checkpointBase = nextCheckpointBase()
-        log(`New run: ${config.checkpointBase}`)
-      } else if (choice === 'p') {
-        config.checkpointBase = previousBase
-        deletePpoCheckpoints(previousBase)
-        log('PPOチェックポイントを削除しました (pretrain checkpoint_0 は保持)。')
-        config.resume = true
-        config.ppoRestart = true
-      } else if (choice === 'r') {
-        config.checkpointBase = previousBase
-        config.resume = true
-      } else {
-        log('中止しました。')
-        process.exit(0)
-      }
-    } else {
-      // 前回ベースのディレクトリはあるが checkpoint がない
-      log(`${BOLD}前回のベースを検出 (チェックポイントなし):${RESET}`)
-      log(`  パス: ${previousBase}/`)
-      log('')
-      log(`  [n] 新しいベースで開始`)
-      log(`  [c] ${previousBase} を再利用して開始`)
-      log(`  [q] 中止`)
-
-      const choice = await promptChoice(`  選択 (n/c/Q): `)
-      if (choice === 'n') {
-        config.checkpointBase = nextCheckpointBase()
-        log(`New run: ${config.checkpointBase}`)
-      } else if (choice === 'c') {
-        config.checkpointBase = previousBase
-        log(`Reusing: ${previousBase}`)
-      } else {
-        log('中止しました。')
-        process.exit(0)
-      }
-    }
+    await promptForCheckpointAction(config, previousBase)
   } else {
     // 初回起動 (train-status.json なし or 前回ベースが存在しない)
     config.checkpointBase = nextCheckpointBase()
@@ -883,7 +976,7 @@ async function main(): Promise<void> {
     // Mason brain: direct vote head (Brain Battle 専用)
     const masonNet = createMasonBrainNetwork()
     const masonTf = createMasonBrainTfNetwork(config.learningRate)
-    const masonDir = `${config.checkpointBase}/ckpt-mason_collective`
+    const masonDir = phaseCheckpointDir(config.checkpointBase, bbStep, 'mason_collective')
     const masonCkpt = findCheckpoint(masonDir, 'collective')
     if (masonCkpt) {
       loadCheckpoint(masonNet, masonCkpt.path)
@@ -938,21 +1031,13 @@ async function main(): Promise<void> {
     const masonBrainNet = createMasonBrainNetwork()
     const wolfBrainNet = createWolfBrainNetwork()
 
-    // BB brain チェックポイントを同一 checkpointBase から読み込み
-    // wolf_brain はステージごとにサブディレクトリを切るため優先順で探す（最新ステージ → 古いステージ）
-    const wolfStagePriority = ['bb_plus_all', 'bb_plus_wolf', 'brain_battle']
-    let wolfCkpt = null as ReturnType<typeof findCheckpoint>
-    for (const stageName of wolfStagePriority) {
-      wolfCkpt = findCheckpoint(`${config.checkpointBase}/ckpt-wolf_brain/${stageName}`, 'wolf_brain')
-      if (wolfCkpt) break
+    // Walk training steps in reverse to find latest checkpoint per model.
+    const loadLatest = (net: AnyNetwork, modelName: string, prefix: string, label: string) => {
+      const hit = findLatestModelCheckpoint(config.checkpointBase, steps, modelName, prefix)
+      if (hit) { loadCheckpoint(net, hit.path); log(`${label}: ${hit.path} (iter ${hit.iteration})`) }
     }
-    if (!wolfCkpt) {
-      // Legacy fallback: old runs kept checkpoints directly under ckpt-wolf_brain/
-      wolfCkpt = findCheckpoint(`${config.checkpointBase}/ckpt-wolf_brain`, 'wolf_brain')
-    }
-    if (wolfCkpt) { loadCheckpoint(wolfBrainNet, wolfCkpt.path); log(`wolf_brain: ${wolfCkpt.path} (iter ${wolfCkpt.iteration})`) }
-    const masonCkpt = findCheckpoint(`${config.checkpointBase}/ckpt-mason_collective`, 'collective')
-    if (masonCkpt) { loadCheckpoint(masonBrainNet, masonCkpt.path); log(`mason_brain: ${masonCkpt.path} (iter ${masonCkpt.iteration})`) }
+    loadLatest(wolfBrainNet, 'wolf_brain', 'wolf_brain', 'wolf_brain')
+    loadLatest(masonBrainNet, 'mason_collective', 'collective', 'mason_brain')
 
     // BB+ individual agent networks: per-role (random init, Pure JS only — TF は stage ごとに作成)
     const VILLAGE_ROLES = ['seer', 'medium', 'bodyguard', 'nekomata', 'villager'] as const
@@ -967,6 +1052,12 @@ async function main(): Promise<void> {
     log(`Wolf Brain: ${wolfBrainNet.totalParams} params, Mason Brain: ${masonBrainNet.totalParams} params`)
     log(`BB+ village roles: ${VILLAGE_ROLES.join(',')} (${villageRoleNets.get('seer')!.totalParams} each)`)
     log(`BB+ fanatic: ${fanaticNet.totalParams}, werehamster: ${werehamsterNet.totalParams}, immoralist: ${immoralistNet.totalParams}`)
+
+    // Load latest per-model checkpoints from prior phases (backbone transfer)
+    for (const role of VILLAGE_ROLES) loadLatest(villageRoleNets.get(role)!, role, role, role)
+    loadLatest(fanaticNet, 'fanatic', 'fanatic', 'fanatic')
+    loadLatest(werehamsterNet, 'werehamster', 'werehamster', 'werehamster')
+    loadLatest(immoralistNet, 'immoralist', 'immoralist', 'immoralist')
 
     if (config.workers !== 0) {
       initGameWorkerPool(config.workers === -1 ? undefined : config.workers)
@@ -1094,10 +1185,6 @@ async function main(): Promise<void> {
   const networks = new Map<ModelName, AnyNetwork>()
   for (const name of MODEL_NAMES) networks.set(name, createNetwork())
 
-  // チーム推論用
-  const wolfTeamNet = createWolfTeamNetwork()
-  const masonTeamNet = createMasonTeamNetwork()
-
   // 学習用 (TF.js GPU): 1セットだけ — 重みをスワップして共有
   const tfNetwork = createTfNetwork(config.learningRate)
   const wolfTeamTf = createWolfTeamTfNetwork(config.learningRate)
@@ -1210,40 +1297,28 @@ async function main(): Promise<void> {
   }
 
   // === Resume ===
+  // Walk all curriculum phases in reverse to find the latest checkpoint per model.
+  // Fallback chain: phases/NN-<step>/ckpt-<model>/ → pretrain/ckpt-<model>/
   const iterCounts = new Map<ModelName, number>()
   let anyResumed = false
+  const resumeCurriculumSteps = buildCurriculum()
   if (config.resume) {
     for (const name of MODEL_NAMES) {
       let startIter = 0
-      const dir = `${config.checkpointBase}/ckpt-${name}`
-      const ckpt = findCheckpoint(dir)
-      if (ckpt) {
+      // default curriculum の collective モデルは collective_final.json が prefix
+      const info = MODEL_GROUPS[name]
+      const prefix = info.collective ? 'collective' : 'checkpoint'
+      const hit = findLatestModelCheckpoint(config.checkpointBase, resumeCurriculumSteps, name, prefix)
+      if (hit) {
         try {
-          loadCheckpoint(networks.get(name)!, ckpt.path)
-          startIter = ckpt.iteration
+          loadCheckpoint(networks.get(name)!, hit.path)
+          startIter = hit.iteration
           anyResumed = true
         } catch (e) {
           log(`  ${COLORS[name]}${name}${RESET}: checkpoint incompatible, starting fresh (${(e as Error).message})`)
         }
       }
       iterCounts.set(name, startIter)
-    }
-    // チームNNも resume
-    const wolfDir = `${config.checkpointBase}/ckpt-werewolf`
-    const wolfCkpt = findCheckpoint(wolfDir)
-    if (wolfCkpt) {
-      const teamPath = wolfCkpt.path.replace('checkpoint_', 'wolf_team_').replace('final.json', 'wolf_team_final.json')
-      if (existsSync(teamPath)) {
-        try { loadCheckpoint(wolfTeamNet, teamPath) } catch { /* incompatible */ }
-      }
-    }
-    const masonDir = `${config.checkpointBase}/ckpt-mason`
-    const masonCkpt = findCheckpoint(masonDir)
-    if (masonCkpt) {
-      const teamPath = masonCkpt.path.replace('checkpoint_', 'mason_team_').replace('final.json', 'mason_team_final.json')
-      if (existsSync(teamPath)) {
-        try { loadCheckpoint(masonTeamNet, teamPath) } catch { /* incompatible */ }
-      }
     }
   } else {
     for (const name of MODEL_NAMES) iterCounts.set(name, 0)
@@ -1448,7 +1523,7 @@ async function main(): Promise<void> {
     savePretrainSnapshots(pretrainSnapshots, config.checkpointBase)
 
     // Pretrain 済み checkpoint を保存 (--resume で復帰可能)
-    const villageDir = `${config.checkpointBase}/ckpt-village`
+    const villageDir = pretrainCheckpointDir(config.checkpointBase, 'village')
     saveCheckpoint(networks.get('village' as ModelName)!, `${villageDir}/checkpoint_0.json`, { iteration: 0, winRate: 0 })
     log(`  Pretrain checkpoint saved → ${villageDir}/checkpoint_0.json`)
 
@@ -1498,15 +1573,18 @@ async function main(): Promise<void> {
   let frozenMasonWeights: SharedWeights | undefined
   let frozenMasonNet: AnyNetwork | undefined
   if (!config.phase2Only) {
-    const masonDir = `${config.checkpointBase}/ckpt-mason_individual`
-    const masonFinalPath = `${masonDir}/final.json`
-    const phase0Done = existsSync(masonFinalPath)
+    const masonStep = curriculum.find(s => s.type === 'training' && s.name === 'mason_individual') as TrainingStep | undefined
+    const masonDir = masonStep ? phaseCheckpointDir(config.checkpointBase, masonStep, 'mason_individual') : ''
+    const masonFinalPath = masonStep ? `${masonDir}/final.json` : ''
+    const phase0Done = masonStep ? isPhaseDone(config.checkpointBase, masonStep) : false
 
-    if (phase0Done) {
+    if (phase0Done && masonStep) {
       log(`${BOLD}=== Phase 0: Mason Individual (already graduated) ===${RESET}`)
       const villageNet = networks.get('village' as ModelName)!
       const masonNet = createNetwork()
-      loadCheckpoint(masonNet, masonFinalPath)
+      const latestHit = findLatestModelCheckpoint(config.checkpointBase, [masonStep], 'mason_individual', 'checkpoint')
+      if (latestHit) loadCheckpoint(masonNet, latestHit.path)
+      else loadCheckpoint(masonNet, masonFinalPath)
       villageNet.loadWeights(masonNet.cloneWeights())
       frozenMasonWeights = packWeights(masonNet)
       frozenMasonNet = masonNet
@@ -1521,7 +1599,8 @@ async function main(): Promise<void> {
       const masonTf = createTfNetwork(config.learningRate * 0.2)
 
       // Initialize from village pretrain weights (if not resuming)
-      if (!config.resume || !findCheckpoint(masonDir)) {
+      const existingMasonCkpt = masonStep ? findLatestModelCheckpoint(config.checkpointBase, [masonStep], 'mason_individual', 'checkpoint') : null
+      if (!config.resume || !existingMasonCkpt) {
         const villageNet = networks.get('village' as ModelName)!
         masonNet.loadWeights(villageNet.cloneWeights())
       }
@@ -1530,7 +1609,7 @@ async function main(): Promise<void> {
       const masonRefNetwork = createNetwork()
       masonRefNetwork.loadWeights(masonNet.cloneWeights())
 
-      const masonStep = curriculum.find(s => s.type === 'training' && s.name === 'mason_individual') as TrainingStep
+      if (!masonStep) throw new Error('mason_individual step not found in default curriculum')
       const phase0Ctx = buildCtx({
         networks: new Map([['mason_individual', masonNet]]),
         tfNetworks: new Map([['mason_individual', masonTf]]),

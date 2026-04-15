@@ -9,11 +9,13 @@ import type { AnyNetwork, AnyTfNetwork } from './ml/nn.ts'
 import type { TrainingConfig } from './training.ts'
 import type { ProcessedStep } from './ml/trajectory.ts'
 import type { SharedWeights, SerializedGameResult, WreSharedWeights, GameTiming } from './parallel.ts'
-import type { TrainingStep, ModelName, AgentAssignment, SingleModelGen } from './curriculum.ts'
+import type { TrainingStep, ModelName, AgentAssignment, SingleModelGen, PhaseStep } from './curriculum.ts'
 import {
   MODEL_GROUPS, MODEL_NAMES, ROLE_TO_GROUP, BASELINE_RATES,
   klTargetForIter, formatAssignment,
+  phaseCheckpointDir, phaseDir, phaseDoneFile,
 } from './curriculum.ts'
+import { writeFileSync, mkdirSync } from 'node:fs'
 import { computeRefPlanLogits } from './agents/neural-agent.ts'
 import { normalizeAdvantages, computeGAE, processTrajectories } from './ml/trajectory.ts'
 import type { TrajectoryStep } from './ml/trajectory.ts'
@@ -157,21 +159,87 @@ const BOLD = '\x1b[1m'
 export function findCheckpoint(dir: string, prefix: string = 'checkpoint'): { iteration: number, path: string } | null {
   if (!existsSync(dir)) return null
   const files = readdirSync(dir)
-  const finalName = `${prefix}_final.json`
-  for (const candidate of [finalName, 'final.json']) {
-    if (files.includes(candidate)) {
-      const raw = JSON.parse(readFileSync(`${dir}/${candidate}`, 'utf-8'))
-      return { iteration: raw.metadata?.iteration ?? 0, path: `${dir}/${candidate}` }
+
+  // Collect candidates: final.json files + numbered files
+  let best: { iteration: number, path: string } | null = null
+  const consider = (iteration: number, path: string) => {
+    if (!best || iteration > best.iteration) best = { iteration, path }
+  }
+
+  for (const finalName of [`${prefix}_final.json`, 'final.json']) {
+    if (files.includes(finalName)) {
+      try {
+        const raw = JSON.parse(readFileSync(`${dir}/${finalName}`, 'utf-8'))
+        consider(raw.metadata?.iteration ?? 0, `${dir}/${finalName}`)
+      } catch { /* corrupt */ }
     }
   }
-  let maxIter = -1
+
   const regex = new RegExp(`^${prefix}_(\\d+)\\.json$`)
   for (const f of files) {
     const m = f.match(regex)
-    if (m) { const n = parseInt(m[1]); if (n > maxIter) maxIter = n }
+    if (m) consider(parseInt(m[1]), `${dir}/${f}`)
   }
-  if (maxIter < 0) return null
-  return { iteration: maxIter, path: `${dir}/${prefix}_${maxIter}.json` }
+  return best
+}
+
+// ============================================================
+// Phase marker helpers
+// ============================================================
+
+export type PhaseDoneMeta = {
+  phaseName: string
+  phaseIndex: number
+  iteration: number
+  graduatedAt: string
+  winRate?: number
+}
+
+export function writePhaseDone(checkpointBase: string, step: TrainingStep, meta: Omit<PhaseDoneMeta, 'phaseName' | 'phaseIndex' | 'graduatedAt'>): void {
+  const path = phaseDoneFile(checkpointBase, step)
+  mkdirSync(phaseDir(checkpointBase, step), { recursive: true })
+  const payload: PhaseDoneMeta = {
+    phaseName: step.name,
+    phaseIndex: step.phaseIndex ?? 0,
+    graduatedAt: new Date().toISOString(),
+    ...meta,
+  }
+  writeFileSync(path, JSON.stringify(payload, null, 2) + '\n')
+}
+
+export function readPhaseDone(checkpointBase: string, step: TrainingStep): PhaseDoneMeta | null {
+  const path = phaseDoneFile(checkpointBase, step)
+  if (!existsSync(path)) return null
+  try { return JSON.parse(readFileSync(path, 'utf-8')) as PhaseDoneMeta }
+  catch { return null }
+}
+
+export function isPhaseDone(checkpointBase: string, step: TrainingStep): boolean {
+  return existsSync(phaseDoneFile(checkpointBase, step))
+}
+
+/**
+ * Walk training steps in reverse to find the most recent checkpoint for `modelName`.
+ * Falls back to `pretrain/ckpt-<modelName>/checkpoint_0.json` if no phase has it.
+ */
+export function findLatestModelCheckpoint(
+  checkpointBase: string,
+  steps: PhaseStep[],
+  modelName: string,
+  prefix: string,
+): { iteration: number, path: string, phaseIndex: number | null } | null {
+  const trainingSteps = steps.filter((s): s is TrainingStep => s.type === 'training')
+  for (let i = trainingSteps.length - 1; i >= 0; i--) {
+    const s = trainingSteps[i]
+    const dir = phaseCheckpointDir(checkpointBase, s, modelName)
+    const ckpt = findCheckpoint(dir, prefix)
+    if (ckpt) return { ...ckpt, phaseIndex: s.phaseIndex ?? i }
+  }
+  // Fallback: pretrain
+  const pretrainDir = `${checkpointBase}/pretrain/ckpt-${modelName}`
+  const ckpt = findCheckpoint(pretrainDir, 'checkpoint')
+  if (ckpt) return { ...ckpt, phaseIndex: null }
+  return null
 }
 
 // ============================================================
@@ -323,14 +391,14 @@ function buildEvalOptions(ctx: PhaseRunnerContext, step: TrainingStep, iter: num
   }
 }
 
-/** Checkpoint dir for a model in a step */
+/** Checkpoint dir for a model in a step (phases/NN-<name>/ckpt-<model>/) */
 function checkpointDir(config: OrchestratorConfig, step: TrainingStep, name: string): string {
-  return `${config.checkpointBase}/${step.checkpointDir ?? `ckpt-${name}`}`
+  return phaseCheckpointDir(config.checkpointBase, step, name)
 }
 
-/** wolf_brain は複数ステージで学習するため、ステージごとにサブディレクトリを切る */
+/** wolf_brain uses the unified phase dir now (previously had its own ckpt-wolf_brain/<stage>/ subtree) */
 function wolfBrainDir(config: OrchestratorConfig, step: TrainingStep): string {
-  return `${config.checkpointBase}/ckpt-wolf_brain/${step.name}`
+  return phaseCheckpointDir(config.checkpointBase, step, 'wolf_brain')
 }
 
 /** Checkpoint file prefix for a model */
@@ -410,6 +478,13 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
   const { config, trainingConfig, progress } = ctx
   const maxIter = config[step.maxIterations]
   const phase = phaseLabel(step)
+
+  // Phase.done marker — generic skip for all non-BB training phases
+  if (config.resume && isPhaseDone(config.checkpointBase, step)) {
+    ctx.log(`${BOLD}=== ${step.displayName} ===${RESET}`)
+    ctx.log(`  Already graduated (phase.done found at ${phaseDoneFile(config.checkpointBase, step)})`)
+    return
+  }
 
   ctx.log(`${BOLD}=== ${step.displayName} ===${RESET}`)
   ctx.log(`  Agent assignment: ${formatAssignment(step.agentAssignment)}`)
@@ -804,6 +879,12 @@ export async function runTrainingPhase(step: TrainingStep, ctx: PhaseRunnerConte
   ctx.log(`${BOLD}=== ${step.displayName} Complete ===${RESET}`)
   progress.latest = { phase: `${phase} (complete)`, model: '-', iter: maxIter, maxIter }
   ctx.writeTrainProgress(progress)
+
+  // Write phase.done marker
+  if (graduated.size === activeModels.length) {
+    const maxIterReached = Math.max(...[...iterCounts.values()])
+    writePhaseDone(config.checkpointBase, step, { iteration: maxIterReached })
+  }
 }
 
 // ============================================================
@@ -965,9 +1046,10 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
         catch (e) { ctx.log(`  ${name}: checkpoint incompatible (${(e as Error).message})`) }
       }
     }
-    // Already graduated check (wolf_brain が学習対象のステージで final.json があれば skip)
-    if (step.graduation.type !== 'none' && trainWolfBrain) {
-      if (existsSync(`${wolfBrainDir(config, step)}/wolf_brain_final.json`)) { ctx.log(`  Already graduated`); return }
+    // Already graduated check — generic for all BB/BB+ stages via phase.done marker
+    if (step.graduation.type !== 'none' && isPhaseDone(config.checkpointBase, step)) {
+      ctx.log(`  Already graduated (phase.done found)`)
+      return
     }
   }
 
@@ -1120,6 +1202,7 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
         saveCheckpoint(masonNet, `${checkpointDir(config, step, 'mason_collective')}/collective_${iter}.json`, { iteration: iter, winRate: 0 })
       }
       for (const [name, net] of individualNets) {
+        if (!individualTfs.has(name)) continue  // skip frozen individuals — saving would pollute own-phase dir
         const dir = checkpointDir(config, step, name)
         saveCheckpoint(net, `${dir}/${name}_${iter}.json`, { iteration: iter, winRate: 0 })
       }
@@ -1193,7 +1276,7 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
       // Graduation check
       if (step.graduation.type === 'min_iter' && iter >= step.graduation.minIter) {
         ctx.log(`${prefix} ${BOLD}GRADUATED${RESET} (iter ${iter} >= ${step.graduation.minIter})`)
-        // Save final checkpoints
+        // Save final checkpoints (only for models actively trained in this stage)
         if (trainWolfBrain) {
           saveCheckpoint(ctx.wolfBrainNetwork, `${wolfBrainDir(config, step)}/wolf_brain_final.json`, { iteration: iter, winRate: 0 })
         }
@@ -1201,9 +1284,11 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
           saveCheckpoint(masonNet, `${checkpointDir(config, step, 'mason_collective')}/collective_final.json`, { iteration: iter, winRate: 0 })
         }
         for (const [name, net] of individualNets) {
+          if (!individualTfs.has(name)) continue  // skip frozen individuals
           const dir = checkpointDir(config, step, name)
           saveCheckpoint(net, `${dir}/${name}_final.json`, { iteration: iter, winRate: 0 })
         }
+        writePhaseDone(config.checkpointBase, step, { iteration: iter })
         break
       }
     }
@@ -1213,5 +1298,10 @@ async function runBrainBattlePhase(step: TrainingStep, ctx: PhaseRunnerContext):
   ctx.log(`${BOLD}=== ${step.displayName} Complete ===${RESET}`)
   progress.latest = { phase: `${phase} (complete)`, model: modelLabel, iter, maxIter }
   ctx.writeTrainProgress(progress)
+
+  // For 'none' graduation stages (BB, bb_plus_all), write phase.done on normal completion
+  if (step.graduation.type === 'none') {
+    writePhaseDone(config.checkpointBase, step, { iteration: iter })
+  }
 }
 
