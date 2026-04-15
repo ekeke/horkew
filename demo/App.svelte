@@ -1258,6 +1258,19 @@
       }
       analyzerJson = JSON.stringify({ vs: JSON.parse(vsJson), setup: JSON.parse(setupJson) }, null, 2)
 
+      // 突然死を含む盤面は Retar が対応していないため解析をスキップ
+      const hasSuddenDeath = [...vs.statuses.values()].some(s => !s.surviving && s.causeOfDeath === 'sudden_death')
+      if (hasSuddenDeath) {
+        analysisSeats = []
+        analysisError = '突然死を含む盤面は解析できません'
+        analysisStatsInfo = null
+        analysisCached = false
+        analysisTotalElapsed = Math.round(performance.now() - runStart)
+        gmorkResult = ''
+        analyzing = false
+        return
+      }
+
       // キャッシュチェック: 同じ行で同じテキスト+assumptionsならRetar再計算をスキップ
       const { key: cacheKey, hash: cacheHash } = computeAnalysisHash(input, cursorLine, assumptions)
       const cached = analysisCache.get(cacheKey)
