@@ -89,6 +89,12 @@ export type GameHandlers<E = never, Ext = unknown> = {
   /** 投票フェーズ: 各プレイヤーの投票先を返す（再投票時にも呼ばれる） */
   onVote(ctx: VoteContext<E, Ext>): MaybePromise<Map<number, number>>
 
+  /**
+   * 勝利判定の上書き（任意）。指定時はエンジン標準の checkWinCondition の代わりに呼ばれる。
+   * state.finished / state.result を直接設定する。
+   */
+  checkWinCondition?(state: GameState<Ext>): void
+
   /** イベント通知（観測用、任意） */
   onEvent?(event: GameEvent | E): void
 

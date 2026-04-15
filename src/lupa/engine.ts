@@ -175,6 +175,7 @@ async function runGameLoop<E = never, Ext = unknown>(
   seatRoles?: Map<number, SystemRole>,
 ): Promise<void> {
   const players = state.players
+  const checkWin = handlers.checkWinCondition ?? checkWinCondition
 
   for (let day = startDay; day <= MAX_DAYS && !state.finished; day++) {
     state.day = day
@@ -197,7 +198,7 @@ async function runGameLoop<E = never, Ext = unknown>(
 
       resolveNight(state, actionsList, events, emit, rng)
 
-      checkWinCondition(state)
+      checkWin(state)
       if (state.finished) {
         emit({ type: 'game_over', result: state.result! })
         break
@@ -350,7 +351,7 @@ async function runGameLoop<E = never, Ext = unknown>(
     checkImmoralistFollow(state, emit)
 
     // 勝利判定
-    checkWinCondition(state)
+    checkWin(state)
     if (state.finished) {
       emit({ type: 'game_over', result: state.result! })
       break

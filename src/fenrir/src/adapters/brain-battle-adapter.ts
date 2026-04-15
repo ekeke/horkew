@@ -24,7 +24,7 @@ import type { MasonBrainAgent } from '../agents/mason-brain.ts'
 import type { GameEvent } from '../../../lupa/types.ts'
 import { StrategyBaseAdapter } from './strategy-base-adapter.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
-import { alivePlayers } from '../../../lupa/roles.ts'
+import { alivePlayers, checkWinCondition } from '../../../lupa/roles.ts'
 import { trace } from '../trace.ts'
 
 // ============================================================
@@ -57,6 +57,25 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
     this.wolfBrain = config.wolfBrain
     this.masonBrain = config.masonBrain
     this.turnOwner = config.fixedTurnOwner ?? 'mason'
+  }
+
+  /**
+   * BB 拡張勝利判定: 標準ルール → PP 即決 (狐非生存 + 狼陣営半数以上)
+   * 「狼陣営」= werewolf + fanatic。狐生存中は判定しない（狐勝ち優先）。
+   */
+  checkWinCondition(state: GameState<FenrirExt>): void {
+    checkWinCondition(state)
+    if (state.finished) return
+
+    const alive = state.players.filter(p => p.alive)
+    const hasFox = alive.some(p => p.role === 'werehamster')
+    if (hasFox) return
+
+    const wolfTeam = alive.filter(p => p.role === 'werewolf' || p.role === 'fanatic').length
+    if (wolfTeam * 2 >= alive.length) {
+      state.finished = true
+      state.result = 'werewolf_won'
+    }
   }
 
   /** コメントイベントを events に追加 */
