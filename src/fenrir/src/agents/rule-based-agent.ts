@@ -2035,7 +2035,15 @@ export class WolfTeamRuleAgent implements TeamAgent {
     if (aliveWolves.length === 0) return { target: 1, attacker: ctx.teamSeats[0] }
 
     const wolfSeats = new Set(ctx.teamSeats)
-    const candidates = alivePlayers(state).filter(p => !wolfSeats.has(p.seat))
+    let candidates = alivePlayers(state).filter(p => !wolfSeats.has(p.seat))
+    // ラスト狼: 確定猫又を除外（噛むと道連れで即負け）
+    if (aliveWolves.length === 1 && ctx.retarPossibilities) {
+      const filtered = candidates.filter(p => {
+        const roles = ctx.retarPossibilities!.get(p.seat)
+        return !(roles && roles.size === 1 && [...roles][0] === 'nekomata')
+      })
+      if (filtered.length > 0) candidates = filtered
+    }
     if (candidates.length === 0) return { target: 1, attacker: aliveWolves[0].seat }
 
     const rng = ctx.rng

@@ -440,16 +440,37 @@ export const TEAM_HEAD_SIZES = {
   attacker: MAX_WOLVES,    // 襲撃者選択 softmax (チーム内インデックス)
 } as const
 
-/** 襲撃先マスク: 生存者で非狼 */
+/** 襲撃先マスク: 生存者で非狼。
+ *  最終狼 (生存狼が1匹) のときは確定猫又を除外（噛むと道連れで即負け）。*/
 export function maskAttackTarget(ctx: TeamDecisionContext): Float32Array {
   const mask = new Float32Array(TEAM_HEAD_SIZES.attack_target).fill(-Infinity)
   const teamSet = new Set(ctx.teamSeats)
+  const aliveWolves = ctx.teamPlayers.filter(p => p.alive).length
+  const excludeNeko = aliveWolves <= 1 ? confirmedNekomataSeats(ctx) : null
   for (const seat of ctx.alivePlayers) {
-    if (!teamSet.has(seat) && seat <= SEATS) {
-      mask[seat - 1] = 0
+    if (teamSet.has(seat) || seat > SEATS) continue
+    if (excludeNeko && excludeNeko.has(seat)) continue
+    mask[seat - 1] = 0
+  }
+  // Fallback: if everything got masked out (all non-wolf alive are confirmed nekomata),
+  // re-open the nekomata seats — forced loss, but we must emit a valid action.
+  if (mask.every(v => v === -Infinity)) {
+    for (const seat of ctx.alivePlayers) {
+      if (!teamSet.has(seat) && seat <= SEATS) mask[seat - 1] = 0
     }
   }
   return mask
+}
+
+/** Retar possibilities から確定猫又席を抽出 */
+function confirmedNekomataSeats(ctx: TeamDecisionContext): Set<number> {
+  const result = new Set<number>()
+  const retar = ctx.retarPossibilities
+  if (!retar) return result
+  for (const [seat, roles] of retar) {
+    if (roles.size === 1 && [...roles][0] === 'nekomata') result.add(seat)
+  }
+  return result
 }
 
 /** 襲撃者マスク: 生存狼のみ (チーム内インデックス) */
