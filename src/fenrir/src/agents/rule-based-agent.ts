@@ -1594,12 +1594,8 @@ function decideFanaticClaim(ctx: DecisionContext): DayClaim {
     const alive = alivePlayersExcept(state, myPlayer.seat)
     for (let n = 0; n < day; n++) { if (alive.length > 0) targets.push(rng.pick(alive).seat) }
     return { type: 'bodyguard_co', targets }
-  } else if (r < 0.93) {
-    // 共有騙り (5%) — 適当な非狼をパートナーに
-    const alive = alivePlayersExcept(state, myPlayer.seat)
-    if (alive.length > 0) return { type: 'mason_co', partner: rng.pick(alive).seat }
   }
-  // 潜伏 (7%)
+  // 潜伏 (12%) — 共有CO は禁止（mason は2人組のため対抗で即バレ）
   return { type: 'none' }
 }
 
