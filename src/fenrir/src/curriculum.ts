@@ -552,7 +552,7 @@ function buildBBPlusCurriculum(): PhaseStep[] {
       ...bbPlusBase,
       name: 'bb_plus_all',
       displayName: 'Phase BB+ Stage 6: All Individual Agents',
-      activeModels: ['wolf_brain', 'village', 'fanatic', 'third'],
+      activeModels: ['wolf_brain', 'mason_collective', 'village', 'fanatic', 'third'],
       graduation: { type: 'none' as const },
       agentAssignment: {
         village: 'neural',

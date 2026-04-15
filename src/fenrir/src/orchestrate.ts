@@ -1051,11 +1051,20 @@ async function main(): Promise<void> {
           stageTfs.push(wolfBrainTfStage)
         }
 
+        // mason_brain を学習対象に含むステージ（bb_plus_all の共進化）では TF を作る
+        const masonBrainIsLearning = step.activeModels.includes('mason_collective' as any)
+        const stageTfNetworks = new Map<string, AnyTfNetwork>()
+        if (masonBrainIsLearning) {
+          const masonBrainTfStage = createMasonBrainTfNetwork(config.learningRate)
+          stageTfs.push(masonBrainTfStage)
+          stageTfNetworks.set('mason_collective', masonBrainTfStage)
+        }
+
         try {
           const stageCtx: PhaseRunnerContext = {
             config, trainingConfig: bbTrainingConfig, progress, runId, gitSha,
             networks: new Map<string, AnyNetwork>([['mason_collective', masonBrainNet]]),
-            tfNetworks: new Map<string, AnyTfNetwork>(),
+            tfNetworks: stageTfNetworks,
             frozenWeights: frozenWeightsMap,
             frozenNets: new Map(),
             wolfBrainNetwork: wolfBrainNet,
