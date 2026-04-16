@@ -5,8 +5,7 @@
   import { Possibilities, ROLE_COUNT, RoleBitIndex, possibilityFromRoles } from '../src/retar/possibilities.ts'
   import { computeRoleProbabilities, getRoleProbability } from '../src/skoll/index.ts'
   import type { RoleProbabilities } from '../src/skoll/index.ts'
-  import { analyzeExecutions } from '../src/skoll/analysis.ts'
-  import type { ExecutionAnalysis } from '../src/skoll/types.ts'
+  import { analyzeExecutionsByWorld, type WorldExecutionAnalysis } from '../src/skoll/world-analysis.ts'
 
   let {
     vs,
@@ -23,7 +22,7 @@
   let error = $state('')
   let elapsed = $state(0)
 
-  let execResult: ExecutionAnalysis | null = $state(null)
+  let execResult: WorldExecutionAnalysis | null = $state(null)
   let execRunning = $state(false)
   let execError = $state('')
   let execElapsed = $state(0)
@@ -133,7 +132,13 @@
         }
         const retar = new VillageRetar(vs!, setup, options)
         const retarResult = retar.analyze()
-        execResult = analyzeExecutions(vs!, setup, retarResult.result)
+
+        const possibilities = new Possibilities(setup)
+        for (const [seat, roles] of retarResult.result) {
+          possibilities.possibilities[seat] = possibilityFromRoles(roles)
+        }
+
+        execResult = analyzeExecutionsByWorld(possibilities, setup, vs!)
         execElapsed = performance.now() - t0
       } catch (e) {
         execError = e instanceof Error ? e.message : String(e)
@@ -212,9 +217,9 @@
       >{execRunning ? '計算中...' : '吊り分析'}</button>
       {#if execResult}
         <span class="skoll-stats">
-          {execResult.branches.length}分岐 / {execElapsed.toFixed(1)}ms
-          {#if execResult.fallback}
-            <span class="skoll-truncated">（CO情報なし）</span>
+          {execResult.totalWorlds}{execResult.truncated ? '+' : ''}世界 / {execElapsed.toFixed(1)}ms
+          {#if execResult.truncated}
+            <span class="skoll-truncated">（打ち切り・近似値）</span>
           {/if}
         </span>
       {/if}
@@ -258,25 +263,6 @@
         </table>
       </div>
 
-      {#if execResult.branches.length > 1}
-        <details class="branch-details">
-          <summary class="branch-summary">分岐詳細 ({execResult.branches.length})</summary>
-          {#each execResult.branches as branch, i}
-            <div class="branch-item">
-              <div class="branch-header">
-                分岐{i + 1}: 真占い={branch.trueSeer ? playerName(branch.trueSeer) : 'なし'}
-                (重み {(branch.weight * 100).toFixed(0)}%)
-              </div>
-              <div class="branch-stats">
-                グレー{branch.classification.grayCount}
-                / 狼{branch.classification.wolvesInGray}
-                / 確定村{branch.classification.confirmedVillageCount}
-                / 確定狼{branch.classification.confirmedWolfCount}
-              </div>
-            </div>
-          {/each}
-        </details>
-      {/if}
     {/if}
   </div>
 </div>
