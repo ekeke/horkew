@@ -17,6 +17,7 @@
   import YouTubePlayer from './YouTubePlayer.svelte'
   import ColorSwatchPane from './ColorSwatchPane.svelte'
   import HatiPane from './HatiPane.svelte'
+  import SkollPane from './SkollPane.svelte'
   import GmorkDebugPane from './GmorkDebugPane.svelte'
   import InspectPane from './InspectPane.svelte'
   import PretrainPane from './PretrainPane.svelte'
@@ -93,6 +94,7 @@
     { id: 'analysis', label: 'Analysis' },
     { id: 'colorSwatch', label: 'Color Swatch' },
     { id: 'hati', label: 'Hati (詰み)' },
+    { id: 'skoll', label: 'Skoll (確率)' },
     { id: 'gmorkDebug', label: 'Gmork Debug' },
     { id: 'fenrirInspect', label: 'Fenrir Inspect' },
     { id: 'pretrainViz', label: 'Pretrain Viz' },
@@ -111,7 +113,7 @@
     panes: Record<PaneId, boolean>
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, gmorkDebug: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false }
+  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, gmorkDebug: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: 'off', panes: { ...defaultPanes } }
@@ -1677,6 +1679,15 @@
       <div class="pane-header">Hati (詰み探索)</div>
       <div class="pane-body">
         <HatiPane vs={villageStatus} setup={currentSetup} {players} />
+      </div>
+    </section>
+    {/if}
+
+    {#if paneVisible.skoll}
+    <section class="pane">
+      <div class="pane-header">Skoll (確率分布)</div>
+      <div class="pane-body">
+        <SkollPane vs={villageStatus} setup={currentSetup} {players} />
       </div>
     </section>
     {/if}
