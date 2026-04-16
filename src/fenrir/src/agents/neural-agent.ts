@@ -3,16 +3,16 @@
  * TransformerNetworkの推論結果をLupaのアクションに変換する。
  */
 
-import type { Agent, DecisionContext } from './agent.ts'
+import type { DecisionContext } from './agent.ts'
 import type { NightAction, DayClaim } from '../../../lupa/types.ts'
 import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
 import type { AnyNetwork, ForwardResult, PlanContext } from '../ml/nn.ts'
-import type { TrajectoryStep } from '../ml/trajectory.ts'
+import { NeuralAgentBase } from './team-base.ts'
 import { encodeObservation, SEATS, CO_ROLES } from '../observation.ts'
 import {
   maskNightAction, maskClaim, applyTruthfulClaimMask, maskVote, maskComm, maskPropose, maskPredict, maskLeader, maskTarget,
-  sampleMasked, CLAIM,
+  CLAIM,
   decodeNightActionWithRole, decodeClaim, decodeComm, decodePropose, decodePredict, decodeLeader,
 } from '../action.ts'
 import { generateStrategicFakeResult, revalidateFakeDivineHistory, reportFakeMediumResult } from './rule-based-agent.ts'
@@ -36,26 +36,10 @@ export type NeuralAgentConfig = {
   truthfulRole?: import('../../../types/index.ts').SystemRole
 }
 
-export class NeuralAgent implements Agent {
-  readonly network: AnyNetwork
-  readonly config: NeuralAgentConfig
-
-  /** 学習時にトラジェクトリを収集するバッファ */
-  trajectory: TrajectoryStep[] = []
-  /** NN推論の累積時間 (ms) */
-  inferMs = 0
-  /** NN推論の呼び出し回数 */
-  inferCount = 0
+export class NeuralAgent extends NeuralAgentBase<DecisionContext> {
   /** 戦略NN出力キャッシュ（strategyOnly時、1日1回計算） */
   private cachedStrategyResult: ForwardResult | null = null
   private cachedDay = -1
-
-  constructor(network: AnyNetwork, config?: Partial<NeuralAgentConfig>) {
-    this.network = network
-    this.config = { explore: true, ...config }
-  }
-
-  protected lastObs: Float32Array | null = null
 
   /** 村側役職の集合（確定白判定用） */
   private static readonly VILLAGE_ROLES: ReadonlySet<string> = new Set([
@@ -120,7 +104,7 @@ export class NeuralAgent implements Agent {
     return { aliveSeats, claimedRoles, confirmedVillageSeats, mySeat: ctx.mySeat - 1, maskedRoles }
   }
 
-  protected infer(ctx: DecisionContext): ForwardResult {
+  protected override infer(ctx: DecisionContext): ForwardResult {
     const t = performance.now()
     const obs = encodeObservation(ctx)
     this.lastObs = obs
@@ -142,92 +126,6 @@ export class NeuralAgent implements Agent {
       this.cachedDay = ctx.day
     }
     return result
-  }
-
-  private record(
-    head: string, actionIdx: number,
-    logProb: number, value: number, reward: number,
-    seat: number,
-    day?: number,
-  ): void {
-    this.trajectory.push({
-      seat,
-      day,
-      observation: this.lastObs!,
-      actionHead: head,
-      actionIdx,
-      logProb,
-      reward,
-      value,
-      done: false,
-    })
-  }
-
-  private selectAction(
-    logits: Float32Array, mask: Float32Array,
-  ): { action: number, logProb: number } {
-    if (this.config.explore) {
-      return sampleMasked(logits, mask)
-    }
-    let bestIdx = 0
-    let bestVal = -Infinity
-    for (let i = 0; i < logits.length; i++) {
-      const val = logits[i] + mask[i]
-      if (val > bestVal) {
-        bestVal = val
-        bestIdx = i
-      }
-    }
-    return { action: bestIdx, logProb: 0 }
-  }
-
-  /** Sigmoid head: 各次元を独立にサンプリング/閾値判定 */
-  private selectSigmoidAction(
-    logits: Float32Array, mask: Float32Array,
-  ): { actions: Float32Array, logProb: number } {
-    const masked = new Float32Array(logits.length)
-    for (let i = 0; i < logits.length; i++) {
-      masked[i] = logits[i] + mask[i]
-    }
-    const probs = sigmoid(masked)
-    const actions = new Float32Array(logits.length)
-    let logProb = 0
-
-    for (let i = 0; i < logits.length; i++) {
-      if (mask[i] === -Infinity) {
-        actions[i] = 0
-        continue
-      }
-      const p = probs[i]
-      if (this.config.explore) {
-        actions[i] = Math.random() < p ? 1 : 0
-      } else {
-        actions[i] = p >= 0.5 ? 1 : 0
-      }
-      logProb += actions[i] === 1
-        ? Math.log(p + 1e-8)
-        : Math.log(1 - p + 1e-8)
-    }
-
-    return { actions, logProb }
-  }
-
-  private recordSigmoid(
-    head: string, actions: Float32Array,
-    logProb: number, value: number, reward: number,
-    seat: number,
-  ): void {
-    this.trajectory.push({
-      seat,
-      observation: this.lastObs!,
-      actionHead: head,
-      actionIdx: -1,
-      logProb,
-      reward,
-      value,
-      done: false,
-      sigmoidActions: actions,
-    })
   }
 
   /** 戦略ステップ（plan tokens + predict）を1つのtrajectoryステップとして記録 */
@@ -416,7 +314,7 @@ export class NeuralAgent implements Agent {
     const proposeLogits = result.policies.get('propose')!
     const proposeMask = maskPropose(ctx)
     const { actions: proposeActions, logProb: proposeLogProb } = this.selectSigmoidAction(proposeLogits, proposeMask)
-    this.recordSigmoid('propose', proposeActions, proposeLogProb, result.value, 0, ctx.mySeat)
+    this.recordSigmoid('propose', proposeActions, proposeLogProb, result.value, 0, ctx.mySeat, ctx.day)
     const proposals = decodePropose(proposeActions, 0.5)
 
     let predictions = undefined
@@ -478,11 +376,10 @@ export class NeuralAgent implements Agent {
     return this.decodeClaimWithFakeGen(claimIdx, targetIdx, ctx)
   }
 
-  /** トラジェクトリをリセット */
-  resetTrajectory(): void {
-    this.trajectory = []
-    this.inferMs = 0
-    this.inferCount = 0
+  override resetTrajectory(): void {
+    super.resetTrajectory()
+    this.cachedStrategyResult = null
+    this.cachedDay = -1
   }
 }
 

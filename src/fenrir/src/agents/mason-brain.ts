@@ -6,17 +6,14 @@
  * WolfBrainAgent と対称的な構造。
  */
 
-import type { TeamDecisionContext, TeamAgent } from './agent.ts'
-import type { NightAction, DayClaim } from '../../../lupa/types.ts'
+import type { TeamDecisionContext } from './agent.ts'
 import type { AnyNetwork, ForwardResult } from '../ml/nn.ts'
 import type { NeuralAgentConfig } from './neural-agent.ts'
-import type { CommunicationAction } from '../communication.ts'
-import type { Proposal, LeadershipResponse } from '../leadership.ts'
 import { encodeCollectiveMasonObservation, SEATS } from '../observation.ts'
 import { CollectiveAgentBase } from './team-base.ts'
 import { trace } from '../trace.ts'
 
-export class MasonBrainAgent extends CollectiveAgentBase implements TeamAgent {
+export class MasonBrainAgent extends CollectiveAgentBase {
   constructor(network: AnyNetwork, config?: Partial<NeuralAgentConfig>) {
     super(network, config)
   }
@@ -59,39 +56,7 @@ export class MasonBrainAgent extends CollectiveAgentBase implements TeamAgent {
     return action + 1  // 0-indexed → 1-indexed seat
   }
 
-  // ============================================================
-  // TeamAgent interface (BB adapter は直接呼ばないが interface 上必要)
-  // ============================================================
-
-  decideNightAction(_ctx: TeamDecisionContext): NightAction {
-    return { type: 'none' }
-  }
-
-  decideDayClaim(_ctx: TeamDecisionContext): DayClaim {
-    return { type: 'none' }
-  }
-
-  decideForecast(_ctx: TeamDecisionContext): DayClaim {
-    return { type: 'none' }
-  }
-
-  decideVote(ctx: TeamDecisionContext): number {
+  override decideVote(ctx: TeamDecisionContext): number {
     return this.decideExecution(ctx)
-  }
-
-  decideCommunication(_ctx: TeamDecisionContext): CommunicationAction {
-    return { signal: { type: 'no_signal' }, proposals: [] }
-  }
-
-  decideProposal(_ctx: TeamDecisionContext): Proposal | null {
-    return null
-  }
-
-  decideLeadershipResponse(_ctx: TeamDecisionContext, _proposal: Proposal): LeadershipResponse {
-    return 'follow'
-  }
-
-  decideDefensiveClaim(_ctx: TeamDecisionContext): DayClaim {
-    return { type: 'none' }
   }
 }
