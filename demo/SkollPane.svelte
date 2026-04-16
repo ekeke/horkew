@@ -5,6 +5,8 @@
   import { Possibilities, ROLE_COUNT, RoleBitIndex, possibilityFromRoles } from '../src/retar/possibilities.ts'
   import { computeRoleProbabilities, getRoleProbability } from '../src/skoll/index.ts'
   import type { RoleProbabilities } from '../src/skoll/index.ts'
+  import { analyzeExecutions } from '../src/skoll/analysis.ts'
+  import type { ExecutionAnalysis } from '../src/skoll/types.ts'
 
   let {
     vs,
@@ -20,6 +22,11 @@
   let running = $state(false)
   let error = $state('')
   let elapsed = $state(0)
+
+  let execResult: ExecutionAnalysis | null = $state(null)
+  let execRunning = $state(false)
+  let execError = $state('')
+  let execElapsed = $state(0)
 
   /** setup に含まれる role 一覧（表示列用） */
   let activeRoles: SystemRole[] = $derived(
@@ -99,6 +106,37 @@
     mason: '共', nekomata: '猫', werewolf: '狼', possessed: '狂',
     fanatic: '信', werehamster: '狐', immoralist: '背',
   }
+
+  function runExecAnalysis() {
+    if (!vs || setup.size === 0) return
+    execRunning = true
+    execError = ''
+    execResult = null
+
+    setTimeout(() => {
+      try {
+        const t0 = performance.now()
+        execResult = analyzeExecutions(vs!, setup)
+        execElapsed = performance.now() - t0
+      } catch (e) {
+        execError = e instanceof Error ? e.message : String(e)
+      } finally {
+        execRunning = false
+      }
+    }, 10)
+  }
+
+  function formatWinRate(p: number): string {
+    return (p * 100).toFixed(1) + '%'
+  }
+
+  function winRateClass(p: number, isBest: boolean): string {
+    if (isBest) return 'wr-best'
+    if (p === 0) return 'wr-zero'
+    if (p >= 0.5) return 'wr-high'
+    if (p >= 0.2) return 'wr-mid'
+    return 'wr-low'
+  }
 </script>
 
 <div class="skoll-pane">
@@ -147,6 +185,83 @@
       </table>
     </div>
   {/if}
+
+  <div class="exec-section">
+    <div class="skoll-controls">
+      <button
+        class="skoll-btn"
+        onclick={runExecAnalysis}
+        disabled={execRunning || !vs || setup.size === 0}
+      >{execRunning ? '計算中...' : '吊り分析'}</button>
+      {#if execResult}
+        <span class="skoll-stats">
+          {execResult.branches.length}分岐 / {execElapsed.toFixed(1)}ms
+          {#if execResult.fallback}
+            <span class="skoll-truncated">（CO情報なし）</span>
+          {/if}
+        </span>
+      {/if}
+    </div>
+
+    {#if execError}
+      <div class="skoll-error">{execError}</div>
+    {/if}
+
+    {#if execResult}
+      <div class="exec-summary">
+        全体勝率: <span class="exec-overall">{formatWinRate(execResult.overallWinRate)}</span>
+        / 最善手: <span class="exec-best">{playerName(execResult.bestExecution)}</span>
+      </div>
+
+      <div class="skoll-table-wrap">
+        <table class="skoll-table">
+          <thead>
+            <tr>
+              <th class="skoll-th-name">吊り候補</th>
+              <th class="skoll-th-role">勝率</th>
+              <th class="skoll-th-role">バー</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each execResult.executions
+              .filter(e => vs!.statuses.get(e.seat)?.surviving)
+              .sort((a, b) => b.winRate - a.winRate) as ex}
+              {@const isBest = ex.seat === execResult.bestExecution}
+              <tr class:exec-best-row={isBest}>
+                <td class="skoll-td-name">{playerName(ex.seat)}</td>
+                <td class="skoll-td-prob {winRateClass(ex.winRate, isBest)}">
+                  {formatWinRate(ex.winRate)}
+                </td>
+                <td class="exec-bar-cell">
+                  <div class="exec-bar" style="width: {Math.max(ex.winRate * 100, 0.5)}%"></div>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+
+      {#if execResult.branches.length > 1}
+        <details class="branch-details">
+          <summary class="branch-summary">分岐詳細 ({execResult.branches.length})</summary>
+          {#each execResult.branches as branch, i}
+            <div class="branch-item">
+              <div class="branch-header">
+                分岐{i + 1}: 真占い={branch.trueSeer ? playerName(branch.trueSeer) : 'なし'}
+                (重み {(branch.weight * 100).toFixed(0)}%)
+              </div>
+              <div class="branch-stats">
+                グレー{branch.classification.grayCount}
+                / 狼{branch.classification.wolvesInGray}
+                / 確定村{branch.classification.confirmedVillageCount}
+                / 確定狼{branch.classification.confirmedWolfCount}
+              </div>
+            </div>
+          {/each}
+        </details>
+      {/if}
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -258,6 +373,102 @@
   }
 
   .prob-low {
+    color: var(--ctp-subtext0);
+  }
+
+  /* ── 吊り分析セクション ── */
+
+  .exec-section {
+    border-top: 1px solid var(--ctp-surface1);
+    padding-top: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .exec-summary {
+    font-size: 0.8rem;
+    color: var(--ctp-subtext0);
+  }
+
+  .exec-overall {
+    color: var(--ctp-text);
+    font-weight: bold;
+  }
+
+  .exec-best {
+    color: var(--ctp-green);
+    font-weight: bold;
+  }
+
+  .exec-best-row {
+    background: color-mix(in srgb, var(--ctp-green) 10%, transparent);
+  }
+
+  .wr-best {
+    color: var(--ctp-green);
+    font-weight: bold;
+  }
+
+  .wr-zero {
+    color: var(--ctp-surface2);
+  }
+
+  .wr-high {
+    color: var(--ctp-blue);
+    font-weight: bold;
+  }
+
+  .wr-mid {
+    color: var(--ctp-peach);
+  }
+
+  .wr-low {
+    color: var(--ctp-subtext0);
+  }
+
+  .exec-bar-cell {
+    width: 100px;
+    padding: 0.2rem 0.4rem;
+  }
+
+  .exec-bar {
+    height: 0.6rem;
+    background: var(--ctp-blue);
+    border-radius: 2px;
+    min-width: 1px;
+  }
+
+  .exec-best-row .exec-bar {
+    background: var(--ctp-green);
+  }
+
+  .branch-details {
+    font-size: 0.75rem;
+    color: var(--ctp-subtext0);
+  }
+
+  .branch-summary {
+    cursor: pointer;
+    color: var(--ctp-subtext1);
+  }
+
+  .branch-summary:hover {
+    color: var(--ctp-text);
+  }
+
+  .branch-item {
+    padding: 0.2rem 0 0.2rem 1rem;
+    border-left: 2px solid var(--ctp-surface1);
+    margin: 0.2rem 0;
+  }
+
+  .branch-header {
+    color: var(--ctp-text);
+    font-weight: bold;
+  }
+
+  .branch-stats {
     color: var(--ctp-subtext0);
   }
 </style>

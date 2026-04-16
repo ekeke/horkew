@@ -1,61 +1,49 @@
 # Skoll TODO
 
+## 概要
+
+Retar の制約知識を戦略的特徴量に変換するモジュール。
+Hati が「詰みがあるか」（二値）を答えるのに対し、Skoll は「最善手と勝率」（連続値）を答える。
+
 ## 完了
 
 - [x] Step 1: 確率分布 — Retar の binary possibilities を全ワールド均等重みの role 確率に変換 (`computeRoleProbabilities`)
+- [x] Step 2: CO構造ベース解析的勝率 — 占いCOから世界分岐を構築し、吊り候補別の村勝率を計算 (`analyzeExecutions`)
+  - `winrate.ts`: 再帰的勝率計算（grays/wolves/confirmed/alive の4整数、メモ化）
+  - `branches.ts`: 占いCO分析、共有CO認識、座席分類
+  - `analysis.ts`: 分岐 × 吊り候補の勝率統合
 
 ## 次のステップ
 
-### Step 2: 吊り別ワールド分岐
+### Step 2b: 霊媒CO分岐
 
-各吊り候補について、処刑後の観測（霊媒結果）でワールドを分岐させる。
+霊媒COも占いと同様に分岐を構築する。霊能ローラーの価値を定量化できるようになる。
 
-- 入力: `Possibilities` + `setup` + 生存者
-- 処理: 各 seat を処刑 → 霊媒結果（人間/人狼）でワールドを分割
-- 出力: `{ seat, mediumResult, worlds[], alive }[]` の構造
-- Hati の `simulate.ts` にある霊媒結果計算・猫又道連れを流用
+- 霊媒の結果は処刑者の種族（人間/人狼）
+- 占い分岐と霊媒分岐の直積で全分岐を生成
 
-### Step 3: 夜フェーズのシミュレーション
+### Step 2c: 分岐重み付け
 
-処刑後の夜を通過させ、翌日の盤面を得る。
+現在は均等重み (1/N)。Retar の確率分布 (Step 1) を使って「seat X が真占いである確率」で重み付けすればより正確に。
 
-- 狼の噛み先: 全パターン列挙 or 最悪ケース（Hati 方式）or 均等ランダム
-- 占い結果・狩人護衛の分岐
-- 死亡・生存の更新
-- 狐噛み（不死）、猫又噛み（道連れ）等の特殊処理
+### Step 3: 狐 (werehamster) 対応
 
-### Step 4: 終端評価と勝率バックプロパゲーション
+狐生存時の勝利条件が変わる（村全滅でも狐勝ち）。勝率計算に第三勢力を導入。
 
-夜通過後の盤面を再帰的に評価し、勝率を算出する。
+### Step 4: Fenrir 統合
 
-- 終端条件: 村勝ち / 狼勝ち / 狐勝ち の判定（`checkOutcome`）
-- 非終端: 翌日の吊りフェーズへ再帰
-- 各分岐の勝率を重み付き平均で集約
-- 探索深度の上限（maxDepth）
+- `analyzeExecutions` の結果を Fenrir の observation に追加
+- 吊り候補別勝率 (14次元) + 全体勝率 (1次元)
+- reward shaping や heuristic の参考値として利用
 
-### Step 5: 公開 API
+## 夜モデル（v1）
 
-```
-analyzeExecutions(vs, setup, options?) → ExecutionAnalysis
-```
-
-出力イメージ:
-```typescript
-type ExecutionAnalysis = {
-  executions: {
-    seat: number
-    villageWinRate: number
-    wolfWinRate: number
-    hamsterWinRate: number
-  }[]
-  // 吊りなし（平和）の場合の勝率も含む？
-}
-```
+- 狼は confirmed village を優先的に噛む
+- confirmed がいなければ gray の非狼を噛む
+- 護衛・占い将来結果は考慮しない
 
 ## 未決事項
 
-- **狼の行動モデル**: 最悪ケース（minimax）vs 均等ランダム vs 設定可能
-- **占い・狩人の行動**: 村側の最善手を仮定？ランダム？
-- **探索深度**: 何日先まで見るか。深いほど正確だがワールド数が爆発
-- **ワールド数上限**: 大きい村で列挙が爆発する場合の対策（サンプリング？枝刈り？）
-- **Fenrir との統合**: 学習の報酬信号やヒューリスティックとして使うか
+- 護衛のモデリング（護衛成功で夜死亡なし）
+- 占いの将来情報（真占い生存 = 翌日追加情報）
+- 夜モデルの改善（最悪ケース vs 平均ケース）
