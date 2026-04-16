@@ -57,14 +57,20 @@ function extractMasonClaims(vs: VillageStatus, setup: Map<SystemRole, number>): 
   return new Set()
 }
 
+/** 人狼陣営の役職 */
+const WOLF_SIDE_ROLES: SystemRole[] = ['werewolf', 'possessed', 'fanatic']
+
 /**
  * 全 seat を分類する。
  *
- * @param trueSeerSeat - この分岐で真占いとされる seat（null = 占いCOなし）
- * @param trueAssertions - 真占いの主張（黒先・白先）
- * @param masonSeats - 確定共有の seat 一覧
- * @param vs - 村の状態
- * @param setup - 役職構成
+ * 情報源の優先順:
+ * 1. 真占いの黒結果 → confirmed_wolf
+ * 2. 真占いの白結果 / 共有CO / 真占い自身 → confirmed_village
+ * 3. Retar が werewolf を排除 → confirmed_village
+ * 4. Retar が村陣営を全排除（wolf/possessed/fanatic のみ）→ confirmed_wolf
+ * 5. それ以外 → gray
+ *
+ * @param retarPossibilities - Retar の分析結果（省略時は占い結果 + 共有のみで分類）
  */
 export function classifySeats(
   trueSeerSeat: Seat | null,
@@ -72,6 +78,7 @@ export function classifySeats(
   masonSeats: Set<Seat>,
   vs: VillageStatus,
   setup: Map<SystemRole, number>,
+  retarPossibilities?: SeatPossibilityMap,
 ): SeatClassification {
   const categories = new Map<Seat, SeatCategory>()
   const totalWolves = setup.get('werewolf') ?? 0
@@ -118,6 +125,21 @@ export function classifySeats(
     } else if (confirmedVillageSeats.has(seat)) {
       categories.set(seat, 'confirmed_village')
       confirmedVillageCount++
+    } else if (retarPossibilities) {
+      // Retar の possibilities で分類を補強
+      const roles = retarPossibilities.get(seat)
+      if (roles && !roles.has('werewolf')) {
+        // 狼がありえない → 確定村側
+        categories.set(seat, 'confirmed_village')
+        confirmedVillageCount++
+      } else if (roles && [...roles].every(r => WOLF_SIDE_ROLES.includes(r))) {
+        // 村陣営の可能性がゼロ → 確定敵（狼扱い）
+        categories.set(seat, 'confirmed_wolf')
+        confirmedWolfCount++
+      } else {
+        categories.set(seat, 'gray')
+        grayCount++
+      }
     } else {
       categories.set(seat, 'gray')
       grayCount++
@@ -125,12 +147,22 @@ export function classifySeats(
   }
 
   // グレー内の狼数 = 総狼数 - 確定狼（生存+死亡）
-  // 死亡確定狼: 真占いが黒を出した対象のうち死亡者
   let deadConfirmedWolves = 0
   for (const seat of confirmedWolfSeats) {
     const status = vs.statuses.get(seat)
     if (status && !status.surviving) {
       deadConfirmedWolves++
+    }
+  }
+  // Retar 由来の confirmed_wolf も死亡者をカウント
+  if (retarPossibilities) {
+    for (const [seat, status] of vs.statuses) {
+      if (status.surviving) continue
+      if (confirmedWolfSeats.has(seat)) continue // 既にカウント済み
+      const roles = retarPossibilities.get(seat)
+      if (roles && [...roles].every(r => WOLF_SIDE_ROLES.includes(r)) && roles.has('werewolf')) {
+        deadConfirmedWolves++
+      }
     }
   }
   const wolvesInGray = Math.max(0, totalWolves - confirmedWolfCount - deadConfirmedWolves)
@@ -166,7 +198,7 @@ export function buildBranches(
 
   // CO なし or 枠なし → 全員グレーの単一分岐
   if (seerClaims.length === 0 || seerSlots === 0) {
-    return [buildNoCOBranch(masonSeats, vs, setup)]
+    return [buildNoCOBranch(masonSeats, vs, setup, retarPossibilities)]
   }
 
   // 占いCO が枠数以内 → 全員真の単一分岐
@@ -174,7 +206,7 @@ export function buildBranches(
     // 全員の assertions を統合
     const allAssertions = seerClaims.flatMap(c => c.assertions)
     const classification = classifySeats(
-      seerClaims[0].seat, allAssertions, masonSeats, vs, setup,
+      seerClaims[0].seat, allAssertions, masonSeats, vs, setup, retarPossibilities,
     )
     // trueSeerSeat は最初の一人を代表とする（v1簡略化）
     return [{
@@ -211,7 +243,7 @@ export function buildBranches(
       .map(c => c.seat)
 
     const classification = classifySeats(
-      trueClaim.seat, trueClaim.assertions, masonSeats, vs, setup,
+      trueClaim.seat, trueClaim.assertions, masonSeats, vs, setup, retarPossibilities,
     )
 
     branches.push({
@@ -233,8 +265,9 @@ function buildNoCOBranch(
   masonSeats: Set<Seat>,
   vs: VillageStatus,
   setup: Map<SystemRole, number>,
+  retarPossibilities?: SeatPossibilityMap,
 ): Branch {
-  const classification = classifySeats(null, [], masonSeats, vs, setup)
+  const classification = classifySeats(null, [], masonSeats, vs, setup, retarPossibilities)
   return {
     trueSeer: null,
     fakeSeats: [],
