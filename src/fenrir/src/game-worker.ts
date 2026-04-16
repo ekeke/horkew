@@ -15,8 +15,8 @@ import { fullAdapter } from './adapters/full-adapter.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { NeuralAgent } from './agents/neural-agent.ts'
 import { FanaticAgent } from './agents/fanatic-agent.ts'
-import { WolfTeamAgent, WolfCollective } from './agents/wolf-collective.ts'
-import { MasonTeamAgent, MasonCollective } from './agents/mason-collective.ts'
+import { WolfCollective } from './agents/wolf-collective.ts'
+import { MasonCollective } from './agents/mason-collective.ts'
 import { RuleBasedAgent } from './agents/rule-based-agent.ts'
 import { WolfBrainAgent } from './agents/wolf-brain.ts'
 import { MasonBrainAgent } from './agents/mason-brain.ts'
@@ -135,8 +135,8 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     // seat → role マッピング (role フィールド出力用)
     let seatRoleMap: Map<number, SystemRole> | undefined
 
-    let wolfTeamAgent: WolfTeamAgent | WolfCollective | undefined
-    let masonTeamAgent: MasonTeamAgent | MasonCollective | MasonBrainAgent | undefined
+    let wolfTeamAgent: WolfCollective | undefined
+    let masonTeamAgent: MasonCollective | MasonBrainAgent | undefined
     let defaultAgent: RuleBasedAgent | undefined
     let onRolesAssigned: ((seatRoles: Map<number, SystemRole>) => void) | undefined
 
@@ -155,7 +155,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
             wolfTeamAgent = ws
           }
         } else if (wolfTeamNet) {
-          wolfTeamAgent = new WolfTeamAgent(wolfTeamNet, { explore: true })
+          wolfTeamAgent = new WolfCollective(wolfTeamNet, { explore: true })
         }
       }
 
@@ -166,7 +166,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
             masonTeamAgent = new MasonCollective(masonNet, { explore: true })
           }
         } else if (masonTeamNet) {
-          masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: true })
+          masonTeamAgent = new MasonCollective(masonTeamNet, { explore: true })
         }
       }
 
@@ -236,9 +236,9 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     const lupaConfig = { roles, seed } as LupaConfig
 
     // Reset trajectories
-    for (const s of neuralAgents.values()) s.resetTrajectory?.()
-    ;(wolfTeamAgent as any)?.resetTrajectory?.()
-    ;(masonTeamAgent as any)?.resetTrajectory?.()
+    for (const s of neuralAgents.values()) s.resetTrajectory()
+    wolfTeamAgent?.resetTrajectory()
+    masonTeamAgent?.resetTrajectory()
 
     const tGameStart = performance.now()
     let state: import('../../lupa/types.ts').GameState
@@ -469,13 +469,13 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       individualSteps.push({ seat, role, steps: steps.map(serializeStep) })
     }
 
-    const wSteps = (wolfTeamAgent as any)?.trajectory ?? []
+    const wSteps = wolfTeamAgent?.trajectory ?? []
     if (wSteps.length > 0) {
       wSteps[wSteps.length - 1].done = true
       wSteps[wSteps.length - 1].reward += terminalReward('werewolf', state.result ?? '', config.rewardConfig)
     }
 
-    const mSteps = (masonTeamAgent as any)?.trajectory ?? []
+    const mSteps = masonTeamAgent?.trajectory ?? []
     if (mSteps.length > 0) {
       mSteps[mSteps.length - 1].done = true
       mSteps[mSteps.length - 1].reward += terminalReward('mason', state.result ?? '', config.rewardConfig)
@@ -613,13 +613,13 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
       totalInferMs += s.inferMs
       totalInferCount += s.inferCount
     }
-    if (wolfTeamAgent && 'inferMs' in wolfTeamAgent) {
-      totalInferMs += (wolfTeamAgent as any).inferMs
-      totalInferCount += (wolfTeamAgent as any).inferCount ?? 0
+    if (wolfTeamAgent) {
+      totalInferMs += wolfTeamAgent.inferMs
+      totalInferCount += wolfTeamAgent.inferCount
     }
-    if (masonTeamAgent && 'inferMs' in masonTeamAgent) {
-      totalInferMs += (masonTeamAgent as any).inferMs
-      totalInferCount += (masonTeamAgent as any).inferCount ?? 0
+    if (masonTeamAgent) {
+      totalInferMs += masonTeamAgent.inferMs
+      totalInferCount += masonTeamAgent.inferCount
     }
 
     const gameResult: SerializedGameResult = {

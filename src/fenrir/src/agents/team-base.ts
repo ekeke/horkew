@@ -236,8 +236,3 @@ export abstract class CollectiveAgentBase<Ctx extends DecisionContext = Decision
     this.cachedDay = -1
   }
 }
-
-// ── Legacy compat exports ──
-/** @deprecated Use NeuralAgentBase */
-export { NeuralAgentBase as TeamAgentBase }
-/** @deprecated Use CollectiveAgentBase */

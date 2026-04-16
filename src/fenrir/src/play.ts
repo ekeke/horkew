@@ -22,8 +22,8 @@ import {
 } from './training.ts'
 import { loadCheckpoint } from './ml/checkpoint.ts'
 import { NeuralAgent } from './agents/neural-agent.ts'
-import { WolfTeamAgent } from './agents/wolf-collective.ts'
-import { MasonTeamAgent } from './agents/mason-collective.ts'
+import { WolfCollective } from './agents/wolf-collective.ts'
+import { MasonCollective } from './agents/mason-collective.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 
@@ -147,8 +147,8 @@ const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
 const heuristic = new RuleBasedAgent()
 
 // ネットワークとストラテジー構築
-let wolfTeamAgent: WolfTeamAgent | WolfTeamRuleAgent | undefined
-let masonTeamAgent: MasonTeamAgent | MasonTeamRuleAgent | undefined
+let wolfTeamAgent: WolfCollective | WolfTeamRuleAgent | undefined
+let masonTeamAgent: MasonCollective | MasonTeamRuleAgent | undefined
 
 if (mldir) {
   // === --mldir モード: グループ別にモデルをロード ===
@@ -217,13 +217,13 @@ if (mldir) {
   const wolfOverride = modelOverrides.get('werewolf')
   const useWolfMl = wolfOverride ? wolfOverride === 'ml' : defaultModel === 'ml'
   wolfTeamAgent = useWolfMl && groupNets.has('werewolf')
-    ? new WolfTeamAgent(wolfTeamNet, { explore: false })
+    ? new WolfCollective(wolfTeamNet, { explore: false })
     : new WolfTeamRuleAgent()
 
   const masonOverride = modelOverrides.get('mason')
   const useMasonMl = masonOverride ? masonOverride === 'ml' : defaultModel === 'ml'
   masonTeamAgent = useMasonMl && groupNets.has('mason')
-    ? new MasonTeamAgent(masonTeamNet, { explore: false })
+    ? new MasonCollective(masonTeamNet, { explore: false })
     : new MasonTeamRuleAgent()
 
   const gameSeed = seed ?? Math.floor(Math.random() * 100000)

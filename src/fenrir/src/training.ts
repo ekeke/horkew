@@ -27,8 +27,8 @@ import { HEAD_SIZES, TEAM_HEAD_SIZES } from './action.ts'
 import { encodeTrueRoles } from './observation.ts'
 import { NeuralAgent } from './agents/neural-agent.ts'
 import { FanaticAgent } from './agents/fanatic-agent.ts'
-import { WolfTeamAgent, WolfCollective } from './agents/wolf-collective.ts'
-import { MasonTeamAgent, MasonCollective } from './agents/mason-collective.ts'
+import { WolfCollective } from './agents/wolf-collective.ts'
+import { MasonCollective } from './agents/mason-collective.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from './agents/rule-based-agent.ts'
 import { terminalReward, intermediateReward, type RewardConfig, DEFAULT_REWARD_CONFIG } from './reward.ts'
 import { processTrajectories, normalizeAdvantages, computeGAE, type TrajectoryStep, type ProcessedStep } from './ml/trajectory.ts'
@@ -481,8 +481,8 @@ type GameAgents = {
   neuralAgents: Map<number, NeuralAgent>
   defaultAgent?: Agent
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
-  wolfTeamAgent?: WolfTeamAgent
-  masonTeamAgent?: MasonTeamAgent
+  wolfTeamAgent?: WolfCollective
+  masonTeamAgent?: MasonCollective
 }
 
 async function generateGame(
@@ -866,7 +866,7 @@ export async function evaluate(
       if (options?.frozenVillageNet) ws.frozenVillageNetwork = options.frozenVillageNet
       wolfTeamAgent = ws
     } else if (wolfTeamNet) {
-      wolfTeamAgent = new WolfTeamAgent(wolfTeamNet, { explore: false })
+      wolfTeamAgent = new WolfCollective(wolfTeamNet, { explore: false })
     } else {
       wolfTeamAgent = new WolfTeamRuleAgent()
     }
@@ -878,7 +878,7 @@ export async function evaluate(
     } else if (options?.masonCollectiveNet) {
       masonTeamAgent = new MasonCollective(options.masonCollectiveNet, { explore: false })
     } else if (masonTeamNet) {
-      masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: false })
+      masonTeamAgent = new MasonCollective(masonTeamNet, { explore: false })
     } else {
       masonTeamAgent = new MasonTeamRuleAgent()
     }
@@ -1332,7 +1332,7 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
     } else {
       // === 直列フォールバック ===
       const useAsync = config.enableRetar
-      const gamePromises: Array<Promise<{ game: GameTrajectories, neuralAgents: Map<number, NeuralAgent>, wolfTeamAgent?: WolfTeamAgent, masonTeamAgent?: MasonTeamAgent }>> = []
+      const gamePromises: Array<Promise<{ game: GameTrajectories, neuralAgents: Map<number, NeuralAgent>, wolfTeamAgent?: WolfCollective, masonTeamAgent?: MasonCollective }>> = []
 
       for (const seed of seeds) {
         const neuralAgents = new Map<number, NeuralAgent>()
@@ -1378,11 +1378,11 @@ export async function train(config: TrainingConfig = DEFAULT_TRAINING_CONFIG, re
           } : undefined
         }
 
-        let wolfTeamAgent: WolfTeamAgent | undefined
-        let masonTeamAgent: MasonTeamAgent | undefined
+        let wolfTeamAgent: WolfCollective | undefined
+        let masonTeamAgent: MasonCollective | undefined
         if (!useHeuristic || multiModel) {
-          wolfTeamAgent = new WolfTeamAgent(wolfTeamNet, { explore: true })
-          masonTeamAgent = new MasonTeamAgent(masonTeamNet, { explore: true })
+          wolfTeamAgent = new WolfCollective(wolfTeamNet, { explore: true })
+          masonTeamAgent = new MasonCollective(masonTeamNet, { explore: true })
         }
 
         const agents: GameAgents = { neuralAgents, defaultAgent, onRolesAssigned, wolfTeamAgent, masonTeamAgent }

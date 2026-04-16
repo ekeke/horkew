@@ -21,8 +21,8 @@ import {
 } from './training.ts'
 import { loadCheckpoint } from './ml/checkpoint.ts'
 import { NeuralAgent } from './agents/neural-agent.ts'
-import { WolfTeamAgent } from './agents/wolf-collective.ts'
-import { MasonTeamAgent } from './agents/mason-collective.ts'
+import { WolfCollective } from './agents/wolf-collective.ts'
+import { MasonCollective } from './agents/mason-collective.ts'
 import type { AnyNetwork } from './ml/nn.ts'
 import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
@@ -204,8 +204,8 @@ for (let g = 0; g < count; g++) {
   const agentsMap = new Map<number, Agent>()
   const neuralAgents = new Map<number, NeuralAgent>()
 
-  let wolfTeamAgent: WolfTeamAgent | WolfTeamRuleAgent
-  let masonTeamAgent: MasonTeamAgent | MasonTeamRuleAgent
+  let wolfTeamAgent: WolfCollective | WolfTeamRuleAgent
+  let masonTeamAgent: MasonCollective | MasonTeamRuleAgent
 
   const onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
     for (const [seat, role] of seatRoles) {
@@ -237,13 +237,13 @@ for (let g = 0; g < count; g++) {
   const wolfOverride = modelOverrides.get('werewolf')
   const useWolfMl = wolfOverride ? wolfOverride === 'ml' : defaultModel === 'ml'
   wolfTeamAgent = useWolfMl && groupNets.has('werewolf')
-    ? new WolfTeamAgent(wolfTeamNet, { explore: false })
+    ? new WolfCollective(wolfTeamNet, { explore: false })
     : new WolfTeamRuleAgent()
 
   const masonOverride = modelOverrides.get('mason')
   const useMasonMl = masonOverride ? masonOverride === 'ml' : defaultModel === 'ml'
   masonTeamAgent = useMasonMl && groupNets.has('mason')
-    ? new MasonTeamAgent(masonTeamNet, { explore: false })
+    ? new MasonCollective(masonTeamNet, { explore: false })
     : new MasonTeamRuleAgent()
 
   const handlers = strategyOnly

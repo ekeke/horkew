@@ -12,7 +12,7 @@ import type { EnumSpecies, SystemRole } from '../../../types/index.ts'
 import type { GameState, PlayerState, NightAction, DayClaim } from '../../../lupa/types.ts'
 import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
-import type { Agent, DecisionContext, TeamAgent, TeamDecisionContext, WolfNightAction } from './agent.ts'
+import { AgentBase, type DecisionContext, type TeamDecisionContext, type WolfNightAction } from './agent.ts'
 import { alivePlayers, alivePlayersExcept, getMediumResult, isWerewolfAligned } from '../../../lupa/roles.ts'
 import type { Rng } from '../../../lupa/random.ts'
 import { searchTsumiFromEvents, checkRetarConsistency } from '../retar-bridge.ts'
@@ -379,7 +379,7 @@ function tryTsumi(ctx: DecisionContext): number | null {
 // RuleBasedAgent
 // ============================================================
 
-export class RuleBasedAgent implements Agent {
+export class RuleBasedAgent extends AgentBase<DecisionContext> {
   decideNightAction(ctx: DecisionContext): NightAction {
     trace('agent', ctx.day, ctx.mySeat, ctx.myRole, 'RuleBasedAgent.decideNightAction')
     switch (ctx.myRole) {
@@ -2026,7 +2026,7 @@ function decideImmoralistComm(ctx: DecisionContext): CommunicationAction {
 // 狼チームヒューリスティック
 // ============================================================
 
-export class WolfTeamRuleAgent implements TeamAgent {
+export class WolfTeamRuleAgent extends AgentBase<TeamDecisionContext> {
   private individual = new RuleBasedAgent()
 
   decideNightAction(ctx: TeamDecisionContext): WolfNightAction {
@@ -2101,7 +2101,7 @@ export class WolfTeamRuleAgent implements TeamAgent {
 // 共有者チームヒューリスティック
 // ============================================================
 
-export class MasonTeamRuleAgent implements TeamAgent {
+export class MasonTeamRuleAgent extends AgentBase<TeamDecisionContext> {
   private individual = new RuleBasedAgent()
 
   decideNightAction(_ctx: TeamDecisionContext): NightAction {
