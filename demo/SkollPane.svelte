@@ -116,7 +116,24 @@
     setTimeout(() => {
       try {
         const t0 = performance.now()
-        execResult = analyzeExecutions(vs!, setup)
+        const options: AnalyzeOptions = {
+          seerClaimingDueDate: 2,
+          mediumClaimingDueDate: 2,
+          bodyguardClaimingDueDate: 99,
+          masonClaimingDueDate: 2,
+          nekomataClaimingDueDate: 99,
+          dayCountFrom: 1,
+          hasFirstGhost: false,
+          assumptions: new Map(),
+          wolfPairDenyals: [],
+          hocusPocus: new Map(),
+          id: 0,
+          batches: 1,
+          batch: 0,
+        }
+        const retar = new VillageRetar(vs!, setup, options)
+        const retarResult = retar.analyze()
+        execResult = analyzeExecutions(vs!, setup, retarResult.result)
         execElapsed = performance.now() - t0
       } catch (e) {
         execError = e instanceof Error ? e.message : String(e)

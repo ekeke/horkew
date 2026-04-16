@@ -9,6 +9,9 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { Branch, SeatClassification, SeatCategory } from './types.ts'
 
+/** Retar の分析結果: seat → ありえる役職の集合 */
+export type SeatPossibilityMap = Map<Seat, Set<SystemRole>>
+
 type ClaimantInfo = {
   seat: Seat
   assertions: { target: Seat, species: 'human' | 'wolf' }[]
@@ -148,10 +151,14 @@ export function classifySeats(
  *
  * 占いCO が2人で枠1の場合、2つの分岐（A真/B真）を返す。
  * CO がない場合は全員グレーの単一分岐を返す。
+ *
+ * @param retarPossibilities - Retar の分析結果。指定すると seer がありえない
+ *   seat の分岐を除外し、seer 確率で重み付けする。
  */
 export function buildBranches(
   vs: VillageStatus,
   setup: Map<SystemRole, number>,
+  retarPossibilities?: SeatPossibilityMap,
 ): Branch[] {
   const seerClaims = extractSeerClaims(vs)
   const masonSeats = extractMasonClaims(vs, setup)
@@ -180,13 +187,27 @@ export function buildBranches(
 
   // 占いCO > 枠数 → C(N, K) 個の分岐を生成
   // v1: K=1 の場合のみ対応（N 個の分岐）
-  const branches: Branch[] = []
-  const weight = 1 / seerClaims.length
 
-  for (let i = 0; i < seerClaims.length; i++) {
-    const trueClaim = seerClaims[i]
+  // Retar の possibilities で seer がありえる claimant だけに絞る
+  const validClaims = retarPossibilities
+    ? seerClaims.filter(c => {
+      const roles = retarPossibilities.get(c.seat)
+      return roles !== undefined && roles.has('seer')
+    })
+    : seerClaims
+
+  // 全員排除された場合はフォールバック（全 claimant を使う）
+  const effectiveClaims = validClaims.length > 0 ? validClaims : seerClaims
+
+  // 重みを Retar の seer ありえる数で均等割り（確率分布は Step 1 で精密化可能）
+  const branches: Branch[] = []
+  const weight = 1 / effectiveClaims.length
+
+  for (let i = 0; i < effectiveClaims.length; i++) {
+    const trueClaim = effectiveClaims[i]
+    // fakeSeats は全 seer claimant のうち trueClaim 以外
     const fakeSeats = seerClaims
-      .filter((_, j) => j !== i)
+      .filter(c => c.seat !== trueClaim.seat)
       .map(c => c.seat)
 
     const classification = classifySeats(

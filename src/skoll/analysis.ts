@@ -7,7 +7,7 @@
 
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { ExecutionAnalysis, ExecutionOutcome, Branch, SeatClassification } from './types.ts'
-import { buildBranches } from './branches.ts'
+import { buildBranches, type SeatPossibilityMap } from './branches.ts'
 import { computeWinRate } from './winrate.ts'
 
 /**
@@ -15,13 +15,15 @@ import { computeWinRate } from './winrate.ts'
  *
  * @param vs - 村の現在状態
  * @param setup - 役職構成
+ * @param retarPossibilities - Retar の分析結果（省略時は均等重み）
  * @returns 吊り候補ごとの勝率 + 最善手
  */
 export function analyzeExecutions(
   vs: VillageStatus,
   setup: Map<SystemRole, number>,
+  retarPossibilities?: SeatPossibilityMap,
 ): ExecutionAnalysis {
-  const branches = buildBranches(vs, setup)
+  const branches = buildBranches(vs, setup, retarPossibilities)
   const cache = new Map<number, number>()
 
   // 全体の勝率（現状評価、特定の吊りを指定せず）
