@@ -1,5 +1,5 @@
 import type { SystemRole, EnumSpecies, ResolvedRules } from '../types/index.ts'
-import type { Agent, TeamAgent, AsyncAgent, AsyncTeamAgent } from '../fenrir/src/agents/agent.ts'
+import type { Agent, TeamAgent, AgentBase, TeamDecisionContext } from '../fenrir/src/agents/agent.ts'
 
 export type LupaConfig = {
   roles: Map<SystemRole, number>
@@ -26,13 +26,13 @@ export type LupaConfig = {
   /** 投票確定後のCO許可 = 遺言 (デフォルト: false) */
   allowPostVoteCO?: boolean
   /** 非同期エージェント (runGameAsync専用、対話型CLI等) */
-  asyncAgents?: Map<number, AsyncAgent>
+  asyncAgents?: Map<number, AgentBase>
   /** asyncAgentsに未登録のseatに使う非同期エージェント */
-  defaultAsyncAgent?: AsyncAgent
+  defaultAsyncAgent?: AgentBase
   /** 非同期狼チームエージェント */
-  asyncWolfTeamAgent?: AsyncTeamAgent
+  asyncWolfTeamAgent?: AgentBase<TeamDecisionContext>
   /** 非同期共有者チームエージェント */
-  asyncMasonTeamAgent?: AsyncTeamAgent
+  asyncMasonTeamAgent?: AgentBase<TeamDecisionContext>
   /** オプションルール（未指定分はるる鯛14D猫デフォルト） */
   rules?: Partial<ResolvedRules>
 }

@@ -11,11 +11,22 @@ import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
 import type { AnyNetwork, ForwardResult } from '../ml/nn.ts'
 import type { VillageNNOutput } from '../observation.ts'
-import { encodeObservation, encodeCollectiveWolfObservation } from '../observation.ts'
+import { encodeObservation, encodeTeamObservation, encodeCollectiveWolfObservation } from '../observation.ts'
 import { maskAttackTarget, maskAttacker, decodeWolfNightAction } from '../action.ts'
 import { TeamAgentBase, CollectiveAgentBase } from './team-base.ts'
 
+/** @deprecated Use WolfCollective instead */
 export class WolfTeamAgent extends TeamAgentBase implements TeamAgent {
+  protected override infer(ctx: TeamDecisionContext): ForwardResult {
+    const t = performance.now()
+    const obs = encodeTeamObservation(ctx)
+    this.lastObs = obs
+    const result = this.network.forward(obs)
+    this.inferMs += performance.now() - t
+    this.inferCount++
+    return result
+  }
+
   decideNightAction(ctx: TeamDecisionContext): WolfNightAction {
     const result = this.infer(ctx)
 

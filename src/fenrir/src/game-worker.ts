@@ -136,7 +136,7 @@ async function runBatch(req: WorkerRequest): Promise<SerializedGameResult[]> {
     let seatRoleMap: Map<number, SystemRole> | undefined
 
     let wolfTeamAgent: WolfTeamAgent | WolfCollective | undefined
-    let masonTeamAgent: MasonTeamAgent | MasonCollective | undefined
+    let masonTeamAgent: MasonTeamAgent | MasonCollective | MasonBrainAgent | undefined
     let defaultAgent: RuleBasedAgent | undefined
     let onRolesAssigned: ((seatRoles: Map<number, SystemRole>) => void) | undefined
 

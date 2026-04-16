@@ -10,10 +10,21 @@ import type { NightAction, DayClaim } from '../../../lupa/types.ts'
 import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
 import type { ForwardResult } from '../ml/nn.ts'
-import { encodeCollectiveMasonObservation } from '../observation.ts'
+import { encodeTeamObservation, encodeCollectiveMasonObservation } from '../observation.ts'
 import { TeamAgentBase, CollectiveAgentBase } from './team-base.ts'
 
+/** @deprecated Use MasonCollective instead */
 export class MasonTeamAgent extends TeamAgentBase implements TeamAgent {
+  protected override infer(ctx: TeamDecisionContext): ForwardResult {
+    const t = performance.now()
+    const obs = encodeTeamObservation(ctx)
+    this.lastObs = obs
+    const result = this.network.forward(obs)
+    this.inferMs += performance.now() - t
+    this.inferCount++
+    return result
+  }
+
   decideNightAction(_ctx: TeamDecisionContext): NightAction {
     return { type: 'none' }
   }

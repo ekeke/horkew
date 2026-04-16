@@ -1,18 +1,17 @@
 /**
- * チームエージェント共通ベースクラス
+ * NN エージェント共通ベースクラス
  *
- * TeamAgentBase: 基本的なチーム推論・記録
- * CollectiveAgentBase: 1日1回キャッシュ付き推論
+ * NeuralAgentBase: network + 推論・記録ユーティリティ
+ * CollectiveAgentBase: 1日1回キャッシュ付き推論（チーム用）
  */
 
-import type { TeamDecisionContext } from './agent.ts'
+import type { DecisionContext, TeamDecisionContext } from './agent.ts'
+import { AgentBase } from './agent.ts'
 import type { DayClaim } from '../../../lupa/types.ts'
 import type { CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
 import type { AnyNetwork, ForwardResult } from '../ml/nn.ts'
-import type { TrajectoryStep } from '../ml/trajectory.ts'
 import type { NeuralAgentConfig } from './neural-agent.ts'
-import { encodeTeamObservation } from '../observation.ts'
 import {
   maskClaim, maskVote, maskComm, maskPropose, maskPredict, maskLeader, maskTarget,
   sampleMasked,
@@ -20,39 +19,34 @@ import {
 } from '../action.ts'
 import { sigmoid } from '../ml/nn.ts'
 
-export abstract class TeamAgentBase {
+/**
+ * NN ベースエージェントの共通基盤。
+ * network, config, 推論 (abstract infer), 記録, action 選択を提供。
+ */
+export abstract class NeuralAgentBase<Ctx extends DecisionContext = DecisionContext> extends AgentBase<Ctx> {
   readonly network: AnyNetwork
   readonly config: NeuralAgentConfig
-  trajectory: TrajectoryStep[] = []
-  /** NN推論の累積時間 (ms) */
-  inferMs = 0
-  /** NN推論の呼び出し回数 */
-  inferCount = 0
 
   constructor(network: AnyNetwork, config?: Partial<NeuralAgentConfig>) {
+    super()
     this.network = network
     this.config = { explore: true, ...config }
   }
 
   protected lastObs: Float32Array | null = null
 
-  protected infer(ctx: TeamDecisionContext): ForwardResult {
-    const t = performance.now()
-    const obs = encodeTeamObservation(ctx)
-    this.lastObs = obs
-    const result = this.network.forward(obs)
-    this.inferMs += performance.now() - t
-    this.inferCount++
-    return result
-  }
+  /** observation エンコード + NN forward。サブクラスが observation 構築を決定 */
+  protected abstract infer(ctx: Ctx): ForwardResult
 
   protected record(
     head: string, actionIdx: number,
     logProb: number, value: number, reward: number,
     seat: number,
+    day?: number,
   ): void {
     this.trajectory.push({
       seat,
+      day,
       observation: this.lastObs!,
       actionHead: head,
       actionIdx,
@@ -67,9 +61,11 @@ export abstract class TeamAgentBase {
     head: string, actions: Float32Array,
     logProb: number, value: number, reward: number,
     seat: number,
+    day?: number,
   ): void {
     this.trajectory.push({
       seat,
+      day,
       observation: this.lastObs!,
       actionHead: head,
       actionIdx: -1,
@@ -122,9 +118,10 @@ export abstract class TeamAgentBase {
     return { actions, logProb }
   }
 
-  // Day action helpers shared by both team types
+  // ── Team action helpers (shared by team-based subclasses) ──
+
   protected decideDayClaimImpl(ctx: TeamDecisionContext): DayClaim {
-    const result = this.infer(ctx)
+    const result = (this as any).infer(ctx)
     const claimLogits = result.policies.get('claim')!
     const claimMask = maskClaim(ctx)
     const { action: claimIdx, logProb: claimLogProb } = this.selectAction(claimLogits, claimMask)
@@ -133,13 +130,13 @@ export abstract class TeamAgentBase {
     const targetMask = maskTarget(ctx)
     const { action: targetIdx } = this.selectAction(targetLogits, targetMask)
 
-    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
-    this.record('claim', claimIdx, claimLogProb, result.value, 0, seat)
+    const seat = ctx.currentActorSeat ?? (ctx as any).teamSeats?.[0]
+    this.record('claim', claimIdx, claimLogProb, result.value, 0, seat, ctx.day)
     return decodeClaim(claimIdx, targetIdx, ctx)
   }
 
   protected decideForecastImpl(ctx: TeamDecisionContext): DayClaim {
-    const result = this.infer(ctx)
+    const result = (this as any).infer(ctx)
     const targetLogits = result.policies.get('target')!
     const targetMask = maskTarget(ctx)
     const { action: targetIdx } = this.selectAction(targetLogits, targetMask)
@@ -151,29 +148,29 @@ export abstract class TeamAgentBase {
   }
 
   protected decideVoteImpl(ctx: TeamDecisionContext): number {
-    const result = this.infer(ctx)
+    const result = (this as any).infer(ctx)
     const logits = result.policies.get('vote')!
     const mask = maskVote(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
-    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
-    this.record('vote', action, logProb, result.value, 0, seat)
+    const seat = ctx.currentActorSeat ?? (ctx as any).teamSeats?.[0]
+    this.record('vote', action, logProb, result.value, 0, seat, ctx.day)
     return action + 1
   }
 
   protected decideCommunicationImpl(ctx: TeamDecisionContext): CommunicationAction {
-    const result = this.infer(ctx)
-    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
+    const result = (this as any).infer(ctx)
+    const seat = ctx.currentActorSeat ?? (ctx as any).teamSeats?.[0]
 
     const commLogits = result.policies.get('comm')!
     const commMask = maskComm(ctx)
     const { action: commAction, logProb: commLogProb } = this.selectAction(commLogits, commMask)
-    this.record('comm', commAction, commLogProb, result.value, 0, seat)
+    this.record('comm', commAction, commLogProb, result.value, 0, seat, ctx.day)
     const signal = decodeComm(commAction)
 
     const proposeLogits = result.policies.get('propose')!
     const proposeMask = maskPropose(ctx)
     const { actions: proposeActions, logProb: proposeLogProb } = this.selectSigmoidAction(proposeLogits, proposeMask)
-    this.recordSigmoid('propose', proposeActions, proposeLogProb, result.value, 0, seat)
+    this.recordSigmoid('propose', proposeActions, proposeLogProb, result.value, 0, seat, ctx.day)
     const proposals = decodePropose(proposeActions, 0.5)
 
     const predictMask = maskPredict(commAction)
@@ -181,7 +178,7 @@ export abstract class TeamAgentBase {
     if (predictMask[0] !== -Infinity) {
       const predictLogits = result.policies.get('predict')!
       const { actions: predictActions, logProb: predictLogProb } = this.selectSigmoidAction(predictLogits, predictMask)
-      this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, seat)
+      this.recordSigmoid('predict', predictActions, predictLogProb, result.value, 0, seat, ctx.day)
       predictions = decodePredict(predictActions, 0.5)
     }
 
@@ -190,7 +187,7 @@ export abstract class TeamAgentBase {
 
   protected decideProposalImpl(ctx: TeamDecisionContext): Proposal | null {
     if (ctx.commander !== ctx.mySeat) return null
-    const result = this.infer(ctx)
+    const result = (this as any).infer(ctx)
     const logits = result.policies.get('vote')!
     const mask = maskVote(ctx)
     const { action } = this.selectAction(logits, mask)
@@ -198,42 +195,36 @@ export abstract class TeamAgentBase {
   }
 
   protected decideLeadershipResponseImpl(ctx: TeamDecisionContext): LeadershipResponse {
-    const result = this.infer(ctx)
+    const result = (this as any).infer(ctx)
     const logits = result.policies.get('leader')!
     const mask = maskLeader(ctx)
     const { action, logProb } = this.selectAction(logits, mask)
-    const seat = ctx.currentActorSeat ?? ctx.teamSeats[0]
-    this.record('leader', action, logProb, result.value, 0, seat)
+    const seat = ctx.currentActorSeat ?? (ctx as any).teamSeats?.[0]
+    this.record('leader', action, logProb, result.value, 0, seat, ctx.day)
     return decodeLeader(action)
-  }
-
-  resetTrajectory(): void {
-    this.trajectory = []
-    this.inferMs = 0
-    this.inferCount = 0
   }
 }
 
 /**
- * 集団戦略の共通基盤。TeamAgentBase を拡張し、
- * once-per-day キャッシュと集団用observation encoding を提供する。
+ * 集団戦略の共通基盤。NeuralAgentBase を拡張し、
+ * once-per-day キャッシュを提供する。
  */
-export abstract class CollectiveAgentBase extends TeamAgentBase {
+export abstract class CollectiveAgentBase<Ctx extends DecisionContext = DecisionContext> extends NeuralAgentBase<Ctx> {
   private cachedResult: ForwardResult | null = null
   private cachedDay = -1
 
   /** Day-cached inference. Public for external access (e.g., BrainBattleAdapter). */
-  getOrInfer(ctx: TeamDecisionContext): ForwardResult {
-    if (this.cachedDay === ctx.day && this.cachedResult) {
+  getOrInfer(ctx: Ctx): ForwardResult {
+    if (this.cachedDay === (ctx as any).day && this.cachedResult) {
       return this.cachedResult
     }
     const result = this.infer(ctx)
     this.cachedResult = result
-    this.cachedDay = ctx.day
+    this.cachedDay = (ctx as any).day
     return result
   }
 
-  /** Clear day cache to force re-inference (e.g., after defensive CO changes game state) */
+  /** Clear day cache to force re-inference */
   clearDayCache(): void {
     this.cachedResult = null
     this.cachedDay = -1
@@ -245,3 +236,8 @@ export abstract class CollectiveAgentBase extends TeamAgentBase {
     this.cachedDay = -1
   }
 }
+
+// ── Legacy compat exports ──
+/** @deprecated Use NeuralAgentBase */
+export { NeuralAgentBase as TeamAgentBase }
+/** @deprecated Use CollectiveAgentBase */

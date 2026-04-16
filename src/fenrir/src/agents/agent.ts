@@ -10,6 +10,7 @@ import type { GameState, PlayerState, NightAction, DayClaim } from '../../../lup
 import type { SignalRecord, CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
 import type { Rng } from '../../../lupa/random.ts'
+import type { TrajectoryStep } from '../ml/trajectory.ts'
 
 // ============================================================
 // 意思決定コンテキスト
@@ -135,31 +136,36 @@ export type TeamAgent = {
 }
 
 // ============================================================
-// 非同期エージェント（対話型CLI等）
+// AgentBase — 全エージェントの基底クラス
 // ============================================================
 
-type MaybePromise<T> = T | Promise<T>
+/**
+ * 全エージェントの基底クラス。
+ * Ctx 型パラメータで Individual (DecisionContext) / Team (TeamDecisionContext) を統一。
+ * 全メソッドに noop デフォルト実装を持つので、サブクラスは必要なメソッドだけ override すればよい。
+ */
+export class AgentBase<Ctx extends DecisionContext = DecisionContext> {
+  trajectory: TrajectoryStep[] = []
+  inferMs = 0
+  inferCount = 0
 
-/** 非同期対応のエージェントインターフェース — Agent の上位互換 */
-export type AsyncAgent = {
-  decideNightAction(ctx: DecisionContext): MaybePromise<NightAction>
-  decideDayClaim(ctx: DecisionContext): MaybePromise<DayClaim>
-  decideForecast(ctx: DecisionContext): MaybePromise<DayClaim>
-  decideVote(ctx: DecisionContext): MaybePromise<number>
-  decideCommunication(ctx: DecisionContext): MaybePromise<CommunicationAction>
-  decideProposal(ctx: DecisionContext): MaybePromise<Proposal | null>
-  decideLeadershipResponse(ctx: DecisionContext, proposal: Proposal): MaybePromise<LeadershipResponse>
-  decideDefensiveClaim(ctx: DecisionContext): MaybePromise<DayClaim>
-}
+  resetTrajectory(): void {
+    this.trajectory = []
+    this.inferMs = 0
+    this.inferCount = 0
+  }
 
-/** 非同期対応のチームエージェントインターフェース */
-export type AsyncTeamAgent = {
-  decideNightAction(ctx: TeamDecisionContext): MaybePromise<WolfNightAction | NightAction>
-  decideDayClaim(ctx: TeamDecisionContext): MaybePromise<DayClaim>
-  decideForecast(ctx: TeamDecisionContext): MaybePromise<DayClaim>
-  decideVote(ctx: TeamDecisionContext): MaybePromise<number>
-  decideCommunication(ctx: TeamDecisionContext): MaybePromise<CommunicationAction>
-  decideProposal(ctx: TeamDecisionContext): MaybePromise<Proposal | null>
-  decideLeadershipResponse(ctx: TeamDecisionContext, proposal: Proposal): MaybePromise<LeadershipResponse>
-  decideDefensiveClaim(ctx: TeamDecisionContext): MaybePromise<DayClaim>
+  decideNightAction(_ctx: Ctx): NightAction | WolfNightAction { return { type: 'none' } }
+  decideDayClaim(_ctx: Ctx): DayClaim { return { type: 'none' } }
+  decideForecast(_ctx: Ctx): DayClaim { return { type: 'none' } }
+  decideVote(ctx: Ctx): number {
+    const others = ctx.alivePlayers.filter(s => s !== ctx.mySeat)
+    return others[0] ?? ctx.alivePlayers[0]
+  }
+  decideCommunication(_ctx: Ctx): CommunicationAction {
+    return { signal: { type: 'no_signal' }, proposals: [] }
+  }
+  decideProposal(_ctx: Ctx): Proposal | null { return null }
+  decideLeadershipResponse(_ctx: Ctx, _proposal: Proposal): LeadershipResponse { return 'follow' }
+  decideDefensiveClaim(_ctx: Ctx): DayClaim { return { type: 'none' } }
 }
