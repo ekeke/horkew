@@ -55,50 +55,22 @@ export function analyzeExecutionsByWorld(
 
   const cache = new Map<number, number>()
 
+  // ワールドのスコアは (wolfMask, hamsterMask, seerMask, mediumMask, nekomataMask, bodyguardSeat)
+  // だけに依存する。villager/mason/fanatic/possessed/immoralist の配置違いでは同じスコアになる。
+  // 同一シグネチャのワールドをまとめてキャッシュする。
+  const sigCache = new Map<string, Float64Array>()
+
   enumerateWorlds(possibilities, setup, (world) => {
     totalWorlds++
 
+    const sigKey = `${world.wolfMask},${world.hamsterMask},${world.seerMask},${world.mediumMask},${world.nekomataMask},${world.bodyguardSeat}`
+    let scores = sigCache.get(sigKey)
+    if (scores === undefined) {
+      scores = computeScoresForWorld(world, aliveSeats, alive, cache)
+      sigCache.set(sigKey, scores)
+    }
     for (let i = 0; i < aliveSeats.length; i++) {
-      const target = aliveSeats[i]
-      const afterExec = applyExecution(alive, target)
-
-      if ((world.nekomataMask & (1 << target)) !== 0) {
-        // 猫又処刑: ランダム1人道連れ退場 → 全候補で平均
-        const curseCandidates = seatsFromMask(afterExec)
-        if (curseCandidates.length === 0) {
-          // 道連れ対象なし（全員退場済み）→ 猫又のみ退場として扱う
-          const outcome = checkOutcome(world, afterExec)
-          if (outcome === 'village_win') winScores[i] += 1.0
-          else if (outcome === 'hamster_win') winScores[i] += FOX_WIN_PENALTY
-          else if (outcome === 'ongoing') winScores[i] += estimateOngoingWinRate(world, target, afterExec, cache)
-        } else {
-          let cursedScore = 0
-          for (const cursedSeat of curseCandidates) {
-            const afterCurse = removeSeat(afterExec, cursedSeat)
-            const outcome = checkOutcome(world, afterCurse)
-            if (outcome === 'village_win') {
-              cursedScore += 1.0
-            } else if (outcome === 'hamster_win') {
-              cursedScore += FOX_WIN_PENALTY
-            } else if (outcome === 'ongoing') {
-              cursedScore += estimateOngoingWinRate(world, target, afterCurse, cache)
-            }
-            // wolf_win → 0
-          }
-          winScores[i] += cursedScore / curseCandidates.length
-        }
-      } else {
-        // 通常処刑
-        const outcome = checkOutcome(world, afterExec)
-        if (outcome === 'village_win') {
-          winScores[i] += 1.0
-        } else if (outcome === 'hamster_win') {
-          winScores[i] += FOX_WIN_PENALTY
-        } else if (outcome === 'ongoing') {
-          winScores[i] += estimateOngoingWinRate(world, target, afterExec, cache)
-        }
-        // wolf_win → 0
-      }
+      winScores[i] += scores[i]
     }
 
     if (totalWorlds >= maxWorlds) {
@@ -141,6 +113,50 @@ export function analyzeExecutionsByWorld(
     bestExecution: bestSeat,
     overallWinRate,
   }
+}
+
+/**
+ * 1ワールド分の各 seat 処刑スコアを計算する。
+ * 同一シグネチャのワールド間でキャッシュ可能な純関数。
+ */
+function computeScoresForWorld(
+  world: World,
+  aliveSeats: Seat[],
+  alive: number,
+  cache: Map<number, number>,
+): Float64Array {
+  const scores = new Float64Array(aliveSeats.length)
+  for (let i = 0; i < aliveSeats.length; i++) {
+    const target = aliveSeats[i]
+    const afterExec = applyExecution(alive, target)
+
+    if ((world.nekomataMask & (1 << target)) !== 0) {
+      // 猫又処刑: ランダム1人道連れ退場 → 全候補で平均
+      const curseCandidates = seatsFromMask(afterExec)
+      if (curseCandidates.length === 0) {
+        const outcome = checkOutcome(world, afterExec)
+        if (outcome === 'village_win') scores[i] = 1.0
+        else if (outcome === 'hamster_win') scores[i] = FOX_WIN_PENALTY
+        else if (outcome === 'ongoing') scores[i] = estimateOngoingWinRate(world, target, afterExec, cache)
+      } else {
+        let cursedScore = 0
+        for (const cursedSeat of curseCandidates) {
+          const afterCurse = removeSeat(afterExec, cursedSeat)
+          const outcome = checkOutcome(world, afterCurse)
+          if (outcome === 'village_win') cursedScore += 1.0
+          else if (outcome === 'hamster_win') cursedScore += FOX_WIN_PENALTY
+          else if (outcome === 'ongoing') cursedScore += estimateOngoingWinRate(world, target, afterCurse, cache)
+        }
+        scores[i] = cursedScore / curseCandidates.length
+      }
+    } else {
+      const outcome = checkOutcome(world, afterExec)
+      if (outcome === 'village_win') scores[i] = 1.0
+      else if (outcome === 'hamster_win') scores[i] = FOX_WIN_PENALTY
+      else if (outcome === 'ongoing') scores[i] = estimateOngoingWinRate(world, target, afterExec, cache)
+    }
+  }
+  return scores
 }
 
 /**
