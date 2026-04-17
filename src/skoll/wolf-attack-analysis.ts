@@ -7,8 +7,8 @@
  * 勝率の扱い:
  * - terminal `wolf_win` → 1.0（狼勝ち）
  * - terminal `village_win` → 0.0（村に敗北）
- * - terminal `hamster_win` → `FOX_WIN_PENALTY`（狐勝は「普通の敗北より悪い」扱い。
- *   狼が狐を潰す動機づけになる。村側分析と同じ環境変数 `FOX_WIN_PENALTY` を共有）
+ * - terminal `hamster_win` → `WOLF_FOX_WIN_PENALTY`（狐勝は狼にとっても敗北。
+ *   ただし狼は狐を直接噛めないため、ペナルティは村側 (-0.5) より弱めの -0.1 デフォルト）
  * - ongoing → `1 - minimaxWinRate` で近似（`P(wolf_win) + P(hamster_win)` を
  *   含むため将来の狐勝分を過大評価する近似。狐リスクが高い盤面では要改善）
  */
@@ -156,12 +156,13 @@ export function analyzeAttacksByWorld(
 /**
  * 狐勝終端への狼側ペナルティ。
  *
- * `analyzeExecutionsByWorld` と同じ環境変数 `FOX_WIN_PENALTY` を共有する
- * （デフォルト -0.5）。狐勝は狼にとっても敗北だが、通常の village_win (0) より
- * さらに悪いとして扱うことで、狼が狐を潰す（= 狼が占われない・噛まれない狐を
- * 襲撃対象から外さない）動機づけになる。
+ * 狼は狐を直接噛み殺せない（免疫）ため、村陣営の `FOX_WIN_PENALTY` (-0.5) ほど
+ * 強く働かせても「terminal で狐勝になる攻撃を避ける」程度にしか影響せず、
+ * かえって局所最適化を歪めるリスクがある。そのため狼側は `WOLF_FOX_WIN_PENALTY`
+ * として独立パラメータにし、デフォルトを弱めの -0.1 に設定する。
+ * 将来 ongoing 推定が狐勝率を分離できるようになった時点で再検討する。
  */
-const FOX_WIN_PENALTY = Number(process.env['FOX_WIN_PENALTY'] ?? '-0.5')
+const FOX_WIN_PENALTY = Number(process.env['WOLF_FOX_WIN_PENALTY'] ?? '-0.1')
 
 /**
  * 噛み後の村勝率をミニマックスで推定する（日フェーズ開始）。
