@@ -11,15 +11,13 @@ import type { VoteContext } from '../lupa/handlers.ts'
 import type { FenrirExt } from '../fenrir/src/ext.ts'
 import type { FenrirExtEvent } from '../fenrir/src/events.ts'
 import type { Proposal } from '../fenrir/src/leadership.ts'
-import type { VillageStatus } from '../types/index.ts'
 import { runGame } from '../lupa/engine.ts'
 import { StrategyBaseAdapter } from '../fenrir/src/adapters/strategy-base-adapter.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../fenrir/src/agents/rule-based-agent.ts'
 import { buildPlayerView } from '../lupa/player-view.ts'
 import { alivePlayers } from '../lupa/roles.ts'
-import { Possibilities, possibilityFromRoles, RoleBitIndex } from '../retar/possibilities.ts'
-import { analyzeExecutionsByWorld } from './world-analysis.ts'
 import { SkollMasonTeamAgent } from './skoll-mason-agent.ts'
+import { SkollWolfTeamAgent } from './skoll-wolf-agent.ts'
 
 type RoleMap = Map<SystemRole, number>
 
@@ -76,25 +74,12 @@ class SkollBenchAdapter extends StrategyBaseAdapter {
   }
 }
 
-function buildSkollPossibilities(
-  globalPoss: Map<number, Set<SystemRole>>,
-  setup: Map<string, number>,
-): Possibilities {
-  let maxSeat = 0
-  for (const seat of globalPoss.keys()) if (seat > maxSeat) maxSeat = seat
-  const possibilities = new Possibilities(maxSeat)
-  for (const [role, count] of setup as Map<string, number>) {
-    const idx = RoleBitIndex[role as keyof typeof RoleBitIndex]
-    if (idx !== undefined) possibilities.setup[idx] = count
-  }
-  possibilities.setupOriginal = new Uint8Array(possibilities.setup)
-  for (const [seat, roles] of globalPoss) {
-    possibilities.possibilities[seat] = possibilityFromRoles(roles as any)
-  }
-  return possibilities
-}
+/** StrategyBaseAdapter の具体化（collectProposals なし = proposals 空） */
+class HeuristicBenchAdapter extends StrategyBaseAdapter {}
 
-async function runBench(cfg: BenchConfig, useSkoll: boolean): Promise<BenchResult> {
+type BenchMode = 'heuristic' | 'skoll_village' | 'skoll_wolf' | 'skoll_both'
+
+async function runBench(cfg: BenchConfig, mode: BenchMode): Promise<BenchResult> {
   const { roles, games, seedStart = 0, hasFirstGhost } = cfg
   let villageWins = 0
   let wolfWins = 0
@@ -106,25 +91,25 @@ async function runBench(cfg: BenchConfig, useSkoll: boolean): Promise<BenchResul
   for (let i = 0; i < games; i++) {
     const seed = seedStart + i
 
-    const handlers = useSkoll
-      ? new SkollBenchAdapter({
-          agents: new Map(),
-          defaultAgent: new RuleBasedAgent(),
-          wolfTeamAgent: new WolfTeamRuleAgent(),
-          masonTeamAgent: new SkollMasonTeamAgent(),
-          enableRetar: true,
-          roles,
-          seed,
-        })
-      : new StrategyBaseAdapter({
-          agents: new Map(),
-          defaultAgent: new RuleBasedAgent(),
-          wolfTeamAgent: new WolfTeamRuleAgent(),
-          masonTeamAgent: new MasonTeamRuleAgent(),
-          enableRetar: true,
-          roles,
-          seed,
-        })
+    const wolfAgent = (mode === 'skoll_wolf' || mode === 'skoll_both')
+      ? new SkollWolfTeamAgent()
+      : new WolfTeamRuleAgent()
+    const masonAgent = (mode === 'skoll_village' || mode === 'skoll_both')
+      ? new SkollMasonTeamAgent()
+      : new MasonTeamRuleAgent()
+
+    const adapterCfg = {
+      agents: new Map(),
+      defaultAgent: new RuleBasedAgent(),
+      wolfTeamAgent: wolfAgent,
+      masonTeamAgent: masonAgent,
+      enableRetar: true,
+      roles,
+      seed,
+    }
+    const handlers = (mode === 'skoll_village' || mode === 'skoll_both')
+      ? new SkollBenchAdapter(adapterCfg)
+      : new HeuristicBenchAdapter(adapterCfg)
 
     const { state } = await runGame({ roles, seed, hasFirstGhost }, handlers)
 
@@ -172,14 +157,23 @@ const configs: BenchConfig[] = [
 ]
 
 const foxWinPenalty = process.env['FOX_WIN_PENALTY'] ?? '-0.5'
-console.log(`=== Skoll (共有提案) vs Heuristic ベンチマーク [FOX_WIN_PENALTY=${foxWinPenalty}] ===\n`)
+console.log(`=== Skoll ベンチマーク [FOX_WIN_PENALTY=${foxWinPenalty}] ===\n`)
 
 for (const cfg of configs) {
   console.log(`--- ${cfg.name} (${cfg.games}ゲーム) ---`)
-  const heuristicResult = await runBench(cfg, false)
-  printResult('Heuristic', heuristicResult)
-  const skollResult = await runBench(cfg, true)
-  printResult('Skoll    ', skollResult)
-  const diff = (skollResult.villageWinRate - heuristicResult.villageWinRate) * 100
-  console.log(`差分: ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}pp\n`)
+  const heuristicResult = await runBench(cfg, 'heuristic')
+  printResult('Heuristic       ', heuristicResult)
+  const skollVillageResult = await runBench(cfg, 'skoll_village')
+  printResult('Skoll(村+)      ', skollVillageResult)
+  const skollWolfResult = await runBench(cfg, 'skoll_wolf')
+  printResult('Skoll(狼+)      ', skollWolfResult)
+  const skollBothResult = await runBench(cfg, 'skoll_both')
+  printResult('Skoll(村+狼+)   ', skollBothResult)
+
+  const diffVillage = (skollVillageResult.villageWinRate - heuristicResult.villageWinRate) * 100
+  const diffWolf = (skollWolfResult.villageWinRate - heuristicResult.villageWinRate) * 100
+  const diffBoth = (skollBothResult.villageWinRate - heuristicResult.villageWinRate) * 100
+  console.log(`差分 Skoll(村+): ${diffVillage >= 0 ? '+' : ''}${diffVillage.toFixed(1)}pp`)
+  console.log(`差分 Skoll(狼+): ${diffWolf >= 0 ? '+' : ''}${diffWolf.toFixed(1)}pp`)
+  console.log(`差分 Skoll(両+): ${diffBoth >= 0 ? '+' : ''}${diffBoth.toFixed(1)}pp\n`)
 }
