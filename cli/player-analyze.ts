@@ -195,8 +195,19 @@ function buildOutput(args: Args): AnalysisOutput {
     process.exit(1)
   }
 
-  const { vs, setup, players } = buildVillageStatus(statements, meta)
-  const options: AnalyzeOptions = { ...defaultOptions, ...(meta?.options ?? {}) }
+  const { vs, setup, players, assumptions } = buildVillageStatus(statements, meta)
+  // spoiler 由来の assumptions と frontmatter 由来の assumptions をマージ（spoiler 優先）
+  const metaOptions = meta?.options ?? {}
+  const mergedAssumptions = new Map<number, SystemRole>()
+  if (metaOptions.assumptions instanceof Map) {
+    for (const [k, v] of metaOptions.assumptions) mergedAssumptions.set(k as number, v as SystemRole)
+  }
+  for (const [k, v] of assumptions) mergedAssumptions.set(k, v)
+  const options: AnalyzeOptions = {
+    ...defaultOptions,
+    ...metaOptions,
+    assumptions: mergedAssumptions,
+  }
   const retar = new VillageRetar(vs, setup, options)
   const analyzeResult = retar.analyze()
   if (analyzeResult.error) {

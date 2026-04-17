@@ -1158,3 +1158,53 @@ describe('inline timestamp', () => {
     assert.equal(result.timestamp, undefined)
   })
 })
+
+describe('spoiler statement', () => {
+  test('basic ASCII: !Alice=seer', () => {
+    const result = S.parseSpoilerStatement('!Alice=seer', 1)
+    assert.deepEqual(result, { type: 'spoiler', line: 1, player: 'Alice', role: 'seer' })
+  })
+
+  test('Japanese role name: !マドック=霊媒', () => {
+    const result = S.parseSpoilerStatement('!マドック=霊媒', 1)
+    assert.deepEqual(result, { type: 'spoiler', line: 1, player: 'マドック', role: '霊媒' })
+  })
+
+  test('full-width ！ and ＝', () => {
+    const result = S.parseSpoilerStatement('！マドック＝人狼', 1)
+    assert.deepEqual(result, { type: 'spoiler', line: 1, player: 'マドック', role: '人狼' })
+  })
+
+  test('whitespace around = is allowed', () => {
+    const result = S.parseSpoilerStatement('! アリス = 狼', 1)
+    assert.deepEqual(result, { type: 'spoiler', line: 1, player: 'アリス', role: '狼' })
+  })
+
+  test('abbreviated role: !アリス=占', () => {
+    const result = S.parseSpoilerStatement('!アリス=占', 1)
+    assert.deepEqual(result, { type: 'spoiler', line: 1, player: 'アリス', role: '占' })
+  })
+
+  test('no prefix returns null', () => {
+    const result = S.parseSpoilerStatement('Alice=seer', 1)
+    assert.equal(result, null)
+  })
+
+  test('missing = returns null', () => {
+    const result = S.parseSpoilerStatement('!Alice seer', 1)
+    assert.equal(result, null)
+  })
+
+  test('unknown role returns null (falls through to Unknown)', () => {
+    const result = S.parseSpoilerStatement('!Alice=something', 1)
+    assert.equal(result, null)
+  })
+
+  test('integrated with parseStatement', () => {
+    const result = S.parseStatement('!マドック=人狼', 42)
+    assert.equal(result.type, 'spoiler')
+    assert.equal((result as S.SpoilerStatement).player, 'マドック')
+    assert.equal((result as S.SpoilerStatement).role, '人狼')
+    assert.equal(result.line, 42)
+  })
+})

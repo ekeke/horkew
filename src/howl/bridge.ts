@@ -24,8 +24,10 @@ import type {
   OverStatement,
   AssertStatement,
   MasonStatement,
+  SpoilerStatement,
 } from './statement.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
+import * as V from './vocabulary.ts'
 
 function createSeatStatus(): SeatStatus {
   return {
@@ -66,6 +68,30 @@ const claimRoleToSystemRole: Record<string, SystemRole> = {
   nekomata: 'nekomata',
 }
 
+// spoiler/reveal 等で使う、日本語/英語の役職トークンを SystemRole に解決する。
+// vocabulary.ts の各パターン（日英両対応）を完全一致で当てていく。
+// plainVillager → villager に集約（retar の SystemRole は素村を区別しない）。
+const spoilerRoleSpecs: { systemRole: SystemRole, pattern: RegExp }[] = [
+  { systemRole: 'villager',    pattern: new RegExp(`^(?:${V.plainVillager}|${V.villager})$`) },
+  { systemRole: 'seer',        pattern: new RegExp(`^${V.seer}$`) },
+  { systemRole: 'medium',      pattern: new RegExp(`^${V.medium}$`) },
+  { systemRole: 'bodyguard',   pattern: new RegExp(`^${V.bodyguard}$`) },
+  { systemRole: 'mason',       pattern: new RegExp(`^${V.mason}$`) },
+  { systemRole: 'nekomata',    pattern: new RegExp(`^${V.nekomata}$`) },
+  { systemRole: 'werewolf',    pattern: new RegExp(`^${V.werewolf}$`) },
+  { systemRole: 'possessed',   pattern: new RegExp(`^${V.possessed}$`) },
+  { systemRole: 'fanatic',     pattern: new RegExp(`^${V.fanatic}$`) },
+  { systemRole: 'werehamster', pattern: new RegExp(`^${V.werehamster}$`) },
+  { systemRole: 'immoralist',  pattern: new RegExp(`^${V.immoralist}$`) },
+]
+
+function resolveSpoilerRole(raw: string): SystemRole | null {
+  for (const spec of spoilerRoleSpecs) {
+    if (spec.pattern.test(raw)) return spec.systemRole
+  }
+  return null
+}
+
 export type BridgeResult = {
   vs: VillageStatus
   setup: Map<SystemRole, number>
@@ -73,6 +99,7 @@ export type BridgeResult = {
   shortNames: Map<number, string>
   dict: FlexibleDictionary
   rules: ResolvedRules
+  assumptions: Map<number, SystemRole>
 }
 
 export function buildVillageStatus(statements: Statement[], meta?: Record<string, any>): BridgeResult {
@@ -466,6 +493,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       }
 
       case 'reveal':
+      case 'spoiler':
       case 'videoSource':
       case 'timestamp':
       case 'unknown':
@@ -533,5 +561,27 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     }
   }
 
-  return { vs, setup, players, shortNames, dict, rules }
+  // spoiler 文を集約して assumptions を構築する。
+  // 同一プレイヤーに対して異なる役職の spoiler が存在する場合はエラー（同じ役職の重複は許容）。
+  const assumptions = new Map<number, SystemRole>()
+  for (const stmt of statements) {
+    if (stmt.type !== 'spoiler') continue
+    const s = stmt as SpoilerStatement
+    const seat = resolveSeat(s.player)
+    if (seat === null) {
+      throw new Error(`spoiler: 未知のプレイヤー "${s.player}" (line ${s.line})`)
+    }
+    const role = resolveSpoilerRole(s.role)
+    if (role === null) {
+      throw new Error(`spoiler: 役職名を解決できません "${s.role}" (line ${s.line})`)
+    }
+    const existing = assumptions.get(seat)
+    if (existing !== undefined && existing !== role) {
+      const name = players.get(seat) ?? s.player
+      throw new Error(`spoiler: ${name} に対する矛盾する仮定 (${existing} vs ${role}) (line ${s.line})`)
+    }
+    assumptions.set(seat, role)
+  }
+
+  return { vs, setup, players, shortNames, dict, rules, assumptions }
 }

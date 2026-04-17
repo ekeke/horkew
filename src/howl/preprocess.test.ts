@@ -9,8 +9,7 @@ author: John Doe
 ---
 # This is a comment
 Line 1
-Line 2 with !spoiler
-!Another spoiler
+!Spoiler line
 `
 
   const expectedMeta = {
@@ -20,9 +19,7 @@ Line 2 with !spoiler
 
   const expectedLines = [
     { number: 6, content: 'Line 1' },
-    { number: 7, content: 'Line 2 with' },
-    { number: 7, content: '!spoiler' },
-    { number: 8, content: '!Another spoiler' },
+    { number: 7, content: '!Spoiler line' },
   ]
 
   const result = preprocess(input)
@@ -34,17 +31,14 @@ Line 2 with !spoiler
 test('preprocess function - handles input without frontmatter', () => {
   const input = `
 Line 1
-Line 2 with !spoiler
-!Another spoiler
+!Spoiler line
 `
 
   const expectedMeta = {}
 
   const expectedLines = [
     { number: 2, content: 'Line 1' },
-    { number: 3, content: 'Line 2 with' },
-    { number: 3, content: '!spoiler' },
-    { number: 4, content: '!Another spoiler' },
+    { number: 3, content: '!Spoiler line' },
   ]
 
   const result = preprocess(input)

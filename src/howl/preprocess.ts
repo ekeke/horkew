@@ -24,21 +24,7 @@ export function preprocess(input: string, cursorLine?: number): PreprocessResult
       // 空行とハッシュコメント行は除去
       return
     }
-
-    // 行内のスポイラーコメントを別ラインとして切り出し
-    const spoilerIndex = line.indexOf('!')
-    if (spoilerIndex >= 0) {
-      const mainPart = line.substring(0, spoilerIndex).trim()
-      const spoilerPart = line.substring(spoilerIndex).trim()
-
-      if (mainPart.length > 0) {
-        lines.push({ number: lineNumber, content: mainPart })
-      }
-
-      lines.push({ number: lineNumber, content: spoilerPart })
-    } else {
-      lines.push({ number: lineNumber, content: line })
-    }
+    lines.push({ number: lineNumber, content: line })
   })
 
   // Join行（+で始まる）を先頭に巻き上げ

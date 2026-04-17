@@ -1,6 +1,6 @@
 import * as V from './vocabulary.ts'
 
-export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'videoSource' | 'timestamp' | 'unknown'
+export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'spoiler' | 'videoSource' | 'timestamp' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf'
@@ -90,6 +90,12 @@ export type PeaceStatement = Statement & {
 
 export type RevealStatement = Statement & {
     type: 'reveal'
+    player: string
+    role: string
+}
+
+export type SpoilerStatement = Statement & {
+    type: 'spoiler'
     player: string
     role: string
 }
@@ -284,6 +290,15 @@ export function parseRevealStatement(text: string, line: number): RevealStatemen
   const match = revealRegex.exec(text)
   if (!match) return null
   return { type: 'reveal', line, player: match[1].trim(), role: match[2].trim() }
+}
+
+// Spoiler statement: !Alice=seer / ！アリス＝占い
+// 視点配信での正体メモ、および retar 解析時の仮定（assumption）として使われる。
+const spoilerRegex = new RegExp(`^[!！]${V.optionalSpace}(${V.possibleName})${V.optionalSpace}${V.equal}${V.optionalSpace}(${V.anyRole})${V.optionalSpace}$`)
+export function parseSpoilerStatement(text: string, line: number): SpoilerStatement | null {
+  const match = spoilerRegex.exec(text)
+  if (!match) return null
+  return { type: 'spoiler', line, player: match[1].trim(), role: match[2].trim() }
 }
 
 export function parseGrelanStatement(text: string, line: number): GrelanStatement | null {
@@ -597,6 +612,7 @@ export function parseStatement (text: string, line: number): Statement {
   const parsers = [
     parseVideoSourceStatement,
     parseTimestampStatement,
+    parseSpoilerStatement,
     parseSetupStatement,
     parseJoinMultiStatement,
     parseJoinStatement,

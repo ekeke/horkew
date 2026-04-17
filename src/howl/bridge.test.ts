@@ -430,3 +430,115 @@ describe('bridge: assertion right-alignment', () => {
     assert.strictEqual(entry!.species, 'human')
   })
 })
+
+describe('bridge: spoiler assumptions', () => {
+  test('collects spoilers into assumptions map', () => {
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
+!アリス=seer
+!ボブ=werewolf
+!チャーリー=狼`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, players } = buildVillageStatus(statements, meta)
+
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+
+    assert.strictEqual(assumptions.get(seatOf('アリス')), 'seer')
+    assert.strictEqual(assumptions.get(seatOf('ボブ')), 'werewolf')
+    assert.strictEqual(assumptions.get(seatOf('チャーリー')), 'werewolf')
+    assert.strictEqual(assumptions.size, 3)
+  })
+
+  test('spoiler can appear before the + join line (hoisting)', () => {
+    const howl = `!マドック=霊媒
++マドック
++ダンカン`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, players } = buildVillageStatus(statements, meta)
+
+    const madocSeat = [...players.entries()].find(([, n]) => n === 'マドック')![0]
+    assert.strictEqual(assumptions.get(madocSeat), 'medium')
+  })
+
+  test('full-width ！ and ＝ are accepted', () => {
+    const howl = `+アリス
++ボブ
+！アリス＝占い師`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, players } = buildVillageStatus(statements, meta)
+
+    const aliceSeat = [...players.entries()].find(([, n]) => n === 'アリス')![0]
+    assert.strictEqual(assumptions.get(aliceSeat), 'seer')
+  })
+
+  test('duplicate spoiler with same role is allowed', () => {
+    const howl = `+アリス
++ボブ
+!アリス=seer
+!アリス=占い`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, players } = buildVillageStatus(statements, meta)
+
+    const aliceSeat = [...players.entries()].find(([, n]) => n === 'アリス')![0]
+    assert.strictEqual(assumptions.get(aliceSeat), 'seer')
+    assert.strictEqual(assumptions.size, 1)
+  })
+
+  test('conflicting spoilers throw an error', () => {
+    const howl = `+アリス
++ボブ
+!アリス=seer
+!アリス=werewolf`
+
+    const { statements, meta } = parse(howl)
+    assert.throws(() => buildVillageStatus(statements, meta), /矛盾する仮定/)
+  })
+
+  test('spoiler for unknown player throws', () => {
+    const howl = `+アリス
++ボブ
+!キャロル=seer`
+
+    const { statements, meta } = parse(howl)
+    assert.throws(() => buildVillageStatus(statements, meta), /未知のプレイヤー/)
+  })
+
+  test('assumptions are consumed by VillageRetar', () => {
+    // 5人規模 simple: 占1 狼1 村3、アリスを占い仮定にすると他席の占い可能性が消える
+    const howl = `---
+setup: { seer: 1, werewolf: 1, villager: 3 }
+---
++アリス
++ボブ
++チャーリー
++デイブ
++エミリー
+!アリス=seer`
+
+    const { statements, meta } = parse(howl)
+    const { vs, setup, assumptions } = buildVillageStatus(statements, meta)
+    const retar = new VillageRetar(vs, setup, {
+      seerClaimingDueDate: 99, mediumClaimingDueDate: 99,
+      bodyguardClaimingDueDate: 99, masonClaimingDueDate: 99,
+      nekomataClaimingDueDate: 99,
+      dayCountFrom: 1, hasFirstGhost: false,
+      assumptions, wolfPairDenyals: [], hocusPocus: new Map(),
+      id: 0, batches: 1, batch: 0,
+    })
+    const result = retar.analyze()
+    assert.strictEqual(result.error, undefined)
+
+    // seat1 (アリス) は seer 確定
+    const alicePos = result.result.get(1)!
+    assert.ok(alicePos.has('seer'))
+    assert.strictEqual(alicePos.size, 1)
+    // 他席は seer を持たない
+    for (let seat = 2; seat <= 5; seat++) {
+      const pos = result.result.get(seat)!
+      assert.ok(!pos.has('seer'), `seat ${seat} should not have seer possibility`)
+    }
+  })
+})

@@ -36,18 +36,18 @@ export const none   = `(?:者?(?:なし|無し|ナシ))`
 
 // ********************************* Basic Roles
 
-export const villager    = `(?:村人?)`
-export const seer        = `(?:占い?師?|[預予]言?者?)`
-export const medium      = `(?:霊(?:媒師?|能者?|))`
-export const bodyguard   = `(?:護(?:衛)?|狩(?:り|人)?)`
-export const mason       = `(?:共(?:有者?)?)`
-export const nekomata    = `(?:猫又?)`
-export const werewolf    = `(?:人?狼)`
-export const possessed   = `(?:狂人?)`
-export const fanatic     = `(?:狂信者?|信)`
-export const werehamster = `(?:妖?狐)`
-export const immoralist    = `(?:背(?:徳者?)?)`
-export const plainVillager = `(?:素村人?)`
+export const villager    = `(?:村人?|villager)`
+export const seer        = `(?:占い?師?|[預予]言?者?|seer)`
+export const medium      = `(?:霊(?:媒師?|能者?|)|medium)`
+export const bodyguard   = `(?:護(?:衛)?|狩(?:り|人)?|bodyguard)`
+export const mason       = `(?:共(?:有者?)?|mason)`
+export const nekomata    = `(?:猫又?|nekomata)`
+export const werewolf    = `(?:人?狼|werewolf)`
+export const possessed   = `(?:狂人?|possessed)`
+export const fanatic     = `(?:狂信者?|信|fanatic)`
+export const werehamster = `(?:妖?狐|werehamster)`
+export const immoralist    = `(?:背(?:徳者?)?|immoralist)`
+export const plainVillager = `(?:素村人?|plainVillager)`
 export const anyRole       = `(?:${plainVillager}|${villager}|${seer}|${medium}|${bodyguard}|${mason}|${nekomata}|${werewolf}|${possessed}|${fanatic}|${werehamster}|${immoralist})`
 
 // ********************************* Alignments
