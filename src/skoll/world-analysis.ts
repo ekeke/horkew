@@ -11,7 +11,7 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { Possibilities } from '../retar/possibilities.ts'
 import type { World } from '../hati/types.ts'
-import { popCount32, maskFromSeats } from '../hati/types.ts'
+import { popCount32, maskFromSeats, hasSeat } from '../hati/types.ts'
 import { enumerateWorlds } from '../hati/worlds.ts'
 import { checkOutcome, applyExecution } from '../hati/simulate.ts'
 import { computeWinRate } from './winrate.ts'
@@ -132,12 +132,25 @@ function estimateOngoingWinRate(
   if (aliveNonWolves <= 0) return 0.0
 
   const seerAlive = (world.seerMask & aliveAfterExec) !== 0
+  const bodyguardAlive = world.bodyguardSeat >= 0
+    && hasSeat(aliveAfterExec, world.bodyguardSeat)
 
-  // 夜: 狼が非狼を1人噛む
-  // NOTE: 狩人の護衛ブロックは未モデル化。
-  // computeWinRate の「ランダム処刑」仮定では、護衛成功（alive 維持）が
-  // グレー狼密度の低下を招き逆効果になるため、正しくモデル化できない。
-  return estimateNextDay(aliveTotal - 1, aliveWolves, seerAlive, cache)
+  // 基本: 夜に狼が非狼を1人噛む
+  const rateNoGuard = estimateNextDay(aliveTotal - 1, aliveWolves, seerAlive, cache)
+
+  if (bodyguardAlive && aliveTotal > 2) {
+    // 狩人生存: 護衛成功なら噛みブロック（alive 維持）
+    // GJ の価値はパリティ依存:
+    //   aliveTotal が奇数 → GJ で偶数落ちを防ぎ +1 処刑機会（有効）
+    //   aliveTotal が偶数 → GJ で密度希釈のみ（モデル上逆効果、実際は中立）
+    // ランダム処刑モデルの限界で偶数時に負になるため、ボーナスを非負にクランプ。
+    const pBlock = 1 / (aliveTotal - 1)
+    const rateWithGuard = estimateNextDay(aliveTotal, aliveWolves, seerAlive, cache)
+    const guardBonus = Math.max(0, rateWithGuard - rateNoGuard)
+    return rateNoGuard + pBlock * guardBonus
+  }
+
+  return rateNoGuard
 }
 
 /**
