@@ -868,7 +868,7 @@ function buildTrueWorld(state: GameState): World {
     }
   }
 
-  return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, bodyguardSeat }
+  return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, mediumMask: 0, bodyguardSeat }
 }
 
 // --- 偽陰性チェック（DBベース） ---

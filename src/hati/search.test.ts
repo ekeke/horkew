@@ -30,7 +30,7 @@ function makeWorld(assignments: Record<number, SystemRole>): World {
     }
   }
 
-  return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, bodyguardSeat }
+  return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, mediumMask: 0, bodyguardSeat }
 }
 
 describe('Hati searchTsumi', () => {

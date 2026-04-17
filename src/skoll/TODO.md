@@ -32,13 +32,14 @@ Hati が「詰みがあるか」（二値）を答えるのに対し、Skoll は
 
 ## 次のステップ
 
-### 霊媒結果による情報更新 [高優先]
-
-処刑後に霊媒（生存・信用時）が黒/白を報告 → ワールドが分岐。
-
-- 各ワールドで処刑者の霊媒結果が確定（`getMediumResult`）
-- 結果でワールドをグループ化 → 各グループ内で翌日の勝率を計算
-- Hati の `partitionWorldsByExecution` が参考になる
+- [x] 霊媒結果による情報更新 — 処刑後の黒/白報告を勝率に反映
+  - `World` 型に `mediumMask` 追加（`worlds.ts` の `createWorld` で populate）
+  - `estimateOngoingWinRate` で `world.mediumMask & alive` から霊媒生存を確認
+  - `estimateNextDay` の霊媒モデル:
+    - 霊媒生存 → `grays -= 1, confirmed += 1`（霊媒席はランダム処刑から除外）
+    - 霊媒黒（狼吊り確認）→ さらに `confirmed += 1`（捕捉確認ボーナス）
+    - 霊媒白（ハズレ確認）→ 追加なし
+  - 効果: 霊媒あり 1/2 vs なし 1/3（5人1狼で村吊り後）など、勝率の精度向上
 
 ### 猫又の道連れ [中優先]
 

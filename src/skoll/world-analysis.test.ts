@@ -289,6 +289,110 @@ describe('analyzeExecutionsByWorld', () => {
     approx(s2.winRate, 1.0, '狼吊り + 狐退場済み → 村勝ち')
   })
 
+  // ── 霊媒対応 ──
+
+  it('霊媒生存: 霊媒なしより勝率が高い', () => {
+    // 霊媒あり (seat5=medium) vs 霊媒なし (seat5=villager) を比較。
+    // 同じ世界構造でも霊媒が確定村扱いになるため、ランダム処刑の命中率が上がる。
+    // 霊媒あり: seat2(villager)を処刑 → nextAlive=4, wolves=1, medium(seat5)生存
+    //   estimateNextDay: grays=2, confirmed=1(medium) → computeWinRate(2,1,0,1,3)=1/2
+    // 霊媒なし: seat2(villager)を処刑 → nextAlive=4, wolves=1, medium不在
+    //   estimateNextDay: grays=3, confirmed=0 → computeWinRate(3,1,0,0,3)=1/3
+    const setupMedium = new Map<SystemRole, number>([
+      ['villager', 3], ['werewolf', 1], ['medium', 1],
+    ])
+    const seatRolesMedium = new Map([
+      [1, ['werewolf']],
+      [2, ['villager']],
+      [3, ['villager']],
+      [4, ['villager']],
+      [5, ['medium']],
+    ]) as Map<number, SystemRole[]>
+    const possibilitiesMedium = buildPossibilities(setupMedium, seatRolesMedium)
+    const vsMedium = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()],
+      [4, makeSeat()], [5, makeSeat()],
+    ]))
+    const resultMedium = analyzeExecutionsByWorld(possibilitiesMedium, setupMedium, vsMedium)
+    const seat2WithMedium = resultMedium.executions.find(e => e.seat === 2)!
+
+    const setupNoMedium = new Map<SystemRole, number>([
+      ['villager', 4], ['werewolf', 1],
+    ])
+    const seatRolesNoMedium = new Map([
+      [1, ['werewolf']],
+      [2, ['villager']],
+      [3, ['villager']],
+      [4, ['villager']],
+      [5, ['villager']],
+    ]) as Map<number, SystemRole[]>
+    const possibilitiesNoMedium = buildPossibilities(setupNoMedium, seatRolesNoMedium)
+    const vsNoMedium = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()],
+      [4, makeSeat()], [5, makeSeat()],
+    ]))
+    const resultNoMedium = analyzeExecutionsByWorld(possibilitiesNoMedium, setupNoMedium, vsNoMedium)
+    const seat2NoMedium = resultNoMedium.executions.find(e => e.seat === 2)!
+
+    // 霊媒あり: 1/2 = 0.5, 霊媒なし: 1/3 ≈ 0.333
+    approx(seat2WithMedium.winRate, 0.5, '霊媒あり: 村吊り勝率=1/2')
+    approx(seat2NoMedium.winRate, 1 / 3, '霊媒なし: 村吊り勝率=1/3')
+    assert.ok(
+      seat2WithMedium.winRate > seat2NoMedium.winRate,
+      '霊媒生存で勝率向上',
+    )
+  })
+
+  it('霊媒黒 (狼吊り確認): 霊媒なしより勝率が高い', () => {
+    // 2狼のケース: seat1=wolf, seat2=wolf, seat3=medium, seat4-6=villager (6人)
+    // 霊媒あり: seat1(wolf)を処刑 → medium=黒 → mediumBlackBonus=1 → confirmed=2
+    //   estimateNextDay(4, 1, 0, false, true, 'wolf', cache):
+    //     grays=3, confirmed=2 → computeWinRate(3,1,0,2,4) = 1/3
+    // 霊媒なし (seat3=villager): seat1(wolf)を処刑
+    //   estimateNextDay(4, 1, 0, false, false, null):
+    //     grays=4, confirmed=0 → computeWinRate(4,1,0,0,4) = 1/4
+    const setupMedium = new Map<SystemRole, number>([
+      ['villager', 3], ['werewolf', 2], ['medium', 1],
+    ])
+    const seatRolesMedium = new Map([
+      [1, ['werewolf']], [2, ['werewolf']],
+      [3, ['medium']],
+      [4, ['villager']], [5, ['villager']], [6, ['villager']],
+    ]) as Map<number, SystemRole[]>
+    const possibilitiesMedium = buildPossibilities(setupMedium, seatRolesMedium)
+    const vsMedium = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()],
+      [4, makeSeat()], [5, makeSeat()], [6, makeSeat()],
+    ]))
+    const resultMedium = analyzeExecutionsByWorld(possibilitiesMedium, setupMedium, vsMedium)
+    // seat1(wolf)処刑の勝率: ongoing (wolf=seat2 still alive), medium=黒
+    const seat1WithMedium = resultMedium.executions.find(e => e.seat === 1)!
+
+    const setupNoMedium = new Map<SystemRole, number>([
+      ['villager', 4], ['werewolf', 2],
+    ])
+    const seatRolesNoMedium = new Map([
+      [1, ['werewolf']], [2, ['werewolf']],
+      [3, ['villager']],
+      [4, ['villager']], [5, ['villager']], [6, ['villager']],
+    ]) as Map<number, SystemRole[]>
+    const possibilitiesNoMedium = buildPossibilities(setupNoMedium, seatRolesNoMedium)
+    const vsNoMedium = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()],
+      [4, makeSeat()], [5, makeSeat()], [6, makeSeat()],
+    ]))
+    const resultNoMedium = analyzeExecutionsByWorld(possibilitiesNoMedium, setupNoMedium, vsNoMedium)
+    const seat1NoMedium = resultNoMedium.executions.find(e => e.seat === 1)!
+
+    // 霊媒あり=黒: 1/3 ≈ 0.333, 霊媒なし: 1/4 = 0.25
+    approx(seat1WithMedium.winRate, 1 / 3, '霊媒黒: 狼吊り後勝率=1/3')
+    approx(seat1NoMedium.winRate, 1 / 4, '霊媒なし: 狼吊り後勝率=1/4')
+    assert.ok(
+      seat1WithMedium.winRate > seat1NoMedium.winRate,
+      '霊媒黒で勝率向上',
+    )
+  })
+
   it('打ち切り: maxWorlds で truncated', () => {
     const setup = new Map<SystemRole, number>([
       ['villager', 2], ['werewolf', 1],

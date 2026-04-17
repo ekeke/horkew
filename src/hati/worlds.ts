@@ -81,6 +81,7 @@ function createWorld(roles: SystemRole[], seats: Seat[]): World {
   let hamsterMask = 0
   let immoralistMask = 0
   let seerMask = 0
+  let mediumMask = 0
   let bodyguardSeat = -1
 
   for (const seat of seats) {
@@ -92,9 +93,10 @@ function createWorld(roles: SystemRole[], seats: Seat[]): World {
       case 'werehamster': hamsterMask |= (1 << seat); break
       case 'immoralist': immoralistMask |= (1 << seat); break
       case 'seer': seerMask |= (1 << seat); break
+      case 'medium': mediumMask |= (1 << seat); break
       case 'bodyguard': bodyguardSeat = seat; break
     }
   }
 
-  return { roles: rolesArr, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, bodyguardSeat }
+  return { roles: rolesArr, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, mediumMask, bodyguardSeat }
 }
