@@ -157,17 +157,23 @@ const configs: BenchConfig[] = [
 ]
 
 const foxWinPenalty = process.env['FOX_WIN_PENALTY'] ?? '-0.5'
+
+const gamesArg = process.argv.find(a => a.startsWith('--games='))
+const gamesOverride = gamesArg ? parseInt(gamesArg.slice('--games='.length), 10) : null
+
 console.log(`=== Skoll ベンチマーク [FOX_WIN_PENALTY=${foxWinPenalty}] ===\n`)
 
 for (const cfg of configs) {
-  console.log(`--- ${cfg.name} (${cfg.games}ゲーム) ---`)
-  const heuristicResult = await runBench(cfg, 'heuristic')
+  const games = gamesOverride ?? cfg.games
+  const effectiveCfg = { ...cfg, games }
+  console.log(`--- ${cfg.name} (${games}ゲーム) ---`)
+  const heuristicResult = await runBench(effectiveCfg, 'heuristic')
   printResult('Heuristic       ', heuristicResult)
-  const skollVillageResult = await runBench(cfg, 'skoll_village')
+  const skollVillageResult = await runBench(effectiveCfg, 'skoll_village')
   printResult('Skoll(村+)      ', skollVillageResult)
-  const skollWolfResult = await runBench(cfg, 'skoll_wolf')
+  const skollWolfResult = await runBench(effectiveCfg, 'skoll_wolf')
   printResult('Skoll(狼+)      ', skollWolfResult)
-  const skollBothResult = await runBench(cfg, 'skoll_both')
+  const skollBothResult = await runBench(effectiveCfg, 'skoll_both')
   printResult('Skoll(村+狼+)   ', skollBothResult)
 
   const diffVillage = (skollVillageResult.villageWinRate - heuristicResult.villageWinRate) * 100
