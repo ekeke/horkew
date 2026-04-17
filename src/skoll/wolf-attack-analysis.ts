@@ -6,7 +6,9 @@
  *
  * 勝率の扱い:
  * - terminal `wolf_win` → 1.0（狼勝ち）
- * - terminal `village_win` / `hamster_win` → 0.0（狼は敗北。狐勝も狼にとっては負け）
+ * - terminal `village_win` → 0.0（村に敗北）
+ * - terminal `hamster_win` → `FOX_WIN_PENALTY`（狐勝は「普通の敗北より悪い」扱い。
+ *   狼が狐を潰す動機づけになる。村側分析と同じ環境変数 `FOX_WIN_PENALTY` を共有）
  * - ongoing → `1 - minimaxWinRate` で近似（`P(wolf_win) + P(hamster_win)` を
  *   含むため将来の狐勝分を過大評価する近似。狐リスクが高い盤面では要改善）
  */
@@ -77,10 +79,12 @@ export function analyzeAttacksByWorld(
         const outcome = checkOutcome(world, alive)
         if (outcome === 'wolf_win') {
           wolfWinScores[i] += 1.0
+        } else if (outcome === 'hamster_win') {
+          wolfWinScores[i] += FOX_WIN_PENALTY
         } else if (outcome === 'ongoing') {
           wolfWinScores[i] += 1.0 - estimateOngoingAttackWinRate(world, alive, cache)
         }
-        // village_win / hamster_win → 0 （どちらも狼の敗北）
+        // village_win → 0
       } else if ((world.nekomataMask & (1 << target)) !== 0) {
         // 猫又噛み: 猫又 + 噛んだ狼が道連れ退場（全生存狼で平均）
         const aliveWolfSeats = seatsFromMask(world.wolfMask & alive)
@@ -94,10 +98,12 @@ export function analyzeAttacksByWorld(
           const outcome = checkOutcome(world, afterFollow)
           if (outcome === 'wolf_win') {
             score += 1.0
+          } else if (outcome === 'hamster_win') {
+            score += FOX_WIN_PENALTY
           } else if (outcome === 'ongoing') {
             score += 1.0 - estimateOngoingAttackWinRate(world, afterFollow, cache)
           }
-          // village_win / hamster_win → 0
+          // village_win → 0
         }
         wolfWinScores[i] += score / aliveWolfSeats.length
       } else {
@@ -107,10 +113,12 @@ export function analyzeAttacksByWorld(
         const outcome = checkOutcome(world, afterFollow)
         if (outcome === 'wolf_win') {
           wolfWinScores[i] += 1.0
+        } else if (outcome === 'hamster_win') {
+          wolfWinScores[i] += FOX_WIN_PENALTY
         } else if (outcome === 'ongoing') {
           wolfWinScores[i] += 1.0 - estimateOngoingAttackWinRate(world, afterFollow, cache)
         }
-        // village_win / hamster_win → 0
+        // village_win → 0
       }
     }
 
@@ -144,6 +152,16 @@ export function analyzeAttacksByWorld(
 
   return { totalWorlds, truncated, attacks, bestAttack: bestSeat }
 }
+
+/**
+ * 狐勝終端への狼側ペナルティ。
+ *
+ * `analyzeExecutionsByWorld` と同じ環境変数 `FOX_WIN_PENALTY` を共有する
+ * （デフォルト -0.5）。狐勝は狼にとっても敗北だが、通常の village_win (0) より
+ * さらに悪いとして扱うことで、狼が狐を潰す（= 狼が占われない・噛まれない狐を
+ * 襲撃対象から外さない）動機づけになる。
+ */
+const FOX_WIN_PENALTY = Number(process.env['FOX_WIN_PENALTY'] ?? '-0.5')
 
 /**
  * 噛み後の村勝率をミニマックスで推定する（日フェーズ開始）。
