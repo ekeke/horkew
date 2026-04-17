@@ -151,7 +151,7 @@ const configs: BenchConfig[] = [
       ['werewolf', 3], ['villager', 2], ['seer', 1], ['medium', 1], ['bodyguard', 1],
       ['mason', 2], ['nekomata', 1], ['fanatic', 1], ['werehamster', 1], ['immoralist', 1],
     ]),
-    games: 200,
+    games: 10,
     hasFirstGhost: true,
   },
 ]
