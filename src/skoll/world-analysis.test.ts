@@ -393,6 +393,105 @@ describe('analyzeExecutionsByWorld', () => {
     )
   })
 
+  // ── 猫又対応 ──
+
+  it('猫又処刑: 道連れ平均 → 狼を引けば勝率 1/3', () => {
+    // 4人: seat1=猫又, seat2=狼, seat3=村, seat4=村 (1ワールド)
+    // 猫又処刑: 道連れ候補 = {seat2, seat3, seat4}
+    //   道連れseat2(狼): afterCurse={seat3,seat4} → wolves=0 → village_win (1.0)
+    //   道連れseat3(村): afterCurse={seat2,seat4} → wolves=1, alive=2 → PP → 0.0
+    //   道連れseat4(村): afterCurse={seat2,seat3} → wolves=1, alive=2 → PP → 0.0
+    //   平均 = (1.0 + 0.0 + 0.0) / 3 = 1/3
+    const setup = new Map<SystemRole, number>([
+      ['nekomata', 1], ['werewolf', 1], ['villager', 2],
+    ])
+    const seatRoles = new Map([
+      [1, ['nekomata']],
+      [2, ['werewolf']],
+      [3, ['villager']],
+      [4, ['villager']],
+    ]) as Map<number, SystemRole[]>
+    const possibilities = buildPossibilities(setup, seatRoles)
+    const vs = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()], [4, makeSeat()],
+    ]))
+
+    const result = analyzeExecutionsByWorld(possibilities, setup, vs)
+    assert.equal(result.totalWorlds, 1)
+
+    // 猫又処刑: 道連れ平均 = 1/3
+    const s1 = result.executions.find(e => e.seat === 1)!
+    approx(s1.winRate, 1 / 3, '猫又処刑 → 道連れ1/3確率で狼引き → 1/3')
+
+    // 狼処刑: village_win
+    const s2 = result.executions.find(e => e.seat === 2)!
+    approx(s2.winRate, 1.0, '狼処刑 → 勝ち')
+
+    // 村人処刑: LW + 猫又生存 → aliveAfterExec = {seat1,seat2,seat4}
+    // PP: wolves=1, alive=3, nonWolfNonHamster=2 → wolves(1) < nonWolfNonHamster(2) → ongoing
+    // estimateOngoingWinRate: aliveWolves=1 (LW) → nekomataBite不発 → 通常モデル
+    const s3 = result.executions.find(e => e.seat === 3)!
+    assert.ok(s3.winRate < s1.winRate, '村人処刑は猫又処刑より悪い')
+
+    // 最善手は狼処刑
+    assert.equal(result.bestExecution, 2)
+  })
+
+  it('猫又噛み: 狼2匹以上で猫又を噛む確率 → 村勝率が上がる', () => {
+    // 6人: seat1=猫又, seat2=狼, seat3=狼, seat4=村, seat5=村, seat6=村
+    // seat4処刑後: afterExec={seat1,seat2,seat3,seat5,seat6} (5人, 狼2, 猫又1)
+    // aliveWolves=2 → 猫又噛みあり
+    //   aliveNonWolves=3, pBiteNeko=1/3, pBiteOther=2/3
+    //   rateIfNekoHit = estimateNextDay(3, 1, ...) = computeWinRate(3,1,0,0,3) = 1/3
+    //   rateIfOtherHit = estimateNextDay(4, 2, ...) = 2*2+0=4>=4 → PP → 0.0
+    //   rateNoGuard = 1/3*1/3 + 2/3*0 = 1/9
+    //
+    // 猫又なし比較 (6人: seat1=村, seat2=狼, seat3=狼, seat4-6=村):
+    //   seat4処刑後: estimateNextDay(4, 2, ...) = PP → 0.0
+    const setupNeko = new Map<SystemRole, number>([
+      ['nekomata', 1], ['werewolf', 2], ['villager', 3],
+    ])
+    const seatRolesNeko = new Map([
+      [1, ['nekomata']],
+      [2, ['werewolf']],
+      [3, ['werewolf']],
+      [4, ['villager']],
+      [5, ['villager']],
+      [6, ['villager']],
+    ]) as Map<number, SystemRole[]>
+    const possibilitiesNeko = buildPossibilities(setupNeko, seatRolesNeko)
+    const vsNeko = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()],
+      [4, makeSeat()], [5, makeSeat()], [6, makeSeat()],
+    ]))
+    const resultNeko = analyzeExecutionsByWorld(possibilitiesNeko, setupNeko, vsNeko)
+    const seat4Neko = resultNeko.executions.find(e => e.seat === 4)!
+
+    const setupNoNeko = new Map<SystemRole, number>([
+      ['villager', 4], ['werewolf', 2],
+    ])
+    const seatRolesNoNeko = new Map([
+      [1, ['villager']],
+      [2, ['werewolf']],
+      [3, ['werewolf']],
+      [4, ['villager']],
+      [5, ['villager']],
+      [6, ['villager']],
+    ]) as Map<number, SystemRole[]>
+    const possibilitiesNoNeko = buildPossibilities(setupNoNeko, seatRolesNoNeko)
+    const vsNoNeko = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()],
+      [4, makeSeat()], [5, makeSeat()], [6, makeSeat()],
+    ]))
+    const resultNoNeko = analyzeExecutionsByWorld(possibilitiesNoNeko, setupNoNeko, vsNoNeko)
+    const seat4NoNeko = resultNoNeko.executions.find(e => e.seat === 4)!
+
+    // 猫又あり: 1/9 ≈ 0.111, 猫又なし: 0.0 (PP)
+    approx(seat4Neko.winRate, 1 / 9, '猫又噛みモデル: seat4処刑勝率=1/9')
+    approx(seat4NoNeko.winRate, 0.0, '猫又なし: seat4処刑勝率=0 (PP)')
+    assert.ok(seat4Neko.winRate > seat4NoNeko.winRate, '猫又噛みで狼が減るため村勝率UP')
+  })
+
   it('打ち切り: maxWorlds で truncated', () => {
     const setup = new Map<SystemRole, number>([
       ['villager', 2], ['werewolf', 1],

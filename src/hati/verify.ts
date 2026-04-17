@@ -854,6 +854,7 @@ function buildTrueWorld(state: GameState): World {
   let hamsterMask = 0
   let immoralistMask = 0
   let seerMask = 0
+  let nekomataMask = 0
   let bodyguardSeat = -1
 
   for (const p of state.players) {
@@ -864,11 +865,12 @@ function buildTrueWorld(state: GameState): World {
       case 'werehamster': hamsterMask |= (1 << p.seat); break
       case 'immoralist': immoralistMask |= (1 << p.seat); break
       case 'seer': seerMask |= (1 << p.seat); break
+      case 'nekomata': nekomataMask |= (1 << p.seat); break
       case 'bodyguard': bodyguardSeat = p.seat; break
     }
   }
 
-  return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, mediumMask: 0, bodyguardSeat }
+  return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, mediumMask: 0, nekomataMask, bodyguardSeat }
 }
 
 // --- 偽陰性チェック（DBベース） ---

@@ -40,12 +40,16 @@ Hati が「詰みがあるか」（二値）を答えるのに対し、Skoll は
     - 霊媒黒（狼吊り確認）→ さらに `confirmed += 1`（捕捉確認ボーナス）
     - 霊媒白（ハズレ確認）→ 追加なし
   - 効果: 霊媒あり 1/2 vs なし 1/3（5人1狼で村吊り後）など、勝率の精度向上
-
-### 猫又の道連れ [中優先]
-
-- 猫又処刑 → ランダム1人道連れ退場（狼を引ければ大きい）
-- 猫又噛み → 噛んだ狼が退場
-- 処刑候補の猫又確率に応じたリスク/リターン計算
+- [x] 猫又の道連れ — 猫又処刑・噛みの道連れを確率的にモデル化
+  - `World` 型に `nekomataMask` 追加（`worlds.ts` の `createWorld` で populate）
+  - `analyzeExecutionsByWorld` で猫又処刑を検出: 道連れ候補全席で平均を取る
+    - 各道連れ先で `checkOutcome` → `village_win/ongoing/wolf_win` を分岐
+    - 道連れ先が狼 → 村勝ちに直結（大きなボーナス）
+  - `estimateOngoingWinRate` で猫又噛みモデル:
+    - `aliveWolves >= 2`（LW は猫又を噛まない）の場合に適用
+    - `pBiteNeko = aliveNekomata / aliveNonWolves` で確率分岐
+    - 猫又噛み → `aliveTotal-2, wolves-1`（猫又と噛んだ狼が退場）
+  - 限界: 狼が1匹のみ（LW）の場合は猫又噛みなし（既に除外済み）
 
 ### 占い複数夜モデル [中優先]
 

@@ -11,7 +11,7 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { Possibilities } from '../retar/possibilities.ts'
 import type { World } from '../hati/types.ts'
-import { popCount32, maskFromSeats, hasSeat } from '../hati/types.ts'
+import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask } from '../hati/types.ts'
 import { enumerateWorlds } from '../hati/worlds.ts'
 import { checkOutcome, applyExecution, getMediumResult } from '../hati/simulate.ts'
 import { computeWinRate } from './winrate.ts'
@@ -60,15 +60,40 @@ export function analyzeExecutionsByWorld(
 
     for (let i = 0; i < aliveSeats.length; i++) {
       const target = aliveSeats[i]
-      const nextAlive = applyExecution(alive, target)
-      const outcome = checkOutcome(world, nextAlive)
+      const afterExec = applyExecution(alive, target)
 
-      if (outcome === 'village_win') {
-        winScores[i] += 1.0
-      } else if (outcome === 'ongoing') {
-        winScores[i] += estimateOngoingWinRate(world, target, nextAlive, cache)
+      if ((world.nekomataMask & (1 << target)) !== 0) {
+        // 猫又処刑: ランダム1人道連れ退場 → 全候補で平均
+        const curseCandidates = seatsFromMask(afterExec)
+        if (curseCandidates.length === 0) {
+          // 道連れ対象なし（全員退場済み）→ 猫又のみ退場として扱う
+          const outcome = checkOutcome(world, afterExec)
+          if (outcome === 'village_win') winScores[i] += 1.0
+          else if (outcome === 'ongoing') winScores[i] += estimateOngoingWinRate(world, target, afterExec, cache)
+        } else {
+          let cursedScore = 0
+          for (const cursedSeat of curseCandidates) {
+            const afterCurse = removeSeat(afterExec, cursedSeat)
+            const outcome = checkOutcome(world, afterCurse)
+            if (outcome === 'village_win') {
+              cursedScore += 1.0
+            } else if (outcome === 'ongoing') {
+              cursedScore += estimateOngoingWinRate(world, target, afterCurse, cache)
+            }
+            // wolf_win, hamster_win → 0
+          }
+          winScores[i] += cursedScore / curseCandidates.length
+        }
+      } else {
+        // 通常処刑
+        const outcome = checkOutcome(world, afterExec)
+        if (outcome === 'village_win') {
+          winScores[i] += 1.0
+        } else if (outcome === 'ongoing') {
+          winScores[i] += estimateOngoingWinRate(world, target, afterExec, cache)
+        }
+        // wolf_win, hamster_win → 0
       }
-      // wolf_win, hamster_win → 0
     }
 
     if (totalWorlds >= maxWorlds) {
@@ -148,6 +173,7 @@ function estimateOngoingWinRate(
   if (2 * aliveWolves + aliveFoxes >= aliveTotal) return 0.0
   if (aliveNonWolvesNonFoxes <= 0) return 0.0
 
+  const aliveNekomata = popCount32(world.nekomataMask & aliveAfterExec)
   const seerAlive = (world.seerMask & aliveAfterExec) !== 0
   const mediumAlive = (world.mediumMask & aliveAfterExec) !== 0
   const bodyguardAlive = world.bodyguardSeat >= 0
@@ -159,10 +185,29 @@ function estimateOngoingWinRate(
     ? getMediumResult(world.roles[executedSeat])
     : null
 
-  // 基本: 夜に狼が非狼非狐を1人噛む
-  const rateNoGuard = estimateNextDay(
-    aliveTotal - 1, aliveWolves, aliveFoxes, seerAlive, mediumAlive, mediumResult, cache,
-  )
+  // 猫又噛みモデル: 狼2匹以上のとき猫又を噛む可能性がある
+  // 猫又が噛まれると: 猫又退場 + 噛んだ狼退場（道連れ）
+  // LW（最後の狼）は猫又を噛まない（自チームも全滅するため）
+  const aliveNonWolves = aliveTotal - aliveWolves
+  let rateNoGuard: number
+  if (aliveNekomata > 0 && aliveWolves >= 2 && aliveNonWolves > 0) {
+    const pBiteNeko = aliveNekomata / aliveNonWolves
+    const pBiteOther = 1 - pBiteNeko
+    // 猫又噛み: 猫又+狼が退場 → aliveTotal-2, wolves-1
+    const rateIfNekoHit = estimateNextDay(
+      aliveTotal - 2, aliveWolves - 1, aliveFoxes, seerAlive, mediumAlive, mediumResult, cache,
+    )
+    // 通常噛み: 1人退場
+    const rateIfOtherHit = estimateNextDay(
+      aliveTotal - 1, aliveWolves, aliveFoxes, seerAlive, mediumAlive, mediumResult, cache,
+    )
+    rateNoGuard = pBiteNeko * rateIfNekoHit + pBiteOther * rateIfOtherHit
+  } else {
+    // 基本: 夜に狼が非狼非狐を1人噛む
+    rateNoGuard = estimateNextDay(
+      aliveTotal - 1, aliveWolves, aliveFoxes, seerAlive, mediumAlive, mediumResult, cache,
+    )
+  }
 
   if (bodyguardAlive && aliveTotal > 2) {
     // 狩人生存: 護衛成功なら噛みブロック（alive 維持）

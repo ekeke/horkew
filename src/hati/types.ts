@@ -52,6 +52,8 @@ export type World = {
   seerMask: number
   /** 真霊媒師のseatビットマスク（0 = なし、複数対応） */
   mediumMask: number
+  /** 猫又のseatビットマスク（0 = なし、複数対応） */
+  nekomataMask: number
   /** 真狩人のseat（いなければ -1） */
   bodyguardSeat: number
 }
