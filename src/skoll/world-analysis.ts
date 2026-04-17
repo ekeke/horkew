@@ -69,6 +69,7 @@ export function analyzeExecutionsByWorld(
           // 道連れ対象なし（全員退場済み）→ 猫又のみ退場として扱う
           const outcome = checkOutcome(world, afterExec)
           if (outcome === 'village_win') winScores[i] += 1.0
+          else if (outcome === 'hamster_win') winScores[i] += FOX_WIN_PENALTY
           else if (outcome === 'ongoing') winScores[i] += estimateOngoingWinRate(world, target, afterExec, cache)
         } else {
           let cursedScore = 0
@@ -77,10 +78,12 @@ export function analyzeExecutionsByWorld(
             const outcome = checkOutcome(world, afterCurse)
             if (outcome === 'village_win') {
               cursedScore += 1.0
+            } else if (outcome === 'hamster_win') {
+              cursedScore += FOX_WIN_PENALTY
             } else if (outcome === 'ongoing') {
               cursedScore += estimateOngoingWinRate(world, target, afterCurse, cache)
             }
-            // wolf_win, hamster_win → 0
+            // wolf_win → 0
           }
           winScores[i] += cursedScore / curseCandidates.length
         }
@@ -89,10 +92,12 @@ export function analyzeExecutionsByWorld(
         const outcome = checkOutcome(world, afterExec)
         if (outcome === 'village_win') {
           winScores[i] += 1.0
+        } else if (outcome === 'hamster_win') {
+          winScores[i] += FOX_WIN_PENALTY
         } else if (outcome === 'ongoing') {
           winScores[i] += estimateOngoingWinRate(world, target, afterExec, cache)
         }
-        // wolf_win, hamster_win → 0
+        // wolf_win → 0
       }
     }
 
@@ -137,6 +142,15 @@ export function analyzeExecutionsByWorld(
     overallWinRate,
   }
 }
+
+/**
+ * 処刑直後に狐勝ちが確定する（hamster_win）ワールドへのペナルティ。
+ *
+ * 通常 hamster_win は score += 0 だが、マイナスにすることで
+ * 「狼を全滅させるが狐が残る」処刑先を積極的に忌避させる。
+ * 環境変数 FOX_WIN_PENALTY で上書き可能（例: FOX_WIN_PENALTY=-1）。
+ */
+const FOX_WIN_PENALTY = Number(process.env['FOX_WIN_PENALTY'] ?? '-0.5')
 
 /**
  * ongoing ワールドの後続勝率をミニマックスで推定する。

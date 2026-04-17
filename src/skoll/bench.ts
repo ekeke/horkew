@@ -38,6 +38,10 @@ type BenchResult = {
   total: number
   villageWinRate: number
   elapsedMs: number
+  // 狼生存数の分布: wolfWinDist[n] = 狼n体生存で狼勝したゲーム数
+  wolfWinDist: number[]
+  // 狐勝時の狼生存数分布: foxWinDist[n] = 狼n体生存で狐勝したゲーム数
+  foxWinDist: number[]
 }
 
 /**
@@ -95,6 +99,8 @@ async function runBench(cfg: BenchConfig, useSkoll: boolean): Promise<BenchResul
   let villageWins = 0
   let wolfWins = 0
   let otherWins = 0
+  const wolfWinDist: number[] = []
+  const foxWinDist: number[] = []
   const t0 = performance.now()
 
   for (let i = 0; i < games; i++) {
@@ -123,19 +129,34 @@ async function runBench(cfg: BenchConfig, useSkoll: boolean): Promise<BenchResul
     const { state } = await runGame({ roles, seed, hasFirstGhost }, handlers)
 
     const result = state.result
-    if (result === 'villager_won') villageWins++
-    else if (result === 'werewolf_won') wolfWins++
-    else otherWins++
+    const survivingWolves = state.players.filter(p => p.role === 'werewolf' && p.alive).length
+
+    if (result === 'villager_won') {
+      villageWins++
+    } else if (result === 'werewolf_won') {
+      wolfWins++
+      wolfWinDist[survivingWolves] = (wolfWinDist[survivingWolves] ?? 0) + 1
+    } else {
+      otherWins++
+      foxWinDist[survivingWolves] = (foxWinDist[survivingWolves] ?? 0) + 1
+    }
   }
 
   const elapsedMs = performance.now() - t0
-  return { villageWins, wolfWins, otherWins, total: games, villageWinRate: villageWins / games, elapsedMs }
+  return { villageWins, wolfWins, otherWins, total: games, villageWinRate: villageWins / games, elapsedMs, wolfWinDist, foxWinDist }
+}
+
+function formatDist(dist: number[]): string {
+  const entries = dist.map((count, wolves) => `狼${wolves}:${count ?? 0}`).filter((_, i) => dist[i] != null)
+  return entries.length > 0 ? entries.join(' ') : '-'
 }
 
 function printResult(label: string, r: BenchResult) {
   const rate = (r.villageWinRate * 100).toFixed(1)
   const ms = r.elapsedMs.toFixed(0)
   console.log(`${label}: 村勝率 ${rate}% (${r.villageWins}/${r.total}) 狼勝 ${r.wolfWins} その他 ${r.otherWins} [${ms}ms]`)
+  if (r.wolfWins > 0) console.log(`  狼勝分布(狼生存数): ${formatDist(r.wolfWinDist)}`)
+  if (r.otherWins > 0) console.log(`  狐勝分布(狼生存数): ${formatDist(r.foxWinDist)}`)
 }
 
 const configs: BenchConfig[] = [
@@ -150,7 +171,8 @@ const configs: BenchConfig[] = [
   },
 ]
 
-console.log('=== Skoll (共有提案) vs Heuristic ベンチマーク ===\n')
+const foxWinPenalty = process.env['FOX_WIN_PENALTY'] ?? '-0.5'
+console.log(`=== Skoll (共有提案) vs Heuristic ベンチマーク [FOX_WIN_PENALTY=${foxWinPenalty}] ===\n`)
 
 for (const cfg of configs) {
   console.log(`--- ${cfg.name} (${cfg.games}ゲーム) ---`)
