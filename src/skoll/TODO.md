@@ -8,42 +8,79 @@ Hati が「詰みがあるか」（二値）を答えるのに対し、Skoll は
 ## 完了
 
 - [x] Step 1: 確率分布 — Retar の binary possibilities を全ワールド均等重みの role 確率に変換 (`computeRoleProbabilities`)
-- [x] Step 2: CO構造ベース解析的勝率 — 占いCOから世界分岐を構築し、吊り候補別の村勝率を計算 (`analyzeExecutions`)
+- [x] CO構造ベース解析的勝率 — 占いCOから世界分岐を構築、Retar で重み付け (`analyzeExecutions`)
   - `winrate.ts`: 再帰的勝率計算（grays/wolves/confirmed/alive の4整数、メモ化）
-  - `branches.ts`: 占いCO分析、共有CO認識、座席分類
+  - `branches.ts`: 占いCO分析、Retar 連携（seer排除で分岐除外、wolf排除で確定村）
   - `analysis.ts`: 分岐 × 吊り候補の勝率統合
+  - 限界: wolf/possessed 区別不可、死亡者の狼数が近似、confirmed_wolf の再帰的扱いに問題
+- [x] ワールド列挙ベース吊り分析 (`analyzeExecutionsByWorld`)
+  - Hati の `enumerateWorlds` + `checkOutcome` + `applyExecution` を再利用
+  - 各ワ��ルドで wolf/possessed が確定 → 正確な吊り結果
+  - ongoing は `computeWinRate` で近似
+- [x] 占い師生存価値 — 占い師が生存しているワールドで翌夜の占い結果を確率的にモデル化
+  - P(狼発見) × winRate(wolves-1) + P(白発見) × winRate(confirmed+1)
+- [x] 狩人 GJ 価値 — パリティ依存の護衛ブロックモデル
+  - 偶数進行���aliveAfterExec 奇数）: GJ で +1 処刑機会 → 正のボーナス
+  - 奇数進行（aliveAfterExec 偶数）: 密度希釈のみ → クランプで 0
+  - ランダム処刑モデルの限界により偶数 aliveAfterExec では逆効果を示すため非負クランプ
 
 ## 次のステップ
 
-### Step 2b: 霊媒CO分岐
+### 狐 (werehamster) 対応 [高優先]
 
-霊媒COも占いと同様に分岐を構築する。霊能ローラーの価値を定量化できるようになる。
+狐生存時の勝利条件が変わる。`checkOutcome` は既に hamster_win を返すが、`estimateOngoingWinRate` が狐の生存を考慮していない。
 
-- 霊媒の結果は処刑者の種族（人間/人狼）
-- 占い分岐と霊媒分岐の直積で全分岐を生成
+- 狼全滅 + 狐生存 → 狐勝ち（村勝ちにならない）
+- PP + 狐生存 → 狐勝ち
+- 占いが狐を占う → 狐死亡（呪殺）
+- 狼の噛みでは狐は死なない
+- 背徳者は狐死亡時に後追い死
 
-### Step 2c: 分岐重み付け
+### 霊媒結果による情報更新 [高優先]
 
-現在は均等重み (1/N)。Retar の確率分布 (Step 1) を使って「seat X が真占いである確率」で重み付けすればより正確に。
+処刑後に霊媒（生存・信用時）が黒/白を報告 → ワールドが分岐。
 
-### Step 3: 狐 (werehamster) 対応
+- 各ワールドで処刑者の霊媒結果が確定（`getMediumResult`）
+- 結果でワールドをグループ化 → 各グループ内で翌日の勝率を計算
+- Hati の `partitionWorldsByExecution` が参考になる
 
-狐生存時の勝利条件が変わる（村全滅でも狐勝ち）。勝率計算に第三勢力を導入。
+### 猫又の道連れ [中優先]
 
-### Step 4: Fenrir 統合
+- 猫又処刑 → ラン��ム1人道連れ死（狼を引ければ大きい）
+- 猫又噛み → 噛んだ狼が死亡
+- ���刑候補の猫又確率に応じたリスク/リターン計算
 
-- `analyzeExecutions` の結果を Fenrir の observation に追加
-- 吊り候補別勝率 (14次元) + 全体勝率 (1次元)
+### 占い複数夜モデル [中優先]
+
+現在1夜分���占い結果のみモデル化。占い師が長く生きるほど情報が累積する。再帰的にモデル化すれば精度向上。
+
+### 狼の噛み先モデル改善 [低優先]
+
+現在: 非狼からランダム。実際は占い師・狩人を優先的に狙う。噛み先モデルを「情報価値の高い seat を優先」に変えれば、占い師/狩人の生存価値がより正確に。
+
+### Fenrir 統合 [将来]
+
+- `analyzeExecutionsByWorld` の結果を Fenrir の observation に追加
+- 吊り候補別勝率 (SEATS 次元) + 全体勝率 (1���元)
 - reward shaping や heuristic の参考値として利用
 
-## 夜モデル（v1）
+## アーキテクチャ
 
-- 狼は confirmed village を優先的に噛む
-- confirmed がいなければ gray の非狼を噛む
-- 護衛・占い将来結果は考慮しない
+```
+src/skoll/
+  index.ts              Step 1: 確率分布 (computeRoleProbabilities)
+  winrate.ts            再帰的勝率計算 (grays/wolves/confirmed/alive)
+  branches.ts           CO構造分析 + Retar連携座席分類
+  analysis.ts           CO分岐ベース吊り分析 (analyzeExecutions)
+  world-analysis.ts     ワールド列挙ベース吊り分析 (analyzeExecutionsByWorld) ← メイン
+  types.ts              共有型定義
+  TODO.md               このファイル
+```
 
-## 未決事項
+`world-analysis.ts` が現在のメインの分析エン���ン。`branches.ts` / `analysis.ts` は CO 構造の可視化や Fenrir 向け特徴量として残す可能性あり。
 
-- 護衛のモデリング（護衛成功で夜死亡なし）
-- 占いの将来情報（真占い生存 = 翌日追加情報）
-- 夜モデルの改善（最悪ケース vs 平均ケース）
+## 既知の制限
+
+- **ランダム���刑仮定**: computeWinRate は全グレーから均等に処刑する前提。実際は情報ベース。このため alive 増加（GJ等）が密度希釈として��影響を示すケースがある
+- **1夜先読みのみ**: 占い・狩人の効果は1夜分のみ。累積効果は未モデル化
+- **狐未対応**: 第三勢���の存在で勝率計算が大きく変わるが未実装
