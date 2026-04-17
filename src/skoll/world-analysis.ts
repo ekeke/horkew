@@ -113,8 +113,11 @@ export function analyzeExecutionsByWorld(
 /**
  * ongoing ワールドの後続勝率を推定する。
  *
- * 処刑後の盤面から夜を1回通過させ（非狼が1人死亡）、
- * 翌日の盤面を computeWinRate で評価する。
+ * 処刑後の盤面から夜を1回通過させ、翌日の盤面を computeWinRate で評価する。
+ *
+ * 真役職の生存を考慮:
+ * - 占い師: 夜の占い結果を確率的にモデリング（狼発見/白発見）
+ * - 狩人: 護衛成功で噛みブロックの確率を考慮
  */
 function estimateOngoingWinRate(
   world: World,
@@ -125,25 +128,45 @@ function estimateOngoingWinRate(
   const aliveTotal = popCount32(aliveAfterExec)
   const aliveNonWolves = aliveTotal - aliveWolves
 
-  // 夜: 狼が非狼を1人噛む
-  const nextAlive = aliveTotal - 1
-  const nextNonWolves = aliveNonWolves - 1
-
-  // 夜噛み後の PP チェック
-  if (aliveWolves * 2 >= nextAlive) return 0.0
   if (aliveWolves <= 0) return 1.0
-  if (nextNonWolves <= 0) return 0.0
+  if (aliveNonWolves <= 0) return 0.0
 
-  // 翌日: 全非狼をグレー扱い、confirmed=0 で計算
-  // grays = nextNonWolves（狼を含まない）は間違い。
-  // computeWinRate の grays は「狼を含むグレー」なので
-  // grays = nextNonWolves + aliveWolves - (噛み分は非狼なので wolves はそのまま)
-  // → 実質、翌日の alive から wolves を含む全員が gray
-  return computeWinRate(
-    nextNonWolves + aliveWolves, // grays（全員グレー扱い、狼含む）
-    aliveWolves,                  // wolves
-    0,                            // confirmed（ワールドレベルでは区別なし）
-    nextAlive,                    // alive
-    cache,
-  )
+  const seerAlive = (world.seerMask & aliveAfterExec) !== 0
+
+  // 夜: 狼が非狼を1人噛む
+  // NOTE: 狩人の護衛ブロックは未モデル化。
+  // computeWinRate の「ランダム処刑」仮定では、護衛成功（alive 維持）が
+  // グレー狼密度の低下を招き逆効果になるため、正しくモデル化できない。
+  return estimateNextDay(aliveTotal - 1, aliveWolves, seerAlive, cache)
+}
+
+/**
+ * 夜通過後の翌日勝率を推定する。
+ * 占い師が生存していれば占い結果を織り込む。
+ */
+function estimateNextDay(
+  nextAlive: number,
+  wolves: number,
+  seerAlive: boolean,
+  cache: Map<number, number>,
+): number {
+  if (wolves * 2 >= nextAlive) return 0.0
+  if (wolves <= 0) return 1.0
+  if (nextAlive - wolves <= 0) return 0.0
+
+  const grays = nextAlive // 全員グレー扱い（狼含む）
+
+  // 占い師が生存 → 夜の占い結果を織り込む
+  if (seerAlive && grays > 1) {
+    const pWolfFound = wolves / grays
+
+    // 狼発見 → 翌日確定吊り（wolves-1）
+    const rateIfWolf = computeWinRate(grays - 1, wolves - 1, 0, nextAlive, cache)
+    // 白発見 → グレー-1, 確定村+1
+    const rateIfHuman = computeWinRate(grays - 1, wolves, 1, nextAlive, cache)
+
+    return pWolfFound * rateIfWolf + (1 - pWolfFound) * rateIfHuman
+  }
+
+  return computeWinRate(grays, wolves, 0, nextAlive, cache)
 }
