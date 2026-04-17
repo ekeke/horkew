@@ -446,6 +446,60 @@ describe('analyzeExecutionsByWorld', () => {
     assert.equal(result.bestExecution, 2)
   })
 
+  it('猫又処刑: 最終日3人「真猫/猫騙り狼/村」→ 50%道連れ込みの勝率', () => {
+    // 3人: seat1=猫又, seat2=狼, seat3=村 (1ワールド)
+    // seat1(真猫)を処刑: 道連れ候補 = {seat2(狼), seat3(村)}
+    //   道連れseat2(狼): afterCurse={seat3} → wolves=0 → village_win = 1.0
+    //   道連れseat3(村): afterCurse={seat2(狼)} → PP → wolf_win = 0.0
+    //   平均 = (1.0 + 0.0) / 2 = 0.5
+    //
+    // seat1/seat2 を不確定 (cat or wolf) にした2ワールドでは:
+    //   - seat1が猫の場合: 上記0.5
+    //   - seat1が狼の場合: village_win = 1.0
+    //   平均 = (0.5 + 1.0) / 2 = 0.75
+    const setup = new Map<SystemRole, number>([
+      ['nekomata', 1], ['werewolf', 1], ['villager', 1],
+    ])
+
+    // --- 確定真猫ワールドで猫吊り = 0.5 ---
+    const seatRolesConfirmed = new Map([
+      [1, ['nekomata']], [2, ['werewolf']], [3, ['villager']],
+    ]) as Map<number, SystemRole[]>
+    const possConfirmed = buildPossibilities(setup, seatRolesConfirmed)
+    const vsConfirmed = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()],
+    ]))
+    const resultConfirmed = analyzeExecutionsByWorld(possConfirmed, setup, vsConfirmed)
+    assert.equal(resultConfirmed.totalWorlds, 1)
+    const s1Confirmed = resultConfirmed.executions.find(e => e.seat === 1)!
+    const s2Confirmed = resultConfirmed.executions.find(e => e.seat === 2)!
+    const s3Confirmed = resultConfirmed.executions.find(e => e.seat === 3)!
+    approx(s1Confirmed.winRate, 1 / 2, '確定真猫吊り: 道連れ1/2で狼引き → 0.5')
+    approx(s2Confirmed.winRate, 1.0, '確定狼吊り → 1.0')
+    approx(s3Confirmed.winRate, 0.0, '村吊り → PP → 0.0')
+    assert.equal(resultConfirmed.bestExecution, 2, '最善手は狼処刑')
+
+    // --- 不確定2ワールド: seat1/seat2 どちらが猫/狼か不明 → 平均0.75 ---
+    const seatRolesAmbig = new Map([
+      [1, ['nekomata', 'werewolf']],
+      [2, ['nekomata', 'werewolf']],
+      [3, ['villager']],
+    ]) as Map<number, SystemRole[]>
+    const possAmbig = buildPossibilities(setup, seatRolesAmbig)
+    const vsAmbig = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()],
+    ]))
+    const resultAmbig = analyzeExecutionsByWorld(possAmbig, setup, vsAmbig)
+    assert.equal(resultAmbig.totalWorlds, 2)
+    const s1Ambig = resultAmbig.executions.find(e => e.seat === 1)!
+    const s2Ambig = resultAmbig.executions.find(e => e.seat === 2)!
+    const s3Ambig = resultAmbig.executions.find(e => e.seat === 3)!
+    // seat1/seat2: 50%で狼吊り(1.0) + 50%で猫吊り(0.5) = 0.75
+    approx(s1Ambig.winRate, 3 / 4, '不確定claim処刑: 50%狼+50%猫吊り(0.5) → 0.75')
+    approx(s2Ambig.winRate, 3 / 4, '不確定claim処刑: 対称なので同じ0.75')
+    approx(s3Ambig.winRate, 0.0, '村吊り → PP → 0.0')
+  })
+
   it('猫又生存: 猫又なしより村勝率が高い', () => {
     // 猫又はグレー外の特殊役職として狼の噛み先候補に加わる。
     // 狼が猫又を噛む場合は猫又+狼の両方が退場するため、残り狼数が減る。
