@@ -25,6 +25,7 @@ import type { GameEvent } from '../../../lupa/types.ts'
 import { StrategyBaseAdapter } from './strategy-base-adapter.ts'
 import { buildPlayerView } from '../../../lupa/player-view.ts'
 import { alivePlayers, checkWinCondition } from '../../../lupa/roles.ts'
+import { collectObservation } from '../observation.ts'
 import { trace } from '../trace.ts'
 
 // ============================================================
@@ -221,7 +222,15 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
         revoteCandidates: vctx.candidates,
         proposals: bbProposals,
       })
-      this.captureVoteObservation(vctx, player, ctx, bbProposals)
+      if (this.config.captureObservations && (vctx.revoteRound === 0 || vctx.revoteRound == null)) {
+        this.capturedObservations.push({
+          seat: player.seat,
+          role: player.role,
+          day: ctx.day,
+          observation: collectObservation(ctx),
+          proposals: bbProposals.map(p => ({ type: p.type, target: p.target })),
+        })
+      }
     }
 
     return votes

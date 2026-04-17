@@ -697,16 +697,16 @@ async function promptForCheckpointAction(config: OrchestratorConfig, checkpointB
     log(`  新レイアウト (phases/NN-name/) に移行するには全削除が必要です。`)
     log('')
     log(`  [n] 全削除して新規学習 (pretrain からやり直し)`)
-    log(`  [N] 新しいベースで開始`)
+    log(`  [new] 新しいベースで開始`)
     log(`  [q] 中止`)
-    const choice = (await promptChoice(`  選択 (n/N/Q): `)).toLowerCase()
+    const choice = await promptChoice(`  選択 (n/new/Q): `)
     if (choice === 'n') {
       deleteAllCheckpoints(checkpointBase)
       config.checkpointBase = checkpointBase
       log('全チェックポイントを削除しました。')
-    } else if (choice === 'N'.toLowerCase()) {
+    } else if (choice === 'new') {
       config.checkpointBase = nextCheckpointBase()
-      log(`New run: ${config.checkpointBase}`)
+      log(`新しいベースで開始: ${config.checkpointBase}`)
     } else {
       log('中止しました。'); process.exit(0)
     }
@@ -738,14 +738,14 @@ async function promptForCheckpointAction(config: OrchestratorConfig, checkpointB
   const latestLabel = latestPhase ? `フェーズ ${String(latestPhase.index).padStart(2, '0')}-${latestPhase.step.name}` : '(なし)'
 
   log(`  [n] 全削除して新規学習 (pretrain からやり直し)`)
-  log(`  [N] 新しいベースで新規ラン開始`)
+  log(`  [new] 新しいベースで新規ラン開始`)
   log(`  [p] pretrain 後から PPO やり直し`)
   log(`  [r] 最新チェックポイントから再開 (${latestLabel})`)
   log(`  [NN] 指定フェーズから再実行 (以降のフェーズを削除)`)
   log(`  [q] 中止`)
 
   const defaultChoice = rec?.recommended ?? 'q'
-  const choice = (await promptChoice(`  選択 (n/N/p/r/NN/Q) [${defaultChoice}]: `) || defaultChoice).trim()
+  const choice = (await promptChoice(`  選択 (n/new/p/r/NN/Q) [${defaultChoice}]: `) || defaultChoice).trim()
   config.checkpointBase = checkpointBase
 
   if (choice === 'n') {
@@ -753,7 +753,7 @@ async function promptForCheckpointAction(config: OrchestratorConfig, checkpointB
     log('全チェックポイントを削除しました。')
     return
   }
-  if (choice === 'N') {
+  if (choice === 'new') {
     config.checkpointBase = nextCheckpointBase()
     log(`新しいベースで開始: ${config.checkpointBase}`)
     return
