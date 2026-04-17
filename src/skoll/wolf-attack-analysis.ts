@@ -2,11 +2,16 @@
  * ワールド列挙ベースの狼襲撃先分析。
  *
  * analyzeExecutionsByWorld の狼版。
- * 各ワールドで各噛み候補を試し、狼の勝率（= 1 - 村の勝率）を計算する。
- * 狼は村勝率を最小化する候補（= 自陣営の勝率を最大化する候補）を選ぶ。
+ * 各ワールドで各噛み候補を試し、狼の勝率を計算する。
+ *
+ * 勝率の扱い:
+ * - terminal `wolf_win` → 1.0（狼勝ち）
+ * - terminal `village_win` / `hamster_win` → 0.0（狼は敗北。狐勝も狼にとっては負け）
+ * - ongoing → `1 - minimaxWinRate` で近似（`P(wolf_win) + P(hamster_win)` を
+ *   含むため将来の狐勝分を過大評価する近似。狐リスクが高い盤面では要改善）
  */
 
-import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
+import type { SystemRole, Seat } from '../types/index.ts'
 import type { Possibilities } from '../retar/possibilities.ts'
 import type { World } from '../hati/types.ts'
 import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask } from '../hati/types.ts'
@@ -39,18 +44,14 @@ const DEFAULT_MAX_WORLDS = 500_000
 export function analyzeAttacksByWorld(
   possibilities: Possibilities,
   setup: Map<SystemRole, number>,
-  vs: VillageStatus,
+  aliveNowSeats: Seat[],
   wolfSeats: Set<number>,
   maxWorlds: number = DEFAULT_MAX_WORLDS,
 ): WorldAttackAnalysis {
-  const aliveSeats: Seat[] = []
-  const candidateSeats: Seat[] = []
-  for (const [seat, status] of vs.statuses) {
-    if (status.surviving) {
-      aliveSeats.push(seat)
-      if (!wolfSeats.has(seat)) candidateSeats.push(seat)
-    }
-  }
+  // `aliveNowSeats` は呼び出し側の現在の生存席リスト（vs.statuses は Retar 実行
+  // 時点のスナップショットなので、当日の処刑が反映されない夜時点では使えない）
+  const aliveSeats = aliveNowSeats
+  const candidateSeats: Seat[] = aliveNowSeats.filter(s => !wolfSeats.has(s))
   const alive = maskFromSeats(aliveSeats)
 
   // 各 seat の累積狼勝率スコアと有効ワールド数
@@ -74,12 +75,12 @@ export function analyzeAttacksByWorld(
       if ((world.hamsterMask & (1 << target)) !== 0) {
         // 妖狐は噛まれても死なない → alive 変化なし
         const outcome = checkOutcome(world, alive)
-        if (outcome === 'wolf_win' || outcome === 'hamster_win') {
+        if (outcome === 'wolf_win') {
           wolfWinScores[i] += 1.0
         } else if (outcome === 'ongoing') {
           wolfWinScores[i] += 1.0 - estimateOngoingAttackWinRate(world, alive, cache)
         }
-        // village_win → 0
+        // village_win / hamster_win → 0 （どちらも狼の敗北）
       } else if ((world.nekomataMask & (1 << target)) !== 0) {
         // 猫又噛み: 猫又 + 噛んだ狼が道連れ退場（全生存狼で平均）
         const aliveWolfSeats = seatsFromMask(world.wolfMask & alive)
@@ -91,12 +92,12 @@ export function analyzeAttacksByWorld(
           const afterBoth = removeSeat(afterNekomata, wolfSeat)
           const afterFollow = applyFollowDeaths(afterBoth, world)
           const outcome = checkOutcome(world, afterFollow)
-          if (outcome === 'wolf_win' || outcome === 'hamster_win') {
+          if (outcome === 'wolf_win') {
             score += 1.0
           } else if (outcome === 'ongoing') {
             score += 1.0 - estimateOngoingAttackWinRate(world, afterFollow, cache)
           }
-          // village_win → 0
+          // village_win / hamster_win → 0
         }
         wolfWinScores[i] += score / aliveWolfSeats.length
       } else {
@@ -104,12 +105,12 @@ export function analyzeAttacksByWorld(
         const afterBite = removeSeat(alive, target)
         const afterFollow = applyFollowDeaths(afterBite, world)
         const outcome = checkOutcome(world, afterFollow)
-        if (outcome === 'wolf_win' || outcome === 'hamster_win') {
+        if (outcome === 'wolf_win') {
           wolfWinScores[i] += 1.0
         } else if (outcome === 'ongoing') {
           wolfWinScores[i] += 1.0 - estimateOngoingAttackWinRate(world, afterFollow, cache)
         }
-        // village_win → 0
+        // village_win / hamster_win → 0
       }
     }
 

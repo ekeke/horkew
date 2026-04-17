@@ -8,9 +8,9 @@
  */
 
 import type { TeamDecisionContext, WolfNightAction } from '../fenrir/src/agents/agent.ts'
-import type { VillageStatus } from '../types/index.ts'
 import { WolfTeamRuleAgent } from '../fenrir/src/agents/rule-based-agent.ts'
 import { Possibilities, possibilityFromRoles, RoleBitIndex } from '../retar/possibilities.ts'
+import { alivePlayers } from '../lupa/roles.ts'
 import { analyzeAttacksByWorld } from './wolf-attack-analysis.ts'
 
 export class SkollWolfTeamAgent extends WolfTeamRuleAgent {
@@ -33,12 +33,12 @@ export class SkollWolfTeamAgent extends WolfTeamRuleAgent {
 
   private skollAttackTarget(ctx: TeamDecisionContext): number | null {
     const artifacts = (ctx.gameState.ext as any)?.retarCache?.lastArtifacts as
-      | { vs: VillageStatus; setup: Map<string, number> }
+      | { setup: Map<string, number> }
       | null
       | undefined
     const globalPoss = ctx.globalRetarPossibilities
 
-    if (!artifacts?.vs || !artifacts?.setup || !globalPoss) return null
+    if (!artifacts?.setup || !globalPoss) return null
 
     let maxSeat = 0
     for (const seat of globalPoss.keys()) {
@@ -54,11 +54,14 @@ export class SkollWolfTeamAgent extends WolfTeamRuleAgent {
       possibilities.possibilities[seat] = possibilityFromRoles(roles as any)
     }
 
+    // 夜時点では vs.statuses が1回分古い（当日の処刑未反映）のため
+    // alivePlayers(state) を正規の生存席として使う
+    const aliveNowSeats = alivePlayers(ctx.gameState).map(p => p.seat)
     const wolfSeats = new Set(ctx.teamSeats)
     const analysis = analyzeAttacksByWorld(
       possibilities,
       artifacts.setup as any,
-      artifacts.vs,
+      aliveNowSeats,
       wolfSeats,
     )
 
