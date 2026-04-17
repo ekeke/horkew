@@ -18,6 +18,7 @@ type BenchConfig = {
   roles: RoleMap
   games: number
   seedStart?: number
+  hasFirstGhost?: boolean
 }
 
 type BenchResult = {
@@ -30,7 +31,7 @@ type BenchResult = {
 }
 
 async function runBench(cfg: BenchConfig, useSkoll: boolean): Promise<BenchResult> {
-  const { roles, games, seedStart = 0 } = cfg
+  const { roles, games, seedStart = 0, hasFirstGhost } = cfg
   let villageWins = 0
   let wolfWins = 0
   let otherWins = 0
@@ -45,7 +46,7 @@ async function runBench(cfg: BenchConfig, useSkoll: boolean): Promise<BenchResul
       defaultAgent: useSkoll ? new SkollAgent() : new RuleBasedAgent(),
       wolfTeamAgent: new WolfTeamRuleAgent(),
       masonTeamAgent: new MasonTeamRuleAgent(),
-      enableRetar: useSkoll,
+      enableRetar: true,
       roles,
       seed,
       onRolesAssigned: useSkoll
@@ -62,7 +63,7 @@ async function runBench(cfg: BenchConfig, useSkoll: boolean): Promise<BenchResul
         : undefined,
     })
 
-    const gameConfig = { roles, seed }
+    const gameConfig = { roles, seed, hasFirstGhost }
     const { state } = await runGame(gameConfig, handlers)
 
     const result = state.result
@@ -105,6 +106,15 @@ const configs: BenchConfig[] = [
       ['werewolf', 2], ['villager', 5], ['seer', 1], ['medium', 1], ['bodyguard', 1],
     ]),
     games: 200,
+  },
+  {
+    name: '14人村 猫又入り (w3/v2/占1/霊1/狩1/共2/猫1/狂1/狐1/背1)',
+    roles: new Map<SystemRole, number>([
+      ['werewolf', 3], ['villager', 2], ['seer', 1], ['medium', 1], ['bodyguard', 1],
+      ['mason', 2], ['nekomata', 1], ['fanatic', 1], ['werehamster', 1], ['immoralist', 1],
+    ]),
+    games: 200,
+    hasFirstGhost: true,
   },
 ]
 
