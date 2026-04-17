@@ -3,6 +3,10 @@
  *
  * branches.ts の世界分岐と winrate.ts の再帰計算を組み合わせ、
  * 各生存 seat を処刑した場合の村勝率を算出する。
+ *
+ * 注: このモジュールは狐（werehamster）を考慮していない。
+ * 狐対応が必要な場合は world-analysis.ts の analyzeExecutionsByWorld を使う。
+ * computeWinRate への foxes 引数は現状すべて 0 を渡している。
  */
 
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
@@ -30,7 +34,9 @@ export function analyzeExecutions(
   let overallWinRate = 0
   for (const branch of branches) {
     const cl = branch.classification
-    const wr = computeWinRate(cl.grayCount, cl.wolvesInGray, cl.confirmedVillageCount, cl.totalAlive, cache)
+    const wr = computeWinRate(
+      cl.grayCount, cl.wolvesInGray, 0, cl.confirmedVillageCount, cl.totalAlive, cache,
+    )
     overallWinRate += wr * branch.weight
   }
 
@@ -117,11 +123,11 @@ function winRateAfterExecutingWolf(
   // 夜: 狼が1人噛む
   if (cl.confirmedVillageCount > 0) {
     return computeWinRate(
-      cl.grayCount, cl.wolvesInGray, cl.confirmedVillageCount - 1, nextAlive - 1, cache,
+      cl.grayCount, cl.wolvesInGray, 0, cl.confirmedVillageCount - 1, nextAlive - 1, cache,
     )
   } else if (cl.grayCount > 0) {
     return computeWinRate(
-      cl.grayCount - 1, cl.wolvesInGray, 0, nextAlive - 1, cache,
+      cl.grayCount - 1, cl.wolvesInGray, 0, 0, nextAlive - 1, cache,
     )
   }
   return 0
@@ -144,11 +150,11 @@ function winRateAfterExecutingVillage(
   const nextConfirmed = cl.confirmedVillageCount - 1
   if (nextConfirmed > 0) {
     return computeWinRate(
-      cl.grayCount, cl.wolvesInGray, nextConfirmed - 1, nextAlive - 1, cache,
+      cl.grayCount, cl.wolvesInGray, 0, nextConfirmed - 1, nextAlive - 1, cache,
     )
   } else if (cl.grayCount > 0) {
     return computeWinRate(
-      cl.grayCount - 1, cl.wolvesInGray, 0, nextAlive - 1, cache,
+      cl.grayCount - 1, cl.wolvesInGray, 0, 0, nextAlive - 1, cache,
     )
   }
   return 0
@@ -177,11 +183,11 @@ function winRateAfterExecutingGray(
       winIfHit = 0.0
     } else if (cl.confirmedVillageCount > 0) {
       winIfHit = computeWinRate(
-        cl.grayCount - 1, wolvesAfterHit, cl.confirmedVillageCount - 1, nextAlive - 1, cache,
+        cl.grayCount - 1, wolvesAfterHit, 0, cl.confirmedVillageCount - 1, nextAlive - 1, cache,
       )
     } else {
       winIfHit = computeWinRate(
-        cl.grayCount - 2, wolvesAfterHit, 0, nextAlive - 1, cache,
+        cl.grayCount - 2, wolvesAfterHit, 0, 0, nextAlive - 1, cache,
       )
     }
   }
@@ -194,11 +200,11 @@ function winRateAfterExecutingGray(
     winIfMiss = 0.0
   } else if (cl.confirmedVillageCount > 0) {
     winIfMiss = computeWinRate(
-      cl.grayCount - 1, cl.wolvesInGray, cl.confirmedVillageCount - 1, nextAlive - 1, cache,
+      cl.grayCount - 1, cl.wolvesInGray, 0, cl.confirmedVillageCount - 1, nextAlive - 1, cache,
     )
   } else {
     winIfMiss = computeWinRate(
-      cl.grayCount - 2, cl.wolvesInGray, 0, nextAlive - 1, cache,
+      cl.grayCount - 2, cl.wolvesInGray, 0, 0, nextAlive - 1, cache,
     )
   }
 

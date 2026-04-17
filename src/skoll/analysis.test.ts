@@ -63,16 +63,16 @@ describe('computeWinRate', () => {
   it('最終日 グレー3 狼1 → 1/3', () => {
     // 4人生存: 確定村1 + グレー3（うち狼1）
     // rope = floor(3/2) = 1
-    approx(computeWinRate(3, 1, 1, 4), 1 / 3)
+    approx(computeWinRate(3, 1, 0, 1, 4), 1 / 3)
   })
 
   it('狼0 → 勝率1.0', () => {
-    approx(computeWinRate(3, 0, 1, 4), 1.0)
+    approx(computeWinRate(3, 0, 0, 1, 4), 1.0)
   })
 
   it('PP → 勝率0.0', () => {
     // 4人生存、グレー2、狼2 → PP (2*2 >= 4)
-    approx(computeWinRate(2, 2, 0, 4), 0.0)
+    approx(computeWinRate(2, 2, 0, 0, 4), 0.0)
   })
 
   it('6人 グレー4 狼2 確定村0 → 勝率計算', () => {
@@ -83,7 +83,7 @@ describe('computeWinRate', () => {
     //         → 1/2
     //   ハズレ: 5人、グレー3、狼2、夜でグレー噛み → 4人グレー2狼2 → PP → 0
     // 勝率 = 1/2 * 1/2 + 1/2 * 0 = 1/4
-    approx(computeWinRate(4, 2, 0, 6), 1 / 4)
+    approx(computeWinRate(4, 2, 0, 0, 6), 1 / 4)
   })
 
   it('6人 グレー4 狼2 確定村2 → confirmed 噛みモデル', () => {
@@ -96,22 +96,60 @@ describe('computeWinRate', () => {
     // ハズレ(2/4): 夜→confirmed噛み → grays=3, wolves=2, confirmed=1, alive=4
     //   PP判定: 2*2=4 >= 4 → PP → 0.0
     // 勝率 = 1/2 * 1/3 + 1/2 * 0 = 1/6
-    approx(computeWinRate(4, 2, 2, 6), 1 / 6)
+    approx(computeWinRate(4, 2, 0, 2, 6), 1 / 6)
   })
 
   it('rope=0 → 0.0', () => {
     // alive=1, rope=0
-    approx(computeWinRate(1, 1, 0, 1), 0.0)
+    approx(computeWinRate(1, 1, 0, 0, 1), 0.0)
   })
 
   it('grays=1 wolves=1 最終日', () => {
     // 2人: グレー1（狼）+ 確定村0? alive=2
     // PP: 1*2 >= 2 → true → 0.0
-    approx(computeWinRate(1, 1, 0, 2), 0.0)
-    // 3人: グレー1（狼）+ 確定村1, alive=3? でも alive = grays+confirmed+...
-    // alive=3, grays=1, wolves=1, confirmed=1
+    approx(computeWinRate(1, 1, 0, 0, 2), 0.0)
+    // 3人: グレー1（狼）+ 確定村1, alive=3
     // rope=1, pHit=1/1=1.0, 最後の狼→1.0
-    approx(computeWinRate(1, 1, 1, 3), 1.0)
+    approx(computeWinRate(1, 1, 0, 1, 3), 1.0)
+  })
+
+  // ── 狐対応 ──
+
+  it('狼0 + 狐1 → 狐勝ち (0.0)', () => {
+    approx(computeWinRate(1, 0, 1, 0, 2), 0.0)
+  })
+
+  it('PP + 狐生存 → 0.0（狐勝ち）', () => {
+    // 3人: 狼1+狐1+村1, 2w+f=3 >= 3 → PP(狐勝ち)
+    approx(computeWinRate(3, 1, 1, 0, 3), 0.0)
+  })
+
+  it('最終日 グレー3 狼1 狐1 → 狐がいるので勝率低下', () => {
+    // 4人、グレー3（狼1狐1村1）、確定村1、rope=1
+    // 処刑:
+    //   狼命中 (1/3): 最後の狼だが狐生存 → 0
+    //   狐命中 (1/3): grays=2 (狼1村1), foxes=0, 夜→confirmed噛み → grays=2,wolves=1,conf=0,alive=2 → PP → 0
+    //   ハズレ (1/3): grays=2 (狼1狐1), foxes=1, 夜→confirmed噛み → grays=2,wolves=1,foxes=1,conf=0,alive=2 → 2w+f=3>=2 PP → 0
+    // 勝率 = 0
+    approx(computeWinRate(3, 1, 1, 1, 4), 0.0)
+  })
+
+  it('6人 グレー5 狼1 狐1 確定村1 → 狐処刑で勝ち筋', () => {
+    // 6人、グレー5（狼1狐1村3）、確定村1、rope=2
+    // 狐命中 (1/5): grays=4(狼1村3), foxes=0, conf=1, alive=5
+    //   夜 confirmed 噛み → grays=4,wolves=1,foxes=0,conf=0,alive=4 → rope=1
+    //   pHit=1/4, 命中=最後狼→1.0, ハズレ=grays=3,wolves=1,alive=3 PP=0
+    //   = 1/4
+    // 狼命中 (1/5): 最後の狼だが狐生存 → 0
+    // ハズレ (3/5): grays=4(狼1狐1村2), foxes=1, conf=1, alive=5
+    //   夜 confirmed 噛み → grays=4,wolves=1,foxes=1,conf=0,alive=4 → 2w+f=3<4 ok, rope=1
+    //   pHit_wolf=1/4→最後狼だが狐生存=0, pHit_fox=1/4→grays=3(狼1村2),foxes=0,alive=3 夜? wolves=1
+    //     applyNightBite(grays=3,w=1,f=0,conf=0,alive=3): gnwnf=2>0 → grays=2,w=1,alive=2 PP=0
+    //     = 0
+    //   pMiss=2/4 → grays=3(狼1狐1村1),foxes=1,alive=3 → 2w+f=3>=3 PP=0
+    //   すべて0
+    // 合計 = 1/5 * 1/4 = 1/20 = 0.05
+    approx(computeWinRate(5, 1, 1, 1, 6), 0.05)
   })
 })
 

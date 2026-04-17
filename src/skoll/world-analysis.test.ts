@@ -143,7 +143,7 @@ describe('analyzeExecutionsByWorld', () => {
 
     // possessed 吊り → ongoing（狼まだいる）
     const possExec = result.executions.find(e => e.seat === 2)!
-    // 3人残り、狼1 → 夜で1人死亡 → 2人、PP → 0
+    // 3人残り、狼1 → 夜で1人退場 → 2人、PP → 0
     approx(possExec.winRate, 0.0)
 
     assert.equal(result.bestExecution, 1)
@@ -187,6 +187,106 @@ describe('analyzeExecutionsByWorld', () => {
 
     // 確定村人 < 狼候補
     assert.ok(s1.winRate > s3.winRate)
+  })
+
+  it('狐生存 + 狼1: 狼吊り → 狼全滅だが狐勝ち', () => {
+    // seat1=村, seat2=狼, seat3=狐 の1ワールド
+    // 狼吊りで aliveWolves=0 になるが hamsterAlive=true → hamster_win
+    const setup = new Map<SystemRole, number>([
+      ['villager', 1], ['werewolf', 1], ['werehamster', 1],
+    ])
+    const seatRoles = new Map([
+      [1, ['villager']],
+      [2, ['werewolf']],
+      [3, ['werehamster']],
+    ]) as Map<number, SystemRole[]>
+    const possibilities = buildPossibilities(setup, seatRoles)
+    const vs = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()],
+    ]))
+
+    const result = analyzeExecutionsByWorld(possibilities, setup, vs)
+    assert.equal(result.totalWorlds, 1)
+
+    // 狼吊り → hamster_win（村負け）
+    const s2 = result.executions.find(e => e.seat === 2)!
+    approx(s2.winRate, 0.0, '狼吊っても狐生存 → 狐勝ち')
+
+    // 狐吊り → 3人残り、狼1、狐0 → 夜→PP → 0
+    const s3 = result.executions.find(e => e.seat === 3)!
+    approx(s3.winRate, 0.0, '狐吊っても狼残る → PP')
+
+    // 村吊り → 狼+狐生存 → PP的に 2w+f=3 >= 3 → 0
+    const s1 = result.executions.find(e => e.seat === 1)!
+    approx(s1.winRate, 0.0, '村吊り → PP相当')
+  })
+
+  it('狐生存: 狼吊り vs 狐吊り vs 村吊りで差が出る盤面', () => {
+    // 5人: seat1=村, seat2=狼, seat3=狐, seat4=占, seat5=村
+    // 狼が1/残り4、狐1いる。設計狼: 狼吊り=0（狐勝ち）、狐吊り=1.0（狼1 → 夜 → 3人で回る）
+    // (狐吊り後: 4人、狼1村3、夜で占い生存→翌日勝率)
+    const setup = new Map<SystemRole, number>([
+      ['villager', 2], ['werewolf', 1], ['werehamster', 1], ['seer', 1],
+    ])
+    const seatRoles = new Map([
+      [1, ['villager']],
+      [2, ['werewolf']],
+      [3, ['werehamster']],
+      [4, ['seer']],
+      [5, ['villager']],
+    ]) as Map<number, SystemRole[]>
+    const possibilities = buildPossibilities(setup, seatRoles)
+    const vs = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()], [3, makeSeat()],
+      [4, makeSeat()], [5, makeSeat()],
+    ]))
+
+    const result = analyzeExecutionsByWorld(possibilities, setup, vs)
+    assert.equal(result.totalWorlds, 1)
+
+    const s2 = result.executions.find(e => e.seat === 2)! // 狼吊り
+    const s3 = result.executions.find(e => e.seat === 3)! // 狐吊り
+    const s1 = result.executions.find(e => e.seat === 1)! // 村吊り
+
+    // 狼吊り: 狼全滅だが狐生存 → hamster_win (0.0)
+    approx(s2.winRate, 0.0, '狼吊り → 狐勝ち')
+
+    // 狐吊り: 狼1残り、4人(狼1村3占1のうち村3＋占1)、夜→ongoing
+    //   占い生存 → 呪殺なし（狐もういない）、狼発見なら勝率UP
+    assert.ok(s3.winRate > 0, '狐吊り → 村にチャンスあり')
+
+    // 村吊り: 狼+狐生存 → 勝率は狐吊りより低いはず
+    assert.ok(s3.winRate > s1.winRate, '狐吊りが村吊りより優位')
+
+    // 最善手は狐吊り
+    assert.equal(result.bestExecution, 3)
+  })
+
+  it('狐未生存: 既に退場している狐は勝敗に影響しない', () => {
+    // 退場した狐（seat3）は hamsterMask に含まれるが alive に含まれない
+    // → (hamsterMask & alive) === 0 なので狐なし扱い
+    const setup = new Map<SystemRole, number>([
+      ['villager', 2], ['werewolf', 1], ['werehamster', 1],
+    ])
+    const seatRoles = new Map([
+      [1, ['villager']],
+      [2, ['werewolf']],
+      [3, ['werehamster']],
+      [4, ['villager']],
+    ]) as Map<number, SystemRole[]>
+    const possibilities = buildPossibilities(setup, seatRoles)
+    const vs = makeVillage(new Map([
+      [1, makeSeat()], [2, makeSeat()],
+      [3, makeSeat({ surviving: false })], // 狐退場
+      [4, makeSeat()],
+    ]))
+
+    const result = analyzeExecutionsByWorld(possibilities, setup, vs)
+    assert.equal(result.totalWorlds, 1)
+
+    // 狼吊り → 村勝ち (狐退場済みなので村勝ち)
+    const s2 = result.executions.find(e => e.seat === 2)!
+    approx(s2.winRate, 1.0, '狼吊り + 狐退場済み → 村勝ち')
   })
 
   it('打ち切り: maxWorlds で truncated', () => {

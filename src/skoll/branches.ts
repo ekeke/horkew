@@ -146,7 +146,7 @@ export function classifySeats(
     }
   }
 
-  // グレー内の狼数 = 総狼数 - 確定狼（生存+死亡）
+  // グレー内の狼数 = 総狼数 - 確定狼（生存+退場）
   let deadConfirmedWolves = 0
   for (const seat of confirmedWolfSeats) {
     const status = vs.statuses.get(seat)
@@ -154,7 +154,7 @@ export function classifySeats(
       deadConfirmedWolves++
     }
   }
-  // Retar 由来の confirmed_wolf も死亡者をカウント
+  // Retar 由来の confirmed_wolf も退場者をカウント
   if (retarPossibilities) {
     for (const [seat, status] of vs.statuses) {
       if (status.surviving) continue
