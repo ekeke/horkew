@@ -13,8 +13,8 @@ import type { Possibilities } from '../retar/possibilities.ts'
 import type { World } from '../hati/types.ts'
 import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask } from '../hati/types.ts'
 import { enumerateWorlds } from '../hati/worlds.ts'
-import { checkOutcome, applyExecution, getMediumResult } from '../hati/simulate.ts'
-import { computeWinRate } from './winrate.ts'
+import { checkOutcome, applyExecution } from '../hati/simulate.ts'
+import { minimaxNightWinRate } from './winrate.ts'
 
 export type WorldExecutionAnalysis = {
   totalWorlds: number
@@ -139,151 +139,38 @@ export function analyzeExecutionsByWorld(
 }
 
 /**
- * ongoing ワールドの後続勝率を推定する。
+ * ongoing ワールドの後続勝率をミニマックスで推定する。
  *
- * 処刑後の盤面から夜を1回通過させ、翌日の盤面を computeWinRate で評価する。
+ * 具体的ワールド（役職確定）の情報を抽象状態に変換し、
+ * minimaxWinRate（村 MAX / 狼 MIN の完全ミニマックス）を呼ぶ。
  *
- * 真役職の生存を考慮:
- * - 占い師: 夜の占い結果を確率的にモデリング（狼発見/白発見/呪殺）
- * - 狩人: 護衛成功で噛みブロックの確率を考慮
- * - 狐: 生存している場合、狼全滅でも狐勝ちになる。呪殺・処刑でのみ退場。
- * - 霊媒: 処刑者の黒/白を観測し、翌日の処刑精度に反映する。
- *   霊媒生存時は霊媒席が確定村扱い（処刑候補から除外）。
+ * 抽象状態への変換:
+ * - wolves/foxes/nekomata: ワールド確定値
+ * - seer/medium/bodyguard: 生存フラグ
+ * - grays: 役職不明プール = alive - 特殊役職
+ * - confirmedVillage/confirmedWolves: 今後の占い確定の初期値（= 0）
  *
- * @param world - 当該ワールドの役職配置
- * @param executedSeat - 今日処刑した seat
- * @param aliveAfterExec - 処刑後の生存者マスク（夜前）
- * @param cache - メモ化キャッシュ
+ * ミニマックスが担う処理（旧モデルからの改善点）:
+ * - 狼が最善の噛み先を選ぶ（占い師・霊媒・狩人を優先的に狙う）
+ * - 占い師の結果が複数夜にわたって蓄積する
+ * - 確定狼は翌日確実に処刑される（발見即退場なし）
+ * - 猫又噛みの道連れは minimax 内の選択肢として評価される
  */
 function estimateOngoingWinRate(
   world: World,
-  executedSeat: Seat,
+  _executedSeat: Seat,
   aliveAfterExec: number,
   cache: Map<number, number>,
 ): number {
-  const aliveWolves = popCount32(world.wolfMask & aliveAfterExec)
-  const aliveFoxes = popCount32(world.hamsterMask & aliveAfterExec)
-  const aliveTotal = popCount32(aliveAfterExec)
-  // 非狼非狐の生存数（PP 判定で使う非狼陣営の母数）
-  const aliveNonWolvesNonFoxes = aliveTotal - aliveWolves - aliveFoxes
-
-  // 狼全退場: 狐が残っていれば狐勝ち、いなければ村勝ち
-  if (aliveWolves <= 0) return aliveFoxes <= 0 ? 1.0 : 0.0
-  // PP: 2w + f >= alive（checkOutcome の非狼非狐カウントに一致）
-  if (2 * aliveWolves + aliveFoxes >= aliveTotal) return 0.0
-  if (aliveNonWolvesNonFoxes <= 0) return 0.0
-
-  const aliveNekomata = popCount32(world.nekomataMask & aliveAfterExec)
+  const wolves = popCount32(world.wolfMask & aliveAfterExec)
+  const foxes = popCount32(world.hamsterMask & aliveAfterExec)
+  const nekomata = popCount32(world.nekomataMask & aliveAfterExec)
   const seerAlive = (world.seerMask & aliveAfterExec) !== 0
   const mediumAlive = (world.mediumMask & aliveAfterExec) !== 0
-  const bodyguardAlive = world.bodyguardSeat >= 0
-    && hasSeat(aliveAfterExec, world.bodyguardSeat)
+  const bodyguardAlive = world.bodyguardSeat >= 0 && hasSeat(aliveAfterExec, world.bodyguardSeat)
+  const aliveTotal = popCount32(aliveAfterExec)
+  // grays = 役職不明プール（狼・狐・村人の混在、特殊役職を除く）
+  const grays = aliveTotal - (seerAlive ? 1 : 0) - (mediumAlive ? 1 : 0) - (bodyguardAlive ? 1 : 0) - nekomata
 
-  // 霊媒生存: 処刑者の黒/白を取得して翌日の情報として使う
-  // 霊媒結果は ongoing win rate の medium 確定数に影響する
-  const mediumResult = mediumAlive
-    ? getMediumResult(world.roles[executedSeat])
-    : null
-
-  // 猫又噛みモデル: 狼2匹以上のとき猫又を噛む可能性がある
-  // 猫又が噛まれると: 猫又退場 + 噛んだ狼退場（道連れ）
-  // LW（最後の狼）は猫又を噛まない（自チームも全滅するため）
-  const aliveNonWolves = aliveTotal - aliveWolves
-  let rateNoGuard: number
-  if (aliveNekomata > 0 && aliveWolves >= 2 && aliveNonWolves > 0) {
-    const pBiteNeko = aliveNekomata / aliveNonWolves
-    const pBiteOther = 1 - pBiteNeko
-    // 猫又噛み: 猫又+狼が退場 → aliveTotal-2, wolves-1
-    const rateIfNekoHit = estimateNextDay(
-      aliveTotal - 2, aliveWolves - 1, aliveFoxes, seerAlive, mediumAlive, mediumResult, cache,
-    )
-    // 通常噛み: 1人退場
-    const rateIfOtherHit = estimateNextDay(
-      aliveTotal - 1, aliveWolves, aliveFoxes, seerAlive, mediumAlive, mediumResult, cache,
-    )
-    rateNoGuard = pBiteNeko * rateIfNekoHit + pBiteOther * rateIfOtherHit
-  } else {
-    // 基本: 夜に狼が非狼非狐を1人噛む
-    rateNoGuard = estimateNextDay(
-      aliveTotal - 1, aliveWolves, aliveFoxes, seerAlive, mediumAlive, mediumResult, cache,
-    )
-  }
-
-  if (bodyguardAlive && aliveTotal > 2) {
-    // 狩人生存: 護衛成功なら噛みブロック（alive 維持）
-    // GJ の価値はパリティ依存:
-    //   aliveTotal が奇数 → GJ で偶数落ちを防ぎ +1 処刑機会（有効）
-    //   aliveTotal が偶数 → GJ で密度希釈のみ（モデル上逆効果、実際は中立）
-    // ランダム処刑モデルの限界で偶数時に負になるため、ボーナスを非負にクランプ。
-    const pBlock = 1 / (aliveTotal - 1)
-    const rateWithGuard = estimateNextDay(
-      aliveTotal, aliveWolves, aliveFoxes, seerAlive, mediumAlive, mediumResult, cache,
-    )
-    const guardBonus = Math.max(0, rateWithGuard - rateNoGuard)
-    return rateNoGuard + pBlock * guardBonus
-  }
-
-  return rateNoGuard
-}
-
-/**
- * 夜通過後の翌日勝率を推定する。
- * 占い師が生存していれば占い結果を織り込む（呪殺含む）。
- * 霊媒が生存していれば霊媒情報を翌日の処刑精度に反映する。
- *
- * 霊媒モデル:
- * - 霊媒生存 → 霊媒席は確定村（処刑候補から除外）: grays-1, confirmed+1
- * - 霊媒結果=黒（処刑者が狼）: 村は狼捕捉を確認。翌日の確定白が+1増える可能性を加味
- * - 霊媒結果=白（処刑者が非狼）: 村はハズレを確認。追加情報なし
- *
- * 注: 霊媒席自体を confirmed に入れることで「狼が霊媒を優先的に噛む」
- * モデルになる（confirmed = 狼が優先的に噛む村側確定席）。これは現実的な近似。
- */
-function estimateNextDay(
-  nextAlive: number,
-  wolves: number,
-  foxes: number,
-  seerAlive: boolean,
-  mediumAlive: boolean,
-  mediumResult: 'wolf' | 'human' | null,
-  cache: Map<number, number>,
-): number {
-  if (wolves <= 0) return foxes <= 0 ? 1.0 : 0.0
-  if (2 * wolves + foxes >= nextAlive) return 0.0
-  if (nextAlive - wolves - foxes <= 0) return 0.0
-
-  // 霊媒生存: 霊媒席は確定村（grays から除き confirmed に移す）
-  // - 村: 霊媒を処刑しない（処刑候補から除外）
-  // - 狼: 霊媒を優先的に噛む（confirmed = 狼優先ターゲット）
-  const mediumConfirmed = mediumAlive ? 1 : 0
-
-  // 霊媒結果=黒（今日の処刑が狼だった）: 翌日確定白+1のボーナスがある
-  // 村が「狼捕捉確認」の情報を持つため、翌日の執行はより的確になる近似として
-  // confirmed をさらに+1する。
-  // 霊媒結果=白または霊媒なし: 追加ボーナスなし
-  const mediumBlackBonus = (mediumResult === 'wolf') ? 1 : 0
-  const totalConfirmed = mediumConfirmed + mediumBlackBonus
-
-  // grays は霊媒席を除いた確定グレー（狼・狐含む）
-  const grays = nextAlive - mediumConfirmed
-
-  // 占い師が生存 → 夜の占い結果を織り込む
-  if (seerAlive && grays > 1) {
-    const pWolf = wolves / grays
-    const pFox = foxes / grays
-    const pHuman = (grays - wolves - foxes) / grays
-
-    // 狼発見 → 翌日確定吊り（wolves-1）
-    const rateIfWolf = computeWinRate(grays - 1, wolves - 1, foxes, totalConfirmed, nextAlive, cache)
-    // 狐占い → 呪殺（狐退場）: foxes-1、alive-1 追加減少、占い結果は「人」で情報価値なし
-    const rateIfFox = foxes > 0
-      ? computeWinRate(grays - 1, wolves, foxes - 1, totalConfirmed, nextAlive - 1, cache)
-      : 0
-    // 白発見 → グレー-1, 確定村+1（狐ではないことは保証されないが v1 は近似）
-    const rateIfHuman = computeWinRate(grays - 1, wolves, foxes, totalConfirmed + 1, nextAlive, cache)
-
-    return pWolf * rateIfWolf + pFox * rateIfFox + pHuman * rateIfHuman
-  }
-
-  return computeWinRate(grays, wolves, foxes, totalConfirmed, nextAlive, cache)
+  return minimaxNightWinRate(wolves, foxes, grays, 0, 0, seerAlive, mediumAlive, bodyguardAlive, nekomata, cache)
 }
