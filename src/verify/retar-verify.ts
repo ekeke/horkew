@@ -138,11 +138,11 @@ function verifyCheckpoint(
   const unknowns = statements.filter(s => s.type === 'unknown')
   if (unknowns.length > 0) {
     const annotatedHowl = partialHowl.trimEnd() + '\n\n'
-      + `# パース失敗: ${unknowns.map((s: any) => s.raw).join(', ')}\n`
+      + `# パース失敗: ${unknowns.map((s: any) => s.text).join(', ')}\n`
     return {
       failure: {
         config: configName, seed, checkpoint, howl: annotatedHowl,
-        players: [{ name: '(parse)', message: `unknown statements: ${unknowns.map((s: any) => s.raw).join(', ')}` }],
+        players: [{ name: '(parse)', message: `unknown statements: ${unknowns.map((s: any) => s.text).join(', ')}` }],
       },
       skipped: false, retarMs: 0,
     }
@@ -235,11 +235,11 @@ function verifyPriorCheckpoint(
   const unknowns = statements.filter(s => s.type === 'unknown')
   if (unknowns.length > 0) {
     const annotatedHowl = partialHowl.trimEnd() + '\n\n'
-      + `# パース失敗: ${unknowns.map((s: any) => s.raw).join(', ')}\n`
+      + `# パース失敗: ${unknowns.map((s: any) => s.text).join(', ')}\n`
     return {
       failure: {
         config: configName, seed, checkpoint, howl: annotatedHowl,
-        players: [{ name: '(parse)', message: `unknown statements: ${unknowns.map((s: any) => s.raw).join(', ')}` }],
+        players: [{ name: '(parse)', message: `unknown statements: ${unknowns.map((s: any) => s.text).join(', ')}` }],
       },
       skipped: false, retarMs: 0,
     }
@@ -876,7 +876,7 @@ function verifyHowlFile(filePath: string): void {
     const { meta, statements } = parse(partialText)
     const unknowns = statements.filter(s => s.type === 'unknown')
     if (unknowns.length > 0) {
-      console.log(`  checkpoint line ${cpLine + 1}: skipped (unknown statements: ${unknowns.map((s: any) => s.raw).join(', ')})`)
+      console.log(`  checkpoint line ${cpLine + 1}: skipped (unknown statements: ${unknowns.map((s: any) => s.text).join(', ')})`)
       continue
     }
 
