@@ -5,6 +5,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import type { AnyNetwork, NetworkConfig } from './nn.ts'
+import { TransformerNetwork } from './transformer-network.ts'
 
 export type CheckpointData = {
   version: number
@@ -68,4 +69,21 @@ export function loadCheckpoint(
 
   network.loadWeights(weights)
   return data
+}
+
+/**
+ * チェックポイント単体から Pure JS TransformerNetwork を構築。
+ * TF.js 非依存で動くため、ブラウザ/demo/推論専用パスで利用可。
+ * training.ts の create*Network を介さないので config 定数の import も不要。
+ */
+export function loadNetworkFromCheckpoint(path: string): TransformerNetwork {
+  const raw = readFileSync(path, 'utf-8')
+  const data: CheckpointData = JSON.parse(raw)
+  const net = new TransformerNetwork(data.config, true)
+  const weights = new Map<string, Float32Array>()
+  for (const [name, b64] of Object.entries(data.weights)) {
+    weights.set(name, base64ToFloat32(b64))
+  }
+  net.loadWeights(weights)
+  return net
 }

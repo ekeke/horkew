@@ -6,16 +6,45 @@
  *
  * ベンチ用 adapter が collectProposals でこのエージェントの decideProposal を呼び、
  * execute_order として全村プレイヤーに伝播する。
+ *
+ * 内部は UnifiedVoteAnalysis で正規化し、NN フォールバックは
+ * estimateWorldCount.upperBound > threshold のとき発火する。
  */
 
 import type { TeamDecisionContext } from '../fenrir/src/agents/agent.ts'
 import type { Proposal } from '../fenrir/src/leadership.ts'
-import type { VillageStatus } from '../types/index.ts'
+import type { VillageStatus, SystemRole } from '../types/index.ts'
 import { MasonTeamRuleAgent } from '../fenrir/src/agents/rule-based-agent.ts'
-import { Possibilities, possibilityFromRoles, RoleBitIndex } from '../retar/possibilities.ts'
 import { analyzeExecutionsByWorld } from './world-analysis.ts'
+import { estimateWorldCount } from './estimate.ts'
+import { encodeCollectiveMasonObservation } from '../fenrir/src/observation.ts'
+import type { AnyNetwork } from '../fenrir/src/ml/nn.ts'
+import {
+  unifyVillageAnalysis, nnInferVote,
+  buildPossibilitiesFromRetar,
+  type UnifiedVoteAnalysis,
+} from './unified.ts'
+
+/** mason_brain NN フォールバック設定 */
+export type MasonNNFallback = {
+  /** mason_brain と互換の NN (createMasonBrainNetwork で作って checkpoint load 済み) */
+  network: AnyNetwork
+  /** estimateWorldCount.upperBound > threshold で NN にフォールバック (default 100_000) */
+  threshold?: number
+  /** デバッグ: フォールバック発火を計測 */
+  onFallback?: (estimatedWorlds: number) => void
+}
+
+const DEFAULT_MASON_THRESHOLD = 100_000
 
 export class SkollMasonTeamAgent extends MasonTeamRuleAgent {
+  private nnFallback: MasonNNFallback | null
+
+  constructor(opts?: { nnFallback?: MasonNNFallback }) {
+    super()
+    this.nnFallback = opts?.nnFallback ?? null
+  }
+
   override decideProposal(ctx: TeamDecisionContext): Proposal | null {
     const target = this.skollTarget(ctx)
     if (target == null) return super.decideProposal(ctx)
@@ -29,43 +58,55 @@ export class SkollMasonTeamAgent extends MasonTeamRuleAgent {
   }
 
   private skollTarget(ctx: TeamDecisionContext): number | null {
-    const artifacts = (ctx.gameState.ext as any)?.retarCache?.lastArtifacts as
-      | { vs: VillageStatus; setup: Map<string, number> }
-      | null
-      | undefined
-    const globalPoss = ctx.globalRetarPossibilities
+    const analysis = this.analyzeVote(ctx)
+    return analysis?.bestVote ?? null
+  }
 
+  /** mason team 視点の UnifiedVoteAnalysis を返す (null = 解析不能) */
+  analyzeVote(ctx: TeamDecisionContext): UnifiedVoteAnalysis | null {
+    const artifacts = (ctx.gameState.ext as { retarCache?: { lastArtifacts?: { vs: VillageStatus, setup: Map<string, number> } | null } } | undefined)?.retarCache?.lastArtifacts
+    const globalPoss = ctx.globalRetarPossibilities
     if (!artifacts?.vs || !artifacts?.setup || !globalPoss) return null
 
-    let maxSeat = 0
-    for (const seat of globalPoss.keys()) {
-      if (seat > maxSeat) maxSeat = seat
+    const setup = artifacts.setup as Map<SystemRole, number>
+    const possibilities = buildPossibilitiesFromRetar(globalPoss, setup)
+    const masonSeats = new Set<number>(ctx.teamSeats)
+
+    // NN フォールバック: 重盤面なら skoll を skip
+    if (this.nnFallback) {
+      const est = estimateWorldCount(possibilities, setup)
+      const threshold = this.nnFallback.threshold ?? DEFAULT_MASON_THRESHOLD
+      if (est.upperBound > threshold) {
+        this.nnFallback.onFallback?.(est.upperBound)
+        return nnInferVote(
+          this.nnFallback.network,
+          encodeCollectiveMasonObservation(ctx),
+          ctx.alivePlayers,
+          masonSeats,
+        )
+      }
     }
-    const possibilities = new Possibilities(maxSeat)
-    for (const [role, count] of artifacts.setup as Map<string, number>) {
-      const idx = RoleBitIndex[role as keyof typeof RoleBitIndex]
-      if (idx !== undefined) possibilities.setup[idx] = count
+
+    // Mason 視点は village skoll (bestExecution を masonSeats 外で選ぶ)
+    const raw = analyzeExecutionsByWorld(possibilities, setup, artifacts.vs)
+    if (raw.totalWorlds === 0) return null
+    // partnerSeat を null で渡し、excluded に masonSeats 全体をあとで差し込む
+    const unified = unifyVillageAnalysis(raw, ctx.mySeat, null)
+    // mason team 全員を除外扱いに
+    for (const c of unified.candidates) if (masonSeats.has(c.seat)) c.excluded = true
+    if (unified.bestVote !== null && masonSeats.has(unified.bestVote)) {
+      // 次善手へ
+      let best: number | null = null
+      let bestScore = -Infinity
+      for (const c of unified.candidates) {
+        if (c.excluded) continue
+        if (c.score > bestScore) {
+          bestScore = c.score
+          best = c.seat
+        }
+      }
+      unified.bestVote = best
     }
-    possibilities.setupOriginal = new Uint8Array(possibilities.setup)
-    for (const [seat, roles] of globalPoss) {
-      possibilities.possibilities[seat] = possibilityFromRoles(roles as any)
-    }
-
-    const analysis = analyzeExecutionsByWorld(
-      possibilities,
-      artifacts.setup as any,
-      artifacts.vs,
-    )
-
-    if (analysis.totalWorlds === 0) return null
-
-    // 自分のチーム（共有）を処刑先から除外
-    const masonSeats = new Set(ctx.teamSeats)
-    if (!masonSeats.has(analysis.bestExecution)) return analysis.bestExecution
-
-    const fallback = [...analysis.executions]
-      .filter(e => !masonSeats.has(e.seat))
-      .sort((a, b) => b.winRate - a.winRate)
-    return fallback[0]?.seat ?? null
+    return unified
   }
 }

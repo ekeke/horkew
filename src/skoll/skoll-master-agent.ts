@@ -14,21 +14,29 @@
  *   - immoralist → immoralist-vote skoll (knownHamster を守る vote)
  *   - possessed → fallback (RuleBased)
  *
+ * 内部は UnifiedVoteAnalysis に正規化して dispatch。NN フォールバックは
+ * estimateWorldCount.upperBound > threshold のとき skoll を skip して NN 推論に切替。
+ *
  * 夜行動 (decideNightAction 等) は super (RuleBased) に委譲。将来 skoll 化する余地あり。
  */
 
 import type { SystemRole, VillageStatus } from '../types/index.ts'
 import type { DecisionContext } from '../fenrir/src/agents/agent.ts'
 import { RuleBasedAgent } from '../fenrir/src/agents/rule-based-agent.ts'
-import { Possibilities, possibilityFromRoles, RoleBitIndex } from '../retar/possibilities.ts'
+import type { Possibilities } from '../retar/possibilities.ts'
 import { analyzeExecutionsByWorld } from './world-analysis.ts'
 import { analyzeWolfVotesByWorld } from './wolf-vote-analysis.ts'
 import { analyzeFanaticVotesByWorld } from './fanatic-analysis.ts'
 import { analyzeHamsterVotesByWorld } from './hamster-analysis.ts'
 import { analyzeImmoralistVotesByWorld } from './immoralist-analysis.ts'
 import { estimateWorldCount } from './estimate.ts'
-import { encodeObservation, SEATS } from '../fenrir/src/observation.ts'
+import { encodeObservation } from '../fenrir/src/observation.ts'
 import type { AnyNetwork } from '../fenrir/src/ml/nn.ts'
+import {
+  unifyVillageAnalysis, unifyWolfAnalysis, unifyHamsterAnalysis, nnInferVote,
+  buildPossibilitiesFromRetar,
+  type UnifiedVoteAnalysis,
+} from './unified.ts'
 
 type RetarArtifacts = {
   vs: VillageStatus
@@ -62,80 +70,80 @@ export class SkollMasterAgent extends RuleBasedAgent {
   }
 
   override decideVote(ctx: DecisionContext): number {
+    const analysis = this.analyzeVote(ctx)
+    return analysis?.bestVote ?? super.decideVote(ctx)
+  }
+
+  /**
+   * 現在の perspective で UnifiedVoteAnalysis を返す (null = 解析不能/unsupported role)。
+   * skoll 投入前提: estimateWorldCount 超過時は NN フォールバック、
+   * フォールバック未設定なら skoll をそのまま走らせる。
+   */
+  analyzeVote(ctx: DecisionContext): UnifiedVoteAnalysis | null {
     const artifacts = (ctx.gameState.ext as { retarCache?: { lastArtifacts?: RetarArtifacts | null } } | undefined)?.retarCache?.lastArtifacts
     const globalPoss = ctx.globalRetarPossibilities
+    if (!artifacts?.vs || !artifacts?.setup || !globalPoss) return null
 
-    if (!artifacts?.vs || !artifacts?.setup || !globalPoss) {
-      return super.decideVote(ctx)
-    }
-
-    const possibilities = buildPossibilities(globalPoss, artifacts.setup as Map<SystemRole, number>)
     const setup = artifacts.setup as Map<SystemRole, number>
-
-    let bestVote: number | null = null
+    const possibilities = buildPossibilitiesFromRetar(globalPoss, setup)
 
     switch (ctx.myRole) {
       case 'villager':
       case 'seer':
       case 'medium':
       case 'bodyguard':
-      case 'nekomata': {
-        const a = analyzeExecutionsByWorld(possibilities, setup, artifacts.vs)
-        bestVote = pickVillageBest(a.executions, a.bestExecution, ctx.mySeat, null)
-        break
-      }
-      case 'mason': {
-        const a = analyzeExecutionsByWorld(possibilities, setup, artifacts.vs)
-        bestVote = pickVillageBest(a.executions, a.bestExecution, ctx.mySeat, ctx.masonPartner)
-        break
-      }
+      case 'nekomata':
+        return unifyVillageAnalysis(
+          analyzeExecutionsByWorld(possibilities, setup, artifacts.vs),
+          ctx.mySeat, null,
+        )
+      case 'mason':
+        return unifyVillageAnalysis(
+          analyzeExecutionsByWorld(possibilities, setup, artifacts.vs),
+          ctx.mySeat, ctx.masonPartner,
+        )
       case 'werewolf': {
         const teammates = new Set<number>(ctx.wolfTeammates ?? [])
         teammates.add(ctx.mySeat)
-        const a = analyzeWolfVotesByWorld(possibilities, setup, artifacts.vs, teammates)
-        bestVote = a.bestVote
-        break
+        return unifyWolfAnalysis(
+          analyzeWolfVotesByWorld(possibilities, setup, artifacts.vs, teammates),
+        )
       }
       case 'fanatic': {
         const knownWolves = new Set<number>(ctx.knownWolves ?? [])
         const excluded = new Set<number>(knownWolves)
         excluded.add(ctx.mySeat)
-        const nnVote = this.tryNNFallback(this.opts.fanaticFallback, ctx, possibilities, setup, excluded)
-        if (nnVote !== undefined) return nnVote
-        const a = analyzeFanaticVotesByWorld(possibilities, setup, artifacts.vs, knownWolves, ctx.mySeat)
-        bestVote = a.bestVote
-        break
+        const nn = this.tryNNFallback(this.opts.fanaticFallback, ctx, possibilities, setup, excluded)
+        if (nn) return nn
+        return unifyWolfAnalysis(
+          analyzeFanaticVotesByWorld(possibilities, setup, artifacts.vs, knownWolves, ctx.mySeat),
+        )
       }
       case 'werehamster': {
         const excluded = new Set<number>([ctx.mySeat])
-        const nnVote = this.tryNNFallback(this.opts.hamsterFallback, ctx, possibilities, setup, excluded)
-        if (nnVote !== undefined) return nnVote
-        const a = analyzeHamsterVotesByWorld(possibilities, setup, artifacts.vs, ctx.mySeat)
-        bestVote = a.bestVote
-        break
+        const nn = this.tryNNFallback(this.opts.hamsterFallback, ctx, possibilities, setup, excluded)
+        if (nn) return nn
+        return unifyHamsterAnalysis(
+          analyzeHamsterVotesByWorld(possibilities, setup, artifacts.vs, ctx.mySeat),
+        )
       }
       case 'immoralist': {
-        if (ctx.knownHamster === null) {
-          return super.decideVote(ctx)
-        }
+        if (ctx.knownHamster === null) return null
         const excluded = new Set<number>([ctx.mySeat, ctx.knownHamster])
-        const nnVote = this.tryNNFallback(this.opts.immoralistFallback, ctx, possibilities, setup, excluded)
-        if (nnVote !== undefined) return nnVote
-        const a = analyzeImmoralistVotesByWorld(possibilities, setup, artifacts.vs, ctx.knownHamster)
-        bestVote = a.bestVote
-        break
+        const nn = this.tryNNFallback(this.opts.immoralistFallback, ctx, possibilities, setup, excluded)
+        if (nn) return nn
+        return unifyHamsterAnalysis(
+          analyzeImmoralistVotesByWorld(possibilities, setup, artifacts.vs, ctx.knownHamster),
+        )
       }
-      // possessed: skoll を持たない → fallback
       default:
-        return super.decideVote(ctx)
+        return null  // possessed 等
     }
-
-    return bestVote ?? super.decideVote(ctx)
   }
 
   /**
-   * NN フォールバック判定。estimate が閾値超なら NN 推論を返す（undefined なら skoll を続行）。
-   * NN の出力は excluded 外で最大 logit の生存席。
+   * NN フォールバック判定。estimate が閾値超なら UnifiedVoteAnalysis (source='nn') を返す。
+   * 閾値以下なら null を返して skoll 分析を続けさせる。
    */
   private tryNNFallback(
     fallback: PerspectiveNNFallback | undefined,
@@ -143,67 +151,14 @@ export class SkollMasterAgent extends RuleBasedAgent {
     possibilities: Possibilities,
     setup: Map<SystemRole, number>,
     excluded: Set<number>,
-  ): number | undefined {
-    if (!fallback) return undefined
+  ): UnifiedVoteAnalysis | null {
+    if (!fallback) return null
     const threshold = fallback.threshold ?? DEFAULT_FALLBACK_THRESHOLD
     const est = estimateWorldCount(possibilities, setup)
-    if (est.upperBound <= threshold) return undefined
+    if (est.upperBound <= threshold) return null
 
     fallback.onFallback?.(est.upperBound)
-    const obs = encodeObservation(ctx)
-    const result = fallback.network.forward(obs)
-    const voteLogits = result.policies.get('vote')
-    if (!voteLogits) return undefined
-
-    let bestSeat = -1
-    let bestLogit = -Infinity
-    for (const seat of ctx.alivePlayers) {
-      if (excluded.has(seat)) continue
-      if (seat < 1 || seat > SEATS) continue
-      const logit = voteLogits[seat - 1]
-      if (logit > bestLogit) {
-        bestLogit = logit
-        bestSeat = seat
-      }
-    }
-    return bestSeat > 0 ? bestSeat : undefined
+    return nnInferVote(fallback.network, encodeObservation(ctx), ctx.alivePlayers, excluded)
   }
 }
 
-/** village 視点で bestExecution を選ぶ。自席 / partner は除外し、必要なら次善手を返す */
-function pickVillageBest(
-  executions: ReadonlyArray<{ seat: number, winRate: number }>,
-  bestSeat: number,
-  mySeat: number,
-  partnerSeat: number | null,
-): number | null {
-  const excluded = new Set<number>([mySeat])
-  if (partnerSeat !== null) excluded.add(partnerSeat)
-
-  if (!excluded.has(bestSeat)) return bestSeat
-
-  const sorted = [...executions]
-    .filter(e => !excluded.has(e.seat))
-    .sort((a, b) => b.winRate - a.winRate)
-  return sorted[0]?.seat ?? null
-}
-
-function buildPossibilities(
-  globalPoss: Map<number, Set<SystemRole>>,
-  setup: Map<SystemRole, number>,
-): Possibilities {
-  let maxSeat = 0
-  for (const seat of globalPoss.keys()) {
-    if (seat > maxSeat) maxSeat = seat
-  }
-  const possibilities = new Possibilities(maxSeat)
-  for (const [role, count] of setup) {
-    const idx = RoleBitIndex[role]
-    if (idx !== undefined) possibilities.setup[idx] = count
-  }
-  possibilities.setupOriginal = new Uint8Array(possibilities.setup)
-  for (const [seat, roles] of globalPoss) {
-    possibilities.possibilities[seat] = possibilityFromRoles(roles)
-  }
-  return possibilities
-}
