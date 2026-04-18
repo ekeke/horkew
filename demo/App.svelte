@@ -255,6 +255,7 @@
   )
   let assumptions: Map<number, SystemRole> = $state(new Map())
   let hocusPocusSeats: Set<number> = $state(new Set())
+  let forceTs = $state(false)
   let denyWolfGroups: number[][] = $state([])
   let showDenyWolfDialog = $state(false)
   let denyWolfSelection: Set<number> = $state(new Set())
@@ -303,6 +304,11 @@
     // hocusPocus をハッシュに混ぜる
     for (const seat of hocusPocusSeats) {
       h ^= seat * 41
+      h = Math.imul(h, 0x01000193)
+    }
+    // forceTs をハッシュに混ぜる（WASM/TS で結果が異なる可能性があるためキャッシュ分離）
+    if (forceTs) {
+      h ^= 0x5a5a5a5a
       h = Math.imul(h, 0x01000193)
     }
     return { key: effectiveLines, hash: (h >>> 0).toString(36) }
@@ -1275,6 +1281,7 @@
         assumptions: [...assumptions],
         wolfPairDenyals: denyWolfGroups.map(g => [g[0], g[1]] as [number, number]),
         hocusPocus: [...hocusPocusSeats],
+        forceTs,
       }
       analyzerJson = JSON.stringify({ vs: JSON.parse(vsJson), setup: JSON.parse(setupJson) }, null, 2)
 
@@ -1544,6 +1551,14 @@
                 <div class="analysis-duration">total {analysisTotalElapsed}ms (cached) — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, wall {analysisStatsInfo.wallClock}ms, worker {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms, {analysisStatsInfo.wasm ? 'WASM' : 'JS'}){/if}</div>
               {:else if analysisDuration > 0}
                 <div class="analysis-duration">total {analysisTotalElapsed}ms — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, wall {analysisStatsInfo.wallClock}ms, worker {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms, {analysisStatsInfo.wasm ? 'WASM' : 'JS'}){/if}</div>
+              {/if}
+              {#if devMode}
+                <div class="analysis-dev-bar">
+                  <label class="dev-toggle" title="WASM を無効化して TypeScript 版 Retar を強制使用（デバッグ用）">
+                    <input type="checkbox" bind:checked={forceTs} />
+                    <span>強制TSモード</span>
+                  </label>
+                </div>
               {/if}
             </div>
             <div class="analysis-sidebar">
@@ -2921,6 +2936,25 @@
     font-size: 10px;
     color: var(--color-text-faint);
     text-align: right;
+  }
+
+  .analysis-dev-bar {
+    padding: 2px;
+    font-size: 10px;
+    color: var(--color-text-faint);
+    text-align: right;
+  }
+
+  .analysis-dev-bar .dev-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .analysis-dev-bar input[type="checkbox"] {
+    margin: 0;
   }
 
   .trial-banner {

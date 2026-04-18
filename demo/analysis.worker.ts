@@ -13,6 +13,7 @@ export type RetarRequest = {
   hocusPocus?: number[]
   batches?: number
   batch?: number
+  forceTs?: boolean
 }
 
 export type SeatResult = {
@@ -60,7 +61,7 @@ function handleAnalysis(msg: any) {
       batch: msg.batch ?? 0,
     })
 
-    if (wasmReady) {
+    if (wasmReady && !msg.forceTs) {
       const resultJson = analyze(vsJson, setupJson, optJson)
 
       const parsed = JSON.parse(resultJson)

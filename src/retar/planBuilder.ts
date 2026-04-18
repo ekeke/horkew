@@ -25,7 +25,10 @@ export function buildRoleTestPlan(
   setup: Map<SystemRole, number>,
   multipleVictims: Seat[],
   _initialPossibilities?: Possibilities,
+  hocusPocus?: Map<Seat, boolean>,
 ): BuildPlanResult {
+  const hocusSeats: Seat[] = hocusPocus ? [...hocusPocus.keys()] : []
+  const hasHocusPocus = hocusSeats.length > 0
   // 露呈人外数の管理の準備
   let numLiars = 0
 
@@ -75,12 +78,12 @@ export function buildRoleTestPlan(
   }
 
   for ( const role of rolesInTestPlanning ) {
-    if ( 'nekomata' !== role && claims[role].length === 0 ) continue
+    if ( 'nekomata' !== role && claims[role].length === 0 && !hasHocusPocus ) continue
     // 処刑道連れによる猫又候補を検出
     const hasExecutionCurse = role === 'nekomata' && Array.from(village.statuses.values()).some(
       s => s.causeOfDeath === 'cursed_by_executed_nekomata'
     )
-    if (claims[role].length === 0 && multipleVictims.length === 0 && !hasExecutionCurse) continue
+    if (claims[role].length === 0 && multipleVictims.length === 0 && !hasExecutionCurse && !hasHocusPocus) continue
     const testsOfRole: RoleTest[] = []
     const num = setup.get(role) || 0
     if ( !num ) continue
@@ -97,6 +100,13 @@ export function buildRoleTestPlan(
         && (status.diedDay == null ? Infinity : status.diedDay) < minClaimDay[role]
       ) {
         unrevealedSeats.push(seat)
+      }
+    }
+    // HocusPocus 指定席は生存/死亡に関わらず全役職の潜伏候補として許容する。
+    // applyHocusPocus で claiming=false 済みだが、生存席は上記ループに入らないため明示追加する。
+    for ( const hocusSeat of hocusSeats ) {
+      if ( !unrevealedSeats.includes(hocusSeat) ) {
+        unrevealedSeats.push(hocusSeat)
       }
     }
     if (role === 'nekomata' && multipleVictims.length > 0) {
