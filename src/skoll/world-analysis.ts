@@ -58,16 +58,30 @@ export function analyzeExecutionsByWorld(
   // ワールドのスコアは (wolfMask, hamsterMask, seerMask, mediumMask, nekomataMask, bodyguardSeat)
   // だけに依存する。villager/mason/fanatic/possessed/immoralist の配置違いでは同じスコアになる。
   // 同一シグネチャのワールドをまとめてキャッシュする。
-  const sigCache = new Map<string, Float64Array>()
+  //
+  // キーは 2 段の数値 Map:
+  //   key1 = wolfMask | (hamsterMask << 15)          (30bit, SMI)
+  //   key2 = seerMask + mediumMask*2^15 + nekomataMask*2^30 + (bodyguardSeat+2)*2^45  (safe integer)
+  // 文字列キー版より alloc/ハッシュコストが小さい。
+  const sigCache = new Map<number, Map<number, Float64Array>>()
 
   enumerateWorlds(possibilities, setup, (world) => {
     totalWorlds++
 
-    const sigKey = `${world.wolfMask},${world.hamsterMask},${world.seerMask},${world.mediumMask},${world.nekomataMask},${world.bodyguardSeat}`
-    let scores = sigCache.get(sigKey)
+    const key1 = world.wolfMask | (world.hamsterMask << 15)
+    const key2 = world.seerMask
+      + world.mediumMask * 0x8000
+      + world.nekomataMask * 0x40000000
+      + (world.bodyguardSeat + 2) * 0x200000000000
+    let inner = sigCache.get(key1)
+    if (inner === undefined) {
+      inner = new Map()
+      sigCache.set(key1, inner)
+    }
+    let scores = inner.get(key2)
     if (scores === undefined) {
       scores = computeScoresForWorld(world, aliveSeats, alive, cache)
-      sigCache.set(sigKey, scores)
+      inner.set(key2, scores)
     }
     for (let i = 0; i < aliveSeats.length; i++) {
       winScores[i] += scores[i]
