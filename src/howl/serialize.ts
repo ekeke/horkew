@@ -30,10 +30,12 @@ import type {
 // Canonical vocabulary for emission
 // ----------------------------------------------------------------------
 
+// 注: `狂` は `possessed` (狂人?) にもマッチしてしまうため、
+// fanatic は必ず `狂信` と出力して両者を区別する。
 const ROLE_SHORT: Record<string, string> = {
   villager: '村', werewolf: '狼', seer: '占', medium: '霊',
   bodyguard: '狩', mason: '共', nekomata: '猫',
-  fanatic: '狂', werehamster: '狐', immoralist: '背',
+  fanatic: '狂信', werehamster: '狐', immoralist: '背',
   possessed: '狂人',
 }
 
@@ -73,7 +75,11 @@ export function makeSetup(roles: Record<string, number>): SetupStatement {
 }
 
 export function makeJoin(name: string, opts: { shortName?: string; aliases?: string[] } = {}): JoinStatement {
-  return { type: 'join', line: 0, name, shortName: opts.shortName, aliases: opts.aliases ?? [] }
+  // shortName は undefined を明示的に入れずに、指定時のみ設定する。
+  // （parseStatement 結果はフィールド未定義なので deepEqual と一致させるため）
+  const stmt: JoinStatement = { type: 'join', line: 0, name, aliases: opts.aliases ?? [] }
+  if (opts.shortName !== undefined) stmt.shortName = opts.shortName
+  return stmt
 }
 
 export function makeJoinMulti(players: string[]): JoinMultiStatement {
@@ -301,7 +307,7 @@ function serializeMason(stmt: MasonStatement): string {
 }
 
 function serializeReveal(stmt: RevealStatement): string {
-  return `${stmt.player} ${stmt.role}`
+  return `${stmt.player}=${stmt.role}`
 }
 
 function serializeSpoiler(stmt: SpoilerStatement): string {
