@@ -162,7 +162,10 @@ export function analyzeAttacksByWorld(
  * として独立パラメータにし、デフォルトを弱めの -0.1 に設定する。
  * 将来 ongoing 推定が狐勝率を分離できるようになった時点で再検討する。
  */
-const FOX_WIN_PENALTY = Number(process.env['WOLF_FOX_WIN_PENALTY'] ?? '-0.1')
+const FOX_WIN_PENALTY = Number(
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.['WOLF_FOX_WIN_PENALTY']
+  ?? '-0.1',
+)
 
 /**
  * 噛み後の村勝率をミニマックスで推定する（日フェーズ開始）。
