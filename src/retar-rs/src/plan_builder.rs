@@ -43,7 +43,13 @@ pub fn build_role_test_plan(
     setup: &BTreeMap<SystemRole, u32>,
     multiple_victims: &[Seat],
     _initial_possibilities: Option<&Possibilities>,
+    hocus_pocus: Option<&BTreeMap<Seat, bool>>,
 ) -> BuildPlanResult {
+    let hocus_seats: Vec<Seat> = hocus_pocus
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default();
+    let has_hocus_pocus = !hocus_seats.is_empty();
+
     let mut num_liars: u32 = 0;
 
     let mut claims: BTreeMap<SystemRole, Vec<Seat>> = BTreeMap::new();
@@ -116,12 +122,12 @@ pub fn build_role_test_plan(
 
     for &role in ROLES_IN_TEST_PLANNING {
         let role_claims = claims.get(&role).cloned().unwrap_or_default();
-        if role != SystemRole::Nekomata && role_claims.is_empty() {
+        if role != SystemRole::Nekomata && role_claims.is_empty() && !has_hocus_pocus {
             continue;
         }
         let has_execution_curse = role == SystemRole::Nekomata
             && village.statuses.values().any(|s| s.cause_of_death == CauseOfDeath::CursedByExecutedNekomata);
-        if role_claims.is_empty() && multiple_victims.is_empty() && !has_execution_curse {
+        if role_claims.is_empty() && multiple_victims.is_empty() && !has_execution_curse && !has_hocus_pocus {
             continue;
         }
         let num = setup.get(&role).copied().unwrap_or(0);
@@ -142,6 +148,13 @@ pub fn build_role_test_plan(
                 && status.died_day.unwrap_or(i32::MAX) < min_day
             {
                 unrevealed_seats.push(seat);
+            }
+        }
+        // HocusPocus 指定席は生存/死亡に関わらず全役職の潜伏候補として許容する。
+        // apply_hocus_pocus で claiming=false 済みだが、生存席は上記ループに入らないため明示追加する。
+        for &hocus_seat in &hocus_seats {
+            if !unrevealed_seats.contains(&hocus_seat) {
+                unrevealed_seats.push(hocus_seat);
             }
         }
 

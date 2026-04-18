@@ -108,7 +108,7 @@ impl VillageRetar {
         };
 
         // 共通後処理
-        let plan = build_role_test_plan(&vs, &setup, &multiple_victims, Some(&initial_possibilities));
+        let plan = build_role_test_plan(&vs, &setup, &multiple_victims, Some(&initial_possibilities), Some(&options.hocus_pocus));
         let role_tests = plan.role_tests;
         let total_liar_roles = plan.total_liar_roles;
         let known_fake_claim_count = plan.known_fake_claim_count;
