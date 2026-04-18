@@ -1,15 +1,25 @@
 /**
  * GameResult / GameEvent[] を Howl 形式文字列に変換する。
  *
- * Lupa が出力する GameEvent 列は Howl 記法の構造化データと直接対応するため、
- * ここではエンジン出力を「正規の Howl 文字列」として書き出すユーティリティを提供する。
+ * GameEvent → Howl Statement への**意味マッピング**のみをここで行い、
+ * 文字列整形は `src/howl/serialize.ts` に委譲する。Howl の表記ルール
+ * （矢印記号、CO ラベル、種族記号 ●○ など）は Lupa 側では一切持たない。
  *
  * デバッグ、シナリオテスト用データ、ベンチからのゲーム記録などで使用する。
  */
 
 import type { SystemRole } from '../types/index.ts'
 import type { GameResult } from './handlers.ts'
-import type { GameEvent } from './types.ts'
+import type { GameEvent, PlayerState } from './types.ts'
+import type { Statement, Species, GameResult as HowlGameResult } from '../howl/statement.ts'
+import {
+  serializeStatement, commentLine,
+  makeSetup, makeJoin, makeVote, makeRevote, makeGrelan,
+  makeAttack, makeLynch, makePeace, makeCurse, makeFollow,
+  makeForecast, makeOver, makeReveal,
+  makeSeerCO, makeSeerResult, makeMediumCO, makeMediumResult,
+  makeBodyguardCO, makeMasonCO, makeNekomataCO,
+} from '../howl/index.ts'
 
 export type HowlExportOptions = {
   /** frontmatter の title */
@@ -24,101 +34,114 @@ export type HowlExportOptions = {
   includeExpect?: boolean
 }
 
-const ROLE_LABEL: Record<SystemRole, string> = {
-  villager: '村', werewolf: '狼', seer: '占', medium: '霊',
-  bodyguard: '狩', mason: '共', nekomata: '猫',
-  fanatic: '狂', werehamster: '狐', immoralist: '背',
-  possessed: '狂人',
+function speciesOf(r: 'wolf' | 'human' | null): Species | null {
+  if (r === 'wolf') return 'isWolf'
+  if (r === 'human') return 'isHuman'
+  return null
 }
 
-const ROLE_ORDER: SystemRole[] = [
-  'villager', 'werewolf', 'seer', 'medium', 'bodyguard',
-  'mason', 'nekomata', 'fanatic', 'werehamster', 'immoralist', 'possessed',
-]
-
-function speciesGlyph(result: 'wolf' | 'human' | null): string {
-  if (result === 'wolf') return '●'
-  if (result === 'human') return '○'
-  return '?'
-}
-
-function formatSetup(roles: Map<SystemRole, number>): string {
-  return ROLE_ORDER
-    .filter(r => (roles.get(r) ?? 0) > 0)
-    .map(r => `${ROLE_LABEL[r]}${roles.get(r)}`)
-    .join('')
+function howlResultOf(r: GameResult<unknown, unknown>['state']['result']): HowlGameResult {
+  switch (r) {
+    case 'villager_won': return 'villageWin'
+    case 'werewolf_won': return 'wolfWin'
+    case 'werehamster_won': return 'hamsterWin'
+    default: return 'draw'
+  }
 }
 
 /**
- * 単一イベントを1行以上の Howl 文字列に変換し、`out` に push する。
- * 拡張イベント（`type` が既知でないもの）は黙って無視する。
+ * 単一イベントを 0 件以上の出力行に変換する。
+ * Statement に写せるものは Statement を返し、写せないものは `# ...` コメント行を返す。
+ * 直接不要なイベント（fox_kill など）は空配列を返してもよい。
  */
-function emitEvent(ev: GameEvent, name: (seat: number) => string, out: string[]): void {
+function eventToLines(
+  ev: GameEvent,
+  name: (seat: number) => string,
+  ctx: { lastExecuted: number | null },
+): string[] {
   switch (ev.type) {
     case 'vote':
-      out.push(`${name(ev.voter)}→${name(ev.target)}`)
-      break
+      return [serializeStatement(makeVote(name(ev.voter), name(ev.target)))]
+
     case 'revote':
-      out.push(`ーーー  # 再投票候補: ${ev.targets.map(name).join(', ')}`)
-      break
+      return [serializeStatement(makeRevote(ev.targets.map(name)))]
+
     case 'grelan':
-      out.push('グレラン')
-      break
+      return [serializeStatement(makeGrelan())]
+
     case 'execution':
-      out.push(`${name(ev.target)}処刑`)
-      break
+      // 処刑者を記録して後続の medium_result の target に使う
+      ctx.lastExecuted = ev.target
+      return [serializeStatement(makeLynch(name(ev.target)))]
+
     case 'night_kill':
-      out.push(`${name(ev.target)}噛み`)
-      break
-    case 'fox_kill':
-      out.push(`# ${name(ev.target)} 妖狐（噛み無効）`)
-      break
+      return [serializeStatement(makeAttack([name(ev.target)]))]
+
     case 'peace':
-      out.push('平和')
-      break
+      return [serializeStatement(makePeace())]
+
     case 'curse_kill':
-      out.push(`# ${name(ev.target)} 呪殺`)
-      break
+      return [serializeStatement(makeCurse(name(ev.target)))]
+
     case 'follow_kill':
-      out.push(`# ${name(ev.target)} 後追い`)
-      break
+      return [serializeStatement(makeFollow(name(ev.target)))]
+
     case 'seer_claim': {
-      const results = ev.results.map(r => `${name(r.target)}${speciesGlyph(r.result)}`).join(' ')
-      out.push(`${name(ev.actor)} 占いCO${results ? ' ' + results : ''}`)
-      break
+      const results = ev.results
+        .map(r => ({ target: name(r.target), result: speciesOf(r.result) }))
+        .filter((r): r is { target: string; result: Species } => r.result !== null)
+      return [serializeStatement(makeSeerCO(name(ev.actor), results))]
     }
-    case 'seer_result':
-      out.push(`${name(ev.actor)} ${name(ev.target)}${speciesGlyph(ev.result)}`)
-      break
+
+    case 'seer_result': {
+      const sp = speciesOf(ev.result)
+      if (sp === null) return []
+      return [serializeStatement(makeSeerResult(name(ev.actor), name(ev.target), sp))]
+    }
+
     case 'medium_claim': {
-      const past = (ev.pastResults ?? []).map(speciesGlyph).join(' ')
-      out.push(`${name(ev.actor)} 霊媒CO${past ? ' ' + past : ''}`)
-      break
+      // pastResults は時系列順だが対応する処刑者がここには無い。
+      // Howl AssertStatement は target 必須のため、暫定 '?' を置く。
+      const results = (ev.pastResults ?? [])
+        .map(r => ({ target: '?', result: speciesOf(r) }))
+        .filter((r): r is { target: string; result: Species } => r.result !== null)
+      return [serializeStatement(makeMediumCO(name(ev.actor), results))]
     }
-    case 'medium_result':
-      out.push(`${name(ev.actor)} 霊能 ${speciesGlyph(ev.result)}`)
-      break
+
+    case 'medium_result': {
+      const sp = speciesOf(ev.result)
+      if (sp === null) return []
+      const target = ctx.lastExecuted !== null ? name(ctx.lastExecuted) : '?'
+      return [serializeStatement(makeMediumResult(name(ev.actor), target, sp))]
+    }
+
     case 'bodyguard_claim':
-      out.push(`${name(ev.actor)} 狩人CO${ev.targets.length > 0 ? ' 護衛: ' + ev.targets.map(name).join(',') : ''}`)
-      break
+      return [serializeStatement(makeBodyguardCO(name(ev.actor), ev.targets.map(name)))]
+
     case 'mason_claim':
-      out.push(`${name(ev.actor)} 共有CO partner=${name(ev.partner)}`)
-      break
+      // 共有CO。Howl の assert には partner 情報が乗らないためコメントで補足。
+      return [
+        serializeStatement(makeMasonCO(name(ev.actor))),
+        commentLine(`${name(ev.actor)} 共有パートナー=${name(ev.partner)}`),
+      ]
+
     case 'nekomata_claim':
-      out.push(`${name(ev.actor)} 猫又CO`)
-      break
+      return [serializeStatement(makeNekomataCO(name(ev.actor)))]
+
     case 'forecast':
-      out.push(`# ${name(ev.actor)} 予告 → ${name(ev.target)}`)
-      break
+      return [serializeStatement(makeForecast(name(ev.actor), name(ev.target)))]
+
     case 'comment':
-      out.push(`# ${ev.text}`)
-      break
+      return [commentLine(ev.text)]
+
     case 'game_over':
-      out.push(`# ゲーム終了: ${ev.result}`)
-      break
+      return [serializeStatement(makeOver(howlResultOf(ev.result)))]
+
     case 'reveal':
-      out.push(`# ${name(ev.seat)} reveal=${ev.role}`)
-      break
+      return [serializeStatement(makeReveal(name(ev.seat), ev.role))]
+
+    case 'fox_kill':
+      return [commentLine(`${name(ev.target)} 妖狐（噛み無効）`)]
   }
 }
 
@@ -127,11 +150,11 @@ function emitEvent(ev: GameEvent, name: (seat: number) => string, out: string[])
  *
  * 出力構造:
  * 1. frontmatter (YAML)
- * 2. レギュレーション
- * 3. プレイヤー名リスト (`+ name`)
- * 4. 真役職のコメント（option）
- * 5. イベント列（処刑・噛みで空行区切り）
- * 6. @expect アノテーション末尾（option）
+ * 2. レギュ 行（SetupStatement を serialize）
+ * 3. プレイヤーリスト（JoinStatement を serialize）
+ * 4. 真役職コメント（option）
+ * 5. イベント列（処刑・噛み・平和の後に空行を挿入）
+ * 6. @expect アノテーション（option）
  */
 export function gameToHowl<E, Ext>(
   result: GameResult<E, Ext>,
@@ -157,58 +180,60 @@ export function gameToHowl<E, Ext>(
   lines.push('---')
 
   // ---- setup ----
-  lines.push(`レギュ ${formatSetup(config.roles)}`)
+  const setupRoles: Record<string, number> = {}
+  for (const [role, count] of config.roles as Map<SystemRole, number>) {
+    setupRoles[role] = count
+  }
+  lines.push(serializeStatement(makeSetup(setupRoles)))
   lines.push('')
 
-  // ---- player list ----
-  for (const p of state.players) {
-    lines.push(`+ ${seatName(p.seat)}`)
+  // ---- players ----
+  for (const p of state.players as PlayerState[]) {
+    lines.push(serializeStatement(makeJoin(seatName(p.seat))))
   }
   lines.push('')
 
   // ---- 真役職（option） ----
   if (includeRoles) {
-    lines.push('# 真役職:')
-    for (const p of state.players) {
-      lines.push(`#   ${seatName(p.seat)}: ${p.role}`)
+    lines.push(commentLine('真役職:'))
+    for (const p of state.players as PlayerState[]) {
+      lines.push(commentLine(`  ${seatName(p.seat)}: ${p.role}`))
     }
     lines.push('')
   }
 
   // ---- イベント列 ----
-  // 処刑・噛み・平和の後に空行を入れて日単位の視認性を確保する
+  const emitCtx = { lastExecuted: null as number | null }
   let prevWasTerminal = false
+
   for (const ev of events as (GameEvent | E)[]) {
-    // 拡張イベント (E) は無視（Lupa標準以外のハンドラ内部情報）
-    if (typeof (ev as any).type !== 'string') continue
+    if (typeof (ev as { type?: unknown }).type !== 'string') continue
     const gev = ev as GameEvent
 
-    if (gev.type === 'execution') {
-      emitEvent(gev, seatName, lines)
-      prevWasTerminal = true
-      continue
-    }
-    if (gev.type === 'night_kill' || gev.type === 'peace') {
-      emitEvent(gev, seatName, lines)
-      lines.push('')
-      prevWasTerminal = true
-      continue
-    }
+    const emitted = eventToLines(gev, seatName, emitCtx)
+    const isTerminal = gev.type === 'execution' || gev.type === 'night_kill' || gev.type === 'peace'
+
     if (prevWasTerminal) {
       lines.push('')
       prevWasTerminal = false
     }
-    emitEvent(gev, seatName, lines)
+    for (const line of emitted) lines.push(line)
+    if (isTerminal) prevWasTerminal = true
   }
 
-  // ---- @expect アノテーション ----
+  // ---- @expect ----
   if (includeExpect) {
     lines.push('')
-    lines.push('# @expect annotations (参考):')
-    for (const p of state.players) {
+    lines.push(commentLine('@expect annotations (参考):'))
+    for (const p of state.players as PlayerState[]) {
       lines.push(`# @expect ${seatName(p.seat)}: [${p.role}]`)
     }
   }
 
   return lines.join('\n')
+}
+
+/** 将来 Statement 列ベースの API を使いたい呼び出し側のために残す薄いラッパー。 */
+export function statementsToString(stmts: Statement[]): string {
+  return stmts.map(serializeStatement).join('\n')
 }

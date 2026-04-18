@@ -4,6 +4,15 @@ export type { Line, PreprocessResult } from './preprocess.ts'
 export { parseFrontmatter, buildFrontmatter } from './frontmatter.ts'
 export type { FrontmatterResult } from './frontmatter.ts'
 export { parseStatement, parseJoinMultiStatement } from './statement.ts'
+export {
+  serializeStatement, commentLine,
+  makeSetup, makeJoin, makeJoinMulti, makeVote, makeMultiVote, makeRevote,
+  makeGrelan, makeAttack, makeLynch, makeSuddenDeath, makePeace,
+  makeCurse, makeFollow, makeForecast, makeOver, makeAssert, makeMason,
+  makeReveal, makeSpoiler,
+  makeSeerCO, makeSeerResult, makeMediumCO, makeMediumResult,
+  makeBodyguardCO, makeMasonCO, makeNekomataCO,
+} from './serialize.ts'
 export type {
   StatementType,
   GameResult,
