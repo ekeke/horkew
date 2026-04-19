@@ -325,8 +325,11 @@ export class SkollCommandAgent implements CommandAgent {
 
   /**
    * 独立人外（fanatic / werehamster / immoralist）のターン毎自律判断。
-   * CO 済: skip。未 CO: {hide, seer, medium, bodyguard, nekomata} を自陣営 perspective で
-   * skoll 評価、最大スコアの option を選ぶ。
+   * 未 CO: {hide, seer, medium, bodyguard, nekomata} を自陣営 perspective で skoll 評価、最大を採用。
+   * CO 済: 何を CO したかで分岐し、以後の結果報告も自陣営 skoll で動的に決定:
+   *   seer → discussionFakeSeer (fakeDivineHistory の populate + 報告)
+   *   medium → discussionFakeMedium (2 option lookahead)
+   *   bodyguard / nekomata → skip (one-shot CO、以後の報告無し)
    */
   private discussionIndependentVillain(
     state: Readonly<GameState<CommandAdapterExt>>,
@@ -335,7 +338,15 @@ export class SkollCommandAgent implements CommandAgent {
     events: AgentEvents,
   ): DecisionResult {
     if (player.claimedRole) {
-      return skipOrFirst(legal, `(discussion)[${player.role}] already-CO skip`)
+      // CO 済: 偽役職ごとの後続処理に routing（結果報告が必要な役職は対応メソッドへ）
+      switch (player.claimedRole) {
+        case 'seer':   return this.discussionFakeSeer(state, player, legal, events)
+        case 'medium': return this.discussionFakeMedium(state, player, legal, events)
+        case 'bodyguard':
+        case 'nekomata':
+        default:
+          return skipOrFirst(legal, `(discussion)[${player.role}] already-CO ${player.claimedRole} skip`)
+      }
     }
 
     type Opt = 'hide' | 'seer' | 'medium' | 'bodyguard' | 'nekomata'
