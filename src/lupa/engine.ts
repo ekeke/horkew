@@ -221,21 +221,26 @@ async function runGameLoop<E = never, Ext = unknown>(
     forceTrueRoleCOPass(state, day, lastExecutedSeat, emit)
 
     // 投票前フェーズ (オプション: 議論、指揮者等)
+    // continueDiscussion が true の間は再呼び出し（consumer 側ミニループ用）
     if (handlers.onPreVote) {
-      const preVoteCtx = makePhaseContext(state, events, rules)
-      const preVoteResult = await handlers.onPreVote(preVoteCtx)
+      while (true) {
+        const preVoteCtx = makePhaseContext(state, events, rules)
+        const preVoteResult = await handlers.onPreVote(preVoteCtx)
 
-      // 追加CO適用
-      if (preVoteResult.additionalClaims) {
-        for (const [seat, claim] of preVoteResult.additionalClaims) {
-          const player = players.find(p => p.seat === seat)!
-          applyClaim(state, player, day, claim, emit)
+        // 追加CO適用
+        if (preVoteResult.additionalClaims) {
+          for (const [seat, claim] of preVoteResult.additionalClaims) {
+            const player = players.find(p => p.seat === seat)!
+            applyClaim(state, player, day, claim, emit)
+          }
         }
-      }
 
-      // ハンドラーが生成したイベントを記録
-      if (preVoteResult.events) {
-        for (const event of preVoteResult.events) emit(event)
+        // ハンドラーが生成したイベントを記録
+        if (preVoteResult.events) {
+          for (const event of preVoteResult.events) emit(event)
+        }
+
+        if (!preVoteResult.continueDiscussion) break
       }
     }
 

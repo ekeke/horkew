@@ -61,6 +61,12 @@ export type PreVoteResult<E = never> = {
   additionalClaims?: Map<number, DayClaim>
   /** 議論フェーズで発生したイベント（エンジンが記録） */
   events?: (GameEvent | E)[]
+  /**
+   * true を返すとエンジンは onPreVote を再度呼び出す（continuation）。
+   * フェーズ内でミニループを回したい consumer 向け。
+   * 未指定 (undefined) / false なら従来通り即投票フェーズへ進む。
+   */
+  continueDiscussion?: boolean
 }
 
 // ============================================================
