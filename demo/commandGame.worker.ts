@@ -123,6 +123,8 @@ async function startGame(opts: StartGameOptions): Promise<void> {
   asyncAgent = new AsyncRemoteAgent()
 
   const agents = new Map<number, CommandAgent>()
+  // 進行役優先席: 人間席を村確定時に commander へ強制割当するため
+  const humanSeatsForCommander = new Set<number>()
   const rolesMap = new Map(opts.roles)
   const seed = opts.seed ?? Math.floor(Math.random() * 1e9)
 
@@ -159,6 +161,7 @@ async function startGame(opts: StartGameOptions): Promise<void> {
     defaultAgent: new SkollCommandAgent({ seed: seed + 1 }),
     roles: rolesMap,
     seed,
+    preferredCommanderSeats: humanSeatsForCommander,
     onStateReady: (state) => {
       stateRef = state
     },
@@ -199,9 +202,13 @@ async function startGame(opts: StartGameOptions): Promise<void> {
       matchedSeats.sort((a, b) => a - b)
 
       if (opts.humanRoleIsMultiSeat) {
-        for (const seat of matchedSeats) agents.set(seat, asyncAgent!)
+        for (const seat of matchedSeats) {
+          agents.set(seat, asyncAgent!)
+          humanSeatsForCommander.add(seat)
+        }
       } else if (matchedSeats.length > 0) {
         agents.set(matchedSeats[0], asyncAgent!)
+        humanSeatsForCommander.add(matchedSeats[0])
       }
 
       // stateRef は onStateReady で onRolesAssigned の前に捕捉済み

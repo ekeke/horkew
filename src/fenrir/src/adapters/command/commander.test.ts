@@ -85,3 +85,49 @@ test('selectCommanderFromRetar: 全員村確定 → 席番号最小', () => {
   ])
   assert.equal(selectCommanderFromRetar(possibilities, [1, 2, 3]), 1)
 })
+
+test('selectCommanderFromRetar: preferred 席が村確定なら優先', () => {
+  const possibilities = new Map([
+    [1, roles('villager')],  // 村確定（= 通常ならここが commander）
+    [2, roles('villager')],  // 村確定（preferred）
+    [3, roles('werewolf')],
+  ])
+  assert.equal(
+    selectCommanderFromRetar(possibilities, [1, 2, 3], new Set([2])),
+    2,
+    'preferred 席 2 が村確定なので最小席 1 を差し置いて選ばれる',
+  )
+})
+
+test('selectCommanderFromRetar: preferred 席が村確定でなければ通常選出にフォールバック', () => {
+  const possibilities = new Map([
+    [1, roles('villager')],        // 村確定（preferred じゃない）
+    [2, roles('werewolf', 'seer')], // preferred だが村未確定
+    [3, roles('medium')],
+  ])
+  assert.equal(
+    selectCommanderFromRetar(possibilities, [1, 2, 3], new Set([2])),
+    1,
+    'preferred 席 2 が村未確定なので通常通り最小村確定席 1',
+  )
+})
+
+test('selectCommanderFromRetar: preferred 席が複数村確定なら preferred 内の最小', () => {
+  const possibilities = new Map([
+    [1, roles('villager')],
+    [3, roles('villager')],  // preferred
+    [5, roles('villager')],  // preferred
+  ])
+  assert.equal(
+    selectCommanderFromRetar(possibilities, [1, 3, 5], new Set([3, 5])),
+    3,
+  )
+})
+
+test('selectCommanderFromRetar: preferred が空 Set なら通常選出', () => {
+  const possibilities = new Map([
+    [1, roles('werewolf')],
+    [2, roles('villager')],
+  ])
+  assert.equal(selectCommanderFromRetar(possibilities, [1, 2], new Set()), 2)
+})

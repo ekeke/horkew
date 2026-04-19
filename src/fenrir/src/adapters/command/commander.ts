@@ -26,13 +26,22 @@ export function isConfirmedVillage(possibilities: Set<SystemRole> | undefined): 
 /**
  * Retar の possibilities Map から commander（進行役）席を選出。
  * 村確定席のうち最小席番を返す。該当なしなら null。
+ *
+ * preferredSeats が渡された場合、村確定席のうち preferredSeats に含まれる席を
+ * 最優先して最小席番で返す（該当なしなら preferredSeats を無視して通常選出）。
+ * ヒューマンプレイで人間席を優先的に進行役にする用途。
  */
 export function selectCommanderFromRetar(
   possibilities: Map<number, Set<SystemRole>>,
   aliveSeats: number[],
+  preferredSeats?: ReadonlySet<number>,
 ): number | null {
   const confirmed = aliveSeats
     .filter(seat => isConfirmedVillage(possibilities.get(seat)))
     .sort((a, b) => a - b)
+  if (preferredSeats && preferredSeats.size > 0) {
+    const preferred = confirmed.find(seat => preferredSeats.has(seat))
+    if (preferred !== undefined) return preferred
+  }
   return confirmed[0] ?? null
 }

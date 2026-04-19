@@ -382,6 +382,8 @@ export class CommandPlayStore {
 
     const seed = opts.seed ?? Math.floor(Math.random() * 1e9)
     const agents = new Map<number, CommandAgent>()
+    // 進行役優先席: 人間席を村確定時に commander へ強制割当するため
+    const humanSeatsForCommander = new Set<number>()
     const multiSeat = MULTI_SEAT_ROLES.has(opts.humanRole)
 
     const lupaConfig: LupaConfig = {
@@ -412,6 +414,7 @@ export class CommandPlayStore {
       defaultAgent: new SkollCommandAgent({ seed: seed + 1 }),
       roles: opts.roles,
       seed,
+      preferredCommanderSeats: humanSeatsForCommander,
       onEventEmitted: (event) => {
         liveEvents.push(event)
         if (event.type === 'comment') {
@@ -429,9 +432,13 @@ export class CommandPlayStore {
         }
         matchedSeats.sort((a, b) => a - b)
         if (multiSeat) {
-          for (const seat of matchedSeats) agents.set(seat, agent)
+          for (const seat of matchedSeats) {
+            agents.set(seat, agent)
+            humanSeatsForCommander.add(seat)
+          }
         } else if (matchedSeats.length > 0) {
           agents.set(matchedSeats[0], agent)
+          humanSeatsForCommander.add(matchedSeats[0])
         }
         this.setState({
           ...this.state,

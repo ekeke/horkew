@@ -53,6 +53,11 @@ export type CommandAdapterConfig = {
   seed?: number
   /** Retar 呼び出しを無効化（デバッグ用） */
   disableRetar?: boolean
+  /**
+   * 村確定なら優先的に進行役に割り当てる席の集合。
+   * 典型的にはヒューマンプレイ時の human 席。空なら通常通り最小席番。
+   */
+  preferredCommanderSeats?: ReadonlySet<number>
   /** 役職割当後フック。onSetup 内で呼ばれ、agents Map を席番号で動的に差し込める */
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   /** 1 日の onPreVote micro-step 上限（暴走防止、デフォルト 200） */
@@ -256,7 +261,9 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
       const plainEvents = [...events].filter(isGameEvent)
       const detailed = analyzeFromEventsDetailed(plainEvents, state, lupaConfig)
       const alive = alivePlayers(state).map(p => p.seat)
-      state.ext.commander = selectCommanderFromRetar(detailed.possibilities, alive)
+      state.ext.commander = selectCommanderFromRetar(
+        detailed.possibilities, alive, this.config.preferredCommanderSeats,
+      )
       state.ext.retarCache = {
         possibilities: detailed.possibilities,
         lastArtifacts: detailed.vs && detailed.setup
