@@ -95,7 +95,7 @@ export type OrchestratorConfig = {
   inspectInterval: number
   ppoRestart: boolean
   skeleton: boolean
-  curriculum: 'default' | 'brain-battle' | 'bb-plus'
+  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain'
 }
 
 export type TrainProgress = {

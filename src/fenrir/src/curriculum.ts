@@ -229,8 +229,9 @@ export type PhaseStep = PretrainStep | TransferStep | TrainingStep
 // Curriculum Builder
 // ============================================================
 
-/** カリキュラム名: 'default' = 本流, 'brain-battle' = BB, 'bb-plus' = BB+個別役職学習 */
-export type CurriculumName = 'default' | 'brain-battle' | 'bb-plus'
+/** カリキュラム名: 'default' = 本流, 'brain-battle' = BB, 'bb-plus' = BB+個別役職学習,
+ *  'skoll-pretrain' = skoll を教師にした vote head 教師あり pretrain（独立パイプライン） */
+export type CurriculumName = 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain'
 
 export type CurriculumOptions = {
   phase1Only?: boolean
