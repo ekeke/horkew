@@ -73,12 +73,37 @@ export class CommandPlayStore {
   private agent: AsyncRemoteAgent
   private state: CommandPlayStoreState
   private listeners = new Set<StoreListener>()
+  /**
+   * 共有 2 席の連動 CO: 片方が mason_co を出したら、もう片方の pending 到着時に
+   * 自動で mirror mason_co を submit する。null なら予約なし。
+   */
+  private pendingMasonMirror: { partnerSeat: number, selfSeat: number } | null = null
 
   constructor() {
     this.agent = new AsyncRemoteAgent()
     this.state = this.initialState()
-    // pending 変化を state へ伝播
+    // pending 変化を state へ伝播 + mason mirror 自動投入
     this.agent.subscribe((p) => {
+      // 予約があり、相方席の pending が到着したら mirror を自動投入
+      if (p && this.pendingMasonMirror && p.mySeat === this.pendingMasonMirror.partnerSeat) {
+        const mirrorCmd: Command = {
+          type: 'role_co',
+          claim: { type: 'mason_co', partner: this.pendingMasonMirror.selfSeat },
+        }
+        const legalMatch = p.legal.some(c =>
+          c.type === 'role_co'
+          && c.claim.type === 'mason_co'
+          && c.claim.partner === this.pendingMasonMirror!.selfSeat,
+        )
+        this.pendingMasonMirror = null
+        if (legalMatch) {
+          // 次のマイクロタスクで submit（現在の subscribe コールスタックを抜けてから）
+          queueMicrotask(() => {
+            try { this.agent.submit(mirrorCmd) } catch { /* already resolved */ }
+          })
+          return
+        }
+      }
       this.setState({
         ...this.state,
         pending: p,
@@ -102,7 +127,23 @@ export class CommandPlayStore {
   // ----------- UI からの意思決定投入 -----------
 
   submit(cmd: Command): void {
+    // mason 連動: 相方も人間制御席なら、相方席に mirror mason_co を自動投入予約
+    const pending = this.agent.getPending()
+    if (
+      pending
+      && cmd.type === 'role_co'
+      && cmd.claim.type === 'mason_co'
+      && this.state.humanSeats.has(cmd.claim.partner)
+      && cmd.claim.partner !== pending.mySeat
+    ) {
+      this.pendingMasonMirror = { partnerSeat: cmd.claim.partner, selfSeat: pending.mySeat }
+    }
     this.agent.submit(cmd)
+  }
+
+  /** reset 時に mirror 予約もクリア */
+  private clearMasonMirror(): void {
+    this.pendingMasonMirror = null
   }
 
   // ----------- ゲーム起動 -----------
@@ -214,6 +255,7 @@ export class CommandPlayStore {
     if (this.state.running) {
       throw new Error('CommandPlayStore: 実行中はリセット不可。先に終了を待つこと')
     }
+    this.clearMasonMirror()
     this.setState(this.initialState())
   }
 

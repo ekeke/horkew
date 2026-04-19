@@ -92,6 +92,117 @@
   const phaseLabel = $derived(ext?.currentPhase ?? '—')
   const commanderSeat = $derived(ext?.commander ?? null)
 
+  /** 私的情報（自席の視点のみ） */
+  type PrivateInfo = {
+    seat: number
+    role: SystemRole
+    alive: boolean
+    /** 役職別メモ: 占い結果、護衛履歴、仲間リスト等 */
+    notes: Array<{ label: string, value: string }>
+  }
+
+  const privateInfoList = $derived.by((): PrivateInfo[] => {
+    if (!gameState || !state.seatRoles) return []
+    const result: PrivateInfo[] = []
+    const sortedSeats = [...state.humanSeats].sort((a, b) => a - b)
+    for (const seat of sortedSeats) {
+      const player = gameState.players.find(p => p.seat === seat)
+      if (!player) continue
+      const role = state.seatRoles.get(seat) ?? player.role
+      const notes = buildPrivateNotes(seat, role, gameState)
+      result.push({ seat, role, alive: player.alive, notes })
+    }
+    return result
+  })
+
+  /** 役職別の私的情報を組み立てる */
+  function buildPrivateNotes(
+    seat: number,
+    role: SystemRole,
+    gs: NonNullable<typeof gameState>,
+  ): Array<{ label: string, value: string }> {
+    const notes: Array<{ label: string, value: string }> = []
+    const player = gs.players.find(p => p.seat === seat)
+    if (!player) return notes
+
+    switch (role) {
+      case 'seer': {
+        const entries = [...player.divineHistory].sort((a, b) => a[0] - b[0])
+        if (entries.length === 0) {
+          notes.push({ label: '占い結果', value: '(未実行)' })
+        } else {
+          for (const [day, r] of entries) {
+            notes.push({
+              label: `D${day} 占い`,
+              value: `${nameOf(r.target)} = ${r.result === 'wolf' ? '● (狼)' : '○ (村人)'}`,
+            })
+          }
+        }
+        break
+      }
+      case 'bodyguard': {
+        const entries = [...player.guardHistory].sort((a, b) => a[0] - b[0])
+        if (entries.length === 0) {
+          notes.push({ label: '護衛履歴', value: '(未実行)' })
+        } else {
+          for (const [day, target] of entries) {
+            notes.push({ label: `D${day} 護衛`, value: nameOf(target) })
+          }
+        }
+        break
+      }
+      case 'medium': {
+        // 処刑履歴 + 各処刑の真結果（medium 視点）
+        const execs = [...gs.executionHistory].sort((a, b) => a[0] - b[0])
+        if (execs.length === 0) {
+          notes.push({ label: '霊能結果', value: '(未処刑)' })
+        } else {
+          for (const [day, executedSeat] of execs) {
+            const executed = gs.players.find(p => p.seat === executedSeat)
+            const result = executed?.role === 'werewolf' ? '● (狼)' : '○ (村人)'
+            notes.push({ label: `D${day} 処刑`, value: `${nameOf(executedSeat)} = ${result}` })
+          }
+        }
+        break
+      }
+      case 'werewolf': {
+        const teammates = gs.players
+          .filter(p => p.role === 'werewolf' && p.seat !== seat)
+          .map(p => nameOf(p.seat))
+        notes.push({ label: '狼仲間', value: teammates.join(', ') || '(単独)' })
+        break
+      }
+      case 'mason': {
+        const partner = gs.players.find(p => p.role === 'mason' && p.seat !== seat)
+        notes.push({ label: '共有相方', value: partner ? nameOf(partner.seat) : '(不在)' })
+        break
+      }
+      case 'fanatic': {
+        const wolves = gs.players
+          .filter(p => p.role === 'werewolf')
+          .map(p => nameOf(p.seat))
+        notes.push({ label: '狼の席', value: wolves.join(', ') || '(不在)' })
+        break
+      }
+      case 'werehamster':
+        notes.push({ label: '役職', value: '妖狐（噛み耐性）' })
+        break
+      case 'immoralist': {
+        const fox = gs.players.find(p => p.role === 'werehamster')
+        notes.push({ label: '狐の席', value: fox ? nameOf(fox.seat) : '(不在)' })
+        break
+      }
+      case 'nekomata':
+        notes.push({ label: '役職', value: '猫又（呪殺能力）' })
+        break
+      case 'villager':
+      default:
+        // 村人は特別情報なし
+        break
+    }
+    return notes
+  }
+
   function formatRole(role: SystemRole | null | undefined): string {
     if (!role) return '—'
     return systemRoles.get(role)?.shortName ?? role
@@ -244,6 +355,29 @@
         <span class="hint">※ ゲーム進行はエディタ（お試しモード）に反映されます</span>
       </div>
     </section>
+
+    <!-- 自席の私的情報（記憶頼りを避けるための参照パネル） -->
+    {#if privateInfoList.length > 0}
+      <section class="private-info">
+        <h3>自席情報</h3>
+        {#each privateInfoList as info (info.seat)}
+          <div class="private-seat">
+            <div class="private-header">
+              <span class="seat-label">{nameOf(info.seat)}</span>
+              <span class="seat-role">{formatRole(info.role)}</span>
+              <span class="seat-status">{info.alive ? '生存' : '退場'}</span>
+            </div>
+            {#if info.notes.length > 0}
+              <ul class="notes">
+                {#each info.notes as note, i (i)}
+                  <li><span class="note-label">{note.label}:</span> {note.value}</li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+        {/each}
+      </section>
+    {/if}
   {/if}
 
   <!-- 手番 UI -->
@@ -419,5 +553,58 @@
     background: var(--ctp-red);
     color: var(--color-bg);
     border-radius: 3px;
+  }
+
+  .private-info {
+    background: var(--ctp-mantle, var(--color-surface));
+  }
+
+  .private-seat {
+    margin-top: 6px;
+    padding: 6px 8px;
+    border-left: 3px solid var(--ctp-mauve);
+    background: var(--color-bg);
+  }
+
+  .private-seat:first-of-type {
+    margin-top: 0;
+  }
+
+  .private-header {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .seat-label {
+    color: var(--ctp-mauve);
+  }
+
+  .seat-role {
+    color: var(--ctp-peach);
+  }
+
+  .seat-status {
+    color: var(--color-text-muted);
+    font-weight: normal;
+    font-size: 11px;
+  }
+
+  .notes {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-size: 11px;
+  }
+
+  .notes li {
+    padding: 1px 0;
+  }
+
+  .note-label {
+    color: var(--color-text-muted);
+    margin-right: 4px;
   }
 </style>
