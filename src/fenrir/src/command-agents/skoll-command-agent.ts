@@ -392,7 +392,12 @@ export class SkollCommandAgent implements CommandAgent {
 
   /**
    * 騙り霊能: 未 CO → medium_co 空、CO 済 → 処刑履歴に追従して報告。
-   * 現状は真の結果（執行された席の role から算出）を報告 — 村から見ると真霊能と区別不能。
+   *
+   * 戦略: 常に '○' と報告する
+   *   - 非狼処刑時: 真霊能も '○' と言うので一致（自然に見える）
+   *   - 狼処刑時: 真霊能が '●' と言う中で自分は '○' → divergence 発生
+   *     真霊能が既に死亡している場合は village から見分け不能になり大きな攪乱
+   *     真霊能生存時でも「どちらが真か」を判断材料にさせる（ログ/retar 勝負）
    */
   private discussionFakeMedium(
     state: Readonly<GameState<CommandAdapterExt>>,
@@ -421,21 +426,23 @@ export class SkollCommandAgent implements CommandAgent {
       return skipOrFirst(legal, '(discussion)[fake-medium] up-to-date skip')
     }
 
-    // 未報告の最古処刑 → 真の結果をそのまま報告（区別不能にする戦略）
+    // 未報告の最古処刑 → 常に '○' (human) と報告（狼処刑隠し戦略）
     const sortedExecs = [...state.executionHistory.entries()].sort(([a], [b]) => a - b)
     const [day, executedSeat] = sortedExecs[reportedCount]
     const executed = state.players.find(p => p.seat === executedSeat)
-    const trueResult = executed?.role === 'werewolf' ? 'wolf' : 'human'
+    const fakeResult: 'human' | 'wolf' = 'human'
+    const trueRole = executed?.role ?? '?'
 
     const reportCmd = legal.find(c =>
       c.type === 'role_result_report'
       && c.claim.type === 'medium_result'
-      && c.claim.result === trueResult,
+      && c.claim.result === fakeResult,
     )
     if (reportCmd) {
+      const tag = trueRole === 'werewolf' ? 'lie-hide-wolf' : 'truthful-non-wolf'
       return {
         cmd: reportCmd,
-        log: `(discussion)[fake-medium] fake-report D${day} seat${executedSeat}=${trueResult}`,
+        log: `(discussion)[fake-medium] D${day} seat${executedSeat}=${fakeResult} (${tag})`,
       }
     }
     return skipOrFirst(legal, '(discussion)[fake-medium] no-matching-report')
