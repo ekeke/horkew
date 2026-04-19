@@ -346,6 +346,10 @@ export class SkollCommandAgent implements CommandAgent {
     let best: Opt = 'hide'
     let bestScore = -Infinity
     let anyOk = false
+    // epsilon: skoll は currentSkollScore と lookaheadScore で計算経路が異なり
+    // float64 の ULP (~1e-16) 程度の noise が出る。意味のある差 (>= 1e-9) でのみ
+    // CO を採用し、タイは hide (options 先頭) に倒す
+    const EPSILON = 1e-9
     for (const opt of options) {
       const hypoEvent = buildClaimEvent(player.seat, opt)
       const score = hypoEvent
@@ -353,7 +357,7 @@ export class SkollCommandAgent implements CommandAgent {
         : this.currentSkollScore(state, player, events)
       if (score === -Infinity) continue
       anyOk = true
-      if (score > bestScore) {
+      if (score > bestScore + EPSILON) {
         bestScore = score
         best = opt
       }
@@ -696,50 +700,84 @@ export class SkollCommandAgent implements CommandAgent {
     return skipOrFirst(legal, '(discussion)[seer] all-reported skip')
   }
 
-  /** 真 medium: 未 CO → medium_co、最新処刑を未報告なら report、済みなら skip */
+  /**
+   * 真 medium: CO 判定 + 結果報告を共に skoll 駆動に統一。
+   *   - 未 CO: medium_claim を仮想注入して lookahead、hide と比較
+   *   - CO 済: 未報告の最古処刑について {human, wolf} を lookahead、自陣営 perspective で
+   *     bestVote score が高い方を採用（村 perspective なら通常は真値が勝つ）
+   */
   private discussionMedium(
     state: Readonly<GameState<CommandAdapterExt>>,
     player: PlayerState,
     legal: readonly Command[],
     events: AgentEvents,
   ): DecisionResult {
+    // CO 判定 (未 CO なら skoll で CO/hide 選択)
     if (!player.claimedRole) {
       const coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === 'medium_co')
-      if (coCmd) return { cmd: coCmd, log: '(discussion)[medium] true-role initial CO' }
+      if (!coCmd) return skipOrFirst(legal, '(discussion)[medium] no-co-legal skip')
+      const hideScore = this.currentSkollScore(state, player, events)
+      const coEvent: GameEvent = { type: 'medium_claim', actor: player.seat } as GameEvent
+      const coScore = this.lookaheadScore(state, player, events, coEvent)
+      if (hideScore === -Infinity && coScore === -Infinity) {
+        return skipOrFirst(legal, '(discussion)[medium] skoll unavailable, default hide')
+      }
+      // epsilon: 計算経路の float64 noise を吸収
+      if (coScore > hideScore + 1e-9) {
+        return {
+          cmd: coCmd,
+          log: `(discussion)[medium/skoll] CO (co=${coScore.toFixed(3)} > hide=${hideScore.toFixed(3)})`,
+        }
+      }
+      return skipOrFirst(
+        legal,
+        `(discussion)[medium/skoll] hide (hide=${hideScore.toFixed(3)} >= co=${coScore.toFixed(3)})`,
+      )
     }
 
-    // 報告済み回数 = 自分発の medium_result イベント数
+    // 報告 (未報告の最古処刑について ○/● を lookahead で選択)
     let reportedCount = 0
     for (const ev of events) {
       if ((ev as { type: string }).type !== 'medium_result') continue
       const e = ev as { actor?: number }
       if (e.actor === player.seat) reportedCount++
     }
-
-    // 処刑履歴の件数と比較。未報告があれば最新を report。
     const executedCount = state.executionHistory.size
     if (reportedCount >= executedCount) {
       return skipOrFirst(legal, '(discussion)[medium] up-to-date skip')
     }
 
-    // 未報告の最古処刑（順番通りに出す）
     const sortedExecs = [...state.executionHistory.entries()].sort((a, b) => a[0] - b[0])
     const [day, executedSeat] = sortedExecs[reportedCount]
-    const executed = state.players.find(p => p.seat === executedSeat)
-    const trueResult = executed?.role === 'werewolf' ? 'wolf' : 'human'
 
+    const options: Array<'human' | 'wolf'> = ['human', 'wolf']
+    let bestResult: 'human' | 'wolf' | null = null
+    let bestScore = -Infinity
+    for (const result of options) {
+      const cmdExists = legal.find(c =>
+        c.type === 'role_result_report'
+        && c.claim.type === 'medium_result'
+        && c.claim.result === result,
+      )
+      if (!cmdExists) continue
+      const score = this.evaluateMediumResultLookahead(state, player, events, executedSeat, result)
+      if (score > bestScore) {
+        bestScore = score
+        bestResult = result
+      }
+    }
+    if (bestResult === null) {
+      return skipOrFirst(legal, '(discussion)[medium] no-matching-report')
+    }
     const reportCmd = legal.find(c =>
       c.type === 'role_result_report'
       && c.claim.type === 'medium_result'
-      && c.claim.result === trueResult,
-    )
-    if (reportCmd) {
-      return {
-        cmd: reportCmd,
-        log: `(discussion)[medium] report D${day} seat${executedSeat}=${trueResult}`,
-      }
+      && c.claim.result === bestResult,
+    )!
+    return {
+      cmd: reportCmd,
+      log: `(discussion)[medium/skoll] D${day} seat${executedSeat}=${bestResult} (lookahead=${bestScore.toFixed(3)})`,
     }
-    return skipOrFirst(legal, '(discussion)[medium] no-matching-report')
   }
 
   /**
@@ -773,7 +811,8 @@ export class SkollCommandAgent implements CommandAgent {
     if (hideScore === -Infinity && coScore === -Infinity) {
       return skipOrFirst(legal, `(discussion)[${tag}] skoll unavailable, default hide`)
     }
-    if (coScore > hideScore) {
+    // epsilon: 計算経路の float64 noise を吸収
+    if (coScore > hideScore + 1e-9) {
       return {
         cmd: coCmd,
         log: `(discussion)[${tag}/skoll] CO (co=${coScore.toFixed(3)} > hide=${hideScore.toFixed(3)})`,
