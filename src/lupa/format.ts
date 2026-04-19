@@ -60,6 +60,9 @@ export function formatHowl(events: readonly any[], state: GameState, config: Lup
 
   // イベント出力
   let lastType: string | null = null
+  // medium_result の target（直近処刑席）を追跡。GameEvent.medium_result は target を持たない
+  // ため、execution 時点の seat を running state として保持し、霊能結果の target に使う
+  let lastExecutedSeat: number | null = null
 
   for (const event of events) {
     switch (event.type) {
@@ -114,7 +117,8 @@ export function formatHowl(events: readonly any[], state: GameState, config: Lup
         if (lastType === 'night_kill' || lastType === 'fox_kill' || lastType === 'peace') {
           lines.push('')
         }
-        lines.push(`${playerName(event.actor)} ${event.result === 'human' ? '○' : '●'}`)
+        const targetName = lastExecutedSeat !== null ? playerName(lastExecutedSeat) : '?'
+        lines.push(`${playerName(event.actor)} ${targetName}${event.result === 'human' ? '○' : '●'}`)
         break
       }
       case 'bodyguard_claim': {
@@ -172,6 +176,7 @@ export function formatHowl(events: readonly any[], state: GameState, config: Lup
       case 'execution': {
         lines.push('')
         lines.push(`${playerName(event.target)}処刑`)
+        lastExecutedSeat = event.target
         break
       }
       case 'game_over': {
