@@ -41,11 +41,21 @@ const RUNOFF_THRESHOLD = 0.05
 /** top-2 も含めて runoff 候補となる最低スコア（どちらもノイズ級は無視） */
 const MIN_RUNOFF_SCORE = 0.1
 
+/** fake 占い populate 時の top 候補（log 出力用） */
+type FakeDivineCandidate = { target: number, result: 'human' | 'wolf', score: number }
+
 export class SkollCommandAgent implements CommandAgent {
   readonly name = 'skoll'
   private master: SkollMasterAgent
   private fallback: CommandAgent
   private rng: Rng
+  /**
+   * 席ごとの fake 占い argmax ランキング履歴 (populate 時の top-N を記録)。
+   * discussionFakeSeer の fake-report ログに「なぜこの (target, result) を選んだか」の
+   * 内訳を出すため、populate 時点で計算した ranking を保存して report 時に引き出す。
+   * seat → day → top-N candidates
+   */
+  private fakeDivineRanking: Map<number, Map<number, FakeDivineCandidate[]>> = new Map()
 
   constructor(options: SkollCommandAgentOptions = {}) {
     this.master = new SkollMasterAgent(options.skollOptions)
@@ -346,6 +356,10 @@ export class SkollCommandAgent implements CommandAgent {
     let best: Opt = 'hide'
     let bestScore = -Infinity
     let anyOk = false
+    const scores: Record<Opt, number> = {
+      hide: -Infinity, seer: -Infinity, medium: -Infinity,
+      bodyguard: -Infinity, nekomata: -Infinity,
+    }
     // epsilon: skoll は currentSkollScore と lookaheadScore で計算経路が異なり
     // float64 の ULP (~1e-16) 程度の noise が出る。意味のある差 (>= 1e-9) でのみ
     // CO を採用し、タイは hide (options 先頭) に倒す
@@ -355,6 +369,7 @@ export class SkollCommandAgent implements CommandAgent {
       const score = hypoEvent
         ? this.lookaheadScore(state, player, events, hypoEvent)
         : this.currentSkollScore(state, player, events)
+      scores[opt] = score
       if (score === -Infinity) continue
       anyOk = true
       if (score > bestScore + EPSILON) {
@@ -363,6 +378,8 @@ export class SkollCommandAgent implements CommandAgent {
       }
     }
 
+    const breakdown = formatOptScores(options, scores)
+
     if (!anyOk) {
       return skipOrFirst(legal, `(discussion)[${player.role}] hide (skoll unavailable)`)
     }
@@ -370,7 +387,7 @@ export class SkollCommandAgent implements CommandAgent {
     if (best === 'hide') {
       return skipOrFirst(
         legal,
-        `(discussion)[${player.role}/skoll] hide score=${bestScore.toFixed(3)}`,
+        `(discussion)[${player.role}/skoll] hide score=${bestScore.toFixed(3)} opts={${breakdown}}`,
       )
     }
 
@@ -389,7 +406,7 @@ export class SkollCommandAgent implements CommandAgent {
     }
     return {
       cmd: coCmd,
-      log: `(discussion)[${player.role}/skoll] CO ${claimType} score=${bestScore.toFixed(3)}`,
+      log: `(discussion)[${player.role}/skoll] CO ${claimType} score=${bestScore.toFixed(3)} opts={${breakdown}}`,
     }
   }
 
@@ -433,9 +450,11 @@ export class SkollCommandAgent implements CommandAgent {
         && c.claim.result === result,
       )
       if (reportCmd) {
+        const ranking = this.fakeDivineRanking.get(player.seat)?.get(day) ?? []
+        const breakdown = formatFakeDivineRanking(ranking)
         return {
           cmd: reportCmd,
-          log: `(discussion)[fake-seer] fake-report D${day} seat${fake.target}=${result}`,
+          log: `(discussion)[fake-seer] fake-report D${day} seat${fake.target}=${result}${breakdown}`,
         }
       }
     }
@@ -467,22 +486,30 @@ export class SkollCommandAgent implements CommandAgent {
       const alreadyFaked = new Set<number>()
       for (const [, e] of player.fakeDivineHistory) alreadyFaked.add(e.target)
 
-      const entry = this.pickBestFakeDivine(state, player, events, alreadyFaked)
-      if (!entry) break
-      player.fakeDivineHistory.set(nextDay, entry)
+      const pick = this.pickBestFakeDivine(state, player, events, alreadyFaked)
+      if (!pick) break
+      player.fakeDivineHistory.set(nextDay, { target: pick.target, result: pick.result })
+      // ranking を保存（fake-report ログの内訳表示で使う）
+      let seatRankings = this.fakeDivineRanking.get(player.seat)
+      if (!seatRankings) {
+        seatRankings = new Map()
+        this.fakeDivineRanking.set(player.seat, seatRankings)
+      }
+      seatRankings.set(nextDay, pick.ranking)
     }
   }
 
   /**
    * 全 (target, result) option を skoll スコアで評価し argmax を返す。
    * skoll 不能時は自席以外・未 fake のランダム非狼に 'human' を返す fallback。
+   * ranking は skoll 評価が通った場合のみ top-3 を含む（fallback 時は空配列）。
    */
   private pickBestFakeDivine(
     state: Readonly<GameState<CommandAdapterExt>>,
     player: PlayerState,
     events: AgentEvents,
     alreadyFaked: Set<number>,
-  ): { target: number, result: 'human' | 'wolf' } | null {
+  ): { target: number, result: 'human' | 'wolf', ranking: FakeDivineCandidate[] } | null {
     const ctx = this.buildDecisionContext(state, player, events, 'day')
     const fallback = () => {
       const candidates = state.players.filter(p =>
@@ -492,30 +519,29 @@ export class SkollCommandAgent implements CommandAgent {
       )
       if (candidates.length === 0) return null
       const picked = candidates[this.rng.nextInt(candidates.length)]
-      return { target: picked.seat, result: 'human' as const }
+      return { target: picked.seat, result: 'human' as const, ranking: [] as FakeDivineCandidate[] }
     }
     if (!ctx) return fallback()
     let analysis
     try { analysis = this.master.analyzeVote(ctx) } catch { return fallback() }
     if (!analysis || analysis.candidates.length === 0) return fallback()
 
-    let best: { target: number, result: 'human' | 'wolf' } | null = null
-    let bestScore = -Infinity
+    // 全 (target, result) 候補を列挙して score 降順にソート、top-3 を ranking として保持
+    const ranked: FakeDivineCandidate[] = []
     for (const c of analysis.candidates) {
       if (c.seat === player.seat) continue
       if (alreadyFaked.has(c.seat)) continue
-      const smearValue = c.score        // 偽黒: 脅威度が高いほど価値大
-      const coverValue = 1 - c.score    // 偽白: 脅威度が低いほど価値大 (= 味方席の保護)
-      if (smearValue > bestScore) {
-        bestScore = smearValue
-        best = { target: c.seat, result: 'wolf' }
-      }
-      if (coverValue > bestScore) {
-        bestScore = coverValue
-        best = { target: c.seat, result: 'human' }
-      }
+      ranked.push({ target: c.seat, result: 'wolf', score: c.score })        // 偽黒 (smear)
+      ranked.push({ target: c.seat, result: 'human', score: 1 - c.score })   // 偽白 (cover)
     }
-    return best ?? fallback()
+    ranked.sort((a, b) => b.score - a.score)
+    if (ranked.length === 0) return fallback()
+    const best = ranked[0]
+    return {
+      target: best.target,
+      result: best.result,
+      ranking: ranked.slice(0, 3),
+    }
   }
 
   /**
@@ -560,6 +586,7 @@ export class SkollCommandAgent implements CommandAgent {
     const options: Array<'human' | 'wolf'> = ['human', 'wolf']
     let bestResult: 'human' | 'wolf' | null = null
     let bestScore = -Infinity
+    const scores: Record<'human' | 'wolf', number> = { human: -Infinity, wolf: -Infinity }
     for (const result of options) {
       const cmdExists = legal.find(c =>
         c.type === 'role_result_report'
@@ -568,6 +595,7 @@ export class SkollCommandAgent implements CommandAgent {
       )
       if (!cmdExists) continue
       const score = this.evaluateMediumResultLookahead(state, player, events, executedSeat, result)
+      scores[result] = score
       if (score > bestScore) {
         bestScore = score
         bestResult = result
@@ -582,9 +610,10 @@ export class SkollCommandAgent implements CommandAgent {
       && c.claim.type === 'medium_result'
       && c.claim.result === bestResult,
     )!
+    const breakdown = formatOptScores(options, scores)
     return {
       cmd: reportCmd,
-      log: `(discussion)[fake-medium] D${day} seat${executedSeat}=${bestResult} (lookahead=${bestScore.toFixed(3)})`,
+      log: `(discussion)[fake-medium] D${day} seat${executedSeat}=${bestResult} lookahead=${bestScore.toFixed(3)} opts={${breakdown}}`,
     }
   }
 
@@ -753,6 +782,7 @@ export class SkollCommandAgent implements CommandAgent {
     const options: Array<'human' | 'wolf'> = ['human', 'wolf']
     let bestResult: 'human' | 'wolf' | null = null
     let bestScore = -Infinity
+    const scores: Record<'human' | 'wolf', number> = { human: -Infinity, wolf: -Infinity }
     for (const result of options) {
       const cmdExists = legal.find(c =>
         c.type === 'role_result_report'
@@ -761,6 +791,7 @@ export class SkollCommandAgent implements CommandAgent {
       )
       if (!cmdExists) continue
       const score = this.evaluateMediumResultLookahead(state, player, events, executedSeat, result)
+      scores[result] = score
       if (score > bestScore) {
         bestScore = score
         bestResult = result
@@ -774,9 +805,10 @@ export class SkollCommandAgent implements CommandAgent {
       && c.claim.type === 'medium_result'
       && c.claim.result === bestResult,
     )!
+    const breakdown = formatOptScores(options, scores)
     return {
       cmd: reportCmd,
-      log: `(discussion)[medium/skoll] D${day} seat${executedSeat}=${bestResult} (lookahead=${bestScore.toFixed(3)})`,
+      log: `(discussion)[medium/skoll] D${day} seat${executedSeat}=${bestResult} lookahead=${bestScore.toFixed(3)} opts={${breakdown}}`,
     }
   }
 
@@ -1227,6 +1259,43 @@ function buildClaimEvent(
   }
 }
 
+
+/**
+ * Opt → score のテーブルをコンパクトな 1 行にフォーマット。
+ * 例: "hide=0.140 seer=0.501 medium=0.300 bg=0.250 neko=0.220"
+ * -Infinity は "ng" で表示（skoll が評価不能だった option）。
+ */
+function formatOptScores<T extends string>(
+  opts: readonly T[], scores: Record<T, number>,
+): string {
+  return opts.map(o => {
+    const s = scores[o]
+    const v = s === -Infinity ? 'ng' : s.toFixed(3)
+    return `${shortOptLabel(o)}=${v}`
+  }).join(' ')
+}
+
+/** ログ内コンパクト表示用の option 短縮名。bodyguard/nekomata のみ略す */
+function shortOptLabel(opt: string): string {
+  if (opt === 'bodyguard') return 'bg'
+  if (opt === 'nekomata') return 'neko'
+  return opt
+}
+
+/**
+ * fake 占いの ranking を 1 行に: " top={s4●=0.850 s3●=0.810 s2○=0.750}"
+ * 空 ranking (fallback 時) は空文字列を返す。● = wolf smear, ○ = human cover。
+ */
+function formatFakeDivineRanking(
+  ranking: ReadonlyArray<{ target: number, result: 'human' | 'wolf', score: number }>,
+): string {
+  if (ranking.length === 0) return ''
+  const parts = ranking.map(r => {
+    const mark = r.result === 'wolf' ? '●' : '○'
+    return `s${r.target}${mark}=${r.score.toFixed(3)}`
+  })
+  return ` top={${parts.join(' ')}}`
+}
 
 /** event 列から指定 actor の seer_claim / seer_result に出た target 集合を収集 */
 function collectReportedTargets(
