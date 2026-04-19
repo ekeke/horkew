@@ -14,7 +14,7 @@ import { resolveRules } from '../howl/ruleset.ts'
 import type { GameState, GameEvent, GameSnapshot, NightAction, DayClaim, PlayerState } from './types.ts'
 import type { GameConfig, GameHandlers, GameResult, PhaseContext, VoteContext } from './handlers.ts'
 import { Rng } from './random.ts'
-import { generateRoleNames, generateRoleSeatNames } from './names.ts'
+import { generateRoleNames, generateRoleSeatNames, generateRandomNames } from './names.ts'
 import {
   assignRoles, alivePlayers, getSeerResult,
   killPlayer, checkWinCondition,
@@ -43,7 +43,9 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
   })
   const names = config.nameStyle === 'seat'
     ? generateRoleSeatNames(assignedRoles)
-    : generateRoleNames(assignedRoles)
+    : config.nameStyle === 'random'
+      ? generateRandomNames(assignedRoles.length, rng)
+      : generateRoleNames(assignedRoles)
   const players = assignRoles(config.roles, names, shuffledIndices)
 
   const state: GameState<Ext> = {

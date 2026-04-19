@@ -445,6 +445,7 @@ export class CommandPlayStore {
       roles: opts.roles,
       seed,
       hasFirstGhost: opts.hasFirstGhost,
+      nameStyle: 'random',
     }
 
     try {

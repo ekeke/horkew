@@ -218,6 +218,7 @@ async function startGame(opts: StartGameOptions): Promise<void> {
     roles: rolesMap,
     seed,
     hasFirstGhost: opts.hasFirstGhost,
+    nameStyle: 'random',
   }
 
   try {

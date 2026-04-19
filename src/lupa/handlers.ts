@@ -27,7 +27,7 @@ export type GameConfig = {
   /** スナップショットを取得する Day 一覧（Seed Bank 用） */
   captureSnapshotDays?: number[]
   /** プレイヤー名の形式 (default: 'role') */
-  nameStyle?: 'role' | 'seat'
+  nameStyle?: 'role' | 'seat' | 'random'
 }
 
 // ============================================================

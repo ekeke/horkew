@@ -1,5 +1,6 @@
 import type { SystemRole } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
+import type { Rng } from './random.ts'
 
 export const RANDOM_NAMES = [
   'アリス',
@@ -64,6 +65,21 @@ export function generateRoleSeatNames(
     const shortName = systemRoles.get(role)!.shortName
     return `${shortName}${i + 1}`
   })
+}
+
+/**
+ * 役職と無関係なランダムカタカナ名を割り当てる（人間プレイ向け）。
+ * RANDOM_NAMES を rng でシャッフルして count 個先頭採用。
+ * RANDOM_NAMES の数を超えたら余剰分に連番を振る（通常は届かない）。
+ */
+export function generateRandomNames(count: number, rng: Rng): string[] {
+  const shuffled = rng.shuffle([...RANDOM_NAMES])
+  if (count <= shuffled.length) return shuffled.slice(0, count)
+  const result = [...shuffled]
+  for (let i = shuffled.length; i < count; i++) {
+    result.push(`Player${i + 1}`)
+  }
+  return result
 }
 
 function toFullWidth(n: number): string {
