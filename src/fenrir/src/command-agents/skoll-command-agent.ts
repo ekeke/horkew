@@ -265,10 +265,12 @@ export class SkollCommandAgent implements CommandAgent {
     }
     const assignment = state.ext.villainClaimPlan.get(player.seat) ?? 'hide'
     switch (assignment) {
-      case 'seer':   return this.discussionFakeSeer(state, player, legal, events)
-      case 'medium': return this.discussionFakeMedium(state, player, legal, events)
+      case 'seer':      return this.discussionFakeSeer(state, player, legal, events)
+      case 'medium':    return this.discussionFakeMedium(state, player, legal, events)
+      case 'bodyguard': return this.discussionOneShotCo(player, legal, 'bodyguard_co')
+      case 'nekomata':  return this.discussionOneShotCo(player, legal, 'nekomata_co')
       case 'hide':
-      default:       return this.discussionHide(player, legal)
+      default:          return this.discussionHide(player, legal)
     }
   }
 
@@ -833,9 +835,10 @@ function labelForRole(role: SystemRole): string {
 
 /**
  * 人外チームの騙り割当を決定。
- * 戦略: 狼席番最小 → 占い騙り、次 → 霊能騙り、残りと他人外 → 潜伏。
- * 単独狼の場合は占い騙り 1 人のみ（霊能無し）。
- * setup に seer/medium が存在しない場合でも問題なし（どちらの騙りも村を攪乱可能）。
+ * 戦略（デフォルト）:
+ *   - 狼 seat 昇順で 占い騙り → 霊能騙り、残り狼は潜伏
+ *   - 狂信者: setup に bodyguard が存在するなら狩人騙り、いなければ潜伏
+ *   - 妖狐・背徳者: 潜伏（積極騙りはリスクが高いため）
  *
  * 決定論的（seat 昇順）— 同一盤面なら常に同じ割当。
  */
@@ -852,11 +855,20 @@ function electVillainClaims(
     })
     .sort((a, b) => a.seat - b.seat)
 
-  // 狼を seat 昇順で取り出し、占い→霊能 の順に割当
+  // 狼: seat 昇順で 占い→霊能、残りは潜伏
   const wolves = villains.filter(p => p.role === 'werewolf')
   if (wolves.length >= 1) result.set(wolves[0].seat, 'seer')
   if (wolves.length >= 2) result.set(wolves[1].seat, 'medium')
-  // 残り狼 + fanatic/hamster/immoralist は潜伏
+
+  // 狂信者: setup に bodyguard がいれば狩人騙り、いなければ潜伏
+  //   bodyguard がいない setup で狩人騙りを出すと retar で即バレしやすい
+  const hasBodyguard = state.players.some(p => p.role === 'bodyguard')
+  const fanatic = villains.find(p => p.role === 'fanatic')
+  if (fanatic && hasBodyguard) {
+    result.set(fanatic.seat, 'bodyguard')
+  }
+
+  // 残り（未割当の狼、fanatic が狩人騙りしなかった場合、狐、背徳）→ 潜伏
   for (const v of villains) {
     if (!result.has(v.seat)) result.set(v.seat, 'hide')
   }

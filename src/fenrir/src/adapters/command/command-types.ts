@@ -134,7 +134,7 @@ export type CommandAdapterExt = {
 }
 
 /** 人外の騙り戦略 */
-export type VillainClaimAssignment = 'seer' | 'medium' | 'hide'
+export type VillainClaimAssignment = 'seer' | 'medium' | 'bodyguard' | 'nekomata' | 'hide'
 
 export function createCommandAdapterExt(): CommandAdapterExt {
   return {

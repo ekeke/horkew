@@ -153,6 +153,49 @@ test('SkollCommandAgent: discussion 2 匹狼は seer 騙り + medium 騙り に�
   assert.equal(state.ext.villainClaimPlan.get(4), 'medium')
 })
 
+test('SkollCommandAgent: 狂信者は setup に bodyguard がいれば狩人騙り', async () => {
+  const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  // makeState: seat1=seer, seat2=villager, seat3=werewolf, seat4=villager
+  // seat2 を bodyguard、seat4 を fanatic に差し替え
+  state.players[1].role = 'bodyguard'
+  state.players[3].role = 'fanatic'
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'bodyguard_co', targets: [] } },
+  ]
+  const result = await agent.decide(state, 4, legal)
+  assert.equal(result.cmd.type, 'role_co')
+  assert.match(result.log ?? '', /fanatic.*initial CO/)
+  assert.equal(state.ext.villainClaimPlan.get(4), 'bodyguard')
+})
+
+test('SkollCommandAgent: 狂信者は setup に bodyguard がいなければ潜伏', async () => {
+  const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  // bodyguard 不在。seat4 を fanatic に（seat1 seer, seat2 villager, seat3 werewolf のまま）
+  state.players[3].role = 'fanatic'
+  const legal: Command[] = [{ type: 'skip' }]
+  const result = await agent.decide(state, 4, legal)
+  assert.equal(result.cmd.type, 'skip')
+  assert.equal(state.ext.villainClaimPlan.get(4), 'hide')
+})
+
+test('SkollCommandAgent: 狐・背徳は常に潜伏', async () => {
+  const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  // seat2=hamster, seat4=immoralist
+  state.players[1].role = 'werehamster'
+  state.players[3].role = 'immoralist'
+  const legalSkip: Command[] = [{ type: 'skip' }]
+  const r2 = await agent.decide(state, 2, legalSkip)
+  assert.equal(r2.cmd.type, 'skip')
+  assert.equal(state.ext.villainClaimPlan.get(2), 'hide')
+  const r4 = await agent.decide(state, 4, legalSkip)
+  assert.equal(r4.cmd.type, 'skip')
+  assert.equal(state.ext.villainClaimPlan.get(4), 'hide')
+})
+
 test('SkollCommandAgent: commander 未 CO の役職があれば request_co', async () => {
   const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
   const state = makeState('commander')
