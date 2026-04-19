@@ -119,6 +119,12 @@ export type CommandAdapterExt = {
   voteCandidates: number[] | null
   /** Retar 再計算結果のキャッシュ（skoll 連携で参照）。未計算 or Retar 無効時は null */
   retarCache: RetarCache | null
+  /**
+   * 当日すでに request_co されたカテゴリ集合。一日一回制限の実装用。
+   * 初日犠牲者が真役職だった場合に進行役が無限ループで CO 要求し続けるのを防ぐ。
+   * onNight（新日開始）でクリアされる。
+   */
+  requestedCategoriesThisDay: Set<CoRequestCategory>
 }
 
 export function createCommandAdapterExt(): CommandAdapterExt {
@@ -135,6 +141,7 @@ export function createCommandAdapterExt(): CommandAdapterExt {
     preVoteStepCount: 0,
     voteCandidates: null,
     retarCache: null,
+    requestedCategoriesThisDay: new Set(),
   }
 }
 

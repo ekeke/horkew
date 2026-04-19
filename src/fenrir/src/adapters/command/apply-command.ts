@@ -105,6 +105,8 @@ function applyCommanderPhase(
       ext.consecutiveSkips.clear()
       // キューはアダプタ側で再構築
       ext.discussionQueue = []
+      // 当日の request_co 履歴に追加（同カテゴリを同日に再要求しないため）
+      ext.requestedCategoriesThisDay.add(cmd.category)
       return
     case 'designate_execution':
       ext.designatedTarget = cmd.target

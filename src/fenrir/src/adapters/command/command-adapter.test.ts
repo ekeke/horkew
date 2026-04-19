@@ -139,12 +139,117 @@ test('legalCommands: 議論フェーズ seer CO 済みは result_report + skip',
   assert.ok(!cmds.some(c => c.type === 'role_co'))
 })
 
+test('legalCommands: 真 seer は divineHistory 付き honest CO バリアントを追加で生成', () => {
+  const state = fiveSeatVillage()
+  state.ext.currentPhase = 'discussion'
+  // seer が D0 に seat3 (villager=human), D1 に seat4 (werewolf=wolf) を占った体で履歴を積む
+  state.players[0].divineHistory.set(0, { target: 3, result: 'human' })
+  state.players[0].divineHistory.set(1, { target: 4, result: 'wolf' })
+  const cmds = legalCommands(state, 1)
+  const seerCos = cmds.filter(c =>
+    c.type === 'role_co' && c.claim.type === 'seer_co',
+  )
+  // 空 results 版 + 履歴付き honest 版の 2 つ
+  assert.equal(seerCos.length, 2, '空 + honest の 2 バリアント')
+  const honest = seerCos.find(c =>
+    c.type === 'role_co'
+    && c.claim.type === 'seer_co'
+    && c.claim.results.length === 2,
+  )
+  assert.ok(honest, 'honest バリアント (results 2件) が存在')
+  if (honest && honest.type === 'role_co' && honest.claim.type === 'seer_co') {
+    assert.deepEqual(honest.claim.results, [
+      { target: 3, result: 'human' },
+      { target: 4, result: 'wolf' },
+    ], 'day 昇順で results が並ぶ')
+  }
+})
+
+test('legalCommands: 真 seer でも divineHistory 空なら honest バリアント無し', () => {
+  const state = fiveSeatVillage()
+  state.ext.currentPhase = 'discussion'
+  const cmds = legalCommands(state, 1)
+  const seerCos = cmds.filter(c =>
+    c.type === 'role_co' && c.claim.type === 'seer_co',
+  )
+  assert.equal(seerCos.length, 1, '空 results 版のみ')
+})
+
+test('legalCommands: 真 medium は executionHistory 付き honest CO バリアントを追加', () => {
+  const state = fiveSeatVillage()
+  // seat2 を medium に差し替え（fiveSeatVillage は bodyguard のところ）
+  state.players[1].role = 'medium'
+  state.ext.currentPhase = 'discussion'
+  // seat3 (villager=human) を D1 処刑、seat4 (werewolf=wolf) を D2 処刑
+  state.executionHistory.set(1, 3)
+  state.executionHistory.set(2, 4)
+  const cmds = legalCommands(state, 2)
+  const mediumCos = cmds.filter(c =>
+    c.type === 'role_co' && c.claim.type === 'medium_co',
+  )
+  assert.equal(mediumCos.length, 2, '空 + honest の 2 バリアント')
+  const honest = mediumCos.find(c =>
+    c.type === 'role_co'
+    && c.claim.type === 'medium_co'
+    && (c.claim.pastResults?.length ?? 0) === 2,
+  )
+  assert.ok(honest, 'honest バリアント (pastResults 2件) が存在')
+  if (honest && honest.type === 'role_co' && honest.claim.type === 'medium_co') {
+    assert.deepEqual(honest.claim.pastResults, ['human', 'wolf'], 'day 昇順')
+  }
+})
+
+test('legalCommands: seer 結果報告は死亡席も対象 (夜占い対象が朝死亡するケース)', () => {
+  const state = fiveSeatVillage()
+  state.ext.currentPhase = 'discussion'
+  state.players[0].claimedRole = 'seer'
+  state.players[2].alive = false  // seat3 退場
+  const cmds = legalCommands(state, 1)
+  const seerResults = cmds.filter(c =>
+    c.type === 'role_result_report' && c.claim.type === 'seer_result',
+  )
+  // 死亡席 seat3 への報告コマンドが存在する
+  const seat3Reports = seerResults.filter(c =>
+    c.type === 'role_result_report'
+    && c.claim.type === 'seer_result'
+    && c.claim.target === 3,
+  )
+  assert.equal(seat3Reports.length, 2, '死亡席へ ○/● 両方報告可能')
+  // 予告は生存席のみ
+  const forecasts = cmds.filter(c =>
+    c.type === 'role_result_report' && c.claim.type === 'forecast',
+  )
+  const seat3Forecasts = forecasts.filter(c =>
+    c.type === 'role_result_report'
+    && c.claim.type === 'forecast'
+    && c.claim.target === 3,
+  )
+  assert.equal(seat3Forecasts.length, 0, '死亡席への予告は不可')
+})
+
 test('legalCommands: 指揮フェーズ commander のみ非空', () => {
   const state = fiveSeatVillage()
   state.ext.currentPhase = 'commander'
   state.ext.commander = 1
   assert.ok(legalCommands(state, 1).length > 0)
   assert.deepEqual(legalCommands(state, 2), [])
+})
+
+test('legalCommands: 指揮フェーズ request_co は当日要求済みカテゴリを除外', () => {
+  const state = fiveSeatVillage()
+  state.ext.currentPhase = 'commander'
+  state.ext.commander = 1
+  // medium, seer を既に要求済み（初日犠牲者で応答なしだった想定）
+  state.ext.requestedCategoriesThisDay.add('medium')
+  state.ext.requestedCategoriesThisDay.add('seer')
+  const cmds = legalCommands(state, 1)
+  const requestCos = cmds.filter(c => c.type === 'request_co')
+  const cats = requestCos
+    .filter(c => c.type === 'request_co')
+    .map(c => (c as { category: string }).category)
+  assert.ok(!cats.includes('medium'), '要求済み medium は除外')
+  assert.ok(!cats.includes('seer'), '要求済み seer は除外')
+  assert.ok(cats.includes('bodyguard'), '未要求 bodyguard は残る')
 })
 
 test('legalCommands: CCO フェーズ ccoQueue 外は空', () => {
@@ -243,6 +348,20 @@ test('applyCommand: request_co は discussion へ戻す', () => {
   applyCommand(state, 1, { type: 'request_co', category: 'seer' })
   assert.equal(state.ext.currentPhase, 'discussion')
   assert.equal(state.ext.consecutiveSkips.size, 0)
+})
+
+test('applyCommand: request_co は当日要求済みカテゴリ集合に追加', () => {
+  const state = fiveSeatVillage()
+  state.ext.currentPhase = 'commander'
+  state.ext.commander = 1
+  assert.equal(state.ext.requestedCategoriesThisDay.size, 0)
+  applyCommand(state, 1, { type: 'request_co', category: 'seer' })
+  assert.ok(state.ext.requestedCategoriesThisDay.has('seer'))
+  // request_co は discussion へ遷移するので、2 回目呼び出し前に commander へ戻す
+  state.ext.currentPhase = 'commander'
+  applyCommand(state, 1, { type: 'request_co', category: 'bodyguard' })
+  assert.ok(state.ext.requestedCategoriesThisDay.has('bodyguard'))
+  assert.equal(state.ext.requestedCategoriesThisDay.size, 2)
 })
 
 test('applyCommand: cco_full は ccoAnyReveal=true & ccoQueue から除去', () => {

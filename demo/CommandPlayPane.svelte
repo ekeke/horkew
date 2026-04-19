@@ -82,15 +82,140 @@
 
   const pending = $derived(state.pending)
   const gameState = $derived(state.gameState)
-  const ext = $derived(gameState?.ext as CommandAdapterExt | undefined)
   const currentSeat = $derived(pending?.mySeat ?? null)
   const currentRole = $derived(
     currentSeat !== null && state.seatRoles
       ? (state.seatRoles.get(currentSeat) ?? null)
       : null,
   )
-  const phaseLabel = $derived(ext?.currentPhase ?? '—')
-  const commanderSeat = $derived(ext?.commander ?? null)
+
+  /**
+   * ライブ更新対象のビュー。gameState.ext は in-place で mutate されるので
+   * tick を読んで毎 tick 新しいオブジェクトを返すことで、下流の description 表示が追随する。
+   */
+  const view = $derived.by(() => {
+    void state.tick
+    const gs = state.gameState
+    const ext = gs?.ext as CommandAdapterExt | undefined
+    const day = gs?.day ?? 0
+    const phase = ext?.currentPhase ?? '—'
+    const commander = ext?.commander ?? null
+    // 現在処理中の席: フェーズに応じた「今誰が決めているか」の推定
+    let activeSeat: number | null = null
+    if (ext) {
+      switch (ext.currentPhase) {
+        case 'discussion': activeSeat = ext.discussionQueue[0] ?? null; break
+        case 'commander': activeSeat = ext.commander ?? null; break
+        case 'cco': activeSeat = ext.ccoQueue[0] ?? null; break
+        case 'night':
+        case 'vote':
+          activeSeat = null  // 全員並行処理
+          break
+      }
+    }
+    return { gs, ext, day, phase, commander, activeSeat }
+  })
+
+  const phaseLabel = $derived(view.phase)
+  const commanderSeat = $derived(view.commander)
+  const activeSeat = $derived(view.activeSeat)
+
+  /** フェーズの日本語ラベル */
+  function phaseJa(p: string): string {
+    switch (p) {
+      case 'night': return '夜'
+      case 'discussion': return '議論'
+      case 'commander': return '指揮'
+      case 'cco': return 'CCO'
+      case 'vote': return '投票'
+      default: return p
+    }
+  }
+
+  /** 占い師の報告テーブル行 */
+  type SeerReportRow = {
+    seat: number
+    alive: boolean
+    /** 自分が実際に占ったときの日（divineHistory の key）。未占なら null */
+    divineDay: number | null
+    /** 自分が実際に占ったときの結果（divineHistory から）。未占なら null */
+    trueResult: 'human' | 'wolf' | null
+    humanCmd: Command | null
+    wolfCmd: Command | null
+    forecastCmd: Command | null
+  }
+
+  /**
+   * 占い師の結果報告コマンドをテーブル行にまとめる。
+   * pending が占い師の結果報告タイミング（role_result_report with seer_result/forecast を含む）のときに row を生成。
+   * 並び順: 占い済み席を divineDay 降順（直近が最上段）、未占席は seat 昇順で下段。
+   */
+  const seerReportTable = $derived.by((): SeerReportRow[] => {
+    void state.tick
+    if (!pending || !gameState) return []
+    const me = gameState.players.find(p => p.seat === pending.mySeat)
+    if (!me || me.role !== 'seer') return []
+
+    // 自分の divine 履歴（target → {day, result}）。target ごとに直近の占いを採用
+    const trueMap = new Map<number, { day: number, result: 'human' | 'wolf' }>()
+    for (const [day, entry] of me.divineHistory) {
+      const existing = trueMap.get(entry.target)
+      if (!existing || day > existing.day) {
+        trueMap.set(entry.target, { day, result: entry.result })
+      }
+    }
+
+    // legal から report 系コマンドを拾って seat ごとに集約
+    const rowMap = new Map<number, SeerReportRow>()
+    const ensure = (seat: number): SeerReportRow => {
+      let row = rowMap.get(seat)
+      if (!row) {
+        const player = gameState.players.find(p => p.seat === seat)
+        const divine = trueMap.get(seat) ?? null
+        row = {
+          seat,
+          alive: !!player?.alive,
+          divineDay: divine?.day ?? null,
+          trueResult: divine?.result ?? null,
+          humanCmd: null, wolfCmd: null, forecastCmd: null,
+        }
+        rowMap.set(seat, row)
+      }
+      return row
+    }
+    for (const cmd of pending.legal) {
+      if (cmd.type !== 'role_result_report') continue
+      const claim = cmd.claim as { type: string, target?: number, result?: string }
+      if (claim.type === 'seer_result' && claim.target != null) {
+        const row = ensure(claim.target)
+        if (claim.result === 'human') row.humanCmd = cmd
+        else if (claim.result === 'wolf') row.wolfCmd = cmd
+      } else if (claim.type === 'forecast' && claim.target != null) {
+        const row = ensure(claim.target)
+        row.forecastCmd = cmd
+      }
+    }
+    return [...rowMap.values()].sort((a, b) => {
+      // divined → divineDay 降順（直近が上）
+      // undivined → divined の下に seat 昇順
+      if (a.divineDay !== null && b.divineDay !== null) return b.divineDay - a.divineDay
+      if (a.divineDay !== null) return -1
+      if (b.divineDay !== null) return 1
+      return a.seat - b.seat
+    })
+  })
+
+  /** テーブル化されないその他の legal コマンド */
+  const nonTableLegal = $derived.by((): Command[] => {
+    void state.tick
+    if (!pending) return []
+    if (seerReportTable.length === 0) return [...pending.legal]
+    return pending.legal.filter(cmd => {
+      if (cmd.type !== 'role_result_report') return true
+      const claim = cmd.claim as { type: string }
+      return claim.type !== 'seer_result' && claim.type !== 'forecast'
+    })
+  })
 
   /** 私的情報（自席の視点のみ） */
   type PrivateInfo = {
@@ -102,6 +227,8 @@
   }
 
   const privateInfoList = $derived.by((): PrivateInfo[] => {
+    // gameState は in-place で mutate されるため、tick を読んで明示的に再計算を駆動する
+    void state.tick
     if (!gameState || !state.seatRoles) return []
     const result: PrivateInfo[] = []
     const sortedSeats = [...state.humanSeats].sort((a, b) => a - b)
@@ -348,13 +475,27 @@
   {#if state.running && gameState}
     <section class="state">
       <div class="state-header">
-        <span class="phase">Day {gameState.day} / {phaseLabel}</span>
+        <span class="phase">Day {view.day} / {phaseJa(phaseLabel)}</span>
         {#if commanderSeat !== null}
-          <span class="commander">Commander: {nameOf(commanderSeat)}</span>
+          <span class="commander">指揮: {nameOf(commanderSeat)}</span>
         {/if}
-        <span class="hint">※ ゲーム進行はエディタ（お試しモード）に反映されます</span>
+        {#if activeSeat !== null}
+          <span class="active">処理中: {nameOf(activeSeat)}</span>
+        {/if}
       </div>
     </section>
+
+    <!-- 活動フィード: 最新 N 件の判断ログを小窓で表示（死後観戦にも有用） -->
+    {#if state.activityLog.length > 0}
+      <section class="activity">
+        <h3>進行ログ</h3>
+        <ul class="activity-list">
+          {#each state.activityLog as line, i (i)}
+            <li>{line}</li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
 
     <!-- 自席の私的情報（記憶頼りを避けるための参照パネル） -->
     {#if privateInfoList.length > 0}
@@ -387,8 +528,64 @@
         <strong>手番: {nameOf(pending.mySeat)}</strong>
         <span class="role">（あなたの役職: {formatRole(currentRole)}）</span>
       </div>
+
+      {#if seerReportTable.length > 0}
+        <div class="seer-report">
+          <div class="seer-report-title">占い結果の報告 / 予告</div>
+          <table class="seer-report-table">
+            <thead>
+              <tr>
+                <th>占日</th>
+                <th>対象</th>
+                <th>状態</th>
+                <th title="人間と報告">○</th>
+                <th title="人狼と報告">●</th>
+                <th title="次の夜に占う予告">予告</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each seerReportTable as row (row.seat)}
+                <tr class:truth-row={row.trueResult !== null}>
+                  <td class="row-day">{row.divineDay !== null ? `D${row.divineDay}` : '—'}</td>
+                  <td class="row-seat">{nameOf(row.seat)}</td>
+                  <td class="row-status">{row.alive ? '生存' : '退場'}</td>
+                  <td>
+                    {#if row.humanCmd}
+                      <button
+                        class="report-cell"
+                        class:truth={row.trueResult === 'human'}
+                        onclick={() => submitCommand(row.humanCmd!)}
+                        title={row.trueResult === 'human' ? '占い結果と一致' : '偽報告になる'}
+                      >○</button>
+                    {/if}
+                  </td>
+                  <td>
+                    {#if row.wolfCmd}
+                      <button
+                        class="report-cell"
+                        class:truth={row.trueResult === 'wolf'}
+                        onclick={() => submitCommand(row.wolfCmd!)}
+                        title={row.trueResult === 'wolf' ? '占い結果と一致' : '偽報告になる'}
+                      >●</button>
+                    {/if}
+                  </td>
+                  <td>
+                    {#if row.forecastCmd}
+                      <button class="report-cell forecast-cell" onclick={() => submitCommand(row.forecastCmd!)}>予告</button>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+          <div class="seer-report-legend">
+            ※ 青枠 = あなたの占い結果と一致する選択肢。並び順: 占い済み席（直近の占日が上）→ 未占席。
+          </div>
+        </div>
+      {/if}
+
       <div class="commands">
-        {#each pending.legal as cmd, i (i)}
+        {#each nonTableLegal as cmd, i (i)}
           <button class="cmd-btn" onclick={() => submitCommand(cmd)}>
             {formatCommand(cmd)}
           </button>
@@ -493,6 +690,38 @@
     color: var(--ctp-green);
   }
 
+  .active {
+    color: var(--ctp-sky);
+  }
+
+  .activity {
+    background: var(--ctp-mantle, var(--color-surface));
+  }
+
+  .activity-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-size: 11px;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  .activity-list li {
+    padding: 1px 4px;
+    border-left: 2px solid var(--ctp-overlay0);
+    margin-bottom: 1px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--color-text-muted);
+  }
+
+  .activity-list li:last-child {
+    color: var(--color-text);
+    border-left-color: var(--ctp-sky);
+  }
+
   .result {
     color: var(--ctp-flamingo);
     font-size: 14px;
@@ -545,6 +774,95 @@
   .cmd-btn:hover {
     background: var(--ctp-sapphire);
     color: var(--color-bg);
+  }
+
+  .seer-report {
+    margin-bottom: 8px;
+    padding: 6px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+  }
+
+  .seer-report-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ctp-peach);
+    margin-bottom: 4px;
+  }
+
+  .seer-report-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+
+  .seer-report-table th,
+  .seer-report-table td {
+    padding: 2px 6px;
+    text-align: center;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .seer-report-table th {
+    color: var(--color-text-muted);
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+  }
+
+  .seer-report-table td.row-day {
+    color: var(--ctp-peach);
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .seer-report-table td.row-seat {
+    text-align: left;
+    font-weight: 600;
+  }
+
+  .seer-report-table td.row-status {
+    color: var(--color-text-muted);
+    font-size: 10px;
+  }
+
+  .seer-report-table tr.truth-row {
+    background: var(--ctp-surface0, transparent);
+  }
+
+  .report-cell {
+    font-size: 12px;
+    min-width: 32px;
+    padding: 2px 6px;
+    background: var(--ctp-surface1);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .report-cell:hover {
+    background: var(--ctp-sapphire);
+    color: var(--color-bg);
+  }
+
+  .report-cell.truth {
+    border: 2px solid var(--ctp-sky);
+    background: var(--ctp-surface2, var(--ctp-surface1));
+    font-weight: 700;
+  }
+
+  .report-cell.forecast-cell {
+    font-size: 10px;
+    min-width: auto;
+  }
+
+  .seer-report-legend {
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--color-text-muted);
   }
 
   .error {

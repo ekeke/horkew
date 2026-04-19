@@ -55,7 +55,18 @@ export type CommandPlayStoreState = {
   running: boolean
   /** エディタへ反映する Howl テキスト（ライブ更新） */
   editorText: string
+  /** 直近の comment イベントのテキスト（末尾 ACTIVITY_LOG_LIMIT 件、ライブ更新） */
+  activityLog: readonly string[]
+  /**
+   * イベント/mutation ティック。gameState は in-place mutate されるため、
+   * Svelte の derived を再実行させる明示的な reactivity トリガとして使う。
+   * event emit および pending 更新のたびにインクリメント。
+   */
+  tick: number
 }
+
+/** activityLog に保持する直近 comment の件数 */
+export const ACTIVITY_LOG_LIMIT = 8
 
 export type StoreListener = (state: CommandPlayStoreState) => void
 
@@ -108,6 +119,7 @@ export class CommandPlayStore {
         ...this.state,
         pending: p,
         gameState: p?.state ?? this.state.gameState,
+        tick: this.state.tick + 1,
       })
     })
   }
@@ -170,15 +182,25 @@ export class CommandPlayStore {
       hasFirstGhost: opts.hasFirstGhost,
     }
 
-    // ライブイベント蓄積 → editorText 再生成
+    // ライブイベント蓄積 → editorText + activityLog 再生成
     const liveEvents: (GameEvent | FenrirExtEvent)[] = []
+    const recentComments: string[] = []
     const refreshEditor = () => {
       const currentState = this.state.gameState
       if (!currentState) return
+      let nextEditorText = this.state.editorText
       try {
-        const howl = formatHowl(liveEvents as GameEvent[], currentState, lupaConfig)
-        this.setState({ ...this.state, editorText: howl })
+        nextEditorText = formatHowl(liveEvents as GameEvent[], currentState, lupaConfig)
       } catch { /* 書き出し失敗は無視（途中状態で format 不可なことがある） */ }
+      // editorText が変わっていなくても tick を進める: gameState は in-place で
+      // mutate されるため、下流の derived (私的情報パネル等) を再計算させるには
+      // state の参照を新しくする必要がある
+      this.setState({
+        ...this.state,
+        editorText: nextEditorText,
+        activityLog: [...recentComments],
+        tick: this.state.tick + 1,
+      })
     }
 
     const adapter = new CommandAdapter({
@@ -188,6 +210,12 @@ export class CommandPlayStore {
       seed,
       onEventEmitted: (event) => {
         liveEvents.push(event)
+        if (event.type === 'comment') {
+          recentComments.push((event as { text: string }).text)
+          if (recentComments.length > ACTIVITY_LOG_LIMIT) {
+            recentComments.splice(0, recentComments.length - ACTIVITY_LOG_LIMIT)
+          }
+        }
         refreshEditor()
       },
       onRolesAssigned: (seatRoles) => {
@@ -275,6 +303,8 @@ export class CommandPlayStore {
       humanRole: null,
       running: false,
       editorText: '',
+      activityLog: [],
+      tick: 0,
     }
   }
 

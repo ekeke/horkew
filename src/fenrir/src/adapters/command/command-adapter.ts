@@ -104,6 +104,7 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
     ext.designatedTarget = null
     ext.runoffCandidates = null
     ext.preVoteStepCount = 0
+    ext.requestedCategoriesThisDay.clear()
 
     const actions = new Map<number, NightAction>()
     for (const p of alivePlayers(state)) {

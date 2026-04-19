@@ -9,7 +9,7 @@
  */
 
 import type { GameState, PlayerState } from '../../../../lupa/types.ts'
-import { alivePlayersExcept, alivePlayers } from '../../../../lupa/roles.ts'
+import { alivePlayersExcept, alivePlayers, getSeerResult } from '../../../../lupa/roles.ts'
 import type {
   Command, CommandAdapterExt, CoRequestCategory, VillainTrueRole,
 } from './command-types.ts'
@@ -120,14 +120,36 @@ function legalDiscussionCommands(
     for (const o of others) {
       cmds.push({ type: 'role_co', claim: { type: 'mason_co', partner: o.seat } })
     }
+    // 真役職 + 履歴あり: 正直 CO バリアント（既知の結果を CO にまとめて添付）
+    // 本バリアントを追加することで、初 CO 時にまとめて全日の結果を報告できる。
+    if (player.role === 'seer' && player.divineHistory.size > 0) {
+      const honestResults = [...player.divineHistory.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, e]) => ({ target: e.target, result: e.result }))
+      cmds.push({ type: 'role_co', claim: { type: 'seer_co', results: honestResults } })
+    }
+    if (player.role === 'medium' && state.executionHistory.size > 0) {
+      const honestPast = [...state.executionHistory.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, seat]) => {
+          const executed = state.players.find(p => p.seat === seat)
+          return executed ? getSeerResult(executed.role) : 'human'
+        })
+      cmds.push({ type: 'role_co', claim: { type: 'medium_co', pastResults: honestPast } })
+    }
   } else {
     // 結果報告（CO 済みなら役職別に列挙）
     switch (player.claimedRole) {
       case 'seer': {
-        const targets = alivePlayersExcept(state, player.seat)
-        for (const t of targets) {
+        // 結果報告は死亡席も含む（夜に占って翌朝死亡したケース等を後日報告可能にする）
+        const resultTargets = state.players.filter(p => p.seat !== player.seat)
+        for (const t of resultTargets) {
           cmds.push({ type: 'role_result_report', claim: { type: 'seer_result', target: t.seat, result: 'human' } })
           cmds.push({ type: 'role_result_report', claim: { type: 'seer_result', target: t.seat, result: 'wolf' } })
+        }
+        // 予告は未来の夜行動を示すため生存席のみ
+        const forecastTargets = alivePlayersExcept(state, player.seat)
+        for (const t of forecastTargets) {
           cmds.push({ type: 'role_result_report', claim: { type: 'forecast', target: t.seat } })
         }
         break
@@ -152,7 +174,10 @@ function legalDiscussionCommands(
 function legalCommanderCommands(state: GameState<CommandAdapterExt>): Command[] {
   // skip は「確信がない時の逃げ道」として常時合法（vote へ直接遷移）
   const cmds: Command[] = [{ type: 'skip' }]
+  // request_co は当日すでに要求済みのカテゴリを除外（初日犠牲者等で無限ループを防ぐ）
+  const requested = state.ext.requestedCategoriesThisDay
   for (const cat of CO_REQUEST_CATEGORIES) {
+    if (requested.has(cat)) continue
     cmds.push({ type: 'request_co', category: cat })
   }
   const alive = alivePlayers(state).map(p => p.seat)
