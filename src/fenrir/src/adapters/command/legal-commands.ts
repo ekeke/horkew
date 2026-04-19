@@ -8,11 +8,43 @@
  * - CCO: 未 CO 席=cco_full 骨子、CO 済み席=cco_villain_reveal（真 villain のみ）
  */
 
+import type { EnumSpecies } from '../../../../types/index.ts'
 import type { GameState, PlayerState, DayClaim } from '../../../../lupa/types.ts'
 import { alivePlayersExcept, alivePlayers, getSeerResult } from '../../../../lupa/roles.ts'
 import type {
   Command, CommandAdapterExt, CoRequestCategory, VillainTrueRole,
 } from './command-types.ts'
+
+/** 指定ターゲットへの自身の占い履歴から最新結果を取得（未占なら null） */
+function latestDivineResult(
+  divineHistory: Map<number, { target: number, result: EnumSpecies }>,
+  targetSeat: number,
+): EnumSpecies | null {
+  let latestDay = -1
+  let latestResult: EnumSpecies | null = null
+  for (const [day, entry] of divineHistory) {
+    if (entry.target === targetSeat && day > latestDay) {
+      latestDay = day
+      latestResult = entry.result
+    }
+  }
+  return latestResult
+}
+
+/** 直近の処刑席の真結果（霊能結果として報告されるべき値）。処刑未発生なら null */
+function latestMediumResult(state: GameState<CommandAdapterExt>): EnumSpecies | null {
+  let latestDay = -1
+  let latestSeat: number | null = null
+  for (const [day, seat] of state.executionHistory) {
+    if (day > latestDay) {
+      latestDay = day
+      latestSeat = seat
+    }
+  }
+  if (latestSeat === null) return null
+  const executed = state.players.find(p => p.seat === latestSeat)
+  return executed ? getSeerResult(executed.role) : 'human'
+}
 
 const CO_REQUEST_CATEGORIES: CoRequestCategory[] = [
   'seer', 'medium', 'bodyguard', 'nekomata', 'nekomata_bodyguard_grelan',
@@ -77,9 +109,13 @@ function legalNightCommands(
       for (const t of targets) cmds.push({ type: 'divine', target: t.seat })
       break
     case 'bodyguard':
+      // 初日 (day 0) は護衛不可。初日犠牲はランダム固定で護衛は効かない
+      if (state.day === 0) break
       for (const t of targets) cmds.push({ type: 'guard', target: t.seat })
       break
     case 'werewolf': {
+      // 初日 (day 0) は襲撃なし。初日犠牲 (random) のみ
+      if (state.day === 0) break
       // 襲撃権限者 = 生存狼のうち最小席番
       const aliveWolves = state.players
         .filter(p => p.alive && p.role === 'werewolf')
@@ -88,7 +124,9 @@ function legalNightCommands(
       const isLeader = aliveWolves[0] === player.seat
       if (isLeader) {
         const nonWolves = targets.filter(t => t.role !== 'werewolf')
-        for (const t of nonWolves) cmds.push({ type: 'attack', target: t.seat })
+        for (const actor of aliveWolves) {
+          for (const t of nonWolves) cmds.push({ type: 'attack', target: t.seat, actor })
+        }
       }
       break
     }
@@ -125,21 +163,41 @@ function legalDiscussionCommands(
       case 'seer': {
         // 結果報告は死亡席も含む（夜に占って翌朝死亡したケース等を後日報告可能にする）
         const resultTargets = state.players.filter(p => p.seat !== player.seat)
+        const isTrueSeer = player.role === 'seer'
         for (const t of resultTargets) {
-          cmds.push({ type: 'role_result_report', claim: { type: 'seer_result', target: t.seat, result: 'human' } })
-          cmds.push({ type: 'role_result_report', claim: { type: 'seer_result', target: t.seat, result: 'wolf' } })
+          if (isTrueSeer) {
+            // 真 seer: 自分の divineHistory の最新結果のみ合法。未占対象や逆結果は列挙しない
+            const latest = latestDivineResult(player.divineHistory, t.seat)
+            if (latest !== null) {
+              cmds.push({ type: 'role_result_report', claim: { type: 'seer_result', target: t.seat, result: latest } })
+            }
+          } else {
+            // 騙り seer（人外 CO）: 両方の結果を合法手として列挙（嘘可）
+            cmds.push({ type: 'role_result_report', claim: { type: 'seer_result', target: t.seat, result: 'human' } })
+            cmds.push({ type: 'role_result_report', claim: { type: 'seer_result', target: t.seat, result: 'wolf' } })
+          }
         }
-        // 予告は未来の夜行動を示すため生存席のみ
+        // 予告は未来の夜行動を示すため生存席のみ（騙りは嘘予告可、真役職は戦略自由なので制約なし）
         const forecastTargets = alivePlayersExcept(state, player.seat)
         for (const t of forecastTargets) {
           cmds.push({ type: 'role_result_report', claim: { type: 'forecast', target: t.seat } })
         }
         break
       }
-      case 'medium':
-        cmds.push({ type: 'role_result_report', claim: { type: 'medium_result', result: 'human' } })
-        cmds.push({ type: 'role_result_report', claim: { type: 'medium_result', result: 'wolf' } })
+      case 'medium': {
+        if (player.role === 'medium') {
+          // 真 medium: 直近の処刑席の真役職から一意に決まる結果のみ
+          const trueResult = latestMediumResult(state)
+          if (trueResult !== null) {
+            cmds.push({ type: 'role_result_report', claim: { type: 'medium_result', result: trueResult } })
+          }
+        } else {
+          // 騙り medium（人外 CO）: 両方の結果が合法
+          cmds.push({ type: 'role_result_report', claim: { type: 'medium_result', result: 'human' } })
+          cmds.push({ type: 'role_result_report', claim: { type: 'medium_result', result: 'wolf' } })
+        }
         break
+      }
       default:
         // bodyguard / mason / nekomata の再報告は Phase 1 では未対応
         break

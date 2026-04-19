@@ -127,7 +127,19 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
       // emit を applyCommand の前に: applyCommand が state.ext.currentPhase を遷移させるため
       this.emitDecisionLog(ctx.events, agent, state, p.seat, result.cmd, result.log, elapsed)
       applyCommand(state, p.seat, result.cmd)
-      actions.set(p.seat, toNightAction(result.cmd))
+      if (result.cmd.type === 'attack') {
+        // 襲撃は actor 席の NightAction として記録する（engine は Map key=席 で襲撃者を判定）
+        actions.set(result.cmd.actor, { type: 'attack', target: result.cmd.target })
+        if (result.cmd.actor !== p.seat && !actions.has(p.seat)) {
+          actions.set(p.seat, { type: 'none' })
+        }
+      } else {
+        // リーダーが他狼席に襲撃委任済みの場合、非リーダー狼の no_action で上書きしない
+        const existing = actions.get(p.seat)
+        if (!existing || existing.type !== 'attack') {
+          actions.set(p.seat, toNightAction(result.cmd))
+        }
+      }
     }
     return actions
   }
@@ -477,7 +489,7 @@ function summarizeCommand(cmd: Command, state: GameState<CommandAdapterExt>): st
     case 'no_action': return 'no_action'
     case 'divine': return `divine ${nameOf(cmd.target)}`
     case 'guard': return `guard ${nameOf(cmd.target)}`
-    case 'attack': return `attack ${nameOf(cmd.target)}`
+    case 'attack': return `attack by seat${cmd.actor} → ${nameOf(cmd.target)}`
     case 'vote': return `vote ${nameOf(cmd.target)}`
     case 'role_co': return `role_co ${cmd.claim.type}`
     case 'role_result_report': return `role_result_report ${cmd.claim.type}`

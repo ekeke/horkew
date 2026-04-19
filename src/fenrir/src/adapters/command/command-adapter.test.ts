@@ -86,7 +86,30 @@ test('legalCommands: 夜フェーズ 狩人は guard × (生存-1) + no_action',
   assert.equal(guards.length, 4)
 })
 
-test('legalCommands: 夜フェーズ 狼リーダーのみ attack 可、他狼は no_action のみ', () => {
+test('legalCommands: 初日 (day 0) は 狩人の護衛と狼の襲撃が合法手に含まれない', () => {
+  const state = makeState([
+    makePlayer(1, 'villager'),
+    makePlayer(2, 'werewolf'),
+    makePlayer(3, 'werewolf'),
+    makePlayer(4, 'bodyguard'),
+    makePlayer(5, 'seer'),
+  ])
+  state.day = 0
+  state.ext.currentPhase = 'night'
+  // 狩人席
+  const guardCmds = legalCommands(state, 4)
+  assert.equal(guardCmds.length, 1, '初日 狩人は no_action のみ')
+  assert.equal(guardCmds[0].type, 'no_action')
+  // 狼リーダー席
+  const wolfCmds = legalCommands(state, 2)
+  assert.equal(wolfCmds.length, 1, '初日 狼リーダーは no_action のみ')
+  assert.equal(wolfCmds[0].type, 'no_action')
+  // 占い師は初日でも占い可能（初日占い）
+  const seerCmds = legalCommands(state, 5)
+  assert.ok(seerCmds.some(c => c.type === 'divine'), '初日 占いは合法')
+})
+
+test('legalCommands: 夜フェーズ 狼リーダーは (襲撃者 × 対象) の組合せを列挙、他狼は no_action のみ', () => {
   const state = makeState([
     makePlayer(1, 'villager'),
     makePlayer(2, 'werewolf'), // leader = 最小席番
@@ -100,7 +123,10 @@ test('legalCommands: 夜フェーズ 狼リーダーのみ attack 可、他狼�
 
   const leaderAttacks = leaderCmds.filter(c => c.type === 'attack')
   const otherAttacks = otherCmds.filter(c => c.type === 'attack')
-  assert.equal(leaderAttacks.length, 3, '狼リーダーは非狼席3人へ attack 可')
+  // 2 生存狼 × 3 非狼席 = 6 通りの (actor, target) 組
+  assert.equal(leaderAttacks.length, 6, 'リーダー席は全狼×全非狼の組合せを出す')
+  const actors = new Set(leaderAttacks.map(c => c.type === 'attack' ? c.actor : -1))
+  assert.deepEqual([...actors].sort((a, b) => a - b), [2, 3], '襲撃者候補は生存狼全員')
   assert.equal(otherAttacks.length, 0, '非リーダー狼は attack 不可')
   assert.equal(otherCmds.length, 1, '非リーダー狼は no_action のみ')
 })
@@ -265,22 +291,30 @@ test('legalCommands: cco_full mason_co も死亡席を partner 候補に含む',
   assert.ok(partners.includes(1), 'CCO でも死亡相方を partner 指定可能')
 })
 
-test('legalCommands: seer 結果報告は死亡席も対象 (夜占い対象が朝死亡するケース)', () => {
+test('legalCommands: 真 seer の結果報告は死亡席も対象 (夜占い対象が朝死亡するケース)', () => {
   const state = fiveSeatVillage()
   state.ext.currentPhase = 'discussion'
   state.players[0].claimedRole = 'seer'
+  // 真 seer が seat3 を D1 に人間占い、seat4 を D0 に狼占いした履歴
+  state.players[0].divineHistory.set(0, { target: 4, result: 'wolf' })
+  state.players[0].divineHistory.set(1, { target: 3, result: 'human' })
   state.players[2].alive = false  // seat3 退場
   const cmds = legalCommands(state, 1)
   const seerResults = cmds.filter(c =>
     c.type === 'role_result_report' && c.claim.type === 'seer_result',
   )
-  // 死亡席 seat3 への報告コマンドが存在する
+  // 死亡席 seat3 への真結果 (human) のみ合法
   const seat3Reports = seerResults.filter(c =>
     c.type === 'role_result_report'
     && c.claim.type === 'seer_result'
     && c.claim.target === 3,
   )
-  assert.equal(seat3Reports.length, 2, '死亡席へ ○/● 両方報告可能')
+  assert.equal(seat3Reports.length, 1, '真 seer は死亡席でも真結果 1 つのみ報告可')
+  assert.ok(seat3Reports.some(c =>
+    c.type === 'role_result_report'
+    && c.claim.type === 'seer_result'
+    && c.claim.result === 'human',
+  ), '真結果 human が合法')
   // 予告は生存席のみ
   const forecasts = cmds.filter(c =>
     c.type === 'role_result_report' && c.claim.type === 'forecast',
@@ -291,6 +325,74 @@ test('legalCommands: seer 結果報告は死亡席も対象 (夜占い対象が�
     && c.claim.target === 3,
   )
   assert.equal(seat3Forecasts.length, 0, '死亡席への予告は不可')
+})
+
+test('legalCommands: 真 seer は嘘結果を合法手に含めない', () => {
+  const state = fiveSeatVillage()
+  state.ext.currentPhase = 'discussion'
+  state.players[0].claimedRole = 'seer'
+  state.players[0].divineHistory.set(0, { target: 4, result: 'wolf' })  // 真は狼
+  const cmds = legalCommands(state, 1)
+  const seat4Reports = cmds.filter(c =>
+    c.type === 'role_result_report'
+    && c.claim.type === 'seer_result'
+    && c.claim.target === 4,
+  )
+  assert.equal(seat4Reports.length, 1, '真結果のみ 1 件')
+  assert.ok(seat4Reports[0].type === 'role_result_report'
+    && seat4Reports[0].claim.type === 'seer_result'
+    && seat4Reports[0].claim.result === 'wolf', '真 wolf のみ合法')
+  // 未占の seat2/3/5 は seer_result コマンドなし
+  const seat2Reports = cmds.filter(c =>
+    c.type === 'role_result_report'
+    && c.claim.type === 'seer_result'
+    && c.claim.target === 2,
+  )
+  assert.equal(seat2Reports.length, 0, '未占席への報告は不可')
+})
+
+test('legalCommands: 騙り seer (人外が CO) は両結果を合法手に含む', () => {
+  const state = fiveSeatVillage()
+  state.ext.currentPhase = 'discussion'
+  // 狼 seat4 が seer を騙る
+  state.players[3].claimedRole = 'seer'
+  const cmds = legalCommands(state, 4)
+  const seat1Reports = cmds.filter(c =>
+    c.type === 'role_result_report'
+    && c.claim.type === 'seer_result'
+    && c.claim.target === 1,
+  )
+  assert.equal(seat1Reports.length, 2, '騙り seer は ○/● 両方合法')
+})
+
+test('legalCommands: 真 medium は直近処刑の真結果のみ合法', () => {
+  const state = fiveSeatVillage()
+  state.players[1].role = 'medium'
+  state.players[1].claimedRole = 'medium'
+  state.ext.currentPhase = 'discussion'
+  // 直近処刑: D2 に seat4 (werewolf) を処刑
+  state.executionHistory.set(1, 3)  // D1 villager
+  state.executionHistory.set(2, 4)  // D2 werewolf (直近)
+  const cmds = legalCommands(state, 2)
+  const mediumResults = cmds.filter(c =>
+    c.type === 'role_result_report' && c.claim.type === 'medium_result',
+  )
+  assert.equal(mediumResults.length, 1, '真 medium は直近の真結果のみ')
+  assert.ok(mediumResults[0].type === 'role_result_report'
+    && mediumResults[0].claim.type === 'medium_result'
+    && mediumResults[0].claim.result === 'wolf', '直近 werewolf 処刑 → wolf のみ合法')
+})
+
+test('legalCommands: 騙り medium (人外が CO) は両結果を合法手に含む', () => {
+  const state = fiveSeatVillage()
+  state.players[3].claimedRole = 'medium'  // 狼 seat4 が medium を騙る
+  state.ext.currentPhase = 'discussion'
+  state.executionHistory.set(1, 3)
+  const cmds = legalCommands(state, 4)
+  const mediumResults = cmds.filter(c =>
+    c.type === 'role_result_report' && c.claim.type === 'medium_result',
+  )
+  assert.equal(mediumResults.length, 2, '騙り medium は ○/● 両方合法')
 })
 
 test('legalCommands: 指揮フェーズ commander のみ非空', () => {

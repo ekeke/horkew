@@ -246,7 +246,9 @@
     void state.tick
     const matching = matchingClaimForRole(currentRole)
     if (matching === null) {
-      return { primary: nonTableLegal, bluffFakeRole: [], bluffWrongTarget: [] }
+      // attack は専用 UI に逃がす
+      const primary = nonTableLegal.filter(cmd => cmd.type !== 'attack')
+      return { primary, bluffFakeRole: [], bluffWrongTarget: [] }
     }
     // mason の真相方席を事前に算出（自役職 mason の場合、同役職の他席）
     const truePartnerSeat = currentRole === 'mason' && pending && gameState
@@ -259,6 +261,8 @@
     const bluffFakeRole: Command[] = []
     const bluffWrongTarget: Command[] = []
     for (const cmd of nonTableLegal) {
+      // attack は専用 UI (wolfAttackView) で描画するためここでは除外
+      if (cmd.type === 'attack') continue
       if (cmd.type !== 'role_co' && cmd.type !== 'cco_full') {
         primary.push(cmd)
         continue
@@ -308,6 +312,79 @@
     executionTargets: Set<number>
     /** 全ての designate_* に出現する席 (picker に表示する席集合) */
     pickerSeats: number[]
+  }
+
+  // ==========================================================
+  // 夜フェーズ専用: 狼襲撃の二段ピッカー (襲撃者 × 対象)
+  // ==========================================================
+
+  /** 狼襲撃の legal コマンドから「誰が」「誰を」噛むかの候補集合を組み立てる */
+  type WolfAttackView = {
+    /** 選択可能な襲撃者席（生存狼） */
+    actors: number[]
+    /** 各襲撃者が選べる対象席（全襲撃者で同じ集合だが actor ごとに保持） */
+    targetsByActor: Map<number, number[]>
+    /** 行動なし（襲撃しない）コマンド。襲撃場面では通常 legal に含まれない想定だが念のため保持 */
+    noActionCmd: Command | null
+  }
+
+  const wolfAttackView = $derived.by((): WolfAttackView | null => {
+    void state.tick
+    if (!pending || !gameState) return null
+    const attackCmds: Array<{ actor: number, target: number }> = []
+    let noActionCmd: Command | null = null
+    for (const cmd of pending.legal) {
+      if (cmd.type === 'attack') attackCmds.push({ actor: cmd.actor, target: cmd.target })
+      else if (cmd.type === 'no_action') noActionCmd = cmd
+    }
+    if (attackCmds.length === 0) return null
+    const actorSet = new Set<number>()
+    const targetsByActor = new Map<number, number[]>()
+    for (const { actor, target } of attackCmds) {
+      actorSet.add(actor)
+      const list = targetsByActor.get(actor)
+      if (list) list.push(target)
+      else targetsByActor.set(actor, [target])
+    }
+    for (const list of targetsByActor.values()) list.sort((a, b) => a - b)
+    const actors = [...actorSet].sort((a, b) => a - b)
+    return { actors, targetsByActor, noActionCmd }
+  })
+
+  let selectedAttacker: number | null = $state(null)
+  let selectedAttackTarget: number | null = $state(null)
+
+  // pending が変わるたびに襲撃ピッカーもリセット。襲撃者は候補が 1 つなら自動選択
+  $effect(() => {
+    void pending
+    selectedAttackTarget = null
+    if (wolfAttackView && wolfAttackView.actors.length === 1) {
+      selectedAttacker = wolfAttackView.actors[0]
+    } else {
+      selectedAttacker = null
+    }
+  })
+
+  function pickAttacker(seat: number): void {
+    selectedAttacker = seat
+    // 異なる襲撃者に切り替えた場合、その襲撃者が噛めない対象なら選択解除
+    const targets = wolfAttackView?.targetsByActor.get(seat) ?? []
+    if (selectedAttackTarget !== null && !targets.includes(selectedAttackTarget)) {
+      selectedAttackTarget = null
+    }
+  }
+
+  function pickAttackTarget(seat: number): void {
+    selectedAttackTarget = seat
+  }
+
+  function submitWolfAttack(): void {
+    if (selectedAttacker === null || selectedAttackTarget === null) return
+    submitCommand({
+      type: 'attack',
+      target: selectedAttackTarget,
+      actor: selectedAttacker,
+    })
   }
 
   const commanderView = $derived.by((): CommanderView | null => {
@@ -501,7 +578,7 @@
       case 'no_action': return '行動なし'
       case 'divine': return `占い: ${nameOf(cmd.target)}`
       case 'guard': return `護衛: ${nameOf(cmd.target)}`
-      case 'attack': return `襲撃: ${nameOf(cmd.target)}`
+      case 'attack': return `襲撃: ${nameOf(cmd.actor)} → ${nameOf(cmd.target)}`
       case 'role_co':
         return `CO: ${describeClaim(cmd.claim)}`
       case 'role_result_report':
@@ -742,7 +819,70 @@
         </div>
       {/if}
 
-      {#if commanderView}
+      {#if wolfAttackView}
+        <!-- 夜フェーズ 狼襲撃 UI: 襲撃者 × 対象 の二段ピッカー -->
+        <div class="wolf-attack-ui">
+          {#if wolfAttackView.actors.length > 1}
+            <div class="cmd-group">
+              <div class="cmd-group-title">襲撃者（誰が噛むか）</div>
+              <div class="seat-picker">
+                {#each wolfAttackView.actors as seat (seat)}
+                  <button
+                    type="button"
+                    class="seat-pick-btn"
+                    class:seat-picked={selectedAttacker === seat}
+                    onclick={() => pickAttacker(seat)}
+                  >
+                    {nameOf(seat)}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {:else}
+            <div class="cmd-group">
+              <div class="cmd-group-title">襲撃者</div>
+              <div class="attacker-fixed">{nameOf(wolfAttackView.actors[0])}（唯一の生存狼）</div>
+            </div>
+          {/if}
+
+          <div class="cmd-group">
+            <div class="cmd-group-title">襲撃対象</div>
+            {#if selectedAttacker === null}
+              <div class="attacker-hint">まず襲撃者を選択してください</div>
+            {:else}
+              <div class="seat-picker">
+                {#each (wolfAttackView.targetsByActor.get(selectedAttacker) ?? []) as target (target)}
+                  <button
+                    type="button"
+                    class="seat-pick-btn"
+                    class:seat-picked={selectedAttackTarget === target}
+                    onclick={() => pickAttackTarget(target)}
+                  >
+                    {nameOf(target)}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <div class="designate-actions">
+            <button
+              class="cmd-btn runoff-submit"
+              disabled={selectedAttacker === null || selectedAttackTarget === null}
+              onclick={submitWolfAttack}
+            >
+              {selectedAttacker !== null && selectedAttackTarget !== null
+                ? `襲撃: ${nameOf(selectedAttacker)} → ${nameOf(selectedAttackTarget)}`
+                : '襲撃者と対象を選択してください'}
+            </button>
+            {#if wolfAttackView.noActionCmd}
+              <button class="cmd-btn secondary" onclick={() => submitCommand(wolfAttackView!.noActionCmd!)}>
+                襲撃しない
+              </button>
+            {/if}
+          </div>
+        </div>
+      {:else if commanderView}
         <!-- 指揮フェーズ専用 UI: カテゴリ分け + 吊り/ラン指定は単一ピッカー -->
         <div class="commander-ui">
           {#if commanderView.skipCmd}
@@ -1076,6 +1216,26 @@
 
   .cmd-btn.bluff-cmd:hover {
     opacity: 1;
+  }
+
+  /* ========== 夜フェーズ 狼襲撃 UI ========== */
+
+  .wolf-attack-ui {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .attacker-fixed {
+    font-size: 12px;
+    color: var(--ctp-red);
+    font-weight: 600;
+  }
+
+  .attacker-hint {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    font-style: italic;
   }
 
   /* ========== 指揮フェーズ UI ========== */

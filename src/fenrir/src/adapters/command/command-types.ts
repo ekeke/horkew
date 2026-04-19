@@ -50,7 +50,7 @@ export type VillainTrueRole = 'werewolf' | 'fanatic' | 'werehamster' | 'immorali
 export type NightCommand =
   | { type: 'divine', target: number }
   | { type: 'guard', target: number }
-  | { type: 'attack', target: number }
+  | { type: 'attack', target: number, actor: number }
   | { type: 'no_action' }
 
 // 昼議論コマンド
