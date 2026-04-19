@@ -145,6 +145,39 @@ export function analyzeFromEvents(
   return runRetar(vs, setup, options)
 }
 
+/** analyzeFromEventsDetailed の戻り値: Retar 結果 + vs/setup (skoll 連携用) */
+export type DetailedRetarResult = RetarResult & {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- VillageStatus: howl ブリッジの型に依存
+  vs: any | null
+  setup: Map<SystemRole, number> | null
+}
+
+/**
+ * analyzeFromEvents の詳細版: Retar 結果に加え、skoll が必要とする vs/setup も返す。
+ * VillageStatus の構築に失敗（unknown 文含む）した場合は vs/setup が null になる。
+ */
+export function analyzeFromEventsDetailed(
+  events: GameEvent[],
+  state: GameState,
+  config: LupaConfig,
+  assumptions?: Map<number, SystemRole>,
+): DetailedRetarResult {
+  const empty: DetailedRetarResult = { possibilities: new Map(), maxSurvivingNV: 0, vs: null, setup: null }
+  const howl = formatHowl(events, state, config)
+  const { meta, statements } = parse(howl)
+  const unknowns = statements.filter(s => s.type === 'unknown')
+  if (unknowns.length > 0) return empty
+
+  const { vs, setup } = buildVillageStatus(statements, meta)
+  const baseOptions = buildRetarOptions(config)
+  const options = assumptions && assumptions.size > 0
+    ? { ...baseOptions, assumptions }
+    : baseOptions
+
+  const result = runRetar(vs, setup, options)
+  return { ...result, vs, setup }
+}
+
 /** プレイヤーの初期知識から Retar assumptions を構築 */
 export function buildAssumptions(
   state: GameState,
