@@ -13,15 +13,16 @@
  */
 
 import type { SystemRole } from '../../../types/index.ts'
-import type { GameState, NightAction, PlayerState } from '../../../lupa/types.ts'
+import type { GameState, NightAction, PlayerState, GameEvent } from '../../../lupa/types.ts'
 import { Rng } from '../../../lupa/random.ts'
 import { alivePlayers } from '../../../lupa/roles.ts'
 import { resolveRules } from '../../../howl/ruleset.ts'
 import { SkollMasterAgent, type SkollMasterOptions } from '../../../skoll/skoll-master-agent.ts'
+import { analyzeFromEventsDetailed } from '../retar-bridge.ts'
 import type { DecisionContext } from '../agents/agent.ts'
 import type {
   Command, CommandAdapterExt, CoRequestCategory,
-  VillainClaimAssignment,
+  VillainClaimAssignment, RetarCache,
 } from '../adapters/command/command-types.ts'
 import type { AgentEvents, CommandAgent, DecisionResult } from './command-agent.ts'
 import { RandomCommandAgent } from './random-command-agent.ts'
@@ -323,13 +324,15 @@ export class SkollCommandAgent implements CommandAgent {
   }
 
   /**
-   * 騙り占いの fakeDivineHistory を day 分 populate する（不足分を生成）。
+   * 騙り占いの fakeDivineHistory を day 分 populate する。
+   * 各エントリは Skoll wolf-perspective で全 (target, result) 候補をスコアリングし最適を選ぶ。
    *
-   * 戦略:
-   *   - 最初の 1 件 (D0 相当): 安全優先で非狼かつ未 fake の席を random pick、結果 'human'
-   *   - 2 件目以降: Skoll の wolf-perspective 分析で「狼陣営が最も吊りたい席 = 村の有力情報役」
-   *     を取得し、その席を 'wolf' で smear（= 村役職候補を偽黒で潰しにいく）。
-   *     分析不能なら random non-wolf に 'human' fallback。
+   * スコア定義:
+   *   - result='wolf' (smear):   targetScore          (voting target が wolf 勝率を上げる度合い)
+   *   - result='human' (cover):  1 - targetScore      (voting target が wolf 勝率を下げる度合い = 保護価値)
+   *
+   * これにより「脅威の高い席は偽黒 smear、味方席は偽白 cover」という行動が自然に創発する。
+   * 決定は skoll スコアのみに依存、ハードコードされた戦略（D0 ランダム等）は持たない。
    */
   private populateFakeDivineEntries(
     state: Readonly<GameState<CommandAdapterExt>>,
@@ -342,62 +345,65 @@ export class SkollCommandAgent implements CommandAgent {
       const alreadyFaked = new Set<number>()
       for (const [, e] of player.fakeDivineHistory) alreadyFaked.add(e.target)
 
-      // 除外対象: 自席 + 狼仲間 + 過去 fake 済み
-      const excluded = new Set<number>([player.seat])
-      for (const p of state.players) if (p.role === 'werewolf') excluded.add(p.seat)
-      for (const s of alreadyFaked) excluded.add(s)
-
-      // 1 件目は smear しない（まだ情報が少なく逆効果）。2 件目以降で Skoll 経由で smear 対象を探す
-      if (nextDay >= 1) {
-        const smearSeat = this.pickFakeSmearSeat(state, player, events, excluded)
-        if (smearSeat !== null) {
-          player.fakeDivineHistory.set(nextDay, { target: smearSeat, result: 'wolf' })
-          continue
-        }
-      }
-
-      // Fallback: 非狼・未 fake の席を random pick、結果 'human'（安全寄り）
-      const candidates = state.players.filter(p => !excluded.has(p.seat))
-      if (candidates.length === 0) break
-      const picked = candidates[this.rng.nextInt(candidates.length)]
-      player.fakeDivineHistory.set(nextDay, { target: picked.seat, result: 'human' })
+      const entry = this.pickBestFakeDivine(state, player, events, alreadyFaked)
+      if (!entry) break
+      player.fakeDivineHistory.set(nextDay, entry)
     }
   }
 
   /**
-   * Skoll wolf-perspective で「狼にとって最も吊りたい席」= 村側の情報役候補を返す。
-   * retarCache 未構築や分析失敗時は null。
+   * 全 (target, result) option を skoll スコアで評価し argmax を返す。
+   * skoll 不能時は自席以外・未 fake のランダム非狼に 'human' を返す fallback。
    */
-  private pickFakeSmearSeat(
+  private pickBestFakeDivine(
     state: Readonly<GameState<CommandAdapterExt>>,
     player: PlayerState,
     events: AgentEvents,
-    excluded: Set<number>,
-  ): number | null {
+    alreadyFaked: Set<number>,
+  ): { target: number, result: 'human' | 'wolf' } | null {
     const ctx = this.buildDecisionContext(state, player, events, 'day')
-    if (!ctx) return null
-    let analysis
-    try {
-      analysis = this.master.analyzeVote(ctx)
-    } catch {
-      return null
+    const fallback = () => {
+      const candidates = state.players.filter(p =>
+        p.seat !== player.seat
+        && p.role !== 'werewolf'
+        && !alreadyFaked.has(p.seat),
+      )
+      if (candidates.length === 0) return null
+      const picked = candidates[this.rng.nextInt(candidates.length)]
+      return { target: picked.seat, result: 'human' as const }
     }
-    if (!analysis || analysis.candidates.length === 0) return null
-    // wolf perspective: score 高い = 狼にとって吊りたい席 = 村の有力情報役
-    const sorted = [...analysis.candidates]
-      .filter(c => !c.excluded && !excluded.has(c.seat))
-      .sort((a, b) => b.score - a.score)
-    return sorted[0]?.seat ?? null
+    if (!ctx) return fallback()
+    let analysis
+    try { analysis = this.master.analyzeVote(ctx) } catch { return fallback() }
+    if (!analysis || analysis.candidates.length === 0) return fallback()
+
+    let best: { target: number, result: 'human' | 'wolf' } | null = null
+    let bestScore = -Infinity
+    for (const c of analysis.candidates) {
+      if (c.seat === player.seat) continue
+      if (alreadyFaked.has(c.seat)) continue
+      const smearValue = c.score        // 偽黒: 脅威度が高いほど価値大
+      const coverValue = 1 - c.score    // 偽白: 脅威度が低いほど価値大 (= 味方席の保護)
+      if (smearValue > bestScore) {
+        bestScore = smearValue
+        best = { target: c.seat, result: 'wolf' }
+      }
+      if (coverValue > bestScore) {
+        bestScore = coverValue
+        best = { target: c.seat, result: 'human' }
+      }
+    }
+    return best ?? fallback()
   }
 
   /**
-   * 騙り霊能: 未 CO → medium_co 空、CO 済 → 処刑履歴に追従して報告。
+   * 騙り霊能: 未 CO → medium_co 空、CO 済 → 処刑履歴に追従。
    *
-   * 戦略: 常に '○' と報告する
-   *   - 非狼処刑時: 真霊能も '○' と言うので一致（自然に見える）
-   *   - 狼処刑時: 真霊能が '●' と言う中で自分は '○' → divergence 発生
-   *     真霊能が既に死亡している場合は village から見分け不能になり大きな攪乱
-   *     真霊能生存時でも「どちらが真か」を判断材料にさせる（ログ/retar 勝負）
+   * 各処刑につき {human, wolf} の 2 option を lookahead:
+   *   仮想的に medium_result イベントを足して retar を再計算し、
+   *   自陣営 (wolf) perspective の skoll analyzeVote で bestVote score を取得。
+   *   高スコア side を採用（= 村の投票先が最も wolf に有利になる側を選ぶ）。
+   * retar 再計算不能時は current retarCache 下で report コマンド自体の skoll 評価にフォールバック。
    */
   private discussionFakeMedium(
     state: Readonly<GameState<CommandAdapterExt>>,
@@ -414,7 +420,6 @@ export class SkollCommandAgent implements CommandAgent {
       if (coCmd) return { cmd: coCmd, log: '(discussion)[fake-medium] initial CO (empty past)' }
     }
 
-    // 自席の medium_result event 数 = 報告済み数
     let reportedCount = 0
     for (const ev of events) {
       if ((ev as { type: string }).type !== 'medium_result') continue
@@ -426,26 +431,103 @@ export class SkollCommandAgent implements CommandAgent {
       return skipOrFirst(legal, '(discussion)[fake-medium] up-to-date skip')
     }
 
-    // 未報告の最古処刑 → 常に '○' (human) と報告（狼処刑隠し戦略）
     const sortedExecs = [...state.executionHistory.entries()].sort(([a], [b]) => a - b)
     const [day, executedSeat] = sortedExecs[reportedCount]
-    const executed = state.players.find(p => p.seat === executedSeat)
-    const fakeResult: 'human' | 'wolf' = 'human'
-    const trueRole = executed?.role ?? '?'
 
+    // 2 option lookahead
+    const options: Array<'human' | 'wolf'> = ['human', 'wolf']
+    let bestResult: 'human' | 'wolf' | null = null
+    let bestScore = -Infinity
+    for (const result of options) {
+      const cmdExists = legal.find(c =>
+        c.type === 'role_result_report'
+        && c.claim.type === 'medium_result'
+        && c.claim.result === result,
+      )
+      if (!cmdExists) continue
+      const score = this.evaluateMediumResultLookahead(state, player, events, executedSeat, result)
+      if (score > bestScore) {
+        bestScore = score
+        bestResult = result
+      }
+    }
+
+    if (bestResult === null) {
+      return skipOrFirst(legal, '(discussion)[fake-medium] no-matching-report')
+    }
     const reportCmd = legal.find(c =>
       c.type === 'role_result_report'
       && c.claim.type === 'medium_result'
-      && c.claim.result === fakeResult,
-    )
-    if (reportCmd) {
-      const tag = trueRole === 'werewolf' ? 'lie-hide-wolf' : 'truthful-non-wolf'
-      return {
-        cmd: reportCmd,
-        log: `(discussion)[fake-medium] D${day} seat${executedSeat}=${fakeResult} (${tag})`,
-      }
+      && c.claim.result === bestResult,
+    )!
+    return {
+      cmd: reportCmd,
+      log: `(discussion)[fake-medium] D${day} seat${executedSeat}=${bestResult} (lookahead=${bestScore.toFixed(3)})`,
     }
-    return skipOrFirst(legal, '(discussion)[fake-medium] no-matching-report')
+  }
+
+  /**
+   * 仮想 medium_result イベントを挿入して retar + skoll を再評価、
+   * wolf perspective で bestVote score を返す。失敗時は -Infinity。
+   */
+  private evaluateMediumResultLookahead(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    events: AgentEvents,
+    _executedSeat: number,  // reserved: 現在は medium_result 自体に target 無し
+    result: 'human' | 'wolf',
+  ): number {
+    const hypoEvent: GameEvent = {
+      type: 'medium_result',
+      actor: player.seat,
+      result,
+    } as GameEvent
+    return this.lookaheadScore(state, player, events, hypoEvent)
+  }
+
+  /**
+   * 共通 lookahead: 仮想イベントを events 末尾に足して retar 再計算、
+   * wolf perspective で skoll analyzeVote を呼び bestVote score を返す。
+   */
+  private lookaheadScore(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    events: AgentEvents,
+    hypoEvent: GameEvent,
+  ): number {
+    const setup = state.ext.retarCache?.lastArtifacts?.setup
+    if (!setup) return -Infinity
+    const hypoEvents = [...events, hypoEvent] as unknown as GameEvent[]
+    const plainEvents = hypoEvents.filter(e => typeof (e as { type?: string }).type === 'string')
+    let detailed
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cfg = { roles: setup } as any
+      detailed = analyzeFromEventsDetailed(plainEvents, state, cfg)
+    } catch {
+      return -Infinity
+    }
+    if (!detailed.possibilities || !detailed.vs || !detailed.setup) return -Infinity
+    const hypoCache: RetarCache = {
+      possibilities: detailed.possibilities,
+      lastArtifacts: { vs: detailed.vs, setup: detailed.setup },
+      computedAtEventCount: plainEvents.length,
+    }
+    const hypoState = {
+      ...state,
+      ext: { ...state.ext, retarCache: hypoCache },
+    } as GameState<CommandAdapterExt>
+    const ctx = this.buildDecisionContext(hypoState, player, events, 'day')
+    if (!ctx) return -Infinity
+    // hypoEvent を ctx にも反映（publicEvents は events と同参照のため差し替え）
+    ctx.publicEvents = hypoEvents
+    let analysis
+    try { analysis = this.master.analyzeVote(ctx) } catch { return -Infinity }
+    if (!analysis || analysis.candidates.length === 0) return -Infinity
+    const maxScore = Math.max(
+      ...analysis.candidates.filter(c => !c.excluded).map(c => c.score),
+    )
+    return maxScore
   }
 
   /** 真 seer: 未 CO → seer_co、CO 済 → 未報告の占い結果を順次 report、全て済みなら skip */
