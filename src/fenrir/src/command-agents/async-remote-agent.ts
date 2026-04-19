@@ -47,6 +47,7 @@ export class AsyncRemoteAgent implements CommandAgent {
     state: Readonly<GameState<CommandAdapterExt>>,
     mySeat: number,
     legal: readonly Command[],
+    _events: readonly unknown[] = [],
   ): Promise<DecisionResult> {
     if (this.pending) {
       throw new Error('AsyncRemoteAgent: decide() called while another decision is pending')

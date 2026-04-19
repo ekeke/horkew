@@ -36,6 +36,7 @@ export class RandomCommandAgent implements CommandAgent {
     state: Readonly<GameState<CommandAdapterExt>>,
     _mySeat: number,
     legal: readonly Command[],
+    _events: readonly unknown[] = [],
   ): Promise<DecisionResult> {
     if (legal.length === 0) {
       throw new Error('RandomCommandAgent: legal commands is empty')

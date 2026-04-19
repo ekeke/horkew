@@ -109,9 +109,10 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
     for (const p of alivePlayers(state)) {
       const legal = legalCommands(state, p.seat)
       const agent = this.getAgent(p.seat)
-      const result = await agent.decide(state, p.seat, legal)
-      applyCommand(state, p.seat, result.cmd)
+      const result = await agent.decide(state, p.seat, legal, ctx.events)
+      // emit を applyCommand の前に: applyCommand が state.ext.currentPhase を遷移させるため
       this.emitDecisionLog(ctx.events, agent, state, p.seat, result.cmd, result.log)
+      applyCommand(state, p.seat, result.cmd)
       actions.set(p.seat, toNightAction(result.cmd))
     }
     return actions
@@ -201,9 +202,9 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
         continue
       }
       const agent = this.getAgent(p.seat)
-      const result = await agent.decide(state, p.seat, legal)
-      applyCommand(state, p.seat, result.cmd)
+      const result = await agent.decide(state, p.seat, legal, ctx.events)
       this.emitDecisionLog(ctx.events, agent, state, p.seat, result.cmd, result.log)
+      applyCommand(state, p.seat, result.cmd)
       if (result.cmd.type === 'vote') {
         votes.set(p.seat, result.cmd.target)
       } else {
@@ -296,9 +297,9 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
       const seat = ext.discussionQueue[0]
       const legal = legalCommands(state, seat)
       const agent = this.getAgent(seat)
-      const result = await agent.decide(state, seat, legal)
-      applyCommand(state, seat, result.cmd)
+      const result = await agent.decide(state, seat, legal, events)
       this.emitDecisionLog(events, agent, state, seat, result.cmd, result.log)
+      applyCommand(state, seat, result.cmd)
 
       const additionalClaims = new Map<number, DayClaim>()
       if (result.cmd.type === 'role_co' || result.cmd.type === 'role_result_report') {
@@ -344,9 +345,9 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
 
     const legal = legalCommands(state, commanderSeat)
     const agent = this.getAgent(commanderSeat)
-    const result = await agent.decide(state, commanderSeat, legal)
-    applyCommand(state, commanderSeat, result.cmd)
+    const result = await agent.decide(state, commanderSeat, legal, events)
     this.emitDecisionLog(events, agent, state, commanderSeat, result.cmd, result.log)
+    applyCommand(state, commanderSeat, result.cmd)
 
     // applyCommand の中で遷移:
     //   request_co → discussion（consecutiveSkips クリア + queue 空）
@@ -370,9 +371,9 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
       const seat = ext.ccoQueue[0]
       const legal = legalCommands(state, seat)
       const agent = this.getAgent(seat)
-      const result = await agent.decide(state, seat, legal)
-      applyCommand(state, seat, result.cmd)
+      const result = await agent.decide(state, seat, legal, events)
       this.emitDecisionLog(events, agent, state, seat, result.cmd, result.log)
+      applyCommand(state, seat, result.cmd)
 
       const additionalClaims = new Map<number, DayClaim>()
       const extraEvents: FenrirExtEvent[] = []
