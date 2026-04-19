@@ -5,6 +5,10 @@ data/
 demo/dist/
 .claude/*.local.*
 .claude/worktrees/
+.claude/plans/
+.claude/scheduled_tasks.lock
+.partykit/
+*.stackdump
 tasks/
 tmp/
 z-ai/*
