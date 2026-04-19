@@ -6,15 +6,25 @@
   import { computeRoleProbabilities, getRoleProbability } from '../src/skoll/index.ts'
   import type { RoleProbabilities } from '../src/skoll/index.ts'
   import { analyzeExecutionsByWorld, type WorldExecutionAnalysis } from '../src/skoll/world-analysis.ts'
+  import { estimateWorldCount, estimateRuntimeMs, type WorldEstimate } from '../src/skoll/estimate.ts'
+  import {
+    loadMasonBrainFromJson,
+    runMasonInference,
+    type MasonInferenceResult,
+    type CheckpointMeta,
+  } from './skoll-nn.ts'
+  import type { AnyNetwork } from '../src/fenrir/src/ml/nn.ts'
 
   let {
     vs,
     setup,
     players,
+    publicEvents = [],
   }: {
     vs: VillageStatus | null
     setup: Map<SystemRole, number>
     players: Map<number, string>
+    publicEvents?: readonly import('../src/lupa/types.ts').GameEvent[]
   } = $props()
 
   let result: RoleProbabilities | null = $state(null)
@@ -26,6 +36,23 @@
   let execRunning = $state(false)
   let execError = $state('')
   let execElapsed = $state(0)
+
+  /** 「吊り分析」を回す前に表示する世界数の見積もり。retar 結果が要るので
+   *  「確率計算」ボタン (= retar を回す) と同時に算出する */
+  let worldEstimate: WorldEstimate | null = $state(null)
+
+  // === NN-skoll (mason_brain pretrained) ===
+  let nnNetwork: AnyNetwork | null = $state(null)
+  let nnMeta: CheckpointMeta | null = $state(null)
+  let nnLoadError = $state('')
+  let nnResult: MasonInferenceResult | null = $state(null)
+  let nnRunning = $state(false)
+  let nnError = $state('')
+  let nnElapsed = $state(0)
+  /** mason 視点 seat（NN 推論用）*/
+  let nnViewerSeat = $state<number | null>(null)
+  /** mason partner seat（不明なら null）*/
+  let nnPartnerSeat = $state<number | null>(null)
 
   /** setup に含まれる role 一覧（表示列用） */
   let activeRoles: SystemRole[] = $derived(
@@ -76,6 +103,7 @@
         }
 
         result = computeRoleProbabilities(possibilities, setup)
+        worldEstimate = estimateWorldCount(possibilities, setup)
         elapsed = performance.now() - t0
       } catch (e) {
         error = e instanceof Error ? e.message : String(e)
@@ -152,9 +180,106 @@
     return (p * 100).toFixed(1) + '%'
   }
 
+  function formatLargeNumber(n: number): string {
+    if (!isFinite(n)) return '∞'
+    if (n < 1_000) return n.toFixed(0)
+    if (n < 1_000_000) return (n / 1_000).toFixed(1) + 'K'
+    if (n < 1_000_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+    return (n / 1_000_000_000).toFixed(1) + 'B'
+  }
+
   function winRateClass(p: number, isBest: boolean): string {
     if (isBest) return 'wr-best'
     if (p === 0) return 'wr-zero'
+    if (p >= 0.5) return 'wr-high'
+    if (p >= 0.2) return 'wr-mid'
+    return 'wr-low'
+  }
+
+  // === NN-skoll handlers ===
+
+  async function onNnFileSelect(ev: Event) {
+    const input = ev.target as HTMLInputElement
+    const file = input.files?.[0]
+    if (!file) return
+    nnLoadError = ''
+    try {
+      const text = await file.text()
+      const { network, meta } = await loadMasonBrainFromJson(text)
+      nnNetwork = network
+      nnMeta = meta
+      nnResult = null
+    } catch (e) {
+      nnLoadError = e instanceof Error ? e.message : String(e)
+      nnNetwork = null
+      nnMeta = null
+    }
+  }
+
+  function aliveSeatList(): number[] {
+    if (!vs) return []
+    return [...vs.statuses.entries()]
+      .filter(([, s]) => s.surviving)
+      .map(([seat]) => seat)
+      .sort((a, b) => a - b)
+  }
+
+  function runNn() {
+    if (!nnNetwork || !vs || setup.size === 0) return
+    nnRunning = true
+    nnError = ''
+    nnResult = null
+
+    setTimeout(() => {
+      try {
+        const t0 = performance.now()
+        const options: AnalyzeOptions = {
+          seerClaimingDueDate: 2,
+          mediumClaimingDueDate: 2,
+          bodyguardClaimingDueDate: 99,
+          masonClaimingDueDate: 2,
+          nekomataClaimingDueDate: 99,
+          dayCountFrom: 1,
+          hasFirstGhost: false,
+          assumptions: new Map(),
+          wolfPairDenyals: [],
+          hocusPocus: new Map(),
+          id: 0,
+          batches: 1,
+          batch: 0,
+        }
+        const retar = new VillageRetar(vs!, setup, options)
+        const retarResult = retar.analyze()
+
+        const alive = aliveSeatList()
+        if (alive.length === 0) throw new Error('no alive seats')
+        const viewer = nnViewerSeat ?? alive[0]
+        if (!alive.includes(viewer)) throw new Error(`viewer seat ${viewer} not alive`)
+
+        nnResult = runMasonInference(nnNetwork!, {
+          vs: vs!,
+          setup,
+          globalPossibilities: retarResult.result,
+          viewerSeat: viewer,
+          partnerSeat: nnPartnerSeat,
+          publicEvents,
+        })
+        nnElapsed = performance.now() - t0
+      } catch (e) {
+        nnError = e instanceof Error ? e.message : String(e)
+      } finally {
+        nnRunning = false
+      }
+    }, 10)
+  }
+
+  function formatPct(p: number): string {
+    return (p * 100).toFixed(1) + '%'
+  }
+
+  function nnProbClass(p: number, isBest: boolean): string {
+    if (isBest) return 'wr-best'
+    if (p < 0.01) return 'wr-zero'
     if (p >= 0.5) return 'wr-high'
     if (p >= 0.2) return 'wr-mid'
     return 'wr-low'
@@ -217,13 +342,20 @@
       >{execRunning ? '計算中...' : '吊り分析'}</button>
       {#if execResult}
         <span class="skoll-stats">
-          {execResult.totalWorlds}{execResult.truncated ? '+' : ''}世界 / {execElapsed.toFixed(1)}ms
+          実測: {execResult.totalWorlds}{execResult.truncated ? '+' : ''}世界 / {execElapsed.toFixed(1)}ms
           {#if execResult.truncated}
             <span class="skoll-truncated">（打ち切り・近似値）</span>
           {/if}
         </span>
       {/if}
     </div>
+
+    {#if worldEstimate}
+      <div class="estimate-line" title="Bregman-Minc permanent 上限。actual ≤ upperBound。">
+        見積上限: ~{formatLargeNumber(worldEstimate.upperBound)}世界 / ~{estimateRuntimeMs(worldEstimate).toFixed(0)}ms
+        <span class="estimate-detail">(alive {worldEstimate.aliveSeats}席, avg {worldEstimate.avgPossibilities.toFixed(1)} roles/seat)</span>
+      </div>
+    {/if}
 
     {#if execError}
       <div class="skoll-error">{execError}</div>
@@ -263,6 +395,101 @@
         </table>
       </div>
 
+    {/if}
+  </div>
+
+  <!-- ── NN-skoll (mason_brain pretrained) ── -->
+  <div class="exec-section">
+    <div class="nn-header">NN-skoll (mason_brain pretrained)</div>
+
+    <div class="skoll-controls">
+      <label class="nn-file-label">
+        <input type="file" accept=".json" onchange={onNnFileSelect} class="nn-file-input" />
+        <span class="skoll-btn">checkpoint 読込</span>
+      </label>
+      {#if nnMeta}
+        <span class="skoll-stats">
+          iter {nnMeta.iteration} / {new Date(nnMeta.timestamp).toLocaleString()}
+        </span>
+      {/if}
+    </div>
+
+    {#if nnLoadError}
+      <div class="skoll-error">load error: {nnLoadError}</div>
+    {/if}
+
+    {#if nnNetwork && vs}
+      <div class="nn-config">
+        <label>
+          視点 seat:
+          <select bind:value={nnViewerSeat}>
+            {#each aliveSeatList() as seat}
+              <option value={seat}>{playerName(seat)}</option>
+            {/each}
+          </select>
+        </label>
+        <label>
+          partner:
+          <select bind:value={nnPartnerSeat}>
+            <option value={null}>(不明)</option>
+            {#each aliveSeatList() as seat}
+              {#if seat !== nnViewerSeat}
+                <option value={seat}>{playerName(seat)}</option>
+              {/if}
+            {/each}
+          </select>
+        </label>
+        <button
+          class="skoll-btn"
+          onclick={runNn}
+          disabled={nnRunning || setup.size === 0}
+        >{nnRunning ? '推論中...' : 'NN 推論'}</button>
+        {#if nnResult}
+          <span class="skoll-stats">{nnElapsed.toFixed(1)}ms</span>
+        {/if}
+      </div>
+    {/if}
+
+    {#if nnError}
+      <div class="skoll-error">{nnError}</div>
+    {/if}
+
+    {#if nnResult}
+      <div class="exec-summary">
+        NN 最善: <span class="exec-best">{playerName(nnResult.bestSeat)}</span>
+        {#if execResult}
+          / Skoll 最善: <span class="exec-best">{playerName(execResult.bestExecution)}</span>
+          {#if nnResult.bestSeat === execResult.bestExecution}
+            <span class="nn-match">✓ 一致</span>
+          {:else}
+            <span class="nn-mismatch">✗ 不一致</span>
+          {/if}
+        {/if}
+      </div>
+
+      <div class="skoll-table-wrap">
+        <table class="skoll-table">
+          <thead>
+            <tr>
+              <th class="skoll-th-name">投票候補</th>
+              <th class="skoll-th-role">NN 確率</th>
+              <th class="skoll-th-role">バー</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each nnResult.ranked as { seat, prob }}
+              {@const isBest = seat === nnResult!.bestSeat}
+              <tr class:exec-best-row={isBest}>
+                <td class="skoll-td-name">{playerName(seat)}</td>
+                <td class="skoll-td-prob {nnProbClass(prob, isBest)}">{formatPct(prob)}</td>
+                <td class="exec-bar-cell">
+                  <div class="exec-bar nn-bar" style="width: {Math.max(prob * 100, 0.5)}%"></div>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
     {/if}
   </div>
 </div>
@@ -473,5 +700,71 @@
 
   .branch-stats {
     color: var(--ctp-subtext0);
+  }
+
+  /* ── 見積もり ── */
+
+  .estimate-line {
+    font-size: 0.8rem;
+    color: var(--ctp-mauve);
+    padding: 0.2rem 0;
+  }
+
+  .estimate-detail {
+    color: var(--ctp-subtext0);
+    font-size: 0.7rem;
+  }
+
+  /* ── NN-skoll セクション ── */
+
+  .nn-header {
+    font-weight: bold;
+    color: var(--ctp-mauve);
+    font-size: 0.9rem;
+  }
+
+  .nn-file-input {
+    display: none;
+  }
+
+  .nn-file-label {
+    display: inline-block;
+    cursor: pointer;
+  }
+
+  .nn-config {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--ctp-subtext0);
+  }
+
+  .nn-config select {
+    padding: 0.15rem 0.3rem;
+    border: 1px solid var(--ctp-surface1);
+    border-radius: 3px;
+    background: var(--ctp-surface0);
+    color: var(--ctp-text);
+    font-size: 0.8rem;
+  }
+
+  .nn-bar {
+    background: var(--ctp-mauve);
+  }
+
+  .exec-best-row .nn-bar {
+    background: var(--ctp-green);
+  }
+
+  .nn-match {
+    color: var(--ctp-green);
+    font-weight: bold;
+  }
+
+  .nn-mismatch {
+    color: var(--ctp-peach);
+    font-weight: bold;
   }
 </style>
