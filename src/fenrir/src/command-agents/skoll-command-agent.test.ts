@@ -153,47 +153,33 @@ test('SkollCommandAgent: discussion 2 匹狼は seer 騙り + medium 騙り に�
   assert.equal(state.ext.villainClaimPlan.get(4), 'medium')
 })
 
-test('SkollCommandAgent: 狂信者は setup に bodyguard がいれば狩人騙り', async () => {
+test('SkollCommandAgent: 狂信者は skoll 不能時は hide (skip)', async () => {
+  // 独立エージェント化により、fanatic はターン毎に skoll で判断するようになった。
+  // 本テスト setup は retarCache 未構築なので lookahead が -Infinity を返し、
+  // fallback で hide → skip となる。villainClaimPlan は狼のみ登録なので fanatic 用 entry 無し。
   const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
   const state = makeState('discussion')
-  // makeState: seat1=seer, seat2=villager, seat3=werewolf, seat4=villager
-  // seat2 を bodyguard、seat4 を fanatic に差し替え
   state.players[1].role = 'bodyguard'
-  state.players[3].role = 'fanatic'
-  const legal: Command[] = [
-    { type: 'skip' },
-    { type: 'role_co', claim: { type: 'bodyguard_co', targets: [] } },
-  ]
-  const result = await agent.decide(state, 4, legal)
-  assert.equal(result.cmd.type, 'role_co')
-  assert.match(result.log ?? '', /fanatic.*initial CO/)
-  assert.equal(state.ext.villainClaimPlan.get(4), 'bodyguard')
-})
-
-test('SkollCommandAgent: 狂信者は setup に bodyguard がいなければ潜伏', async () => {
-  const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
-  const state = makeState('discussion')
-  // bodyguard 不在。seat4 を fanatic に（seat1 seer, seat2 villager, seat3 werewolf のまま）
   state.players[3].role = 'fanatic'
   const legal: Command[] = [{ type: 'skip' }]
   const result = await agent.decide(state, 4, legal)
   assert.equal(result.cmd.type, 'skip')
-  assert.equal(state.ext.villainClaimPlan.get(4), 'hide')
+  // fanatic は独立エージェントなので villainClaimPlan には入らない（狼のみ対象）
+  assert.equal(state.ext.villainClaimPlan.has(4), false)
 })
 
-test('SkollCommandAgent: 狐・背徳は常に潜伏', async () => {
+test('SkollCommandAgent: 狐・背徳は独立エージェント、skoll 不能時は hide', async () => {
   const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
   const state = makeState('discussion')
-  // seat2=hamster, seat4=immoralist
   state.players[1].role = 'werehamster'
   state.players[3].role = 'immoralist'
   const legalSkip: Command[] = [{ type: 'skip' }]
   const r2 = await agent.decide(state, 2, legalSkip)
   assert.equal(r2.cmd.type, 'skip')
-  assert.equal(state.ext.villainClaimPlan.get(2), 'hide')
+  assert.equal(state.ext.villainClaimPlan.has(2), false)
   const r4 = await agent.decide(state, 4, legalSkip)
   assert.equal(r4.cmd.type, 'skip')
-  assert.equal(state.ext.villainClaimPlan.get(4), 'hide')
+  assert.equal(state.ext.villainClaimPlan.has(4), false)
 })
 
 test('SkollCommandAgent: commander 未 CO の役職があれば request_co', async () => {

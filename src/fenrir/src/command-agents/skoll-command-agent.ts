@@ -301,22 +301,179 @@ export class SkollCommandAgent implements CommandAgent {
     legal: readonly Command[],
     events: AgentEvents,
   ): DecisionResult {
-    // 初回: plan を populate（1 ゲーム内 1 回のみ）
-    if (state.ext.villainClaimPlan.size === 0) {
-      const plan = electVillainClaims(state)
-      // Readonly cast を回避: ext は mutable（command-adapter 側で常に mutation）
-      const mutablePlan = (state.ext as CommandAdapterExt).villainClaimPlan
-      for (const [seat, role] of plan) mutablePlan.set(seat, role)
+    // 狼だけチーム（3 匹）として初回に plan を決定。他の人外は独立エージェントとして
+    // ターン毎に自分で判断する（fanatic / werehamster / immoralist）
+    if (player.role === 'werewolf') {
+      if (state.ext.villainClaimPlan.size === 0) {
+        const plan = this.electWolfTeamClaimsSkoll(state, events)
+        const mutablePlan = (state.ext as CommandAdapterExt).villainClaimPlan
+        for (const [seat, role] of plan) mutablePlan.set(seat, role)
+      }
+      const assignment = state.ext.villainClaimPlan.get(player.seat) ?? 'hide'
+      switch (assignment) {
+        case 'seer':      return this.discussionFakeSeer(state, player, legal, events)
+        case 'medium':    return this.discussionFakeMedium(state, player, legal, events)
+        case 'bodyguard': return this.discussionOneShotCo(player, legal, 'bodyguard_co')
+        case 'nekomata':  return this.discussionOneShotCo(player, legal, 'nekomata_co')
+        case 'hide':
+        default:          return this.discussionHide(player, legal)
+      }
     }
-    const assignment = state.ext.villainClaimPlan.get(player.seat) ?? 'hide'
-    switch (assignment) {
-      case 'seer':      return this.discussionFakeSeer(state, player, legal, events)
-      case 'medium':    return this.discussionFakeMedium(state, player, legal, events)
-      case 'bodyguard': return this.discussionOneShotCo(player, legal, 'bodyguard_co')
-      case 'nekomata':  return this.discussionOneShotCo(player, legal, 'nekomata_co')
-      case 'hide':
-      default:          return this.discussionHide(player, legal)
+    // fanatic / werehamster / immoralist: 独立エージェント
+    return this.discussionIndependentVillain(state, player, legal, events)
+  }
+
+  /**
+   * 独立人外（fanatic / werehamster / immoralist）のターン毎自律判断。
+   * CO 済: skip。未 CO: {hide, seer, medium, bodyguard, nekomata} を自陣営 perspective で
+   * skoll 評価、最大スコアの option を選ぶ。
+   */
+  private discussionIndependentVillain(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    legal: readonly Command[],
+    events: AgentEvents,
+  ): DecisionResult {
+    if (player.claimedRole) {
+      return skipOrFirst(legal, `(discussion)[${player.role}] already-CO skip`)
     }
+
+    type Opt = 'hide' | 'seer' | 'medium' | 'bodyguard' | 'nekomata'
+    const options: Opt[] = ['hide', 'seer', 'medium', 'bodyguard', 'nekomata']
+    let best: Opt = 'hide'
+    let bestScore = -Infinity
+    let anyOk = false
+    for (const opt of options) {
+      const hypoEvent = buildClaimEvent(player.seat, opt)
+      const score = hypoEvent
+        ? this.lookaheadScore(state, player, events, hypoEvent)
+        : this.currentSkollScore(state, player, events)
+      if (score === -Infinity) continue
+      anyOk = true
+      if (score > bestScore) {
+        bestScore = score
+        best = opt
+      }
+    }
+
+    if (!anyOk) {
+      return skipOrFirst(legal, `(discussion)[${player.role}] hide (skoll unavailable)`)
+    }
+
+    if (best === 'hide') {
+      return skipOrFirst(
+        legal,
+        `(discussion)[${player.role}/skoll] hide score=${bestScore.toFixed(3)}`,
+      )
+    }
+
+    const claimType: 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' = {
+      seer: 'seer_co' as const,
+      medium: 'medium_co' as const,
+      bodyguard: 'bodyguard_co' as const,
+      nekomata: 'nekomata_co' as const,
+    }[best]
+    const coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === claimType)
+    if (!coCmd) {
+      return skipOrFirst(
+        legal,
+        `(discussion)[${player.role}/skoll] wanted ${claimType} but not in legal`,
+      )
+    }
+    return {
+      cmd: coCmd,
+      log: `(discussion)[${player.role}/skoll] CO ${claimType} score=${bestScore.toFixed(3)}`,
+    }
+  }
+
+  /**
+   * 狼チーム（3 匹）の騙り割当を skoll 駆動で決定（greedy）。
+   *
+   * 各狼を seat 昇順で処理し、それぞれ {seer, medium, bodyguard, nekomata, hide} の
+   * 5 option を lookahead で評価して wolf winrate が最大になる option を採用。
+   * 先行狼の選択結果は累積 events に反映され、後続狼は前提として参照する。
+   *
+   * lookahead 不能時はその狼は hide、全体が機能しない場合は heuristic 版にフォールバック。
+   * fanatic / werehamster / immoralist はこの関数では割り当てず、それぞれ独立判断する。
+   */
+  private electWolfTeamClaimsSkoll(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    events: AgentEvents,
+  ): Map<number, VillainClaimAssignment> {
+    const result = new Map<number, VillainClaimAssignment>()
+    const wolves = state.players
+      .filter(p => p.role === 'werewolf')
+      .sort((a, b) => a.seat - b.seat)
+    if (wolves.length === 0) return result
+
+    const cumulative: (GameEvent | unknown)[] = [...events]
+    const options: VillainClaimAssignment[] = ['seer', 'medium', 'bodyguard', 'nekomata', 'hide']
+    let anyLookaheadSucceeded = false
+
+    for (const w of wolves) {
+      let best: VillainClaimAssignment = 'hide'
+      let bestScore = -Infinity
+      for (const opt of options) {
+        const hypoEvent = buildClaimEvent(w.seat, opt)
+        const testEvents = hypoEvent
+          ? [...cumulative, hypoEvent] as (GameEvent | unknown)[]
+          : cumulative
+        const score = this.lookaheadScoreRaw(state, w, testEvents)
+        if (score === -Infinity) continue
+        anyLookaheadSucceeded = true
+        if (score > bestScore) {
+          bestScore = score
+          best = opt
+        }
+      }
+      result.set(w.seat, best)
+      const chosenEvent = buildClaimEvent(w.seat, best)
+      if (chosenEvent) cumulative.push(chosenEvent)
+    }
+
+    if (!anyLookaheadSucceeded) {
+      return electVillainClaims(state)
+    }
+    return result
+  }
+
+  /**
+   * lookaheadScore の内部実装（events を直接受け取る版）。
+   * 仮想イベント注入パターンでなく、任意の events list に対して retar+skoll を走らせる。
+   */
+  private lookaheadScoreRaw(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    events: readonly unknown[],
+  ): number {
+    const setup = state.ext.retarCache?.lastArtifacts?.setup
+    if (!setup) return -Infinity
+    const plainEvents = (events as Array<{ type?: string }>).filter(e => typeof e.type === 'string') as unknown as GameEvent[]
+    let detailed
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cfg = { roles: setup } as any
+      detailed = analyzeFromEventsDetailed(plainEvents, state, cfg)
+    } catch {
+      return -Infinity
+    }
+    if (!detailed.possibilities || !detailed.vs || !detailed.setup) return -Infinity
+    const hypoCache: RetarCache = {
+      possibilities: detailed.possibilities,
+      lastArtifacts: { vs: detailed.vs, setup: detailed.setup },
+      computedAtEventCount: plainEvents.length,
+    }
+    const hypoState = {
+      ...state,
+      ext: { ...state.ext, retarCache: hypoCache },
+    } as GameState<CommandAdapterExt>
+    const ctx = this.buildDecisionContext(hypoState, player, events as AgentEvents, 'day')
+    if (!ctx) return -Infinity
+    ctx.publicEvents = events
+    let analysis
+    try { analysis = this.master.analyzeVote(ctx) } catch { return -Infinity }
+    if (!analysis || analysis.candidates.length === 0) return -Infinity
+    return Math.max(...analysis.candidates.filter(c => !c.excluded).map(c => c.score))
   }
 
   /**
@@ -1105,6 +1262,25 @@ function labelForRole(role: SystemRole): string {
  *
  * 決定論的（seat 昇順）— 同一盤面なら常に同じ割当。
  */
+/** VillainClaimAssignment → 対応する hypothetical event を構築（hide は null） */
+function buildClaimEvent(
+  seat: number, assignment: VillainClaimAssignment,
+): GameEvent | null {
+  switch (assignment) {
+    case 'seer':
+      return { type: 'seer_claim', actor: seat, results: [] } as GameEvent
+    case 'medium':
+      return { type: 'medium_claim', actor: seat } as GameEvent
+    case 'bodyguard':
+      return { type: 'bodyguard_claim', actor: seat, targets: [] } as GameEvent
+    case 'nekomata':
+      return { type: 'nekomata_claim', actor: seat } as GameEvent
+    case 'hide':
+    default:
+      return null
+  }
+}
+
 function electVillainClaims(
   state: Readonly<GameState<CommandAdapterExt>>,
 ): Map<number, VillainClaimAssignment> {
