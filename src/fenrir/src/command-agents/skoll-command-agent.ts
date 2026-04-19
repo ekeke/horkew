@@ -181,7 +181,16 @@ export class SkollCommandAgent implements CommandAgent {
       return this.nightFallback(state, mySeat, legal, 'no-retar-cache', events)
     }
 
-    // 狩人: skoll 駆動で護衛先選択（rule-based は fallback）
+    // 狩人 D0 夜: どこを護衛しても初日犠牲者（ランダム）は防げない & CO 情報も無いため
+    //   意味のある判断が出来ない。expensive lookahead を避けて no_action を返す
+    if (player.role === 'bodyguard' && state.day === 0) {
+      const noActionCmd = legal.find(c => c.type === 'no_action')
+      if (noActionCmd) {
+        return { cmd: noActionCmd, log: '(night)[bodyguard] D0 no-guard (first-victim random)' }
+      }
+    }
+
+    // 狩人 D1+: skoll 駆動で護衛先選択（rule-based は fallback）
     if (player.role === 'bodyguard') {
       const skollResult = this.decideNightBodyguardSkoll(state, player, legal, events)
       if (skollResult) return skollResult
@@ -276,8 +285,8 @@ export class SkollCommandAgent implements CommandAgent {
     switch (player.role) {
       case 'seer':     return this.discussionSeer(player, legal, events)
       case 'medium':   return this.discussionMedium(state, player, legal, events)
-      case 'bodyguard': return this.discussionRealBodyguard(state, player, legal, events)
-      case 'nekomata': return this.discussionOneShotCo(player, legal, 'nekomata_co')
+      case 'bodyguard': return this.discussionSkollCoOrHide(state, player, legal, events, 'bodyguard_co')
+      case 'nekomata': return this.discussionSkollCoOrHide(state, player, legal, events, 'nekomata_co')
       case 'mason':    return this.discussionMason(state, player, legal)
       case 'villager':
         return this.discussionHide(player, legal)
@@ -301,25 +310,8 @@ export class SkollCommandAgent implements CommandAgent {
     legal: readonly Command[],
     events: AgentEvents,
   ): DecisionResult {
-    // 狼だけチーム（3 匹）として初回に plan を決定。他の人外は独立エージェントとして
-    // ターン毎に自分で判断する（fanatic / werehamster / immoralist）
-    if (player.role === 'werewolf') {
-      if (state.ext.villainClaimPlan.size === 0) {
-        const plan = this.electWolfTeamClaimsSkoll(state, events)
-        const mutablePlan = (state.ext as CommandAdapterExt).villainClaimPlan
-        for (const [seat, role] of plan) mutablePlan.set(seat, role)
-      }
-      const assignment = state.ext.villainClaimPlan.get(player.seat) ?? 'hide'
-      switch (assignment) {
-        case 'seer':      return this.discussionFakeSeer(state, player, legal, events)
-        case 'medium':    return this.discussionFakeMedium(state, player, legal, events)
-        case 'bodyguard': return this.discussionOneShotCo(player, legal, 'bodyguard_co')
-        case 'nekomata':  return this.discussionOneShotCo(player, legal, 'nekomata_co')
-        case 'hide':
-        default:          return this.discussionHide(player, legal)
-      }
-    }
-    // fanatic / werehamster / immoralist: 独立エージェント
+    // 現状: 狼もチーム coordinator を使わず、全人外が独立エージェント。
+    // 先行した狼の CO は events に流れるので、後続狼は lookahead 時に自然と前提として参照する
     return this.discussionIndependentVillain(state, player, legal, events)
   }
 
@@ -397,95 +389,6 @@ export class SkollCommandAgent implements CommandAgent {
     }
   }
 
-  /**
-   * 狼チーム（3 匹）の騙り割当を skoll 駆動で決定（greedy）。
-   *
-   * 各狼を seat 昇順で処理し、それぞれ {seer, medium, bodyguard, nekomata, hide} の
-   * 5 option を lookahead で評価して wolf winrate が最大になる option を採用。
-   * 先行狼の選択結果は累積 events に反映され、後続狼は前提として参照する。
-   *
-   * lookahead 不能時はその狼は hide、全体が機能しない場合は heuristic 版にフォールバック。
-   * fanatic / werehamster / immoralist はこの関数では割り当てず、それぞれ独立判断する。
-   */
-  private electWolfTeamClaimsSkoll(
-    state: Readonly<GameState<CommandAdapterExt>>,
-    events: AgentEvents,
-  ): Map<number, VillainClaimAssignment> {
-    const result = new Map<number, VillainClaimAssignment>()
-    const wolves = state.players
-      .filter(p => p.role === 'werewolf')
-      .sort((a, b) => a.seat - b.seat)
-    if (wolves.length === 0) return result
-
-    const cumulative: (GameEvent | unknown)[] = [...events]
-    const options: VillainClaimAssignment[] = ['seer', 'medium', 'bodyguard', 'nekomata', 'hide']
-    let anyLookaheadSucceeded = false
-
-    for (const w of wolves) {
-      let best: VillainClaimAssignment = 'hide'
-      let bestScore = -Infinity
-      for (const opt of options) {
-        const hypoEvent = buildClaimEvent(w.seat, opt)
-        const testEvents = hypoEvent
-          ? [...cumulative, hypoEvent] as (GameEvent | unknown)[]
-          : cumulative
-        const score = this.lookaheadScoreRaw(state, w, testEvents)
-        if (score === -Infinity) continue
-        anyLookaheadSucceeded = true
-        if (score > bestScore) {
-          bestScore = score
-          best = opt
-        }
-      }
-      result.set(w.seat, best)
-      const chosenEvent = buildClaimEvent(w.seat, best)
-      if (chosenEvent) cumulative.push(chosenEvent)
-    }
-
-    if (!anyLookaheadSucceeded) {
-      return electVillainClaims(state)
-    }
-    return result
-  }
-
-  /**
-   * lookaheadScore の内部実装（events を直接受け取る版）。
-   * 仮想イベント注入パターンでなく、任意の events list に対して retar+skoll を走らせる。
-   */
-  private lookaheadScoreRaw(
-    state: Readonly<GameState<CommandAdapterExt>>,
-    player: PlayerState,
-    events: readonly unknown[],
-  ): number {
-    const setup = state.ext.retarCache?.lastArtifacts?.setup
-    if (!setup) return -Infinity
-    const plainEvents = (events as Array<{ type?: string }>).filter(e => typeof e.type === 'string') as unknown as GameEvent[]
-    let detailed
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cfg = { roles: setup } as any
-      detailed = analyzeFromEventsDetailed(plainEvents, state, cfg)
-    } catch {
-      return -Infinity
-    }
-    if (!detailed.possibilities || !detailed.vs || !detailed.setup) return -Infinity
-    const hypoCache: RetarCache = {
-      possibilities: detailed.possibilities,
-      lastArtifacts: { vs: detailed.vs, setup: detailed.setup },
-      computedAtEventCount: plainEvents.length,
-    }
-    const hypoState = {
-      ...state,
-      ext: { ...state.ext, retarCache: hypoCache },
-    } as GameState<CommandAdapterExt>
-    const ctx = this.buildDecisionContext(hypoState, player, events as AgentEvents, 'day')
-    if (!ctx) return -Infinity
-    ctx.publicEvents = events
-    let analysis
-    try { analysis = this.master.analyzeVote(ctx) } catch { return -Infinity }
-    if (!analysis || analysis.candidates.length === 0) return -Infinity
-    return Math.max(...analysis.candidates.filter(c => !c.excluded).map(c => c.score))
-  }
 
   /**
    * 騙り占い: 未 CO → seer_co 空、CO 済 → fakeDivineHistory を日数分に満たしつつ未報告分を report。
@@ -839,60 +742,46 @@ export class SkollCommandAgent implements CommandAgent {
     return skipOrFirst(legal, '(discussion)[medium] no-matching-report')
   }
 
-  /** 真 bodyguard / fake bodyguard / nekomata: 初回 CO、以後 skip（one-shot 版） */
-  private discussionOneShotCo(
-    player: PlayerState,
-    legal: readonly Command[],
-    claimType: 'bodyguard_co' | 'nekomata_co',
-  ): DecisionResult {
-    if (!player.claimedRole) {
-      const coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === claimType)
-      if (coCmd) return { cmd: coCmd, log: `(discussion)[${player.role}] true-role initial CO` }
-    }
-    return skipOrFirst(legal, `(discussion)[${player.role}] already-CO skip`)
-  }
-
   /**
-   * 真 bodyguard: CO する/しない を skoll で判定、以後 skip。
-   *   - CO 選択肢: hypothetical bodyguard_claim イベントを足して lookahead
+   * 真 bodyguard / 真 nekomata: CO する/しない を skoll で判定、以後 skip。
+   *   - CO 選択肢: hypothetical claim event を足して lookahead
    *   - 潜伏選択肢: 現状 state の skoll 分析 (現在の bestVote score)
-   * 高い方を採用。lookahead 失敗時は潜伏にフォールバック。
+   * 高い方を採用。lookahead 両方失敗時は skip にフォールバック。
    */
-  private discussionRealBodyguard(
+  private discussionSkollCoOrHide(
     state: Readonly<GameState<CommandAdapterExt>>,
     player: PlayerState,
     legal: readonly Command[],
     events: AgentEvents,
+    claimType: 'bodyguard_co' | 'nekomata_co',
   ): DecisionResult {
+    const tag = player.role
     if (player.claimedRole) {
-      return skipOrFirst(legal, '(discussion)[bodyguard] already-CO skip')
+      return skipOrFirst(legal, `(discussion)[${tag}] already-CO skip`)
     }
-    const coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === 'bodyguard_co')
+    const coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === claimType)
     if (!coCmd) {
-      return skipOrFirst(legal, '(discussion)[bodyguard] no-co-legal skip')
+      return skipOrFirst(legal, `(discussion)[${tag}] no-co-legal skip`)
     }
 
     const hideScore = this.currentSkollScore(state, player, events)
-    const coEvent: GameEvent = {
-      type: 'bodyguard_claim',
-      actor: player.seat,
-      targets: [],
-    } as GameEvent
+    const coEvent: GameEvent = claimType === 'bodyguard_co'
+      ? { type: 'bodyguard_claim', actor: player.seat, targets: [] } as GameEvent
+      : { type: 'nekomata_claim', actor: player.seat } as GameEvent
     const coScore = this.lookaheadScore(state, player, events, coEvent)
 
-    // 両方失敗は skip
     if (hideScore === -Infinity && coScore === -Infinity) {
-      return { cmd: coCmd, log: '(discussion)[bodyguard] CO (lookahead unavailable, default CO)' }
+      return skipOrFirst(legal, `(discussion)[${tag}] skoll unavailable, default hide`)
     }
     if (coScore > hideScore) {
       return {
         cmd: coCmd,
-        log: `(discussion)[bodyguard/skoll] CO (co=${coScore.toFixed(3)} > hide=${hideScore.toFixed(3)})`,
+        log: `(discussion)[${tag}/skoll] CO (co=${coScore.toFixed(3)} > hide=${hideScore.toFixed(3)})`,
       }
     }
     return skipOrFirst(
       legal,
-      `(discussion)[bodyguard/skoll] hide (hide=${hideScore.toFixed(3)} >= co=${coScore.toFixed(3)})`,
+      `(discussion)[${tag}/skoll] hide (hide=${hideScore.toFixed(3)} >= co=${coScore.toFixed(3)})`,
     )
   }
 
@@ -1207,10 +1096,17 @@ function findUnclaimedRoleCategory(
   return null
 }
 
-/** skip コマンドが legal に無ければ legal[0] で最悪回避する共通ヘルパー */
+/**
+ * discussion の「skip」を返す共通ヘルパー。
+ * discussion phase では legal に必ず skip が含まれるため、見つからない場合は
+ * 上位の legal 生成ロジックのバグとして throw する（CO/report を誤返却するよりマシ）。
+ */
 function skipOrFirst(legal: readonly Command[], log: string): DecisionResult {
   const skip = legal.find(c => c.type === 'skip')
-  return { cmd: skip ?? legal[0], log }
+  if (!skip) {
+    throw new Error(`skipOrFirst: 'skip' missing in discussion legal (${log})`)
+  }
+  return { cmd: skip, log }
 }
 
 /** 役職 → cco_full で使う真 CO の claim type（村騙り可能性のある役職は null） */
@@ -1290,39 +1186,6 @@ function buildClaimEvent(
     default:
       return null
   }
-}
-
-function electVillainClaims(
-  state: Readonly<GameState<CommandAdapterExt>>,
-): Map<number, VillainClaimAssignment> {
-  const result = new Map<number, VillainClaimAssignment>()
-  const villains = state.players
-    .filter(p => {
-      return p.role === 'werewolf'
-        || p.role === 'fanatic'
-        || p.role === 'werehamster'
-        || p.role === 'immoralist'
-    })
-    .sort((a, b) => a.seat - b.seat)
-
-  // 狼: seat 昇順で 占い→霊能、残りは潜伏
-  const wolves = villains.filter(p => p.role === 'werewolf')
-  if (wolves.length >= 1) result.set(wolves[0].seat, 'seer')
-  if (wolves.length >= 2) result.set(wolves[1].seat, 'medium')
-
-  // 狂信者: setup に bodyguard がいれば狩人騙り、いなければ潜伏
-  //   bodyguard がいない setup で狩人騙りを出すと retar で即バレしやすい
-  const hasBodyguard = state.players.some(p => p.role === 'bodyguard')
-  const fanatic = villains.find(p => p.role === 'fanatic')
-  if (fanatic && hasBodyguard) {
-    result.set(fanatic.seat, 'bodyguard')
-  }
-
-  // 残り（未割当の狼、fanatic が狩人騙りしなかった場合、狐、背徳）→ 潜伏
-  for (const v of villains) {
-    if (!result.has(v.seat)) result.set(v.seat, 'hide')
-  }
-  return result
 }
 
 
