@@ -116,9 +116,11 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
     for (const p of alivePlayers(state)) {
       const legal = legalCommands(state, p.seat)
       const agent = this.getAgent(p.seat)
+      const t0 = performance.now()
       const result = await agent.decide(state, p.seat, legal, ctx.events)
+      const elapsed = performance.now() - t0
       // emit を applyCommand の前に: applyCommand が state.ext.currentPhase を遷移させるため
-      this.emitDecisionLog(ctx.events, agent, state, p.seat, result.cmd, result.log)
+      this.emitDecisionLog(ctx.events, agent, state, p.seat, result.cmd, result.log, elapsed)
       applyCommand(state, p.seat, result.cmd)
       actions.set(p.seat, toNightAction(result.cmd))
     }
@@ -209,8 +211,10 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
         continue
       }
       const agent = this.getAgent(p.seat)
+      const t0 = performance.now()
       const result = await agent.decide(state, p.seat, legal, ctx.events)
-      this.emitDecisionLog(ctx.events, agent, state, p.seat, result.cmd, result.log)
+      const elapsed = performance.now() - t0
+      this.emitDecisionLog(ctx.events, agent, state, p.seat, result.cmd, result.log, elapsed)
       applyCommand(state, p.seat, result.cmd)
       if (result.cmd.type === 'vote') {
         votes.set(p.seat, result.cmd.target)
@@ -279,8 +283,9 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
     seat: number,
     cmd: Command,
     log: string | undefined,
+    elapsedMs: number,
   ): void {
-    const text = formatDecisionLog(agent, state, seat, cmd, log)
+    const text = formatDecisionLog(agent, state, seat, cmd, log, elapsedMs)
     const ev: GameEvent = { type: 'comment', text }
     ;(events as (GameEvent | FenrirExtEvent)[]).push(ev)
     this.config.onEventEmitted?.(ev)
@@ -304,8 +309,10 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
       const seat = ext.discussionQueue[0]
       const legal = legalCommands(state, seat)
       const agent = this.getAgent(seat)
+      const t0 = performance.now()
       const result = await agent.decide(state, seat, legal, events)
-      this.emitDecisionLog(events, agent, state, seat, result.cmd, result.log)
+      const elapsed = performance.now() - t0
+      this.emitDecisionLog(events, agent, state, seat, result.cmd, result.log, elapsed)
       applyCommand(state, seat, result.cmd)
 
       const additionalClaims = new Map<number, DayClaim>()
@@ -352,8 +359,10 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
 
     const legal = legalCommands(state, commanderSeat)
     const agent = this.getAgent(commanderSeat)
+    const t0 = performance.now()
     const result = await agent.decide(state, commanderSeat, legal, events)
-    this.emitDecisionLog(events, agent, state, commanderSeat, result.cmd, result.log)
+    const elapsed = performance.now() - t0
+    this.emitDecisionLog(events, agent, state, commanderSeat, result.cmd, result.log, elapsed)
     applyCommand(state, commanderSeat, result.cmd)
 
     // applyCommand の中で遷移:
@@ -378,8 +387,10 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
       const seat = ext.ccoQueue[0]
       const legal = legalCommands(state, seat)
       const agent = this.getAgent(seat)
+      const t0 = performance.now()
       const result = await agent.decide(state, seat, legal, events)
-      this.emitDecisionLog(events, agent, state, seat, result.cmd, result.log)
+      const elapsed = performance.now() - t0
+      this.emitDecisionLog(events, agent, state, seat, result.cmd, result.log, elapsed)
       applyCommand(state, seat, result.cmd)
 
       const additionalClaims = new Map<number, DayClaim>()
@@ -430,19 +441,21 @@ function toNightAction(cmd: Command): NightAction {
   }
 }
 
-/** 判断ログのテキスト整形: `D{day} {phase} seat{n}({role}) {agentName}: {log} → {cmdSummary}` */
+/** 判断ログのテキスト整形: `D{day} {phase} seat{n}({role}) {agentName} [Nms]: {log} → {cmdSummary}` */
 function formatDecisionLog(
   agent: CommandAgent,
   state: GameState<CommandAdapterExt>,
   seat: number,
   cmd: Command,
   log: string | undefined,
+  elapsedMs: number,
 ): string {
   const player = state.players.find(p => p.seat === seat)
   const role = player?.role ?? '?'
   const phase = state.ext.currentPhase
   const summary = summarizeCommand(cmd, state)
-  const head = `D${state.day} ${phase} seat${seat}(${role}) ${agent.name}`
+  const elapsed = `[${Math.round(elapsedMs)}ms]`
+  const head = `D${state.day} ${phase} seat${seat}(${role}) ${agent.name} ${elapsed}`
   return log ? `${head}: ${log} → ${summary}` : `${head} → ${summary}`
 }
 
