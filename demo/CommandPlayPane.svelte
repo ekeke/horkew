@@ -217,6 +217,158 @@
     })
   })
 
+  /** 自役職の CO claim type（role_co / cco_full の一致判定に使う） */
+  function matchingClaimForRole(role: SystemRole | null | undefined): string | null {
+    switch (role) {
+      case 'seer': return 'seer_co'
+      case 'medium': return 'medium_co'
+      case 'bodyguard': return 'bodyguard_co'
+      case 'nekomata': return 'nekomata_co'
+      case 'mason': return 'mason_co'
+      default: return null
+    }
+  }
+
+  /**
+   * nonTableLegal を「主要」「騙り (折りたたみ)」に分割する。
+   * 真役職の CO（自分の役職に一致する claim）は主要、他役職の CO は騙り扱いで末尾に。
+   * 非 CO コマンド（skip / request_co / designate / vote 等）はすべて主要に含める。
+   * 自役職の claim が定義できない場合（villager/villain）は分割せず全て主要。
+   *
+   * bluff はさらに「他役職の CO」と「自役職だが違う相方/対象の CO」に分けて
+   * UI で区切って描画する（mason の場合: 真相方以外の partner 指定が後者に入る）。
+   */
+  const splitLegal = $derived.by((): {
+    primary: Command[],
+    bluffFakeRole: Command[],
+    bluffWrongTarget: Command[],
+  } => {
+    void state.tick
+    const matching = matchingClaimForRole(currentRole)
+    if (matching === null) {
+      return { primary: nonTableLegal, bluffFakeRole: [], bluffWrongTarget: [] }
+    }
+    // mason の真相方席を事前に算出（自役職 mason の場合、同役職の他席）
+    const truePartnerSeat = currentRole === 'mason' && pending && gameState
+      ? (gameState.players.find(p =>
+          p.role === 'mason' && p.seat !== pending.mySeat,
+        )?.seat ?? null)
+      : null
+
+    const primary: Command[] = []
+    const bluffFakeRole: Command[] = []
+    const bluffWrongTarget: Command[] = []
+    for (const cmd of nonTableLegal) {
+      if (cmd.type !== 'role_co' && cmd.type !== 'cco_full') {
+        primary.push(cmd)
+        continue
+      }
+      const claimType = (cmd.claim as { type: string }).type
+      if (claimType !== matching) {
+        // 自役職と違う claim → 他役職 CO（騙り）
+        bluffFakeRole.push(cmd)
+        continue
+      }
+      // 自役職と同じ claim。mason_co の場合は真相方かどうかで分岐
+      if (claimType === 'mason_co' && currentRole === 'mason') {
+        const cmdPartner = (cmd.claim as { partner?: number }).partner
+        if (cmdPartner === truePartnerSeat) {
+          primary.push(cmd)
+        } else {
+          bluffWrongTarget.push(cmd)
+        }
+      } else {
+        primary.push(cmd)
+      }
+    }
+    return { primary, bluffFakeRole, bluffWrongTarget }
+  })
+
+  const bluffTotal = $derived(splitLegal.bluffFakeRole.length + splitLegal.bluffWrongTarget.length)
+
+  let showBluff: boolean = $state(false)
+
+  // ==========================================================
+  // 指揮フェーズ専用: 席ピッカー (1 席=吊り指定、2+ 席=ラン指定)
+  // ==========================================================
+
+  let designateSelection: number[] = $state([])
+
+  // pending が変わる（次の手番）ごとに席選択をリセット
+  $effect(() => {
+    void pending
+    designateSelection = []
+  })
+
+  /** 指揮フェーズかつ pending がある時の専用ビュー */
+  type CommanderView = {
+    skipCmd: Command | null
+    requestCoCmds: Command[]
+    /** designate_execution の target 集合（生存席） */
+    executionTargets: Set<number>
+    /** 全ての designate_* に出現する席 (picker に表示する席集合) */
+    pickerSeats: number[]
+  }
+
+  const commanderView = $derived.by((): CommanderView | null => {
+    void state.tick
+    if (!pending || !gameState) return null
+    if (phaseLabel !== 'commander') return null
+
+    let skipCmd: Command | null = null
+    const requestCoCmds: Command[] = []
+    const executionTargets = new Set<number>()
+    for (const cmd of pending.legal) {
+      if (cmd.type === 'skip') skipCmd = cmd
+      else if (cmd.type === 'request_co') requestCoCmds.push(cmd)
+      else if (cmd.type === 'designate_execution') executionTargets.add(cmd.target)
+    }
+    const pickerSeats = [...executionTargets].sort((a, b) => a - b)
+    return { skipCmd, requestCoCmds, executionTargets, pickerSeats }
+  })
+
+  /** picker の席選択をトグル（上限なし） */
+  function toggleDesignateSeat(seat: number): void {
+    if (designateSelection.includes(seat)) {
+      designateSelection = designateSelection.filter(s => s !== seat)
+    } else {
+      designateSelection = [...designateSelection, seat]
+    }
+  }
+
+  /** 選択クリア */
+  function clearDesignateSelection(): void {
+    designateSelection = []
+  }
+
+  /** 選択席から designate コマンドを組み立てて submit */
+  function submitDesignateSelection(): void {
+    if (!commanderView) return
+    const selected = [...designateSelection].sort((a, b) => a - b)
+    if (selected.length === 1) {
+      submitCommand({ type: 'designate_execution', target: selected[0] })
+    } else if (selected.length >= 2) {
+      submitCommand({ type: 'designate_runoff', targets: selected })
+    }
+    designateSelection = []
+  }
+
+  /** 選択数に応じた決定ボタンラベル */
+  function designateActionLabel(count: number): string {
+    if (count === 0) return '席を選択してください'
+    if (count === 1) return `吊り指定（1 席）`
+    return `ラン指定（${count} 席）`
+  }
+
+  /** commander phase の CO 要求カテゴリ日本語ラベル */
+  function coRequestLabel(cat: string): string {
+    const map: Record<string, string> = {
+      seer: '占い', medium: '霊能', bodyguard: '狩人',
+      nekomata: '猫又', nekomata_bodyguard_grelan: '猫狩ギドラ',
+    }
+    return map[cat] ?? cat
+  }
+
   /** 私的情報（自席の視点のみ） */
   type PrivateInfo = {
     seat: number
@@ -590,13 +742,109 @@
         </div>
       {/if}
 
-      <div class="commands">
-        {#each nonTableLegal as cmd, i (i)}
-          <button class="cmd-btn" onclick={() => submitCommand(cmd)}>
-            {formatCommand(cmd)}
+      {#if commanderView}
+        <!-- 指揮フェーズ専用 UI: カテゴリ分け + 吊り/ラン指定は単一ピッカー -->
+        <div class="commander-ui">
+          {#if commanderView.skipCmd}
+            <div class="cmd-group">
+              <button class="cmd-btn cmd-skip" onclick={() => submitCommand(commanderView.skipCmd!)}>
+                スキップ（指定せず投票へ）
+              </button>
+            </div>
+          {/if}
+
+          {#if commanderView.requestCoCmds.length > 0}
+            <div class="cmd-group">
+              <div class="cmd-group-title">CO 要求</div>
+              <div class="commands">
+                {#each commanderView.requestCoCmds as cmd, i (i)}
+                  {#if cmd.type === 'request_co'}
+                    <button class="cmd-btn" onclick={() => submitCommand(cmd)}>
+                      {coRequestLabel(cmd.category)}
+                    </button>
+                  {/if}
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          {#if commanderView.pickerSeats.length > 0}
+            <div class="cmd-group">
+              <div class="cmd-group-title">吊り / ラン指定（席を選択: 1 席=吊り、2+ 席=ラン）</div>
+              <div class="seat-picker">
+                {#each commanderView.pickerSeats as seat (seat)}
+                  <button
+                    type="button"
+                    class="seat-pick-btn"
+                    class:seat-picked={designateSelection.includes(seat)}
+                    onclick={() => toggleDesignateSeat(seat)}
+                  >
+                    {nameOf(seat)}
+                  </button>
+                {/each}
+              </div>
+              <div class="designate-actions">
+                <button
+                  class="cmd-btn runoff-submit"
+                  disabled={designateSelection.length === 0}
+                  onclick={submitDesignateSelection}
+                >
+                  {designateActionLabel(designateSelection.length)}
+                </button>
+                {#if designateSelection.length > 0}
+                  <button class="cmd-btn secondary" onclick={clearDesignateSelection}>
+                    クリア
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {/if}
+        </div>
+      {:else}
+        <div class="commands">
+          {#each splitLegal.primary as cmd, i (i)}
+            <button class="cmd-btn" onclick={() => submitCommand(cmd)}>
+              {formatCommand(cmd)}
+            </button>
+          {/each}
+        </div>
+      {/if}
+
+      {#if bluffTotal > 0}
+        <div class="bluff-section">
+          <button
+            type="button"
+            class="bluff-toggle"
+            onclick={() => { showBluff = !showBluff }}
+            title="他役職の CO・違う相方指定（騙り）候補を表示"
+          >
+            {showBluff ? '▼' : '▶'} 騙り CO ({bluffTotal})
           </button>
-        {/each}
-      </div>
+          {#if showBluff}
+            {#if splitLegal.bluffFakeRole.length > 0}
+              <div class="commands bluff-commands">
+                {#each splitLegal.bluffFakeRole as cmd, i (i)}
+                  <button class="cmd-btn bluff-cmd" onclick={() => submitCommand(cmd)}>
+                    {formatCommand(cmd)}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+            {#if splitLegal.bluffWrongTarget.length > 0}
+              {#if splitLegal.bluffFakeRole.length > 0}
+                <div class="bluff-divider">— 違う相方指定 —</div>
+              {/if}
+              <div class="commands bluff-commands">
+                {#each splitLegal.bluffWrongTarget as cmd, i (i)}
+                  <button class="cmd-btn bluff-cmd" onclick={() => submitCommand(cmd)}>
+                    {formatCommand(cmd)}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          {/if}
+        </div>
+      {/if}
     </section>
   {/if}
 
@@ -786,6 +1034,129 @@
 
   .cmd-btn:hover {
     background: var(--ctp-sapphire);
+    color: var(--color-bg);
+  }
+
+  .bluff-section {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--color-border);
+  }
+
+  .bluff-toggle {
+    font-size: 11px;
+    background: transparent;
+    color: var(--color-text-muted);
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+  }
+
+  .bluff-toggle:hover {
+    color: var(--color-text);
+  }
+
+  .bluff-commands {
+    margin-top: 4px;
+  }
+
+  .bluff-divider {
+    margin-top: 6px;
+    margin-bottom: 4px;
+    font-size: 10px;
+    color: var(--color-text-muted);
+    text-align: center;
+    border-top: 1px dashed var(--color-border);
+    padding-top: 4px;
+  }
+
+  .cmd-btn.bluff-cmd {
+    opacity: 0.7;
+  }
+
+  .cmd-btn.bluff-cmd:hover {
+    opacity: 1;
+  }
+
+  /* ========== 指揮フェーズ UI ========== */
+
+  .commander-ui {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .cmd-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .cmd-group-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .cmd-skip {
+    align-self: flex-start;
+  }
+
+  .seat-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .seat-pick-btn {
+    font-size: 11px;
+    background: var(--ctp-surface1);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    padding: 3px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    min-width: 60px;
+  }
+
+  .seat-pick-btn:hover {
+    background: var(--ctp-sapphire);
+    color: var(--color-bg);
+  }
+
+  .seat-pick-btn.seat-picked {
+    background: var(--ctp-sky);
+    color: var(--color-bg);
+    border-color: var(--ctp-sky);
+    font-weight: 700;
+  }
+
+  .runoff-submit {
+    align-self: flex-start;
+    background: var(--ctp-peach);
+  }
+
+  .runoff-submit:disabled {
+    background: var(--ctp-surface1);
+    color: var(--color-text-muted);
+    cursor: not-allowed;
+  }
+
+  .designate-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .cmd-btn.secondary {
+    background: var(--ctp-surface1);
+    color: var(--color-text);
+  }
+
+  .cmd-btn.secondary:hover {
+    background: var(--ctp-red);
     color: var(--color-bg);
   }
 

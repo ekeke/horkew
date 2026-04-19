@@ -135,7 +135,8 @@ export class CommandPlayStore {
   // ----------- UI からの意思決定投入 -----------
 
   submit(cmd: Command): void {
-    // mason 連動: 相方も人間制御席なら、相方席に mirror mason_co を自動投入予約
+    // mason 連動: 相方も人間制御席 かつ 生存していれば、相方席に mirror mason_co を自動投入予約
+    // （相方が初日犠牲等で死亡していれば pending が来ないので mirror 不要）
     const currentPending = this.state.pending
     if (
       currentPending
@@ -144,9 +145,14 @@ export class CommandPlayStore {
       && this.state.humanSeats.has(cmd.claim.partner)
       && cmd.claim.partner !== currentPending.mySeat
     ) {
-      this.pendingMasonMirror = {
-        partnerSeat: cmd.claim.partner,
-        selfSeat: currentPending.mySeat,
+      const partnerPlayer = this.state.gameState?.players.find(
+        p => p.seat === cmd.claim.partner,
+      )
+      if (partnerPlayer?.alive) {
+        this.pendingMasonMirror = {
+          partnerSeat: cmd.claim.partner,
+          selfSeat: currentPending.mySeat,
+        }
       }
     }
     this.doSubmit(cmd)

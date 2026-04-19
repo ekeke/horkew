@@ -8,7 +8,7 @@
  * - CCO: 未 CO 席=cco_full 骨子、CO 済み席=cco_villain_reveal（真 villain のみ）
  */
 
-import type { GameState, PlayerState } from '../../../../lupa/types.ts'
+import type { GameState, PlayerState, DayClaim } from '../../../../lupa/types.ts'
 import { alivePlayersExcept, alivePlayers, getSeerResult } from '../../../../lupa/roles.ts'
 import type {
   Command, CommandAdapterExt, CoRequestCategory, VillainTrueRole,
@@ -106,38 +106,20 @@ function legalNightCommands(
 function legalDiscussionCommands(
   state: GameState<CommandAdapterExt>, player: PlayerState,
 ): Command[] {
-  const cmds: Command[] = [{ type: 'skip' }]
+  const cmds: Command[] = []
   const hasClaim = player.claimedRole !== null
 
   if (!hasClaim) {
-    // 初 CO 候補（役職 CO の骨子。results/targets/partner は空またはデフォルトを入れる）
-    cmds.push({ type: 'role_co', claim: { type: 'seer_co', results: [] } })
-    cmds.push({ type: 'role_co', claim: { type: 'medium_co' } })
-    cmds.push({ type: 'role_co', claim: { type: 'bodyguard_co', targets: [] } })
-    cmds.push({ type: 'role_co', claim: { type: 'nekomata_co' } })
-    // mason_co は partner 必須なので alive プレイヤーで展開
-    const others = alivePlayersExcept(state, player.seat)
-    for (const o of others) {
-      cmds.push({ type: 'role_co', claim: { type: 'mason_co', partner: o.seat } })
-    }
-    // 真役職 + 履歴あり: 正直 CO バリアント（既知の結果を CO にまとめて添付）
-    // 本バリアントを追加することで、初 CO 時にまとめて全日の結果を報告できる。
-    if (player.role === 'seer' && player.divineHistory.size > 0) {
-      const honestResults = [...player.divineHistory.entries()]
-        .sort(([a], [b]) => a - b)
-        .map(([, e]) => ({ target: e.target, result: e.result }))
-      cmds.push({ type: 'role_co', claim: { type: 'seer_co', results: honestResults } })
-    }
-    if (player.role === 'medium' && state.executionHistory.size > 0) {
-      const honestPast = [...state.executionHistory.entries()]
-        .sort(([a], [b]) => a - b)
-        .map(([, seat]) => {
-          const executed = state.players.find(p => p.seat === seat)
-          return executed ? getSeerResult(executed.role) : 'human'
-        })
-      cmds.push({ type: 'role_co', claim: { type: 'medium_co', pastResults: honestPast } })
-    }
+    // 順序:
+    //   1. 自役職に対応する CO（正直バリアント先頭、次に骨子）
+    //   2. skip
+    //   3. 騙り CO（他役職の CO 候補、UI 末尾へ）
+    const matching = roleMatchingCOs(state, player, 'role_co')
+    cmds.push(...matching)
+    cmds.push({ type: 'skip' })
+    cmds.push(...roleMismatchedCOs(state, player, 'role_co'))
   } else {
+    cmds.push({ type: 'skip' })
     // 結果報告（CO 済みなら役職別に列挙）
     switch (player.claimedRole) {
       case 'seer': {
@@ -202,21 +184,16 @@ function legalCommanderCommands(state: GameState<CommandAdapterExt>): Command[] 
 function legalCcoCommands(
   state: GameState<CommandAdapterExt>, player: PlayerState,
 ): Command[] {
-  const cmds: Command[] = [{ type: 'cco_skip' }]
+  const cmds: Command[] = []
   const hasClaim = player.claimedRole !== null
 
   if (!hasClaim) {
-    // 未 CO 席: cco_full 骨子
-    cmds.push({ type: 'cco_full', claim: { type: 'seer_co', results: [] } })
-    cmds.push({ type: 'cco_full', claim: { type: 'medium_co' } })
-    cmds.push({ type: 'cco_full', claim: { type: 'bodyguard_co', targets: [] } })
-    cmds.push({ type: 'cco_full', claim: { type: 'nekomata_co' } })
-    // mason_co は partner 席を必要とするため、自席以外の生存席ごとに列挙
-    const others = alivePlayersExcept(state, player.seat)
-    for (const o of others) {
-      cmds.push({ type: 'cco_full', claim: { type: 'mason_co', partner: o.seat } })
-    }
+    // 順序: 自役職の cco_full → cco_skip → 騙り cco_full
+    cmds.push(...roleMatchingCOs(state, player, 'cco_full'))
+    cmds.push({ type: 'cco_skip' })
+    cmds.push(...roleMismatchedCOs(state, player, 'cco_full'))
   } else {
+    cmds.push({ type: 'cco_skip' })
     // CO 済み席: 人外自白（真 villain のみ）
     if (isVillainRole(player.role)) {
       cmds.push({ type: 'cco_villain_reveal', trueRole: player.role as VillainTrueRole })
@@ -228,4 +205,126 @@ function legalCcoCommands(
 
 function isVillainRole(role: string): boolean {
   return role === 'werewolf' || role === 'fanatic' || role === 'werehamster' || role === 'immoralist'
+}
+
+/**
+ * mason_co の partner 候補を並べる。自席以外の全プレイヤー（生存/退場問わず）を返し、
+ * 真 mason の場合は真相方席を先頭に置く（UI で正しい選択肢を最上段に表示するため）。
+ * それ以外の席は seat 昇順。
+ */
+function sortMasonPartners(
+  state: GameState<CommandAdapterExt>, player: PlayerState,
+): PlayerState[] {
+  const candidates = state.players.filter(p => p.seat !== player.seat)
+  if (player.role !== 'mason') {
+    return [...candidates].sort((a, b) => a.seat - b.seat)
+  }
+  const truePartner = candidates.find(p => p.role === 'mason')
+  const others = candidates
+    .filter(p => p.seat !== truePartner?.seat)
+    .sort((a, b) => a.seat - b.seat)
+  return truePartner ? [truePartner, ...others] : others
+}
+
+/** CO 系コマンドの外枠: discussion なら role_co、CCO なら cco_full */
+type CoOuterType = 'role_co' | 'cco_full'
+
+function makeCoCmd(
+  outer: CoOuterType, claim: DayClaim,
+): Command {
+  if (outer === 'role_co') {
+    return { type: 'role_co', claim }
+  }
+  return { type: 'cco_full', claim }
+}
+
+/**
+ * 自役職に一致する CO 候補を優先度順で返す。
+ * 正直バリアント（履歴ありなら）→ 骨子（空 results / targets）→ mason なら真相方を頭にした partner 全列挙。
+ * villager/werewolf/fanatic/werehamster/immoralist は真の CO 先無しなので空配列。
+ */
+function roleMatchingCOs(
+  state: GameState<CommandAdapterExt>, player: PlayerState, outer: CoOuterType,
+): Command[] {
+  switch (player.role) {
+    case 'seer': {
+      const list: Command[] = []
+      if (player.divineHistory.size > 0) {
+        const honestResults = [...player.divineHistory.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([, e]) => ({ target: e.target, result: e.result }))
+        list.push(makeCoCmd(outer, { type: 'seer_co', results: honestResults }))
+      }
+      list.push(makeCoCmd(outer, { type: 'seer_co', results: [] }))
+      return list
+    }
+    case 'medium': {
+      const list: Command[] = []
+      if (state.executionHistory.size > 0) {
+        const honestPast = [...state.executionHistory.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([, seat]) => {
+            const executed = state.players.find(p => p.seat === seat)
+            return executed ? getSeerResult(executed.role) : 'human'
+          })
+        list.push(makeCoCmd(outer, { type: 'medium_co', pastResults: honestPast }))
+      }
+      list.push(makeCoCmd(outer, { type: 'medium_co' }))
+      return list
+    }
+    case 'bodyguard':
+      return [makeCoCmd(outer, { type: 'bodyguard_co', targets: [] })]
+    case 'nekomata':
+      return [makeCoCmd(outer, { type: 'nekomata_co' })]
+    case 'mason': {
+      // 真 mason は真相方とだけ matching に入れる（他席の partner 指定は騙り扱いで bluff へ）
+      const truePartner = state.players.find(p =>
+        p.role === 'mason' && p.seat !== player.seat,
+      )
+      if (truePartner) {
+        return [makeCoCmd(outer, { type: 'mason_co', partner: truePartner.seat })]
+      }
+      // 想定外（相方が見つからない）: 何も返さない
+      return []
+    }
+    default:
+      return []
+  }
+}
+
+/**
+ * 自役職以外の CO 候補（騙り用）を UI 末尾に並べるためにまとめる。
+ * 自役職に一致するものは除外。mason_co は真 mason でない限り全 partner を列挙。
+ */
+function roleMismatchedCOs(
+  state: GameState<CommandAdapterExt>, player: PlayerState, outer: CoOuterType,
+): Command[] {
+  const list: Command[] = []
+  if (player.role !== 'seer') {
+    list.push(makeCoCmd(outer, { type: 'seer_co', results: [] }))
+  }
+  if (player.role !== 'medium') {
+    list.push(makeCoCmd(outer, { type: 'medium_co' }))
+  }
+  if (player.role !== 'bodyguard') {
+    list.push(makeCoCmd(outer, { type: 'bodyguard_co', targets: [] }))
+  }
+  if (player.role !== 'nekomata') {
+    list.push(makeCoCmd(outer, { type: 'nekomata_co' }))
+  }
+  // mason_co は「自役職以外」なら全 partner 候補、「mason」なら真相方以外を騙り扱いに
+  if (player.role !== 'mason') {
+    for (const o of sortMasonPartners(state, player)) {
+      list.push(makeCoCmd(outer, { type: 'mason_co', partner: o.seat }))
+    }
+  } else {
+    const truePartnerSeat = state.players.find(p =>
+      p.role === 'mason' && p.seat !== player.seat,
+    )?.seat
+    for (const o of sortMasonPartners(state, player)) {
+      if (o.seat === truePartnerSeat) continue
+      list.push(makeCoCmd(outer, { type: 'mason_co', partner: o.seat }))
+    }
+  }
+  return list
 }

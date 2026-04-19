@@ -89,9 +89,35 @@ export class AsyncRemoteAgent implements CommandAgent {
 
 /**
  * legal 配列に cmd と構造的等価な要素があるかチェック。
- * discriminated union なので JSON 深比較で十分（Map/Set は現 Command 内に無し）
+ * discriminated union なので JSON 深比較で十分（Map/Set は現 Command 内に無し）。
+ *
+ * ただし designate_runoff は size 2+ の任意の subset を許容する:
+ * legal には size-2 の全ペアのみ展開されているため、size-3+ は厳密一致せず緩和する。
+ * 緩和条件: targets の全要素が legal の designate_* に出現する seat（= 生存席）であり、
+ * かつ重複無し。
  */
 function isLegalMatch(cmd: Command, legal: readonly Command[]): boolean {
+  if (cmd.type === 'designate_runoff' && cmd.targets.length >= 2) {
+    // 厳密一致をまず試す（size 2 の通常経路）
+    const key = JSON.stringify(cmd)
+    if (legal.some(c => JSON.stringify(c) === key)) return true
+    // 3+ seat 緩和: legal に出てくる生存席の subset か検証
+    const aliveFromLegal = new Set<number>()
+    for (const c of legal) {
+      if (c.type === 'designate_execution') aliveFromLegal.add(c.target)
+      else if (c.type === 'designate_runoff') {
+        for (const t of c.targets) aliveFromLegal.add(t)
+      }
+    }
+    if (aliveFromLegal.size === 0) return false
+    const seen = new Set<number>()
+    for (const t of cmd.targets) {
+      if (seen.has(t)) return false
+      if (!aliveFromLegal.has(t)) return false
+      seen.add(t)
+    }
+    return true
+  }
   const key = JSON.stringify(cmd)
   return legal.some(c => JSON.stringify(c) === key)
 }

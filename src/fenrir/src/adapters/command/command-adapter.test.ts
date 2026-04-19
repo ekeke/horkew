@@ -199,6 +199,72 @@ test('legalCommands: 真 medium は executionHistory 付き honest CO バリア�
   }
 })
 
+test('legalCommands: 真 mason の mason_co は真相方を先頭に列挙', () => {
+  const state = fiveSeatVillage()
+  // seat2 + seat5 を mason、seat5 が真相方
+  state.players[1].role = 'mason'
+  state.players[4].role = 'mason'
+  state.ext.currentPhase = 'discussion'
+  const cmds = legalCommands(state, 2)
+  const masonCos = cmds.filter(c =>
+    c.type === 'role_co' && c.claim.type === 'mason_co',
+  )
+  const partners = masonCos
+    .filter(c => c.type === 'role_co' && c.claim.type === 'mason_co')
+    .map(c => (c as { claim: { partner: number } }).claim.partner)
+  assert.equal(partners[0], 5, '真相方 seat5 が先頭')
+})
+
+test('legalCommands: 真 seer の honest seer_co が骨子より先に並ぶ', () => {
+  const state = fiveSeatVillage()
+  state.players[0].divineHistory.set(0, { target: 3, result: 'human' })
+  state.ext.currentPhase = 'discussion'
+  const cmds = legalCommands(state, 1)
+  const seerCoIndices = cmds
+    .map((c, i) => ({ c, i }))
+    .filter(x => x.c.type === 'role_co' && x.c.claim.type === 'seer_co')
+  assert.equal(seerCoIndices.length, 2, 'honest + 骨子')
+  const [first, second] = seerCoIndices
+  const firstClaim = first.c.type === 'role_co' ? first.c.claim : null
+  assert.ok(firstClaim?.type === 'seer_co' && firstClaim.results.length > 0, 'honest が先頭')
+  const secondClaim = second.c.type === 'role_co' ? second.c.claim : null
+  assert.ok(secondClaim?.type === 'seer_co' && secondClaim.results.length === 0, '骨子が後')
+})
+
+test('legalCommands: mason_co は死亡席も partner 候補に含む (初日犠牲の相方を指定可能)', () => {
+  const state = fiveSeatVillage()
+  // seat1=seer, seat2=bodyguard, seat3=villager, seat4=werewolf, seat5=fanatic
+  // seat2 を mason に昇格 + seat3 を死亡（相方が初日犠牲想定）
+  state.players[1].role = 'mason'
+  state.players[2].role = 'mason'
+  state.players[2].alive = false
+  state.ext.currentPhase = 'discussion'
+  const cmds = legalCommands(state, 2)
+  const masonCos = cmds.filter(c =>
+    c.type === 'role_co' && c.claim.type === 'mason_co',
+  )
+  const partners = masonCos
+    .filter(c => c.type === 'role_co' && c.claim.type === 'mason_co')
+    .map(c => (c as { claim: { partner: number } }).claim.partner)
+  assert.ok(partners.includes(3), '死亡した相方 seat3 を partner 指定可能')
+  assert.ok(!partners.includes(2), '自席は partner 候補から除外')
+})
+
+test('legalCommands: cco_full mason_co も死亡席を partner 候補に含む', () => {
+  const state = fiveSeatVillage()
+  state.players[0].alive = false  // seat1 が初日犠牲
+  state.ext.currentPhase = 'cco'
+  state.ext.ccoQueue = [2]
+  const cmds = legalCommands(state, 2)
+  const ccoMasons = cmds.filter(c =>
+    c.type === 'cco_full' && c.claim.type === 'mason_co',
+  )
+  const partners = ccoMasons
+    .filter(c => c.type === 'cco_full' && c.claim.type === 'mason_co')
+    .map(c => (c as { claim: { partner: number } }).claim.partner)
+  assert.ok(partners.includes(1), 'CCO でも死亡相方を partner 指定可能')
+})
+
 test('legalCommands: seer 結果報告は死亡席も対象 (夜占い対象が朝死亡するケース)', () => {
   const state = fiveSeatVillage()
   state.ext.currentPhase = 'discussion'
