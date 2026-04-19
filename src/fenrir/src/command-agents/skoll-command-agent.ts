@@ -181,6 +181,13 @@ export class SkollCommandAgent implements CommandAgent {
       return this.nightFallback(state, mySeat, legal, 'no-retar-cache', events)
     }
 
+    // 狩人: skoll 駆動で護衛先選択（rule-based は fallback）
+    if (player.role === 'bodyguard') {
+      const skollResult = this.decideNightBodyguardSkoll(state, player, legal, events)
+      if (skollResult) return skollResult
+      // fallback to rule-based
+    }
+
     // SkollMasterAgent は RuleBasedAgent を継承しているので decideNightAction をそのまま呼べる
     let action: NightAction
     try {
@@ -202,6 +209,43 @@ export class SkollCommandAgent implements CommandAgent {
       ? 'no_action'
       : `${action.type} seat${(action as { target?: number }).target ?? '?'}`
     return { cmd, log: `(night)[${player.role}/rule-based] ${actionStr}` }
+  }
+
+  /**
+   * 狩人の護衛先を skoll で決定。
+   * 各生存席 T について「T が噛まれた場合」の自陣営 perspective 勝率を lookahead で計算し、
+   * 最も勝率が下がる（= post-score が最小の）席を guard。
+   * lookahead 失敗時は null を返し rule-based fallback に委ねる。
+   */
+  private decideNightBodyguardSkoll(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    legal: readonly Command[],
+    events: AgentEvents,
+  ): DecisionResult | null {
+    const guardTargets = legal
+      .filter(c => c.type === 'guard')
+      .map(c => (c as { type: 'guard', target: number }).target)
+    if (guardTargets.length === 0) return null
+
+    let best: number | null = null
+    let bestPostScore = Infinity
+    for (const t of guardTargets) {
+      const hypoEvent: GameEvent = { type: 'night_kill', target: t } as GameEvent
+      const postScore = this.lookaheadScore(state, player, events, hypoEvent)
+      if (postScore === -Infinity) continue  // lookahead 失敗はスキップ
+      if (postScore < bestPostScore) {
+        bestPostScore = postScore
+        best = t
+      }
+    }
+    if (best === null) return null
+    const cmd = legal.find(c => c.type === 'guard' && c.target === best)
+    if (!cmd) return null
+    return {
+      cmd,
+      log: `(night)[bodyguard/skoll] guard seat${best} (post-score=${bestPostScore.toFixed(3)})`,
+    }
   }
 
   /** night fallback: 現状は RandomCommandAgent に委譲 */
@@ -232,7 +276,7 @@ export class SkollCommandAgent implements CommandAgent {
     switch (player.role) {
       case 'seer':     return this.discussionSeer(player, legal, events)
       case 'medium':   return this.discussionMedium(state, player, legal, events)
-      case 'bodyguard': return this.discussionOneShotCo(player, legal, 'bodyguard_co')
+      case 'bodyguard': return this.discussionRealBodyguard(state, player, legal, events)
       case 'nekomata': return this.discussionOneShotCo(player, legal, 'nekomata_co')
       case 'mason':    return this.discussionMason(state, player, legal)
       case 'villager':
@@ -627,7 +671,7 @@ export class SkollCommandAgent implements CommandAgent {
     return skipOrFirst(legal, '(discussion)[medium] no-matching-report')
   }
 
-  /** 真 bodyguard / nekomata: 初回 CO、以後 skip */
+  /** 真 bodyguard / fake bodyguard / nekomata: 初回 CO、以後 skip（one-shot 版） */
   private discussionOneShotCo(
     player: PlayerState,
     legal: readonly Command[],
@@ -638,6 +682,64 @@ export class SkollCommandAgent implements CommandAgent {
       if (coCmd) return { cmd: coCmd, log: `(discussion)[${player.role}] true-role initial CO` }
     }
     return skipOrFirst(legal, `(discussion)[${player.role}] already-CO skip`)
+  }
+
+  /**
+   * 真 bodyguard: CO する/しない を skoll で判定、以後 skip。
+   *   - CO 選択肢: hypothetical bodyguard_claim イベントを足して lookahead
+   *   - 潜伏選択肢: 現状 state の skoll 分析 (現在の bestVote score)
+   * 高い方を採用。lookahead 失敗時は潜伏にフォールバック。
+   */
+  private discussionRealBodyguard(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    legal: readonly Command[],
+    events: AgentEvents,
+  ): DecisionResult {
+    if (player.claimedRole) {
+      return skipOrFirst(legal, '(discussion)[bodyguard] already-CO skip')
+    }
+    const coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === 'bodyguard_co')
+    if (!coCmd) {
+      return skipOrFirst(legal, '(discussion)[bodyguard] no-co-legal skip')
+    }
+
+    const hideScore = this.currentSkollScore(state, player, events)
+    const coEvent: GameEvent = {
+      type: 'bodyguard_claim',
+      actor: player.seat,
+      targets: [],
+    } as GameEvent
+    const coScore = this.lookaheadScore(state, player, events, coEvent)
+
+    // 両方失敗は skip
+    if (hideScore === -Infinity && coScore === -Infinity) {
+      return { cmd: coCmd, log: '(discussion)[bodyguard] CO (lookahead unavailable, default CO)' }
+    }
+    if (coScore > hideScore) {
+      return {
+        cmd: coCmd,
+        log: `(discussion)[bodyguard/skoll] CO (co=${coScore.toFixed(3)} > hide=${hideScore.toFixed(3)})`,
+      }
+    }
+    return skipOrFirst(
+      legal,
+      `(discussion)[bodyguard/skoll] hide (hide=${hideScore.toFixed(3)} >= co=${coScore.toFixed(3)})`,
+    )
+  }
+
+  /** 現状 state での自陣営 perspective bestVote スコア（lookahead 無し） */
+  private currentSkollScore(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    events: AgentEvents,
+  ): number {
+    const ctx = this.buildDecisionContext(state, player, events, 'day')
+    if (!ctx) return -Infinity
+    let analysis
+    try { analysis = this.master.analyzeVote(ctx) } catch { return -Infinity }
+    if (!analysis || analysis.candidates.length === 0) return -Infinity
+    return Math.max(...analysis.candidates.filter(c => !c.excluded).map(c => c.score))
   }
 
   /** 真 mason: 未 CO → mason_co (partner = 真相方席)、以後 skip */
