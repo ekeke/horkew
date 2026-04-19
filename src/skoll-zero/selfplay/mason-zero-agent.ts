@@ -9,6 +9,7 @@ import type { MCTSConfig } from '../mcts/ismcts.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import { TrainingBuffer } from './buffer.ts'
 import { captureObs } from './observation.ts'
+import type { RootObs } from './observation.ts'
 import { normalizeVisits, sampleFromVisits, argmaxFromVisits } from './policy-utils.ts'
 
 export type MasonZeroAgentOptions = {
@@ -78,12 +79,13 @@ export class MasonZeroAgent extends SkollMasterAgent {
     }
     const alive = aliveBitmask(ctx.alivePlayers)
     const infoState = createSimState(sampleWorld, alive, ctx.day, 'day')
+    const rootObs: RootObs = captureObs(ctx)
 
     const mctsConfig: MCTSConfig = this.mzOpts.mctsConfig
       ? { ...this.mzOpts.mctsConfig, rng: () => ctx.rng.next() }
       : { ...DEFAULT_MCTS_CONFIG, rng: () => ctx.rng.next() }
 
-    const result = runMCTS(infoState, ctx.mySeat, determinizer, this.mzOpts.nn, mctsConfig)
+    const result = runMCTS(rootObs, infoState, ctx.mySeat, determinizer, this.mzOpts.nn, mctsConfig)
     if (result.visits.size === 0) {
       this.fallbackCalls++
       return super.decideVote(ctx)
@@ -93,7 +95,7 @@ export class MasonZeroAgent extends SkollMasterAgent {
 
     const pi = normalizeVisits(result.visits)
     this.mzOpts.buffer.appendPending({
-      obs: captureObs(alive, ctx.day, ctx.mySeat),
+      obs: rootObs,
       visits: result.visits,
       pi,
       day: ctx.day,

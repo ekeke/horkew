@@ -1,7 +1,7 @@
-import type { RawObs } from './observation.ts'
+import type { RootObs } from './observation.ts'
 
 export type PendingRecord = {
-  obs: RawObs
+  obs: RootObs
   /** action (vote 先 seat) → MCTS visit 数 */
   visits: Map<number, number>
   /** 正規化済み policy target π = N(a) / Σ N(b) */

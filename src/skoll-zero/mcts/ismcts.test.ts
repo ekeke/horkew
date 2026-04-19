@@ -67,7 +67,8 @@ describe('DummyNN', () => {
   it('uniform policy + value 0、合法 action のみ', () => {
     const nn = new DummyNN()
     const state = createSimState({} as any, aliveOf([1, 2, 3, 4, 5]))
-    const out = nn.forward(state, 2)
+    const rootObs = new Float32Array(1) // DummyNN は rootObs を無視
+    const out = nn.forward(rootObs, state, 2)
     assert.equal(out.value, 0)
     assert.equal(out.policy.size, 4, 'mason 自席を除いた 4 候補')
     let sum = 0
@@ -89,7 +90,8 @@ describe('runMCTS: 基本動作', () => {
     // mason 席を seat 1 と仮定した root infoState（world は仮置き、Determinizer で上書き）
     const dummyWorld = det.sample(seededRng(1))!
     const root = createSimState(dummyWorld, aliveOf([1, 2, 3, 4, 5]))
-    const result = runMCTS(root, 1, det, nn, {
+    const rootObs = new Float32Array(1)
+    const result = runMCTS(rootObs, root, 1, det, nn, {
       cPuct: 1.5, nRollouts: 100, rng: seededRng(123),
     })
 
@@ -137,7 +139,8 @@ describe('runMCTS: 基本動作', () => {
     const dummyWorld = det.sample(seededRng(1))!
     const root = createSimState(dummyWorld, aliveOf([1, 2, 3, 4, 5]))
     const masonSeat = 3
-    const result = runMCTS(root, masonSeat, det, nn, {
+    const rootObs = new Float32Array(1)
+    const result = runMCTS(rootObs, root, masonSeat, det, nn, {
       cPuct: 1.5, nRollouts: 200, rng: seededRng(456),
     })
     assert.ok(!result.visits.has(masonSeat), `mason 自席 ${masonSeat} は action にない`)
@@ -158,8 +161,9 @@ describe('runMCTS: 基本動作', () => {
     const dummyWorld = det.sample(seededRng(1))!
     const root = createSimState(dummyWorld, aliveOf([1, 2, 3, 4, 5]))
 
-    const r1 = runMCTS(root, 1, det, nn, { cPuct: 1.5, nRollouts: 200, rng: seededRng(789) })
-    const r2 = runMCTS(root, 1, det, nn, { cPuct: 1.5, nRollouts: 200, rng: seededRng(789) })
+    const rootObs = new Float32Array(1)
+    const r1 = runMCTS(rootObs, root, 1, det, nn, { cPuct: 1.5, nRollouts: 200, rng: seededRng(789) })
+    const r2 = runMCTS(rootObs, root, 1, det, nn, { cPuct: 1.5, nRollouts: 200, rng: seededRng(789) })
 
     assert.deepEqual(
       [...r1.visits.entries()].sort(),
@@ -180,7 +184,8 @@ describe('runMCTS: 基本動作', () => {
     const dummyWorld = det.sample(seededRng(1))!
     const root = createSimState(dummyWorld, aliveOf([1, 2, 3, 4, 5]))
 
-    const result = runMCTS(root, 1, det, nn, {
+    const rootObs = new Float32Array(1)
+    const result = runMCTS(rootObs, root, 1, det, nn, {
       cPuct: 1.5, nRollouts: 400, rng: seededRng(2024),
     })
     // 4 candidates、合計 visit ~399
@@ -208,11 +213,12 @@ function runLatencyCheck(_setup: Map<SystemRole, number>, det: Determinizer): vo
   for (let s = 1; s <= 14; s++) alive |= (1 << s)
   const root = createSimState(dummyWorld, alive)
 
+  const rootObs = new Float32Array(1)
   // 1 回ウォームアップ
-  runMCTS(root, 1, det, nn, { ...DEFAULT_MCTS_CONFIG, rng: seededRng(1) })
+  runMCTS(rootObs, root, 1, det, nn, { ...DEFAULT_MCTS_CONFIG, rng: seededRng(1) })
 
   const t0 = Date.now()
-  runMCTS(root, 1, det, nn, { ...DEFAULT_MCTS_CONFIG, rng: seededRng(2) })
+  runMCTS(rootObs, root, 1, det, nn, { ...DEFAULT_MCTS_CONFIG, rng: seededRng(2) })
   const elapsed = Date.now() - t0
   assert.ok(elapsed < 100, `400 rollouts は <100ms (実測 ${elapsed}ms)`)
 }

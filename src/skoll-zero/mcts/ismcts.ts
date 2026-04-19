@@ -5,7 +5,7 @@ import { runRollout, stepDayNightCycle } from '../simulator/rollout-sim.ts'
 import { createTreeNode, totalChildVisits } from './node.ts'
 import type { TreeNode } from './node.ts'
 import type { Determinizer } from './determinize.ts'
-import type { MasonZeroNN } from './nn.ts'
+import type { MasonZeroNN, RootObservation } from './nn.ts'
 import { isMasonAlive } from './nn.ts'
 
 /**
@@ -36,6 +36,7 @@ export type MCTSResult = {
 /**
  * mason の 1 vote 決定点で MCTS を実行し、root の visit 分布を返す。
  *
+ * @param rootObs MCTS 開始時にキャプチャした生観測（rollout 中固定）
  * @param infoState mason の情報集合 state（world は仮置き、rollout ごとに上書き）
  * @param masonSeat decide する mason 席
  * @param determinizer determinized world サンプラ
@@ -43,6 +44,7 @@ export type MCTSResult = {
  * @param config MCTS hyperparams
  */
 export function runMCTS(
+  rootObs: RootObservation,
   infoState: SimState,
   masonSeat: number,
   determinizer: Determinizer,
@@ -60,7 +62,7 @@ export function runMCTS(
     const world = determinizer.sample(config.rng)
     if (!world) break
     const rolloutState = createSimState(world, infoState.alive, infoState.day, infoState.phase as 'day' | 'night')
-    runOneRollout(root, rolloutState, masonSeat, nn, config)
+    runOneRollout(root, rolloutState, masonSeat, nn, rootObs, config)
   }
   return { root, visits: collectRootVisits(root), abortReason: null }
 }
@@ -78,6 +80,7 @@ function runOneRollout(
   initialState: SimState,
   masonSeat: number,
   nn: MasonZeroNN,
+  rootObs: RootObservation,
   config: MCTSConfig,
 ): void {
   const path: { node: TreeNode, action: number }[] = []
@@ -96,7 +99,7 @@ function runOneRollout(
       return
     }
     if (!node.expanded) {
-      const value = expandWithNN(node, state, masonSeat, nn)
+      const value = expandWithNN(node, state, masonSeat, nn, rootObs)
       backup(path, value)
       return
     }
@@ -127,8 +130,9 @@ function expandWithNN(
   state: SimState,
   masonSeat: number,
   nn: MasonZeroNN,
+  rootObs: RootObservation,
 ): number {
-  const { policy, value } = nn.forward(state, masonSeat)
+  const { policy, value } = nn.forward(rootObs, state, masonSeat)
   for (const [action, prior] of policy) {
     if (!node.edges.has(action)) {
       node.edges.set(action, { visits: 0, totalValue: 0, prior })

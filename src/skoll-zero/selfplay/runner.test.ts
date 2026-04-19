@@ -9,7 +9,7 @@ describe('TrainingBuffer', () => {
   it('appendPending → finalize で z が貼られる', () => {
     const buf = new TrainingBuffer()
     buf.appendPending({
-      obs: { alive: 0xff, day: 1, masonSeat: 3 },
+      obs: new Float32Array(8),
       visits: new Map([[5, 100], [7, 50]]),
       pi: new Map([[5, 0.67], [7, 0.33]]),
       day: 1,
@@ -26,7 +26,7 @@ describe('TrainingBuffer', () => {
   it('reset で全クリア', () => {
     const buf = new TrainingBuffer()
     buf.appendPending({
-      obs: { alive: 0, day: 1, masonSeat: 1 },
+      obs: new Float32Array(0),
       visits: new Map(),
       pi: new Map(),
       day: 1,

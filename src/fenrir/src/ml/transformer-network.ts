@@ -617,6 +617,15 @@ export class TransformerNetwork {
     }
   }
 
+  /**
+   * Value head の重み・バイアスを 0 で初期化。forward は tanh(0)=0 を返す。
+   * skoll-zero の warm start で、SL 済み trunk を保ちつつ value 出力のみ中立化するのに使う。
+   */
+  zeroInitValueHead(): void {
+    this.valueHead.weights.fill(0)
+    this.valueHead.biases.fill(0)
+  }
+
   /** 重みのクローン（チェックポイント用） */
   cloneWeights(): Map<string, Float32Array> {
     const weights = new Map<string, Float32Array>()
