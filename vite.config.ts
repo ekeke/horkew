@@ -250,4 +250,8 @@ export default defineConfig({
       },
     },
   },
+  worker: {
+    // 'es' 形式を使用: top-level await（retar-bridge の wasm ロード）を許可するため
+    format: 'es',
+  },
 })

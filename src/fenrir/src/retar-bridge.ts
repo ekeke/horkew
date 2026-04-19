@@ -26,12 +26,26 @@ import type { TsumiResult, StrategyNode } from '../../hati/index.ts'
 
 let wasmAnalyze: ((village: string, setup: string, options: string) => string) | null = null
 
-try {
-  // @ts-ignore — WASM pkg は動的ロード
-  const wasm = await import('../../retar-rs/pkg/retar.js')
-  wasmAnalyze = wasm.analyze
-} catch {
-  // WASM not available, fallback to JS
+// pkg/retar.js は Node CommonJS 版（Rust側の docker build 出力）で、
+// ブラウザ/Web Worker では `exports is not defined` で落ちる。
+// 事前に Node 環境判定し、該当するときだけ動的 import を試みる。
+// ブラウザ側は無条件に JS fallback（retar/index.ts）を使う。
+declare const importScripts: ((...urls: string[]) => void) | undefined
+const isNodeEnv =
+  typeof process !== 'undefined' &&
+  process.versions != null &&
+  process.versions.node != null &&
+  typeof (globalThis as { window?: unknown }).window === 'undefined' &&
+  typeof importScripts === 'undefined'
+
+if (isNodeEnv) {
+  try {
+    // @ts-ignore — WASM pkg は動的ロード
+    const wasm = await import('../../retar-rs/pkg/retar.js')
+    wasmAnalyze = wasm.analyze
+  } catch {
+    // WASM not available, fallback to JS
+  }
 }
 
 export const useWasm = wasmAnalyze !== null

@@ -19,7 +19,10 @@ import { alivePlayers } from '../../../lupa/roles.ts'
 import { resolveRules } from '../../../howl/ruleset.ts'
 import { SkollMasterAgent, type SkollMasterOptions } from '../../../skoll/skoll-master-agent.ts'
 import type { DecisionContext } from '../agents/agent.ts'
-import type { Command, CommandAdapterExt, CoRequestCategory } from '../adapters/command/command-types.ts'
+import type {
+  Command, CommandAdapterExt, CoRequestCategory,
+  VillainClaimAssignment,
+} from '../adapters/command/command-types.ts'
 import type { AgentEvents, CommandAgent, DecisionResult } from './command-agent.ts'
 import { RandomCommandAgent } from './random-command-agent.ts'
 
@@ -232,14 +235,139 @@ export class SkollCommandAgent implements CommandAgent {
       case 'nekomata': return this.discussionOneShotCo(player, legal, 'nekomata_co')
       case 'mason':    return this.discussionMason(state, player, legal)
       case 'villager':
+        return this.discussionHide(player, legal)
       case 'werewolf':
       case 'fanatic':
       case 'werehamster':
       case 'immoralist':
-        return this.discussionHide(player, legal)
+        return this.discussionVillain(state, player, legal, events)
       default:
         return this.discussionHide(player, legal)
     }
+  }
+
+  /**
+   * 人外の議論ルーター: villainClaimPlan を lazy 初期化し、割当に応じてルーティング。
+   * 'seer' → fake seer、'medium' → fake medium、'hide' → 潜伏。
+   */
+  private discussionVillain(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    legal: readonly Command[],
+    events: AgentEvents,
+  ): DecisionResult {
+    // 初回: plan を populate（1 ゲーム内 1 回のみ）
+    if (state.ext.villainClaimPlan.size === 0) {
+      const plan = electVillainClaims(state)
+      // Readonly cast を回避: ext は mutable（command-adapter 側で常に mutation）
+      const mutablePlan = (state.ext as CommandAdapterExt).villainClaimPlan
+      for (const [seat, role] of plan) mutablePlan.set(seat, role)
+    }
+    const assignment = state.ext.villainClaimPlan.get(player.seat) ?? 'hide'
+    switch (assignment) {
+      case 'seer':   return this.discussionFakeSeer(state, player, legal, events)
+      case 'medium': return this.discussionFakeMedium(state, player, legal, events)
+      case 'hide':
+      default:       return this.discussionHide(player, legal)
+    }
+  }
+
+  /**
+   * 騙り占い: 未 CO → seer_co 空、CO 済 → fakeDivineHistory を日数分に満たしつつ未報告分を report。
+   * target は非狼席からランダム（skoll は未活用、将来的に wolf-perspective で優先席選択を強化）。
+   */
+  private discussionFakeSeer(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    legal: readonly Command[],
+    events: AgentEvents,
+  ): DecisionResult {
+    if (!player.claimedRole) {
+      // 空 results 版を選ぶ（fake 付き single-result 版は legal に存在しないため）
+      const coCmd = legal.find(c =>
+        c.type === 'role_co'
+        && c.claim.type === 'seer_co'
+        && c.claim.results.length === 0,
+      )
+      if (coCmd) return { cmd: coCmd, log: '(discussion)[fake-seer] initial CO (empty results)' }
+    }
+
+    // fakeDivineHistory を state.day に合わせて populate（不足分を生成）
+    // D1 discussion では 1 件（D0 夜分）、D2 では 2 件…となる
+    ensureFakeDivineEntries(state, player, this.rng)
+
+    // 既に報告済みの対象を event 走査で確認
+    const reportedTargets = collectReportedTargets(player.seat, events)
+    // 最古未報告の fake を順番に出す
+    const sortedFakes = [...player.fakeDivineHistory.entries()].sort(([a], [b]) => a - b)
+    for (const [day, fake] of sortedFakes) {
+      if (reportedTargets.has(fake.target)) continue
+      const result = fake.result === 'wolf' ? 'wolf' : 'human'
+      const reportCmd = legal.find(c =>
+        c.type === 'role_result_report'
+        && c.claim.type === 'seer_result'
+        && c.claim.target === fake.target
+        && c.claim.result === result,
+      )
+      if (reportCmd) {
+        return {
+          cmd: reportCmd,
+          log: `(discussion)[fake-seer] fake-report D${day} seat${fake.target}=${result}`,
+        }
+      }
+    }
+    return skipOrFirst(legal, '(discussion)[fake-seer] all-reported skip')
+  }
+
+  /**
+   * 騙り霊能: 未 CO → medium_co 空、CO 済 → 処刑履歴に追従して報告。
+   * 現状は真の結果（執行された席の role から算出）を報告 — 村から見ると真霊能と区別不能。
+   */
+  private discussionFakeMedium(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    legal: readonly Command[],
+    events: AgentEvents,
+  ): DecisionResult {
+    if (!player.claimedRole) {
+      const coCmd = legal.find(c =>
+        c.type === 'role_co'
+        && c.claim.type === 'medium_co'
+        && (c.claim.pastResults == null || c.claim.pastResults.length === 0),
+      )
+      if (coCmd) return { cmd: coCmd, log: '(discussion)[fake-medium] initial CO (empty past)' }
+    }
+
+    // 自席の medium_result event 数 = 報告済み数
+    let reportedCount = 0
+    for (const ev of events) {
+      if ((ev as { type: string }).type !== 'medium_result') continue
+      const e = ev as { actor?: number }
+      if (e.actor === player.seat) reportedCount++
+    }
+    const executedCount = state.executionHistory.size
+    if (reportedCount >= executedCount) {
+      return skipOrFirst(legal, '(discussion)[fake-medium] up-to-date skip')
+    }
+
+    // 未報告の最古処刑 → 真の結果をそのまま報告（区別不能にする戦略）
+    const sortedExecs = [...state.executionHistory.entries()].sort(([a], [b]) => a - b)
+    const [day, executedSeat] = sortedExecs[reportedCount]
+    const executed = state.players.find(p => p.seat === executedSeat)
+    const trueResult = executed?.role === 'werewolf' ? 'wolf' : 'human'
+
+    const reportCmd = legal.find(c =>
+      c.type === 'role_result_report'
+      && c.claim.type === 'medium_result'
+      && c.claim.result === trueResult,
+    )
+    if (reportCmd) {
+      return {
+        cmd: reportCmd,
+        log: `(discussion)[fake-medium] fake-report D${day} seat${executedSeat}=${trueResult}`,
+      }
+    }
+    return skipOrFirst(legal, '(discussion)[fake-medium] no-matching-report')
   }
 
   /** 真 seer: 未 CO → seer_co、CO 済 → 未報告の占い結果を順次 report、全て済みなら skip */
@@ -701,4 +829,84 @@ function labelForRole(role: SystemRole): string {
     case 'mason': return 'mason'
     default: return 'village'
   }
+}
+
+/**
+ * 人外チームの騙り割当を決定。
+ * 戦略: 狼席番最小 → 占い騙り、次 → 霊能騙り、残りと他人外 → 潜伏。
+ * 単独狼の場合は占い騙り 1 人のみ（霊能無し）。
+ * setup に seer/medium が存在しない場合でも問題なし（どちらの騙りも村を攪乱可能）。
+ *
+ * 決定論的（seat 昇順）— 同一盤面なら常に同じ割当。
+ */
+function electVillainClaims(
+  state: Readonly<GameState<CommandAdapterExt>>,
+): Map<number, VillainClaimAssignment> {
+  const result = new Map<number, VillainClaimAssignment>()
+  const villains = state.players
+    .filter(p => {
+      return p.role === 'werewolf'
+        || p.role === 'fanatic'
+        || p.role === 'werehamster'
+        || p.role === 'immoralist'
+    })
+    .sort((a, b) => a.seat - b.seat)
+
+  // 狼を seat 昇順で取り出し、占い→霊能 の順に割当
+  const wolves = villains.filter(p => p.role === 'werewolf')
+  if (wolves.length >= 1) result.set(wolves[0].seat, 'seer')
+  if (wolves.length >= 2) result.set(wolves[1].seat, 'medium')
+  // 残り狼 + fanatic/hamster/immoralist は潜伏
+  for (const v of villains) {
+    if (!result.has(v.seat)) result.set(v.seat, 'hide')
+  }
+  return result
+}
+
+/**
+ * fakeDivineHistory を state.day に合わせて populate。
+ * D1 discussion では 1 件（D0 夜分の fake）、D2 では 2 件…。
+ * 不足分を生成: target は非狼生存席からランダム、result は 'human' 固定（当面）。
+ */
+function ensureFakeDivineEntries(
+  state: Readonly<GameState<CommandAdapterExt>>,
+  player: PlayerState,
+  rng: Rng,
+): void {
+  const expected = state.day
+  while (player.fakeDivineHistory.size < expected) {
+    const nextDay = player.fakeDivineHistory.size
+    // 対象: 自席以外 + 非狼 + 過去に fake した席以外（alive 問わず）
+    const alreadyFaked = new Set<number>()
+    for (const [, e] of player.fakeDivineHistory) alreadyFaked.add(e.target)
+    const candidates = state.players.filter(p =>
+      p.seat !== player.seat
+      && p.role !== 'werewolf'
+      && !alreadyFaked.has(p.seat),
+    )
+    if (candidates.length === 0) break  // 全員占った（通常到達しない）
+    const picked = candidates[rng.nextInt(candidates.length)]
+    // 当面は全て 'human' 報告（偽 CO が 'wolf' 報告を乱発するとすぐバレるため安全側）
+    player.fakeDivineHistory.set(nextDay, { target: picked.seat, result: 'human' })
+  }
+}
+
+/** event 列から指定 actor の seer_claim / seer_result に出た target 集合を収集 */
+function collectReportedTargets(
+  actorSeat: number, events: AgentEvents,
+): Set<number> {
+  const reported = new Set<number>()
+  for (const ev of events) {
+    const t = (ev as { type: string }).type
+    if (t === 'seer_claim') {
+      const e = ev as { actor?: number, results?: Array<{ target: number }> }
+      if (e.actor === actorSeat) {
+        for (const r of e.results ?? []) reported.add(r.target)
+      }
+    } else if (t === 'seer_result') {
+      const e = ev as { actor?: number, target?: number }
+      if (e.actor === actorSeat && e.target != null) reported.add(e.target)
+    }
+  }
+  return reported
 }

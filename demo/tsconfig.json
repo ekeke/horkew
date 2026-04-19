@@ -4,5 +4,5 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
   "include": ["."],
-  "exclude": ["analysis.worker.ts"]
+  "exclude": ["analysis.worker.ts", "commandGame.worker.ts"]
 }

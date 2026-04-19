@@ -125,7 +125,16 @@ export type CommandAdapterExt = {
    * onNight（新日開始）でクリアされる。
    */
   requestedCategoriesThisDay: Set<CoRequestCategory>
+  /**
+   * 人外の騙り割当。初回 villain discussion turn で決定され、以降不変。
+   * Map<seat, claim> の形式。'hide' は潜伏（何も CO しない）。
+   * 割り当てられた役職を CO し、以後その役職として結果報告を続ける。
+   */
+  villainClaimPlan: Map<number, VillainClaimAssignment>
 }
+
+/** 人外の騙り戦略 */
+export type VillainClaimAssignment = 'seer' | 'medium' | 'hide'
 
 export function createCommandAdapterExt(): CommandAdapterExt {
   return {
@@ -142,6 +151,7 @@ export function createCommandAdapterExt(): CommandAdapterExt {
     voteCandidates: null,
     retarCache: null,
     requestedCategoriesThisDay: new Set(),
+    villainClaimPlan: new Map(),
   }
 }
 

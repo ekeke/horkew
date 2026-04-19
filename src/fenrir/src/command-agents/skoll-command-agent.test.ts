@@ -122,14 +122,35 @@ test('SkollCommandAgent: discussion 村人は潜伏 (skip)', async () => {
   assert.match(result.log ?? '', /villager.*hide/)
 })
 
-test('SkollCommandAgent: discussion 狼は潜伏 (skip)', async () => {
+test('SkollCommandAgent: discussion 単独狼は占い騙り CO (fake-seer)', async () => {
   const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
   const state = makeState('discussion')
-  // seat 3 = werewolf
-  const legal: Command[] = [{ type: 'skip' }]
+  // seat 3 = werewolf（単独）→ electVillainClaims で 'seer' 割当
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'seer_co', results: [] } },
+  ]
   const result = await agent.decide(state, 3, legal)
-  assert.equal(result.cmd.type, 'skip')
-  assert.match(result.log ?? '', /werewolf.*hide/)
+  assert.equal(result.cmd.type, 'role_co')
+  assert.match(result.log ?? '', /fake-seer.*initial CO/)
+  // plan が populate されていること
+  assert.equal(state.ext.villainClaimPlan.get(3), 'seer')
+})
+
+test('SkollCommandAgent: discussion 2 匹狼は seer 騙り + medium 騙り に分担', async () => {
+  const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  // seat4 を werewolf に昇格（seat3 と seat4 が wolf）
+  state.players[3].role = 'werewolf'
+  // seat3 の legal（CO 済でないので empty seer_co）
+  const legalSeat3: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'seer_co', results: [] } },
+  ]
+  const r3 = await agent.decide(state, 3, legalSeat3)
+  assert.match(r3.log ?? '', /fake-seer.*initial CO/)
+  assert.equal(state.ext.villainClaimPlan.get(3), 'seer')
+  assert.equal(state.ext.villainClaimPlan.get(4), 'medium')
 })
 
 test('SkollCommandAgent: commander 未 CO の役職があれば request_co', async () => {

@@ -472,6 +472,12 @@
   {/if}
 
   <!-- 実行中フェーズ情報（最小限） -->
+  {#if state.running && !gameState}
+    <section class="loading">
+      <div class="loading-body">ゲームを準備中...</div>
+    </section>
+  {/if}
+
   {#if state.running && gameState}
     <section class="state">
       <div class="state-header">
@@ -692,6 +698,13 @@
 
   .active {
     color: var(--ctp-sky);
+  }
+
+  .loading {
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: 12px;
+    padding: 16px;
   }
 
   .activity {

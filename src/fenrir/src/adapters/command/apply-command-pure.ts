@@ -29,6 +29,7 @@ export function cloneCommandAdapterExt(ext: CommandAdapterExt): CommandAdapterEx
     voteCandidates: ext.voteCandidates ? [...ext.voteCandidates] : null,
     retarCache: ext.retarCache,  // 共有参照で OK（applyCommand は触らない）
     requestedCategoriesThisDay: new Set(ext.requestedCategoriesThisDay),
+    villainClaimPlan: new Map(ext.villainClaimPlan),
   }
 }
 

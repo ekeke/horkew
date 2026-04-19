@@ -59,6 +59,11 @@ export type CommandAdapterConfig = {
   maxPreVoteStepsPerDay?: number
   /** 各 GameEvent 発生時のフック（UI ライブ更新用） */
   onEventEmitted?: (event: GameEvent | FenrirExtEvent) => void
+  /**
+   * onSetup で state の参照を渡すフック。worker ランナーがイベント毎に state を
+   * snapshot するために使う。lupa state は in-place 更新されるため、一度捕捉すれば以降参照可能。
+   */
+  onStateReady?: (state: GameState<CommandAdapterExt>) => void
 }
 
 const DEFAULT_MAX_PREVOTE_STEPS = 200
@@ -80,6 +85,7 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
 
   onSetup(roles: Map<number, SystemRole>, state: GameState<CommandAdapterExt>): void {
     state.ext = createCommandAdapterExt()
+    this.config.onStateReady?.(state)
     this.config.onRolesAssigned?.(roles)
   }
 
