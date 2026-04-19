@@ -34,7 +34,7 @@ export function legalCommands(
     case 'commander':
       return seat === ext.commander ? legalCommanderCommands(state) : []
     case 'cco':
-      return ext.ccoQueue.includes(seat) ? legalCcoCommands(player) : []
+      return ext.ccoQueue.includes(seat) ? legalCcoCommands(state, player) : []
     case 'vote':
       return legalVoteCommands(state, player)
   }
@@ -150,7 +150,8 @@ function legalDiscussionCommands(
 // ============================================================
 
 function legalCommanderCommands(state: GameState<CommandAdapterExt>): Command[] {
-  const cmds: Command[] = []
+  // skip は「確信がない時の逃げ道」として常時合法（vote へ直接遷移）
+  const cmds: Command[] = [{ type: 'skip' }]
   for (const cat of CO_REQUEST_CATEGORIES) {
     cmds.push({ type: 'request_co', category: cat })
   }
@@ -173,7 +174,9 @@ function legalCommanderCommands(state: GameState<CommandAdapterExt>): Command[] 
 // CCO コマンド
 // ============================================================
 
-function legalCcoCommands(player: PlayerState): Command[] {
+function legalCcoCommands(
+  state: GameState<CommandAdapterExt>, player: PlayerState,
+): Command[] {
   const cmds: Command[] = [{ type: 'cco_skip' }]
   const hasClaim = player.claimedRole !== null
 
@@ -183,6 +186,11 @@ function legalCcoCommands(player: PlayerState): Command[] {
     cmds.push({ type: 'cco_full', claim: { type: 'medium_co' } })
     cmds.push({ type: 'cco_full', claim: { type: 'bodyguard_co', targets: [] } })
     cmds.push({ type: 'cco_full', claim: { type: 'nekomata_co' } })
+    // mason_co は partner 席を必要とするため、自席以外の生存席ごとに列挙
+    const others = alivePlayersExcept(state, player.seat)
+    for (const o of others) {
+      cmds.push({ type: 'cco_full', claim: { type: 'mason_co', partner: o.seat } })
+    }
   } else {
     // CO 済み席: 人外自白（真 villain のみ）
     if (isVillainRole(player.role)) {

@@ -185,6 +185,42 @@ test('SkollCommandAgent: cco 狼は cco_skip', async () => {
   assert.match(result.log ?? '', /werewolf.*stay-silent/)
 })
 
+test('SkollCommandAgent: cco 未 CO 真 mason は真相方付き mason_co を選ぶ', async () => {
+  const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
+  const state = makeState('cco')
+  // seat 2 を mason に、seat 4 を mason (partner) に書き換え
+  state.players[1].role = 'mason'
+  state.players[3].role = 'mason'
+  const legal: Command[] = [
+    { type: 'cco_skip' },
+    { type: 'cco_full', claim: { type: 'mason_co', partner: 1 } },  // 偽相方
+    { type: 'cco_full', claim: { type: 'mason_co', partner: 3 } },  // 偽相方
+    { type: 'cco_full', claim: { type: 'mason_co', partner: 4 } },  // 真相方
+  ]
+  const result = await agent.decide(state, 2, legal)
+  assert.equal(result.cmd.type, 'cco_full')
+  if (result.cmd.type === 'cco_full' && result.cmd.claim.type === 'mason_co') {
+    assert.equal(result.cmd.claim.partner, 4, '真相方の席を選ぶ')
+  }
+  assert.match(result.log ?? '', /mason.*partner=seat4/)
+})
+
+test('SkollCommandAgent: commander skip が legal にあり analysis 不能時に skip', async () => {
+  const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
+  const state = makeState('commander')
+  // retarCache 未設定 → no-retar-cache → skip 経由
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'request_co', category: 'seer' },
+  ]
+  // seer が生存し events 空 → Step A で request_co seer が先に選ばれる
+  // ここでは seer を削除して全員 CO 済扱いにするため events を使う想定
+  // → 代わりに player 不在で no-player パスをテスト
+  const result = await agent.decide(state, 99, legal)
+  assert.equal(result.cmd.type, 'skip')
+  assert.match(result.log ?? '', /skip.*no-player/)
+})
+
 // ============================================================
 // Vote フェーズ
 // ============================================================

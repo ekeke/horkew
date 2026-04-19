@@ -32,6 +32,11 @@ export type SkollCommandAgentOptions = {
   seed?: number
 }
 
+/** commander で top-1 と top-2 の score 差がこれ未満なら designate_runoff を検討 */
+const RUNOFF_THRESHOLD = 0.05
+/** top-2 も含めて runoff 候補となる最低スコア（どちらもノイズ級は無視） */
+const MIN_RUNOFF_SCORE = 0.1
+
 export class SkollCommandAgent implements CommandAgent {
   readonly name = 'skoll'
   private master: SkollMasterAgent
@@ -391,13 +396,34 @@ export class SkollCommandAgent implements CommandAgent {
     if (!player.claimedRole) {
       const targetClaimType = trueCoClaimType(player.role)
       if (targetClaimType) {
-        const ccoCmd = legal.find(c =>
-          c.type === 'cco_full' && c.claim.type === targetClaimType,
-        )
-        if (ccoCmd) {
-          return {
-            cmd: ccoCmd,
-            log: `(cco)[${player.role}] true-role last-chance CO`,
+        let ccoCmd: Command | undefined
+        if (player.role === 'mason') {
+          // 真相方席の mason_co を選ぶ
+          const partner = state.players.find(p =>
+            p.role === 'mason' && p.seat !== player.seat,
+          )
+          if (partner) {
+            ccoCmd = legal.find(c =>
+              c.type === 'cco_full'
+              && c.claim.type === 'mason_co'
+              && c.claim.partner === partner.seat,
+            )
+          }
+          if (ccoCmd) {
+            return {
+              cmd: ccoCmd,
+              log: `(cco)[mason] true-role last-chance CO partner=seat${partner!.seat}`,
+            }
+          }
+        } else {
+          ccoCmd = legal.find(c =>
+            c.type === 'cco_full' && c.claim.type === targetClaimType,
+          )
+          if (ccoCmd) {
+            return {
+              cmd: ccoCmd,
+              log: `(cco)[${player.role}] true-role last-chance CO`,
+            }
           }
         }
       }
@@ -423,7 +449,7 @@ export class SkollCommandAgent implements CommandAgent {
     events: AgentEvents,
   ): Promise<DecisionResult> {
     const player = state.players.find(p => p.seat === mySeat)
-    if (!player) return this.fallbackFor('commander', state, mySeat, legal, 'no-player', events)
+    if (!player) return this.commanderSkipOrFallback(state, mySeat, legal, 'no-player', events)
 
     // Step A: まだ CO が来てない役職カテゴリがあれば request_co
     const unclaimed = findUnclaimedRoleCategory(state, events)
@@ -436,34 +462,79 @@ export class SkollCommandAgent implements CommandAgent {
       }
     }
 
-    // Step B: 全 CO 揃った / 要求対象なし → skoll で最も怪しい席を吊り指定
+    // Step B: 全 CO 揃った / 要求対象なし → skoll で最も怪しい席を判断
     const ctx = this.buildDecisionContext(state, player, events, 'day')
     if (!ctx) {
-      return this.fallbackFor('commander', state, mySeat, legal, 'no-retar-cache', events)
+      return this.commanderSkipOrFallback(state, mySeat, legal, 'no-retar-cache', events)
     }
 
     const analysis = this.master.analyzeVote(ctx)
     if (!analysis || analysis.bestVote === null) {
-      return this.fallbackFor('commander', state, mySeat, legal, 'no-analysis', events)
+      return this.commanderSkipOrFallback(state, mySeat, legal, 'no-analysis', events)
     }
 
+    // top-2 candidate を score 降順で抽出（excluded 除外）
+    const ranked = [...analysis.candidates]
+      .filter(c => !c.excluded)
+      .sort((a, b) => b.score - a.score)
+    const top1 = ranked[0]
+    const top2 = ranked[1]
+
+    const worldsStr = analysis.totalWorlds != null ? ` worlds=${analysis.totalWorlds}` : ''
+
+    // top-1 と top-2 が拮抗 (score 差 < RUNOFF_THRESHOLD) かつ両席とも有意 (>0.1) なら designate_runoff
+    if (top1 && top2) {
+      const diff = top1.score - top2.score
+      if (diff < RUNOFF_THRESHOLD && top2.score > MIN_RUNOFF_SCORE) {
+        const runoffCmd = legal.find(c =>
+          c.type === 'designate_runoff'
+          && c.targets.length === 2
+          && c.targets.includes(top1.seat)
+          && c.targets.includes(top2.seat),
+        )
+        if (runoffCmd) {
+          return {
+            cmd: runoffCmd,
+            log: `(commander) runoff seat${top1.seat}/seat${top2.seat}${worldsStr} diff=${diff.toFixed(3)}`,
+          }
+        }
+      }
+    }
+
+    // 通常: bestVote を designate_execution
     const designateCmd = legal.find(c =>
       c.type === 'designate_execution' && c.target === analysis.bestVote,
     )
     if (!designateCmd) {
-      return this.fallbackFor(
-        'commander', state, mySeat, legal,
+      return this.commanderSkipOrFallback(
+        state, mySeat, legal,
         `bestVote-seat${analysis.bestVote}-not-in-legal`, events,
       )
     }
 
-    const best = analysis.candidates.find(c => c.seat === analysis.bestVote)
-    const bestScore = best?.score ?? 0
-    const worldsStr = analysis.totalWorlds != null ? ` worlds=${analysis.totalWorlds}` : ''
+    const bestScore = top1?.score ?? 0
     return {
       cmd: designateCmd,
       log: `(commander) designate seat${analysis.bestVote}${worldsStr} score=${bestScore.toFixed(3)}`,
     }
+  }
+
+  /**
+   * commander の安全な撤退: skip が legal にあればそれを選び、
+   * 無ければ fallback (random) へ。random designate を避ける。
+   */
+  private async commanderSkipOrFallback(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    mySeat: number,
+    legal: readonly Command[],
+    reason: string,
+    events: AgentEvents,
+  ): Promise<DecisionResult> {
+    const skipCmd = legal.find(c => c.type === 'skip')
+    if (skipCmd) {
+      return { cmd: skipCmd, log: `(commander) skip (${reason})` }
+    }
+    return this.fallbackFor('commander', state, mySeat, legal, reason, events)
   }
 
   // ============================================================
@@ -581,14 +652,14 @@ function skipOrFirst(legal: readonly Command[], log: string): DecisionResult {
   return { cmd: skip ?? legal[0], log }
 }
 
-/** 役職 → cco_full で使う真 CO の claim type（偽 CO 可能性のある役職は null） */
-function trueCoClaimType(role: SystemRole): 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' | null {
+/** 役職 → cco_full で使う真 CO の claim type（村騙り可能性のある役職は null） */
+function trueCoClaimType(role: SystemRole): 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' | 'mason_co' | null {
   switch (role) {
     case 'seer': return 'seer_co'
     case 'medium': return 'medium_co'
     case 'bodyguard': return 'bodyguard_co'
     case 'nekomata': return 'nekomata_co'
-    // mason は cco_full に partner が必要で現在 legal 列挙が対応してないため除外
+    case 'mason': return 'mason_co'
     // villain/villager 系は cco_skip で揃える
     default: return null
   }
