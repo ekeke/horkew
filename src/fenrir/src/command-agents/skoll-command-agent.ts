@@ -325,14 +325,17 @@ export class SkollCommandAgent implements CommandAgent {
 
   /**
    * 騙り占いの fakeDivineHistory を day 分 populate する。
-   * 各エントリは Skoll wolf-perspective で全 (target, result) 候補をスコアリングし最適を選ぶ。
+   * 各エントリは自陣営 perspective の Skoll 分析で (target, result) 候補をスコアリングし最適を選ぶ。
+   *
+   * Skoll perspective は ctx.myRole でルーティング (SkollMasterAgent.analyzeVote):
+   *   werewolf → 狼陣営, fanatic → 狂信者（狼陣営に寄り）, werehamster → 狐, immoralist → 背徳者
+   * したがって誰がこのメソッドを呼んでも「自陣営が勝つ確率」を最適化する。
    *
    * スコア定義:
-   *   - result='wolf' (smear):   targetScore          (voting target が wolf 勝率を上げる度合い)
-   *   - result='human' (cover):  1 - targetScore      (voting target が wolf 勝率を下げる度合い = 保護価値)
+   *   - result='wolf' (smear): targetScore      = 自陣営が target を吊りたい度合い
+   *   - result='human' (cover): 1 - targetScore = 自陣営が target を残したい度合い
    *
-   * これにより「脅威の高い席は偽黒 smear、味方席は偽白 cover」という行動が自然に創発する。
-   * 決定は skoll スコアのみに依存、ハードコードされた戦略（D0 ランダム等）は持たない。
+   * 現状は electVillainClaims で 'seer' 割当されるのが狼のみなので実質 wolf perspective。
    */
   private populateFakeDivineEntries(
     state: Readonly<GameState<CommandAdapterExt>>,
@@ -401,9 +404,9 @@ export class SkollCommandAgent implements CommandAgent {
    *
    * 各処刑につき {human, wolf} の 2 option を lookahead:
    *   仮想的に medium_result イベントを足して retar を再計算し、
-   *   自陣営 (wolf) perspective の skoll analyzeVote で bestVote score を取得。
-   *   高スコア side を採用（= 村の投票先が最も wolf に有利になる側を選ぶ）。
-   * retar 再計算不能時は current retarCache 下で report コマンド自体の skoll 評価にフォールバック。
+   *   自陣営 perspective の skoll analyzeVote で bestVote score を取得。
+   *   高スコア side を採用（= 自陣営に最も有利な側）。
+   * perspective は ctx.myRole で自動ルーティング（狼/狂信者/狐/背徳でそれぞれ最適化）。
    */
   private discussionFakeMedium(
     state: Readonly<GameState<CommandAdapterExt>>,
@@ -468,7 +471,7 @@ export class SkollCommandAgent implements CommandAgent {
 
   /**
    * 仮想 medium_result イベントを挿入して retar + skoll を再評価、
-   * wolf perspective で bestVote score を返す。失敗時は -Infinity。
+   * 自陣営 perspective で bestVote score を返す。失敗時は -Infinity。
    */
   private evaluateMediumResultLookahead(
     state: Readonly<GameState<CommandAdapterExt>>,
@@ -487,7 +490,7 @@ export class SkollCommandAgent implements CommandAgent {
 
   /**
    * 共通 lookahead: 仮想イベントを events 末尾に足して retar 再計算、
-   * wolf perspective で skoll analyzeVote を呼び bestVote score を返す。
+   * 自陣営 (ctx.myRole) perspective で skoll analyzeVote を呼び bestVote score を返す。
    */
   private lookaheadScore(
     state: Readonly<GameState<CommandAdapterExt>>,
