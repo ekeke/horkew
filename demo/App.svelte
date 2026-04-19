@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte'
   import { parse, parseFrontmatter, buildFrontmatter } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
+  import { statementsToPublicEvents } from '../src/howl/events-bridge.ts'
   import { systemRoles } from '../src/types/index.ts'
   import { stringifyStatements, type StringifiedLine } from './stringify.ts'
   import type { SeatResult } from './analysis.worker.ts'
@@ -22,6 +23,8 @@
   import InspectPane from './InspectPane.svelte'
   import PretrainPane from './PretrainPane.svelte'
   import StatsPane from './StatsPane.svelte'
+  import CommandPlayPane from './CommandPlayPane.svelte'
+  import { commandPlayStore } from './commandPlayStore.ts'
   import './theme.css'
   import { runGame } from '../src/lupa/engine.ts'
   import { agentAdapter } from '../src/verify/agent-adapter.ts'
@@ -99,6 +102,7 @@
     { id: 'fenrirInspect', label: 'Fenrir Inspect' },
     { id: 'pretrainViz', label: 'Pretrain Viz' },
     { id: 'fenrirStats', label: 'Fenrir Stats' },
+    { id: 'commandPlay', label: 'Command Play' },
   ] as const
 
   type PaneId = typeof paneEntries[number]['id']
@@ -113,7 +117,7 @@
     panes: Record<PaneId, boolean>
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, gmorkDebug: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false }
+  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, gmorkDebug: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false, commandPlay: false }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: 'off', panes: { ...defaultPanes } }
@@ -180,6 +184,92 @@
   let obsRoom: string | null = $state(null)
   let obsSocket: WebSocket | null = $state(null)
   let obsConnected = $state(false)
+  let obsSettingsOpen = $state(false)
+  type ObsCanvas = 'hd' | 'fhd'
+  type ObsAlign = 'top' | 'bottom' | 'left' | 'right'
+  let obsCanvas: ObsCanvas = $state('hd')
+  let obsAlign: ObsAlign = $state('bottom')
+  let obsBannerHeight: number = $state(100)
+  let obsStripWidth: number = $state(320)
+  type ObsCols = 1 | 2
+  let obsCols: ObsCols = $state(1)
+  let obsBgOpacity: number = $state(100)
+  type AppTheme = 'dark' | 'light'
+  let appTheme: AppTheme = $state('dark')
+  let obsTheme: AppTheme = $state('dark')
+
+  const OBS_SETTINGS_KEY = 'horkew-obs-settings'
+  const APP_THEME_KEY = 'horkew-theme'
+  const OBS_ROOM_KEY = 'horkew-obs-room'
+  const OBS_RECONNECT_PROBE_MS = 2000
+
+  function saveObsRoomKey(room: string | null) {
+    try {
+      if (room === null) localStorage.removeItem(OBS_ROOM_KEY)
+      else localStorage.setItem(OBS_ROOM_KEY, room)
+    } catch {
+      // ignore
+    }
+  }
+
+  function loadObsRoomKey(): string | null {
+    try {
+      return localStorage.getItem(OBS_ROOM_KEY)
+    } catch {
+      return null
+    }
+  }
+
+  function loadObsSettings() {
+    try {
+      const raw = localStorage.getItem(OBS_SETTINGS_KEY)
+      if (!raw) return
+      const s = JSON.parse(raw)
+      if (s.canvas === 'hd' || s.canvas === 'fhd') obsCanvas = s.canvas
+      if (s.align === 'top' || s.align === 'bottom' || s.align === 'left' || s.align === 'right') obsAlign = s.align
+      if (Number.isFinite(s.banner) && s.banner > 0) obsBannerHeight = Math.round(s.banner)
+      if (Number.isFinite(s.strip) && s.strip > 0) obsStripWidth = Math.round(s.strip)
+      if (s.cols === 1 || s.cols === 2) obsCols = s.cols
+      if (Number.isFinite(s.bg) && s.bg >= 0 && s.bg <= 100) obsBgOpacity = Math.round(s.bg)
+      if (s.theme === 'dark' || s.theme === 'light') obsTheme = s.theme
+    } catch {
+      // ignore
+    }
+  }
+
+  function saveObsSettings() {
+    try {
+      localStorage.setItem(OBS_SETTINGS_KEY, JSON.stringify({
+        canvas: obsCanvas,
+        align: obsAlign,
+        banner: obsBannerHeight,
+        strip: obsStripWidth,
+        cols: obsCols,
+        bg: obsBgOpacity,
+        theme: obsTheme,
+      }))
+    } catch {
+      // ignore
+    }
+  }
+
+  function loadAppTheme() {
+    try {
+      const raw = localStorage.getItem(APP_THEME_KEY)
+      if (raw === 'dark' || raw === 'light') appTheme = raw
+    } catch {
+      // ignore
+    }
+  }
+
+  function setAppTheme(next: AppTheme) {
+    appTheme = next
+    try { localStorage.setItem(APP_THEME_KEY, next) } catch { /* ignore */ }
+  }
+
+  $effect(() => {
+    document.documentElement.dataset.theme = appTheme
+  })
 
   function generateRoomCode(): string {
     const chars = 'abcdefghijkmnpqrstuvwxyz23456789'
@@ -194,7 +284,17 @@
     const base = import.meta.env.DEV
       ? `http://localhost:5375/horkew/overlay.html`
       : `${window.location.origin}/horkew/overlay.html`
-    return `${base}?room=${room}`
+    const params = new URLSearchParams({
+      room,
+      canvas: obsCanvas,
+      align: obsAlign,
+      banner: String(obsBannerHeight),
+      strip: String(obsStripWidth),
+      cols: String(obsCols),
+      bg: String(obsBgOpacity),
+      theme: obsTheme,
+    })
+    return `${base}?${params.toString()}`
   }
 
   function toggleObs() {
@@ -203,10 +303,12 @@
       obsSocket = null
       obsRoom = null
       obsConnected = false
+      saveObsRoomKey(null)
       return
     }
     const room = generateRoomCode()
     obsRoom = room
+    saveObsRoomKey(room)
     const protocol = import.meta.env.DEV ? 'ws' : 'wss'
     const ws = new WebSocket(`${protocol}://${obsPartyHost()}/party/${room}`)
     ws.onopen = () => {
@@ -219,8 +321,81 @@
     navigator.clipboard.writeText(overlayUrl(room))
   }
 
+  async function tryAutoReconnectObs() {
+    const saved = loadObsRoomKey()
+    if (!saved) return
+
+    const protocol = import.meta.env.DEV ? 'ws' : 'wss'
+    const ws = new WebSocket(`${protocol}://${obsPartyHost()}/party/${saved}`)
+
+    const result = await new Promise<'has-content' | 'empty'>((resolve) => {
+      let settled = false
+      const done = (r: 'has-content' | 'empty') => {
+        if (settled) return
+        settled = true
+        resolve(r)
+      }
+      const timer = setTimeout(() => done('empty'), OBS_RECONNECT_PROBE_MS)
+      ws.addEventListener('message', () => { clearTimeout(timer); done('has-content') }, { once: true })
+      ws.addEventListener('error', () => { clearTimeout(timer); done('empty') }, { once: true })
+      ws.addEventListener('close', () => { clearTimeout(timer); done('empty') }, { once: true })
+    })
+
+    if (result === 'empty') {
+      try { ws.close() } catch { /* ignore */ }
+      saveObsRoomKey(null)
+      return
+    }
+
+    obsRoom = saved
+    obsConnected = ws.readyState === WebSocket.OPEN
+    ws.onmessage = null
+    ws.onclose = () => { obsConnected = false }
+    ws.onerror = () => { obsConnected = false }
+    obsSocket = ws
+    if (input && ws.readyState === WebSocket.OPEN) ws.send(input)
+  }
+
   function copyObsUrl() {
     if (obsRoom) navigator.clipboard.writeText(overlayUrl(obsRoom))
+  }
+
+  function setObsCanvas(next: ObsCanvas) {
+    obsCanvas = next
+    saveObsSettings()
+  }
+
+  function setObsAlign(next: ObsAlign) {
+    obsAlign = next
+    saveObsSettings()
+  }
+
+  function setObsBannerHeight(next: number) {
+    if (!Number.isFinite(next) || next <= 0) return
+    obsBannerHeight = Math.round(next)
+    saveObsSettings()
+  }
+
+  function setObsStripWidth(next: number) {
+    if (!Number.isFinite(next) || next <= 0) return
+    obsStripWidth = Math.round(next)
+    saveObsSettings()
+  }
+
+  function setObsCols(next: ObsCols) {
+    obsCols = next
+    saveObsSettings()
+  }
+
+  function setObsBgOpacity(next: number) {
+    if (!Number.isFinite(next)) return
+    obsBgOpacity = Math.max(0, Math.min(100, Math.round(next)))
+    saveObsSettings()
+  }
+
+  function setObsTheme(next: AppTheme) {
+    obsTheme = next
+    saveObsSettings()
   }
 
   let input = $state(activeKey ? loadText(activeKey) : '')
@@ -244,6 +419,7 @@
   let players: Map<number, string> = $state(new Map())
   let playerShortNames: Map<number, string> = $state(new Map())
   let villageStatus: VillageStatus | null = $state(null)
+  let currentEvents: import('../src/lupa/types.ts').GameEvent[] = $state([])
   let sourceLines: SourceLines = $state({ survivor: new Map(), claimRow: new Map(), claimCell: new Map(), kill: new Map(), exec: new Map(), vote: new Map() })
   let cursorLine = $state(0)
   let claimShortNames: Map<number, string> = $derived(
@@ -509,6 +685,9 @@
     const hash = location.hash.slice(1)
     if (hash.startsWith('help-')) doOpenHelp(hash)
     if (!activeKey) handleStartTrial(TUTORIAL_TEXT)
+    loadObsSettings()
+    loadAppTheme()
+    tryAutoReconnectObs()
   })
 
   $effect(() => {
@@ -799,6 +978,57 @@
     run()
     tick().then(scrollRawToCursor)
   }
+
+  // ============================================================
+  // Command Play 連動: ゲーム進行を formatHowl でエディタに書き出し
+  // ============================================================
+  let cmdPlayRunning = $state(false)
+  let cmdPlayEditorText = $state('')
+  let cmdPlayWasRunning = false  // running 立ち上がり検出用
+
+  onMount(() => {
+    const unsub = commandPlayStore.subscribe(s => {
+      cmdPlayRunning = s.running
+      cmdPlayEditorText = s.editorText
+    })
+    return unsub
+  })
+
+  // running 立ち上がりで trial モードへ（保存ドキュメントを守る）
+  // running 立ち下がりでも trial のまま（結果を読める状態を保つ）
+  $effect(() => {
+    if (cmdPlayRunning && !cmdPlayWasRunning) {
+      // 保存ドキュメントを壊さないために即 trial モードへ
+      if (!trialMode) {
+        trialMode = true
+        resetVideoState()
+        input = cmdPlayEditorText || ''
+        setEditorContent(input)
+        showHelp = false
+      }
+    }
+    cmdPlayWasRunning = cmdPlayRunning
+  })
+
+  // 実行中 editorText 変化 → エディタに書き込み、カーソルを末尾へ
+  $effect(() => {
+    if (!editorView) return
+    if (!cmdPlayRunning) return
+    if (!cmdPlayEditorText) return
+    const current = editorView.state.doc.toString()
+    if (current === cmdPlayEditorText) return
+    editorView.dispatch({
+      changes: { from: 0, to: editorView.state.doc.length, insert: cmdPlayEditorText },
+      selection: { anchor: cmdPlayEditorText.length },
+      scrollIntoView: true,
+    })
+  })
+
+  // 実行中フラグ変化 → エディタの編集可否を切替
+  $effect(() => {
+    if (!editorView || !editorModule) return
+    editorModule.setEditable(editorView, !cmdPlayRunning)
+  })
 
   // Initialize CM6 editor when parent element is available (lazy-loaded)
   // Only depends on editorParent (DOM availability via {#if activeKey} block).
@@ -1202,6 +1432,7 @@
 
       const { vs, setup, players: playersMap, shortNames: shortNamesMap, dict } = buildVillageStatus(statements, meta)
       sourceLines = buildSourceLines(statements, dict)
+      currentEvents = statementsToPublicEvents(statements, dict).map(de => de.event)
 
       // Feed parse results to CM6 for syntax highlighting (after buildVillageStatus so dict is available)
       if (editorView) {
@@ -1476,11 +1707,125 @@
     >{{ off: 'DEBUG OFF', debug: 'DEBUG', fenrir: 'FENRIR' }[debugMode]}</button>
     {/if}
 
-    {#if obsRoom}
-    <button class="header-btn obs-btn obs-connected" onclick={copyObsUrl} title="OBS URLを再コピー（クリックで切断はダブルクリック）" ondblclick={toggleObs}>OBS{obsConnected ? '' : '…'}</button>
-    {:else}
-    <button class="header-btn obs-btn" onclick={toggleObs} title="OBS連携を開始（URLがクリップボードにコピーされます）">OBS</button>
-    {/if}
+    <button
+      class="header-btn theme-btn"
+      onclick={() => setAppTheme(appTheme === 'dark' ? 'light' : 'dark')}
+      title="アプリのテーマを切り替え"
+      aria-label="テーマ切替"
+    >{appTheme === 'dark' ? 'Dark' : 'Light'}</button>
+
+    <div class="obs-cluster">
+      <button
+        class="header-btn obs-btn"
+        class:obs-connected={obsRoom}
+        onclick={() => obsSettingsOpen = !obsSettingsOpen}
+        title="OBS連携・表示設定"
+      >OBS{obsRoom ? (obsConnected ? '●' : '…') : ''}</button>
+      {#if obsSettingsOpen}
+        <div
+          class="obs-settings-backdrop"
+          onclick={() => obsSettingsOpen = false}
+          role="button"
+          tabindex="-1"
+          aria-label="設定を閉じる"
+          onkeydown={(e) => { if (e.key === 'Escape') obsSettingsOpen = false }}
+        ></div>
+        <div class="obs-settings-popover" role="dialog" aria-label="OBS連携・表示設定">
+          <header class="obs-dialog-header">
+            <h2>OBS 連携・表示設定</h2>
+            <button class="obs-dialog-close" onclick={() => obsSettingsOpen = false} aria-label="閉じる">×</button>
+          </header>
+          <div class="obs-dialog-body">
+          <div class="obs-settings-section">
+            <div class="obs-settings-label">連携</div>
+            {#if obsRoom}
+              <div class="obs-connection-info">
+                <span class="obs-conn-status" class:obs-conn-active={obsConnected}>{obsConnected ? '接続中' : '接続待ち…'}</span>
+                <span class="obs-conn-room">room: {obsRoom}</span>
+              </div>
+              <div class="obs-connection-actions">
+                <button class="obs-action-btn obs-action-primary" onclick={copyObsUrl}>URL をコピー</button>
+                <button class="obs-action-btn" onclick={toggleObs}>停止</button>
+              </div>
+            {:else}
+              <button class="obs-action-btn obs-action-primary" onclick={toggleObs}>OBS 連携を開始</button>
+            {/if}
+          </div>
+          <div class="obs-settings-section">
+            <div class="obs-settings-label">キャンバス</div>
+            <div class="obs-segmented">
+              <button class="obs-segment" class:active={obsCanvas === 'hd'} onclick={() => setObsCanvas('hd')}>HD 1280×720</button>
+              <button class="obs-segment" class:active={obsCanvas === 'fhd'} onclick={() => setObsCanvas('fhd')}>FHD 1920×1080</button>
+            </div>
+          </div>
+          <div class="obs-settings-section">
+            <div class="obs-settings-label">配置</div>
+            <div class="obs-align-pad">
+              <button class="obs-pad-btn obs-pad-top" class:active={obsAlign === 'top'} onclick={() => setObsAlign('top')} aria-label="上寄せ">↑</button>
+              <button class="obs-pad-btn obs-pad-left" class:active={obsAlign === 'left'} onclick={() => setObsAlign('left')} aria-label="左寄せ">←</button>
+              <button class="obs-pad-btn obs-pad-right" class:active={obsAlign === 'right'} onclick={() => setObsAlign('right')} aria-label="右寄せ">→</button>
+              <button class="obs-pad-btn obs-pad-bottom" class:active={obsAlign === 'bottom'} onclick={() => setObsAlign('bottom')} aria-label="下寄せ">↓</button>
+            </div>
+          </div>
+          <div class="obs-settings-section">
+            <div class="obs-settings-label">カラム数</div>
+            <div class="obs-segmented">
+              <button class="obs-segment" class:active={obsCols === 1} onclick={() => setObsCols(1)}>1 カラム</button>
+              <button class="obs-segment" class:active={obsCols === 2} onclick={() => setObsCols(2)}>2 カラム</button>
+            </div>
+          </div>
+          <div class="obs-settings-section">
+            <div class="obs-settings-label">バーの厚み</div>
+            <div class="obs-size-inputs">
+              <label class="obs-size-label" class:dim={obsAlign === 'left' || obsAlign === 'right'}>
+                <span>横バー高さ</span>
+                <input
+                  type="number"
+                  min="20"
+                  max="1080"
+                  step="10"
+                  value={obsBannerHeight}
+                  onchange={(e) => setObsBannerHeight(Number(e.currentTarget.value))}
+                />
+                <span class="obs-size-unit">px</span>
+              </label>
+              <label class="obs-size-label" class:dim={obsAlign === 'top' || obsAlign === 'bottom'}>
+                <span>縦バー幅</span>
+                <input
+                  type="number"
+                  min="40"
+                  max="1920"
+                  step="10"
+                  value={obsStripWidth}
+                  onchange={(e) => setObsStripWidth(Number(e.currentTarget.value))}
+                />
+                <span class="obs-size-unit">px</span>
+              </label>
+            </div>
+          </div>
+          <div class="obs-settings-section">
+            <div class="obs-settings-label">背景の不透明度 <span class="obs-range-value">{obsBgOpacity}%</span></div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={obsBgOpacity}
+              oninput={(e) => setObsBgOpacity(Number(e.currentTarget.value))}
+              class="obs-range"
+            />
+          </div>
+          <div class="obs-settings-section">
+            <div class="obs-settings-label">オーバーレイのテーマ</div>
+            <div class="obs-segmented">
+              <button class="obs-segment" class:active={obsTheme === 'dark'} onclick={() => setObsTheme('dark')}>Dark</button>
+              <button class="obs-segment" class:active={obsTheme === 'light'} onclick={() => setObsTheme('light')}>Light</button>
+            </div>
+          </div>
+          </div>
+        </div>
+      {/if}
+    </div>
     <button class="header-btn help-btn" onclick={() => showHelp = true} title="Howl記法ヘルプ">?</button>
   </header>
 
@@ -1702,7 +2047,7 @@
     <section class="pane">
       <div class="pane-header">Skoll (確率分布)</div>
       <div class="pane-body">
-        <SkollPane vs={villageStatus} setup={currentSetup} {players} />
+        <SkollPane vs={villageStatus} setup={currentSetup} {players} publicEvents={currentEvents} />
       </div>
     </section>
     {/if}
@@ -1754,6 +2099,15 @@
       <div class="pane-header">Fenrir Stats</div>
       <div class="pane-body">
         <StatsPane />
+      </div>
+    </section>
+    {/if}
+
+    {#if paneVisible.commandPlay}
+    <section class="pane">
+      <div class="pane-header">Command Play</div>
+      <div class="pane-body">
+        <CommandPlayPane />
       </div>
     </section>
     {/if}
@@ -2011,12 +2365,272 @@
     cursor: default;
   }
 
+  .theme-btn {
+    font-size: 11px;
+    min-width: 48px;
+  }
+
   .obs-btn {
     font-size: 11px;
     font-weight: 700;
   }
   .obs-connected {
     color: var(--ctp-green, #a6e3a1);
+  }
+
+  .obs-cluster {
+    position: relative;
+    display: flex;
+    gap: 2px;
+  }
+
+  .obs-connection-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0;
+  }
+
+  .obs-conn-status {
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+
+  .obs-conn-status.obs-conn-active {
+    color: var(--ctp-green);
+  }
+
+  .obs-conn-room {
+    font-size: 10px;
+    color: var(--color-text-muted);
+    font-family: 'Consolas', 'Menlo', monospace;
+  }
+
+  .obs-connection-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .obs-action-btn {
+    flex: 1;
+    padding: 5px 10px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .obs-action-btn:hover {
+    background: var(--color-surface-hover);
+  }
+
+  .obs-action-btn.obs-action-primary {
+    background: var(--color-accent);
+    color: var(--color-bg);
+    border-color: var(--color-accent);
+    font-weight: 600;
+  }
+
+  .obs-action-btn.obs-action-primary:hover {
+    filter: brightness(1.1);
+  }
+
+  .obs-settings-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--color-overlay-backdrop);
+    z-index: 199;
+    border: 0;
+    cursor: default;
+  }
+
+  .obs-settings-popover {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(560px, 90vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-bg-elevated);
+    color: var(--color-text);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    font-size: 13px;
+    z-index: 200;
+  }
+
+  .obs-dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .obs-dialog-header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--color-accent);
+  }
+
+  .obs-dialog-close {
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 4px;
+  }
+
+  .obs-dialog-close:hover {
+    color: var(--color-text);
+    background: var(--color-surface-hover);
+  }
+
+  .obs-dialog-body {
+    padding: 16px 18px;
+    overflow: auto;
+  }
+
+  .obs-range {
+    width: 100%;
+    accent-color: var(--color-accent);
+  }
+
+  .obs-range-value {
+    color: var(--color-text);
+    font-family: 'Consolas', 'Menlo', monospace;
+    margin-left: 6px;
+  }
+
+  .obs-settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .obs-settings-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .obs-settings-label {
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+
+  .obs-segmented {
+    display: flex;
+    gap: 4px;
+    background: var(--color-bg-sunken);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 3px;
+  }
+
+  .obs-segment {
+    flex: 1;
+    padding: 5px 8px;
+    background: transparent;
+    color: var(--color-text-muted);
+    border: none;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .obs-segment:hover {
+    color: var(--color-text);
+  }
+
+  .obs-segment.active {
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  .obs-align-pad {
+    display: grid;
+    grid-template-columns: 32px 32px 32px;
+    grid-template-rows: 32px 32px 32px;
+    gap: 3px;
+    width: fit-content;
+  }
+
+  .obs-pad-btn {
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .obs-pad-btn:hover {
+    color: var(--color-text);
+    background: var(--color-surface-hover);
+  }
+
+  .obs-pad-btn.active {
+    background: var(--color-accent);
+    color: var(--color-bg);
+    border-color: var(--color-accent);
+  }
+
+  .obs-pad-top { grid-column: 2; grid-row: 1; }
+  .obs-pad-left { grid-column: 1; grid-row: 2; }
+  .obs-pad-right { grid-column: 3; grid-row: 2; }
+  .obs-pad-bottom { grid-column: 2; grid-row: 3; }
+
+  .obs-size-inputs {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .obs-size-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--color-text);
+  }
+
+  .obs-size-label.dim {
+    opacity: 0.5;
+  }
+
+  .obs-size-label > span:first-child {
+    flex: 1;
+    color: var(--color-text-muted);
+  }
+
+  .obs-size-label input {
+    width: 60px;
+    padding: 3px 5px;
+    background: var(--color-bg-sunken);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: 11px;
+    text-align: right;
+  }
+
+  .obs-size-unit {
+    color: var(--color-text-muted);
+    font-size: 10px;
   }
   .help-btn {
     font-weight: 700;

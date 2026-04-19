@@ -9,7 +9,9 @@
   import PlayerName from './PlayerName.svelte'
   import SpeciesIcon from './SpeciesIcon.svelte'
 
-  let { days, groups, maxDay, players, survivors, nightKilled, executed, claimShortNames = new Map() }: {
+  type HiddenSection = 'kill' | 'execution' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata'
+
+  let { days, groups, maxDay, players, survivors, nightKilled, executed, claimShortNames = new Map(), compact = false, hiddenSections = new Set() }: {
     days: DayDeaths[]
     groups: ClaimGroup[]
     maxDay: number
@@ -18,6 +20,8 @@
     nightKilled: Set<number>
     executed: Set<number>
     claimShortNames?: Map<number, string>
+    compact?: boolean
+    hiddenSections?: Set<HiddenSection>
   } = $props()
 
   const srcLines = getContext<Writable<SourceLines>>('sourceLines')
@@ -31,9 +35,12 @@
     roleDisplayOrder
       .map(r => groups.find(g => g.role === r))
       .filter((g): g is ClaimGroup => g != null)
+      .filter(g => !hiddenSections.has(g.role as HiddenSection))
   )
-  let masonGroup = $derived(groups.find(g => g.role === 'mason'))
-  let nekomataGroup = $derived(groups.find(g => g.role === 'nekomata'))
+  let masonGroup = $derived(hiddenSections.has('mason') ? undefined : groups.find(g => g.role === 'mason'))
+  let nekomataGroup = $derived(hiddenSections.has('nekomata') ? undefined : groups.find(g => g.role === 'nekomata'))
+  let hideKill = $derived(hiddenSections.has('kill'))
+  let hideExec = $derived(hiddenSections.has('execution'))
 
   // Index death history by day
   let deathByDay = $derived(new Map(days.map(d => [d.day, d])))
@@ -106,7 +113,7 @@
 </script>
 
 {#if dayColumns.length > 0 || groups.length > 0}
-<div class="table-wrap">
+<div class="table-wrap" class:compact>
   <table>
     <thead>
       <tr>
@@ -118,6 +125,7 @@
       </tr>
     </thead>
     <tbody>
+      {#if !hideKill}
       <!-- 噛み -->
       <tr class="kill-row">
         <td class="label-cell kill-label">噛</td>
@@ -127,6 +135,7 @@
           <td class="data-cell" class:active-hl-cell={$srcLines.kill.get(day - 1) === $cursor}>{#if d}{#each d.nightKills as entry, i}{#if i > 0}、{/if}<PlayerName dead nightKill={nightKillCauses.has(entry.causeOfDeath)} executed={false} claim={claimShortNames.get(entry.seat)} seat={entry.seat}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'night_kill'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}{/if}</td>
         {/each}
       </tr>
+      {/if}
 
       <!-- 各役職 (狩→占→霊) -->
       {#each tableGroups as group}
@@ -149,6 +158,7 @@
         {/each}
       {/each}
 
+      {#if !hideExec}
       <!-- 吊り -->
       <tr class="exec-row group-first">
         <td class="label-cell exec-label">吊</td>
@@ -158,6 +168,7 @@
           <td class="data-cell" class:active-hl-cell={$srcLines.exec.get(day) === $cursor}>{#if d}{#each d.executions as entry, i}{#if i > 0}、{/if}<PlayerName dead nightKill={false} executed claim={claimShortNames.get(entry.seat)} seat={entry.seat}>{entry.name}</PlayerName>{#if entry.causeOfDeath !== 'execution'}<span class="cause-note">({causeOfDeathLabel(entry.causeOfDeath)})</span>{/if}{/each}{/if}</td>
         {/each}
       </tr>
+      {/if}
 
     </tbody>
   </table>
@@ -180,6 +191,10 @@
     overflow-x: auto;
   }
 
+  .table-wrap.compact {
+    padding: 0;
+  }
+
   table {
     border-collapse: collapse;
     font-size: 12px;
@@ -190,6 +205,19 @@
     border: 1px solid var(--color-border);
     padding: 2px 6px;
     white-space: nowrap;
+  }
+
+  .compact th, .compact td {
+    padding: 0 3px;
+  }
+
+  .compact .day-col {
+    min-width: 0;
+  }
+
+  .compact .extra-claims {
+    margin-top: 2px;
+    gap: 2px 8px;
   }
 
   th {

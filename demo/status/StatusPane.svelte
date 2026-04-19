@@ -12,14 +12,20 @@
   import SummaryTable from './SummaryTable.svelte'
   import PlayerDialog from './PlayerDialog.svelte'
 
-  let { vs, players, setup, shortNames = new Map(), sourceLines, cursorLine = 0 }: {
+  type HiddenSection = 'setup' | 'survivor' | 'vote' | 'kill' | 'execution' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata'
+
+  let { vs, players, setup, shortNames = new Map(), sourceLines, cursorLine = 0, hiddenSections = new Set() }: {
     vs: VillageStatus
     players: Map<number, string>
     setup: Map<SystemRole, number>
     shortNames?: Map<number, string>
     sourceLines: SourceLines
     cursorLine?: number
+    hiddenSections?: Set<HiddenSection>
   } = $props()
+
+  const summarySectionKeys: HiddenSection[] = ['kill', 'execution', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+  let summaryHidden = $derived(new Set(summarySectionKeys.filter(k => hiddenSections.has(k))))
 
   let dialogSeat: number | null = $state(null)
   let dialogName = $derived(dialogSeat != null ? players.get(dialogSeat) ?? `#${dialogSeat}` : '')
@@ -92,7 +98,7 @@
 </script>
 
 <div class="status-pane">
-  {#if setupEntries.length > 0}
+  {#if !hiddenSections.has('setup') && setupEntries.length > 0}
     <div class="setup-section">
       <span class="setup-header">配役 <span class="count">{setupTotal}</span>人</span>
       {#each setupEntries as { shortName, count, alignment }}
@@ -100,9 +106,13 @@
       {/each}
     </div>
   {/if}
-  <SurvivorSection info={survivorInfo} {setupMismatch} day={vs.day} />
-  <SummaryTable days={deathHistory} groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} {claimShortNames} />
-  <VoteTable status={voteStatus} />
+  {#if !hiddenSections.has('survivor')}
+    <SurvivorSection info={survivorInfo} {setupMismatch} day={vs.day} />
+  {/if}
+  <SummaryTable days={deathHistory} groups={claimGroups} maxDay={vs.day} {players} {survivors} {nightKilled} {executed} {claimShortNames} compact={hiddenSections.size > 0} hiddenSections={summaryHidden} />
+  {#if !hiddenSections.has('vote')}
+    <VoteTable status={voteStatus} />
+  {/if}
 </div>
 
 {#if dialogSeat != null && dialogStatus}
