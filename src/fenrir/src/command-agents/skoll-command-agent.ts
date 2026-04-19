@@ -295,8 +295,9 @@ export class SkollCommandAgent implements CommandAgent {
     }
 
     // fakeDivineHistory を state.day に合わせて populate（不足分を生成）
-    // D1 discussion では 1 件（D0 夜分）、D2 では 2 件…となる
-    ensureFakeDivineEntries(state, player, this.rng)
+    // D1 discussion では 1 件（D0 夜分）、D2 では 2 件…となる。
+    // Skoll の wolf-perspective で「狼が最も吊りたい村役職」を smear 対象として優先。
+    this.populateFakeDivineEntries(state, player, events)
 
     // 既に報告済みの対象を event 走査で確認
     const reportedTargets = collectReportedTargets(player.seat, events)
@@ -319,6 +320,74 @@ export class SkollCommandAgent implements CommandAgent {
       }
     }
     return skipOrFirst(legal, '(discussion)[fake-seer] all-reported skip')
+  }
+
+  /**
+   * 騙り占いの fakeDivineHistory を day 分 populate する（不足分を生成）。
+   *
+   * 戦略:
+   *   - 最初の 1 件 (D0 相当): 安全優先で非狼かつ未 fake の席を random pick、結果 'human'
+   *   - 2 件目以降: Skoll の wolf-perspective 分析で「狼陣営が最も吊りたい席 = 村の有力情報役」
+   *     を取得し、その席を 'wolf' で smear（= 村役職候補を偽黒で潰しにいく）。
+   *     分析不能なら random non-wolf に 'human' fallback。
+   */
+  private populateFakeDivineEntries(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    events: AgentEvents,
+  ): void {
+    const expected = state.day
+    while (player.fakeDivineHistory.size < expected) {
+      const nextDay = player.fakeDivineHistory.size
+      const alreadyFaked = new Set<number>()
+      for (const [, e] of player.fakeDivineHistory) alreadyFaked.add(e.target)
+
+      // 除外対象: 自席 + 狼仲間 + 過去 fake 済み
+      const excluded = new Set<number>([player.seat])
+      for (const p of state.players) if (p.role === 'werewolf') excluded.add(p.seat)
+      for (const s of alreadyFaked) excluded.add(s)
+
+      // 1 件目は smear しない（まだ情報が少なく逆効果）。2 件目以降で Skoll 経由で smear 対象を探す
+      if (nextDay >= 1) {
+        const smearSeat = this.pickFakeSmearSeat(state, player, events, excluded)
+        if (smearSeat !== null) {
+          player.fakeDivineHistory.set(nextDay, { target: smearSeat, result: 'wolf' })
+          continue
+        }
+      }
+
+      // Fallback: 非狼・未 fake の席を random pick、結果 'human'（安全寄り）
+      const candidates = state.players.filter(p => !excluded.has(p.seat))
+      if (candidates.length === 0) break
+      const picked = candidates[this.rng.nextInt(candidates.length)]
+      player.fakeDivineHistory.set(nextDay, { target: picked.seat, result: 'human' })
+    }
+  }
+
+  /**
+   * Skoll wolf-perspective で「狼にとって最も吊りたい席」= 村側の情報役候補を返す。
+   * retarCache 未構築や分析失敗時は null。
+   */
+  private pickFakeSmearSeat(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    events: AgentEvents,
+    excluded: Set<number>,
+  ): number | null {
+    const ctx = this.buildDecisionContext(state, player, events, 'day')
+    if (!ctx) return null
+    let analysis
+    try {
+      analysis = this.master.analyzeVote(ctx)
+    } catch {
+      return null
+    }
+    if (!analysis || analysis.candidates.length === 0) return null
+    // wolf perspective: score 高い = 狼にとって吊りたい席 = 村の有力情報役
+    const sorted = [...analysis.candidates]
+      .filter(c => !c.excluded && !excluded.has(c.seat))
+      .sort((a, b) => b.score - a.score)
+    return sorted[0]?.seat ?? null
   }
 
   /**
@@ -875,33 +944,6 @@ function electVillainClaims(
   return result
 }
 
-/**
- * fakeDivineHistory を state.day に合わせて populate。
- * D1 discussion では 1 件（D0 夜分の fake）、D2 では 2 件…。
- * 不足分を生成: target は非狼生存席からランダム、result は 'human' 固定（当面）。
- */
-function ensureFakeDivineEntries(
-  state: Readonly<GameState<CommandAdapterExt>>,
-  player: PlayerState,
-  rng: Rng,
-): void {
-  const expected = state.day
-  while (player.fakeDivineHistory.size < expected) {
-    const nextDay = player.fakeDivineHistory.size
-    // 対象: 自席以外 + 非狼 + 過去に fake した席以外（alive 問わず）
-    const alreadyFaked = new Set<number>()
-    for (const [, e] of player.fakeDivineHistory) alreadyFaked.add(e.target)
-    const candidates = state.players.filter(p =>
-      p.seat !== player.seat
-      && p.role !== 'werewolf'
-      && !alreadyFaked.has(p.seat),
-    )
-    if (candidates.length === 0) break  // 全員占った（通常到達しない）
-    const picked = candidates[rng.nextInt(candidates.length)]
-    // 当面は全て 'human' 報告（偽 CO が 'wolf' 報告を乱発するとすぐバレるため安全側）
-    player.fakeDivineHistory.set(nextDay, { target: picked.seat, result: 'human' })
-  }
-}
 
 /** event 列から指定 actor の seer_claim / seer_result に出た target 集合を収集 */
 function collectReportedTargets(
