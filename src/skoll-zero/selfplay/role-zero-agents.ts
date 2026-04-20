@@ -13,11 +13,16 @@
  */
 
 import type { DecisionContext, TeamDecisionContext } from '../../fenrir/src/agents/agent.ts'
+import type { NightAction } from '../../lupa/types.ts'
 import {
   encodeObservation,
   encodeCollectiveWolfObservation,
 } from '../../fenrir/src/observation.ts'
-import type { Faction } from '../mcts/ismcts.ts'
+import { buildPossibilitiesFromRetar } from '../../skoll/unified.ts'
+import { createSimState } from '../simulator/world-state.ts'
+import { Determinizer } from '../mcts/determinize.ts'
+import { runMCTS, DEFAULT_MCTS_CONFIG, type Faction, type MCTSConfig } from '../mcts/ismcts.ts'
+import { argmaxFromVisits, sampleFromVisits } from './policy-utils.ts'
 import { RoleZeroAgent } from './role-zero-agent.ts'
 import type { RootObs } from './observation.ts'
 
@@ -33,21 +38,88 @@ export class VillageZeroAgent extends RoleZeroAgent {
 export class WolfZeroAgent extends RoleZeroAgent {
   protected override faction(): Faction { return 'wolf' }
   protected override captureObservation(ctx: DecisionContext): RootObs {
-    // encodeCollectiveWolfObservation は TeamDecisionContext を取る。
-    // 個別 Agent の DecisionContext から team info を復元して渡す。
-    const teamSeats = [...(ctx.wolfTeammates ?? [])]
-    if (!teamSeats.includes(ctx.mySeat)) teamSeats.unshift(ctx.mySeat)
-    const teamPlayers = teamSeats
-      .map(s => ctx.gameState.players.find(p => p.seat === s))
-      .filter((p): p is NonNullable<typeof p> => !!p)
-    const teamCtx: TeamDecisionContext = {
-      ...ctx,
-      teamSeats,
-      teamPlayers,
-      currentActorSeat: ctx.mySeat,
-    }
-    return encodeCollectiveWolfObservation(teamCtx)
+    return buildWolfTeamObs(ctx)
   }
+
+  /**
+   * 夜の噛み先を ISMCTS + NN で決定する。
+   *
+   * - 観測: encodeCollectiveWolfObservation (team scope)
+   * - Determinizer: village 視点 retar の世界列挙
+   * - action space: 非狼生存席 (wolf team は除外)
+   * - rollout: night → attack apply → day/night cycle heuristic → terminal → wolf faction value
+   *
+   * Retar 無効 / Determinizer overflow 時は super (SkollMasterAgent → heuristic) に委譲。
+   */
+  override decideNightAction(ctx: DecisionContext): NightAction {
+    if (!ctx.globalRetarPossibilities) {
+      this.fallbackCalls++
+      return super.decideNightAction(ctx)
+    }
+
+    const possibilities = buildPossibilitiesFromRetar(ctx.globalRetarPossibilities, this.zeroOpts.setup)
+    const determinizer = new Determinizer(possibilities, this.zeroOpts.setup, this.zeroOpts.determinizerMaxWorlds)
+    if (determinizer.isOverflow() || determinizer.size() === 0) {
+      this.fallbackCalls++
+      return super.decideNightAction(ctx)
+    }
+
+    const sampleWorld = determinizer.sample(() => ctx.rng.next())
+    if (!sampleWorld) {
+      this.fallbackCalls++
+      return super.decideNightAction(ctx)
+    }
+    const alive = aliveBitmask(ctx.alivePlayers)
+    const infoState = createSimState(sampleWorld, alive, ctx.day, 'night')
+
+    // wolf team (自席 + teammates) を除外 mask (1-based seat bit)
+    let excludedMask = 1 << ctx.mySeat
+    for (const s of ctx.wolfTeammates ?? []) excludedMask |= 1 << s
+
+    const rootObs = buildWolfTeamObs(ctx)
+    const mctsConfig: MCTSConfig = this.zeroOpts.mctsConfig
+      ? { ...this.zeroOpts.mctsConfig, rng: () => ctx.rng.next() }
+      : { ...DEFAULT_MCTS_CONFIG, rng: () => ctx.rng.next() }
+
+    const result = runMCTS(
+      rootObs, infoState, ctx.mySeat, determinizer, this.zeroOpts.nn, mctsConfig, 'wolf',
+      { actionMode: 'attack', excludedMask },
+    )
+    if (result.visits.size === 0) {
+      this.fallbackCalls++
+      return super.decideNightAction(ctx)
+    }
+    this.mctsCalls++
+
+    const target = this.zeroOpts.selectionMode === 'argmax'
+      ? argmaxFromVisits(result.visits)
+      : sampleFromVisits(result.visits, () => ctx.rng.next())
+
+    // 個別 Agent の NightAction は lupa 型 (attacker は team agent が決める)
+    return { type: 'attack', target }
+  }
+}
+
+/** 個別 wolf の DecisionContext から team obs を復元 */
+function buildWolfTeamObs(ctx: DecisionContext): RootObs {
+  const teamSeats = [...(ctx.wolfTeammates ?? [])]
+  if (!teamSeats.includes(ctx.mySeat)) teamSeats.unshift(ctx.mySeat)
+  const teamPlayers = teamSeats
+    .map(s => ctx.gameState.players.find(p => p.seat === s))
+    .filter((p): p is NonNullable<typeof p> => !!p)
+  const teamCtx: TeamDecisionContext = {
+    ...ctx,
+    teamSeats,
+    teamPlayers,
+    currentActorSeat: ctx.mySeat,
+  }
+  return encodeCollectiveWolfObservation(teamCtx)
+}
+
+function aliveBitmask(alivePlayers: number[]): number {
+  let mask = 0
+  for (const seat of alivePlayers) mask |= (1 << seat)
+  return mask
 }
 
 /** Fanatic 視点: standard obs、wolf faction (狼勝ち = +1) */

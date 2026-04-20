@@ -48,6 +48,13 @@ export type MCTSResult = {
  * @param nn policy + value 評価器
  * @param config MCTS hyperparams
  */
+/**
+ * MCTS の root action 種別。
+ * - 'vote' (default): day フェーズで投票先 seat を選ぶ
+ * - 'attack': night フェーズで噛み先 seat を選ぶ (wolf 用)
+ */
+export type RootActionMode = 'vote' | 'attack'
+
 export function runMCTS(
   rootObs: RootObservation,
   infoState: SimState,
@@ -58,7 +65,11 @@ export function runMCTS(
   config: MCTSConfig = DEFAULT_MCTS_CONFIG,
   /** value を評価する陣営視点 (default: village、mason/村側全般) */
   faction: Faction = 'village',
+  /** root action 種別 (default 'vote') と NN policy から除外する席 bitmask (wolf 仲間等) */
+  opts: { actionMode?: RootActionMode, excludedMask?: number } = {},
 ): MCTSResult {
+  const actionMode = opts.actionMode ?? 'vote'
+  const excludedMask = opts.excludedMask ?? 0
   const root = createTreeNode()
   if (determinizer.isOverflow()) {
     return { root, visits: new Map(), abortReason: 'determinizer_overflow' }
@@ -75,14 +86,14 @@ export function runMCTS(
   }
   const rootState = createSimState(firstWorld, infoState.alive, infoState.day, infoState.phase as 'day' | 'night')
   if (rootState.phase !== 'terminal' && isMasonAlive(rootState, decisionSeat)) {
-    expandWithNN(root, rootState, decisionSeat, nn, rootObs)
+    expandWithNN(root, rootState, decisionSeat, nn, rootObs, excludedMask)
     applyRootDirichletNoise(root, config)
   }
   for (let i = 0; i < config.nRollouts; i++) {
     const world = determinizer.sample(config.rng)
     if (!world) break
     const rolloutState = createSimState(world, infoState.alive, infoState.day, infoState.phase as 'day' | 'night')
-    runOneRollout(root, rolloutState, decisionSeat, nn, rootObs, config, faction)
+    runOneRollout(root, rolloutState, decisionSeat, nn, rootObs, config, faction, actionMode, excludedMask)
   }
   return { root, visits: collectRootVisits(root), abortReason: null }
 }
@@ -171,10 +182,13 @@ function runOneRollout(
   rootObs: RootObservation,
   config: MCTSConfig,
   faction: Faction,
+  actionMode: RootActionMode,
+  excludedMask: number,
 ): void {
   const path: { node: TreeNode, action: number }[] = []
   let node = root
   let state = initialState
+  let isRoot = true
 
   while (true) {
     if (state.phase === 'terminal') {
@@ -188,20 +202,27 @@ function runOneRollout(
       return
     }
     if (!node.expanded) {
-      const value = expandWithNN(node, state, decisionSeat, nn, rootObs)
+      // root 以外の展開は通常の自席除外 (actionMode='vote' と同じ扱い)。
+      // root のみ actionMode/excludedMask を適用済み (呼び出し側で expandWithNN 済み)。
+      const value = expandWithNN(node, state, decisionSeat, nn, rootObs, isRoot ? excludedMask : 0)
       backup(path, value)
       return
     }
     const action = selectActionUCB(node, config.cPuct)
     if (action < 0) {
-      // 合法 action がない（理論上 decisionSeat 生存時は必ずあるはず）
       backup(path, 0)
       return
     }
-    // step: decisionSeat の vote = action、他席は heuristic
+    // step: root action の適用。attack 時は night override、vote 時は day override。
+    // 木の深い部分 (isRoot=false) は常に vote override で扱う (標準動作)。
     const nextState = cloneSimState(state)
-    const override = new Map<number, number>([[decisionSeat, action]])
-    stepDayNightCycle(nextState, override)
+    if (isRoot && actionMode === 'attack') {
+      stepDayNightCycle(nextState, null, action)
+    } else {
+      const override = new Map<number, number>([[decisionSeat, action]])
+      stepDayNightCycle(nextState, override, null)
+    }
+    isRoot = false
     let child = node.children.get(action)
     if (!child) {
       child = createTreeNode()
@@ -213,18 +234,40 @@ function runOneRollout(
   }
 }
 
-/** node に対し NN forward → edge を初期化、value を返す */
+/**
+ * node に対し NN forward → edge を初期化、value を返す。
+ * excludedMask で指定された seat (wolf 仲間等) は policy から除外し、残りを renormalize する。
+ */
 function expandWithNN(
   node: TreeNode,
   state: SimState,
   masonSeat: number,
   nn: MasonZeroNN,
   rootObs: RootObservation,
+  excludedMask: number = 0,
 ): number {
   const { policy, value } = nn.forward(rootObs, state, masonSeat)
+  // excludedMask の seat を除外 + renormalize
+  let sum = 0
+  const filtered: Array<[number, number]> = []
   for (const [action, prior] of policy) {
-    if (!node.edges.has(action)) {
-      node.edges.set(action, { visits: 0, totalValue: 0, prior })
+    if ((excludedMask >>> action) & 1) continue
+    filtered.push([action, prior])
+    sum += prior
+  }
+  if (filtered.length === 0) {
+    // fallback: excludedMask が policy を全除外してしまった場合は元の policy を使う
+    for (const [action, prior] of policy) {
+      if (!node.edges.has(action)) {
+        node.edges.set(action, { visits: 0, totalValue: 0, prior })
+      }
+    }
+  } else {
+    const norm = sum > 0 ? 1 / sum : 1 / filtered.length
+    for (const [action, prior] of filtered) {
+      if (!node.edges.has(action)) {
+        node.edges.set(action, { visits: 0, totalValue: 0, prior: sum > 0 ? prior * norm : norm })
+      }
     }
   }
   node.expanded = true

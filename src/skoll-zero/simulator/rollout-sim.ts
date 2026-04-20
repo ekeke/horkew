@@ -17,6 +17,8 @@ import type { SimState } from './world-state.ts'
 export function stepDayNightCycle(
   state: SimState,
   masonVoteOverride: Map<number, number> | null = null,
+  /** 夜フェーズで狼の噛み先を強制指定する。null なら heuristic */
+  nightAttackOverride: number | null = null,
 ): SimState {
   if (state.phase === 'terminal') return state
 
@@ -38,12 +40,13 @@ export function stepDayNightCycle(
 
   // --- Night phase ---
   const night = decideNightHeuristic(state.world, state.alive)
+  const attackTarget = nightAttackOverride !== null ? nightAttackOverride : night.wolfBiteTarget
   // wolfBiteTarget=-1 は「狼不在」で本来到達しないが、防御的に skip
-  if (night.wolfBiteTarget >= 0) {
+  if (attackTarget >= 0) {
     const result = simulateNight(
       state.world,
       state.alive,
-      night.wolfBiteTarget,
+      attackTarget,
       night.bodyguardTarget,
       night.seerTargets,
     )
