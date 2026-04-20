@@ -249,8 +249,12 @@ export function trio3v2Block(): Scenario {
       'learning',
       'learning',
       'learning',
-      { type: 'fixedVote', target: 0 },   // 狼 → s0
-      { type: 'fixedVote', target: 0 },   // 狂信者 → s0
+      // 狼: unanimous offer(I:L0, Y:L0) を broadcast. 村チームと同形の会話を出し、観測側 (学習 agent) の
+      //    commit count feature に狼陣営の意思統一信号が流入する.
+      { type: 'offerer', primary: 0, acceptable: [0, 1, 2], mode: 'unanimous' },
+      // 狂信: 狼の offer(Y:L0) を受けて commit(L0). 最終投票も L0 = 最若 learner.
+      //    学習 agent から見ると「敵 2 票が揃って L0 に commit」が features[6] に載る.
+      { type: 'eagerCommitter', primary: 0, acceptable: [0, 1, 2] },
     ],
     primaryFromBots: true,
     randomizeRolesPerGame: true,
