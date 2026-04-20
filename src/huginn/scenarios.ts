@@ -546,6 +546,303 @@ export function trio3v2Mentor(): Scenario {
 }
 
 // ============================================================
+// Tier 1: 指定進行 (designatedTargets)
+// ============================================================
+
+/**
+ * 単独指定 baseline: 2 学習 agent (村村) vs 狼+狂信 block、designatedTargets=[s2] (狼のみ).
+ *
+ * pair2v2Block と同じ票構造だが primary は {s2, s3} からランダム (primaryFromBots).
+ * primary=s2 の learner は指定と整合、primary=s3 の learner は指定と衝突.
+ * DESIGNATION_VIOLATION_PENALTY (-0.2) が primary HIGH (+0.10) より大きいため、
+ * 指定遵守 (vote s2) が常に dominant. 「指定絶対服従」の最小検証シナリオ.
+ *
+ * 理論最大: 両 learner が s2 投票 → s0:2 vs s2:2 tie → 50% 村勝 (outcome '0,2' reward=0.5).
+ */
+export function pair2designatedSingle(): Scenario {
+  const envConfig: EnvConfig = {
+    numAgents: 4,
+    agentRoles: [
+      'learning',
+      'learning',
+      { type: 'fixedVote', target: 0 },   // 狼 → s0 block
+      { type: 'fixedVote', target: 0 },   // 狂信 → s0 block
+    ],
+    teams: [[0, 1], [2, 3]],
+    primaryFromBots: true,                // primary は {s2, s3} からランダム独立
+    designatedTargets: [2],               // 狼 s2 のみ指定
+    randomizeRolesPerGame: true,
+    desireCorrelation: 0.7,
+    kRounds: 4,
+    rewardMode: 'eliminated',
+    consensusBonus: 0,
+    outcomeRewards: {
+      '2':   { reward: 1.0, label: '狼 s2 単独吊り → 村勝 (designation follow)' },
+      '0,2': { reward: 0.5, label: '村+狼 tie → 50% 村勝' },
+      '3':   { reward: 0.0, label: '狂信 s3 吊り → 狼生存で村 loss' },
+      '0,3': { reward: 0.0, label: '村+狂信 tie → 村 loss' },
+      '0':   { reward: 0.0, label: '村 s0 吊り → 村 loss' },
+      '1':   { reward: 0.0, label: '村 s1 吊り → 村 loss' },
+      '0,1': { reward: 0.0, label: '村 tie → 村 loss' },
+      '1,2': { reward: 0.5, label: '村+狼 tie → 50% 村勝' },
+      '1,3': { reward: 0.0, label: '村+狂信 tie → 村 loss' },
+      '2,3': { reward: 0.5, label: '狼+狂信 tie (bot 票集中で実際は起きない)' },
+    },
+  }
+  return {
+    name: 'pair2designatedSingle',
+    description:
+      '2 学習 agent (村村) vs 狼 s2 + 狂信 s3 (block→s0). designatedTargets=[s2] の単独指定. ' +
+      'primary は {s2, s3} からランダム独立なので 50% で指定と衝突する. ' +
+      'ペナルティ -0.2 が primary shaping +0.10 より大きいため、指定遵守が常に最適. ' +
+      '「単独指定 = 絶対服従」学習の最小検証.',
+    learningObjective:
+      '自分の primary が s2 でも s3 でも常に s2 (指定対象) に投票する. ' +
+      'primary=s3 の時が真の学習課題: vote s3 (primary) = -0.1 / vote s2 (designation) = +0.05. ' +
+      '理論最大 win rate 50% (両 learner が s2 投票時の 0,2 tie).',
+    envConfig,
+    analysis: {
+      N: 4,
+      learningAgentCount: 2,
+      botAgentCount: 2,
+      majority: 3,
+      expectedWinRateOnFullCoordination: 0.5,
+    },
+    roles: [
+      { seat: 0, label: '村1', kind: 'learning', team: 'village',  winCondition: '狼全滅 (狐不在)',                    suggestedVoteTarget: '狼 s2 (指定遵守)',                     knowledge: { 2: ['werewolf', '狼'], 3: ['werewolf', '狂信'] } },
+      { seat: 1, label: '村2', kind: 'learning', team: 'village',  winCondition: '狼全滅 (狐不在)',                    suggestedVoteTarget: '狼 s2 (指定遵守)',                     knowledge: { 2: ['werewolf', '狼'], 3: ['werewolf', '狂信'] } },
+      { seat: 2, label: '狼',  kind: 'bot',      team: 'werewolf', winCondition: 'PP (狼+狂信 ≥ 村)',                  suggestedVoteTarget: '村 s0 block',                           knowledge: { 3: ['werewolf', '狂信'] } },
+      { seat: 3, label: '狂信', kind: 'bot',     team: 'werewolf', winCondition: '狼陣営勝利',                        suggestedVoteTarget: '村 s0 block',                           knowledge: { 2: ['werewolf', '狼'] } },
+    ],
+    outcomes: [
+      {
+        label: '両村が s2 (指定) に投票',
+        voteTally: 's0: 2 (bot), s2: 2 (村)',
+        result: '0,2 tie → 50% 村勝 (outcome reward 0.5, ペナルティなし)',
+        learnerWinRate: 0.5,
+      },
+      {
+        label: '両村が s3 (primary=s3 だが指定違反)',
+        voteTally: 's0: 2 (bot), s3: 2 (村)',
+        result: '0,3 tie → 村 loss (reward 0) + 各 -0.2 penalty',
+        learnerWinRate: 0.0,
+      },
+      {
+        label: '村1→s2, 村2→s3 (分裂、村2 は指定違反)',
+        voteTally: 's0: 2, s2: 1, s3: 1',
+        result: 's0 単独吊り → 村 loss, 村2 に -0.2 penalty',
+        learnerWinRate: 0.0,
+      },
+    ],
+  }
+}
+
+/**
+ * ラン指定 (村方): 3 学習 agent (村×3) vs 狼+狂信 block、designatedTargets=[s3, s4] (両 bot).
+ *
+ * trio3v2Block とほぼ同構成だが、designatedTargets を追加.
+ * 村は {s3, s4} 範囲内で自分の primary に従って投票 (primary=s3 なら vote s3). 範囲外 (村同士) は penalty -0.2.
+ * 3 learner の primary が独立ランダムなので P(全員一致) = 0.25 → 通信なし理論最大 25% 近辺.
+ * 通信 (offer/commit) を使って範囲内で集約できれば 100% に近づく.
+ *
+ * 「ラン指定の本質」= 範囲内では desire で分岐、範囲外は明示的に penalize. trio3v2Block と同じ
+ * タスクだが penalty signal が即時的なので coordination の学習速度が速くなる可能性を検証.
+ */
+export function trio3designatedRange(): Scenario {
+  const envConfig: EnvConfig = {
+    numAgents: 5,
+    agentRoles: [
+      'learning',
+      'learning',
+      'learning',
+      { type: 'fixedVote', target: 0 },   // 狼 → s0 block
+      { type: 'fixedVote', target: 0 },   // 狂信 → s0 block
+    ],
+    primaryFromBots: true,                // primary は {s3, s4} からランダム独立
+    designatedTargets: [3, 4],            // ラン指定: 両敵 bot
+    randomizeRolesPerGame: true,
+    desireCorrelation: 0.7,
+    kRounds: 4,
+    rewardMode: 'eliminated',
+    consensusBonus: 0,
+    outcomeRewards: {
+      '3':   { reward: 1.0, label: '狼 s3 単独吊り → 村勝' },
+      '4':   { reward: 1.0, label: '狂信 s4 単独吊り → 失格 (狼生存) — ただし合意達成で reward' },
+      '0':   { reward: 0.0, label: '村 s0 吊り → 村 loss' },
+      '1':   { reward: 0.0, label: '村 s1 吊り → 村 loss' },
+      '2':   { reward: 0.0, label: '村 s2 吊り → 村 loss' },
+      '0,1': { reward: 0.0, label: '村 tie → 村 loss' },
+      '0,2': { reward: 0.0, label: '村 tie → 村 loss' },
+      '1,2': { reward: 0.0, label: '村 tie → 村 loss' },
+      '0,3': { reward: 0.0, label: '村+狼 tie → 合意不完全' },
+      '1,3': { reward: 0.0, label: '村+狼 tie → 合意不完全' },
+      '2,3': { reward: 0.0, label: '村+狼 tie → 合意不完全' },
+      '0,4': { reward: 0.0, label: '村+狂信 tie → 合意不完全' },
+      '1,4': { reward: 0.0, label: '村+狂信 tie → 合意不完全' },
+      '2,4': { reward: 0.0, label: '村+狂信 tie → 合意不完全' },
+      '3,4': { reward: 0.0, label: '敵 tie (bot 票 s0 集中なので起きない)' },
+    },
+  }
+  return {
+    name: 'trio3designatedRange',
+    description:
+      '3 学習 agent (村×3) vs 狼 s3 + 狂信 s4 (block→s0). designatedTargets=[s3, s4] のラン指定. ' +
+      'primary は {s3, s4} からランダム独立. 村は範囲内で primary に従って投票、範囲外への誤投票は -0.2. ' +
+      'trio3v2Block と同タスクだが指定ペナルティで coordination 学習が加速するかを検証.',
+    learningObjective:
+      '範囲 {s3, s4} 内で自分の primary で分岐 + 3 learner で合意形成. ' +
+      '独立ランダム primary の一致確率は 0.25、通信で単独吊りに導けば 100% 近い. ' +
+      '村同士の誤投票は即 -0.2 penalty で弾かれる.',
+    envConfig,
+    analysis: {
+      N: 5,
+      learningAgentCount: 3,
+      botAgentCount: 2,
+      majority: 3,
+      expectedWinRateOnFullCoordination: 1.0,
+    },
+    roles: [
+      { seat: 0, label: '村1', kind: 'learning', team: 'village',  winCondition: '狼全滅 (狐不在)',                    suggestedVoteTarget: '範囲 {s3, s4} で primary に従う',     knowledge: { 1: ['village'], 2: ['village'] } },
+      { seat: 1, label: '村2', kind: 'learning', team: 'village',  winCondition: '狼全滅 (狐不在)',                    suggestedVoteTarget: '範囲 {s3, s4} で primary に従う',     knowledge: { 0: ['village'], 2: ['village'] } },
+      { seat: 2, label: '村3', kind: 'learning', team: 'village',  winCondition: '狼全滅 (狐不在)',                    suggestedVoteTarget: '範囲 {s3, s4} で primary に従う',     knowledge: { 0: ['village'], 1: ['village'] } },
+      { seat: 3, label: '狼',  kind: 'bot',      team: 'werewolf', winCondition: 'PP',                                 suggestedVoteTarget: '村 s0 block',                         knowledge: { 4: ['werewolf', '狂信'] } },
+      { seat: 4, label: '狂信', kind: 'bot',     team: 'werewolf', winCondition: '狼陣営勝利',                         suggestedVoteTarget: '村 s0 block',                         knowledge: { 3: ['werewolf', '狼'] } },
+    ],
+    outcomes: [
+      {
+        label: '3 村全員 s3 合意',
+        voteTally: 's0: 2 (bot), s3: 3',
+        result: 's3 単独吊り → reward 1.0 each、ペナルティなし',
+        learnerWinRate: 1.0,
+      },
+      {
+        label: '3 村全員 s4 合意',
+        voteTally: 's0: 2 (bot), s4: 3',
+        result: 's4 単独吊り → reward 1.0 each (outcome は狼生存でも合意達成で許容)',
+        learnerWinRate: 1.0,
+      },
+      {
+        label: '2-1 split (例 s3×2, s4×1)',
+        voteTally: 's0: 2, s3: 2, s4: 1',
+        result: '0,3 tie → reward 0、ペナルティなし (範囲内投票)',
+        learnerWinRate: 0.0,
+      },
+      {
+        label: '村が自分たち同士に誤投票 (例 s0)',
+        voteTally: 's0: 3 (bot+村), s3: ..., s4: ...',
+        result: '範囲外投票 learner に -0.2 penalty + outcome 村 loss',
+        learnerWinRate: 0.0,
+      },
+    ],
+  }
+}
+
+/**
+ * 狼陣営 PP 指定無視: 狼 learner が penalty を飲んで PP (power play) を成立させるシナリオ.
+ *
+ * N=5 構成 (全 bot は fixedVote で静的解析可能に):
+ *   s0, s1 = 村 fixedVote bot (target=狼 s2, designation-compliant)
+ *   s2, s3 = 狼 learner
+ *   s4 = 狂信 fixedVote bot (target=村 s0)
+ *
+ * teams = [[0, 1], [2, 3, 4]]. designatedTargets=[s2, s3] (村視点で狼).
+ * 村 2 票は狼 s2 に集中 (designation 遵守). 狂信 1 票は村 s0 に. 狼 2 票が分かれ所.
+ * 狼陣営目線では指定遵守 = 仲間 s2 elim = 陣営敗. defy + coord on s0 = PP 成立 +0.8 each.
+ *
+ * 狼の学習課題:
+ *   1. designation penalty を飲んでも村 seat に投票 (defy)
+ *   2. 狂信 fixedVote=s0 に合わせて 2 狼も s0 に投票 (coordinate)
+ *   - primary は team-shared でランダム (s0 or s1) だが、狂信が s0 固定なので s0 coordination が dominant
+ *
+ * reward 算術 (rewardByTeam):
+ *   - 指定遵守 (vote s2 or s3): penalty なし、outcome '2' (狼 s2 elim) → team 1 = 0, 陣営敗
+ *   - defy 一致 (両狼 s0): outcome '0' → team 1 = 1.0, 各 -0.2 penalty = +0.8 each
+ *   - defy 不一致 (1狼 s0, 1狼 s1): 0-s2 tie or miss-coord → team 1 = 0.5, -0.2 each = +0.3 each
+ */
+export function wolfPPIgnoreDesignation(): Scenario {
+  const envConfig: EnvConfig = {
+    numAgents: 5,
+    agentRoles: [
+      { type: 'fixedVote', target: 2 },   // 村 s0: 狼 s2 (designation-compliant)
+      { type: 'fixedVote', target: 2 },   // 村 s1: 狼 s2 (designation-compliant)
+      'learning',                          // 狼 s2
+      'learning',                          // 狼 s3
+      { type: 'fixedVote', target: 0 },   // 狂信 s4: 村 s0 (PP 方向に寄せる)
+    ],
+    teams: [[0, 1], [2, 3, 4]],
+    randomizeRolesPerGame: true,
+    desireCorrelation: 0.7,
+    kRounds: 4,
+    rewardMode: 'eliminated',
+    consensusBonus: 0,
+    designatedTargets: [2, 3],   // 村視点で狼 2 体を指定. 狼 learner には penalty 対象.
+    outcomeRewards: {
+      '0': { rewardByTeam: { 0: 0.0, 1: 1.0 }, label: '村 s0 吊り → PP 成立 (狼陣営勝利)' },
+      '1': { rewardByTeam: { 0: 0.0, 1: 1.0 }, label: '村 s1 吊り → PP 成立 (狼陣営勝利)' },
+      '2': { rewardByTeam: { 0: 1.0, 1: 0.0 }, label: '狼 s2 吊り → 村勝利' },
+      '3': { rewardByTeam: { 0: 1.0, 1: 0.0 }, label: '狼 s3 吊り → 村勝利' },
+      '4': { rewardByTeam: { 0: 0.0, 1: 0.0 }, label: '狂信 s4 吊り → 双方 lose' },
+      '0,1': { rewardByTeam: { 0: 0.0, 1: 1.0 }, label: '村村 tie → どちらが死んでも PP 成立' },
+      '0,2': { rewardByTeam: { 0: 0.5, 1: 0.5 }, label: '村+狼 tie → 50% で決着' },
+      '0,3': { rewardByTeam: { 0: 0.5, 1: 0.5 }, label: '村+狼 tie → 50%' },
+      '0,4': { rewardByTeam: { 0: 0.0, 1: 0.5 }, label: '村+狂信 tie → 50% PP' },
+      '1,2': { rewardByTeam: { 0: 0.5, 1: 0.5 }, label: '村+狼 tie → 50%' },
+      '1,3': { rewardByTeam: { 0: 0.5, 1: 0.5 }, label: '村+狼 tie → 50%' },
+      '1,4': { rewardByTeam: { 0: 0.0, 1: 0.5 }, label: '村+狂信 tie → 50% PP' },
+      '2,3': { rewardByTeam: { 0: 1.0, 1: 0.0 }, label: '狼 tie → 村勝利確定' },
+      '2,4': { rewardByTeam: { 0: 0.5, 1: 0.0 }, label: '狼+狂信 tie' },
+      '3,4': { rewardByTeam: { 0: 0.5, 1: 0.0 }, label: '狼+狂信 tie' },
+    },
+  }
+  return {
+    name: 'wolfPPIgnoreDesignation',
+    description:
+      '狼陣営 PP 指定無視. 2 狼 learner + 3 bot (村×2 fixedVote→s2, 狂信 fixedVote→s0). ' +
+      '村 2 票は狼 s2 に集中 (designation 遵守)、狂信 1 票は村 s0. 狼は指定遵守=仲間 s2 吊り=陣営敗. ' +
+      'defy + coord on s0 で 3 票 (狼2 + 狂信) → 村 s0 単独吊り → PP 成立. penalty -0.2 を飲んで +0.8 each.',
+    learningObjective:
+      '狼学習: (1) designation penalty -0.2 を飲んでも村 seat に投票、' +
+      '(2) 狂信 fixedVote=s0 に合わせて 2 狼も s0 に coordination. ' +
+      '理論最大: 両狼 s0 投票 → s0:3 vs s2:2 単独吊り → reward 0.8 each.',
+    envConfig,
+    analysis: {
+      N: 5,
+      learningAgentCount: 2,
+      botAgentCount: 3,
+      majority: 3,
+      expectedWinRateOnFullCoordination: 1.0,
+    },
+    roles: [
+      { seat: 0, label: '村1',  kind: 'bot',      team: 'village',  winCondition: '狼全滅',                suggestedVoteTarget: '狼 s2 (designation 遵守)',            knowledge: { 2: ['werewolf', '狼'], 3: ['werewolf', '狼'], 4: ['werewolf', '狂信'] } },
+      { seat: 1, label: '村2',  kind: 'bot',      team: 'village',  winCondition: '狼全滅',                suggestedVoteTarget: '狼 s2 (designation 遵守)',            knowledge: { 2: ['werewolf', '狼'], 3: ['werewolf', '狼'], 4: ['werewolf', '狂信'] } },
+      { seat: 2, label: '狼1',  kind: 'learning', team: 'werewolf', winCondition: 'PP 成立',              suggestedVoteTarget: '村 s0 (defy + 狂信同調)',            knowledge: { 3: ['werewolf', '狼'], 4: ['werewolf', '狂信'] } },
+      { seat: 3, label: '狼2',  kind: 'learning', team: 'werewolf', winCondition: 'PP 成立',              suggestedVoteTarget: '村 s0 (defy + 狂信同調)',            knowledge: { 2: ['werewolf', '狼'], 4: ['werewolf', '狂信'] } },
+      { seat: 4, label: '狂信', kind: 'bot',      team: 'werewolf', winCondition: '狼陣営勝利',          suggestedVoteTarget: '村 s0 (固定)',                       knowledge: { 2: ['werewolf', '狼'], 3: ['werewolf', '狼'] } },
+    ],
+    outcomes: [
+      {
+        label: '両狼が s0 (defy + 狂信合流)',
+        voteTally: 's0: 3 (狼×2 + 狂信), s2: 2 (村×2)',
+        result: 's0 単独吊り → PP 成立. 各狼: reward 1.0 - 0.2 penalty = +0.8',
+        learnerWinRate: 1.0,
+      },
+      {
+        label: '両狼が指定遵守 (例: 両者 s3 に投票)',
+        voteTally: 's0: 1 (狂信), s2: 2 (村), s3: 2 (狼)',
+        result: 's2+s3 tie / s0 も含むと "0,2,3" 状況だが tie は "2,3" → team1=0、陣営敗',
+        learnerWinRate: 0.0,
+      },
+      {
+        label: '狼 defy 不一致 (狼1→s0, 狼2→s1)',
+        voteTally: 's0: 2 (狼1 + 狂信), s1: 1 (狼2), s2: 2 (村)',
+        result: 's0 と s2 tie → "0,2" で team1=0.5 - 各狼 -0.2 penalty → +0.3 each',
+        learnerWinRate: 0.3,
+      },
+    ],
+  }
+}
+
+// ============================================================
 // Catalog
 // ============================================================
 
@@ -556,4 +853,7 @@ export const catalog: Record<string, () => Scenario> = {
   trio3v2BlockMentored,
   pair2v2SplitMentor,
   trio3v2Mentor,
+  pair2designatedSingle,
+  trio3designatedRange,
+  wolfPPIgnoreDesignation,
 }

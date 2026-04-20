@@ -15,6 +15,7 @@ import { catalog, type Scenario } from './scenarios.ts'
 import { AbstractGame, type AgentRole, type OutcomeReward } from './abstract-env.ts'
 import { Rng } from './rng.ts'
 import type { HuginnInput, AgentId } from './types.ts'
+import { DESIGNATION_VIOLATION_PENALTY } from './types.ts'
 
 const GAMES_PER_SCENARIO = 2
 const SEED = 42
@@ -127,11 +128,25 @@ function computeOutcome(
     .join(',')
   const override = env.config.outcomeRewards?.[outcomeKey] ?? null
 
+  // 指定進行ペナルティ: 集合外投票の learner に DESIGNATION_VIOLATION_PENALTY を加算.
+  // env.step() と同じロジックを複製 (env 側は actualDesignatedTargets を private に持つためここで再計算).
+  const actualDesignated = new Set<AgentId>()
+  if (env.config.designatedTargets) {
+    for (const l of env.config.designatedTargets) {
+      actualDesignated.add(env.getActualSeat(l))
+    }
+  }
+  const designationPenalty = (li: number): number => {
+    if (actualDesignated.size === 0) return 0
+    return actualDesignated.has(learnerVotes[li]) ? 0 : DESIGNATION_VIOLATION_PENALTY
+  }
+
   if (override !== null) {
     const teams = env.getTeams()
-    const rewardPerLearner = learners.map(lSeat => {
+    const rewardPerLearner = learners.map((lSeat, li) => {
       const teamId = teams[lSeat]
-      return override.rewardByTeam?.[teamId] ?? override.reward ?? 0
+      const base = override.rewardByTeam?.[teamId] ?? override.reward ?? 0
+      return base + designationPenalty(li)
     })
     return { voteCounts: counts, tieSet, outcomeKey, override, rewardPerLearner }
   }
@@ -156,7 +171,7 @@ function computeOutcome(
       for (const t of tieSet) sum += inputs[lSeat].desire[t]
       r = sum / tieSet.length
     }
-    return r + bonus
+    return r + bonus + designationPenalty(li)
   })
 
   return { voteCounts: counts, tieSet, outcomeKey, override: null, rewardPerLearner }
