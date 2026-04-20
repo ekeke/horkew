@@ -29,11 +29,14 @@ export type AgentRole =
   /** 実演ボット: 毎 round offer を出す. 投票は primary.
    *  mode='split' (default): offer(iVote=primary, youVote=(acceptable\{primary}) の round サイクル) — 2-way 分割提案
    *  mode='unanimous': offer(iVote=primary, youVote=primary) — 「primary に全員で合意しよう」broadcast
-   *  primary/acceptable はシナリオ定義では論理 seat. reset() で実 seat に変換される. */
-  | { type: 'offerer'; primary: AgentId; acceptable: AgentId[]; mode?: 'split' | 'unanimous' }
+   *  primary/acceptable はシナリオ定義では論理 seat. reset() で実 seat に変換される.
+   *  startRound: 指定 round 未満は silent (途中参加シミュレーション).
+   *  gameParticipationProb: 各ゲーム reset 時にサイコロ、unreach なら全 round silent (ランダム参加). */
+  | { type: 'offerer'; primary: AgentId; acceptable: AgentId[]; mode?: 'split' | 'unanimous'; startRound?: number; gameParticipationProb?: number }
   /** 実演ボット: 既出 offer のうち youVote ∈ acceptable を見つけたら即 commit(youVote) を出す.
-   *  自分の過去 commit があればその target に投票、無ければ primary. */
-  | { type: 'eagerCommitter'; primary: AgentId; acceptable: AgentId[] }
+   *  自分の過去 commit があればその target に投票、無ければ primary.
+   *  startRound, gameParticipationProb: offerer と同じ挙動. */
+  | { type: 'eagerCommitter'; primary: AgentId; acceptable: AgentId[]; startRound?: number; gameParticipationProb?: number }
 
 /** シナリオ作者が投票帰結に対する報酬を明示指定するための override エントリ. */
 export type OutcomeReward = {
@@ -171,17 +174,28 @@ export class AbstractGame {
             ...(baseRole.silent !== undefined ? { silent: baseRole.silent } : {}),
           }
         } else if (typeof baseRole === 'object' && baseRole.type === 'offerer') {
-          newRoles[actual] = {
-            type: 'offerer',
-            primary: actualOfLogical[baseRole.primary],
-            acceptable: baseRole.acceptable.map(l => actualOfLogical[l]),
-            ...(baseRole.mode !== undefined ? { mode: baseRole.mode } : {}),
+          // gameParticipationProb でサイコロ: 不参加なら silent で置換
+          if (baseRole.gameParticipationProb !== undefined && this.rng.next() > baseRole.gameParticipationProb) {
+            newRoles[actual] = { type: 'silent' }
+          } else {
+            newRoles[actual] = {
+              type: 'offerer',
+              primary: actualOfLogical[baseRole.primary],
+              acceptable: baseRole.acceptable.map(l => actualOfLogical[l]),
+              ...(baseRole.mode !== undefined ? { mode: baseRole.mode } : {}),
+              ...(baseRole.startRound !== undefined ? { startRound: baseRole.startRound } : {}),
+            }
           }
         } else if (typeof baseRole === 'object' && baseRole.type === 'eagerCommitter') {
-          newRoles[actual] = {
-            type: 'eagerCommitter',
-            primary: actualOfLogical[baseRole.primary],
-            acceptable: baseRole.acceptable.map(l => actualOfLogical[l]),
+          if (baseRole.gameParticipationProb !== undefined && this.rng.next() > baseRole.gameParticipationProb) {
+            newRoles[actual] = { type: 'silent' }
+          } else {
+            newRoles[actual] = {
+              type: 'eagerCommitter',
+              primary: actualOfLogical[baseRole.primary],
+              acceptable: baseRole.acceptable.map(l => actualOfLogical[l]),
+              ...(baseRole.startRound !== undefined ? { startRound: baseRole.startRound } : {}),
+            }
           }
         } else {
           newRoles[actual] = baseRole
@@ -412,6 +426,7 @@ export function scriptedBotMessage(
     case 'silent':
       return { type: 'silent' }
     case 'offerer': {
+      if (role.startRound !== undefined && round < role.startRound) return { type: 'silent' }
       if (role.primary === self) return { type: 'silent' }
       const mode = role.mode ?? 'split'
       if (mode === 'unanimous') {
@@ -423,6 +438,7 @@ export function scriptedBotMessage(
       return { type: 'offer', iVote: role.primary, youVote }
     }
     case 'eagerCommitter': {
+      if (role.startRound !== undefined && round < role.startRound) return { type: 'silent' }
       const acceptable = new Set(role.acceptable)
       for (let i = messageHistory.length - 1; i >= 0; i--) {
         const entry = messageHistory[i]
