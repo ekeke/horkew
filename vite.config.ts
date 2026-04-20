@@ -6,6 +6,7 @@ import { join, extname, resolve } from 'node:path'
 
 const scenariosSrc = 'src/retar/scenarios'
 const skollModelsSrc = 'src/skoll/models'
+const skollZeroModelsSrc = 'tmp/skoll-zero-multi-v1'
 const orchBase = 'tmp'
 
 function serveScenarios(): Plugin {
@@ -78,6 +79,36 @@ function serveSkollModels(): Plugin {
           source: readFileSync(join(skollModelsSrc, file), 'utf-8'),
         })
       }
+    },
+  }
+}
+
+/**
+ * skoll-zero の学習済みモデル (tmp/skoll-zero-multi-v1/{slot}/final.json) を
+ * /horkew/models/zero/{slot}.json で配信。
+ * 学習成果物なので dev のみ (build 時は未コミットのため emit しない)。
+ */
+function serveSkollZeroModels(): Plugin {
+  let base = '/horkew/'
+  return {
+    name: 'serve-skoll-zero-models',
+    configResolved(config) { base = config.base },
+    configureServer(server) {
+      const prefix = `${base}models/zero/`
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith(prefix)) return next()
+        const filename = decodeURIComponent(req.url.slice(prefix.length))
+        const slot = filename.replace(/\.json$/, '')
+        const filePath = join(skollZeroModelsSrc, slot, 'final.json')
+        if (!existsSync(filePath)) return next()
+        try {
+          const content = readFileSync(filePath, 'utf-8')
+          res.setHeader('Content-Type', 'application/json')
+          res.end(content)
+        } catch {
+          next()
+        }
+      })
     },
   }
 }
@@ -272,7 +303,7 @@ function servePublicEarly(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), serveStats(), servePublicEarly(), serveScenarios(), serveSkollModels(), servePretrainSnapshots()],
+  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), serveStats(), servePublicEarly(), serveScenarios(), serveSkollModels(), serveSkollZeroModels(), servePretrainSnapshots()],
   root: 'demo',
   base: '/horkew/',
   server: { port: 5375, strictPort: true },

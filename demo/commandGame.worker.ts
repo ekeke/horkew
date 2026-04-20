@@ -27,6 +27,11 @@ import { TransformerNetwork } from '../src/fenrir/src/ml/transformer-network.ts'
 import { inferObservationMode } from '../src/fenrir/src/observation.ts'
 import { MasonZeroNetwork } from '../src/skoll-zero/network/mason-zero.ts'
 import { MasonZeroAgent } from '../src/skoll-zero/selfplay/mason-zero-agent.ts'
+import {
+  VillageZeroAgent, WolfZeroAgent, FanaticZeroAgent,
+  HamsterZeroAgent, ImmoralistZeroAgent,
+} from '../src/skoll-zero/selfplay/role-zero-agents.ts'
+import type { RoleZeroAgent } from '../src/skoll-zero/selfplay/role-zero-agent.ts'
 import { TrainingBuffer } from '../src/skoll-zero/selfplay/buffer.ts'
 
 // ============================================================
@@ -123,40 +128,79 @@ function post(msg: FromWorkerMessage): void {
   }
 }
 
-/**
- * mason_zero NN を /horkew/models/mason.json からロードして MasonZeroAgent を構築。
- * 失敗時は null を返して呼び出し側で heuristic にフォールバックさせる。
- */
-async function buildMasonZeroAgent(
-  rolesMap: Map<SystemRole, number>,
-): Promise<MasonZeroAgent | null> {
-  try {
-    const url = new URL('models/mason.json', import.meta.url).toString()
-      .replace(/\/demo\/models\//, '/models/')  // dev 時は /horkew/models/ のみ有効
-    const res = await fetch('models/mason.json').catch(() =>
-      fetch(url).catch(() => null)
-    )
-    if (!res || !res.ok) return null
-    const data = await res.json()
-    const net = new TransformerNetwork(data.config, inferObservationMode(data.config.inputSize))
-    const weights = new Map<string, Float32Array>()
-    for (const [name, b64] of Object.entries(data.weights as Record<string, string>)) {
-      const binary = atob(b64)
-      const bytes = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-      weights.set(name, new Float32Array(bytes.buffer))
+/** checkpoint を fetch して Pure JS TransformerNetwork + MasonZeroNetwork wrapper に展開 */
+async function fetchMasonZeroNetwork(slot: string): Promise<MasonZeroNetwork | null> {
+  // 優先: /horkew/models/zero/{slot}.json (trained skoll-zero)
+  // fallback: /horkew/models/{slot}.json (SL warm-start)
+  for (const path of [`models/zero/${slot}.json`, `models/${slot}.json`]) {
+    try {
+      const res = await fetch(path)
+      if (!res.ok) continue
+      const data = await res.json()
+      const net = new TransformerNetwork(data.config, inferObservationMode(data.config.inputSize))
+      const weights = new Map<string, Float32Array>()
+      for (const [name, b64] of Object.entries(data.weights as Record<string, string>)) {
+        const binary = atob(b64)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+        weights.set(name, new Float32Array(bytes.buffer))
+      }
+      net.loadWeights(weights)
+      return new MasonZeroNetwork(net, { zeroValueHead: false })
+    } catch {
+      // 次の path にフォールバック
     }
-    net.loadWeights(weights)
-    const mzNet = new MasonZeroNetwork(net)
-    return new MasonZeroAgent({
-      nn: mzNet,
-      setup: rolesMap,
-      buffer: new TrainingBuffer(),  // 使い捨て (command play では学習しない)
-      selectionMode: 'argmax',        // deterministic for play
-    })
-  } catch (e) {
-    post({ type: 'error', message: `mason_zero load failed: ${e instanceof Error ? e.message : String(e)}` })
-    return null
+  }
+  return null
+}
+
+type ZeroSlot = 'mason' | 'village' | 'wolf' | 'fanatic' | 'hamster' | 'immoralist'
+
+const ZERO_SLOTS: ZeroSlot[] = ['mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist']
+
+/**
+ * 6 slot の skoll-zero NN をロードして RoleZeroAgent の Map を返す。
+ * 失敗した slot は null のまま、呼び出し側で heuristic にフォールバック。
+ */
+async function buildSkollZeroAgents(
+  rolesMap: Map<SystemRole, number>,
+): Promise<Map<ZeroSlot, RoleZeroAgent>> {
+  const out = new Map<ZeroSlot, RoleZeroAgent>()
+  const commonOpts = {
+    setup: rolesMap,
+    buffer: new TrainingBuffer(),
+    selectionMode: 'argmax' as const,
+  }
+  for (const slot of ZERO_SLOTS) {
+    const mzNet = await fetchMasonZeroNetwork(slot)
+    if (!mzNet) continue
+    const opts = { nn: mzNet, ...commonOpts }
+    const agent: RoleZeroAgent =
+      slot === 'mason' ? new MasonZeroAgent(opts)
+      : slot === 'village' ? new VillageZeroAgent(opts)
+      : slot === 'wolf' ? new WolfZeroAgent(opts)
+      : slot === 'fanatic' ? new FanaticZeroAgent(opts)
+      : slot === 'hamster' ? new HamsterZeroAgent(opts)
+      : new ImmoralistZeroAgent(opts)
+    out.set(slot, agent)
+  }
+  return out
+}
+
+function roleToSlot(role: SystemRole): ZeroSlot | null {
+  switch (role) {
+    case 'mason': return 'mason'
+    case 'villager':
+    case 'seer':
+    case 'medium':
+    case 'bodyguard':
+    case 'nekomata':
+      return 'village'
+    case 'werewolf': return 'wolf'
+    case 'fanatic': return 'fanatic'
+    case 'werehamster': return 'hamster'
+    case 'immoralist': return 'immoralist'
+    default: return null
   }
 }
 
@@ -176,11 +220,12 @@ async function startGame(opts: StartGameOptions): Promise<void> {
     hasFirstGhost: opts.hasFirstGhost,
   }
 
-  // mason 席に差し込む skoll-zero エージェント (fetch 失敗時は null)
-  const masonZeroAgent = await buildMasonZeroAgent(rolesMap)
-  const masonZeroCommandAgent: CommandAgent | null = masonZeroAgent
-    ? new SkollCommandAgent({ seed: seed + 2, master: masonZeroAgent })
-    : null
+  // 6 slot の skoll-zero エージェント (fetch 失敗 slot は heuristic fallback)
+  const zeroAgents = await buildSkollZeroAgents(rolesMap)
+  const zeroCommandAgents = new Map<ZeroSlot, CommandAgent>()
+  for (const [slot, agent] of zeroAgents) {
+    zeroCommandAgents.set(slot, new SkollCommandAgent({ seed: seed + 2, master: agent }))
+  }
 
   const liveEvents: Array<GameEvent | FenrirExtEvent> = []
   const recentComments: string[] = []
@@ -262,13 +307,13 @@ async function startGame(opts: StartGameOptions): Promise<void> {
         humanSeats.add(matchedSeats[0])
       }
 
-      // mason 席 (非人間) に skoll-zero ISMCTS エージェントを割当
-      if (masonZeroCommandAgent) {
-        for (const [seat, role] of seatRoles) {
-          if (role === 'mason' && !humanSeats.has(seat)) {
-            agents.set(seat, masonZeroCommandAgent)
-          }
-        }
+      // 非人間席を役職に応じた skoll-zero ISMCTS エージェントに割当
+      for (const [seat, role] of seatRoles) {
+        if (humanSeats.has(seat)) continue
+        const slot = roleToSlot(role)
+        if (!slot) continue
+        const agent = zeroCommandAgents.get(slot)
+        if (agent) agents.set(seat, agent)
       }
 
       // stateRef は onStateReady で onRolesAssigned の前に捕捉済み
