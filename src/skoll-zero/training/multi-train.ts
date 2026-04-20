@@ -47,6 +47,8 @@ type Args = {
   lr: number
   seed: number
   enabled: Set<keyof MultiTrainerSlots>
+  /** 前回実行の output dir。指定時は {dir}/{slot}/final.json から resume する */
+  resumeFrom: string | null
 }
 
 const ALL_SLOTS: (keyof MultiTrainerSlots)[] = [
@@ -81,6 +83,7 @@ function parseCli(): Args {
     lr: parseFloat(get('--lr') ?? '3e-4'),
     seed: parseInt(get('--seed') ?? '42', 10),
     enabled,
+    resumeFrom: get('--resume-from') ?? null,
   }
 }
 
@@ -105,8 +108,12 @@ function buildSlot(
     tfNet = createStandardZeroTfNetwork(args.lr)
   }
 
-  // warm-start (village 以外)
-  if (slotKey !== 'village') {
+  // resume > warm-start > random の順で読み込み先を決定
+  const resumePath = args.resumeFrom ? `${args.resumeFrom.replace(/\/$/, '')}/${slotKey}/final.json` : null
+  if (resumePath && existsSync(resumePath)) {
+    loadCheckpoint(pureNet, resumePath)
+    log(`${slotKey}: resume from ${resumePath}`)
+  } else if (slotKey !== 'village') {
     const ckptPath = WARM_START_PATHS[slotKey]
     if (existsSync(ckptPath)) {
       loadCheckpoint(pureNet, ckptPath)
