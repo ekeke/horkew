@@ -16,7 +16,7 @@
 import { existsSync } from 'node:fs'
 
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
-import { createSkollZeroTfNetwork } from '../network/config.ts'
+import { createSkollZeroTfNetwork } from '../network/tf-config.ts'
 import { loadSkollSupervisedWeights } from '../network/warm-start.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import { SkollZeroTrainer } from './trainer.ts'

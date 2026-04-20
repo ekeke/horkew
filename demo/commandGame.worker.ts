@@ -23,6 +23,11 @@ import type { CommandAgent } from '../src/fenrir/src/command-agents/command-agen
 import { SkollCommandAgent } from '../src/fenrir/src/command-agents/skoll-command-agent.ts'
 import { AsyncRemoteAgent } from '../src/fenrir/src/command-agents/async-remote-agent.ts'
 import type { FenrirExtEvent } from '../src/fenrir/src/events.ts'
+import { TransformerNetwork } from '../src/fenrir/src/ml/transformer-network.ts'
+import { inferObservationMode } from '../src/fenrir/src/observation.ts'
+import { MasonZeroNetwork } from '../src/skoll-zero/network/mason-zero.ts'
+import { MasonZeroAgent } from '../src/skoll-zero/selfplay/mason-zero-agent.ts'
+import { TrainingBuffer } from '../src/skoll-zero/selfplay/buffer.ts'
 
 // ============================================================
 // プロトコル型
@@ -118,6 +123,43 @@ function post(msg: FromWorkerMessage): void {
   }
 }
 
+/**
+ * mason_zero NN を /horkew/models/mason.json からロードして MasonZeroAgent を構築。
+ * 失敗時は null を返して呼び出し側で heuristic にフォールバックさせる。
+ */
+async function buildMasonZeroAgent(
+  rolesMap: Map<SystemRole, number>,
+): Promise<MasonZeroAgent | null> {
+  try {
+    const url = new URL('models/mason.json', import.meta.url).toString()
+      .replace(/\/demo\/models\//, '/models/')  // dev 時は /horkew/models/ のみ有効
+    const res = await fetch('models/mason.json').catch(() =>
+      fetch(url).catch(() => null)
+    )
+    if (!res || !res.ok) return null
+    const data = await res.json()
+    const net = new TransformerNetwork(data.config, inferObservationMode(data.config.inputSize))
+    const weights = new Map<string, Float32Array>()
+    for (const [name, b64] of Object.entries(data.weights as Record<string, string>)) {
+      const binary = atob(b64)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      weights.set(name, new Float32Array(bytes.buffer))
+    }
+    net.loadWeights(weights)
+    const mzNet = new MasonZeroNetwork(net)
+    return new MasonZeroAgent({
+      nn: mzNet,
+      setup: rolesMap,
+      buffer: new TrainingBuffer(),  // 使い捨て (command play では学習しない)
+      selectionMode: 'argmax',        // deterministic for play
+    })
+  } catch (e) {
+    post({ type: 'error', message: `mason_zero load failed: ${e instanceof Error ? e.message : String(e)}` })
+    return null
+  }
+}
+
 async function startGame(opts: StartGameOptions): Promise<void> {
   gameInFlight = true
   asyncAgent = new AsyncRemoteAgent()
@@ -133,6 +175,12 @@ async function startGame(opts: StartGameOptions): Promise<void> {
     seed,
     hasFirstGhost: opts.hasFirstGhost,
   }
+
+  // mason 席に差し込む skoll-zero エージェント (fetch 失敗時は null)
+  const masonZeroAgent = await buildMasonZeroAgent(rolesMap)
+  const masonZeroCommandAgent: CommandAgent | null = masonZeroAgent
+    ? new SkollCommandAgent({ seed: seed + 2, master: masonZeroAgent })
+    : null
 
   const liveEvents: Array<GameEvent | FenrirExtEvent> = []
   const recentComments: string[] = []
@@ -201,21 +249,33 @@ async function startGame(opts: StartGameOptions): Promise<void> {
       }
       matchedSeats.sort((a, b) => a - b)
 
+      const humanSeats = new Set<number>()
       if (opts.humanRoleIsMultiSeat) {
         for (const seat of matchedSeats) {
           agents.set(seat, asyncAgent!)
           humanSeatsForCommander.add(seat)
+          humanSeats.add(seat)
         }
       } else if (matchedSeats.length > 0) {
         agents.set(matchedSeats[0], asyncAgent!)
         humanSeatsForCommander.add(matchedSeats[0])
+        humanSeats.add(matchedSeats[0])
+      }
+
+      // mason 席 (非人間) に skoll-zero ISMCTS エージェントを割当
+      if (masonZeroCommandAgent) {
+        for (const [seat, role] of seatRoles) {
+          if (role === 'mason' && !humanSeats.has(seat)) {
+            agents.set(seat, masonZeroCommandAgent)
+          }
+        }
       }
 
       // stateRef は onStateReady で onRolesAssigned の前に捕捉済み
       post({
         type: 'rolesAssigned',
         seatRoles: [...seatRoles.entries()],
-        humanSeats: [...agents.keys()],
+        humanSeats: [...humanSeats],
         state: stateRef ? snapshotState(stateRef) : (null as unknown as GameState<CommandAdapterExt>),
       })
     },

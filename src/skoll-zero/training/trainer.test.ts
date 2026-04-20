@@ -7,10 +7,8 @@ import { join } from 'node:path'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { TrainingRecord } from '../selfplay/buffer.ts'
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
-import {
-  createSkollZeroNetwork,
-  createSkollZeroTfNetwork,
-} from '../network/config.ts'
+import { createSkollZeroNetwork } from '../network/config.ts'
+import { createSkollZeroTfNetwork } from '../network/tf-config.ts'
 import { loadCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { DEFAULT_SKOLL_ZERO_TRAIN_CONFIG } from './schedule.ts'
 import { SkollZeroTrainer, recordsToBatchInputs } from './trainer.ts'

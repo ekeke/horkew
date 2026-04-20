@@ -34,6 +34,11 @@ export type SkollCommandAgentOptions = {
   skollOptions?: SkollMasterOptions
   /** 決定性確保用の seed（fallback 生成時と内部 rng に渡す） */
   seed?: number
+  /**
+   * 事前構築済みの SkollMasterAgent (MasonZeroAgent 等の継承クラスを差込む用途)。
+   * 指定されると skollOptions は無視される。
+   */
+  master?: SkollMasterAgent
 }
 
 /** commander で top-1 と top-2 の score 差がこれ未満なら designate_runoff を検討 */
@@ -58,7 +63,7 @@ export class SkollCommandAgent implements CommandAgent {
   private fakeDivineRanking: Map<number, Map<number, FakeDivineCandidate[]>> = new Map()
 
   constructor(options: SkollCommandAgentOptions = {}) {
-    this.master = new SkollMasterAgent(options.skollOptions)
+    this.master = options.master ?? new SkollMasterAgent(options.skollOptions)
     this.fallback = options.fallback ?? new RandomCommandAgent(options.seed)
     this.rng = new Rng(options.seed)
   }
