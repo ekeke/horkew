@@ -51,10 +51,13 @@ export type MCTSResult = {
 export function runMCTS(
   rootObs: RootObservation,
   infoState: SimState,
-  masonSeat: number,
+  /** 決定者の席 (MCTS 木の root action を選ぶ seat) */
+  decisionSeat: number,
   determinizer: Determinizer,
   nn: MasonZeroNN,
   config: MCTSConfig = DEFAULT_MCTS_CONFIG,
+  /** value を評価する陣営視点 (default: village、mason/村側全般) */
+  faction: Faction = 'village',
 ): MCTSResult {
   const root = createTreeNode()
   if (determinizer.isOverflow()) {
@@ -65,21 +68,21 @@ export function runMCTS(
   }
   // root を先に NN 展開して Dirichlet noise を注入（rollout 中は descent のみ）。
   // 未展開だと noise を prior に効かせられず exploration が鈍る。
-  // alive / masonSeat は determinization で不変なので、サンプル world は mask 専用。
+  // alive / decisionSeat は determinization で不変なので、サンプル world は mask 専用。
   const firstWorld = determinizer.sample(config.rng)
   if (!firstWorld) {
     return { root, visits: new Map(), abortReason: 'no_consistent_world' }
   }
   const rootState = createSimState(firstWorld, infoState.alive, infoState.day, infoState.phase as 'day' | 'night')
-  if (rootState.phase !== 'terminal' && isMasonAlive(rootState, masonSeat)) {
-    expandWithNN(root, rootState, masonSeat, nn, rootObs)
+  if (rootState.phase !== 'terminal' && isMasonAlive(rootState, decisionSeat)) {
+    expandWithNN(root, rootState, decisionSeat, nn, rootObs)
     applyRootDirichletNoise(root, config)
   }
   for (let i = 0; i < config.nRollouts; i++) {
     const world = determinizer.sample(config.rng)
     if (!world) break
     const rolloutState = createSimState(world, infoState.alive, infoState.day, infoState.phase as 'day' | 'night')
-    runOneRollout(root, rolloutState, masonSeat, nn, rootObs, config)
+    runOneRollout(root, rolloutState, decisionSeat, nn, rootObs, config, faction)
   }
   return { root, visits: collectRootVisits(root), abortReason: null }
 }
@@ -163,10 +166,11 @@ function sampleNormal(rng: () => number): number {
 function runOneRollout(
   root: TreeNode,
   initialState: SimState,
-  masonSeat: number,
+  decisionSeat: number,
   nn: MasonZeroNN,
   rootObs: RootObservation,
   config: MCTSConfig,
+  faction: Faction,
 ): void {
   const path: { node: TreeNode, action: number }[] = []
   let node = root
@@ -174,29 +178,29 @@ function runOneRollout(
 
   while (true) {
     if (state.phase === 'terminal') {
-      backup(path, outcomeToMasonValue(state.outcome))
+      backup(path, outcomeToValue(state.outcome, faction))
       return
     }
-    if (!isMasonAlive(state, masonSeat)) {
-      // mason 死亡: tree はこれ以上分岐しない、heuristic rollout で終端まで
+    if (!isMasonAlive(state, decisionSeat)) {
+      // 決定者死亡: tree はこれ以上分岐しない、heuristic rollout で終端まで
       const finalOutcome = runRollout(cloneSimState(state))
-      backup(path, outcomeToMasonValue(finalOutcome))
+      backup(path, outcomeToValue(finalOutcome, faction))
       return
     }
     if (!node.expanded) {
-      const value = expandWithNN(node, state, masonSeat, nn, rootObs)
+      const value = expandWithNN(node, state, decisionSeat, nn, rootObs)
       backup(path, value)
       return
     }
     const action = selectActionUCB(node, config.cPuct)
     if (action < 0) {
-      // 合法 action がない（理論上 mason 生存時は必ずあるはず）
+      // 合法 action がない（理論上 decisionSeat 生存時は必ずあるはず）
       backup(path, 0)
       return
     }
-    // step: mason vote = action、他席は heuristic
+    // step: decisionSeat の vote = action、他席は heuristic
     const nextState = cloneSimState(state)
-    const override = new Map<number, number>([[masonSeat, action]])
+    const override = new Map<number, number>([[decisionSeat, action]])
     stepDayNightCycle(nextState, override)
     let child = node.children.get(action)
     if (!child) {
@@ -270,18 +274,34 @@ function collectRootVisits(root: TreeNode): Map<number, number> {
 }
 
 /**
- * GameOutcome → mason 視点の value [-1.3, +1]。
- *
- * - village_win: +1.0
- * - wolf_win: -1.0
- * - hamster_win: -1.3 (狐勝ちは「3陣営で最悪」、reward.ts と一致)
- * - ongoing: 0（ここに来るのは異常系のみ）
+ * どの陣営の視点で value を評価するか。
+ * 陣営別に 3 陣営の勝利を +1 / -1 / -1.3 (敵陣営の最悪勝利) にマップ。
  */
-export function outcomeToMasonValue(outcome: GameOutcome | null): number {
-  switch (outcome) {
-    case 'village_win': return 1.0
-    case 'wolf_win': return -1.0
-    case 'hamster_win': return -1.3
-    default: return 0
+export type Faction = 'village' | 'wolf' | 'hamster'
+
+/**
+ * GameOutcome → 指定 faction 視点の value [-1.3, +1]。
+ *
+ * 各陣営の視点で「自陣営勝ち = +1」「他 2 陣営のうち最悪 = -1.3」。
+ * reward.ts と整合 (village 視点で hamster_win が最悪という慣例)。
+ *
+ * - village faction: village_win +1 / wolf_win -1 / hamster_win -1.3
+ * - wolf faction:    wolf_win +1 / village_win -1 / hamster_win -1.3
+ * - hamster faction: hamster_win +1 / village_win -1 / wolf_win -1.3
+ */
+export function outcomeToValue(outcome: GameOutcome | null, faction: Faction): number {
+  if (outcome == null) return 0
+  switch (faction) {
+    case 'village':
+      return outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.0 : outcome === 'hamster_win' ? -1.3 : 0
+    case 'wolf':
+      return outcome === 'wolf_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'hamster_win' ? -1.3 : 0
+    case 'hamster':
+      return outcome === 'hamster_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'wolf_win' ? -1.3 : 0
   }
+}
+
+/** 互換: mason は village faction */
+export function outcomeToMasonValue(outcome: GameOutcome | null): number {
+  return outcomeToValue(outcome, 'village')
 }

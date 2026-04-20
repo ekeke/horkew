@@ -1,16 +1,15 @@
 /**
- * skoll-zero M5 smoke-train。warm start checkpoint から N round 自己対戦 + 学習を回す。
- *
- * 本訓練ではなく「Trainer が end-to-end で動くか」の確認用。
- * 既定 3 rounds × 10 games × 100 MCTS rollouts。
+ * skoll-zero training loop。warm start checkpoint から N round 自己対戦 + 学習を回す。
  *
  * 使い方:
  *   node --experimental-strip-types src/skoll-zero/training/smoke-train.ts \
- *     --ckpt tmp/skoll-mb-large-v2/phases/00-skoll-supervised/ckpt-mason_collective/collective_final.json \
- *     --output tmp/skoll-zero-smoke \
- *     --rounds 3 --games 10 --rollouts 100
+ *     --ckpt src/skoll/models/mason.json \
+ *     --output tmp/skoll-zero-train \
+ *     --rounds 20 --games 50 --rollouts 200 \
+ *     --eval-every 5 --eval-games 50
  *
- * --ckpt を省略すると Phase 1 の SL checkpoint デフォルト path を使う。
+ * --eval-every N を指定すると N round ごとに head-to-head eval を実行して
+ * baseline heuristic に対する村勝率を測定する。
  */
 
 import { existsSync } from 'node:fs'
@@ -21,6 +20,7 @@ import { loadSkollSupervisedWeights } from '../network/warm-start.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import { SkollZeroTrainer } from './trainer.ts'
 import { DEFAULT_SKOLL_ZERO_TRAIN_CONFIG } from './schedule.ts'
+import { runHeadToHead } from '../eval/head-to-head.ts'
 
 type Args = {
   ckptPath: string | null
@@ -32,9 +32,12 @@ type Args = {
   stepsPerRound: number
   lr: number
   seed: number
+  evalEvery: number
+  evalGames: number
+  evalRollouts: number
 }
 
-const DEFAULT_CKPT_PATH = 'tmp/skoll-mb-large-v2/phases/00-skoll-supervised/ckpt-mason_collective/collective_final.json'
+const DEFAULT_CKPT_PATH = 'src/skoll/models/mason.json'
 
 function parseCli(): Args {
   const argv = process.argv.slice(2)
@@ -44,7 +47,7 @@ function parseCli(): Args {
   }
   return {
     ckptPath: get('--ckpt') ?? DEFAULT_CKPT_PATH,
-    outputDir: get('--output') ?? 'tmp/skoll-zero-smoke',
+    outputDir: get('--output') ?? 'tmp/skoll-zero-train',
     rounds: parseInt(get('--rounds') ?? '3', 10),
     games: parseInt(get('--games') ?? '10', 10),
     rollouts: parseInt(get('--rollouts') ?? '100', 10),
@@ -52,6 +55,9 @@ function parseCli(): Args {
     stepsPerRound: parseInt(get('--steps') ?? '20', 10),
     lr: parseFloat(get('--lr') ?? '3e-4'),
     seed: parseInt(get('--seed') ?? '42', 10),
+    evalEvery: parseInt(get('--eval-every') ?? '0', 10),
+    evalGames: parseInt(get('--eval-games') ?? '50', 10),
+    evalRollouts: parseInt(get('--eval-rollouts') ?? '50', 10),
   }
 }
 
@@ -96,6 +102,27 @@ async function main(): Promise<void> {
     log(`round ${r}/${args.rounds} elapsed=${elapsed}s records+=${stats.recordsAdded} buf=${stats.bufferSize} expired=${stats.bufferExpired} steps=${stats.stepsRun}`)
     log(`  loss=${stats.avgLoss.toFixed(4)} policy=${stats.avgPolicyLoss.toFixed(4)} value=${stats.avgValueLoss.toFixed(4)}`)
     log(`  outcomes: vill=${stats.outcomes.villagerWon} wolf=${stats.outcomes.werewolfWon} hamster=${stats.outcomes.werehamsterWon} draw=${stats.outcomes.draw}`)
+
+    if (args.evalEvery > 0 && r % args.evalEvery === 0) {
+      log(`--- eval @ round ${r} (${args.evalGames} games × rollouts=${args.evalRollouts}) ---`)
+      const evalResults = await runHeadToHead({
+        ckptPath: stats.checkpointPath,
+        games: args.evalGames,
+        baseSeed: 700_000,
+        variants: [
+          { name: 'baseline' },
+          {
+            name: 'trained',
+            mode: 'zero',
+            zero: { rollouts: args.evalRollouts, zeroValueHead: false, selectionMode: 'argmax' },
+          },
+        ],
+      })
+      const base = evalResults.find(x => x.name === 'baseline')?.villageWinRate ?? 0
+      const trained = evalResults.find(x => x.name === 'trained')?.villageWinRate ?? 0
+      const delta = (trained - base) * 100
+      log(`eval@${r}: baseline=${(base * 100).toFixed(1)}% trained=${(trained * 100).toFixed(1)}% (${delta >= 0 ? '+' : ''}${delta.toFixed(1)}pp)`)
+    }
   }
 
   tfNet.dispose()
