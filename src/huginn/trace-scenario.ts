@@ -13,7 +13,7 @@
 
 import { train } from './train.ts'
 import { catalog, type Scenario } from './scenarios.ts'
-import { AbstractGame } from './abstract-env.ts'
+import { AbstractGame, scriptedBotMessage, scriptedBotVoteIdx } from './abstract-env.ts'
 import { TrainableNetwork, applyMask } from './trainable-network.ts'
 import { Rng } from './rng.ts'
 import { encodeObservation } from './observation.ts'
@@ -100,7 +100,7 @@ function greedyTrace(
     for (let a = 0; a < N; a++) {
       const role = env.getAgentRole(a)
       if (role !== 'learning') {
-        const m: Message = { type: 'silent' }
+        const m = scriptedBotMessage(role, a, round, messageHistory)
         perAgentMessages[a].push(m)
         roundMsgs.push(m)
         continue
@@ -131,19 +131,7 @@ function greedyTrace(
   for (let a = 0; a < N; a++) {
     const role = env.getAgentRole(a)
     if (role !== 'learning') {
-      let idx: number
-      if (typeof role === 'object' && role.type === 'fixedVote') {
-        idx = inputs[a].participants.indexOf(role.target)
-        if (idx < 0 || inputs[a].excluded[idx]) {
-          const cand: number[] = []
-          for (let i = 0; i < N; i++) if (!inputs[a].excluded[i]) cand.push(i)
-          idx = cand[Math.floor(rng.next() * cand.length)]
-        }
-      } else {
-        const cand: number[] = []
-        for (let i = 0; i < N; i++) if (!inputs[a].excluded[i]) cand.push(i)
-        idx = cand[Math.floor(rng.next() * cand.length)]
-      }
+      const idx = scriptedBotVoteIdx(role, a, inputs[a], messageHistory, rng)
       finalVoteIdx[a] = idx
       finalVotes[a] = inputs[a].participants[idx]
       continue
@@ -188,9 +176,18 @@ function printGame(scenario: Scenario, env: AbstractGame, gameNum: number, resul
   const setupRows: string[][] = []
   for (let a = 0; a < N; a++) {
     const role = env.getAgentRole(a)
-    const roleStr = role === 'learning'
-      ? 'learn'
-      : (typeof role === 'object' && role.type === 'fixedVote' ? `fixed→s${role.target}` : 'silent')
+    let roleStr: string
+    if (role === 'learning') {
+      roleStr = 'learn'
+    } else if (typeof role === 'object' && role.type === 'fixedVote') {
+      roleStr = `fixed→s${role.target}`
+    } else if (typeof role === 'object' && role.type === 'offerer') {
+      roleStr = `offerer(p=s${role.primary})`
+    } else if (typeof role === 'object' && role.type === 'eagerCommitter') {
+      roleStr = `committer(p=s${role.primary})`
+    } else {
+      roleStr = 'silent'
+    }
     const prim = primaries.get(a)
     const primStr = prim !== undefined ? `s${prim}` : '-'
     const desireStr = Array.from(result.inputs[a].desire).map(d => d.toFixed(2)).join(' ')
@@ -270,11 +267,17 @@ function main(): void {
   console.log(`Training: iter=${iterations}, gamesPerIter=${gamesPerIter}, traceGames=${traceGames}`)
   console.log(``)
 
+  const entropyBonus = Number(process.env.HUGINN_ENTROPY ?? '0.01')
+  const optimizer = (process.env.HUGINN_OPTIMIZER ?? 'sgd') as 'sgd' | 'adam'
+  const lr = Number(process.env.HUGINN_LR ?? '0.05')
+  console.log(`Hyperparams: entropy=${entropyBonus}, optimizer=${optimizer}, lr=${lr}`)
+  console.log(``)
+
   const startedAt = Date.now()
   const { network } = train({
     iterations,
     gamesPerIter,
-    lr: 0.05,
+    lr,
     dModel: 32,
     numLayers: 1,
     numHeads: 2,
@@ -285,7 +288,8 @@ function main(): void {
     greedyEvalEvery: 50,
     greedyEvalGames: 64,
     normalizeAdvantage: true,
-    entropyBonus: 0.01,
+    entropyBonus,
+    optimizer,
   })
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
   console.log(``)

@@ -17,7 +17,7 @@
  * - 報酬 = desire[eliminated] + 食言ペナルティ
  */
 
-import type { HuginnInput, AgentId } from './types.ts'
+import type { HuginnInput, AgentId, Message } from './types.ts'
 import { COMMIT_VIOLATION_PENALTY } from './types.ts'
 import type { Rng } from './rng.ts'
 import { detectCommitViolation, type Trace } from './protocol.ts'
@@ -26,6 +26,12 @@ export type AgentRole =
   | 'learning'                          // policy 学習対象
   | { type: 'fixedVote'; target: AgentId; silent?: boolean }   // 固定投票、silent なら全ラウンド SILENT
   | { type: 'silent' }                  // SILENT 固定、投票はランダム
+  /** 実演ボット: 毎 round offer(iVote=primary, youVote=(acceptable\{primary}) から round でサイクル) を出す.
+   *  投票は primary. primary/acceptable はシナリオ定義では論理 seat. reset() で実 seat に変換される. */
+  | { type: 'offerer'; primary: AgentId; acceptable: AgentId[] }
+  /** 実演ボット: 既出 offer のうち youVote ∈ acceptable を見つけたら即 commit(youVote) を出す.
+   *  自分の過去 commit があればその target に投票、無ければ primary. */
+  | { type: 'eagerCommitter'; primary: AgentId; acceptable: AgentId[] }
 
 /** シナリオ作者が投票帰結に対する報酬を明示指定するための override エントリ. */
 export type OutcomeReward = {
@@ -141,7 +147,7 @@ export class AbstractGame {
       this._logicalOfActual[actualOfLogical[logical]] = logical
     }
 
-    // 論理で書かれた agentRoles を実 seat 配置に展開. fixedVote target も同じ permutation を通す.
+    // 論理で書かれた agentRoles を実 seat 配置に展開. fixedVote/offerer/eagerCommitter の target/primary/acceptable も permutation で変換.
     if (this.config.agentRoles) {
       const newRoles = new Array<AgentRole>(N)
       for (let logical = 0; logical < N; logical++) {
@@ -152,6 +158,18 @@ export class AbstractGame {
             type: 'fixedVote',
             target: actualOfLogical[baseRole.target],
             ...(baseRole.silent !== undefined ? { silent: baseRole.silent } : {}),
+          }
+        } else if (typeof baseRole === 'object' && baseRole.type === 'offerer') {
+          newRoles[actual] = {
+            type: 'offerer',
+            primary: actualOfLogical[baseRole.primary],
+            acceptable: baseRole.acceptable.map(l => actualOfLogical[l]),
+          }
+        } else if (typeof baseRole === 'object' && baseRole.type === 'eagerCommitter') {
+          newRoles[actual] = {
+            type: 'eagerCommitter',
+            primary: actualOfLogical[baseRole.primary],
+            acceptable: baseRole.acceptable.map(l => actualOfLogical[l]),
           }
         } else {
           newRoles[actual] = baseRole
@@ -351,4 +369,89 @@ export class AbstractGame {
 
 function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x))
+}
+
+export type MessageHistoryEntry = { round: number; sender: AgentId; message: Message }
+
+/**
+ * 非 learning ボットの各 round の発話を決める. learning は呼び出し側で扱う.
+ * role は reset() で permutation 変換済みの、実 seat ベースのもの.
+ */
+export function scriptedBotMessage(
+  role: AgentRole,
+  self: AgentId,
+  round: number,
+  messageHistory: MessageHistoryEntry[],
+): Message {
+  if (role === 'learning') throw new Error('scriptedBotMessage called for learning role')
+  if (typeof role !== 'object') return { type: 'silent' }
+  switch (role.type) {
+    case 'fixedVote':
+    case 'silent':
+      return { type: 'silent' }
+    case 'offerer': {
+      if (role.primary === self) return { type: 'silent' }
+      const others = role.acceptable.filter(x => x !== role.primary && x !== self)
+      if (others.length === 0) return { type: 'silent' }
+      const youVote = others[round % others.length]
+      return { type: 'offer', iVote: role.primary, youVote }
+    }
+    case 'eagerCommitter': {
+      const acceptable = new Set(role.acceptable)
+      for (let i = messageHistory.length - 1; i >= 0; i--) {
+        const entry = messageHistory[i]
+        if (entry.sender === self) continue
+        const m = entry.message
+        if (m.type === 'offer' && acceptable.has(m.youVote) && m.youVote !== self) {
+          return { type: 'commit', target: m.youVote }
+        }
+      }
+      return { type: 'silent' }
+    }
+  }
+}
+
+/**
+ * 非 learning ボットの最終投票 (participants インデックス) を決める. learning は呼び出し側で扱う.
+ */
+export function scriptedBotVoteIdx(
+  role: AgentRole,
+  self: AgentId,
+  input: HuginnInput,
+  messageHistory: MessageHistoryEntry[],
+  rng: Rng,
+): number {
+  const randomNonExcluded = (): number => {
+    const cand: number[] = []
+    for (let i = 0; i < input.participants.length; i++) if (!input.excluded[i]) cand.push(i)
+    return cand[Math.floor(rng.next() * cand.length)]
+  }
+  const tryIdxOf = (target: AgentId): number | null => {
+    const idx = input.participants.indexOf(target)
+    if (idx < 0 || input.excluded[idx]) return null
+    return idx
+  }
+  if (typeof role !== 'object') return randomNonExcluded()
+  switch (role.type) {
+    case 'fixedVote': {
+      return tryIdxOf(role.target) ?? randomNonExcluded()
+    }
+    case 'silent':
+      return randomNonExcluded()
+    case 'offerer': {
+      return tryIdxOf(role.primary) ?? randomNonExcluded()
+    }
+    case 'eagerCommitter': {
+      let lastCommitTarget: AgentId | null = null
+      for (const entry of messageHistory) {
+        if (entry.sender !== self) continue
+        if (entry.message.type === 'commit') lastCommitTarget = entry.message.target
+      }
+      if (lastCommitTarget !== null) {
+        const idx = tryIdxOf(lastCommitTarget)
+        if (idx !== null) return idx
+      }
+      return tryIdxOf(role.primary) ?? randomNonExcluded()
+    }
+  }
 }

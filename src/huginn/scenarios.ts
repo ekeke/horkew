@@ -325,6 +325,68 @@ export function trio3v2Block(): Scenario {
   }
 }
 
+/**
+ * 実演デモ (学習なし): 2 bot 村 (offerer + eagerCommitter) vs 狼 + 狐.
+ *
+ * pair2v2Split と同じ構造だが、2 村を学習 agent ではなくスクリプトボットに置き換えた.
+ * 論理 seat:
+ *   s0 = offerer 村 (primary=s2 狼, acceptable={s2,s3}) — 毎 round offer(iVote=s2, youVote=s3)
+ *   s1 = eagerCommitter 村 (primary=s3 狐, acceptable={s2,s3}) — offer.youVote=s3 を見て commit(s3)
+ *   s2 = 狼 (fixedVote→s3)
+ *   s3 = 狐 (fixedVote→s2)
+ *
+ * 期待帰結: offerer→s2, committer→s3, 狼→s3, 狐→s2 で 2-way tie (s2,s3) = 村勝確率 50%.
+ * 学習 agent なしなので reward 集計は 0、プロトコルの動作検証のみ.
+ */
+export function pair2v2SplitMentor(): Scenario {
+  const envConfig: EnvConfig = {
+    numAgents: 4,
+    agentRoles: [
+      { type: 'offerer', primary: 2, acceptable: [2, 3] },
+      { type: 'eagerCommitter', primary: 3, acceptable: [2, 3] },
+      { type: 'fixedVote', target: 3 },
+      { type: 'fixedVote', target: 2 },
+    ],
+    randomizeRolesPerGame: true,
+    desireCorrelation: 0.7,
+    kRounds: 4,
+    rewardMode: 'eliminated',
+    consensusBonus: 0,
+    outcomeRewards: {
+      '2,3': { reward: 1.0, label: '狼狐 tie → 引き分け (実演プロトコル成功)' },
+    },
+  }
+  return {
+    name: 'pair2v2SplitMentor',
+    description:
+      '実演デモ: 2 bot 村 (offerer + eagerCommitter) vs 狼+狐. 学習 agent なし. offer→commit プロトコルの動作検証用.',
+    learningObjective:
+      '(学習なし) bot プロトコル検証: offerer が offer(iVote=s2, youVote=s3) を出す → eagerCommitter が commit(s3) → 分散投票で s2-s3 tie 成立.',
+    envConfig,
+    analysis: {
+      N: 4,
+      learningAgentCount: 0,
+      botAgentCount: 4,
+      majority: 3,
+      expectedWinRateOnFullCoordination: 0,   // no learners
+    },
+    roles: [
+      { seat: 0, label: '村-offer', kind: 'bot', team: 'village',  winCondition: '狼全滅 かつ 狐非生存',           suggestedVoteTarget: '狼 s2 (primary)',   knowledge: { 2: ['werewolf', '狼'], 3: ['fox', '狐'] } },
+      { seat: 1, label: '村-commit', kind: 'bot', team: 'village',  winCondition: '狼全滅 かつ 狐非生存',           suggestedVoteTarget: '狐 s3 (primary)',   knowledge: { 2: ['werewolf', '狼'], 3: ['fox', '狐'] } },
+      { seat: 2, label: '狼',      kind: 'bot', team: 'werewolf', winCondition: 'PP (狼 ≥ 対抗) かつ 狐非生存', suggestedVoteTarget: '狐 (seat3)',          knowledge: {} },
+      { seat: 3, label: '狐',      kind: 'bot', team: 'fox',      winCondition: '自分以外の誰かが処刑',           suggestedVoteTarget: '狼 (seat2)',          knowledge: {} },
+    ],
+    outcomes: [
+      {
+        label: 'プロトコル完遂 (想定帰結)',
+        voteTally: 's2: 2 (村-offer + 狐), s3: 2 (村-commit + 狼)',
+        result: '2-way tie (s2, s3) → 50% 村勝',
+        learnerWinRate: 0.5,
+      },
+    ],
+  }
+}
+
 // ============================================================
 // Catalog
 // ============================================================
@@ -333,4 +395,5 @@ export const catalog: Record<string, () => Scenario> = {
   pair2v2Block,
   pair2v2Split,
   trio3v2Block,
+  pair2v2SplitMentor,
 }

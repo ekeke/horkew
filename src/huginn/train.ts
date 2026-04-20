@@ -14,7 +14,13 @@ import {
   logProbOf,
   softmax,
 } from './trainable-network.ts'
-import { AbstractGame, type EnvConfig, type StepResult } from './abstract-env.ts'
+import {
+  AbstractGame,
+  type EnvConfig,
+  type StepResult,
+  scriptedBotMessage,
+  scriptedBotVoteIdx,
+} from './abstract-env.ts'
 import { Rng } from './rng.ts'
 import { encodeObservation } from './observation.ts'
 import { buildVocabLayout, decodeMessage, buildLegalMask } from './message-vocab.ts'
@@ -325,9 +331,9 @@ function rolloutGame(
     const roundMsgs: Message[] = []
     for (let a = 0; a < N; a++) {
       const role = env.getAgentRole(a)
-      // Bot (非 learning) は SILENT 固定で trace に積まない
+      // Bot (非 learning) はスクリプトされた発話を出す. trace には積まない (学習対象外).
       if (role !== 'learning') {
-        const message: Message = { type: 'silent' }
+        const message = scriptedBotMessage(role, a, round, messageHistory)
         perAgentMessages[a].push(message)
         roundMsgs.push(message)
         continue
@@ -370,23 +376,8 @@ function rolloutGame(
   const finalVoteIdx: number[] = []
   for (let a = 0; a < N; a++) {
     const role = env.getAgentRole(a)
-    // Bot の投票は固定／ランダム
     if (role !== 'learning') {
-      let idx: number
-      if (typeof role === 'object' && role.type === 'fixedVote') {
-        idx = inputs[a].participants.indexOf(role.target)
-        if (idx < 0 || inputs[a].excluded[idx]) {
-          // fallback: 自分以外でランダム
-          const cand: number[] = []
-          for (let i = 0; i < inputs[a].participants.length; i++) if (!inputs[a].excluded[i]) cand.push(i)
-          idx = cand[Math.floor(rng.next() * cand.length)]
-        }
-      } else {
-        const cand: number[] = []
-        for (let i = 0; i < inputs[a].participants.length; i++) if (!inputs[a].excluded[i]) cand.push(i)
-        idx = cand[Math.floor(rng.next() * cand.length)]
-      }
-      finalVoteIdx.push(idx)
+      finalVoteIdx.push(scriptedBotVoteIdx(role, a, inputs[a], messageHistory, rng))
       continue
     }
     const obs: Observation = {
@@ -438,7 +429,7 @@ function greedyEval(
   network: TrainableNetwork,
   env: AbstractGame,
   layout: ReturnType<typeof buildVocabLayout>,
-  _rng: Rng,
+  rng: Rng,
   numGames: number,
 ): number {
   let total = 0
@@ -448,10 +439,18 @@ function greedyEval(
     const N = inputs.length
     const messageHistory: { round: number; sender: AgentId; message: Message }[] = []
     const pastViolations = new Map<AgentId, number>()
+    const perAgentMessages: Message[][] = inputs.map(() => [])
 
     for (let round = 0; round < K_ROUNDS; round++) {
       const roundMsgs: Message[] = []
       for (let a = 0; a < N; a++) {
+        const role = env.getAgentRole(a)
+        if (role !== 'learning') {
+          const m = scriptedBotMessage(role, a, round, messageHistory)
+          perAgentMessages[a].push(m)
+          roundMsgs.push(m)
+          continue
+        }
         const obs: Observation = { input: inputs[a], roundNumber: round, messageHistory, pastCommitViolations: pastViolations }
         const enc = encodeObservation(obs, K_ROUNDS)
         const result = network.forward(enc.cls, enc.agents, enc.numAgents)
@@ -459,7 +458,9 @@ function greedyEval(
         const mask = buildLegalMask(inputs[a], recentOffers, layout)
         const masked = applyMask(result.msgLogits, mask)
         const tokenId = argmax(masked)
-        roundMsgs.push(decodeMessage(tokenId, inputs[a].participants, layout))
+        const m = decodeMessage(tokenId, inputs[a].participants, layout)
+        perAgentMessages[a].push(m)
+        roundMsgs.push(m)
       }
       for (let a = 0; a < N; a++) {
         messageHistory.push({ round, sender: inputs[a].self, message: roundMsgs[a] })
@@ -467,6 +468,11 @@ function greedyEval(
     }
     const finalVotes: number[] = []
     for (let a = 0; a < N; a++) {
+      const role = env.getAgentRole(a)
+      if (role !== 'learning') {
+        finalVotes.push(scriptedBotVoteIdx(role, a, inputs[a], messageHistory, rng))
+        continue
+      }
       const obs: Observation = { input: inputs[a], roundNumber: K_ROUNDS, messageHistory, pastCommitViolations: pastViolations }
       const enc = encodeObservation(obs, K_ROUNDS)
       const result = network.forward(enc.cls, enc.agents, enc.numAgents)
@@ -479,7 +485,7 @@ function greedyEval(
       perAgent: inputs.map((input, a) => ({
         agent: input.self,
         steps: [],
-        messages: [],
+        messages: perAgentMessages[a],
         finalVoteIdx: finalVotes[a],
         finalVoteLogProb: 0,
         finalVoteValue: 0,
