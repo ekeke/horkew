@@ -9,7 +9,6 @@
   import { estimateWorldCount, estimateRuntimeMs, type WorldEstimate } from '../src/skoll/estimate.ts'
   import {
     loadSkollNetworkByPerspective,
-    loadSkollNetworkFromJson,
     runSkollNNInference,
     type Perspective,
     type CheckpointMeta,
@@ -208,14 +207,24 @@
 
   // === NN-skoll handlers ===
 
+  /** perspective キャッシュ: 一度ロードしたモデルは再利用 */
+  const nnCache = new Map<Perspective, { network: AnyNetwork, meta: CheckpointMeta }>()
+
   async function loadSelectedPerspective() {
+    const hit = nnCache.get(nnPerspective)
+    if (hit) {
+      nnNetwork = hit.network
+      nnMeta = hit.meta
+      nnLoadError = ''
+      return
+    }
     nnLoadError = ''
     nnLoading = true
     try {
       const { network, meta } = await loadSkollNetworkByPerspective(nnPerspective)
+      nnCache.set(nnPerspective, { network, meta })
       nnNetwork = network
       nnMeta = meta
-      nnResult = null
     } catch (e) {
       nnLoadError = e instanceof Error ? e.message : String(e)
       nnNetwork = null
@@ -225,23 +234,12 @@
     }
   }
 
-  async function onNnFileSelect(ev: Event) {
-    const input = ev.target as HTMLInputElement
-    const file = input.files?.[0]
-    if (!file) return
-    nnLoadError = ''
-    try {
-      const text = await file.text()
-      const { network, meta } = loadSkollNetworkFromJson(text)
-      nnNetwork = network
-      nnMeta = meta
-      nnResult = null
-    } catch (e) {
-      nnLoadError = e instanceof Error ? e.message : String(e)
-      nnNetwork = null
-      nnMeta = null
-    }
-  }
+  // perspective 変更 (および初期 mount) で自動的に該当モデルを load
+  $effect(() => {
+    void nnPerspective  // subscribe
+    nnResult = null
+    loadSelectedPerspective()
+  })
 
   function parseSeatList(s: string): number[] {
     return s.split(/[,\s]+/).map(x => parseInt(x, 10)).filter(x => Number.isFinite(x) && x > 0)
@@ -441,20 +439,15 @@
     <div class="skoll-controls">
       <label>
         視点:
-        <select bind:value={nnPerspective} onchange={() => { nnNetwork = null; nnMeta = null; nnResult = null }}>
+        <select bind:value={nnPerspective}>
           {#each perspectives as p}
             <option value={p}>{perspectiveLabels[p]}</option>
           {/each}
         </select>
       </label>
-      <button class="skoll-btn" onclick={loadSelectedPerspective} disabled={nnLoading}>
-        {nnLoading ? '読込中...' : 'モデル読込'}
-      </button>
-      <label class="nn-file-label">
-        <input type="file" accept=".json" onchange={onNnFileSelect} class="nn-file-input" />
-        <span class="skoll-btn">file から</span>
-      </label>
-      {#if nnMeta}
+      {#if nnLoading}
+        <span class="skoll-stats">読込中...</span>
+      {:else if nnMeta}
         <span class="skoll-stats">
           iter {nnMeta.iteration} / {new Date(nnMeta.timestamp).toLocaleString()}
         </span>
@@ -801,15 +794,6 @@
     font-weight: bold;
     color: var(--ctp-mauve);
     font-size: 0.9rem;
-  }
-
-  .nn-file-input {
-    display: none;
-  }
-
-  .nn-file-label {
-    display: inline-block;
-    cursor: pointer;
   }
 
   .nn-config {
