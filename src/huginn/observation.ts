@@ -37,7 +37,8 @@ export const CLS_FEATURE_DIMS = 8
 //   9: offersIVoteCount   — このゲームで「i に "I vote" で投じる」と宣言された offer の count / 10
 //  10: offersYouVoteCount — このゲームで「i に "You vote" と要請する」offer の count / 10
 //                           unanimous offer(X,X) は両方に加算. split offer(X,Y) は別々の seat に加算.
-export const AGENT_FEATURE_DIMS = 11
+//  11: isDesignationTarget — 指定進行の許容投票先集合に i が含まれるなら 1. ゲーム開始時から不変、全 agent 共有.
+export const AGENT_FEATURE_DIMS = 12
 
 export type ObservationIntermediate = {
   cls: Float32Array
@@ -59,6 +60,7 @@ export function collectObservation(obs: Observation, kRounds: number): Observati
     const violations = obs.pastCommitViolations.get(input.participants[i]) ?? 0
     agents[off + 4] = Math.min(violations, 5) / 5
     agents[off + 8] = i / MAX_AGENTS
+    agents[off + 11] = input.isDesignationTarget[i] ? 1 : 0
   }
 
   for (const entry of obs.messageHistory) {

@@ -18,7 +18,7 @@
  */
 
 import type { HuginnInput, AgentId, Message } from './types.ts'
-import { COMMIT_VIOLATION_PENALTY, DESIRE_HIGH_BASE } from './types.ts'
+import { COMMIT_VIOLATION_PENALTY, DESIGNATION_VIOLATION_PENALTY, DESIRE_HIGH_BASE } from './types.ts'
 import type { Rng } from './rng.ts'
 import { detectCommitViolation, type Trace } from './protocol.ts'
 
@@ -82,6 +82,9 @@ export type EnvConfig = {
    *  primaryFromBots / teams 由来の primary を override する (fixedPrimaries は更に上書き可能).
    *  bot プールに混ぜたくない agent (例: 村メンターボット) がいる場合に使う. */
   primaryCandidates?: AgentId[]
+  /** 指定進行: final vote の許容集合 (論理 seat). 集合外に投票した learner は DESIGNATION_VIOLATION_PENALTY.
+   *  「ラン指定」(村の民意で範囲内から吊り先を選ぶ) をプロトコルに落としたもの. 集合内は desire/primary で判断する. */
+  designatedTargets?: AgentId[]
 }
 
 // desire は「ちょっとしたヒント」程度の shaping signal として使う. outcomeRewards override の
@@ -120,6 +123,8 @@ export class AbstractGame {
   private _logicalOfActual: number[] = []
   /** 今回のゲームでの、実 seat → AgentRole (fixedVote target は既に実 seat に変換済み). agentRoles 未指定の場合は null. */
   private currentRoles: AgentRole[] | null = null
+  /** 今回のゲームでの指定進行 target 集合 (実 seat). config.designatedTargets 未指定なら空 Set. */
+  private actualDesignatedTargets: Set<AgentId> = new Set()
 
   constructor(config: EnvConfig, rng: Rng) {
     this.config = config
@@ -262,6 +267,17 @@ export class AbstractGame {
       }
     }
 
+    // designatedTargets は論理 seat で記述される. permutation で実 seat に変換し Set に格納.
+    this.actualDesignatedTargets = new Set()
+    if (this.config.designatedTargets && this.config.designatedTargets.length > 0) {
+      for (const logical of this.config.designatedTargets) {
+        if (logical < 0 || logical >= N) throw new Error(`designatedTargets member ${logical} out of range`)
+        this.actualDesignatedTargets.add(actualOfLogical[logical])
+      }
+    }
+    const isDesignationTargetByActual = new Array<boolean>(N).fill(false)
+    for (const actual of this.actualDesignatedTargets) isDesignationTargetByActual[actual] = true
+
     const noiseScale = NOISE_AMP * (1 - this.config.desireCorrelation)
     const inputs: HuginnInput[] = []
     for (let self = 0; self < N; self++) {
@@ -297,7 +313,9 @@ export class AbstractGame {
         const noise = (this.rng.next() - 0.5) * noiseScale
         desire[i] = clamp01(base + noise)
       }
-      inputs.push({ self, participants, desire, excluded })
+      // participants[i] === i なので isDesignationTargetByActual をそのまま index で使える.
+      // 同一配列を全 self で共有 (指定は全員に見える共有観測、各 input で readonly).
+      inputs.push({ self, participants, desire, excluded, isDesignationTarget: isDesignationTargetByActual })
     }
     this.inputs = inputs
     return inputs
@@ -363,6 +381,7 @@ export class AbstractGame {
         commitViolations[a.agent] = violated
         if (violated) rewards[a.agent] += COMMIT_VIOLATION_PENALTY
       }
+      this.applyDesignationPenalty(trace, rewards)
       return {
         eliminated,
         voteCounts,
@@ -408,7 +427,21 @@ export class AbstractGame {
       }
     }
 
+    this.applyDesignationPenalty(trace, rewards)
     return { eliminated, voteCounts, rewards, done: true, commitViolations }
+  }
+
+  /** 指定進行: 各 learner の final vote が designatedTargets 集合外なら DESIGNATION_VIOLATION_PENALTY を加算.
+   *  集合が空 (config 未指定) なら何もしない. 非 learner (scripted bot) には適用しない. */
+  private applyDesignationPenalty(trace: Trace, rewards: number[]): void {
+    if (this.actualDesignatedTargets.size === 0) return
+    for (const a of trace.perAgent) {
+      if (!this.isLearning(a.agent)) continue
+      const votedAgent = this.inputs[a.agent].participants[a.finalVoteIdx]
+      if (!this.actualDesignatedTargets.has(votedAgent)) {
+        rewards[a.agent] += DESIGNATION_VIOLATION_PENALTY
+      }
+    }
   }
 
   getTeams(): number[] {
