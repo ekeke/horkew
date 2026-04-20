@@ -101,7 +101,7 @@ type OrchestratorConfig = {
   wre?: string
   /** WRE再学習間隔 (iteration数、0=再学習無効)。サンプルバッファが batch×14×5×n×4.8KB 蓄積するため batch=64 なら n≤40 推奨 */
   wreRefresh: number
-  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain'
+  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero'
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -163,7 +163,7 @@ function parseArgs(): OrchestratorConfig {
         break
       }
       case '--wre-refresh': config.wreRefresh = parseInt(args[++i]); break
-      case '--curriculum': config.curriculum = args[++i] as 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain'; break
+      case '--curriculum': config.curriculum = args[++i] as 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero'; break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -195,7 +195,7 @@ Options:
   --strategy-only          戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
   --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
   --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
-  --curriculum <name>      カリキュラム選択: default | brain-battle | bb-plus | skoll-pretrain (default: default)
+  --curriculum <name>      カリキュラム選択: default | brain-battle | bb-plus | skoll-pretrain | skoll-zero (default: default)
   --skeleton               最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用)
   --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
   --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled)
@@ -969,6 +969,18 @@ async function main(): Promise<void> {
     })
     shutdownCleanup('completed')
     log(`${BOLD}Skoll Pretrain complete!${RESET}`)
+    return
+  }
+
+  // === Skoll-Zero カリキュラム: 6 役職 multi-agent self-play + ISMCTS ===
+  if (config.curriculum === 'skoll-zero') {
+    const { runSkollZero } = await import('../../skoll-zero/phase/runner.ts')
+    await runSkollZero({
+      checkpointBase: config.checkpointBase,
+      learningRate: config.learningRate,
+    })
+    shutdownCleanup('completed')
+    log(`${BOLD}Skoll Zero complete!${RESET}`)
     return
   }
 
