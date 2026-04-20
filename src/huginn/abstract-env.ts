@@ -27,6 +27,12 @@ export type AgentRole =
   | { type: 'fixedVote'; target: AgentId; silent?: boolean }   // 固定投票、silent なら全ラウンド SILENT
   | { type: 'silent' }                  // SILENT 固定、投票はランダム
 
+/** シナリオ作者が投票帰結に対する報酬を明示指定するための override エントリ. */
+export type OutcomeReward = {
+  reward: number
+  label: string
+}
+
 export type EnvConfig = {
   numAgents: number
   /** 各 agent の役割。省略時は全員 'learning' */
@@ -46,6 +52,14 @@ export type EnvConfig = {
   rewardMode?: 'eliminated' | 'voteDirect'
   /** 合意ボーナス: 学習 agent 間の投票一致度に応じて [0, consensusBonus] を全学習 agent の reward に加算 */
   consensusBonus?: number
+  /** 投票帰結 (top 票 seats) の key → 学習 agent 全員に与える報酬を直接指定する.
+   *  key = 最多得票 seats を昇順ソートしてカンマ連結. 単独吊り "2", 2-way tie "2,3", 4-way tie "0,1,2,3".
+   *  override あり: desire/consensusBonus はスキップし、この reward を使う (commit violation は従来通り加算).
+   *  override なし: 従来通り random pick + desire[eliminated] + consensusBonus. */
+  outcomeRewards?: Record<string, OutcomeReward>
+  /** 学習 agent の primary を明示指定する (seat → primary seat). 既存の primaryFromBots / teams 由来 primary を上書きする.
+   *  「村は狼の seat を知っている」のような前知識を表現するのに使う. */
+  fixedPrimaries?: Record<AgentId, AgentId>
 }
 
 const LOW_BASE = 0.05
@@ -59,6 +73,10 @@ export type StepResult = {
   rewards: number[]
   done: boolean
   commitViolations: boolean[]
+  /** outcomeRewards override が適用された場合の key. なければ undefined. */
+  outcomeKey?: string
+  /** outcomeRewards override が適用された場合の label. なければ undefined. */
+  outcomeLabel?: string
 }
 
 export class AbstractGame {
@@ -146,6 +164,12 @@ export class AbstractGame {
       }
     }
 
+    if (this.config.fixedPrimaries) {
+      for (const [selfStr, primary] of Object.entries(this.config.fixedPrimaries)) {
+        this.primaryByAgent.set(Number(selfStr), primary)
+      }
+    }
+
     const noiseScale = NOISE_AMP * (1 - this.config.desireCorrelation)
     const inputs: HuginnInput[] = []
     for (let self = 0; self < N; self++) {
@@ -226,6 +250,28 @@ export class AbstractGame {
 
     const rewards = new Array<number>(N).fill(0)
     const commitViolations = new Array<boolean>(N).fill(false)
+
+    const outcomeKey = topAgents.slice().sort((a, b) => a - b).join(',')
+    const override = this.config.outcomeRewards?.[outcomeKey]
+
+    if (override !== undefined) {
+      for (const a of trace.perAgent) {
+        if (this.isLearning(a.agent)) rewards[a.agent] += override.reward
+        const violated = detectCommitViolation(a, this.inputs[a.agent].participants)
+        commitViolations[a.agent] = violated
+        if (violated) rewards[a.agent] += COMMIT_VIOLATION_PENALTY
+      }
+      return {
+        eliminated,
+        voteCounts,
+        rewards,
+        done: true,
+        commitViolations,
+        outcomeKey,
+        outcomeLabel: override.label,
+      }
+    }
+
     const mode = this.config.rewardMode ?? 'eliminated'
     for (const a of trace.perAgent) {
       if (mode === 'voteDirect') {

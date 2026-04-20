@@ -6,14 +6,19 @@
  * policy gradient と value loss を計算してパラメータを更新する。
  */
 
-import { TrainableNetwork, type ForwardCache } from './trainable-network.ts'
+import {
+  TrainableNetwork,
+  type ForwardCache,
+  applyMask,
+  sampleStochastic,
+  logProbOf,
+  softmax,
+} from './trainable-network.ts'
 import { AbstractGame, type EnvConfig, type StepResult } from './abstract-env.ts'
 import { Rng } from './rng.ts'
 import { encodeObservation } from './observation.ts'
 import { buildVocabLayout, decodeMessage, buildLegalMask } from './message-vocab.ts'
-import { applyMask, sampleStochastic, logProbOf } from './network.ts'
 import { type Trace } from './protocol.ts'
-import { softmax } from '../fenrir/src/ml/nn.ts'
 import {
   K_ROUNDS,
   OFFER_REF_WINDOW,
@@ -45,7 +50,12 @@ export type TrainConfig = {
   numLayers?: number    // default 2
   numHeads?: number     // default 4
   dFf?: number          // default 128
-  envConfig: EnvConfig
+  /** 訓練に使う env 設定の配列. 1 個なら単一シナリオ、複数なら mix. 全て numAgents 同一必須. */
+  envConfigs: EnvConfig[]
+  /** sampling weight (長さは envConfigs と一致). 省略時 uniform. */
+  mixWeights?: number[]
+  /** 表示用シナリオ名 (長さは envConfigs と一致). 省略時 "scenario0" 等. */
+  mixNames?: string[]
   seed: number
   log?: (line: string) => void
   greedyEvalEvery?: number   // 0 = off
@@ -73,8 +83,27 @@ export type IterationLog = {
 export function train(config: TrainConfig): { history: IterationLog[]; network: TrainableNetwork } {
   const log = config.log ?? ((s: string) => console.log(s))
   const rng = new Rng(config.seed)
-  const env = new AbstractGame(config.envConfig, rng)
-  const N = config.envConfig.numAgents
+
+  if (config.envConfigs.length === 0) throw new Error('envConfigs must have at least one entry')
+  const N = config.envConfigs[0].numAgents
+  for (const ec of config.envConfigs) {
+    if (ec.numAgents !== N) {
+      throw new Error(`mix requires same numAgents; got [${config.envConfigs.map(e => e.numAgents).join(', ')}]`)
+    }
+  }
+  const envs = config.envConfigs.map(ec => new AbstractGame(ec, rng))
+  const mixNames = config.mixNames ?? envs.map((_, i) => `scenario${i}`)
+  const mixWeights = config.mixWeights ?? envs.map(() => 1)
+  const totalWeight = mixWeights.reduce((s, v) => s + v, 0)
+  const sampleEnvIdx = (): number => {
+    let r = rng.next() * totalWeight
+    for (let i = 0; i < mixWeights.length; i++) {
+      r -= mixWeights[i]
+      if (r <= 0) return i
+    }
+    return mixWeights.length - 1
+  }
+
   const layout = buildVocabLayout(N, OFFER_REF_WINDOW)
   const dModel = config.dModel ?? 64
   const numLayers = config.numLayers ?? 2
@@ -88,6 +117,11 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
   log(`# Huginn training (Transformer)`)
   log(`N=${N}, K=${K_ROUNDS}, vocabSize=${layout.vocabSize}, dModel=${dModel}, layers=${numLayers}, heads=${numHeads}`)
   log(`iterations=${config.iterations}, gamesPerIter=${config.gamesPerIter}, lr=${config.lr}`)
+  if (envs.length > 1) {
+    log(`mix: ${mixNames.map((n, i) => `${n}(w=${mixWeights[i]})`).join(', ')}`)
+  } else {
+    log(`single scenario: ${mixNames[0]}`)
+  }
   log(``)
 
   const history: IterationLog[] = []
@@ -105,13 +139,18 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
     let totalMsgs = 0
 
     // Phase 1: rollout 全件、advantage の生値を集める
-    const rolloutBatch: { result: ReturnType<typeof rolloutGame> }[] = []
+    const rolloutBatch: { result: ReturnType<typeof rolloutGame>; envIdx: number }[] = []
     const rawAdvantages: number[] = []
+    const perEnvRewardSum = new Array<number>(envs.length).fill(0)
+    const perEnvAgentCount = new Array<number>(envs.length).fill(0)
     for (let g = 0; g < config.gamesPerIter; g++) {
-      const result = rolloutGame(network, env, layout, rng, true)
-      rolloutBatch.push({ result })
+      const envIdx = envs.length === 1 ? 0 : sampleEnvIdx()
+      const result = rolloutGame(network, envs[envIdx], layout, rng, true)
+      rolloutBatch.push({ result, envIdx })
       for (let a = 0; a < N; a++) {
         const ret = result.envResult.rewards[a]
+        perEnvRewardSum[envIdx] += ret
+        perEnvAgentCount[envIdx] += 1
         for (const step of result.perAgentSteps[a]) {
           rawAdvantages.push(ret - step.value)
         }
@@ -244,7 +283,16 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
     }
 
     if (config.greedyEvalEvery && (iter + 1) % config.greedyEvalEvery === 0) {
-      entry.greedyMeanReward = greedyEval(network, env, layout, rng, config.greedyEvalGames ?? 16)
+      const perEnvGreedy = envs.map(e => greedyEval(network, e, layout, rng, config.greedyEvalGames ?? 16))
+      entry.greedyMeanReward = perEnvGreedy.reduce((s, v) => s + v, 0) / perEnvGreedy.length
+      if (envs.length > 1) {
+        log(`  greedy per scenario: ${mixNames.map((n, i) => `${n}=${perEnvGreedy[i].toFixed(3)}`).join(', ')}`)
+      }
+    }
+
+    if (envs.length > 1) {
+      const perEnvMean = perEnvRewardSum.map((s, i) => perEnvAgentCount[i] > 0 ? s / perEnvAgentCount[i] : 0)
+      log(`  train per scenario: ${mixNames.map((n, i) => `${n}=${perEnvMean[i].toFixed(3)}(n=${perEnvAgentCount[i]})`).join(', ')}`)
     }
 
     history.push(entry)
