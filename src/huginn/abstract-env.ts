@@ -18,7 +18,7 @@
  */
 
 import type { HuginnInput, AgentId, Message } from './types.ts'
-import { COMMIT_VIOLATION_PENALTY } from './types.ts'
+import { COMMIT_VIOLATION_PENALTY, DESIRE_HIGH_BASE } from './types.ts'
 import type { Rng } from './rng.ts'
 import { detectCommitViolation, type Trace } from './protocol.ts'
 
@@ -70,10 +70,15 @@ export type EnvConfig = {
   fixedPrimaries?: Record<AgentId, AgentId>
 }
 
-const LOW_BASE = 0.05
-const MID_BASE = 0.55
-const HIGH_BASE = 0.95
-const NOISE_AMP = 0.1   // 構造を壊さない程度の小さなノイズ
+// desire は「ちょっとしたヒント」程度の shaping signal として使う. outcomeRewards override の
+// reward (0.0〜1.0) に対して全域で微小であるべき — そうでないと desire-based reward モードで
+// 単独 primary 吊り (HIGH) が引き分け成功 (override) を超えてしまい学習目標が歪む.
+// 自分の primary への加点は 0.1 以下に抑える. LOW/MID/HIGH のギャップは 0.05 ずつ.
+// HIGH_BASE は types.ts の DESIRE_HIGH_BASE で定義 (observation 側の正規化と共有するため).
+const LOW_BASE = 0.00
+const MID_BASE = 0.05
+const HIGH_BASE = DESIRE_HIGH_BASE
+const NOISE_AMP = 0.04   // noiseScale = 0.04 * (1 - desireCorr). desireCorr=0.7 なら ±0.006 (ギャップ 0.05 の 12%)
 
 export type StepResult = {
   eliminated: AgentId

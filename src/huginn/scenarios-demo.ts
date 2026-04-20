@@ -21,9 +21,13 @@ const SEED = 42
 
 function formatAgentRole(role: AgentRole): string {
   if (role === 'learning') return 'learn'
-  if (typeof role === 'object' && role.type === 'fixedVote') return `fixed→s${role.target}`
-  if (typeof role === 'object' && role.type === 'silent') return 'silent'
-  return String(role)
+  if (typeof role !== 'object') return String(role)
+  switch (role.type) {
+    case 'fixedVote': return `fixed→s${role.target}`
+    case 'silent': return 'silent'
+    case 'offerer': return `offerer(p=s${role.primary},${role.mode ?? 'split'})`
+    case 'eagerCommitter': return `committer(p=s${role.primary})`
+  }
 }
 
 function formatDesire(desire: Float64Array | number[]): string {

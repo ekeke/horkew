@@ -43,3 +43,7 @@ export const HEAT_LEVELS = 3
 
 export const COMMIT_VIOLATION_PENALTY = -0.1
 export const SILENT_ENTROPY_BONUS = 0.0
+
+/** desire の primary (HIGH) 値. observation 側の正規化にも使うため types.ts で共有.
+ *  reward として desire を使う場合に outcomeRewards override (0〜1) より充分小さくしておく. */
+export const DESIRE_HIGH_BASE = 0.10

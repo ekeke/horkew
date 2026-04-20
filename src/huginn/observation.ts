@@ -4,7 +4,14 @@
  */
 
 import type { Observation } from './types.ts'
-import { MAX_AGENTS } from './types.ts'
+import { MAX_AGENTS, DESIRE_HIGH_BASE } from './types.ts'
+
+/** raw desire 値 (reward scale 0〜0.1) を observation 用 0〜1 に正規化する.
+ *  NN の他 features (0〜1 normalized) と magnitude を揃えて attention が埋もれないようにする. */
+function normDesire(d: number): number {
+  const v = d / DESIRE_HIGH_BASE
+  return v > 1 ? 1 : (v < 0 ? 0 : v)
+}
 
 // CLS feature dims:
 //   0: roundNumber / kRounds
@@ -45,7 +52,7 @@ export function collectObservation(obs: Observation, kRounds: number): Observati
   const agents = new Float32Array(MAX_AGENTS * AGENT_FEATURE_DIMS)
   for (let i = 0; i < N; i++) {
     const off = i * AGENT_FEATURE_DIMS
-    agents[off + 0] = input.desire[i]
+    agents[off + 0] = normDesire(input.desire[i])
     agents[off + 1] = input.excluded[i] ? 1 : 0
     agents[off + 2] = input.participants[i] === input.self ? 1 : 0
     agents[off + 3] = 1
@@ -90,7 +97,7 @@ export function collectObservation(obs: Observation, kRounds: number): Observati
   cls[1] = N / MAX_AGENTS
   const sorted: number[] = []
   for (let i = 0; i < N; i++) {
-    if (!input.excluded[i]) sorted.push(input.desire[i])
+    if (!input.excluded[i]) sorted.push(normDesire(input.desire[i]))
   }
   sorted.sort((a, b) => b - a)
   cls[2] = sorted[0] ?? 0
