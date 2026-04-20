@@ -38,9 +38,16 @@ export type AgentRole =
    *  startRound, gameParticipationProb: offerer と同じ挙動. */
   | { type: 'eagerCommitter'; primary: AgentId; acceptable: AgentId[]; startRound?: number; gameParticipationProb?: number }
 
-/** シナリオ作者が投票帰結に対する報酬を明示指定するための override エントリ. */
+/** シナリオ作者が投票帰結に対する報酬を明示指定するための override エントリ.
+ *
+ *  - reward: 全 learner に同じ reward (タイプ A: 同チーム協調シナリオ).
+ *  - rewardByTeam: teamId → reward の辞書. 指定がある team の learner はこの値を、
+ *    無い team の learner は reward (fallback) を受ける. タイプ B: hidden role / 混在チームで
+ *    「村勝は狼の負け」のようにチームで符号が逆転するケースに使う. teams config が必須.
+ */
 export type OutcomeReward = {
-  reward: number
+  reward?: number
+  rewardByTeam?: Record<number, number>
   label: string
 }
 
@@ -345,7 +352,13 @@ export class AbstractGame {
 
     if (override !== undefined) {
       for (const a of trace.perAgent) {
-        if (this.isLearning(a.agent)) rewards[a.agent] += override.reward
+        if (this.isLearning(a.agent)) {
+          // rewardByTeam があれば learner の team の値を優先、無ければ reward (fallback) を使う.
+          const teamId = this.teamMembership[a.agent]
+          const teamReward = override.rewardByTeam?.[teamId]
+          const base = teamReward !== undefined ? teamReward : (override.reward ?? 0)
+          rewards[a.agent] += base
+        }
         const violated = detectCommitViolation(a, this.inputs[a.agent].participants)
         commitViolations[a.agent] = violated
         if (violated) rewards[a.agent] += COMMIT_VIOLATION_PENALTY

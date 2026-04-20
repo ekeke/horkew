@@ -128,7 +128,11 @@ function computeOutcome(
   const override = env.config.outcomeRewards?.[outcomeKey] ?? null
 
   if (override !== null) {
-    const rewardPerLearner = learners.map(() => override.reward)
+    const teams = env.getTeams()
+    const rewardPerLearner = learners.map(lSeat => {
+      const teamId = teams[lSeat]
+      return override.rewardByTeam?.[teamId] ?? override.reward ?? 0
+    })
     return { voteCounts: counts, tieSet, outcomeKey, override, rewardPerLearner }
   }
 

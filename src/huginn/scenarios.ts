@@ -549,6 +549,85 @@ export function trio3v2Mentor(): Scenario {
 // Catalog
 // ============================================================
 
+/**
+ * タイプ B (hidden role / 混在チーム) の設計例: 3 村 learner + 1 狼 learner + 1 狂信 bot.
+ *
+ * teams: [[0,1,2], [3,4]] — 村チーム (learner×3) vs 狼チーム (learner s3 + 狂信 bot s4)
+ * rewardByTeam で「同じ outcome でも team によって reward 符号が逆」を表現:
+ *   - '3' (狼吊り): 村 team +1, 狼 team -1
+ *   - '0','1','2' (村吊り): 村 team -1, 狼 team +1
+ *   - '4' (狂信吊り): どちらも 0 (単独 round で決着つかない)
+ *
+ * 狼 learner はどうやって自分が狼と知る? → desire パターンで暗黙に. 自分の primary が logical 0-2
+ *   (村 seat) なら自分は狼. 自分の primary が logical 3 なら自分は村.
+ *   network はこの desire パターンから role を推論する.
+ *
+ * 狼 1 人だけだと policy を学ぶサンプルが少ない. first pass として「とりあえず動く」デモ.
+ */
+export function duo3v1v1HiddenWolf(): Scenario {
+  const envConfig: EnvConfig = {
+    numAgents: 5,
+    agentRoles: [
+      'learning',
+      'learning',
+      'learning',
+      'learning',
+      { type: 'fixedVote', target: 0 },   // 狂信 bot: 最若 village seat に固定投票
+    ],
+    teams: [[0, 1, 2], [3, 4]],
+    randomizeRolesPerGame: true,
+    desireCorrelation: 0.7,
+    kRounds: 4,
+    rewardMode: 'eliminated',
+    consensusBonus: 0,
+    outcomeRewards: {
+      '0': { rewardByTeam: { 0: -1.0, 1: 1.0 }, label: '村 s0 吊り → 狼勝' },
+      '1': { rewardByTeam: { 0: -1.0, 1: 1.0 }, label: '村 s1 吊り → 狼勝' },
+      '2': { rewardByTeam: { 0: -1.0, 1: 1.0 }, label: '村 s2 吊り → 狼勝' },
+      '3': { rewardByTeam: { 0:  1.0, 1: -1.0 }, label: '狼 s3 吊り → 村勝' },
+      '4': { rewardByTeam: { 0:  0.0, 1:  0.0 }, label: '狂信 s4 吊り → 決着なし' },
+    },
+  }
+  return {
+    name: 'duo3v1v1HiddenWolf',
+    description:
+      'タイプ B demo: 3 村 learner + 1 狼 learner + 1 狂信 bot. rewardByTeam で村/狼 chamber 勝敗逆転. ' +
+      '学習 agent は自分の desire パターン (HIGH primary の seat が誰か) から自分の役割を暗黙に推論する必要がある.',
+    learningObjective:
+      '村 learner: 狼 s3 に全員合意投票 (mentor なし、純粋にコーディネーションで). ' +
+      '狼 learner: 村の合意を妨害/誘導、自分が吊られないように立ち回る.',
+    envConfig,
+    analysis: {
+      N: 5,
+      learningAgentCount: 4,
+      botAgentCount: 1,
+      majority: 3,
+      expectedWinRateOnFullCoordination: 0.75,   // 村 3 がコード化できれば、狼 1 を押し切れる (vs 狂信 bot 1 票)
+    },
+    roles: [
+      { seat: 0, label: '村1', kind: 'learning', team: 'village',  winCondition: '狼 s3 吊り', suggestedVoteTarget: '狼 s3',        knowledge: {} },
+      { seat: 1, label: '村2', kind: 'learning', team: 'village',  winCondition: '狼 s3 吊り', suggestedVoteTarget: '狼 s3',        knowledge: {} },
+      { seat: 2, label: '村3', kind: 'learning', team: 'village',  winCondition: '狼 s3 吊り', suggestedVoteTarget: '狼 s3',        knowledge: {} },
+      { seat: 3, label: '狼',  kind: 'learning', team: 'werewolf', winCondition: '村 1 人吊り', suggestedVoteTarget: '任意の村',   knowledge: { 4: ['werewolf', '狂信'] } },
+      { seat: 4, label: '狂信', kind: 'bot',    team: 'werewolf', winCondition: '狼勝利',     suggestedVoteTarget: '村 s0 固定',     knowledge: { 3: ['werewolf', '狼'] } },
+    ],
+    outcomes: [
+      {
+        label: '村 3 人が狼 s3 に合意',
+        voteTally: 's0: 1 (bot) + α, s3: 3 (村), α ≤ 1 (wolf 投票)',
+        result: 's3 単独吊り → 村勝',
+        learnerWinRate: 1.0,
+      },
+      {
+        label: '村の合意失敗',
+        voteTally: '分散',
+        result: 'tie / 村吊り → 狼勝',
+        learnerWinRate: 0.0,
+      },
+    ],
+  }
+}
+
 export const catalog: Record<string, () => Scenario> = {
   pair2v2Block,
   pair2v2Split,
@@ -556,4 +635,5 @@ export const catalog: Record<string, () => Scenario> = {
   trio3v2BlockMentored,
   pair2v2SplitMentor,
   trio3v2Mentor,
+  duo3v1v1HiddenWolf,
 }
