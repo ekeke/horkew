@@ -116,7 +116,11 @@ function computeOutcome(
     else if (counts[i] === max) tieSet.push(i)
   }
 
-  const outcomeKey = tieSet.slice().sort((a, b) => a - b).join(',')
+  // outcomeRewards は論理 seat 基準. 実 seat の tieSet を論理 seat に変換してから lookup.
+  const outcomeKey = tieSet
+    .map(a => env.getLogicalSeat(a))
+    .sort((a, b) => a - b)
+    .join(',')
   const override = env.config.outcomeRewards?.[outcomeKey] ?? null
 
   if (override !== null) {

@@ -87,7 +87,11 @@ export class AbstractGame {
   private primaryByTeam: Map<number, AgentId> = new Map()
   /** primaryFromBots モード時、各学習 agent の個別 primary */
   private primaryByAgent: Map<AgentId, AgentId> = new Map()
-  /** randomizeRolesPerGame=true のとき、毎ゲーム再割当された role */
+  /** 論理 seat (シナリオ定義順) → 実 seat (今回のゲームでの座席位置) */
+  private _actualOfLogical: number[] = []
+  /** 実 seat → 論理 seat */
+  private _logicalOfActual: number[] = []
+  /** 今回のゲームでの、実 seat → AgentRole (fixedVote target は既に実 seat に変換済み). agentRoles 未指定の場合は null. */
   private currentRoles: AgentRole[] | null = null
 
   constructor(config: EnvConfig, rng: Rng) {
@@ -108,34 +112,58 @@ export class AbstractGame {
     return new Map(this.primaryByAgent)
   }
 
+  /** 実 seat から論理 seat (シナリオ定義順) を得る. */
+  getLogicalSeat(actual: AgentId): AgentId {
+    return this._logicalOfActual[actual]
+  }
+
+  /** 論理 seat (シナリオ定義順) から実 seat を得る. */
+  getActualSeat(logical: AgentId): AgentId {
+    return this._actualOfLogical[logical]
+  }
+
   reset(): HuginnInput[] {
     const N = this.config.numAgents
     const participants = Array.from({ length: N }, (_, i) => i)
-    this.teamMembership = this.assignTeams()
-    const numTeams = Math.max(...this.teamMembership) + 1
 
-    // role の再割当 (randomizeRolesPerGame=true のとき)
-    if (this.config.randomizeRolesPerGame && this.config.agentRoles) {
-      const baseRoles = this.config.agentRoles
-      const learnerCount = baseRoles.filter(r => r === 'learning').length
-      // ランダム順列で seat を選び、最若 N-learnerCount seat を bot にする (これも順列で)
-      const perm = Array.from({ length: N }, (_, i) => i)
+    // 論理 seat → 実 seat の permutation を毎ゲーム生成.
+    // randomize 無効時は identity で、シナリオ定義どおりの配置.
+    const actualOfLogical = Array.from({ length: N }, (_, i) => i)
+    if (this.config.randomizeRolesPerGame) {
       for (let i = N - 1; i > 0; i--) {
         const j = Math.floor(this.rng.next() * (i + 1))
-        ;[perm[i], perm[j]] = [perm[j], perm[i]]
+        ;[actualOfLogical[i], actualOfLogical[j]] = [actualOfLogical[j], actualOfLogical[i]]
       }
+    }
+    this._actualOfLogical = actualOfLogical
+    this._logicalOfActual = new Array<number>(N)
+    for (let logical = 0; logical < N; logical++) {
+      this._logicalOfActual[actualOfLogical[logical]] = logical
+    }
+
+    // 論理で書かれた agentRoles を実 seat 配置に展開. fixedVote target も同じ permutation を通す.
+    if (this.config.agentRoles) {
       const newRoles = new Array<AgentRole>(N)
-      // 最初の learnerCount seat を learner、残りを bot として割当
-      const learnerSeats = perm.slice(0, learnerCount).sort((a, b) => a - b)
-      const lowestLearnerSeat = learnerSeats[0]
-      for (let i = 0; i < N; i++) newRoles[i] = 'learning'
-      for (let k = learnerCount; k < N; k++) {
-        newRoles[perm[k]] = { type: 'fixedVote', target: lowestLearnerSeat }
+      for (let logical = 0; logical < N; logical++) {
+        const actual = actualOfLogical[logical]
+        const baseRole = this.config.agentRoles[logical]
+        if (typeof baseRole === 'object' && baseRole.type === 'fixedVote') {
+          newRoles[actual] = {
+            type: 'fixedVote',
+            target: actualOfLogical[baseRole.target],
+            ...(baseRole.silent !== undefined ? { silent: baseRole.silent } : {}),
+          }
+        } else {
+          newRoles[actual] = baseRole
+        }
       }
       this.currentRoles = newRoles
     } else {
       this.currentRoles = null
     }
+
+    this.teamMembership = this.assignTeams()
+    const numTeams = Math.max(...this.teamMembership) + 1
 
     this.primaryByTeam = new Map()
     this.primaryByAgent = new Map()
@@ -164,9 +192,12 @@ export class AbstractGame {
       }
     }
 
+    // fixedPrimaries は論理 seat で記述される. key/value ともに permutation で実 seat に変換する.
     if (this.config.fixedPrimaries) {
-      for (const [selfStr, primary] of Object.entries(this.config.fixedPrimaries)) {
-        this.primaryByAgent.set(Number(selfStr), primary)
+      for (const [logicalSelfStr, logicalPrimary] of Object.entries(this.config.fixedPrimaries)) {
+        const actualSelf = actualOfLogical[Number(logicalSelfStr)]
+        const actualPrimary = actualOfLogical[logicalPrimary]
+        this.primaryByAgent.set(actualSelf, actualPrimary)
       }
     }
 
@@ -220,9 +251,9 @@ export class AbstractGame {
     const result = new Array<number>(N).fill(0)
     if (!this.config.teams || this.config.teams.length === 0) return result
     for (let t = 0; t < this.config.teams.length; t++) {
-      for (const member of this.config.teams[t]) {
-        if (member < 0 || member >= N) throw new Error(`team member ${member} out of range`)
-        result[member] = t
+      for (const logicalMember of this.config.teams[t]) {
+        if (logicalMember < 0 || logicalMember >= N) throw new Error(`team member ${logicalMember} out of range`)
+        result[this._actualOfLogical[logicalMember]] = t
       }
     }
     return result
@@ -251,7 +282,11 @@ export class AbstractGame {
     const rewards = new Array<number>(N).fill(0)
     const commitViolations = new Array<boolean>(N).fill(false)
 
-    const outcomeKey = topAgents.slice().sort((a, b) => a - b).join(',')
+    // outcomeRewards はシナリオ作者が論理 seat で記述する. 実 seat の topAgents を論理 seat に戻してから key を作る.
+    const outcomeKey = topAgents
+      .map(a => this._logicalOfActual[a])
+      .sort((a, b) => a - b)
+      .join(',')
     const override = this.config.outcomeRewards?.[outcomeKey]
 
     if (override !== undefined) {

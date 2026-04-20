@@ -80,7 +80,7 @@ export function pair2v2Block(): Scenario {
     ],
     teams: [[0, 1], [2, 3]],               // 村 team, 狼+狂信 team (村は両者が wolf 陣営と知っている)
     fixedPrimaries: { 0: 2, 1: 2 },        // 村の primary = 狼 s2 (村は狼 seat を知っている)
-    randomizeRolesPerGame: false,
+    randomizeRolesPerGame: true,
     desireCorrelation: 0.7,
     kRounds: 4,
     rewardMode: 'eliminated',
@@ -150,10 +150,6 @@ export function pair2v2Block(): Scenario {
  * 狼は「狐が生存している間は勝てない」ため、まず狐を吊る必要がある.
  * 狐は「自分以外が処刑されれば勝ち」のため、誰を狙っても良い (実装上 狼 固定).
  * 結果として敵 2 票は互いに打ち消し合い (狼→狐, 狐→狼), 村は合意すれば確定勝利.
- *
- * 注: 現行 env は randomizeRolesPerGame=true 時に bot の fixed-vote target を
- *    一律 lowestLearnerSeat に書き換える. このシナリオは狼と狐が別 target を
- *    持つ必要があるため seat 位置を固定 (randomize=false).
  */
 export function pair2v2Split(): Scenario {
   const envConfig: EnvConfig = {
@@ -165,7 +161,7 @@ export function pair2v2Split(): Scenario {
       { type: 'fixedVote', target: 2 },   // 狐 → 狼 (自分以外なら誰でも OK、便宜上 狼)
     ],
     primaryFromBots: true,
-    randomizeRolesPerGame: false,
+    randomizeRolesPerGame: true,
     desireCorrelation: 0.7,
     kRounds: 4,
     rewardMode: 'eliminated',
@@ -189,7 +185,7 @@ export function pair2v2Split(): Scenario {
     description:
       '2 学習 agent (村村) vs 狼 1 + 狐 1. 狼は「狐非生存」を勝利条件に含むため狐を吊る必要がある. ' +
       '狐は「自分以外の誰かが処刑」で勝利. 両 bot が互いに投票し、敵票は打ち消し合う. ' +
-      '村は合意すれば単独最多 3 票で確定勝利. 現行 env の制約で seat 位置固定.',
+      '村は合意すれば単独最多 3 票で確定勝利.',
     learningObjective:
       '味方 1 人と個別 primary を擦り合わせて bot (狼 or 狐) の一方に票を集中させる. ' +
       '合意すれば確定勝利 (100%), 非合意なら 4-way tie で 50%.',
@@ -257,7 +253,7 @@ export function trio3v2Block(): Scenario {
       { type: 'fixedVote', target: 0 },   // 狂信者 → s0
     ],
     primaryFromBots: true,
-    randomizeRolesPerGame: false,
+    randomizeRolesPerGame: true,
     desireCorrelation: 0.7,
     kRounds: 4,
     rewardMode: 'eliminated',
