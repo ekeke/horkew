@@ -33,6 +33,8 @@ export type TrainerSlot = {
   tfNet: TfTransformerNetwork
   /** 教師データ buffer */
   buffer: TrainingBuffer
+  /** true なら train step / sync / checkpoint 上書きを skip (self-play では使う) */
+  frozen?: boolean
 }
 
 export type MultiTrainerSlots = {
@@ -135,24 +137,26 @@ export class MultiSkollZeroTrainer {
       const bufferExpired = slot.buffer.expireOldest(this.config.bufferCapacity)
 
       let lossSum = 0, policyLossSum = 0, valueLossSum = 0, stepsWithData = 0
-      for (let s = 0; s < this.config.stepsPerRound; s++) {
-        const records = slot.buffer.sample(this.config.batchSize, this.rng)
-        if (records.length === 0) break
-        const { observations, policyTargets, masks, valueTargets } = recordsToBatchInputs(records)
-        const res = slot.tfNet.trainMasonZero({
-          observations,
-          policyTargets,
-          masks,
-          valueTargets,
-          valueCoeff: this.config.valueCoeff,
-        })
-        lossSum += res.loss
-        policyLossSum += res.policyLoss
-        valueLossSum += res.valueLoss
-        stepsWithData++
+      if (!slot.frozen) {
+        for (let s = 0; s < this.config.stepsPerRound; s++) {
+          const records = slot.buffer.sample(this.config.batchSize, this.rng)
+          if (records.length === 0) break
+          const { observations, policyTargets, masks, valueTargets } = recordsToBatchInputs(records)
+          const res = slot.tfNet.trainMasonZero({
+            observations,
+            policyTargets,
+            masks,
+            valueTargets,
+            valueCoeff: this.config.valueCoeff,
+          })
+          lossSum += res.loss
+          policyLossSum += res.policyLoss
+          valueLossSum += res.valueLoss
+          stepsWithData++
+        }
+        // sync TF → Pure JS
+        slot.masonZeroNet.net.loadWeights(slot.tfNet.cloneWeights())
       }
-      // sync TF → Pure JS
-      slot.masonZeroNet.net.loadWeights(slot.tfNet.cloneWeights())
 
       const avgLoss = stepsWithData > 0 ? lossSum / stepsWithData : 0
       const avgPolicyLoss = stepsWithData > 0 ? policyLossSum / stepsWithData : 0

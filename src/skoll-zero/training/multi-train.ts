@@ -49,6 +49,8 @@ type Args = {
   enabled: Set<keyof MultiTrainerSlots>
   /** 前回実行の output dir。指定時は {dir}/{slot}/final.json から resume する */
   resumeFrom: string | null
+  /** self-play には参加するが weight 更新を止める slot */
+  frozen: Set<keyof MultiTrainerSlots>
 }
 
 const ALL_SLOTS: (keyof MultiTrainerSlots)[] = [
@@ -73,6 +75,10 @@ function parseCli(): Args {
   for (const slot of ALL_SLOTS) {
     if (argv.includes(`--no-${slot}`)) enabled.delete(slot)
   }
+  const frozen = new Set<keyof MultiTrainerSlots>()
+  for (const slot of ALL_SLOTS) {
+    if (argv.includes(`--freeze-${slot}`)) frozen.add(slot)
+  }
   return {
     outputDir: get('--output') ?? 'tmp/skoll-zero-multi',
     rounds: parseInt(get('--rounds') ?? '10', 10),
@@ -84,6 +90,7 @@ function parseCli(): Args {
     seed: parseInt(get('--seed') ?? '42', 10),
     enabled,
     resumeFrom: get('--resume-from') ?? null,
+    frozen,
   }
 }
 
@@ -130,7 +137,9 @@ function buildSlot(
 
   const masonZeroNet = new MasonZeroNetwork(pureNet, { zeroValueHead: false })
   const buffer = new TrainingBuffer()
-  return { masonZeroNet, tfNet, buffer }
+  const frozen = args.frozen.has(slotKey)
+  if (frozen) log(`${slotKey}: FROZEN (self-play only, no weight update)`)
+  return { masonZeroNet, tfNet, buffer, frozen }
 }
 
 async function main(): Promise<void> {
