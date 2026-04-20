@@ -26,11 +26,20 @@ const SEATS = 14
 export class MasonZeroNetwork implements MasonZeroNN {
   readonly net: TransformerNetwork
 
-  constructor(net?: TransformerNetwork) {
+  /**
+   * @param net  完成品の TransformerNetwork（省略時は fresh ネット）
+   * @param opts.zeroValueHead  true なら value head を zero reset (default true)。
+   *   false にすると warm-start 元の checkpoint が持つ value head をそのまま使う
+   *   (ablation 用: SL で学習した value signal が ISMCTS に効くか検証)。
+   */
+  constructor(net?: TransformerNetwork, opts: { zeroValueHead?: boolean } = {}) {
     this.net = net ?? createSkollZeroNetwork()
-    // value head は skoll-zero では zero init が初期設計（tanh(0)=0）。
-    // 学習前 or warm start 時に中立評価を返すため。
-    this.net.zeroInitValueHead()
+    const zeroValueHead = opts.zeroValueHead ?? true
+    if (zeroValueHead) {
+      // value head は skoll-zero では zero init が初期設計（tanh(0)=0）。
+      // 学習前 or warm start 時に中立評価を返すため。
+      this.net.zeroInitValueHead()
+    }
   }
 
   forward(rootObs: RootObservation, state: SimState, masonSeat: number): NNOutput {

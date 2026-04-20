@@ -18,7 +18,7 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { GameHandlers } from '../../lupa/handlers.ts'
 import type { FenrirExtEvent } from '../../fenrir/src/events.ts'
-import type { Agent } from '../../fenrir/src/agents/agent.ts'
+import type { Agent, DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from '../../fenrir/src/adapters/full-adapter.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
@@ -27,7 +27,9 @@ import { loadNetworkFromCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
 import { MasonZeroAgent } from '../selfplay/mason-zero-agent.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
+import { captureObs } from '../selfplay/observation.ts'
 import { DEFAULT_MCTS_CONFIG, type MCTSConfig } from '../mcts/ismcts.ts'
+import { SEATS } from '../../fenrir/src/observation.ts'
 
 const DEFAULT_ROLES: Map<SystemRole, number> = new Map<SystemRole, number>([
   ['werewolf', 3], ['villager', 2], ['seer', 1], ['medium', 1], ['bodyguard', 1],
@@ -36,10 +38,28 @@ const DEFAULT_ROLES: Map<SystemRole, number> = new Map<SystemRole, number>([
 
 const DEFAULT_REVOTE = { maxRevotes: 2, style: 'full_revote' as const, tiebreaker: 'draw' as const }
 
-export type Variant = 'baseline' | 'mason_zero'
+export type VariantConfig = {
+  name: string
+  /**
+   * モード: 省略 = baseline (SkollMasterAgent heuristic)
+   *        'policy_only' = MCTS skip、NN policy head の argmax のみ
+   *        'zero' = 通常の MasonZeroAgent (ISMCTS)
+   */
+  mode?: 'policy_only' | 'zero'
+  /** mode='zero' 時のみ使う */
+  zero?: {
+    rollouts: number
+    zeroValueHead: boolean
+    selectionMode?: 'sample' | 'argmax'
+  }
+  /** mode='policy_only' 時のみ使う (default: value head SL 温存) */
+  policyOnly?: {
+    zeroValueHead: boolean
+  }
+}
 
 export type VariantStats = {
-  variant: Variant
+  name: string
   games: number
   village: number
   wolf: number
@@ -55,32 +75,77 @@ export type HeadToHeadOptions = {
   ckptPath: string
   games: number
   baseSeed: number
-  rollouts: number
+  variants: VariantConfig[]
 }
+
+const DEFAULT_VARIANTS: VariantConfig[] = [
+  { name: 'baseline' },
+  { name: 'policy_only',   mode: 'policy_only', policyOnly: { zeroValueHead: false } },
+  { name: 'zero/r50/slV',  mode: 'zero', zero: { rollouts: 50, zeroValueHead: false, selectionMode: 'argmax' } },
+  { name: 'zero/r200/slV', mode: 'zero', zero: { rollouts: 200, zeroValueHead: false, selectionMode: 'argmax' } },
+]
 
 const DEFAULTS: HeadToHeadOptions = {
   ckptPath: 'src/skoll/models/mason.json',
   games: 100,
   baseSeed: 700000,
-  rollouts: 50,
+  variants: DEFAULT_VARIANTS,
 }
 
+/**
+ * MCTS 無しで NN policy 単体 (argmax) で vote を決める mason agent。
+ * 「ISMCTS が本当に policy prior に何か足しているのか」を測る ablation 用。
+ * vote 以外は SkollMasterAgent (heuristic) に委譲。
+ */
+class PolicyOnlyMasonAgent extends SkollMasterAgent {
+  voteCalls = 0
+  private readonly nn: MasonZeroNetwork
+  constructor(nn: MasonZeroNetwork) {
+    super()
+    this.nn = nn
+  }
+
+  override decideVote(ctx: DecisionContext): number {
+    this.voteCalls++
+    const obs = captureObs(ctx)
+    const result = this.nn.net.forward(obs)
+    const logits = result.policies.get('vote')
+    if (!logits) return super.decideVote(ctx)
+
+    const excluded = new Set<number>([ctx.mySeat])
+    if (ctx.masonPartner !== null) excluded.add(ctx.masonPartner)
+
+    let best = -1
+    let bestLogit = -Infinity
+    for (const seat of ctx.alivePlayers) {
+      if (excluded.has(seat)) continue
+      if (seat < 1 || seat > SEATS) continue
+      if (logits[seat - 1] > bestLogit) {
+        bestLogit = logits[seat - 1]
+        best = seat
+      }
+    }
+    return best > 0 ? best : super.decideVote(ctx)
+  }
+}
+
+type VoteAgent = MasonZeroAgent | PolicyOnlyMasonAgent
+
 async function runSingleGame(
-  variant: Variant,
   seed: number,
-  zeroAgentFactory: (() => MasonZeroAgent) | null,
-): Promise<{ result: string, mctsCalls: number, fallbackCalls: number }> {
+  agentFactory: (() => VoteAgent) | null,
+): Promise<{ result: string, mctsCalls: number, fallbackCalls: number, voteCalls: number }> {
   const roles = DEFAULT_ROLES
   const agents = new Map<number, Agent>()
-  const zeroAgent = variant === 'mason_zero' ? zeroAgentFactory!() : null
+  const masonAgent = agentFactory?.() ?? null
 
   const handlers = fullAdapter({
     agents,
     defaultAgent: new SkollMasterAgent(),
     onRolesAssigned: (seatRoles) => {
-      if (zeroAgent) {
+      if (masonAgent) {
         for (const [seat, role] of seatRoles) {
-          if (role === 'mason') agents.set(seat, zeroAgent)
+          if (role === 'mason') agents.set(seat, masonAgent)
         }
       }
     },
@@ -95,50 +160,79 @@ async function runSingleGame(
     handlers,
   )
 
+  const mctsCalls = masonAgent instanceof MasonZeroAgent ? masonAgent.mctsCalls : 0
+  const fallbackCalls = masonAgent instanceof MasonZeroAgent ? masonAgent.fallbackCalls : 0
+  const voteCalls = masonAgent instanceof PolicyOnlyMasonAgent ? masonAgent.voteCalls : 0
   return {
     result: result.state.result ?? 'draw',
-    mctsCalls: zeroAgent?.mctsCalls ?? 0,
-    fallbackCalls: zeroAgent?.fallbackCalls ?? 0,
+    mctsCalls, fallbackCalls, voteCalls,
   }
+}
+
+type AgentPool = {
+  /** zeroValueHead の true/false ごとに 1 つ保持 */
+  getNet: (zeroValueHead: boolean) => MasonZeroNetwork
+}
+
+function buildAgentPool(ckptPath: string): AgentPool {
+  const cache = new Map<boolean, MasonZeroNetwork>()
+  return {
+    getNet(zeroValueHead: boolean) {
+      const hit = cache.get(zeroValueHead)
+      if (hit) return hit
+      // 各 variant 独立にロード (zeroInitValueHead が net を mutate するので共有不可)
+      const net = loadNetworkFromCheckpoint(ckptPath)
+      const mz = new MasonZeroNetwork(net, { zeroValueHead })
+      cache.set(zeroValueHead, mz)
+      return mz
+    },
+  }
+}
+
+function makeVariantAgentFactory(
+  pool: AgentPool,
+  variant: VariantConfig,
+): (() => VoteAgent) | null {
+  if (variant.mode === 'zero' && variant.zero) {
+    const cfg = variant.zero
+    const mctsConfig: MCTSConfig = { ...DEFAULT_MCTS_CONFIG, nRollouts: cfg.rollouts }
+    return () => new MasonZeroAgent({
+      nn: pool.getNet(cfg.zeroValueHead),
+      setup: DEFAULT_ROLES,
+      buffer: new TrainingBuffer(),
+      mctsConfig,
+      selectionMode: cfg.selectionMode ?? 'argmax',
+    })
+  }
+  if (variant.mode === 'policy_only') {
+    const zeroValueHead = variant.policyOnly?.zeroValueHead ?? false
+    return () => new PolicyOnlyMasonAgent(pool.getNet(zeroValueHead))
+  }
+  return null  // baseline
 }
 
 export async function runHeadToHead(opts: Partial<HeadToHeadOptions> = {}): Promise<VariantStats[]> {
   const options = { ...DEFAULTS, ...opts }
   process.stderr.write(`[h2h] loading mason_zero NN from ${options.ckptPath}\n`)
-  const net = loadNetworkFromCheckpoint(options.ckptPath)
-  const masonZeroNet = new MasonZeroNetwork(net)
-
-  const mctsConfig: MCTSConfig = {
-    ...DEFAULT_MCTS_CONFIG,
-    nRollouts: options.rollouts,
-  }
-
-  // MasonZeroAgent factory (game ごとに fresh buffer で作る)
-  const zeroAgentFactory = () => new MasonZeroAgent({
-    nn: masonZeroNet,
-    setup: DEFAULT_ROLES,
-    buffer: new TrainingBuffer(),
-    mctsConfig,
-    selectionMode: 'argmax',
-  })
+  const pool = buildAgentPool(options.ckptPath)
 
   const results: VariantStats[] = []
 
-  for (const variant of ['baseline', 'mason_zero'] as Variant[]) {
-    process.stderr.write(`[h2h] === ${variant} (${options.games} games, rollouts=${options.rollouts}) ===\n`)
+  for (const variant of options.variants) {
+    const label = variant.mode === 'zero' && variant.zero
+      ? `${variant.name} (r=${variant.zero.rollouts}, zeroV=${variant.zero.zeroValueHead})`
+      : variant.name
+    process.stderr.write(`[h2h] === ${label} (${options.games} games) ===\n`)
     const stats: VariantStats = {
-      variant, games: options.games,
+      name: variant.name, games: options.games,
       village: 0, wolf: 0, hamster: 0, draw: 0,
       villageWinRate: 0, elapsedMs: 0,
       mctsCalls: 0, fallbackCalls: 0,
     }
+    const factory = makeVariantAgentFactory(pool, variant)
     const t0 = performance.now()
     for (let g = 0; g < options.games; g++) {
-      const seed = options.baseSeed + g
-      const r = await runSingleGame(
-        variant, seed,
-        variant === 'mason_zero' ? zeroAgentFactory : null,
-      )
+      const r = await runSingleGame(options.baseSeed + g, factory)
       if (r.result === 'villager_won') stats.village++
       else if (r.result === 'werewolf_won') stats.wolf++
       else if (r.result === 'werehamster_won') stats.hamster++
@@ -146,27 +240,30 @@ export async function runHeadToHead(opts: Partial<HeadToHeadOptions> = {}): Prom
       stats.mctsCalls += r.mctsCalls
       stats.fallbackCalls += r.fallbackCalls
       if ((g + 1) % 10 === 0) {
-        process.stderr.write(`[h2h] ${variant} ${g + 1}/${options.games}: v=${stats.village} w=${stats.wolf} h=${stats.hamster}\n`)
+        process.stderr.write(`[h2h] ${variant.name} ${g + 1}/${options.games}: v=${stats.village} w=${stats.wolf} h=${stats.hamster}\n`)
       }
     }
     stats.elapsedMs = performance.now() - t0
     stats.villageWinRate = stats.village / stats.games
     process.stderr.write(
-      `[h2h] ${variant}: v=${stats.village} w=${stats.wolf} h=${stats.hamster} draw=${stats.draw} | `
+      `[h2h] ${variant.name}: v=${stats.village} w=${stats.wolf} h=${stats.hamster} draw=${stats.draw} | `
       + `villageWin=${(stats.villageWinRate * 100).toFixed(1)}% (${(stats.elapsedMs / 1000).toFixed(1)}s)\n`,
     )
-    if (variant === 'mason_zero') {
+    if (variant.mode === 'zero') {
       process.stderr.write(`[h2h]   MCTS calls: ${stats.mctsCalls}, fallback: ${stats.fallbackCalls}\n`)
     }
     results.push(stats)
   }
 
-  const delta = (results[1].villageWinRate - results[0].villageWinRate) * 100
-  process.stderr.write(`\n[h2h] === Summary ===\n`)
-  process.stderr.write(`[h2h] baseline  villageWin = ${(results[0].villageWinRate * 100).toFixed(1)}%\n`)
-  process.stderr.write(`[h2h] mason_zero villageWin = ${(results[1].villageWinRate * 100).toFixed(1)}%\n`)
-  process.stderr.write(`[h2h] delta = ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}pp\n`)
-
+  process.stderr.write(`\n[h2h] === Summary (N=${options.games}) ===\n`)
+  const baseRate = results[0]?.villageWinRate ?? 0
+  for (const s of results) {
+    const delta = (s.villageWinRate - baseRate) * 100
+    const deltaStr = s === results[0] ? '' : ` (${delta >= 0 ? '+' : ''}${delta.toFixed(1)}pp vs baseline)`
+    process.stderr.write(
+      `[h2h]   ${s.name.padEnd(22)} villageWin=${(s.villageWinRate * 100).toFixed(1)}%${deltaStr}\n`,
+    )
+  }
   return results
 }
 
@@ -178,7 +275,6 @@ function parseArgs(): Partial<HeadToHeadOptions> {
       case '--ckpt': opts.ckptPath = args[++i]; break
       case '--games': opts.games = parseInt(args[++i], 10); break
       case '--seed': opts.baseSeed = parseInt(args[++i], 10); break
-      case '--rollouts': opts.rollouts = parseInt(args[++i], 10); break
     }
   }
   return opts
