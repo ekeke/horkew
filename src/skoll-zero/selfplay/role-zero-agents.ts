@@ -22,7 +22,7 @@ import { buildPossibilitiesFromRetar } from '../../skoll/unified.ts'
 import { createSimState } from '../simulator/world-state.ts'
 import { Determinizer } from '../mcts/determinize.ts'
 import { runMCTS, DEFAULT_MCTS_CONFIG, type Faction, type MCTSConfig } from '../mcts/ismcts.ts'
-import { argmaxFromVisits, sampleFromVisits } from './policy-utils.ts'
+import { argmaxFromVisits, sampleFromVisits, normalizeVisits } from './policy-utils.ts'
 import { RoleZeroAgent } from './role-zero-agent.ts'
 import type { RootObs } from './observation.ts'
 
@@ -90,6 +90,19 @@ export class WolfZeroAgent extends RoleZeroAgent {
       return super.decideNightAction(ctx)
     }
     this.mctsCalls++
+
+    // 昼 vote と同じく buffer に (obs, visits, π) を記録。
+    // vote head を attack policy としても流用 (semantics 接近: どちらも「誰を退場させるか」)。
+    // 厳密には別 head のほうが良いが、MVP として共有。
+    const pi = normalizeVisits(result.visits)
+    this.zeroOpts.buffer.appendPending({
+      obs: rootObs,
+      visits: result.visits,
+      pi,
+      day: ctx.day,
+      masonSeat: ctx.mySeat,
+      alive,
+    })
 
     const target = this.zeroOpts.selectionMode === 'argmax'
       ? argmaxFromVisits(result.visits)
