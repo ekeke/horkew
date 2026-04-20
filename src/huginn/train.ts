@@ -54,6 +54,8 @@ export type TrainConfig = {
   normalizeAdvantage?: boolean   // default true
   valueLossWeight?: number       // default 1.0
   optimizer?: 'sgd' | 'adam'     // default 'sgd'
+  entropyBonus?: number          // default 0. policy entropy を最大化する方向の regularizer.
+                                 //   β > 0 で smoother policy, exploration 促進
 }
 
 export type IterationLog = {
@@ -91,6 +93,7 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
   const history: IterationLog[] = []
   const normalizeAdvantage = config.normalizeAdvantage ?? true
   const valueLossWeight = config.valueLossWeight ?? 1.0
+  const entropyBonus = config.entropyBonus ?? 0
 
   for (let iter = 0; iter < config.iterations; iter++) {
     let totalReward = 0
@@ -154,11 +157,22 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
           const msgWeight = config.msgLossWeight ?? 1.0
           if (!step.isFinal && step.msgMaskedLogits && msgWeight !== 0) {
             const probs = softmax(step.msgMaskedLogits)
+            let H = 0
+            if (entropyBonus !== 0) {
+              for (let i = 0; i < layout.vocabSize; i++) {
+                if (step.msgMaskedLogits[i] <= MASK_NEG_THRESHOLD) continue
+                if (probs[i] > 0) H -= probs[i] * Math.log(probs[i])
+              }
+            }
             for (let i = 0; i < layout.vocabSize; i++) {
               if (step.msgMaskedLogits[i] <= MASK_NEG_THRESHOLD) {
                 msgGrad[i] = 0
               } else {
-                msgGrad[i] = (probs[i] - (i === step.msgChosen ? 1 : 0)) * advantage * msgWeight
+                let g = (probs[i] - (i === step.msgChosen ? 1 : 0)) * advantage * msgWeight
+                if (entropyBonus !== 0) {
+                  g += entropyBonus * probs[i] * (Math.log(Math.max(probs[i], 1e-12)) + H)
+                }
+                msgGrad[i] = g
               }
             }
             policyLossSum += -step.msgLogp * advantage * msgWeight
@@ -167,11 +181,22 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
           const voteGrad = new Float32Array(step.numAgents)
           if (step.isFinal && step.voteMaskedLogits) {
             const probs = softmax(step.voteMaskedLogits)
+            let H = 0
+            if (entropyBonus !== 0) {
+              for (let i = 0; i < step.numAgents; i++) {
+                if (step.voteMaskedLogits[i] <= MASK_NEG_THRESHOLD) continue
+                if (probs[i] > 0) H -= probs[i] * Math.log(probs[i])
+              }
+            }
             for (let i = 0; i < step.numAgents; i++) {
               if (step.voteMaskedLogits[i] <= MASK_NEG_THRESHOLD) {
                 voteGrad[i] = 0
               } else {
-                voteGrad[i] = (probs[i] - (i === step.voteChosen ? 1 : 0)) * advantage
+                let g = (probs[i] - (i === step.voteChosen ? 1 : 0)) * advantage
+                if (entropyBonus !== 0) {
+                  g += entropyBonus * probs[i] * (Math.log(Math.max(probs[i], 1e-12)) + H)
+                }
+                voteGrad[i] = g
               }
             }
             policyLossSum += -step.voteLogp * advantage
