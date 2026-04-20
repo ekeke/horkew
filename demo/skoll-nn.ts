@@ -1,68 +1,35 @@
 /**
- * demo 用: mason_brain NN の checkpoint 読み込み + 推論ヘルパー
+ * demo 用: 5 perspective skoll NN の checkpoint 読込 + 推論ヘルパー
  *
- * skoll-supervised pretrain で生成した checkpoint を browser で load し、
- * VillageStatus + Possibilities + viewer seat から vote 確率を計算する。
+ * src/skoll/models/{mason,wolf,fanatic,hamster,immoralist}.json を
+ * /horkew/models/ 経由で fetch し、checkpoint 内蔵の config から
+ * TransformerNetwork を構築する (TF.js 非依存)。
  *
- * 制約:
- *   - 完全な GameState を VillageStatus から復元できないため、
- *     一部観測次元（divineHistory 等）は空。mason 視点では問題なし。
- *   - viewer seat と partner seat はユーザー指定（既知の mason 配置を想定）。
+ * perspective ごとの違い:
+ *   - observation encoder (standard / collective mason / collective wolf)
+ *   - TeamDecisionContext vs DecisionContext (mason/wolf は team)
+ *   - excluded 席 (mason: self+partner, wolf: teamSeats, fanatic: self+knownWolves,
+ *     hamster: self, immoralist: self+knownHamster)
+ *
+ * すべての結果は UnifiedVoteAnalysis に正規化される。
  */
 
 import type { VillageStatus, SystemRole } from '../src/types/index.ts'
-import type { TeamDecisionContext, ExecutionPlan } from '../src/fenrir/src/agents/agent.ts'
+import type {
+  DecisionContext, TeamDecisionContext, ExecutionPlan,
+} from '../src/fenrir/src/agents/agent.ts'
 import type { GameState, PlayerState, GameEvent } from '../src/lupa/types.ts'
 import { resolveRules } from '../src/howl/ruleset.ts'
 import { Rng } from '../src/lupa/random.ts'
 import {
-  encodeCollectiveMasonObservation,
-  SEATS,
-  MASON_COLLECTIVE_OBSERVATION_SIZE,
-  MASON_COLLECTIVE_SEAT_FEATURES,
-  MASON_COLLECTIVE_CLS_FEATURES,
-  NUM_ROLE_TOKENS,
-  ROLE_TOKEN_FEATURES,
+  encodeObservation, encodeCollectiveMasonObservation, encodeCollectiveWolfObservation,
 } from '../src/fenrir/src/observation.ts'
 import { TransformerNetwork } from '../src/fenrir/src/ml/transformer-network.ts'
-import type { AnyNetwork, NetworkConfig } from '../src/fenrir/src/ml/nn.ts'
-import { HEAD_SIZES } from '../src/fenrir/src/action.ts'
+import { inferObservationMode } from '../src/fenrir/src/ml/checkpoint.ts'
+import type { AnyNetwork } from '../src/fenrir/src/ml/nn.ts'
+import { nnInferVote, type UnifiedVoteAnalysis } from '../src/skoll/unified.ts'
 
-// training.ts は TF.js (Node-only) を取り込むので、demo (browser) では直接 NetworkConfig を組む
-const MASON_BRAIN_TRANSFORMER_CONFIG: NetworkConfig = {
-  inputSize: MASON_COLLECTIVE_OBSERVATION_SIZE,
-  heads: { vote: HEAD_SIZES.vote },
-  sigmoidHeads: {},
-  transformer: {
-    dModel: 64,
-    numHeads: 4,
-    dFf: 128,
-    planFeatures: 0,
-    maxPlanTokens: 0,
-    roleFeatures: ROLE_TOKEN_FEATURES,
-    numRoleTokens: NUM_ROLE_TOKENS,
-    seatLayers: 3,
-    strategyLayers: 2,
-    numPlanTokens: 0,
-    planVocabSize: 0,
-    seatFeatures: MASON_COLLECTIVE_SEAT_FEATURES,
-    clsFeatures: MASON_COLLECTIVE_CLS_FEATURES,
-    perSeatHeads: ['vote'],
-    perSeatSigmoidHeads: [],
-  },
-}
-
-function createMasonBrainNetwork(): TransformerNetwork {
-  return new TransformerNetwork(MASON_BRAIN_TRANSFORMER_CONFIG, 'mason_collective')
-}
-
-export type MasonInferenceResult = {
-  voteLogits: Float32Array
-  voteProbs: Float32Array
-  bestSeat: number
-  /** alive seats のみ、prob 降順 */
-  ranked: Array<{ seat: number, prob: number }>
-}
+export type Perspective = 'mason' | 'wolf' | 'fanatic' | 'hamster' | 'immoralist'
 
 export type CheckpointMeta = {
   iteration: number
@@ -77,10 +44,14 @@ function base64ToFloat32(b64: string): Float32Array {
   return new Float32Array(bytes.buffer)
 }
 
-/** JSON 文字列または fetch URL から checkpoint を load する */
-export async function loadMasonBrainFromJson(jsonText: string): Promise<{ network: AnyNetwork, meta: CheckpointMeta }> {
+/**
+ * Checkpoint JSON テキストから TransformerNetwork を構築。
+ * config は checkpoint に埋め込まれているので perspective ごとの config 定数は不要。
+ */
+export function loadSkollNetworkFromJson(jsonText: string): { network: AnyNetwork, meta: CheckpointMeta } {
   const data = JSON.parse(jsonText)
-  const network = createMasonBrainNetwork()
+  const mode = inferObservationMode(data.config)
+  const network = new TransformerNetwork(data.config, mode)
   const weights = new Map<string, Float32Array>()
   for (const [name, b64] of Object.entries(data.weights as Record<string, string>)) {
     weights.set(name, base64ToFloat32(b64))
@@ -89,47 +60,63 @@ export async function loadMasonBrainFromJson(jsonText: string): Promise<{ networ
   return { network, meta: data.metadata }
 }
 
-export async function loadMasonBrainFromUrl(url: string): Promise<{ network: AnyNetwork, meta: CheckpointMeta }> {
+/** /horkew/models/{perspective}.json から fetch して load */
+export async function loadSkollNetworkByPerspective(
+  perspective: Perspective,
+  baseUrl: string = import.meta.env.BASE_URL,
+): Promise<{ network: AnyNetwork, meta: CheckpointMeta }> {
+  const url = `${baseUrl.replace(/\/$/, '')}/models/${perspective}.json`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`fetch ${url} → ${res.status}`)
   const text = await res.text()
-  return loadMasonBrainFromJson(text)
+  return loadSkollNetworkFromJson(text)
 }
 
-export type InferenceInputs = {
+// ══════════════════════════════════════════════════════════
+// DecisionContext 構築
+// ══════════════════════════════════════════════════════════
+
+export type NNInferenceInputs = {
+  perspective: Perspective
   vs: VillageStatus
   setup: Map<SystemRole, number>
-  /** Skoll 計算で使った Possibilities の per-seat possible roles */
   globalPossibilities: Map<number, Set<SystemRole>>
-  /** mason 視点 seat（生存している必要がある） */
   viewerSeat: number
-  /** mason partner seat（不明なら null） */
-  partnerSeat: number | null
-  /** Howl から復元した public events（指定なし = 空、観測の per-seat 特徴がゼロになる） */
+  /** mason: partner / wolf: 他の wolf 席 / fanatic: knownWolves / immoralist: knownHamster */
+  partnerSeat?: number | null
+  teamSeats?: number[]
+  knownWolves?: number[]
+  knownHamster?: number | null
   publicEvents?: readonly GameEvent[]
 }
 
-/**
- * VillageStatus + viewer seat から TeamDecisionContext を mock する。
- *
- * 役職割当は viewer/partner = mason、それ以外は villager と仮置き。
- * 観測の seat-level 特徴は alive/CO/投票履歴ベースなので、仮置きで問題なし。
- */
-function buildMasonContext(inputs: InferenceInputs): TeamDecisionContext {
-  const { vs, viewerSeat, partnerSeat, globalPossibilities, publicEvents } = inputs
-
-  const aliveSeats: number[] = []
-  for (const [seat, status] of vs.statuses) {
-    if (status.surviving) aliveSeats.push(seat)
+function viewerRole(perspective: Perspective): SystemRole {
+  switch (perspective) {
+    case 'mason': return 'mason'
+    case 'wolf': return 'werewolf'
+    case 'fanatic': return 'fanatic'
+    case 'hamster': return 'werehamster'
+    case 'immoralist': return 'immoralist'
   }
-  aliveSeats.sort((a, b) => a - b)
+}
 
+function buildPlayers(
+  vs: VillageStatus,
+  perspective: Perspective,
+  viewerSeat: number,
+  teamSeats: number[],
+): PlayerState[] {
   const players: PlayerState[] = []
   const maxSeat = Math.max(...vs.statuses.keys())
+  const myRole = viewerRole(perspective)
+  const teamSet = new Set(teamSeats)
   for (let seat = 1; seat <= maxSeat; seat++) {
     const status = vs.statuses.get(seat)
     if (!status) continue
-    const role: SystemRole = (seat === viewerSeat || seat === partnerSeat) ? 'mason' : 'villager'
+    let role: SystemRole = 'villager'
+    if (seat === viewerSeat) role = myRole
+    else if (perspective === 'mason' && teamSet.has(seat)) role = 'mason'
+    else if (perspective === 'wolf' && teamSet.has(seat)) role = 'werewolf'
     players.push({
       seat,
       name: String(seat),
@@ -143,32 +130,29 @@ function buildMasonContext(inputs: InferenceInputs): TeamDecisionContext {
       forecastTarget: null,
     })
   }
+  return players
+}
 
+function buildIndividualContext(
+  inputs: NNInferenceInputs,
+  aliveSeats: number[],
+  players: PlayerState[],
+): DecisionContext {
+  const { vs, perspective, viewerSeat, publicEvents, globalPossibilities } = inputs
   const myPlayer = players.find(p => p.seat === viewerSeat)
   if (!myPlayer) throw new Error(`viewerSeat ${viewerSeat} not in VillageStatus`)
   if (!myPlayer.alive) throw new Error(`viewerSeat ${viewerSeat} is dead`)
 
   const day = (vs as { day?: number }).day ?? 1
-
   const gameState: GameState = {
-    players,
-    day,
-    phase: 'day',
-    finished: false,
-    result: null,
-    executionHistory: new Map(),
-    commander: null,
+    players, day, phase: 'day', finished: false, result: null,
+    executionHistory: new Map(), commander: null,
     ext: {} as never,
   }
 
-  const teamSeats = partnerSeat !== null && partnerSeat !== viewerSeat
-    ? [viewerSeat, partnerSeat]
-    : [viewerSeat]
-  const teamPlayers = players.filter(p => teamSeats.includes(p.seat))
-
   return {
     mySeat: viewerSeat,
-    myRole: 'mason',
+    myRole: viewerRole(perspective),
     myPlayer,
     day,
     phase: 'day',
@@ -184,9 +168,69 @@ function buildMasonContext(inputs: InferenceInputs): TeamDecisionContext {
     maxSurvivingNV: null,
     globalRetarPossibilities: globalPossibilities,
     wolfTeammates: null,
+    knownWolves: perspective === 'fanatic' ? (inputs.knownWolves ?? null) : null,
+    knownHamster: perspective === 'immoralist' ? (inputs.knownHamster ?? null) : null,
+    masonPartner: null,
+    revoteRound: 0,
+    revoteCandidates: null,
+    executionPlans: [] as ExecutionPlan[],
+    planIndices: null,
+    tsumiTarget: null,
+    rules: resolveRules(),
+  }
+}
+
+function buildTeamContext(
+  inputs: NNInferenceInputs,
+  aliveSeats: number[],
+  players: PlayerState[],
+): TeamDecisionContext {
+  const { vs, perspective, viewerSeat, publicEvents, globalPossibilities } = inputs
+  const myPlayer = players.find(p => p.seat === viewerSeat)
+  if (!myPlayer) throw new Error(`viewerSeat ${viewerSeat} not in VillageStatus`)
+  if (!myPlayer.alive) throw new Error(`viewerSeat ${viewerSeat} is dead`)
+
+  const day = (vs as { day?: number }).day ?? 1
+  const gameState: GameState = {
+    players, day, phase: 'day', finished: false, result: null,
+    executionHistory: new Map(), commander: null,
+    ext: {} as never,
+  }
+
+  // team seats の組立て
+  let teamSeats: number[] = []
+  if (perspective === 'mason') {
+    teamSeats = inputs.partnerSeat !== null && inputs.partnerSeat !== undefined && inputs.partnerSeat !== viewerSeat
+      ? [viewerSeat, inputs.partnerSeat]
+      : [viewerSeat]
+  } else if (perspective === 'wolf') {
+    teamSeats = (inputs.teamSeats && inputs.teamSeats.length > 0)
+      ? inputs.teamSeats
+      : [viewerSeat]
+  }
+  const teamPlayers = players.filter(p => teamSeats.includes(p.seat))
+
+  return {
+    mySeat: viewerSeat,
+    myRole: viewerRole(perspective),
+    myPlayer,
+    day,
+    phase: 'day',
+    alivePlayers: aliveSeats,
+    publicEvents: publicEvents ?? [],
+    signals: [],
+    commander: null,
+    proposals: [],
+    rng: new Rng(0),
+    gameState,
+    lastExecutedSeat: null,
+    retarPossibilities: globalPossibilities,
+    maxSurvivingNV: null,
+    globalRetarPossibilities: globalPossibilities,
+    wolfTeammates: perspective === 'wolf' ? teamSeats.filter(s => s !== viewerSeat) : null,
     knownWolves: null,
     knownHamster: null,
-    masonPartner: partnerSeat,
+    masonPartner: perspective === 'mason' ? (inputs.partnerSeat ?? null) : null,
     revoteRound: 0,
     revoteCandidates: null,
     executionPlans: [] as ExecutionPlan[],
@@ -199,54 +243,57 @@ function buildMasonContext(inputs: InferenceInputs): TeamDecisionContext {
   }
 }
 
-export function runMasonInference(
+// ══════════════════════════════════════════════════════════
+// Perspective 別 NN 推論 (UnifiedVoteAnalysis で正規化)
+// ══════════════════════════════════════════════════════════
+
+/**
+ * perspective に応じた観測エンコーダで NN を回し、UnifiedVoteAnalysis を返す。
+ *
+ * @returns 生存席 × NN の vote 確率 (softmax、exclude 対象も候補には残り excluded=true)
+ */
+export function runSkollNNInference(
   network: AnyNetwork,
-  inputs: InferenceInputs,
-): MasonInferenceResult {
-  const ctx = buildMasonContext(inputs)
-  const obs = encodeCollectiveMasonObservation(ctx)
-  const result = network.forward(obs)
-  const voteLogits = result.policies.get('vote')
-  if (!voteLogits) throw new Error('NN does not have vote head')
+  inputs: NNInferenceInputs,
+): UnifiedVoteAnalysis {
+  const { perspective, viewerSeat } = inputs
+  const aliveSeats: number[] = []
+  for (const [seat, status] of inputs.vs.statuses) {
+    if (status.surviving) aliveSeats.push(seat)
+  }
+  aliveSeats.sort((a, b) => a - b)
 
-  // alive マスク + self/partner 除外
-  const aliveMask = new Uint8Array(SEATS)
-  for (const seat of ctx.alivePlayers) {
-    if (seat >= 1 && seat <= SEATS) aliveMask[seat - 1] = 1
-  }
-  if (ctx.mySeat >= 1 && ctx.mySeat <= SEATS) aliveMask[ctx.mySeat - 1] = 0
-  if (ctx.masonPartner !== null && ctx.masonPartner >= 1 && ctx.masonPartner <= SEATS) {
-    aliveMask[ctx.masonPartner - 1] = 0
-  }
+  const teamSeats =
+    perspective === 'mason'
+      ? (inputs.partnerSeat !== null && inputs.partnerSeat !== undefined ? [viewerSeat, inputs.partnerSeat] : [viewerSeat])
+    : perspective === 'wolf'
+      ? (inputs.teamSeats && inputs.teamSeats.length > 0 ? inputs.teamSeats : [viewerSeat])
+    : [viewerSeat]
 
-  // softmax over masked
-  let maxLogit = -Infinity
-  for (let i = 0; i < SEATS; i++) {
-    if (aliveMask[i] && voteLogits[i] > maxLogit) maxLogit = voteLogits[i]
-  }
-  const voteProbs = new Float32Array(SEATS)
-  let expSum = 0
-  for (let i = 0; i < SEATS; i++) {
-    if (aliveMask[i]) {
-      voteProbs[i] = Math.exp(voteLogits[i] - maxLogit)
-      expSum += voteProbs[i]
+  const players = buildPlayers(inputs.vs, perspective, viewerSeat, teamSeats)
+
+  let observation: Float32Array
+  let excluded: Set<number>
+
+  if (perspective === 'mason') {
+    const ctx = buildTeamContext(inputs, aliveSeats, players)
+    observation = encodeCollectiveMasonObservation(ctx)
+    excluded = new Set<number>(ctx.teamSeats)
+  } else if (perspective === 'wolf') {
+    const ctx = buildTeamContext(inputs, aliveSeats, players)
+    observation = encodeCollectiveWolfObservation(ctx)
+    excluded = new Set<number>(ctx.teamSeats)
+  } else {
+    const ctx = buildIndividualContext(inputs, aliveSeats, players)
+    observation = encodeObservation(ctx)
+    excluded = new Set<number>([viewerSeat])
+    if (perspective === 'fanatic' && inputs.knownWolves) {
+      for (const s of inputs.knownWolves) excluded.add(s)
+    }
+    if (perspective === 'immoralist' && inputs.knownHamster !== null && inputs.knownHamster !== undefined) {
+      excluded.add(inputs.knownHamster)
     }
   }
-  if (expSum > 0) {
-    for (let i = 0; i < SEATS; i++) voteProbs[i] /= expSum
-  }
 
-  let bestSeat = -1
-  let bestProb = -1
-  const ranked: Array<{ seat: number, prob: number }> = []
-  for (const seat of ctx.alivePlayers) {
-    if (seat < 1 || seat > SEATS) continue
-    if (!aliveMask[seat - 1]) continue
-    const prob = voteProbs[seat - 1]
-    ranked.push({ seat, prob })
-    if (prob > bestProb) { bestProb = prob; bestSeat = seat }
-  }
-  ranked.sort((a, b) => b.prob - a.prob)
-
-  return { voteLogits, voteProbs, bestSeat, ranked }
+  return nnInferVote(network, observation, aliveSeats, excluded)
 }

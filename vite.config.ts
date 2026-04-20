@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { join, extname, resolve } from 'node:path'
 
 const scenariosSrc = 'src/retar/scenarios'
+const skollModelsSrc = 'src/skoll/models'
 const orchBase = 'tmp'
 
 function serveScenarios(): Plugin {
@@ -41,6 +42,40 @@ function serveScenarios(): Plugin {
           type: 'asset',
           fileName: `scenarios/${file}`,
           source: readFileSync(join(scenariosSrc, file), 'utf-8'),
+        })
+      }
+    },
+  }
+}
+
+/** src/skoll/models/*.json を /horkew/models/ で配信 */
+function serveSkollModels(): Plugin {
+  let base = '/horkew/'
+  return {
+    name: 'serve-skoll-models',
+    configResolved(config) { base = config.base },
+    configureServer(server) {
+      const prefix = `${base}models/`
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith(prefix)) return next()
+        const filename = decodeURIComponent(req.url.slice(prefix.length))
+        try {
+          const content = readFileSync(join(skollModelsSrc, filename), 'utf-8')
+          res.setHeader('Content-Type', 'application/json')
+          res.end(content)
+        } catch {
+          next()
+        }
+      })
+    },
+    generateBundle() {
+      if (!existsSync(skollModelsSrc)) return
+      const files = readdirSync(skollModelsSrc).filter(f => f.endsWith('.json'))
+      for (const file of files) {
+        this.emitFile({
+          type: 'asset',
+          fileName: `models/${file}`,
+          source: readFileSync(join(skollModelsSrc, file), 'utf-8'),
         })
       }
     },
@@ -237,7 +272,7 @@ function servePublicEarly(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), serveStats(), servePublicEarly(), serveScenarios(), servePretrainSnapshots()],
+  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), serveStats(), servePublicEarly(), serveScenarios(), serveSkollModels(), servePretrainSnapshots()],
   root: 'demo',
   base: '/horkew/',
   server: { port: 5375, strictPort: true },

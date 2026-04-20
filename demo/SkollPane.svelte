@@ -2,18 +2,20 @@
   import type { VillageStatus, SystemRole } from '../src/types/index.ts'
   import type { AnalyzeOptions } from '../src/retar/index.ts'
   import { VillageRetar } from '../src/retar/index.ts'
-  import { Possibilities, ROLE_COUNT, RoleBitIndex, possibilityFromRoles } from '../src/retar/possibilities.ts'
+  import { Possibilities, RoleBitIndex, possibilityFromRoles } from '../src/retar/possibilities.ts'
   import { computeRoleProbabilities, getRoleProbability } from '../src/skoll/index.ts'
   import type { RoleProbabilities } from '../src/skoll/index.ts'
   import { analyzeExecutionsByWorld, type WorldExecutionAnalysis } from '../src/skoll/world-analysis.ts'
   import { estimateWorldCount, estimateRuntimeMs, type WorldEstimate } from '../src/skoll/estimate.ts'
   import {
-    loadMasonBrainFromJson,
-    runMasonInference,
-    type MasonInferenceResult,
+    loadSkollNetworkByPerspective,
+    loadSkollNetworkFromJson,
+    runSkollNNInference,
+    type Perspective,
     type CheckpointMeta,
   } from './skoll-nn.ts'
   import type { AnyNetwork } from '../src/fenrir/src/ml/nn.ts'
+  import type { UnifiedVoteAnalysis } from '../src/skoll/unified.ts'
 
   let {
     vs,
@@ -41,18 +43,26 @@
    *  「確率計算」ボタン (= retar を回す) と同時に算出する */
   let worldEstimate: WorldEstimate | null = $state(null)
 
-  // === NN-skoll (mason_brain pretrained) ===
+  // === NN-skoll (5 perspective supported) ===
+  const perspectives: Perspective[] = ['mason', 'wolf', 'fanatic', 'hamster', 'immoralist']
+  const perspectiveLabels: Record<Perspective, string> = {
+    mason: '共有', wolf: '狼', fanatic: '狂信', hamster: '狐', immoralist: '背徳',
+  }
+  let nnPerspective = $state<Perspective>('mason')
   let nnNetwork: AnyNetwork | null = $state(null)
   let nnMeta: CheckpointMeta | null = $state(null)
   let nnLoadError = $state('')
-  let nnResult: MasonInferenceResult | null = $state(null)
+  let nnLoading = $state(false)
+  let nnResult: UnifiedVoteAnalysis | null = $state(null)
   let nnRunning = $state(false)
   let nnError = $state('')
   let nnElapsed = $state(0)
-  /** mason 視点 seat（NN 推論用）*/
+  /** 視点 seat (NN 推論用) */
   let nnViewerSeat = $state<number | null>(null)
-  /** mason partner seat（不明なら null）*/
+  /** mason: partner / immoralist: 狐 / 単一指定用 */
   let nnPartnerSeat = $state<number | null>(null)
+  /** wolf: 他の wolf 席 / fanatic: 知っている狼席 */
+  let nnTeamSeatsStr = $state('')
 
   /** setup に含まれる role 一覧（表示列用） */
   let activeRoles: SystemRole[] = $derived(
@@ -198,6 +208,23 @@
 
   // === NN-skoll handlers ===
 
+  async function loadSelectedPerspective() {
+    nnLoadError = ''
+    nnLoading = true
+    try {
+      const { network, meta } = await loadSkollNetworkByPerspective(nnPerspective)
+      nnNetwork = network
+      nnMeta = meta
+      nnResult = null
+    } catch (e) {
+      nnLoadError = e instanceof Error ? e.message : String(e)
+      nnNetwork = null
+      nnMeta = null
+    } finally {
+      nnLoading = false
+    }
+  }
+
   async function onNnFileSelect(ev: Event) {
     const input = ev.target as HTMLInputElement
     const file = input.files?.[0]
@@ -205,7 +232,7 @@
     nnLoadError = ''
     try {
       const text = await file.text()
-      const { network, meta } = await loadMasonBrainFromJson(text)
+      const { network, meta } = loadSkollNetworkFromJson(text)
       nnNetwork = network
       nnMeta = meta
       nnResult = null
@@ -214,6 +241,10 @@
       nnNetwork = null
       nnMeta = null
     }
+  }
+
+  function parseSeatList(s: string): number[] {
+    return s.split(/[,\s]+/).map(x => parseInt(x, 10)).filter(x => Number.isFinite(x) && x > 0)
   }
 
   function aliveSeatList(): number[] {
@@ -256,12 +287,17 @@
         const viewer = nnViewerSeat ?? alive[0]
         if (!alive.includes(viewer)) throw new Error(`viewer seat ${viewer} not alive`)
 
-        nnResult = runMasonInference(nnNetwork!, {
+        const teamList = parseSeatList(nnTeamSeatsStr)
+        nnResult = runSkollNNInference(nnNetwork!, {
+          perspective: nnPerspective,
           vs: vs!,
           setup,
           globalPossibilities: retarResult.result,
           viewerSeat: viewer,
-          partnerSeat: nnPartnerSeat,
+          partnerSeat: nnPerspective === 'mason' ? nnPartnerSeat : null,
+          teamSeats: nnPerspective === 'wolf' ? [viewer, ...teamList.filter(s => s !== viewer)] : undefined,
+          knownWolves: nnPerspective === 'fanatic' ? teamList : undefined,
+          knownHamster: nnPerspective === 'immoralist' ? nnPartnerSeat : null,
           publicEvents,
         })
         nnElapsed = performance.now() - t0
@@ -398,14 +434,25 @@
     {/if}
   </div>
 
-  <!-- ── NN-skoll (mason_brain pretrained) ── -->
+  <!-- ── NN-skoll (5 perspective) ── -->
   <div class="exec-section">
-    <div class="nn-header">NN-skoll (mason_brain pretrained)</div>
+    <div class="nn-header">NN-skoll ({perspectiveLabels[nnPerspective]}視点)</div>
 
     <div class="skoll-controls">
+      <label>
+        視点:
+        <select bind:value={nnPerspective} onchange={() => { nnNetwork = null; nnMeta = null; nnResult = null }}>
+          {#each perspectives as p}
+            <option value={p}>{perspectiveLabels[p]}</option>
+          {/each}
+        </select>
+      </label>
+      <button class="skoll-btn" onclick={loadSelectedPerspective} disabled={nnLoading}>
+        {nnLoading ? '読込中...' : 'モデル読込'}
+      </button>
       <label class="nn-file-label">
         <input type="file" accept=".json" onchange={onNnFileSelect} class="nn-file-input" />
-        <span class="skoll-btn">checkpoint 読込</span>
+        <span class="skoll-btn">file から</span>
       </label>
       {#if nnMeta}
         <span class="skoll-stats">
@@ -421,24 +468,54 @@
     {#if nnNetwork && vs}
       <div class="nn-config">
         <label>
-          視点 seat:
+          {nnPerspective === 'mason' ? '共有席'
+            : nnPerspective === 'wolf' ? '狼自席'
+            : nnPerspective === 'fanatic' ? '狂信席'
+            : nnPerspective === 'hamster' ? '狐席'
+            : '背徳席'}:
           <select bind:value={nnViewerSeat}>
             {#each aliveSeatList() as seat}
               <option value={seat}>{playerName(seat)}</option>
             {/each}
           </select>
         </label>
-        <label>
-          partner:
-          <select bind:value={nnPartnerSeat}>
-            <option value={null}>(不明)</option>
-            {#each aliveSeatList() as seat}
-              {#if seat !== nnViewerSeat}
-                <option value={seat}>{playerName(seat)}</option>
-              {/if}
-            {/each}
-          </select>
-        </label>
+
+        {#if nnPerspective === 'mason'}
+          <label>
+            partner:
+            <select bind:value={nnPartnerSeat}>
+              <option value={null}>(不明)</option>
+              {#each aliveSeatList() as seat}
+                {#if seat !== nnViewerSeat}
+                  <option value={seat}>{playerName(seat)}</option>
+                {/if}
+              {/each}
+            </select>
+          </label>
+        {:else if nnPerspective === 'wolf'}
+          <label>
+            仲間狼席 (カンマ区切り):
+            <input type="text" bind:value={nnTeamSeatsStr} placeholder="例: 2,5" />
+          </label>
+        {:else if nnPerspective === 'fanatic'}
+          <label>
+            知ってる狼席 (カンマ区切り):
+            <input type="text" bind:value={nnTeamSeatsStr} placeholder="例: 2,5,9" />
+          </label>
+        {:else if nnPerspective === 'immoralist'}
+          <label>
+            知ってる狐席:
+            <select bind:value={nnPartnerSeat}>
+              <option value={null}>(未指定)</option>
+              {#each aliveSeatList() as seat}
+                {#if seat !== nnViewerSeat}
+                  <option value={seat}>{playerName(seat)}</option>
+                {/if}
+              {/each}
+            </select>
+          </label>
+        {/if}
+
         <button
           class="skoll-btn"
           onclick={runNn}
@@ -456,10 +533,10 @@
 
     {#if nnResult}
       <div class="exec-summary">
-        NN 最善: <span class="exec-best">{playerName(nnResult.bestSeat)}</span>
-        {#if execResult}
+        NN 最善: <span class="exec-best">{nnResult.bestVote !== null ? playerName(nnResult.bestVote) : '—'}</span>
+        {#if execResult && nnPerspective === 'mason'}
           / Skoll 最善: <span class="exec-best">{playerName(execResult.bestExecution)}</span>
-          {#if nnResult.bestSeat === execResult.bestExecution}
+          {#if nnResult.bestVote === execResult.bestExecution}
             <span class="nn-match">✓ 一致</span>
           {:else}
             <span class="nn-mismatch">✗ 不一致</span>
@@ -477,13 +554,16 @@
             </tr>
           </thead>
           <tbody>
-            {#each nnResult.ranked as { seat, prob }}
-              {@const isBest = seat === nnResult!.bestSeat}
-              <tr class:exec-best-row={isBest}>
-                <td class="skoll-td-name">{playerName(seat)}</td>
-                <td class="skoll-td-prob {nnProbClass(prob, isBest)}">{formatPct(prob)}</td>
+            {#each [...nnResult.candidates].sort((a, b) => b.score - a.score) as c}
+              {@const isBest = c.seat === nnResult!.bestVote}
+              <tr class:exec-best-row={isBest} class:excluded-row={c.excluded}>
+                <td class="skoll-td-name">
+                  {playerName(c.seat)}
+                  {#if c.excluded}<span class="excluded-badge">除外</span>{/if}
+                </td>
+                <td class="skoll-td-prob {nnProbClass(c.score, isBest)}">{formatPct(c.score)}</td>
                 <td class="exec-bar-cell">
-                  <div class="exec-bar nn-bar" style="width: {Math.max(prob * 100, 0.5)}%"></div>
+                  <div class="exec-bar nn-bar" style="width: {Math.max(c.score * 100, 0.5)}%"></div>
                 </td>
               </tr>
             {/each}
@@ -766,5 +846,30 @@
   .nn-mismatch {
     color: var(--ctp-peach);
     font-weight: bold;
+  }
+
+  .excluded-row {
+    opacity: 0.5;
+  }
+
+  .excluded-badge {
+    display: inline-block;
+    margin-left: 0.3rem;
+    padding: 0 0.3rem;
+    font-size: 0.65rem;
+    background: var(--ctp-surface1);
+    color: var(--ctp-subtext0);
+    border-radius: 2px;
+  }
+
+  .nn-config input[type="text"] {
+    padding: 0.15rem 0.3rem;
+    border: 1px solid var(--ctp-surface1);
+    border-radius: 3px;
+    background: var(--ctp-surface0);
+    color: var(--ctp-text);
+    font-size: 0.8rem;
+    width: 6rem;
+    font-family: 'Consolas', 'Menlo', monospace;
   }
 </style>

@@ -6,6 +6,12 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import type { AnyNetwork, NetworkConfig } from './nn.ts'
 import { TransformerNetwork } from './transformer-network.ts'
+import type { ObservationMode } from '../observation.ts'
+import {
+  OBSERVATION_SIZE, TEAM_OBSERVATION_SIZE,
+  WOLF_COLLECTIVE_OBSERVATION_SIZE, MASON_COLLECTIVE_OBSERVATION_SIZE,
+  FANATIC_OBSERVATION_SIZE,
+} from '../observation.ts'
 
 export type CheckpointData = {
   version: number
@@ -72,14 +78,35 @@ export function loadCheckpoint(
 }
 
 /**
+ * config.inputSize から ObservationMode を自動判定。
+ * 一致しないサイズは 'individual' にフォールバック。
+ */
+export function inferObservationMode(config: NetworkConfig): ObservationMode {
+  switch (config.inputSize) {
+    case MASON_COLLECTIVE_OBSERVATION_SIZE: return 'mason_collective'
+    case WOLF_COLLECTIVE_OBSERVATION_SIZE: return 'wolf_collective'
+    case FANATIC_OBSERVATION_SIZE: return 'fanatic'
+    case TEAM_OBSERVATION_SIZE: return 'team'
+    case OBSERVATION_SIZE: return 'individual'
+    default: return 'individual'
+  }
+}
+
+/**
  * チェックポイント単体から Pure JS TransformerNetwork を構築。
  * TF.js 非依存で動くため、ブラウザ/demo/推論専用パスで利用可。
  * training.ts の create*Network を介さないので config 定数の import も不要。
+ *
+ * @param mode ObservationMode (省略時は config.inputSize から自動判定)
  */
-export function loadNetworkFromCheckpoint(path: string): TransformerNetwork {
+export function loadNetworkFromCheckpoint(
+  path: string,
+  mode?: ObservationMode,
+): TransformerNetwork {
   const raw = readFileSync(path, 'utf-8')
   const data: CheckpointData = JSON.parse(raw)
-  const net = new TransformerNetwork(data.config, true)
+  const resolvedMode = mode ?? inferObservationMode(data.config)
+  const net = new TransformerNetwork(data.config, resolvedMode)
   const weights = new Map<string, Float32Array>()
   for (const [name, b64] of Object.entries(data.weights)) {
     weights.set(name, base64ToFloat32(b64))
