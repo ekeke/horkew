@@ -23,9 +23,9 @@ import { resolveRules } from '../src/howl/ruleset.ts'
 import { Rng } from '../src/lupa/random.ts'
 import {
   encodeObservation, encodeCollectiveMasonObservation, encodeCollectiveWolfObservation,
+  inferObservationMode,
 } from '../src/fenrir/src/observation.ts'
 import { TransformerNetwork } from '../src/fenrir/src/ml/transformer-network.ts'
-import { inferObservationMode } from '../src/fenrir/src/ml/checkpoint.ts'
 import type { AnyNetwork } from '../src/fenrir/src/ml/nn.ts'
 import { nnInferVote, type UnifiedVoteAnalysis } from '../src/skoll/unified.ts'
 
@@ -50,7 +50,7 @@ function base64ToFloat32(b64: string): Float32Array {
  */
 export function loadSkollNetworkFromJson(jsonText: string): { network: AnyNetwork, meta: CheckpointMeta } {
   const data = JSON.parse(jsonText)
-  const mode = inferObservationMode(data.config)
+  const mode = inferObservationMode(data.config.inputSize)
   const network = new TransformerNetwork(data.config, mode)
   const weights = new Map<string, Float32Array>()
   for (const [name, b64] of Object.entries(data.weights as Record<string, string>)) {

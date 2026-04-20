@@ -760,6 +760,24 @@ const FANATIC_VILLAGE_TRUST_SIZE = SEATS               // 14
 const FANATIC_EXTRA = FANATIC_VILLAGE_PREDICT_SIZE + FANATIC_VILLAGE_TRUST_SIZE  // 168
 export const FANATIC_OBSERVATION_SIZE = OBSERVATION_SIZE + FANATIC_EXTRA
 
+/**
+ * NetworkConfig.inputSize から ObservationMode を自動判定。
+ * 一致しない場合は 'individual' にフォールバック。
+ *
+ * NOTE: ブラウザ/demo でも使えるよう、ここ (観測サイズ定数の隣) に置いている。
+ * checkpoint.ts は node:fs に依存するため browser から import できない。
+ */
+export function inferObservationMode(inputSize: number): ObservationMode {
+  switch (inputSize) {
+    case MASON_COLLECTIVE_OBSERVATION_SIZE: return 'mason_collective'
+    case WOLF_COLLECTIVE_OBSERVATION_SIZE: return 'wolf_collective'
+    case FANATIC_OBSERVATION_SIZE: return 'fanatic'
+    case TEAM_OBSERVATION_SIZE: return 'team'
+    case OBSERVATION_SIZE: return 'individual'
+    default: return 'individual'
+  }
+}
+
 // 狂信者オフセット (OBSERVATION_SIZE基準)
 const FANATIC_VILLAGE_PREDICT_START = OBSERVATION_SIZE
 const FANATIC_VILLAGE_TRUST_START = FANATIC_VILLAGE_PREDICT_START + FANATIC_VILLAGE_PREDICT_SIZE
