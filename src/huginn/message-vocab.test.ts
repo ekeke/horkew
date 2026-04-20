@@ -98,11 +98,15 @@ describe('legal mask', () => {
     assert.strictEqual(mask[layout.commitBase + 1], 1)
   })
 
-  it('OFFER self-OFFER (i===j) is masked', () => {
-    const input = makeInput(0, [])
+  it('OFFER iVote===youVote (unanimous broadcast) is legal except when involving self', () => {
+    const input = makeInput(0, [])  // self=0 is excluded
     const mask = buildLegalMask(input, 0, layout)
     for (let i = 0; i < N; i++) {
-      assert.strictEqual(mask[layout.offerBase + i * N + i], 0, `self-OFFER at i=${i}`)
+      if (i === 0) {
+        assert.strictEqual(mask[layout.offerBase + i * N + i], 0, `OFFER(self,self) at i=${i} must be masked`)
+      } else {
+        assert.strictEqual(mask[layout.offerBase + i * N + i], 1, `unanimous OFFER(${i},${i}) must be legal`)
+      }
     }
   })
 

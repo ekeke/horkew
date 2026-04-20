@@ -387,6 +387,74 @@ export function pair2v2SplitMentor(): Scenario {
   }
 }
 
+/**
+ * 実演デモ (学習なし): 3 bot 村 (unanimous offerer + 2 eagerCommitter) vs 狼 + 狂信.
+ *
+ * trio3v2Block と同じ構造だが、3 村をスクリプトボットに置換.
+ * 論理 seat:
+ *   s0 = unanimous offerer 村 (primary=s3 狼, mode=unanimous) — 毎 round offer(iVote=s3, youVote=s3)
+ *   s1 = eagerCommitter 村 (primary=s4, acceptable={s3,s4}) — offer.youVote=s3 を見て commit(s3), 自分の primary を譲る
+ *   s2 = eagerCommitter 村 (primary=s3, acceptable={s3,s4}) — 同じく commit(s3)
+ *   s3 = 狼 (fixedVote→s0)
+ *   s4 = 狂信 (fixedVote→s0)
+ *
+ * 期待帰結: 全 3 村 s3 に一致投票、bot 2 票は s0、tally s0:2 s3:3 → s3 単独吊り → '3' 成功.
+ * s1 の primary は本来 s4 だが acceptable に s3 を含むので「offer broadcast に乗って譲る」動作を検証する.
+ */
+export function trio3v2Mentor(): Scenario {
+  const envConfig: EnvConfig = {
+    numAgents: 5,
+    agentRoles: [
+      { type: 'offerer', primary: 3, acceptable: [3, 4], mode: 'unanimous' },
+      { type: 'eagerCommitter', primary: 4, acceptable: [3, 4] },
+      { type: 'eagerCommitter', primary: 3, acceptable: [3, 4] },
+      { type: 'fixedVote', target: 0 },
+      { type: 'fixedVote', target: 0 },
+    ],
+    randomizeRolesPerGame: true,
+    desireCorrelation: 0.7,
+    kRounds: 4,
+    rewardMode: 'eliminated',
+    consensusBonus: 0,
+    outcomeRewards: {
+      '3': { reward: 1.0, label: '3 人単独合意 (狼 s3 吊り) — unanimous broadcast 成功' },
+      '4': { reward: 1.0, label: '3 人単独合意 (狂信 s4 吊り)' },
+    },
+  }
+  return {
+    name: 'trio3v2Mentor',
+    description:
+      '実演デモ: 3 bot 村 (unanimous offerer + 2 eagerCommitter) vs 狼+狂信. ' +
+      'unanimous offer(iVote=X, youVote=X) の broadcast protocol を検証. ' +
+      '1 名の committer は primary が s4 だが acceptable に s3 を含むため、offerer の s3 broadcast に乗り換える (= 譲歩).',
+    learningObjective:
+      '(学習なし) bot プロトコル検証: unanimous offerer が offer(3,3) を broadcast → committer 2 名が即 commit(3) → 全 3 村 s3 集中投票 → 狼単独吊り成功.',
+    envConfig,
+    analysis: {
+      N: 5,
+      learningAgentCount: 0,
+      botAgentCount: 5,
+      majority: 3,
+      expectedWinRateOnFullCoordination: 0,   // no learners
+    },
+    roles: [
+      { seat: 0, label: '村-offer',   kind: 'bot', team: 'village',  winCondition: '狼全滅',                              suggestedVoteTarget: '狼 s3 を broadcast',     knowledge: { 3: ['werewolf', '狼'], 4: ['werewolf', '狂信'] } },
+      { seat: 1, label: '村-commit1', kind: 'bot', team: 'village',  winCondition: '狼全滅',                              suggestedVoteTarget: 'offer に乗る (譲歩)',       knowledge: { 3: ['werewolf'], 4: ['werewolf'] } },
+      { seat: 2, label: '村-commit2', kind: 'bot', team: 'village',  winCondition: '狼全滅',                              suggestedVoteTarget: 'offer に乗る',              knowledge: { 3: ['werewolf'], 4: ['werewolf'] } },
+      { seat: 3, label: '狼',         kind: 'bot', team: 'werewolf', winCondition: 'PP',                                 suggestedVoteTarget: 's0 集中',                  knowledge: { 4: ['werewolf', '狂信'] } },
+      { seat: 4, label: '狂信',       kind: 'bot', team: 'werewolf', winCondition: '狼勝利',                              suggestedVoteTarget: 's0 集中',                  knowledge: { 3: ['werewolf', '狼'] } },
+    ],
+    outcomes: [
+      {
+        label: 'プロトコル完遂 (想定帰結)',
+        voteTally: 's0: 2 (bot), s3: 3 (村×3)',
+        result: 's3 単独吊り → 狼全滅',
+        learnerWinRate: 1.0,
+      },
+    ],
+  }
+}
+
 // ============================================================
 // Catalog
 // ============================================================
@@ -396,4 +464,5 @@ export const catalog: Record<string, () => Scenario> = {
   pair2v2Split,
   trio3v2Block,
   pair2v2SplitMentor,
+  trio3v2Mentor,
 }

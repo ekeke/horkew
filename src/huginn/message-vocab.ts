@@ -130,10 +130,11 @@ export function buildLegalMask(
     }
   }
 
+  // offer(iVote=X, youVote=Y): X ≠ Y の制約を撤廃して X===Y (全員で X に合意しよう broadcast) も合法化.
+  // excluded[self] は既に除外されるので self-offer の禁止は維持される.
   for (let i = 0; i < N; i++) {
     if (input.excluded[i]) continue
     for (let j = 0; j < N; j++) {
-      if (i === j) continue
       if (input.excluded[j]) continue
       mask[layout.offerBase + i * N + j] = 1
     }

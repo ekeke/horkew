@@ -26,9 +26,11 @@ export type AgentRole =
   | 'learning'                          // policy 学習対象
   | { type: 'fixedVote'; target: AgentId; silent?: boolean }   // 固定投票、silent なら全ラウンド SILENT
   | { type: 'silent' }                  // SILENT 固定、投票はランダム
-  /** 実演ボット: 毎 round offer(iVote=primary, youVote=(acceptable\{primary}) から round でサイクル) を出す.
-   *  投票は primary. primary/acceptable はシナリオ定義では論理 seat. reset() で実 seat に変換される. */
-  | { type: 'offerer'; primary: AgentId; acceptable: AgentId[] }
+  /** 実演ボット: 毎 round offer を出す. 投票は primary.
+   *  mode='split' (default): offer(iVote=primary, youVote=(acceptable\{primary}) の round サイクル) — 2-way 分割提案
+   *  mode='unanimous': offer(iVote=primary, youVote=primary) — 「primary に全員で合意しよう」broadcast
+   *  primary/acceptable はシナリオ定義では論理 seat. reset() で実 seat に変換される. */
+  | { type: 'offerer'; primary: AgentId; acceptable: AgentId[]; mode?: 'split' | 'unanimous' }
   /** 実演ボット: 既出 offer のうち youVote ∈ acceptable を見つけたら即 commit(youVote) を出す.
    *  自分の過去 commit があればその target に投票、無ければ primary. */
   | { type: 'eagerCommitter'; primary: AgentId; acceptable: AgentId[] }
@@ -164,6 +166,7 @@ export class AbstractGame {
             type: 'offerer',
             primary: actualOfLogical[baseRole.primary],
             acceptable: baseRole.acceptable.map(l => actualOfLogical[l]),
+            ...(baseRole.mode !== undefined ? { mode: baseRole.mode } : {}),
           }
         } else if (typeof baseRole === 'object' && baseRole.type === 'eagerCommitter') {
           newRoles[actual] = {
@@ -391,6 +394,10 @@ export function scriptedBotMessage(
       return { type: 'silent' }
     case 'offerer': {
       if (role.primary === self) return { type: 'silent' }
+      const mode = role.mode ?? 'split'
+      if (mode === 'unanimous') {
+        return { type: 'offer', iVote: role.primary, youVote: role.primary }
+      }
       const others = role.acceptable.filter(x => x !== role.primary && x !== self)
       if (others.length === 0) return { type: 'silent' }
       const youVote = others[round % others.length]
