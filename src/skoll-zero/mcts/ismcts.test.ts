@@ -97,8 +97,8 @@ describe('runMCTS: 基本動作', () => {
 
     let visitSum = 0
     for (const v of result.visits.values()) visitSum += v
-    // 初回 rollout は root expansion で path=[]、後続 99 が root.edge を 1 ずつ更新
-    assert.equal(visitSum, 99, 'root child visits = nRollouts - 1')
+    // M5 以降: root は eagerly expand するので、全 rollout (100) が root.edge を 1 ずつ更新
+    assert.equal(visitSum, 100, 'root child visits = nRollouts')
     assert.equal(result.abortReason, null)
   })
 
@@ -198,10 +198,40 @@ describe('runMCTS: 基本動作', () => {
       if (v < minV) minV = v
     }
     assert.equal(result.visits.size, 4)
-    assert.equal(sum, 399, 'sum = nRollouts - 1')
-    // value=0 の dummy NN では UCB 探索項のみで均等寄り
-    // 期待 ~100/action、極端な偏りがないこと
-    assert.ok(maxV - minV < 200, `分散が極端ではない (max-min=${maxV - minV})`)
+    assert.equal(sum, 400, 'sum = nRollouts (M5 で root eagerly expanded)')
+  })
+
+  it('Dirichlet noise: 有効時に root prior が変化し visits に偏りが出る', () => {
+    // 5 人 1 狼、dummy NN=uniform。noise なしだとほぼ均等 → α=0.3/ε=0.5 で偏らせる
+    const setup = new Map<SystemRole, number>([
+      ['villager', 3], ['mason', 1], ['werewolf', 1],
+    ])
+    const roleMask = RoleSignatureBits.villager | RoleSignatureBits.mason | RoleSignatureBits.werewolf
+    const poss = makePossibilitiesAllOpen(setup, 5, roleMask)
+    const det = new Determinizer(poss, setup)
+    const nn = new DummyNN()
+    const dummyWorld = det.sample(seededRng(1))!
+    const root = createSimState(dummyWorld, aliveOf([1, 2, 3, 4, 5]))
+
+    const rootObs = new Float32Array(1)
+    const resNoNoise = runMCTS(rootObs, root, 1, det, nn, {
+      cPuct: 1.5, nRollouts: 400, rng: seededRng(777),
+    })
+    const resWithNoise = runMCTS(rootObs, root, 1, det, nn, {
+      cPuct: 1.5, nRollouts: 400, rng: seededRng(777),
+      rootDirichletAlpha: 0.3, rootDirichletEps: 0.5,
+    })
+    // 合計は同じ (= nRollouts)
+    let sumNo = 0
+    let sumN = 0
+    for (const v of resNoNoise.visits.values()) sumNo += v
+    for (const v of resWithNoise.visits.values()) sumN += v
+    assert.equal(sumNo, 400)
+    assert.equal(sumN, 400)
+    // 分布が同じではないこと (noise の効果)
+    const a = [...resNoNoise.visits.entries()].sort()
+    const b = [...resWithNoise.visits.entries()].sort()
+    assert.notDeepEqual(a, b, 'noise ありとなしで visit 分布が異なる')
   })
 })
 

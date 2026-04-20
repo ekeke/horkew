@@ -100,6 +100,7 @@ export class MasonZeroAgent extends SkollMasterAgent {
       pi,
       day: ctx.day,
       masonSeat: ctx.mySeat,
+      alive,
     })
 
     return this.mzOpts.selectionMode === 'argmax'

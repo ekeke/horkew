@@ -1340,6 +1340,76 @@ export class TfTransformerNetwork {
   }
 
   /**
+   * skoll-zero の AlphaZero 系 self-play loss。
+   *
+   * 入力は MCTS の visit 分布から得た π (policy target) と z (mason 視点 outcome value)。
+   * - policy: cross-entropy(π, softmax(vote_logits + mask))
+   * - value:  MSE(z, matMul(clsOut, valueW) + valueB)
+   *
+   * mask は illegal 席に -1e9 を入れる加算形式（trainSupervisedVote と同形式）。
+   * L2 regularization は Phase 1 では省略（必要なら後日追加）。
+   */
+  trainMasonZero(batch: {
+    observations: Float32Array[]
+    policyTargets: Float32Array[]   // [n, SEATS] normalized π (illegal seats = 0)
+    masks: Float32Array[]           // [n, SEATS] additive: 0 legal / -1e9 illegal
+    valueTargets: number[]          // [n] z ∈ [-1.3, +1] (mason 視点)
+    valueCoeff?: number             // default 1.0
+  }): { loss: number, policyLoss: number, valueLoss: number } {
+    const n = batch.observations.length
+    if (n === 0) return { loss: 0, policyLoss: 0, valueLoss: 0 }
+
+    const voteHeadEntry = this.perSeatHeadWeights.get('vote')
+    if (!voteHeadEntry) throw new Error('trainMasonZero: vote head not found')
+    const [voteW, voteB] = voteHeadEntry
+
+    const voteHeadSize = this.config.heads.vote
+    const inputSize = this.config.inputSize
+    const valueCoeff = batch.valueCoeff ?? 1.0
+
+    const obsData = new Float32Array(n * inputSize)
+    const policyData = new Float32Array(n * voteHeadSize)
+    const maskData = new Float32Array(n * voteHeadSize)
+    const valueData = new Float32Array(n)
+    for (let i = 0; i < n; i++) {
+      obsData.set(batch.observations[i], i * inputSize)
+      policyData.set(batch.policyTargets[i], i * voteHeadSize)
+      maskData.set(batch.masks[i], i * voteHeadSize)
+      valueData[i] = batch.valueTargets[i]
+    }
+
+    const result = { loss: 0, policyLoss: 0, valueLoss: 0 }
+
+    const lossFunc = () => {
+      const obsTensor = tf.tensor2d(obsData, [n, inputSize])
+      const { clsOut, seatOutputs } = this.forwardTrunk(obsTensor)
+
+      const logits = this.perSeatLogits(seatOutputs, voteW, voteB)  // [n, SEATS]
+      const maskTensor = tf.tensor2d(maskData, [n, voteHeadSize])
+      const maskedLogits = tf.add(logits, maskTensor)
+      const probs = tf.softmax(maskedLogits)
+      const policyTensor = tf.tensor2d(policyData, [n, voteHeadSize])
+      const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
+      const policyLoss = tf.neg(tf.mean(tf.sum(tf.mul(policyTensor, logProbs), 1))) as tf.Scalar
+
+      const valueOut = tf.add(tf.matMul(clsOut, this.valueW), this.valueB).squeeze([1])  // [n]
+      const valueTensor = tf.tensor1d(valueData)
+      const valueLoss = tf.mean(tf.squaredDifference(valueOut, valueTensor)) as tf.Scalar
+
+      const totalLoss = tf.add(policyLoss, tf.mul(tf.scalar(valueCoeff), valueLoss)) as tf.Scalar
+
+      result.policyLoss = policyLoss.dataSync()[0]
+      result.valueLoss = valueLoss.dataSync()[0]
+      result.loss = totalLoss.dataSync()[0]
+
+      return totalLoss
+    }
+
+    this.optimizer.minimize(lossFunc, false, this.allVariables)
+    return result
+  }
+
+  /**
    * Plan token Pointer 教師あり学習
    * Forward plan tokensのPointer出力にcross-entropy損失を適用
    */

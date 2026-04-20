@@ -11,12 +11,17 @@ import { isMasonAlive } from './nn.ts'
 /**
  * MCTS の hyperparams。c_puct は AlphaZero default 中央値 1.5。
  *
- * Phase 1 では Dirichlet noise 未導入（M5 で root prior に注入予定）。
+ * rootDirichlet* は M5 で追加。root prior に `(1-ε)*prior + ε*Dir(α)` を適用して
+ * exploration を促す。eval では ε=0 (noise 無効) 推奨。
  */
 export type MCTSConfig = {
   cPuct: number
   nRollouts: number
   rng: () => number
+  /** root Dirichlet α (省略 or 0 で noise 無効) */
+  rootDirichletAlpha?: number
+  /** root Dirichlet ε (省略 or 0 で noise 無効) */
+  rootDirichletEps?: number
 }
 
 export const DEFAULT_MCTS_CONFIG: MCTSConfig = {
@@ -58,6 +63,18 @@ export function runMCTS(
   if (determinizer.size() === 0) {
     return { root, visits: new Map(), abortReason: 'no_consistent_world' }
   }
+  // root を先に NN 展開して Dirichlet noise を注入（rollout 中は descent のみ）。
+  // 未展開だと noise を prior に効かせられず exploration が鈍る。
+  // alive / masonSeat は determinization で不変なので、サンプル world は mask 専用。
+  const firstWorld = determinizer.sample(config.rng)
+  if (!firstWorld) {
+    return { root, visits: new Map(), abortReason: 'no_consistent_world' }
+  }
+  const rootState = createSimState(firstWorld, infoState.alive, infoState.day, infoState.phase as 'day' | 'night')
+  if (rootState.phase !== 'terminal' && isMasonAlive(rootState, masonSeat)) {
+    expandWithNN(root, rootState, masonSeat, nn, rootObs)
+    applyRootDirichletNoise(root, config)
+  }
   for (let i = 0; i < config.nRollouts; i++) {
     const world = determinizer.sample(config.rng)
     if (!world) break
@@ -65,6 +82,74 @@ export function runMCTS(
     runOneRollout(root, rolloutState, masonSeat, nn, rootObs, config)
   }
   return { root, visits: collectRootVisits(root), abortReason: null }
+}
+
+/**
+ * root prior に Dirichlet noise を混合: P ← (1-ε)P + ε·Dir(α)。
+ * α / ε のいずれかが未設定 or 0 なら no-op。
+ */
+function applyRootDirichletNoise(root: TreeNode, config: MCTSConfig): void {
+  const alpha = config.rootDirichletAlpha ?? 0
+  const eps = config.rootDirichletEps ?? 0
+  if (alpha <= 0 || eps <= 0 || root.edges.size === 0) return
+  const actions = Array.from(root.edges.keys())
+  const noise = sampleDirichlet(actions.length, alpha, config.rng)
+  for (let i = 0; i < actions.length; i++) {
+    const edge = root.edges.get(actions[i])!
+    edge.prior = (1 - eps) * edge.prior + eps * noise[i]
+  }
+}
+
+/**
+ * Dirichlet(α) sample (K 次元、合計 1)。α<1 は boost 法で処理:
+ *   g_i ~ Gamma(α+1, 1)、u_i ~ U(0,1)、x_i = g_i · u_i^(1/α)
+ * 次に x を合計で正規化。
+ */
+function sampleDirichlet(k: number, alpha: number, rng: () => number): Float32Array {
+  const out = new Float32Array(k)
+  let sum = 0
+  const useBoost = alpha < 1
+  for (let i = 0; i < k; i++) {
+    const g = sampleGamma(useBoost ? alpha + 1 : alpha, rng)
+    const x = useBoost ? g * Math.pow(Math.max(rng(), 1e-12), 1 / alpha) : g
+    out[i] = x
+    sum += x
+  }
+  if (sum <= 0) {
+    const u = 1 / k
+    for (let i = 0; i < k; i++) out[i] = u
+    return out
+  }
+  for (let i = 0; i < k; i++) out[i] /= sum
+  return out
+}
+
+/**
+ * Marsaglia-Tsang 法で Gamma(α, 1) sampling (α ≥ 1 向け)。
+ * 本実装は applyRootDirichletNoise 内で常に α ≥ 1 (boost 適用後) で呼ばれる。
+ */
+function sampleGamma(alpha: number, rng: () => number): number {
+  const d = alpha - 1 / 3
+  const c = 1 / Math.sqrt(9 * d)
+  for (let iter = 0; iter < 1000; iter++) {
+    const x = sampleNormal(rng)
+    const v1 = 1 + c * x
+    if (v1 <= 0) continue
+    const v = v1 * v1 * v1
+    const u = Math.max(rng(), 1e-12)
+    if (Math.log(u) < 0.5 * x * x + d - d * v + d * Math.log(v)) {
+      return d * v
+    }
+  }
+  // 極端な numerical 状況での fallback
+  return d
+}
+
+/** Box-Muller で standard normal sampling */
+function sampleNormal(rng: () => number): number {
+  const u1 = Math.max(rng(), 1e-12)
+  const u2 = rng()
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
 }
 
 /**

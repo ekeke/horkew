@@ -14,6 +14,7 @@ describe('TrainingBuffer', () => {
       pi: new Map([[5, 0.67], [7, 0.33]]),
       day: 1,
       masonSeat: 3,
+      alive: 0b11111110,
     })
     assert.equal(buf.size(), 0)
     assert.equal(buf.pendingSize(), 1)
@@ -31,6 +32,7 @@ describe('TrainingBuffer', () => {
       pi: new Map(),
       day: 1,
       masonSeat: 1,
+      alive: 0b10,
     })
     buf.finalize(0.5)
     assert.equal(buf.size(), 1)

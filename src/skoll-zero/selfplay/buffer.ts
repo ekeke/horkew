@@ -8,6 +8,8 @@ export type PendingRecord = {
   pi: Map<number, number>
   day: number
   masonSeat: number
+  /** 決定時点の生存 bitmask (1-based)。legal action mask を Float32Array に変換するのに使う */
+  alive: number
 }
 
 export type TrainingRecord = PendingRecord & {
@@ -51,6 +53,32 @@ export class TrainingBuffer {
 
   pendingSize(): number {
     return this.pending.length
+  }
+
+  /**
+   * FIFO で古い record を落として上限以下に保つ。
+   * M5 trainer が round ごとに呼ぶ想定。
+   */
+  expireOldest(maxSize: number): number {
+    const overflow = this.finalized.length - maxSize
+    if (overflow <= 0) return 0
+    this.finalized.splice(0, overflow)
+    return overflow
+  }
+
+  /**
+   * finalized から size 件を uniform random sampling (with replacement)。
+   * 決定的にしたい場合は rng を渡す。
+   */
+  sample(size: number, rng: () => number = Math.random): TrainingRecord[] {
+    const n = this.finalized.length
+    if (n === 0 || size <= 0) return []
+    const out: TrainingRecord[] = new Array(size)
+    for (let i = 0; i < size; i++) {
+      const idx = Math.floor(rng() * n)
+      out[i] = this.finalized[idx]
+    }
+    return out
   }
 
   /** 全状態クリア（テスト or 新 epoch 用） */
