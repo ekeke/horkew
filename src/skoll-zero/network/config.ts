@@ -17,6 +17,8 @@ import type { NetworkConfig } from '../../fenrir/src/ml/nn.ts'
 import { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 import {
   MASON_COLLECTIVE_OBSERVATION_SIZE, MASON_COLLECTIVE_SEAT_FEATURES, MASON_COLLECTIVE_CLS_FEATURES,
+  WOLF_COLLECTIVE_OBSERVATION_SIZE, WOLF_COLLECTIVE_SEAT_FEATURES, WOLF_COLLECTIVE_CLS_FEATURES,
+  OBSERVATION_SIZE, SEAT_TOKEN_FEATURES, CLS_FEATURES,
   NUM_ROLE_TOKENS, ROLE_TOKEN_FEATURES,
 } from '../../fenrir/src/observation.ts'
 import { HEAD_SIZES } from '../../fenrir/src/action.ts'
@@ -51,4 +53,60 @@ export const SKOLL_ZERO_NETWORK_CONFIG: NetworkConfig = {
 /** Pure JS (推論用)。ブラウザ可。 */
 export function createSkollZeroNetwork(): TransformerNetwork {
   return new TransformerNetwork(SKOLL_ZERO_NETWORK_CONFIG, 'mason_collective')
+}
+
+/** Standard individual 観測 (1029 dims) 用 config — village/fanatic/hamster/immoralist で共用 */
+export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
+  inputSize: OBSERVATION_SIZE,
+  heads: { vote: HEAD_SIZES.vote },
+  sigmoidHeads: {},
+  transformer: {
+    dModel: 64,
+    numHeads: 4,
+    dFf: 128,
+    planFeatures: 0,
+    maxPlanTokens: 0,
+    roleFeatures: ROLE_TOKEN_FEATURES,
+    numRoleTokens: NUM_ROLE_TOKENS,
+    seatLayers: 3,
+    strategyLayers: 2,
+    numPlanTokens: 0,
+    planVocabSize: 0,
+    seatFeatures: SEAT_TOKEN_FEATURES,
+    clsFeatures: CLS_FEATURES,
+    perSeatHeads: ['vote'],
+    perSeatSigmoidHeads: [],
+  },
+}
+
+/** Wolf collective 観測 (1212 dims) 用 config */
+export const WOLF_ZERO_NETWORK_CONFIG: NetworkConfig = {
+  inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
+  heads: { vote: HEAD_SIZES.vote },
+  sigmoidHeads: {},
+  transformer: {
+    dModel: 64,
+    numHeads: 4,
+    dFf: 128,
+    planFeatures: 0,
+    maxPlanTokens: 0,
+    roleFeatures: ROLE_TOKEN_FEATURES,
+    numRoleTokens: NUM_ROLE_TOKENS,
+    seatLayers: 3,
+    strategyLayers: 2,
+    numPlanTokens: 0,
+    planVocabSize: 0,
+    seatFeatures: WOLF_COLLECTIVE_SEAT_FEATURES,
+    clsFeatures: WOLF_COLLECTIVE_CLS_FEATURES,
+    perSeatHeads: ['vote'],
+    perSeatSigmoidHeads: [],
+  },
+}
+
+export function createStandardZeroNetwork(): TransformerNetwork {
+  return new TransformerNetwork(STANDARD_ZERO_NETWORK_CONFIG, 'individual')
+}
+
+export function createWolfZeroNetwork(): TransformerNetwork {
+  return new TransformerNetwork(WOLF_ZERO_NETWORK_CONFIG, 'wolf_collective')
 }
