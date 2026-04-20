@@ -149,3 +149,70 @@ export class TrainableNetwork {
     this.encoder.applyStepAdam(lr, divisor, opts)
   }
 }
+
+export function softmax(logits: Float32Array): Float32Array {
+  let max = -Infinity
+  for (let i = 0; i < logits.length; i++) {
+    if (logits[i] > max) max = logits[i]
+  }
+  const out = new Float32Array(logits.length)
+  let sum = 0
+  for (let i = 0; i < logits.length; i++) {
+    out[i] = Math.exp(logits[i] - max)
+    sum += out[i]
+  }
+  for (let i = 0; i < logits.length; i++) out[i] /= sum
+  return out
+}
+
+export function applyMask(logits: Float32Array, mask: Uint8Array): Float32Array {
+  const out = new Float32Array(logits.length)
+  for (let i = 0; i < logits.length; i++) {
+    out[i] = mask[i] ? logits[i] : -1e9
+  }
+  return out
+}
+
+export function sampleArgmax(logits: Float32Array): number {
+  let bestIdx = 0
+  let best = -Infinity
+  for (let i = 0; i < logits.length; i++) {
+    if (logits[i] > best) {
+      best = logits[i]
+      bestIdx = i
+    }
+  }
+  return bestIdx
+}
+
+export function sampleStochastic(logits: Float32Array, rngNext: () => number): number {
+  let max = -Infinity
+  for (let i = 0; i < logits.length; i++) {
+    if (logits[i] > max) max = logits[i]
+  }
+  let sum = 0
+  const probs = new Float32Array(logits.length)
+  for (let i = 0; i < logits.length; i++) {
+    probs[i] = Math.exp(logits[i] - max)
+    sum += probs[i]
+  }
+  for (let i = 0; i < logits.length; i++) probs[i] /= sum
+  let r = rngNext()
+  for (let i = 0; i < probs.length; i++) {
+    r -= probs[i]
+    if (r <= 0) return i
+  }
+  return probs.length - 1
+}
+
+export function logProbOf(logits: Float32Array, idx: number): number {
+  let max = -Infinity
+  for (let i = 0; i < logits.length; i++) {
+    if (logits[i] > max) max = logits[i]
+  }
+  let sum = 0
+  for (let i = 0; i < logits.length; i++) {
+    sum += Math.exp(logits[i] - max)
+  }
+  return logits[idx] - max - Math.log(sum)
+}

@@ -6,12 +6,12 @@
 import type { HuginnInput, Message, Observation, AgentId } from './types.ts'
 import { OFFER_REF_WINDOW } from './types.ts'
 import {
-  HuginnNetwork,
+  TrainableNetwork,
   applyMask,
   sampleArgmax,
   sampleStochastic,
   logProbOf,
-} from './network.ts'
+} from './trainable-network.ts'
 import { encodeObservation } from './observation.ts'
 import { buildVocabLayout, decodeMessage, buildLegalMask } from './message-vocab.ts'
 import type { Rng } from './rng.ts'
@@ -48,7 +48,7 @@ export type RunOptions = {
 
 export function runRounds(
   inputs: HuginnInput[],
-  network: HuginnNetwork,
+  network: TrainableNetwork,
   pastCommitViolations: Map<AgentId, number>,
   opts: RunOptions,
 ): Trace {
