@@ -27,7 +27,10 @@ export const CLS_FEATURE_DIMS = 8
 //   6: commitsAgainstThis (count, normalized)
 //   7: proposesAgainstThis (count, normalized)
 //   8: position index / MAX_AGENTS (絶対位置情報)
-export const AGENT_FEATURE_DIMS = 9
+//   9: offersIVoteCount   — このゲームで「i に "I vote" で投じる」と宣言された offer の count / 10
+//  10: offersYouVoteCount — このゲームで「i に "You vote" と要請する」offer の count / 10
+//                           unanimous offer(X,X) は両方に加算. split offer(X,Y) は別々の seat に加算.
+export const AGENT_FEATURE_DIMS = 11
 
 export type ObservationIntermediate = {
   cls: Float32Array
@@ -66,6 +69,11 @@ export function collectObservation(obs: Observation, kRounds: number): Observati
       if (tIdx >= 0) {
         agents[tIdx * AGENT_FEATURE_DIMS + 6] += 1
       }
+    } else if (m.type === 'offer') {
+      const iIdx = input.participants.indexOf(m.iVote)
+      const yIdx = input.participants.indexOf(m.youVote)
+      if (iIdx >= 0) agents[iIdx * AGENT_FEATURE_DIMS + 9] += 1
+      if (yIdx >= 0) agents[yIdx * AGENT_FEATURE_DIMS + 10] += 1
     }
   }
 
@@ -73,6 +81,8 @@ export function collectObservation(obs: Observation, kRounds: number): Observati
     const off = i * AGENT_FEATURE_DIMS
     agents[off + 6] = Math.min(agents[off + 6], 10) / 10
     agents[off + 7] = Math.min(agents[off + 7], 10) / 10
+    agents[off + 9] = Math.min(agents[off + 9], 10) / 10
+    agents[off + 10] = Math.min(agents[off + 10], 10) / 10
   }
 
   const cls = new Float32Array(CLS_FEATURE_DIMS)
