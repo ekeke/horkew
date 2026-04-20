@@ -39,6 +39,8 @@ export type SkollCommandAgentOptions = {
    * 指定されると skollOptions は無視される。
    */
   master?: SkollMasterAgent
+  /** Agent 識別名 (default: 'skoll')。skoll-zero 系では 'zero-mason' 等を指定 */
+  name?: string
 }
 
 /** commander で top-1 と top-2 の score 差がこれ未満なら designate_runoff を検討 */
@@ -50,7 +52,7 @@ const MIN_RUNOFF_SCORE = 0.1
 type FakeDivineCandidate = { target: number, result: 'human' | 'wolf', score: number }
 
 export class SkollCommandAgent implements CommandAgent {
-  readonly name = 'skoll'
+  readonly name: string
   private master: SkollMasterAgent
   private fallback: CommandAgent
   private rng: Rng
@@ -66,6 +68,7 @@ export class SkollCommandAgent implements CommandAgent {
     this.master = options.master ?? new SkollMasterAgent(options.skollOptions)
     this.fallback = options.fallback ?? new RandomCommandAgent(options.seed)
     this.rng = new Rng(options.seed)
+    this.name = options.name ?? 'skoll'
   }
 
   async decide(

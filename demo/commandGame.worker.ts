@@ -224,7 +224,11 @@ async function startGame(opts: StartGameOptions): Promise<void> {
   const zeroAgents = await buildSkollZeroAgents(rolesMap)
   const zeroCommandAgents = new Map<ZeroSlot, CommandAgent>()
   for (const [slot, agent] of zeroAgents) {
-    zeroCommandAgents.set(slot, new SkollCommandAgent({ seed: seed + 2, master: agent }))
+    zeroCommandAgents.set(slot, new SkollCommandAgent({
+      seed: seed + 2,
+      master: agent,
+      name: `zero-${slot}`,
+    }))
   }
 
   const liveEvents: Array<GameEvent | FenrirExtEvent> = []
