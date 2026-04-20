@@ -68,6 +68,10 @@ export type EnvConfig = {
   /** 学習 agent の primary を明示指定する (seat → primary seat). 既存の primaryFromBots / teams 由来 primary を上書きする.
    *  「村は狼の seat を知っている」のような前知識を表現するのに使う. */
   fixedPrimaries?: Record<AgentId, AgentId>
+  /** 学習 agent の primary 候補セット (論理 seat). 指定時は各 learner が独立にランダム選出する.
+   *  primaryFromBots / teams 由来の primary を override する (fixedPrimaries は更に上書き可能).
+   *  bot プールに混ぜたくない agent (例: 村メンターボット) がいる場合に使う. */
+  primaryCandidates?: AgentId[]
 }
 
 // desire は「ちょっとしたヒント」程度の shaping signal として使う. outcomeRewards override の
@@ -215,6 +219,16 @@ export class AbstractGame {
       for (let self = 0; self < N; self++) {
         const p = this.primaryByTeam.get(this.teamMembership[self])
         if (p !== undefined) this.primaryByAgent.set(self, p)
+      }
+    }
+
+    // primaryCandidates: 明示された論理 seat から各 learner が独立にランダム選出. primaryFromBots/teams の結果を上書き.
+    if (this.config.primaryCandidates && this.config.primaryCandidates.length > 0) {
+      const cands = this.config.primaryCandidates.map(l => actualOfLogical[l])
+      for (let i = 0; i < N; i++) {
+        if (this.isLearning(i)) {
+          this.primaryByAgent.set(i, cands[Math.floor(this.rng.next() * cands.length)])
+        }
       }
     }
 

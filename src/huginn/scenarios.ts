@@ -392,6 +392,92 @@ export function pair2v2SplitMentor(): Scenario {
 }
 
 /**
+ * 学習あり curriculum: 2 learner 村 + 1 mentor 村 (unanimous offerer) vs 狼 + 狂信.
+ *
+ * trio3v2Block の村 3 人のうち 1 人を mentor 実演ボットに置換. mentor は毎 round
+ * offer(iVote=s3 狼, youVote=s3) を broadcast. 学習 agent 2 人は自分の primary が
+ * mentor 推奨 (狼 s3) と一致するか食い違うかに応じて振る舞いを学ぶ必要がある:
+ *
+ *   - primary=s3 の learner は自然に mentor に同調 → 全員 s3 に投票で勝利
+ *   - primary=s4 の learner は自分の primary を捨てて mentor broadcast に乗り換え必須
+ *
+ * 狼 s3 / 狂信 s4 は trio3v2Block と同じ offerer + committer プロトコルで L0 集中 broadcast を
+ * 出すので、学習側は「mentor broadcast (s3 狙い)」と「敵 broadcast (L0 狙い)」を識別し、
+ * desire と offer count の両方を参照して判定する必要がある.
+ *
+ * 理論最大: 100% (全 learner が mentor に同調、狼 s3 単独吊り → outcome '3').
+ * 情報なし baseline: 学習 2 人が独立ランダム → 一致確率 0.5 → 50%.
+ */
+export function trio3v2BlockMentored(): Scenario {
+  const envConfig: EnvConfig = {
+    numAgents: 5,
+    agentRoles: [
+      'learning',
+      'learning',
+      { type: 'offerer', primary: 3, acceptable: [3], mode: 'unanimous' },  // mentor 村: 狼に合意しよう
+      { type: 'offerer', primary: 0, acceptable: [0, 1, 2], mode: 'unanimous' },  // 狼: L0 に合意しよう
+      { type: 'eagerCommitter', primary: 0, acceptable: [0, 1, 2] },  // 狂信: 狼 offer に乗る
+    ],
+    primaryCandidates: [3, 4],  // 学習 agent の primary は 狼/狂信 から独立ランダム
+    teams: [[0, 1, 2], [3, 4]], // 村チーム (learner 2 + mentor) vs 狼陣営. desire で teammate/primary 区別するために必須
+    randomizeRolesPerGame: true,
+    desireCorrelation: 0.7,
+    kRounds: 4,
+    rewardMode: 'eliminated',
+    consensusBonus: 0,
+    outcomeRewards: {
+      '3': { reward: 1.0, label: '狼 s3 単独吊り成功 — mentor 同調合格' },
+      '4': { reward: 1.0, label: '狂信 s4 単独吊り — (可) mentor 無視だが勝利' },
+      '0': { reward: 0.0, label: '村 s0 吊り — 敵 broadcast に乗せられた失格' },
+      '1': { reward: 0.0, label: '村 s1 吊り — 失格' },
+      '2': { reward: 0.0, label: '村 mentor s2 吊り — 失格' },
+      '0,1': { reward: 0.0, label: '村 tie — 失格' },
+      '0,2': { reward: 0.0, label: '村 tie — 失格' },
+      '1,2': { reward: 0.0, label: '村 tie — 失格' },
+      '0,3': { reward: 0.0, label: '村+敵 tie — 意思統一不完全' },
+      '1,3': { reward: 0.0, label: '村+敵 tie — 意思統一不完全' },
+      '2,3': { reward: 0.0, label: '村+敵 tie — 意思統一不完全' },
+      '0,4': { reward: 0.0, label: '村+敵 tie — 意思統一不完全' },
+      '1,4': { reward: 0.0, label: '村+敵 tie — 意思統一不完全' },
+      '2,4': { reward: 0.0, label: '村+敵 tie — 意思統一不完全' },
+      '3,4': { reward: 0.0, label: '敵 tie — 意思統一不完全' },
+    },
+  }
+  return {
+    name: 'trio3v2BlockMentored',
+    description:
+      '2 学習 agent 村 + 1 mentor 村 (unanimous offerer, 狼 s3 を broadcast) vs 狼 s3 (unanimous offerer, L0 を broadcast) + 狂信 s4 (eagerCommitter). ' +
+      '学習 agent は自分の primary ではなく mentor broadcast に乗る必要がある. 敵の L0 broadcast とは desire で識別する.',
+    learningObjective:
+      '学習: mentor の offer(s3,s3) を読み取って自分の primary (s3 or s4 ランダム) が食い違う時に譲歩して s3 に投票. ' +
+      '敵の L0 broadcast は desire LOW (teammate) で識別し無視.',
+    envConfig,
+    analysis: {
+      N: 5,
+      learningAgentCount: 2,
+      botAgentCount: 3,
+      majority: 3,
+      expectedWinRateOnFullCoordination: 1.0,
+    },
+    roles: [
+      { seat: 0, label: '村1',   kind: 'learning', team: 'village',  winCondition: '狼全滅',                 suggestedVoteTarget: 'mentor の broadcast 狼 s3',     knowledge: { 2: ['village', 'mentor'] } },
+      { seat: 1, label: '村2',   kind: 'learning', team: 'village',  winCondition: '狼全滅',                 suggestedVoteTarget: 'mentor の broadcast 狼 s3',     knowledge: { 2: ['village', 'mentor'] } },
+      { seat: 2, label: 'mentor', kind: 'bot',    team: 'village',  winCondition: '狼全滅',                 suggestedVoteTarget: '狼 s3 unanimous broadcast',      knowledge: { 3: ['werewolf', '狼'] } },
+      { seat: 3, label: '狼',    kind: 'bot',     team: 'werewolf', winCondition: 'PP',                    suggestedVoteTarget: 'L0 unanimous broadcast',         knowledge: { 4: ['werewolf', '狂信'] } },
+      { seat: 4, label: '狂信',  kind: 'bot',     team: 'werewolf', winCondition: '狼勝利',                suggestedVoteTarget: '狼 broadcast に乗る',             knowledge: { 3: ['werewolf', '狼'] } },
+    ],
+    outcomes: [
+      {
+        label: '学習 2 村が mentor に同調',
+        voteTally: 's0: 2 (bot), s3: 3 (村×3)',
+        result: 's3 単独吊り → 狼全滅',
+        learnerWinRate: 1.0,
+      },
+    ],
+  }
+}
+
+/**
  * 実演デモ (学習なし): 3 bot 村 (unanimous offerer + 2 eagerCommitter) vs 狼 + 狂信.
  *
  * trio3v2Block と同じ構造だが、3 村をスクリプトボットに置換.
@@ -467,6 +553,7 @@ export const catalog: Record<string, () => Scenario> = {
   pair2v2Block,
   pair2v2Split,
   trio3v2Block,
+  trio3v2BlockMentored,
   pair2v2SplitMentor,
   trio3v2Mentor,
 }
