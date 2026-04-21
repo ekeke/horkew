@@ -4,10 +4,26 @@ import { decideNightHeuristic, tallyVotes } from './heuristic-policy.ts'
 import type { SimState } from './world-state.ts'
 
 /**
+ * 夜フェーズの heuristic を上書きするための構造体。
+ *
+ * - `attackTarget`: 狼の噛み先。未指定なら heuristic (wolfBiteTarget)。
+ * - `seerDivines`: seer seat → divine target の map。指定された seer のみ上書き、
+ *   他 seer は heuristic。占いの「結果」は simulateNight 内で world 参照して求まる。
+ * - `guardTarget`: bodyguard の護衛先。未指定なら heuristic。
+ */
+export type NightOverride = {
+  attackTarget?: number
+  seerDivines?: Map<number, number>
+  guardTarget?: number
+}
+
+/**
  * Day 1 サイクル（vote → execute → checkOutcome → night → simulate → checkOutcome）を進める。
  *
  * - `masonVoteOverride` で mason 席の投票先を強制できる（MCTS の root action 注入用）。
  *   Map<voterSeat, targetSeat> の形式。複数 mason がある場合は両方を override 可能。
+ * - `nightOverride` で狼襲撃先・seer 占い先・bodyguard 護衛先を強制指定できる。
+ *   指定がない夜行動は heuristic に従う。
  * - state は in-place mutate（rollout 内で短命なため OK）。caller が状態を保持したい
  *   場合は事前に `cloneSimState` すること。
  *
@@ -17,8 +33,7 @@ import type { SimState } from './world-state.ts'
 export function stepDayNightCycle(
   state: SimState,
   masonVoteOverride: Map<number, number> | null = null,
-  /** 夜フェーズで狼の噛み先を強制指定する。null なら heuristic */
-  nightAttackOverride: number | null = null,
+  nightOverride: NightOverride | null = null,
 ): SimState {
   if (state.phase === 'terminal') return state
 
@@ -40,15 +55,19 @@ export function stepDayNightCycle(
 
   // --- Night phase ---
   const night = decideNightHeuristic(state.world, state.alive)
-  const attackTarget = nightAttackOverride !== null ? nightAttackOverride : night.wolfBiteTarget
+  const attackTarget = nightOverride?.attackTarget ?? night.wolfBiteTarget
+  const guardTarget = nightOverride?.guardTarget !== undefined
+    ? nightOverride.guardTarget
+    : night.bodyguardTarget
+  const seerTargets = applySeerDivineOverride(state.world, night.seerTargets, nightOverride?.seerDivines)
   // wolfBiteTarget=-1 は「狼不在」で本来到達しないが、防御的に skip
   if (attackTarget >= 0) {
     const result = simulateNight(
       state.world,
       state.alive,
       attackTarget,
-      night.bodyguardTarget,
-      night.seerTargets,
+      guardTarget,
+      seerTargets,
     )
     state.alive = result.nextAlive
     state.alive = applyFollowDeaths(state.alive, state.world)
@@ -62,6 +81,30 @@ export function stepDayNightCycle(
   state.day += 1
   state.phase = 'day'
   return state
+}
+
+/**
+ * heuristic が返した seerTargets 配列の中で、override で指定された seer の
+ * divine 先を上書きする。seerTargets の各要素と seerMask の seat 順は同じ前提。
+ */
+function applySeerDivineOverride(
+  world: { seerMask: number },
+  heuristicTargets: number[],
+  overrides: Map<number, number> | undefined,
+): number[] {
+  if (!overrides || overrides.size === 0) return heuristicTargets
+  const result = [...heuristicTargets]
+  let mask = world.seerMask
+  let idx = 0
+  while (mask !== 0 && idx < result.length) {
+    const bit = mask & (-mask)
+    const seerSeat = 31 - Math.clz32(bit)
+    mask ^= bit
+    const target = overrides.get(seerSeat)
+    if (target !== undefined) result[idx] = target
+    idx++
+  }
+  return result
 }
 
 /**

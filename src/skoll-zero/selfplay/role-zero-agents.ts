@@ -32,6 +32,76 @@ export class VillageZeroAgent extends RoleZeroAgent {
   protected override captureObservation(ctx: DecisionContext): RootObs {
     return encodeObservation(ctx)
   }
+
+  /**
+   * 夜行動: seer は divine head、bodyguard は guard head で ISMCTS を実行。
+   * 他役職 (villager/medium/nekomata) は super (RuleBasedAgent) に委譲。
+   */
+  override decideNightAction(ctx: DecisionContext): NightAction {
+    if (ctx.myRole === 'seer') {
+      return this.decideVillageNightWithMCTS(ctx, 'divine')
+    }
+    if (ctx.myRole === 'bodyguard') {
+      return this.decideVillageNightWithMCTS(ctx, 'guard')
+    }
+    return super.decideNightAction(ctx)
+  }
+
+  private decideVillageNightWithMCTS(
+    ctx: DecisionContext,
+    mode: 'divine' | 'guard',
+  ): NightAction {
+    if (!ctx.globalRetarPossibilities) {
+      this.fallbackCalls++
+      return super.decideNightAction(ctx)
+    }
+    const possibilities = buildPossibilitiesFromRetar(ctx.globalRetarPossibilities, this.zeroOpts.setup)
+    const determinizer = new Determinizer(possibilities, this.zeroOpts.setup, this.zeroOpts.determinizerMaxWorlds)
+    if (determinizer.isOverflow() || determinizer.size() === 0) {
+      this.fallbackCalls++
+      return super.decideNightAction(ctx)
+    }
+    const sampleWorld = determinizer.sample(() => ctx.rng.next())
+    if (!sampleWorld) {
+      this.fallbackCalls++
+      return super.decideNightAction(ctx)
+    }
+    const alive = aliveBitmask(ctx.alivePlayers)
+    const infoState = createSimState(sampleWorld, alive, ctx.day, 'night')
+    const rootObs = encodeObservation(ctx)
+    const excludedMask = 1 << ctx.mySeat
+
+    const mctsConfig: MCTSConfig = this.zeroOpts.mctsConfig
+      ? { ...this.zeroOpts.mctsConfig, rng: () => ctx.rng.next() }
+      : { ...DEFAULT_MCTS_CONFIG, rng: () => ctx.rng.next() }
+
+    const result = runMCTS(
+      rootObs, infoState, ctx.mySeat, determinizer, this.zeroOpts.nn, mctsConfig, 'village',
+      { actionMode: mode, excludedMask },
+    )
+    if (result.visits.size === 0) {
+      this.fallbackCalls++
+      return super.decideNightAction(ctx)
+    }
+    this.mctsCalls++
+
+    const pi = normalizeVisits(result.visits)
+    this.zeroOpts.buffer.appendPending({
+      obs: rootObs,
+      visits: result.visits,
+      pi,
+      day: ctx.day,
+      masonSeat: ctx.mySeat,
+      alive,
+      headName: mode,
+    })
+
+    const target = this.zeroOpts.selectionMode === 'argmax'
+      ? argmaxFromVisits(result.visits)
+      : sampleFromVisits(result.visits, () => ctx.rng.next())
+
+    return { type: mode, target }
+  }
 }
 
 /** Wolf 視点: wolf_collective obs、wolf faction。各 wolf 席が独立に MCTS を回す近似 */
@@ -91,9 +161,7 @@ export class WolfZeroAgent extends RoleZeroAgent {
     }
     this.mctsCalls++
 
-    // 昼 vote と同じく buffer に (obs, visits, π) を記録。
-    // vote head を attack policy としても流用 (semantics 接近: どちらも「誰を退場させるか」)。
-    // 厳密には別 head のほうが良いが、MVP として共有。
+    // attack 専用 head に (obs, visits, π) を記録 — vote policy と分離。
     const pi = normalizeVisits(result.visits)
     this.zeroOpts.buffer.appendPending({
       obs: rootObs,
@@ -102,6 +170,7 @@ export class WolfZeroAgent extends RoleZeroAgent {
       day: ctx.day,
       masonSeat: ctx.mySeat,
       alive,
+      headName: 'attack',
     })
 
     const target = this.zeroOpts.selectionMode === 'argmax'

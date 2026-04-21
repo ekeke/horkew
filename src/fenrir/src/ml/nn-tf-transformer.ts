@@ -1355,15 +1355,19 @@ export class TfTransformerNetwork {
     masks: Float32Array[]           // [n, SEATS] additive: 0 legal / -1e9 illegal
     valueTargets: number[]          // [n] z ∈ [-1.3, +1] (mason 視点)
     valueCoeff?: number             // default 1.0
+    /** どの per-seat head を更新するか (default 'vote')。attack/divine/guard は zero-multi-head 用 */
+    headName?: string
   }): { loss: number, policyLoss: number, valueLoss: number } {
     const n = batch.observations.length
     if (n === 0) return { loss: 0, policyLoss: 0, valueLoss: 0 }
 
-    const voteHeadEntry = this.perSeatHeadWeights.get('vote')
-    if (!voteHeadEntry) throw new Error('trainMasonZero: vote head not found')
+    const headName = batch.headName ?? 'vote'
+    const voteHeadEntry = this.perSeatHeadWeights.get(headName)
+    if (!voteHeadEntry) throw new Error(`trainMasonZero: head '${headName}' not found`)
     const [voteW, voteB] = voteHeadEntry
 
-    const voteHeadSize = this.config.heads.vote
+    const voteHeadSize = this.config.heads[headName]
+    if (voteHeadSize === undefined) throw new Error(`trainMasonZero: heads['${headName}'] size not in config`)
     const inputSize = this.config.inputSize
     const valueCoeff = batch.valueCoeff ?? 1.0
 

@@ -22,6 +22,7 @@ import { saveCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { SEATS } from '../../fenrir/src/observation.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { TrainingRecord } from '../selfplay/buffer.ts'
+import type { HeadName } from '../mcts/nn.ts'
 import { runSelfPlayBatch } from '../selfplay/runner.ts'
 import type { SelfPlayResult } from '../selfplay/runner.ts'
 import type { MCTSConfig } from '../mcts/ismcts.ts'
@@ -248,6 +249,23 @@ export function recordsToBatchInputs(records: readonly TrainingRecord[]): {
   }
 
   return { observations, policyTargets, masks, valueTargets }
+}
+
+/**
+ * records を headName ごとにバケットに分ける。head ごとに独立 trainMasonZero を呼ぶための前処理。
+ * 他の head を持たない records に対しては空配列を返す。
+ */
+export function groupRecordsByHead(records: readonly TrainingRecord[]): Map<HeadName, TrainingRecord[]> {
+  const out = new Map<HeadName, TrainingRecord[]>()
+  for (const r of records) {
+    let bucket = out.get(r.headName)
+    if (!bucket) {
+      bucket = []
+      out.set(r.headName, bucket)
+    }
+    bucket.push(r)
+  }
+  return out
 }
 
 function makeRng(seed: number): () => number {

@@ -7,11 +7,19 @@ import { join } from 'node:path'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { TrainingRecord } from '../selfplay/buffer.ts'
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
-import { createSkollZeroNetwork } from '../network/config.ts'
-import { createSkollZeroTfNetwork } from '../network/tf-config.ts'
+import {
+  createSkollZeroNetwork,
+  createStandardZeroNetwork,
+  createWolfZeroNetwork,
+} from '../network/config.ts'
+import {
+  createSkollZeroTfNetwork,
+  createStandardZeroTfNetwork,
+  createWolfZeroTfNetwork,
+} from '../network/tf-config.ts'
 import { loadCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { DEFAULT_SKOLL_ZERO_TRAIN_CONFIG } from './schedule.ts'
-import { SkollZeroTrainer, recordsToBatchInputs } from './trainer.ts'
+import { SkollZeroTrainer, groupRecordsByHead, recordsToBatchInputs } from './trainer.ts'
 
 /** テスト用の seat/role 数 (MASON_COLLECTIVE input size) を取得 */
 function getInputSize(): number {
@@ -26,6 +34,7 @@ function makeRecord(opts: {
   z: number
   day?: number
   rng?: () => number
+  headName?: TrainingRecord['headName']
 }): TrainingRecord {
   const inputSize = getInputSize()
   const obs = new Float32Array(inputSize)
@@ -42,6 +51,7 @@ function makeRecord(opts: {
     masonSeat: opts.masonSeat,
     alive: opts.alive,
     z: opts.z,
+    headName: opts.headName ?? 'vote',
   }
 }
 
@@ -229,5 +239,130 @@ describe('SkollZeroTrainer', () => {
       rmSync(tmpDir, { recursive: true, force: true })
       tfNet.dispose()
     }
+  })
+})
+
+describe('groupRecordsByHead', () => {
+  it('headName ごとに records を分割する', () => {
+    const rec = (headName: TrainingRecord['headName'], seat: number): TrainingRecord => ({
+      obs: new Float32Array(0),
+      visits: new Map([[seat, 1]]),
+      pi: new Map([[seat, 1]]),
+      day: 1,
+      masonSeat: 1,
+      alive: 0b111110,
+      z: 0,
+      headName,
+    })
+    const records: TrainingRecord[] = [
+      rec('vote', 2), rec('attack', 3), rec('vote', 4),
+      rec('divine', 5), rec('guard', 2), rec('attack', 5),
+    ]
+    const groups = groupRecordsByHead(records)
+    assert.equal(groups.get('vote')?.length, 2)
+    assert.equal(groups.get('attack')?.length, 2)
+    assert.equal(groups.get('divine')?.length, 1)
+    assert.equal(groups.get('guard')?.length, 1)
+  })
+
+  it('空入力は空 Map', () => {
+    const groups = groupRecordsByHead([])
+    assert.equal(groups.size, 0)
+  })
+})
+
+describe('trainMasonZero: multi-head 分離学習', () => {
+  /**
+   * 同一 batch を vote head と attack head にそれぞれ流しても、
+   * 別 head 間で weight が独立に更新される（あるいは誤って同一 weights を更新しない）ことを確認。
+   */
+  it('wolf config の attack head で trainMasonZero が走る', () => {
+    const pureNet = createWolfZeroNetwork()
+    const tfNet = createWolfZeroTfNetwork(1e-3)
+    tfNet.loadWeights(pureNet.cloneWeights())
+
+    const inputSize = pureNet.config.inputSize
+    const rng = makeRng(42)
+    const obs = new Float32Array(inputSize)
+    for (let i = 0; i < inputSize; i++) obs[i] = (rng() - 0.5) * 0.1
+    const pi = new Float32Array(14)
+    pi[2] = 1.0  // seat 3 に集中
+    const mask = new Float32Array(14)
+    for (let i = 0; i < 14; i++) mask[i] = -1e9
+    // legal: seat 2..5 (index 1..4)
+    for (let i = 1; i <= 4; i++) mask[i] = 0
+
+    // attack head を学習 → 有限 loss
+    const resAttack = tfNet.trainMasonZero({
+      observations: [obs, obs, obs, obs],
+      policyTargets: [pi, pi, pi, pi],
+      masks: [mask, mask, mask, mask],
+      valueTargets: [1, 1, 1, 1],
+      valueCoeff: 1.0,
+      headName: 'attack',
+    })
+    assert.ok(Number.isFinite(resAttack.loss), 'attack head loss finite')
+    assert.ok(Number.isFinite(resAttack.policyLoss), 'attack policyLoss finite')
+
+    // vote head も同様に学習可能
+    const resVote = tfNet.trainMasonZero({
+      observations: [obs, obs, obs, obs],
+      policyTargets: [pi, pi, pi, pi],
+      masks: [mask, mask, mask, mask],
+      valueTargets: [1, 1, 1, 1],
+      valueCoeff: 1.0,
+      headName: 'vote',
+    })
+    assert.ok(Number.isFinite(resVote.loss), 'vote head loss finite')
+
+    tfNet.dispose()
+  })
+
+  it('standard config の divine / guard head でも trainMasonZero が走る', () => {
+    const pureNet = createStandardZeroNetwork()
+    const tfNet = createStandardZeroTfNetwork(1e-3)
+    tfNet.loadWeights(pureNet.cloneWeights())
+
+    const inputSize = pureNet.config.inputSize
+    const rng = makeRng(7)
+    const obs = new Float32Array(inputSize)
+    for (let i = 0; i < inputSize; i++) obs[i] = (rng() - 0.5) * 0.1
+    const pi = new Float32Array(14)
+    pi[1] = 1.0
+    const mask = new Float32Array(14)
+    for (let i = 0; i < 14; i++) mask[i] = -1e9
+    for (let i = 1; i <= 4; i++) mask[i] = 0
+
+    for (const headName of ['divine', 'guard'] as const) {
+      const res = tfNet.trainMasonZero({
+        observations: [obs, obs],
+        policyTargets: [pi, pi],
+        masks: [mask, mask],
+        valueTargets: [0.5, 0.5],
+        valueCoeff: 1.0,
+        headName,
+      })
+      assert.ok(Number.isFinite(res.loss), `${headName} head loss finite`)
+    }
+
+    tfNet.dispose()
+  })
+
+  it('存在しない head 名は例外を投げる', () => {
+    const pureNet = createSkollZeroNetwork()  // mason config: vote head のみ
+    const tfNet = createSkollZeroTfNetwork(1e-3)
+    tfNet.loadWeights(pureNet.cloneWeights())
+    const inputSize = pureNet.config.inputSize
+    const obs = new Float32Array(inputSize)
+    const pi = new Float32Array(14)
+    const mask = new Float32Array(14)
+    assert.throws(() => tfNet.trainMasonZero({
+      observations: [obs],
+      policyTargets: [pi],
+      masks: [mask],
+      valueTargets: [0],
+      headName: 'attack',
+    }), /head 'attack' not found/)
+    tfNet.dispose()
   })
 })

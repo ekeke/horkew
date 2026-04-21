@@ -105,6 +105,7 @@ export abstract class RoleZeroAgent extends SkollMasterAgent {
       day: ctx.day,
       masonSeat: ctx.mySeat,  // PendingRecord の masonSeat フィールドは「決定者の席」として流用
       alive,
+      headName: 'vote',
     })
 
     return this.zeroOpts.selectionMode === 'argmax'

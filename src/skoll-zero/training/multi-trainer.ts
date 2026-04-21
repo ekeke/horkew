@@ -23,7 +23,7 @@ import {
   type MultiAgentSelfPlayResult,
 } from '../selfplay/multi-runner.ts'
 import type { MCTSConfig } from '../mcts/ismcts.ts'
-import { recordsToBatchInputs } from './trainer.ts'
+import { groupRecordsByHead, recordsToBatchInputs } from './trainer.ts'
 import type { SkollZeroTrainConfig } from './schedule.ts'
 
 export type TrainerSlot = {
@@ -141,17 +141,31 @@ export class MultiSkollZeroTrainer {
         for (let s = 0; s < this.config.stepsPerRound; s++) {
           const records = slot.buffer.sample(this.config.batchSize, this.rng)
           if (records.length === 0) break
-          const { observations, policyTargets, masks, valueTargets } = recordsToBatchInputs(records)
-          const res = slot.tfNet.trainMasonZero({
-            observations,
-            policyTargets,
-            masks,
-            valueTargets,
-            valueCoeff: this.config.valueCoeff,
-          })
-          lossSum += res.loss
-          policyLossSum += res.policyLoss
-          valueLossSum += res.valueLoss
+          // head 別にバケット分割し、head ごとに trainMasonZero を実行。
+          // 1 step 内で複数 head を回す (wolf: vote+attack、village: vote+divine+guard)。
+          const groups = groupRecordsByHead(records)
+          let stepLoss = 0, stepPolicyLoss = 0, stepValueLoss = 0, headsTrained = 0
+          for (const [headName, bucket] of groups) {
+            if (bucket.length === 0) continue
+            const { observations, policyTargets, masks, valueTargets } = recordsToBatchInputs(bucket)
+            const res = slot.tfNet.trainMasonZero({
+              observations,
+              policyTargets,
+              masks,
+              valueTargets,
+              valueCoeff: this.config.valueCoeff,
+              headName,
+            })
+            stepLoss += res.loss
+            stepPolicyLoss += res.policyLoss
+            stepValueLoss += res.valueLoss
+            headsTrained++
+          }
+          if (headsTrained === 0) break
+          // head 間で loss を平均して step として計上 (record 数で重み付けは将来検討)
+          lossSum += stepLoss / headsTrained
+          policyLossSum += stepPolicyLoss / headsTrained
+          valueLossSum += stepValueLoss / headsTrained
           stepsWithData++
         }
         // sync TF → Pure JS

@@ -2,10 +2,11 @@ import type { GameOutcome } from '../../hati/simulate.ts'
 import { cloneSimState, createSimState } from '../simulator/world-state.ts'
 import type { SimState } from '../simulator/world-state.ts'
 import { runRollout, stepDayNightCycle } from '../simulator/rollout-sim.ts'
+import type { NightOverride } from '../simulator/rollout-sim.ts'
 import { createTreeNode, totalChildVisits } from './node.ts'
 import type { TreeNode } from './node.ts'
 import type { Determinizer } from './determinize.ts'
-import type { MasonZeroNN, RootObservation } from './nn.ts'
+import type { HeadName, MasonZeroNN, RootObservation } from './nn.ts'
 import { isMasonAlive } from './nn.ts'
 
 /**
@@ -52,8 +53,17 @@ export type MCTSResult = {
  * MCTS の root action 種別。
  * - 'vote' (default): day フェーズで投票先 seat を選ぶ
  * - 'attack': night フェーズで噛み先 seat を選ぶ (wolf 用)
+ * - 'divine': night フェーズで占い先 seat を選ぶ (seer 用)
+ * - 'guard':  night フェーズで護衛先 seat を選ぶ (bodyguard 用)
+ *
+ * head 名は action mode と 1:1 対応（'vote' → 'vote' head 等）。
  */
-export type RootActionMode = 'vote' | 'attack'
+export type RootActionMode = 'vote' | 'attack' | 'divine' | 'guard'
+
+/** action mode → NN forward で使う head 名 */
+function headNameForMode(mode: RootActionMode): HeadName {
+  return mode
+}
 
 export function runMCTS(
   rootObs: RootObservation,
@@ -86,7 +96,7 @@ export function runMCTS(
   }
   const rootState = createSimState(firstWorld, infoState.alive, infoState.day, infoState.phase as 'day' | 'night')
   if (rootState.phase !== 'terminal' && isMasonAlive(rootState, decisionSeat)) {
-    expandWithNN(root, rootState, decisionSeat, nn, rootObs, excludedMask)
+    expandWithNN(root, rootState, decisionSeat, nn, rootObs, excludedMask, headNameForMode(actionMode))
     applyRootDirichletNoise(root, config)
   }
   for (let i = 0; i < config.nRollouts; i++) {
@@ -202,7 +212,7 @@ function runOneRollout(
       return
     }
     if (!node.expanded) {
-      // root 以外の展開は通常の自席除外 (actionMode='vote' と同じ扱い)。
+      // root 以外の展開は通常の自席除外 + vote head (標準動作)。
       // root のみ actionMode/excludedMask を適用済み (呼び出し側で expandWithNN 済み)。
       const value = expandWithNN(node, state, decisionSeat, nn, rootObs, isRoot ? excludedMask : 0)
       backup(path, value)
@@ -213,11 +223,12 @@ function runOneRollout(
       backup(path, 0)
       return
     }
-    // step: root action の適用。attack 時は night override、vote 時は day override。
-    // 木の深い部分 (isRoot=false) は常に vote override で扱う (標準動作)。
+    // step: root action の適用。actionMode ごとに正しい override を組み立てる。
+    // 木の深い部分 (isRoot=false) は常に day vote override で扱う (標準動作)。
     const nextState = cloneSimState(state)
-    if (isRoot && actionMode === 'attack') {
-      stepDayNightCycle(nextState, null, action)
+    if (isRoot && actionMode !== 'vote') {
+      const nightOverride = buildNightOverride(actionMode, decisionSeat, action)
+      stepDayNightCycle(nextState, null, nightOverride)
     } else {
       const override = new Map<number, number>([[decisionSeat, action]])
       stepDayNightCycle(nextState, override, null)
@@ -235,8 +246,21 @@ function runOneRollout(
 }
 
 /**
+ * root 夜行動 (attack/divine/guard) を stepDayNightCycle に渡す NightOverride に変換。
+ */
+function buildNightOverride(mode: RootActionMode, decisionSeat: number, action: number): NightOverride {
+  switch (mode) {
+    case 'attack': return { attackTarget: action }
+    case 'divine': return { seerDivines: new Map([[decisionSeat, action]]) }
+    case 'guard':  return { guardTarget: action }
+    case 'vote':   return {}
+  }
+}
+
+/**
  * node に対し NN forward → edge を初期化、value を返す。
  * excludedMask で指定された seat (wolf 仲間等) は policy から除外し、残りを renormalize する。
+ * headName で policy を読み出す head を切り替える (default 'vote')。
  */
 function expandWithNN(
   node: TreeNode,
@@ -245,8 +269,9 @@ function expandWithNN(
   nn: MasonZeroNN,
   rootObs: RootObservation,
   excludedMask: number = 0,
+  headName: HeadName = 'vote',
 ): number {
-  const { policy, value } = nn.forward(rootObs, state, masonSeat)
+  const { policy, value } = nn.forward(rootObs, state, masonSeat, headName)
   // excludedMask の seat を除外 + renormalize
   let sum = 0
   const filtered: Array<[number, number]> = []

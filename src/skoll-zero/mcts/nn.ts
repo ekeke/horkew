@@ -25,8 +25,21 @@ export type NNOutput = {
   value: number
 }
 
+/**
+ * policy を読み出す head 名。
+ * - `vote`: 昼投票 (default、全役職)
+ * - `attack`: wolf の噛み先
+ * - `divine`: seer の占い先
+ * - `guard`: bodyguard の護衛先
+ */
+export type HeadName = 'vote' | 'attack' | 'divine' | 'guard'
+
 export interface MasonZeroNN {
-  forward(rootObs: RootObservation, state: SimState, masonSeat: number): NNOutput
+  /**
+   * @param headName どの per-seat head から policy を取り出すか (default 'vote')。
+   *   該当 head を持たないネットで非対応 head 名が渡された場合は実装が throw する。
+   */
+  forward(rootObs: RootObservation, state: SimState, masonSeat: number, headName?: HeadName): NNOutput
 }
 
 /**
@@ -36,10 +49,10 @@ export interface MasonZeroNN {
  * value=0 は「中立評価」を意味し、終端まで到達した rollout だけが backup
  * で確かな信号を返す。
  *
- * rootObs は無視（DummyNN は観測に依存しない）。
+ * rootObs / headName は無視（DummyNN は観測と head に依存しない）。
  */
 export class DummyNN implements MasonZeroNN {
-  forward(_rootObs: RootObservation, state: SimState, masonSeat: number): NNOutput {
+  forward(_rootObs: RootObservation, state: SimState, masonSeat: number, _headName: HeadName = 'vote'): NNOutput {
     const policy = new Map<number, number>()
     let mask = state.alive & ~(1 << masonSeat)
     const candidates: number[] = []

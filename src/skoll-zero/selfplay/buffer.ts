@@ -1,8 +1,9 @@
+import type { HeadName } from '../mcts/nn.ts'
 import type { RootObs } from './observation.ts'
 
 export type PendingRecord = {
   obs: RootObs
-  /** action (vote 先 seat) → MCTS visit 数 */
+  /** action (対象 seat) → MCTS visit 数 */
   visits: Map<number, number>
   /** 正規化済み policy target π = N(a) / Σ N(b) */
   pi: Map<number, number>
@@ -10,6 +11,8 @@ export type PendingRecord = {
   masonSeat: number
   /** 決定時点の生存 bitmask (1-based)。legal action mask を Float32Array に変換するのに使う */
   alive: number
+  /** この記録が学習すべき head 名 (vote/attack/divine/guard)。trainer が head ごとに分割 */
+  headName: HeadName
 }
 
 export type TrainingRecord = PendingRecord & {

@@ -55,10 +55,21 @@ export function createSkollZeroNetwork(): TransformerNetwork {
   return new TransformerNetwork(SKOLL_ZERO_NETWORK_CONFIG, 'mason_collective')
 }
 
-/** Standard individual 観測 (1029 dims) 用 config — village/fanatic/hamster/immoralist で共用 */
+/**
+ * Standard individual 観測 (1029 dims) 用 config — village/fanatic/hamster/immoralist で共用。
+ *
+ * Heads:
+ * - `vote`: 昼投票 (全役職で使用)
+ * - `divine`: seer の夜占い先 (seer 以外は使わない、shared trunk 上の独立 head)
+ * - `guard`: bodyguard の夜護衛先 (bodyguard 以外は使わない)
+ */
 export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
   inputSize: OBSERVATION_SIZE,
-  heads: { vote: HEAD_SIZES.vote },
+  heads: {
+    vote: HEAD_SIZES.vote,
+    divine: HEAD_SIZES.vote,
+    guard: HEAD_SIZES.vote,
+  },
   sigmoidHeads: {},
   transformer: {
     dModel: 64,
@@ -74,15 +85,24 @@ export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
     planVocabSize: 0,
     seatFeatures: SEAT_TOKEN_FEATURES,
     clsFeatures: CLS_FEATURES,
-    perSeatHeads: ['vote'],
+    perSeatHeads: ['vote', 'divine', 'guard'],
     perSeatSigmoidHeads: [],
   },
 }
 
-/** Wolf collective 観測 (1212 dims) 用 config */
+/**
+ * Wolf collective 観測 (1212 dims) 用 config。
+ *
+ * Heads:
+ * - `vote`: 昼投票
+ * - `attack`: 夜の噛み先 (vote とは別 head、policy 汚染を防ぐ)
+ */
 export const WOLF_ZERO_NETWORK_CONFIG: NetworkConfig = {
   inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
-  heads: { vote: HEAD_SIZES.vote },
+  heads: {
+    vote: HEAD_SIZES.vote,
+    attack: HEAD_SIZES.vote,
+  },
   sigmoidHeads: {},
   transformer: {
     dModel: 64,
@@ -98,7 +118,7 @@ export const WOLF_ZERO_NETWORK_CONFIG: NetworkConfig = {
     planVocabSize: 0,
     seatFeatures: WOLF_COLLECTIVE_SEAT_FEATURES,
     clsFeatures: WOLF_COLLECTIVE_CLS_FEATURES,
-    perSeatHeads: ['vote'],
+    perSeatHeads: ['vote', 'attack'],
     perSeatSigmoidHeads: [],
   },
 }

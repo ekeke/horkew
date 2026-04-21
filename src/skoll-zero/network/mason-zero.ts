@@ -15,12 +15,11 @@
  * rootObs 自体は MCTS 開始時の観測固定 (Phase 1 の割り切り)。
  */
 
-import type { MasonZeroNN, NNOutput, RootObservation } from '../mcts/nn.ts'
+import type { HeadName, MasonZeroNN, NNOutput, RootObservation } from '../mcts/nn.ts'
 import type { SimState } from '../simulator/world-state.ts'
 import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 import { createSkollZeroNetwork } from './config.ts'
 
-const VOTE_HEAD = 'vote'
 const SEATS = 14
 
 export class MasonZeroNetwork implements MasonZeroNN {
@@ -42,13 +41,13 @@ export class MasonZeroNetwork implements MasonZeroNN {
     }
   }
 
-  forward(rootObs: RootObservation, state: SimState, masonSeat: number): NNOutput {
+  forward(rootObs: RootObservation, state: SimState, masonSeat: number, headName: HeadName = 'vote'): NNOutput {
     const result = this.net.forward(rootObs)
-    const voteLogits = result.policies.get(VOTE_HEAD)
-    if (!voteLogits) {
-      throw new Error(`MasonZeroNetwork: vote head not found in policies`)
+    const logits = result.policies.get(headName)
+    if (!logits) {
+      throw new Error(`MasonZeroNetwork: head '${headName}' not found in policies`)
     }
-    const policy = softmaxMasked(voteLogits, state.alive, masonSeat)
+    const policy = softmaxMasked(logits, state.alive, masonSeat)
     return { policy, value: result.value }
   }
 }

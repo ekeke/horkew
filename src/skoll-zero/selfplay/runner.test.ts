@@ -15,6 +15,7 @@ describe('TrainingBuffer', () => {
       day: 1,
       masonSeat: 3,
       alive: 0b11111110,
+      headName: 'vote',
     })
     assert.equal(buf.size(), 0)
     assert.equal(buf.pendingSize(), 1)
@@ -33,6 +34,7 @@ describe('TrainingBuffer', () => {
       day: 1,
       masonSeat: 1,
       alive: 0b10,
+      headName: 'vote',
     })
     buf.finalize(0.5)
     assert.equal(buf.size(), 1)

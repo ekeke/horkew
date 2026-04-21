@@ -201,6 +201,66 @@ describe('stepDayNightCycle: mason vote override', () => {
     // 「mason の vote が tally に反映される」ことが見えれば OK
   })
 
+  it('nightOverride.attackTarget で heuristic と異なる噛み先を強制できる', () => {
+    // heuristic では wolf が seer を噛むが、override で別席を噛ませる
+    const world = makeWorld({
+      1: 'seer', 2: 'villager', 3: 'werewolf', 4: 'villager', 5: 'villager',
+    })
+    // mason override で 3 票を seat5 に集中 → seat5 処刑 (wolf 残存で夜が起きる)
+    const masonOverride = new Map<number, number>([[1, 5], [2, 5], [4, 5]])
+
+    // heuristic: wolf → SEER priority で seat1 を噛む
+    const stateA = createSimState(world, aliveOf([1, 2, 3, 4, 5]))
+    stepDayNightCycle(stateA, masonOverride)
+    assert.equal(stateA.alive, aliveOf([2, 3, 4]), 'heuristic: seer(seat1) 噛み')
+
+    // override: wolf が seat4 を噛む
+    const stateB = createSimState(world, aliveOf([1, 2, 3, 4, 5]))
+    stepDayNightCycle(stateB, masonOverride, { attackTarget: 4 })
+    assert.equal(stateB.alive, aliveOf([1, 2, 3]), 'override: seat4 噛み')
+  })
+
+  it('nightOverride.seerDivines で seer の占い先を上書きできる', () => {
+    // 狼 2 匹 + 狐 1 匹で夜が生じる。
+    // heuristic では seer が狐を占って呪殺するが、override で村人を占えば狐は生存する。
+    const world = makeWorld({
+      1: 'seer', 2: 'werewolf', 3: 'werewolf', 4: 'werehamster',
+      5: 'villager', 6: 'villager', 7: 'villager',
+    })
+    // day1 は 5 票が wolf(seat2) に集中 → seat2 処刑 → wolf 1 匹生存で night 発生
+
+    // heuristic: seer → WEREHAMSTER priority で seat4 を占う → 呪殺
+    //            wolf(seat3) → SEER で seat1 を噛む
+    //            alive = [3,5,6,7]
+    const stateA = createSimState(world, aliveOf([1, 2, 3, 4, 5, 6, 7]))
+    stepDayNightCycle(stateA)
+    assert.equal(stateA.alive, aliveOf([3, 5, 6, 7]), 'heuristic: 狐 seat4 を呪殺 + seer 噛み')
+
+    // override: seer が seat5 (村人) を占う → 呪殺なし → 狐生存
+    const stateB = createSimState(world, aliveOf([1, 2, 3, 4, 5, 6, 7]))
+    stepDayNightCycle(stateB, null, { seerDivines: new Map([[1, 5]]) })
+    assert.equal(stateB.alive, aliveOf([3, 4, 5, 6, 7]), 'override: 狐 seat4 生存')
+  })
+
+  it('nightOverride.guardTarget で bodyguard の護衛先を上書きできる', () => {
+    // 狼 2 匹の setup: day1 で決着しないので night が起き guard の効果が見える
+    const world = makeWorld({
+      1: 'bodyguard', 2: 'seer', 3: 'werewolf', 4: 'villager', 5: 'werewolf',
+    })
+    // day1 vote: 村陣営 3 票が seat3、狼 2 票が seat2 → seat3 処刑 → alive [1,2,4,5]
+    // night: wolf(seat5) → SEER priority で seat2 を噛む
+
+    // heuristic: bodyguard は seat2 (seer) を守る → seer 生存
+    const stateA = createSimState(world, aliveOf([1, 2, 3, 4, 5]))
+    stepDayNightCycle(stateA)
+    assert.equal(stateA.alive, aliveOf([1, 2, 4, 5]), 'heuristic: seer 護衛成功')
+
+    // override: bodyguard を seat4 (村) へ → wolf が seer を噛んで seer 退場
+    const stateB = createSimState(world, aliveOf([1, 2, 3, 4, 5]))
+    stepDayNightCycle(stateB, null, { guardTarget: 4 })
+    assert.equal(stateB.alive, aliveOf([1, 4, 5]), 'override: seer 未護衛で退場')
+  })
+
   it('mason override による direct な処刑対象変更', () => {
     // 村陣営 4 人 + 狼 1 人。mason 全員 + 村人 1 人で別席を投票させる
     const world = makeWorld({
