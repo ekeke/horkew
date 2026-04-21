@@ -64,6 +64,14 @@ export abstract class RoleZeroAgent extends SkollMasterAgent {
     return this.lastMCTSResult
   }
 
+  /**
+   * phase2Nets に `${role}-${method}` checkpoint が登録されているか。
+   * SkollCommandAgent 等の外部 consumer が NN 経路の発火可否を duck-type 判定するのに使う。
+   */
+  hasPhase2Head(method: string, role: SystemRole): boolean {
+    return this.zeroOpts.phase2Nets?.has(`${role}-${method}`) ?? false
+  }
+
   constructor(opts: RoleZeroAgentOptions) {
     super({})
     this.zeroOpts = {
@@ -193,7 +201,7 @@ export abstract class RoleZeroAgent extends SkollMasterAgent {
     let bestSeat = superDecision.target
     let bestScore = -Infinity
     for (let i = 0; i < logits.length; i++) {
-      const seat = i + 1  // observation.ts の per-seat layout: index i → seat i+1
+      const seat = i + 1  // encodeSeatMultiHot と対応: seat N は out[N-1] に書かれる
       if (!aliveSet.has(seat) || seat === ctx.mySeat) continue
       if (logits[i] > bestScore) { bestScore = logits[i]; bestSeat = seat }
     }

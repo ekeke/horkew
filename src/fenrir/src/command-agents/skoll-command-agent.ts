@@ -13,7 +13,7 @@
  */
 
 import type { SystemRole } from '../../../types/index.ts'
-import type { GameState, NightAction, PlayerState, GameEvent } from '../../../lupa/types.ts'
+import type { GameState, NightAction, PlayerState, GameEvent, DayClaim } from '../../../lupa/types.ts'
 import { Rng } from '../../../lupa/random.ts'
 import { alivePlayers } from '../../../lupa/roles.ts'
 import { resolveRules } from '../../../howl/ruleset.ts'
@@ -69,6 +69,20 @@ function hasMCTSSupport(
   m: SkollMasterAgent,
 ): m is SkollMasterAgent & { getLastMCTSResult(): ZeroMCTSResult | null } {
   return typeof (m as unknown as { getLastMCTSResult?: unknown }).getLastMCTSResult === 'function'
+}
+
+/**
+ * master が Phase 2 NN の claim head を持つか duck-type 判定。
+ * RoleZeroAgent.hasPhase2Head(method, role) が登録済み checkpoint の有無を返す。
+ */
+function hasPhase2ClaimHead(m: SkollMasterAgent, role: SystemRole): boolean {
+  const fn = (m as unknown as { hasPhase2Head?: unknown }).hasPhase2Head
+  if (typeof fn !== 'function') return false
+  try {
+    return (fn as (method: string, role: SystemRole) => boolean).call(m, 'claim', role)
+  } catch {
+    return false
+  }
 }
 
 /** visits (Map<seat, count>) を prob 降順の配列にする */
@@ -282,8 +296,9 @@ export class SkollCommandAgent implements CommandAgent {
     let action: NightAction
     try {
       action = this.master.decideNightAction(ctx)
-    } catch {
-      return this.nightFallback(state, mySeat, legal, 'rule-based-throw', events)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return this.nightFallback(state, mySeat, legal, `rule-based-throw: ${msg}`, events)
     }
 
     // NightAction → Command 変換
@@ -399,6 +414,7 @@ export class SkollCommandAgent implements CommandAgent {
   /**
    * 独立人外（fanatic / werehamster / immoralist）のターン毎自律判断。
    * 未 CO: {hide, seer, medium, bodyguard, nekomata} を自陣営 perspective で skoll 評価、最大を採用。
+   *        master が Phase 2 claim head を持つ場合は先に NN 経由で CO 種類を決定する。
    * CO 済: 何を CO したかで分岐し、以後の結果報告も自陣営 skoll で動的に決定:
    *   seer → discussionFakeSeer (fakeDivineHistory の populate + 報告)
    *   medium → discussionFakeMedium (2 option lookahead)
@@ -420,6 +436,13 @@ export class SkollCommandAgent implements CommandAgent {
         default:
           return skipOrFirst(legal, `(discussion)[${player.role}] already-CO ${player.claimedRole} skip`)
       }
+    }
+
+    // NN 経路: master が Phase 2 claim head を持つなら argmax 済みの DayClaim を使う。
+    // NN が unsupported type / legal 外を返した場合は既存 lookahead にフォールスルー。
+    if (hasPhase2ClaimHead(this.master, player.role)) {
+      const nnResult = this.tryVillainCoFromClaimHead(state, player, legal, events)
+      if (nnResult) return nnResult
     }
 
     type Opt = 'hide' | 'seer' | 'medium' | 'bodyguard' | 'nekomata'
@@ -478,6 +501,37 @@ export class SkollCommandAgent implements CommandAgent {
     return {
       cmd: coCmd,
       log: `(discussion)[${player.role}/skoll] CO ${claimType} score=${bestScore.toFixed(3)} opts={${breakdown}}`,
+    }
+  }
+
+  /**
+   * master.decideDayClaim (Phase 2 claim head 経由) で villain の CO 種類を決定。
+   * 対応可能な type (seer_co/medium_co/bodyguard_co/nekomata_co/none) かつ legal に一致する
+   * 場合のみ DecisionResult を返す。それ以外は null で既存 lookahead にフォールスルー。
+   * retarCache 不在時 (ctx==null) は NN 経路を踏まず null を返し、lookahead 経路の
+   * 「skoll unavailable」処理に揃える。
+   */
+  private tryVillainCoFromClaimHead(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    legal: readonly Command[],
+    events: AgentEvents,
+  ): DecisionResult | null {
+    const ctx = this.buildDecisionContext(state, player, events, 'day')
+    if (!ctx) return null
+    let claim: DayClaim
+    try { claim = this.master.decideDayClaim(ctx) } catch { return null }
+
+    if (claim.type === 'none') {
+      return skipOrFirst(legal, `(discussion)[${player.role}/zero] hide (NN claim=none)`)
+    }
+    const claimType = mapVillainCoType(claim.type)
+    if (!claimType) return null
+    const coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === claimType)
+    if (!coCmd) return null
+    return {
+      cmd: coCmd,
+      log: `(discussion)[${player.role}/zero] CO ${claimType} (NN)`,
     }
   }
 
@@ -1312,6 +1366,22 @@ function skipOrFirst(legal: readonly Command[], log: string): DecisionResult {
     throw new Error(`skipOrFirst: 'skip' missing in discussion legal (${log})`)
   }
   return { cmd: skip, log }
+}
+
+/**
+ * DayClaim.type → villain 初期 CO で対応可能な role_co claim type。
+ * mason_co / forecast / *_result 等は villain の CO 選択には使えないので null。
+ */
+function mapVillainCoType(
+  type: DayClaim['type'],
+): 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' | null {
+  switch (type) {
+    case 'seer_co':      return 'seer_co'
+    case 'medium_co':    return 'medium_co'
+    case 'bodyguard_co': return 'bodyguard_co'
+    case 'nekomata_co':  return 'nekomata_co'
+    default: return null
+  }
 }
 
 /** 役職 → cco_full で使う真 CO の claim type（村騙り可能性のある役職は null） */

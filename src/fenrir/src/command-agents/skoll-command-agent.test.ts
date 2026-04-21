@@ -438,6 +438,95 @@ test('SkollCommandAgent: legal 空なら throw', async () => {
 })
 
 // ============================================================
+// Phase 2 claim head 経路 (villain の CO 種類選択を NN に委譲)
+// ============================================================
+
+/**
+ * Phase 2 claim head を持つ master のスタブ。
+ * hasPhase2Head('claim', *) が true を返し、decideDayClaim が固定の DayClaim を返す。
+ * analyzeVote は null (fallback lookahead を意図的に無力化して NN 経路の発火を切り分け)。
+ */
+class FakeClaimZeroMaster extends SkollMasterAgent {
+  private readonly claim: DayClaim
+  constructor(claim: DayClaim) {
+    super({})
+    this.claim = claim
+  }
+  hasPhase2Head(method: string, _role: SystemRole): boolean {
+    return method === 'claim'
+  }
+  override decideDayClaim(_ctx: DecisionContext): DayClaim {
+    return this.claim
+  }
+  override analyzeVote(): null {
+    return null
+  }
+}
+
+test('SkollCommandAgent: discussion villain NN claim=seer_co → seer_co 発火', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'seer_co', results: [] })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  stubRetarCache(state)
+  // seat 3 = werewolf (makeState の既定)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'seer_co', results: [] } },
+    { type: 'role_co', claim: { type: 'medium_co' } },
+  ]
+  const result = await agent.decide(state, 3, legal)
+  assert.equal(result.cmd.type, 'role_co')
+  assert.equal((result.cmd as { claim: DayClaim }).claim.type, 'seer_co')
+  assert.match(result.log ?? '', /\[werewolf\/zero\]/)
+  assert.match(result.log ?? '', /CO seer_co \(NN\)/)
+})
+
+test('SkollCommandAgent: discussion villain NN claim=none → hide (skip)', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'none' })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'seer_co', results: [] } },
+  ]
+  const result = await agent.decide(state, 3, legal)
+  assert.equal(result.cmd.type, 'skip')
+  assert.match(result.log ?? '', /\[werewolf\/zero\]/)
+  assert.match(result.log ?? '', /hide \(NN claim=none\)/)
+})
+
+test('SkollCommandAgent: discussion villain NN claim=forecast → lookahead にフォールスルー', async () => {
+  // forecast は villain 初期 CO では未対応 → mapVillainCoType が null を返し、
+  // 既存 skoll lookahead 経路に落ちる。analyzeVote=null なので最終的に hide。
+  const master = new FakeClaimZeroMaster({ type: 'forecast', target: 2 })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'seer_co', results: [] } },
+  ]
+  const result = await agent.decide(state, 3, legal)
+  assert.equal(result.cmd.type, 'skip')
+  assert.match(result.log ?? '', /skoll unavailable/)
+  assert.doesNotMatch(result.log ?? '', /\(NN\)/)
+})
+
+test('SkollCommandAgent: discussion villain NN claim=seer_co 但し legal 不整合 → フォールスルー', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'seer_co', results: [] })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  stubRetarCache(state)
+  // role_co が legal に存在しない状況
+  const legal: Command[] = [{ type: 'skip' }]
+  const result = await agent.decide(state, 3, legal)
+  assert.equal(result.cmd.type, 'skip')
+  // NN 経路は null を返し、lookahead fallback に落ちる
+  assert.doesNotMatch(result.log ?? '', /\(NN\)/)
+})
+
+// ============================================================
 // Integration: CommandAdapter + SkollCommandAgent で完走
 // ============================================================
 
