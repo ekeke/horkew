@@ -72,6 +72,7 @@ export type Scenario = {
 export function pair2v2Block(): Scenario {
   const envConfig: EnvConfig = {
     numAgents: 4,
+    roles: { 0: 'villager', 1: 'villager', 2: 'werewolf', 3: 'fanatic' },
     agentRoles: [
       'learning',
       'learning',
@@ -154,6 +155,7 @@ export function pair2v2Block(): Scenario {
 export function pair2v2Split(): Scenario {
   const envConfig: EnvConfig = {
     numAgents: 4,
+    roles: { 0: 'villager', 1: 'villager', 2: 'werewolf', 3: 'werehamster' },
     agentRoles: [
       'learning',
       'learning',
@@ -245,6 +247,7 @@ export function pair2v2Split(): Scenario {
 export function trio3v2Block(): Scenario {
   const envConfig: EnvConfig = {
     numAgents: 5,
+    roles: { 0: 'villager', 1: 'villager', 2: 'villager', 3: 'werewolf', 4: 'fanatic' },
     agentRoles: [
       'learning',
       'learning',
@@ -345,6 +348,7 @@ export function trio3v2Block(): Scenario {
 export function pair2v2SplitMentor(): Scenario {
   const envConfig: EnvConfig = {
     numAgents: 4,
+    roles: { 0: 'villager', 1: 'villager', 2: 'werewolf', 3: 'werehamster' },
     agentRoles: [
       { type: 'offerer', primary: 2, acceptable: [2, 3] },
       { type: 'eagerCommitter', primary: 3, acceptable: [2, 3] },
@@ -411,6 +415,7 @@ export function pair2v2SplitMentor(): Scenario {
 export function trio3v2BlockMentored(): Scenario {
   const envConfig: EnvConfig = {
     numAgents: 5,
+    roles: { 0: 'villager', 1: 'villager', 2: 'villager', 3: 'werewolf', 4: 'fanatic' },
     agentRoles: [
       'learning',
       'learning',
@@ -494,6 +499,7 @@ export function trio3v2BlockMentored(): Scenario {
 export function trio3v2Mentor(): Scenario {
   const envConfig: EnvConfig = {
     numAgents: 5,
+    roles: { 0: 'villager', 1: 'villager', 2: 'villager', 3: 'werewolf', 4: 'fanatic' },
     agentRoles: [
       { type: 'offerer', primary: 3, acceptable: [3, 4], mode: 'unanimous' },
       { type: 'eagerCommitter', primary: 4, acceptable: [3, 4] },
@@ -562,6 +568,7 @@ export function trio3v2Mentor(): Scenario {
 export function pair2designatedSingle(): Scenario {
   const envConfig: EnvConfig = {
     numAgents: 4,
+    roles: { 0: 'villager', 1: 'villager', 2: 'werewolf', 3: 'fanatic' },
     agentRoles: [
       'learning',
       'learning',
@@ -651,6 +658,7 @@ export function pair2designatedSingle(): Scenario {
 export function trio3designatedRange(): Scenario {
   const envConfig: EnvConfig = {
     numAgents: 5,
+    roles: { 0: 'villager', 1: 'villager', 2: 'villager', 3: 'werewolf', 4: 'fanatic' },
     agentRoles: [
       'learning',
       'learning',
@@ -762,6 +770,7 @@ export function trio3designatedRange(): Scenario {
 export function wolfPPIgnoreDesignation(): Scenario {
   const envConfig: EnvConfig = {
     numAgents: 5,
+    roles: { 0: 'villager', 1: 'villager', 2: 'werewolf', 3: 'werewolf', 4: 'fanatic' },
     agentRoles: [
       { type: 'fixedVote', target: 2 },   // 村 s0: 狼 s2 (designation-compliant)
       { type: 'fixedVote', target: 2 },   // 村 s1: 狼 s2 (designation-compliant)
@@ -878,6 +887,7 @@ export function wolfPPIgnoreDesignation(): Scenario {
 export function wolfFanaticPPHidden(): Scenario {
   const envConfig: EnvConfig = {
     numAgents: 5,
+    roles: { 0: 'villager', 1: 'villager', 2: 'werewolf', 3: 'werewolf', 4: 'fanatic' },
     agentRoles: [
       { type: 'fixedVote', target: 2 },   // s0 村 (fixedVote→狼 s2)
       { type: 'fixedVote', target: 2 },   // s1 村 (fixedVote→狼 s2)

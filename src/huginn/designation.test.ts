@@ -6,10 +6,17 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { AbstractGame, type EnvConfig } from './abstract-env.ts'
 import type { Trace, AgentTrace } from './protocol.ts'
-import type { HuginnInput, Message } from './types.ts'
+import type { HuginnInput, Message, RoleName } from './types.ts'
 import { DESIGNATION_VIOLATION_PENALTY } from './types.ts'
 import { Rng } from './rng.ts'
 import { encodeObservation, AGENT_FEATURE_DIMS } from './observation.ts'
+
+// 全 seat を villager 扱いする test 用 roles (viewerRole の具体値が本質でない mechanism test 向け).
+function allVillager(n: number): Record<number, RoleName> {
+  const r: Record<number, RoleName> = {}
+  for (let i = 0; i < n; i++) r[i] = 'villager'
+  return r
+}
 
 function makeTrace(inputs: HuginnInput[], finalVoteIdxBySelf: number[]): Trace {
   const perAgent: AgentTrace[] = inputs.map((input) => ({
@@ -27,6 +34,7 @@ describe('designation (指定進行)', () => {
   it('未指定なら HuginnInput.isDesignationTarget は全 false', () => {
     const env = new AbstractGame({
       numAgents: 4,
+      roles: allVillager(4),
       desireCorrelation: 1.0,
       kRounds: 1,
     }, new Rng(1))
@@ -40,6 +48,7 @@ describe('designation (指定進行)', () => {
   it('指定あり (randomize なし) で isDesignationTarget が論理 seat 位置に立つ', () => {
     const env = new AbstractGame({
       numAgents: 5,
+      roles: allVillager(5),
       desireCorrelation: 1.0,
       kRounds: 1,
       designatedTargets: [2, 3],
@@ -57,6 +66,7 @@ describe('designation (指定進行)', () => {
   it('randomize あり でも論理→実 seat 変換が正しい', () => {
     const config: EnvConfig = {
       numAgents: 5,
+      roles: allVillager(5),
       desireCorrelation: 1.0,
       kRounds: 1,
       designatedTargets: [3, 4],
@@ -77,6 +87,7 @@ describe('designation (指定進行)', () => {
   it('step: 集合外投票で learner にペナルティ発火、集合内では発火しない', () => {
     const env = new AbstractGame({
       numAgents: 4,
+      roles: allVillager(4),
       desireCorrelation: 1.0,
       kRounds: 1,
       agentRoles: ['learning', 'learning', { type: 'fixedVote', target: 2 }, { type: 'fixedVote', target: 2 }],
@@ -102,6 +113,7 @@ describe('designation (指定進行)', () => {
   it('step: designatedTargets 未指定なら penalty 加算なし', () => {
     const env = new AbstractGame({
       numAgents: 3,
+      roles: allVillager(3),
       desireCorrelation: 1.0,
       kRounds: 1,
       agentRoles: ['learning', 'learning', { type: 'fixedVote', target: 0 }],
@@ -121,6 +133,7 @@ describe('designation (指定進行)', () => {
   it('step: outcomeRewards override 経路でも penalty 加算', () => {
     const env = new AbstractGame({
       numAgents: 4,
+      roles: allVillager(4),
       desireCorrelation: 1.0,
       kRounds: 1,
       agentRoles: ['learning', 'learning', { type: 'fixedVote', target: 2 }, { type: 'fixedVote', target: 2 }],
@@ -142,6 +155,7 @@ describe('designation (指定進行)', () => {
   it('step: bot (非 learner) は penalty 対象外', () => {
     const env = new AbstractGame({
       numAgents: 3,
+      roles: allVillager(3),
       desireCorrelation: 1.0,
       kRounds: 1,
       agentRoles: ['learning', { type: 'fixedVote', target: 2 }, { type: 'fixedVote', target: 0 }],
@@ -165,6 +179,7 @@ describe('designation (指定進行)', () => {
   it('observation: feature 11 に isDesignationTarget が乗る', () => {
     const env = new AbstractGame({
       numAgents: 4,
+      roles: allVillager(4),
       desireCorrelation: 1.0,
       kRounds: 1,
       designatedTargets: [1, 3],

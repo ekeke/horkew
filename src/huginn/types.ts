@@ -16,9 +16,14 @@ export type Message =
   | { type: 'reject'; offerRef: number }
   | { type: 'commit'; target: AgentId }
 
-/** 役職名の語彙. Retar 流の英語 role 名集合.
- *  knowledge config の possibility set の値はこのいずれか. */
-export const ROLE_VOCABULARY = ['villager', 'werewolf', 'fanatic'] as const
+/** 役職名の語彙. retar の SystemRole と 1:1 対応 (順序は RoleBitIndex 順).
+ *  knowledge config の possibility set の値はこのいずれか.
+ *  retar への文字列変換不要 (adapter で同じ文字列をそのまま使える). */
+export const ROLE_VOCABULARY = [
+  'villager', 'seer', 'medium', 'bodyguard', 'mason',
+  'nekomata', 'werewolf', 'possessed', 'fanatic',
+  'werehamster', 'immoralist',
+] as const
 export type RoleName = typeof ROLE_VOCABULARY[number]
 
 /** Knowledge possibility map: viewer seat → (other seat → 可能性のある役職集合).
@@ -28,6 +33,9 @@ export type KnowledgeMap = Record<AgentId, Record<AgentId, RoleName[]>>
 
 export type HuginnInput = {
   self: AgentId
+  /** self 自身の役職. observation の CLS に one-hot で encode される.
+   *  「自分が何者か」を NN に直接伝えるための信号 (role-conditioned 共有 NN 用). */
+  viewerRole: RoleName
   participants: AgentId[]   // ソート済み (昇順)
   desire: Float64Array      // length === participants.length, ∈ [0,1]
   excluded: boolean[]       // length === participants.length

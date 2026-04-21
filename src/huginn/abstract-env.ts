@@ -53,6 +53,10 @@ export type OutcomeReward = {
 
 export type EnvConfig = {
   numAgents: number
+  /** 各 agent の retar 対応 role (論理 seat → RoleName). 全 agent 必須.
+   *  observation の CLS に viewer 自身の role one-hot として encode される (role-conditioned 共有 NN 用).
+   *  randomizeRolesPerGame 有効時は reset() で permutation 追従して実 seat → role に変換される. */
+  roles: Record<AgentId, RoleName>
   /** 各 agent の役割。省略時は全員 'learning' */
   agentRoles?: AgentRole[]
   /** bot シナリオ用: 学習 agent の primary を bot 集団からランダムに独立選出する場合 true */
@@ -310,6 +314,15 @@ export class AbstractGame {
       }
     }
 
+    // roles: 論理 seat 指定を実 seat に変換. 全 seat 必須.
+    const rolesByActual = new Array<RoleName>(N)
+    for (let logical = 0; logical < N; logical++) {
+      const r = this.config.roles[logical]
+      if (r === undefined) throw new Error(`roles[${logical}] is required`)
+      if (!ROLE_VOCABULARY.includes(r)) throw new Error(`unknown role '${r}' in roles[${logical}]`)
+      rolesByActual[actualOfLogical[logical]] = r
+    }
+
     const noiseScale = NOISE_AMP * (1 - this.config.desireCorrelation)
     const inputs: HuginnInput[] = []
     for (let self = 0; self < N; self++) {
@@ -353,6 +366,7 @@ export class AbstractGame {
       // knowledgeByOther は viewer 視点 (= self) の row を取り出す.
       inputs.push({
         self,
+        viewerRole: rolesByActual[self],
         participants,
         desire,
         excluded,

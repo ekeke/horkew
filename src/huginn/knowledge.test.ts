@@ -7,12 +7,20 @@ import assert from 'node:assert'
 import { AbstractGame } from './abstract-env.ts'
 import { Rng } from './rng.ts'
 import { encodeObservation, AGENT_FEATURE_DIMS } from './observation.ts'
-import { ROLE_VOCABULARY, DESIRE_HIGH_BASE } from './types.ts'
+import { ROLE_VOCABULARY, type RoleName } from './types.ts'
+
+// 全 seat を villager 扱いする test 用 roles (viewerRole の具体値が本質でない mechanism test 向け).
+function allVillager(n: number): Record<number, RoleName> {
+  const r: Record<number, RoleName> = {}
+  for (let i = 0; i < n; i++) r[i] = 'villager'
+  return r
+}
 
 describe('knowledge config (役職可能性集合)', () => {
   it('未指定なら全 seat に全 role 可能 (default 全 1)', () => {
     const env = new AbstractGame({
       numAgents: 3,
+      roles: allVillager(3),
       desireCorrelation: 1.0,
       kRounds: 1,
     }, new Rng(1))
@@ -30,6 +38,7 @@ describe('knowledge config (役職可能性集合)', () => {
   it('明示指定で specified set が入る', () => {
     const env = new AbstractGame({
       numAgents: 5,
+      roles: allVillager(5),
       desireCorrelation: 1.0,
       kRounds: 1,
       knowledge: {
@@ -57,6 +66,7 @@ describe('knowledge config (役職可能性集合)', () => {
   it('randomize あり でも論理→実 seat 変換が正しい', () => {
     const env = new AbstractGame({
       numAgents: 5,
+      roles: allVillager(5),
       desireCorrelation: 1.0,
       kRounds: 1,
       randomizeRolesPerGame: true,
@@ -75,6 +85,7 @@ describe('knowledge config (役職可能性集合)', () => {
     assert.throws(() => {
       const env = new AbstractGame({
         numAgents: 3,
+        roles: allVillager(3),
         desireCorrelation: 1.0,
         kRounds: 1,
         knowledge: {
@@ -90,6 +101,7 @@ describe('knowledge mode の desire 生成 (primary-only)', () => {
   it('knowledge 未設定: 既存 teams ベース desire (teammate=LOW)', () => {
     const env = new AbstractGame({
       numAgents: 4,
+      roles: allVillager(4),
       desireCorrelation: 1.0,                 // ノイズ 0
       kRounds: 1,
       teams: [[0, 1], [2, 3]],
@@ -105,6 +117,7 @@ describe('knowledge mode の desire 生成 (primary-only)', () => {
   it('knowledge 設定時: primary-only mode で teammate も MID', () => {
     const env = new AbstractGame({
       numAgents: 4,
+      roles: allVillager(4),
       desireCorrelation: 1.0,                 // ノイズ 0
       kRounds: 1,
       teams: [[0, 1], [2, 3]],
@@ -124,10 +137,11 @@ describe('knowledge mode の desire 生成 (primary-only)', () => {
   })
 })
 
-describe('observation feature 12-14: knowledge multi-hot', () => {
-  it('未指定 (default 全 role 可能) → 全 seat で features 12-14 が 1', () => {
+describe('observation feature 12..(12+|vocab|-1): knowledge multi-hot', () => {
+  it('未指定 (default 全 role 可能) → 全 seat で role multi-hot が全 1', () => {
     const env = new AbstractGame({
       numAgents: 3,
+      roles: allVillager(3),
       desireCorrelation: 1.0,
       kRounds: 1,
     }, new Rng(1))
@@ -149,6 +163,7 @@ describe('observation feature 12-14: knowledge multi-hot', () => {
   it('明示指定で multi-hot が反映される (Hidden 想定)', () => {
     const env = new AbstractGame({
       numAgents: 5,
+      roles: allVillager(5),
       desireCorrelation: 1.0,
       kRounds: 1,
       knowledge: {
@@ -165,15 +180,83 @@ describe('observation feature 12-14: knowledge multi-hot', () => {
       messageHistory: [],
       pastCommitViolations: new Map(),
     }, 1)
+    // ROLE_VOCABULARY 順に対応する feature index を role 名で参照 (vocab 拡張耐性).
+    const featOf = (role: typeof ROLE_VOCABULARY[number]) => 12 + ROLE_VOCABULARY.indexOf(role)
     // s3 = 確定 werewolf
     const off3 = 3 * AGENT_FEATURE_DIMS
-    assert.strictEqual(mid.agents[off3 + 12], 0)  // villager
-    assert.strictEqual(mid.agents[off3 + 13], 1)  // werewolf
-    assert.strictEqual(mid.agents[off3 + 14], 0)  // fanatic
-    // s4 = villager か fanatic 不明
+    assert.strictEqual(mid.agents[off3 + featOf('villager')], 0)
+    assert.strictEqual(mid.agents[off3 + featOf('werewolf')], 1)
+    assert.strictEqual(mid.agents[off3 + featOf('fanatic')], 0)
+    // s3 は他役職すべて 0 のはず
+    for (const role of ROLE_VOCABULARY) {
+      if (role === 'werewolf') continue
+      assert.strictEqual(mid.agents[off3 + featOf(role)], 0, `s3 ${role} should be 0`)
+    }
+    // s4 = villager か fanatic 不明 (他役職すべて 0)
     const off4 = 4 * AGENT_FEATURE_DIMS
-    assert.strictEqual(mid.agents[off4 + 12], 1)  // villager
-    assert.strictEqual(mid.agents[off4 + 13], 0)  // werewolf
-    assert.strictEqual(mid.agents[off4 + 14], 1)  // fanatic
+    assert.strictEqual(mid.agents[off4 + featOf('villager')], 1)
+    assert.strictEqual(mid.agents[off4 + featOf('werewolf')], 0)
+    assert.strictEqual(mid.agents[off4 + featOf('fanatic')], 1)
+    for (const role of ROLE_VOCABULARY) {
+      if (role === 'villager' || role === 'fanatic') continue
+      assert.strictEqual(mid.agents[off4 + featOf(role)], 0, `s4 ${role} should be 0`)
+    }
+  })
+})
+
+describe('CLS viewer role one-hot', () => {
+  it('viewerRole が CLS feature 8+roleIdx に one-hot encode される', () => {
+    const env = new AbstractGame({
+      numAgents: 4,
+      roles: { 0: 'werewolf', 1: 'villager', 2: 'fanatic', 3: 'werehamster' },
+      desireCorrelation: 1.0,
+      kRounds: 1,
+    }, new Rng(1))
+    const inputs = env.reset()
+    for (let self = 0; self < 4; self++) {
+      const mid = encodeObservation({
+        input: inputs[self],
+        roundNumber: 0,
+        messageHistory: [],
+        pastCommitViolations: new Map(),
+      }, 1)
+      const expectedIdx = ROLE_VOCABULARY.indexOf(inputs[self].viewerRole)
+      for (let r = 0; r < ROLE_VOCABULARY.length; r++) {
+        const expected = r === expectedIdx ? 1 : 0
+        assert.strictEqual(
+          mid.cls[8 + r], expected,
+          `self=${self} role=${inputs[self].viewerRole} cls[8+${r}]=${mid.cls[8 + r]} expected ${expected}`,
+        )
+      }
+    }
+  })
+
+  it('randomize あり でも viewerRole は論理 seat の role を実 seat に持ち込む', () => {
+    const logicalRoles: Record<number, RoleName> = { 0: 'werewolf', 1: 'villager', 2: 'fanatic', 3: 'werehamster' }
+    const env = new AbstractGame({
+      numAgents: 4,
+      roles: logicalRoles,
+      desireCorrelation: 1.0,
+      kRounds: 1,
+      randomizeRolesPerGame: true,
+    }, new Rng(42))
+    const inputs = env.reset()
+    for (let logical = 0; logical < 4; logical++) {
+      const actual = env.getActualSeat(logical)
+      assert.strictEqual(inputs[actual].viewerRole, logicalRoles[logical], `logical ${logical} → actual ${actual}`)
+    }
+  })
+
+  it('roles 未指定で throw', () => {
+    // roles 必須: 型エラー回避で unknown 経由で config を渡し、run-time 検証のみ走らせる.
+    const config = {
+      numAgents: 3,
+      desireCorrelation: 1.0,
+      kRounds: 1,
+    }
+    assert.throws(() => {
+      const env = new AbstractGame(config as unknown as ConstructorParameters<typeof AbstractGame>[0], new Rng(1))
+      env.reset()
+    }, /roles\[0\] is required|Cannot read/)
   })
 })

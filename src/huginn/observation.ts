@@ -22,7 +22,9 @@ function normDesire(d: number): number {
 //   5: mean desire
 //   6: top1 - top2 gap
 //   7: reserved
-export const CLS_FEATURE_DIMS = 8
+//   8..(8+|ROLE_VOCABULARY|-1): viewer role one-hot. viewer 自身の role を NN に直接伝える (role-conditioned 共有 NN).
+//                               ROLE_VOCABULARY (retar の RoleBitIndex 順) に対応.
+export const CLS_FEATURE_DIMS = 8 + ROLE_VOCABULARY.length
 
 // Per-agent feature dims:
 //   0: desire[i]
@@ -38,8 +40,10 @@ export const CLS_FEATURE_DIMS = 8
 //  10: offersYouVoteCount — このゲームで「i に "You vote" と要請する」offer の count / 10
 //                           unanimous offer(X,X) は両方に加算. split offer(X,Y) は別々の seat に加算.
 //  11: isDesignationTarget — 指定進行の許容投票先集合に i が含まれるなら 1. ゲーム開始時から不変、全 agent 共有.
-//  12-14: knowledgeRolePossible_{villager,werewolf,fanatic} — multi-hot. self 視点で seat i がその role の可能性
-//                                                            ありと観測されたら 1. ROLE_VOCABULARY 順に対応.
+//  12..(12+|ROLE_VOCABULARY|-1): knowledgeRolePossible_<role> — multi-hot. self 視点で seat i がその role の
+//                                可能性ありと観測されたら 1. ROLE_VOCABULARY (retar の RoleBitIndex 順) に対応.
+//                                現状 11 役職: villager, seer, medium, bodyguard, mason, nekomata,
+//                                             werewolf, possessed, fanatic, werehamster, immoralist
 export const AGENT_FEATURE_DIMS = 12 + ROLE_VOCABULARY.length
 
 export type ObservationIntermediate = {
@@ -116,6 +120,10 @@ export function collectObservation(obs: Observation, kRounds: number): Observati
   cls[5] = sorted.length > 0 ? sorted.reduce((s, v) => s + v, 0) / sorted.length : 0
   cls[6] = (sorted[0] ?? 0) - (sorted[1] ?? 0)
   cls[7] = 0
+  // viewer role one-hot: CLS 8..(8+|vocab|-1). 未知 role は throw (types レベルで RoleName に絞ってるので到達不能想定).
+  const viewerRoleIdx = ROLE_VOCABULARY.indexOf(input.viewerRole)
+  if (viewerRoleIdx < 0) throw new Error(`unknown viewerRole '${input.viewerRole}'`)
+  cls[8 + viewerRoleIdx] = 1
 
   return { cls, agents, numAgents: N }
 }

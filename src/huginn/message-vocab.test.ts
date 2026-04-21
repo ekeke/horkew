@@ -1,8 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { buildVocabLayout, encodeMessage, decodeMessage, buildLegalMask } from './message-vocab.ts'
-import type { Message, HuginnInput } from './types.ts'
-import { PRIORITY_LEVELS, HEAT_LEVELS, HEAT_NAMES } from './types.ts'
+import type { Message, HuginnInput, RoleName } from './types.ts'
+import { PRIORITY_LEVELS, HEAT_LEVELS, HEAT_NAMES, ROLE_VOCABULARY } from './types.ts'
 
 describe('message vocab', () => {
   const N = 5
@@ -72,8 +72,9 @@ describe('legal mask', () => {
     excluded[self] = true
     for (const i of excludedIdx) excluded[i] = true
     const isDesignationTarget = new Array<boolean>(N).fill(false)
-    const knowledgeByOther = Array.from({ length: N }, () => new Set<'villager' | 'werewolf' | 'fanatic'>(['villager', 'werewolf', 'fanatic']))
-    return { self, participants, desire, excluded, isDesignationTarget, knowledgeByOther }
+    const knowledgeByOther = Array.from({ length: N }, () => new Set<RoleName>(ROLE_VOCABULARY))
+    const viewerRole: RoleName = 'villager'
+    return { self, viewerRole, participants, desire, excluded, isDesignationTarget, knowledgeByOther }
   }
 
   it('SILENT always allowed, self/excluded excluded as PROPOSE/COMMIT target', () => {
