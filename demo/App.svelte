@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
-  import { parse, parseFrontmatter, buildFrontmatter } from '../src/howl/index.ts'
+  import { parse, parseFrontmatter, buildFrontmatter, parseStatement } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import { statementsToPublicEvents } from '../src/howl/events-bridge.ts'
   import { systemRoles } from '../src/types/index.ts'
@@ -515,6 +515,14 @@
   let videoDay = $state(1)
   let dayLineMap: Map<number, number> = $state(new Map())  // day → first line number
   let videoInitialized = $state(false)  // true after first parse of current document
+  let autoTimestampEnabled = $state(true)
+  // Live note mode: record videoCurrentTime when a line transitions blank→non-blank,
+  // then append @MM:SS at line end when Enter finalizes it (if statement type qualifies).
+  let autoTimestampStartTime: number | null = null
+  let autoTimestampLine: number | null = null
+
+  const AUTO_TIMESTAMP_TYPES = new Set(['assert', 'vote', 'lynch', 'attack', 'peace'])
+  const EXISTING_TIMESTAMP_RE = /@\d+:\d\d/
 
   function resetVideoState() {
     videoId = ''
@@ -525,6 +533,8 @@
     videoSyncActive = false
     videoDay = 1
     videoInitialized = false
+    autoTimestampStartTime = null
+    autoTimestampLine = null
   }
   let maxDay = $state(1)
 
@@ -1039,6 +1049,7 @@
     import('./editor/index.ts').then(mod => {
       editorModule = mod
       if (!editorParent || editorView) return
+      mod.setVideoTimeGetter(() => videoId ? videoCurrentTime : null)
       editorView = mod.createHowlEditor(editorParent, {
         doc: input,
         onChange(value) {
@@ -1078,6 +1089,58 @@
               }).catch(() => {})
               return true
             },
+          }),
+          mod.EditorView.updateListener.of(update => {
+            if (!update.docChanged) return
+
+            // Detect newline insertion — identifies which line was just finalized.
+            let finalizedLineNumber: number | null = null
+            update.changes.iterChanges((fromA, _toA, _fromB, _toB, inserted) => {
+              if (finalizedLineNumber !== null) return
+              if (!inserted.toString().includes('\n')) return
+              finalizedLineNumber = update.startState.doc.lineAt(fromA).number
+            })
+
+            if (
+              autoTimestampEnabled &&
+              finalizedLineNumber !== null &&
+              autoTimestampLine === finalizedLineNumber &&
+              autoTimestampStartTime !== null &&
+              videoId
+            ) {
+              const line = update.state.doc.line(finalizedLineNumber)
+              const text = line.text
+              if (!EXISTING_TIMESTAMP_RE.test(text)) {
+                const stmt = parseStatement(text, finalizedLineNumber)
+                if (AUTO_TIMESTAMP_TYPES.has(stmt.type)) {
+                  const timeStr = formatSeconds(autoTimestampStartTime)
+                  const insertPos = line.to
+                  const view = update.view
+                  queueMicrotask(() => {
+                    view.dispatch({
+                      changes: { from: insertPos, insert: ` @${timeStr}` },
+                    })
+                  })
+                }
+              }
+            }
+
+            if (finalizedLineNumber !== null) {
+              autoTimestampStartTime = null
+              autoTimestampLine = null
+            }
+
+            // Record start time on blank→non-blank transition of the cursor's line.
+            const head = update.state.selection.main.head
+            const currentLine = update.state.doc.lineAt(head)
+            const isNonBlank = currentLine.text.trim() !== ''
+            if (isNonBlank && autoTimestampLine !== currentLine.number) {
+              autoTimestampStartTime = videoCurrentTime
+              autoTimestampLine = currentLine.number
+            } else if (!isNonBlank && autoTimestampLine === currentLine.number) {
+              autoTimestampStartTime = null
+              autoTimestampLine = null
+            }
           }),
         ],
       })
@@ -2157,6 +2220,10 @@
       <div class="video-editor-wrap">
         <div class="video-editor-toolbar">
           <button class="mark-time-btn" onclick={insertTimeAnnotation}>いまここ！</button>
+          <label class="auto-ts-toggle">
+            <input type="checkbox" bind:checked={autoTimestampEnabled} />
+            <span>自動タイムスタンプ</span>
+          </label>
         </div>
         {@render inputPane()}
       </div>
@@ -2951,9 +3018,25 @@
 
   .video-editor-toolbar {
     display: flex;
+    align-items: center;
+    gap: 12px;
     padding: 4px 8px;
     background: var(--color-bg-elevated);
     border-bottom: 1px solid var(--color-border);
+  }
+
+  .auto-ts-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .auto-ts-toggle input {
+    cursor: pointer;
   }
 
   .mark-time-btn {

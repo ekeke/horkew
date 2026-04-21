@@ -24,7 +24,8 @@
 // ============================================================================
 
 import { StateEffect, StateField, type Extension } from '@codemirror/state'
-import { autocompletion, type CompletionSource, type Completion } from '@codemirror/autocomplete'
+import { EditorView } from '@codemirror/view'
+import { autocompletion, startCompletion, type CompletionSource, type Completion } from '@codemirror/autocomplete'
 import * as V from '../../src/howl/vocabulary.ts'
 
 // ---- カナ→ローマ字変換 ----
@@ -575,6 +576,41 @@ function getLeftArrowExclusions(lineText: string, players: PlayerEntry[]): Set<s
   return excluded
 }
 
+// ---- 動画タイムスタンプ補完 ----
+
+let videoTimeGetter: (() => number | null) | undefined
+
+export function setVideoTimeGetter(fn: () => number | null) {
+  videoTimeGetter = fn
+}
+
+function formatTimestamp(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+const videoTimestampCompletionSource: CompletionSource = (context) => {
+  if (!videoTimeGetter) return null
+  const match = context.matchBefore(/@/)
+  if (!match || match.to - match.from !== 1) return null
+  const time = videoTimeGetter()
+  if (time === null) return null
+  const timeStr = formatTimestamp(time)
+  return {
+    from: match.from,
+    to: match.to,
+    options: [{
+      label: `@${timeStr}`,
+      apply: `@${timeStr}`,
+      detail: '現在時刻',
+      type: 'keyword',
+      boost: 99,
+    }],
+    filter: false,
+  }
+}
+
 // ---- 補完ソース ----
 
 const isAscii = /^[a-zA-Z0-9_\-]+$/
@@ -697,13 +733,24 @@ const howlCompletionSource: CompletionSource = (context) => {
 
 // ---- Extension ----
 
+// `@` は CM autocomplete のデフォルト起動文字に含まれないため、明示的にトリガーする
+const atCompletionTrigger = EditorView.updateListener.of(update => {
+  if (!update.docChanged) return
+  let typedAt = false
+  update.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
+    if (inserted.toString() === '@') typedAt = true
+  })
+  if (typedAt) queueMicrotask(() => startCompletion(update.view))
+})
+
 export const howlCompletionExtension: Extension = [
   playerListField,
   setupField,
   currentDayField,
   autocompletion({
-    override: [howlCompletionSource],
+    override: [videoTimestampCompletionSource, howlCompletionSource],
     activateOnTyping: true,
     activateOnCompletion: (c) => typeof c.apply === 'string' && c.apply.endsWith(' '),
   }),
+  atCompletionTrigger,
 ]
