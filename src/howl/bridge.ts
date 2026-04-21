@@ -414,7 +414,10 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
               .map(r => claimRoleToSystemRole[r])
               .filter((r): r is SystemRole => r != null)
 
-            if (assertion.negative || sysRoles.length > 1) {
+            if (assertion.roles.includes('nonVillage') && !assertion.negative) {
+              // 人外CO / 人狼CO / 狂人CO / 妖狐CO / 狂信者CO / 背徳者CO: 村全 6 役職を否定
+              actorStatus.deniedRoles.push(...villageRoles)
+            } else if (assertion.negative || sysRoles.length > 1) {
               // 否定CO or 複数CO (ギドラ): claiming せず deniedRoles で処理
               const denied = assertion.negative
                 ? sysRoles                                          // 非占いCO → deny seer

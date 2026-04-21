@@ -358,6 +358,15 @@ Multiple roles in a single CO denote a multi-role claim (ギドラ). The player 
 チャーリー: 村人CO  # same effect
 ```
 
+#### Non-village CO (人外CO etc.)
+
+`人外CO`, `人狼CO`, `狂人CO`, `妖狐CO`, `狂信者CO`, and `背徳者CO` all deny every village role at once (villager + 5 power roles) — equivalent to claiming "I am on the scum team." The specific scum role is not distinguished; all six notations produce the same denial constraint.
+
+```
+ボブ: 人外CO      # denies villager, seer, medium, bodyguard, mason, nekomata
+チャーリー: 人狼CO  # same effect
+```
+
 #### Medium Target Auto-fill
 
 When a medium claimant reports results without explicit target names, the targets are automatically filled from the execution history in chronological order:

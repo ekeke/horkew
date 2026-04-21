@@ -80,6 +80,33 @@ describe('bridge: follow statement', () => {
   })
 })
 
+describe('bridge: nonVillage CO (人外系)', () => {
+  const variants = [
+    { label: '人外CO',   howl: 'ボブ　人外CO' },
+    { label: '人狼CO',   howl: 'ボブ　人狼CO' },
+    { label: '狂人CO',   howl: 'ボブ　狂人CO' },
+    { label: '妖狐CO',   howl: 'ボブ　妖狐CO' },
+    { label: '狂信者CO', howl: 'ボブ　狂信者CO' },
+    { label: '背徳者CO', howl: 'ボブ　背徳者CO' },
+  ]
+
+  for (const { label, howl } of variants) {
+    test(`${label} denies all 6 village roles via deniedRoles`, () => {
+      const text = `++アリス、ボブ、チャーリー\n噛み アリス\n${howl}`
+      const { statements, meta } = parse(text)
+      const { vs, players } = buildVillageStatus(statements, meta)
+      const bobSeat = [...players.entries()].find(([, n]) => n === 'ボブ')![0]
+      const bobStatus = vs.statuses.get(bobSeat)!
+      assert.strictEqual(bobStatus.claiming, false, `${label} should not set claiming`)
+      assert.deepStrictEqual(
+        [...bobStatus.deniedRoles].sort(),
+        ['bodyguard', 'mason', 'medium', 'nekomata', 'seer', 'villager'],
+        `${label} should deny all 6 village roles`,
+      )
+    })
+  }
+})
+
 describe('bridge: suddenDeath statement', () => {
   test('suddenDeath at execution timing goes to executions with diedDay=day', () => {
     const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
