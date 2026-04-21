@@ -35,20 +35,21 @@ export class VillageZeroAgent extends RoleZeroAgent {
   }
 
   /**
-   * 昼 CO: villager 席 + phase2Net 装着時のみ NN claim head で type を決定し、
-   * 補助情報 (target/result 等) は super の heuristic 結果から借用してマージする。
-   * villager 以外は super の RuleBasedAgent に委譲 (seer/medium 等は phase2 checkpoint 別)。
+   * 昼 CO: phase2Nets に `${ctx.myRole}-claim` checkpoint があれば NN claim head で type を
+   * 決定し、補助情報 (target/result 等) は super の heuristic 結果から借用してマージ。
+   * 該当 checkpoint 無しは super (RuleBasedAgent) に委譲。
    */
   override decideDayClaim(ctx: DecisionContext): DayClaim {
     const superDecision = super.decideDayClaim(ctx)
-    if (ctx.myRole !== 'villager' || !this.zeroOpts.phase2Net) return superDecision
+    const claimNet = this.zeroOpts.phase2Nets?.get(`${ctx.myRole}-claim`)
+    if (!claimNet) return superDecision
     const obs = encodeObservation(ctx)
-    const logits = this.zeroOpts.phase2Net.forward(obs).policies.get('claim')
+    const logits = claimNet.forward(obs).policies.get('claim')
     if (!logits) return superDecision
     const argmax = argmaxIndex(logits)
     const merged = mergeClaimTypeWithSuper(argmax, superDecision)
     // eslint-disable-next-line no-console
-    console.log(`[phase2-village seat=${ctx.mySeat}] claim argmax=${argmax} (${claimTypeFromIdx(argmax)}) super=${superDecision.type} → ${merged.type}`)
+    console.log(`[phase2-village seat=${ctx.mySeat} role=${ctx.myRole}] claim argmax=${argmax} (${claimTypeFromIdx(argmax)}) super=${superDecision.type} → ${merged.type}`)
     return merged
   }
 

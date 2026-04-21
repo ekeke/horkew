@@ -143,12 +143,29 @@ async function fetchPhase2Network(relativeFile: string): Promise<TransformerNetw
       weights.set(name, new Float32Array(bytes.buffer))
     }
     net.loadWeights(weights)
-    console.log(`[phase2] loaded ${relativeFile}`)
     return net
-  } catch (err) {
-    console.warn(`[phase2] failed to load ${relativeFile}:`, err)
+  } catch {
     return null
   }
+}
+
+/** slot に属する全 role × method の checkpoint を並列 fetch し、map<`${role}-${method}`, net> にする */
+async function fetchPhase2NetsForSlot(slot: ZeroSlot): Promise<Map<string, TransformerNetwork>> {
+  const out = new Map<string, TransformerNetwork>()
+  const rolesForSlot = SLOT_ROLES[slot]
+  // pretrain-all.ts で生成される method 名一覧 (METHOD_HEAD_MAP と同じ 9 種類)
+  const methods = ['claim', 'comm', 'propose', 'leader', 'forecast', 'defensive_claim', 'target', 'bodyguard_targets', 'predict']
+  const pairs: Array<[string, string]> = []
+  for (const role of rolesForSlot) {
+    for (const method of methods) pairs.push([role, method])
+  }
+  const results = await Promise.all(pairs.map(async ([role, method]) => {
+    const net = await fetchPhase2Network(`${role}-${method}.json`)
+    return net ? ([`${role}-${method}`, net] as [string, TransformerNetwork]) : null
+  }))
+  for (const r of results) if (r) out.set(r[0], r[1])
+  console.log(`[phase2] slot=${slot} loaded ${out.size}/${pairs.length} checkpoints`)
+  return out
 }
 
 /** checkpoint を fetch して Pure JS TransformerNetwork + MasonZeroNetwork wrapper に展開 */
@@ -181,6 +198,16 @@ type ZeroSlot = 'mason' | 'village' | 'wolf' | 'fanatic' | 'hamster' | 'immorali
 
 const ZERO_SLOTS: ZeroSlot[] = ['mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist']
 
+/** slot → その slot で動く SystemRole 集合 (phase2 checkpoint のキーに使う role) */
+const SLOT_ROLES: Record<ZeroSlot, SystemRole[]> = {
+  mason: ['mason'],
+  village: ['villager', 'seer', 'medium', 'bodyguard', 'nekomata'],
+  wolf: ['werewolf'],
+  fanatic: ['fanatic'],
+  hamster: ['werehamster'],
+  immoralist: ['immoralist'],
+}
+
 /**
  * 6 slot の skoll-zero NN をロードして RoleZeroAgent の Map を返す。
  * 失敗した slot は null のまま、呼び出し側で heuristic にフォールバック。
@@ -194,13 +221,21 @@ async function buildSkollZeroAgents(
     buffer: new TrainingBuffer(),
     selectionMode: 'argmax' as const,
   }
-  // Phase 2 pretrained head (villager/claim) を village slot に注入。未配置なら null で素通し。
-  const villagerClaimNet = await fetchPhase2Network('villager-claim.json')
-  for (const slot of ZERO_SLOTS) {
-    const mzNet = await fetchMasonZeroNetwork(slot)
+  // 6 slot を並列 fetch (skoll-zero + phase2 heads 両方)
+  const slotResults = await Promise.all(ZERO_SLOTS.map(async slot => {
+    const [mzNet, phase2Nets] = await Promise.all([
+      fetchMasonZeroNetwork(slot),
+      fetchPhase2NetsForSlot(slot),
+    ])
+    return { slot, mzNet, phase2Nets }
+  }))
+  for (const { slot, mzNet, phase2Nets } of slotResults) {
     if (!mzNet) continue
-    const phase2Net = slot === 'village' ? (villagerClaimNet ?? undefined) : undefined
-    const opts = { nn: mzNet, phase2Net, ...commonOpts }
+    const opts = {
+      nn: mzNet,
+      phase2Nets: phase2Nets.size > 0 ? phase2Nets : undefined,
+      ...commonOpts,
+    }
     const agent: RoleZeroAgent =
       slot === 'mason' ? new MasonZeroAgent(opts)
       : slot === 'village' ? new VillageZeroAgent(opts)

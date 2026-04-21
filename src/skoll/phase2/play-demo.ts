@@ -35,6 +35,8 @@ export type PlayDemoOptions = {
 export async function runPlayDemo(opts: PlayDemoOptions): Promise<void> {
   process.stderr.write(`[play-demo] loading phase2 checkpoint: ${opts.checkpoint}\n`)
   const phase2Net = loadNetworkFromCheckpoint(opts.checkpoint, 'individual')
+  // 単一 checkpoint なので villager-claim 固定で map に入れる
+  const phase2Nets = new Map<string, typeof phase2Net>([['villager-claim', phase2Net]])
 
   const roles = DEFAULT_ROLES
   const buffer = new TrainingBuffer()
@@ -42,7 +44,7 @@ export async function runPlayDemo(opts: PlayDemoOptions): Promise<void> {
     nn: new DummyNN(),
     setup: roles,
     buffer,
-    phase2Net,
+    phase2Nets,
     selectionMode: 'argmax',
   })
 

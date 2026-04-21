@@ -29,8 +29,12 @@ export type RoleZeroAgentOptions = {
   mctsConfig?: MCTSConfig
   selectionMode?: 'sample' | 'argmax'
   determinizerMaxWorlds?: number
-  /** Phase 2 pretrained NN: claim/comm/leader 等の head を持つ。decide* が参照する */
-  phase2Net?: TransformerNetwork
+  /**
+   * Phase 2 pretrained heads: key は `${role}-${method}` (例 'villager-claim', 'werewolf-comm')。
+   * 役職別 checkpoint を実行時に ctx.myRole で切り替える用途。未登録の key は undefined が返り、
+   * 呼び出し側は super の heuristic にフォールバックする。
+   */
+  phase2Nets?: Map<string, TransformerNetwork>
 }
 
 /**
@@ -38,8 +42,8 @@ export type RoleZeroAgentOptions = {
  * をオーバーライドするだけ。
  */
 export abstract class RoleZeroAgent extends SkollMasterAgent {
-  protected readonly zeroOpts: Required<Omit<RoleZeroAgentOptions, 'nn' | 'setup' | 'buffer' | 'mctsConfig' | 'phase2Net'>>
-    & Pick<RoleZeroAgentOptions, 'nn' | 'setup' | 'buffer' | 'mctsConfig' | 'phase2Net'>
+  protected readonly zeroOpts: Required<Omit<RoleZeroAgentOptions, 'nn' | 'setup' | 'buffer' | 'mctsConfig' | 'phase2Nets'>>
+    & Pick<RoleZeroAgentOptions, 'nn' | 'setup' | 'buffer' | 'mctsConfig' | 'phase2Nets'>
 
   /** 何度 MCTS を実行したか (debug) */
   mctsCalls = 0
@@ -66,7 +70,7 @@ export abstract class RoleZeroAgent extends SkollMasterAgent {
       mctsConfig: opts.mctsConfig,
       selectionMode: opts.selectionMode ?? 'sample',
       determinizerMaxWorlds: opts.determinizerMaxWorlds ?? 100000,
-      phase2Net: opts.phase2Net,
+      phase2Nets: opts.phase2Nets,
     }
   }
 

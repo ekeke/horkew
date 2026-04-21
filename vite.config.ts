@@ -274,12 +274,12 @@ function serveStats(): Plugin {
 }
 
 /**
- * Phase 2 pretrained checkpoints (tmp/phase2-smoke/*.json) を
+ * Phase 2 pretrained checkpoints (tmp/phase2-pretrain-v1/{role}-{method}.json) を
  * /horkew/models/phase2/{file}.json で配信。dev only（tmp/ は .gitignore）。
  */
 function servePhase2Models(): Plugin {
   let base = '/horkew/'
-  const phase2Dir = 'tmp/phase2-smoke'
+  const phase2Dir = 'tmp/phase2-pretrain-v1'
   return {
     name: 'serve-phase2-models',
     configResolved(config) { base = config.base },
