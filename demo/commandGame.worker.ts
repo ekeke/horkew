@@ -244,6 +244,9 @@ async function startGame(opts: StartGameOptions): Promise<void> {
     roles: rolesMap,
     seed,
     hasFirstGhost: opts.hasFirstGhost,
+    // 14d-neko の正式再投票ルール。default (random_tied) だと再投票がエンジン側で
+    // ランダム解決され、handlers.onVote 経由の agent 判断が効かない。
+    revoteConfig: { maxRevotes: 2, style: 'full_revote', tiebreaker: 'draw' },
   }
 
   // 6 slot の skoll-zero エージェント (fetch 失敗 slot は heuristic fallback)

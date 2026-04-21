@@ -390,6 +390,8 @@ export class CommandPlayStore {
       roles: opts.roles,
       seed,
       hasFirstGhost: opts.hasFirstGhost,
+      // 14d-neko の正式再投票ルール。commandGame.worker.ts と揃える。
+      revoteConfig: { maxRevotes: 2, style: 'full_revote', tiebreaker: 'draw' },
     }
 
     const liveEvents: (GameEvent | FenrirExtEvent)[] = []
