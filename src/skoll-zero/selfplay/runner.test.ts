@@ -2,7 +2,8 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { TrainingBuffer } from './buffer.ts'
 import { DummyNN } from '../mcts/nn.ts'
-import { runSelfPlayGame, runSelfPlayBatch } from './runner.ts'
+import { runSelfPlayGame, runSelfPlayBatch, DEFAULT_ROLES } from './runner.ts'
+import { MasonZeroAgent } from './mason-zero-agent.ts'
 import { normalizeVisits, sampleFromVisits, argmaxFromVisits } from './policy-utils.ts'
 
 describe('TrainingBuffer', () => {
@@ -76,6 +77,17 @@ describe('policy-utils', () => {
     }
     assert.equal(counts.get(1), 100, '全 100 回 action 1')
     assert.ok(!counts.has(2), 'action 2 は visit 0 → 選ばれない')
+  })
+})
+
+describe('RoleZeroAgent.getLastMCTSResult', () => {
+  it('初期状態では null', () => {
+    const agent = new MasonZeroAgent({
+      nn: new DummyNN(),
+      setup: DEFAULT_ROLES,
+      buffer: new TrainingBuffer(),
+    })
+    assert.equal(agent.getLastMCTSResult(), null)
   })
 })
 

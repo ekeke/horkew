@@ -15,7 +15,7 @@ import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import { buildPossibilitiesFromRetar } from '../../skoll/unified.ts'
 import { createSimState } from '../simulator/world-state.ts'
 import { Determinizer } from '../mcts/determinize.ts'
-import { runMCTS, DEFAULT_MCTS_CONFIG, type Faction, type MCTSConfig } from '../mcts/ismcts.ts'
+import { runMCTS, DEFAULT_MCTS_CONFIG, type Faction, type MCTSConfig, type MCTSResult } from '../mcts/ismcts.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import { TrainingBuffer } from './buffer.ts'
 import type { RootObs } from './observation.ts'
@@ -43,6 +43,17 @@ export abstract class RoleZeroAgent extends SkollMasterAgent {
   /** 何度 fallback に落ちたか (debug) */
   fallbackCalls = 0
 
+  /**
+   * 直近の decideVote で得た MCTS 結果。fallback 経路では null。
+   * huginn-adapter 等の外部 consumer が policy (visits) を取得するために使う。
+   */
+  protected lastMCTSResult: MCTSResult | null = null
+
+  /** 直近の MCTS 結果を取得 (fallback 時は null) */
+  getLastMCTSResult(): MCTSResult | null {
+    return this.lastMCTSResult
+  }
+
   constructor(opts: RoleZeroAgentOptions) {
     super({})
     this.zeroOpts = {
@@ -62,6 +73,7 @@ export abstract class RoleZeroAgent extends SkollMasterAgent {
   protected abstract captureObservation(ctx: DecisionContext): RootObs
 
   override decideVote(ctx: DecisionContext): number {
+    this.lastMCTSResult = null
     if (!ctx.globalRetarPossibilities) {
       this.fallbackCalls++
       return super.decideVote(ctx)
@@ -96,6 +108,7 @@ export abstract class RoleZeroAgent extends SkollMasterAgent {
     }
 
     this.mctsCalls++
+    this.lastMCTSResult = result
 
     const pi = normalizeVisits(result.visits)
     this.zeroOpts.buffer.appendPending({

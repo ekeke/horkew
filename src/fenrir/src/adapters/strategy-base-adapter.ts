@@ -173,6 +173,26 @@ export abstract class StrategyBaseAdapter
     const dayProposals = this.collectProposals(vctx, ext)
 
     // 5. 投票収集
+    const votes = this.collectVotes(vctx, state, ext, dayProposals)
+
+    // 6. Hook: 後処理
+    this.afterVoteCollection(vctx, ext)
+
+    return votes
+  }
+
+  /**
+   * 投票収集フェーズ。subclass が override して huginn-adapter 等で置き換え可能。
+   *
+   * デフォルト実装: 全 alive player について個別に `decideVote(ctx)` を呼び、
+   * 結果を Map<seat, targetSeat> で返す。TeamAgent (wolf/mason) は team ctx 経由。
+   */
+  protected collectVotes(
+    vctx: VoteContext<FenrirExtEvent, FenrirExt>,
+    state: GameState<FenrirExt>,
+    ext: FenrirExt,
+    dayProposals: Proposal[],
+  ): Map<number, number> {
     const votes = new Map<number, number>()
     for (const player of alivePlayers(state)) {
       const view = buildPlayerView(state, player.seat)
@@ -206,10 +226,6 @@ export abstract class StrategyBaseAdapter
         votes.set(player.seat, this.getAgent(player.seat).decideVote(ctx))
       }
     }
-
-    // 6. Hook: 後処理
-    this.afterVoteCollection(vctx, ext)
-
     return votes
   }
 
