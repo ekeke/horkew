@@ -1271,67 +1271,117 @@ export class TfTransformerNetwork {
   }
 
   /**
-   * 教師あり学習（vote head用 cross-entropy）
+   * 教師あり学習（汎用 head cross-entropy / BCE）
+   *
+   * headType で 3 種の head を dispatch:
+   * - `perSeatSoftmax`: per-seat readout + masked softmax + CE (vote/attack/divine/guard/target)
+   * - `globalSoftmax`: clsOut @ W + B + softmax + CE (claim/comm/leader)
+   * - `perSeatSigmoid`: per-seat sigmoid readout + BCE (propose/predict)
+   *
+   * masks は perSeatSoftmax のみ必須 (illegal seat を -1e9 で抑え込む加算マスク)。
    */
-  trainSupervisedVote(batch: {
+  trainSupervisedHead(batch: {
     observations: Float32Array[]
     labels: Float32Array[]
-    masks: Float32Array[]
+    masks?: Float32Array[]
+    headName: string
+    headType: 'perSeatSoftmax' | 'globalSoftmax' | 'perSeatSigmoid'
   }): { loss: number, accuracy: number } {
     const n = batch.observations.length
     if (n === 0) return { loss: 0, accuracy: 0 }
 
     const inputSize = this.config.inputSize
-    const obsData = new Float32Array(n * inputSize)
-    for (let i = 0; i < n; i++) {
-      obsData.set(batch.observations[i], i * inputSize)
+
+    let headW: tf.Variable
+    let headB: tf.Variable
+    let outputSize: number
+    if (batch.headType === 'perSeatSoftmax') {
+      const entry = this.perSeatHeadWeights.get(batch.headName)
+      if (!entry) throw new Error(`per-seat softmax head '${batch.headName}' not found`)
+      ;[headW, headB] = entry
+      outputSize = this.config.heads[batch.headName]
+      if (outputSize === undefined) throw new Error(`heads['${batch.headName}'] size not in config`)
+    } else if (batch.headType === 'globalSoftmax') {
+      const entry = this.globalHeadWeights.get(batch.headName)
+      if (!entry) throw new Error(`global softmax head '${batch.headName}' not found`)
+      ;[headW, headB] = entry
+      outputSize = this.config.heads[batch.headName]
+      if (outputSize === undefined) throw new Error(`heads['${batch.headName}'] size not in config`)
+    } else {
+      const entry = this.perSeatSigmoidHeadWeights.get(batch.headName)
+      if (!entry) throw new Error(`per-seat sigmoid head '${batch.headName}' not found`)
+      ;[headW, headB] = entry
+      outputSize = (this.config.sigmoidHeads ?? {})[batch.headName]
+      if (outputSize === undefined) throw new Error(`sigmoidHeads['${batch.headName}'] size not in config`)
     }
 
-    const voteHeadSize = this.config.heads.vote
-    const labelData = new Float32Array(n * voteHeadSize)
-    const maskData = new Float32Array(n * voteHeadSize)
-    for (let i = 0; i < n; i++) {
-      labelData.set(batch.labels[i], i * voteHeadSize)
-      maskData.set(batch.masks[i], i * voteHeadSize)
+    const obsData = new Float32Array(n * inputSize)
+    for (let i = 0; i < n; i++) obsData.set(batch.observations[i], i * inputSize)
+
+    const labelData = new Float32Array(n * outputSize)
+    for (let i = 0; i < n; i++) labelData.set(batch.labels[i], i * outputSize)
+
+    const needMasks = batch.headType === 'perSeatSoftmax'
+    let maskData: Float32Array | null = null
+    if (needMasks) {
+      if (!batch.masks) throw new Error('masks required for perSeatSoftmax')
+      maskData = new Float32Array(n * outputSize)
+      for (let i = 0; i < n; i++) maskData.set(batch.masks[i], i * outputSize)
     }
 
     const result = { loss: 0, accuracy: 0 }
-
-    // vote head weights を特定
-    const voteHeadEntry = this.perSeatHeadWeights.get('vote')
-    if (!voteHeadEntry) throw new Error('vote head not found in perSeatHeadWeights')
-    const [voteW, voteB] = voteHeadEntry
-
-    // 学習対象: projections + transformer layers + vote head
     const trainableVars = this.allVariables
 
     const lossFunc = () => {
       const obsTensor = tf.tensor2d(obsData, [n, inputSize])
-      const { seatOutputs } = this.forwardTrunk(obsTensor)  // other outputs unused here
+      const { clsOut, seatOutputs } = this.forwardTrunk(obsTensor)
+      const labelTensor = tf.tensor2d(labelData, [n, outputSize])
 
-      // vote logits: per-seat readout
-      const logits = this.perSeatLogits(seatOutputs, voteW, voteB)  // [n, SEATS]
+      if (batch.headType === 'perSeatSoftmax') {
+        const logits = this.perSeatLogits(seatOutputs, headW, headB)
+        const maskTensor = tf.tensor2d(maskData!, [n, outputSize])
+        const maskedLogits = tf.add(logits, maskTensor)
+        const probs = tf.softmax(maskedLogits)
+        const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
+        const loss = tf.neg(tf.mean(tf.sum(tf.mul(labelTensor, logProbs), 1)))
 
-      // マスク適用
-      const maskTensor = tf.tensor2d(maskData, [n, voteHeadSize])
-      const maskedLogits = tf.add(logits, maskTensor)
-
-      const probs = tf.softmax(maskedLogits)
-      const labelTensor = tf.tensor2d(labelData, [n, voteHeadSize])
-
-      const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
-      const loss = tf.neg(tf.mean(tf.sum(tf.mul(labelTensor, logProbs), 1)))
-
-      // accuracy
-      const predIndices = tf.argMax(probs, 1).dataSync()
-      const labelIndices = tf.argMax(labelTensor, 1).dataSync()
-      let correct = 0
-      for (let i = 0; i < n; i++) {
-        if (predIndices[i] === labelIndices[i]) correct++
+        const predIndices = tf.argMax(probs, 1).dataSync()
+        const labelIndices = tf.argMax(labelTensor, 1).dataSync()
+        let correct = 0
+        for (let i = 0; i < n; i++) if (predIndices[i] === labelIndices[i]) correct++
+        result.accuracy = correct / n
+        result.loss = loss.dataSync()[0]
+        return loss as tf.Scalar
       }
-      result.accuracy = correct / n
-      result.loss = loss.dataSync()[0]
 
+      if (batch.headType === 'globalSoftmax') {
+        const logits = tf.add(tf.matMul(clsOut, headW), headB) as tf.Tensor2D
+        const probs = tf.softmax(logits)
+        const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
+        const loss = tf.neg(tf.mean(tf.sum(tf.mul(labelTensor, logProbs), 1)))
+
+        const predIndices = tf.argMax(probs, 1).dataSync()
+        const labelIndices = tf.argMax(labelTensor, 1).dataSync()
+        let correct = 0
+        for (let i = 0; i < n; i++) if (predIndices[i] === labelIndices[i]) correct++
+        result.accuracy = correct / n
+        result.loss = loss.dataSync()[0]
+        return loss as tf.Scalar
+      }
+
+      // perSeatSigmoid
+      const logits = this.perSeatSigmoidLogits(seatOutputs, headW, headB)
+      const probs = tf.sigmoid(logits)
+      const eps = tf.scalar(1e-8)
+      const logP = tf.log(tf.add(probs, eps))
+      const logOneMinusP = tf.log(tf.add(tf.sub(tf.scalar(1), probs), eps))
+      const bce = tf.add(tf.mul(labelTensor, logP), tf.mul(tf.sub(tf.scalar(1), labelTensor), logOneMinusP))
+      const loss = tf.neg(tf.mean(bce))
+
+      const predBinary = tf.cast(tf.greaterEqual(probs, tf.scalar(0.5)), 'float32')
+      const match = tf.cast(tf.equal(predBinary, labelTensor), 'float32')
+      result.accuracy = tf.mean(match).dataSync()[0]
+      result.loss = loss.dataSync()[0]
       return loss as tf.Scalar
     }
 
@@ -1346,7 +1396,7 @@ export class TfTransformerNetwork {
    * - policy: cross-entropy(π, softmax(vote_logits + mask))
    * - value:  MSE(z, matMul(clsOut, valueW) + valueB)
    *
-   * mask は illegal 席に -1e9 を入れる加算形式（trainSupervisedVote と同形式）。
+   * mask は illegal 席に -1e9 を入れる加算形式（trainSupervisedHead と同形式）。
    * L2 regularization は Phase 1 では省略（必要なら後日追加）。
    */
   trainMasonZero(batch: {

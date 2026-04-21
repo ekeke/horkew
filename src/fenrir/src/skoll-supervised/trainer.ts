@@ -3,7 +3,7 @@
  *
  * data-collector.ts が出した JSONL を読んで、
  * mason_collective と互換の標準 NN (createTfNetwork) の vote head + trunk を
- * trainSupervisedVote で fresh から学習する。
+ * trainSupervisedHead で fresh から学習する。
  *
  * - train/eval split (デフォルト 90/10)
  * - epoch ごとに eval、early stopping (patience)
@@ -134,11 +134,11 @@ function argmax(arr: Float32Array): number {
 
 /**
  * NN forward → vote logits → masked softmax → top-k 取得。
- * trainSupervisedVote と同じ処理だが gradient なし。
+ * trainSupervisedHead と同じ処理だが gradient なし。
  *
  * 簡易実装: バッチごとに network.forward を呼ぶ（ピュア JS の方が overhead 少ない可能性あり）。
  * ここでは TF network の forwardTrunk + perSeatLogits を直接呼ぶのは public API 化されていないため、
- * trainSupervisedVote と同じ tensor 経路を使う簡略 eval を実装する。
+ * trainSupervisedHead と同じ tensor 経路を使う簡略 eval を実装する。
  */
 function evalAccuracy(
   net: AnyNetwork,
@@ -154,8 +154,8 @@ function evalAccuracy(
 
   for (let start = 0; start < samples.length; start += batchSize) {
     const batch = samples.slice(start, Math.min(start + batchSize, samples.length))
-    // trainSupervisedVote を eval モードで呼ぶための簡略策: 1 epoch の forward + loss を計算するために
-    // trainSupervisedVote を呼んでしまうと weights が更新される。
+    // trainSupervisedHead を eval モードで呼ぶための簡略策: 1 epoch の forward + loss を計算するために
+    // trainSupervisedHead を呼んでしまうと weights が更新される。
     // 代わりに pure JS network.forward 相当の処理を tf.tidy で実装するのは複雑なので、
     // ここでは「1 ステップだけ」super-low LR (0) ではなく、forward だけ手動実装する。
     //
@@ -275,10 +275,12 @@ export async function trainAndSave(opts: Partial<TrainerOptions> = {}): Promise<
     let trainCount = 0
     for (let start = 0; start < trainSet.length; start += options.batchSize) {
       const batch = trainSet.slice(start, Math.min(start + options.batchSize, trainSet.length))
-      const result = tfNet.trainSupervisedVote({
+      const result = tfNet.trainSupervisedHead({
         observations: batch.map(s => s.observation),
         labels: batch.map(s => s.label),
         masks: batch.map(s => s.mask),
+        headName: 'vote',
+        headType: 'perSeatSoftmax',
       })
       trainLoss += result.loss * batch.length
       trainAcc += result.accuracy * batch.length

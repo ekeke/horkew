@@ -174,10 +174,12 @@ export async function trainAndSaveHamster(opts: Partial<HamsterTrainerOptions> =
     let trainCount = 0
     for (let start = 0; start < trainSet.length; start += options.batchSize) {
       const batch = trainSet.slice(start, Math.min(start + options.batchSize, trainSet.length))
-      const result = tfNet.trainSupervisedVote({
+      const result = tfNet.trainSupervisedHead({
         observations: batch.map(s => s.observation),
         labels: batch.map(s => s.label),
         masks: batch.map(s => s.mask),
+        headName: 'vote',
+        headType: 'perSeatSoftmax',
       })
       trainLoss += result.loss * batch.length
       trainAcc += result.accuracy * batch.length
