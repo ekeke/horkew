@@ -20,8 +20,32 @@ import {
   WOLF_COLLECTIVE_OBSERVATION_SIZE, WOLF_COLLECTIVE_SEAT_FEATURES, WOLF_COLLECTIVE_CLS_FEATURES,
   OBSERVATION_SIZE, SEAT_TOKEN_FEATURES, CLS_FEATURES,
   NUM_ROLE_TOKENS, ROLE_TOKEN_FEATURES,
+  SEATS, NUM_ROLES,
 } from '../../fenrir/src/observation.ts'
 import { HEAD_SIZES } from '../../fenrir/src/action.ts'
+
+/**
+ * Phase 2 で追加される共通 head 群 (claim/comm/leader/target/propose/predict)。
+ * 3 config 共通でこれらを含め、role 別の agent が必要な head だけ参照する。
+ *
+ * - softmax heads (categorical 1-of-K): claim (10), comm (119), leader (3), target (14)
+ *   - target は per-seat 選択 (forecast/defensiveClaim の対象指定)
+ * - sigmoid heads (multi-label): propose (14), predict (154 = 14 × 11 roles)
+ */
+const PHASE2_HEADS = {
+  claim: HEAD_SIZES.claim,         // 10
+  comm: HEAD_SIZES.comm,           // 119
+  leader: HEAD_SIZES.leader,       // 3
+  target: HEAD_SIZES.target,       // 14 (per-seat)
+} as const
+
+const PHASE2_SIGMOID_HEADS = {
+  propose: HEAD_SIZES.propose,     // 14 (per-seat sigmoid)
+  predict: SEATS * NUM_ROLES,      // 154 (per-seat sigmoid)
+} as const
+
+const PHASE2_PER_SEAT_HEADS = ['target'] as const
+const PHASE2_PER_SEAT_SIGMOID_HEADS = ['propose', 'predict'] as const
 
 /**
  * mason_brain と互換の MasonZeroNetwork 用 TransformerNetwork config。
@@ -29,8 +53,11 @@ import { HEAD_SIZES } from '../../fenrir/src/action.ts'
  */
 export const SKOLL_ZERO_NETWORK_CONFIG: NetworkConfig = {
   inputSize: MASON_COLLECTIVE_OBSERVATION_SIZE,
-  heads: { vote: HEAD_SIZES.vote },
-  sigmoidHeads: {},
+  heads: {
+    vote: HEAD_SIZES.vote,
+    ...PHASE2_HEADS,
+  },
+  sigmoidHeads: { ...PHASE2_SIGMOID_HEADS },
   transformer: {
     dModel: 64,
     numHeads: 4,
@@ -45,8 +72,8 @@ export const SKOLL_ZERO_NETWORK_CONFIG: NetworkConfig = {
     planVocabSize: 0,
     seatFeatures: MASON_COLLECTIVE_SEAT_FEATURES,
     clsFeatures: MASON_COLLECTIVE_CLS_FEATURES,
-    perSeatHeads: ['vote'],
-    perSeatSigmoidHeads: [],
+    perSeatHeads: ['vote', ...PHASE2_PER_SEAT_HEADS],
+    perSeatSigmoidHeads: [...PHASE2_PER_SEAT_SIGMOID_HEADS],
   },
 }
 
@@ -62,6 +89,7 @@ export function createSkollZeroNetwork(): TransformerNetwork {
  * - `vote`: 昼投票 (全役職で使用)
  * - `divine`: seer の夜占い先 (seer 以外は使わない、shared trunk 上の独立 head)
  * - `guard`: bodyguard の夜護衛先 (bodyguard 以外は使わない)
+ * - Phase 2 共通: claim, comm, leader, target (per-seat), propose (per-seat sigmoid), predict (per-seat sigmoid)
  */
 export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
   inputSize: OBSERVATION_SIZE,
@@ -69,8 +97,9 @@ export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
     vote: HEAD_SIZES.vote,
     divine: HEAD_SIZES.vote,
     guard: HEAD_SIZES.vote,
+    ...PHASE2_HEADS,
   },
-  sigmoidHeads: {},
+  sigmoidHeads: { ...PHASE2_SIGMOID_HEADS },
   transformer: {
     dModel: 64,
     numHeads: 4,
@@ -85,8 +114,8 @@ export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
     planVocabSize: 0,
     seatFeatures: SEAT_TOKEN_FEATURES,
     clsFeatures: CLS_FEATURES,
-    perSeatHeads: ['vote', 'divine', 'guard'],
-    perSeatSigmoidHeads: [],
+    perSeatHeads: ['vote', 'divine', 'guard', ...PHASE2_PER_SEAT_HEADS],
+    perSeatSigmoidHeads: [...PHASE2_PER_SEAT_SIGMOID_HEADS],
   },
 }
 
@@ -96,14 +125,16 @@ export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
  * Heads:
  * - `vote`: 昼投票
  * - `attack`: 夜の噛み先 (vote とは別 head、policy 汚染を防ぐ)
+ * - Phase 2 共通: claim, comm, leader, target (per-seat), propose (per-seat sigmoid), predict (per-seat sigmoid)
  */
 export const WOLF_ZERO_NETWORK_CONFIG: NetworkConfig = {
   inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
   heads: {
     vote: HEAD_SIZES.vote,
     attack: HEAD_SIZES.vote,
+    ...PHASE2_HEADS,
   },
-  sigmoidHeads: {},
+  sigmoidHeads: { ...PHASE2_SIGMOID_HEADS },
   transformer: {
     dModel: 64,
     numHeads: 4,
@@ -118,8 +149,8 @@ export const WOLF_ZERO_NETWORK_CONFIG: NetworkConfig = {
     planVocabSize: 0,
     seatFeatures: WOLF_COLLECTIVE_SEAT_FEATURES,
     clsFeatures: WOLF_COLLECTIVE_CLS_FEATURES,
-    perSeatHeads: ['vote', 'attack'],
-    perSeatSigmoidHeads: [],
+    perSeatHeads: ['vote', 'attack', ...PHASE2_PER_SEAT_HEADS],
+    perSeatSigmoidHeads: [...PHASE2_PER_SEAT_SIGMOID_HEADS],
   },
 }
 

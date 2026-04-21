@@ -27,12 +27,25 @@ export type NNOutput = {
 
 /**
  * policy を読み出す head 名。
+ *
+ * Phase 1 (MCTS per-seat softmax):
  * - `vote`: 昼投票 (default、全役職)
  * - `attack`: wolf の噛み先
  * - `divine`: seer の占い先
  * - `guard`: bodyguard の護衛先
+ *
+ * Phase 2 (NN-direct、MCTS 不使用):
+ * - `target`: 占い/護衛/forecast/defensiveClaim target (per-seat softmax)
+ * - `claim`: 昼 claim (categorical 10)
+ * - `comm`: communication signal (categorical 119)
+ * - `leader`: leadership response (categorical 3)
+ * - `propose`: 処刑提案 (per-seat sigmoid)
+ * - `predict`: 配役予想 (per-seat sigmoid 154)
  */
-export type HeadName = 'vote' | 'attack' | 'divine' | 'guard'
+export type HeadName =
+  | 'vote' | 'attack' | 'divine' | 'guard' | 'target'
+  | 'claim' | 'comm' | 'leader'
+  | 'propose' | 'predict'
 
 export interface MasonZeroNN {
   /**

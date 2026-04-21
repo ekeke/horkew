@@ -773,24 +773,35 @@ export class TransformerNetwork {
       if (sk) this.specialKeys!.set(sk)
     }
 
-    // Heads
+    // Heads — 部分 load に対応: warmstart checkpoint に存在しない head は skip
+    // (skoll-zero の attack/divine/guard head など新規 head は random 初期化のまま残す)
     for (const [name, head] of this.perSeatHeads) {
-      head.weights.set(weights.get(`head_${name}_w`)!)
-      head.biases.set(weights.get(`head_${name}_b`)!)
+      const w = weights.get(`head_${name}_w`)
+      const b = weights.get(`head_${name}_b`)
+      if (w) head.weights.set(w)
+      if (b) head.biases.set(b)
     }
     if (this.nightSeatHead) {
-      this.nightSeatHead.weights.set(weights.get('head_night_seat_w')!)
-      this.nightSeatHead.biases.set(weights.get('head_night_seat_b')!)
-      this.nightClsHead!.weights.set(weights.get('head_night_cls_w')!)
-      this.nightClsHead!.biases.set(weights.get('head_night_cls_b')!)
+      const nsW = weights.get('head_night_seat_w')
+      const nsB = weights.get('head_night_seat_b')
+      const ncW = weights.get('head_night_cls_w')
+      const ncB = weights.get('head_night_cls_b')
+      if (nsW) this.nightSeatHead.weights.set(nsW)
+      if (nsB) this.nightSeatHead.biases.set(nsB)
+      if (ncW) this.nightClsHead!.weights.set(ncW)
+      if (ncB) this.nightClsHead!.biases.set(ncB)
     }
     for (const [name, head] of this.perSeatSigmoidHeads) {
-      head.weights.set(weights.get(`head_${name}_w`)!)
-      head.biases.set(weights.get(`head_${name}_b`)!)
+      const w = weights.get(`head_${name}_w`)
+      const b = weights.get(`head_${name}_b`)
+      if (w) head.weights.set(w)
+      if (b) head.biases.set(b)
     }
     for (const [name, head] of this.globalHeads) {
-      head.weights.set(weights.get(`head_${name}_w`)!)
-      head.biases.set(weights.get(`head_${name}_b`)!)
+      const w = weights.get(`head_${name}_w`)
+      const b = weights.get(`head_${name}_b`)
+      if (w) head.weights.set(w)
+      if (b) head.biases.set(b)
     }
     for (const [name, head] of this.globalSigmoidHeads) {
       head.weights.set(weights.get(`head_${name}_w`)!)
