@@ -17,6 +17,7 @@ import { createSimState } from '../simulator/world-state.ts'
 import { Determinizer } from '../mcts/determinize.ts'
 import { runMCTS, DEFAULT_MCTS_CONFIG, type Faction, type MCTSConfig, type MCTSResult } from '../mcts/ismcts.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
+import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 import { TrainingBuffer } from './buffer.ts'
 import type { RootObs } from './observation.ts'
 import { normalizeVisits, sampleFromVisits, argmaxFromVisits } from './policy-utils.ts'
@@ -28,6 +29,8 @@ export type RoleZeroAgentOptions = {
   mctsConfig?: MCTSConfig
   selectionMode?: 'sample' | 'argmax'
   determinizerMaxWorlds?: number
+  /** Phase 2 pretrained NN: claim/comm/leader 等の head を持つ。decide* が参照する */
+  phase2Net?: TransformerNetwork
 }
 
 /**
@@ -35,8 +38,8 @@ export type RoleZeroAgentOptions = {
  * をオーバーライドするだけ。
  */
 export abstract class RoleZeroAgent extends SkollMasterAgent {
-  protected readonly zeroOpts: Required<Omit<RoleZeroAgentOptions, 'nn' | 'setup' | 'buffer' | 'mctsConfig'>>
-    & Pick<RoleZeroAgentOptions, 'nn' | 'setup' | 'buffer' | 'mctsConfig'>
+  protected readonly zeroOpts: Required<Omit<RoleZeroAgentOptions, 'nn' | 'setup' | 'buffer' | 'mctsConfig' | 'phase2Net'>>
+    & Pick<RoleZeroAgentOptions, 'nn' | 'setup' | 'buffer' | 'mctsConfig' | 'phase2Net'>
 
   /** 何度 MCTS を実行したか (debug) */
   mctsCalls = 0
@@ -63,6 +66,7 @@ export abstract class RoleZeroAgent extends SkollMasterAgent {
       mctsConfig: opts.mctsConfig,
       selectionMode: opts.selectionMode ?? 'sample',
       determinizerMaxWorlds: opts.determinizerMaxWorlds ?? 100000,
+      phase2Net: opts.phase2Net,
     }
   }
 

@@ -273,6 +273,35 @@ function serveStats(): Plugin {
   }
 }
 
+/**
+ * Phase 2 pretrained checkpoints (tmp/phase2-smoke/*.json) を
+ * /horkew/models/phase2/{file}.json で配信。dev only（tmp/ は .gitignore）。
+ */
+function servePhase2Models(): Plugin {
+  let base = '/horkew/'
+  const phase2Dir = 'tmp/phase2-smoke'
+  return {
+    name: 'serve-phase2-models',
+    configResolved(config) { base = config.base },
+    configureServer(server) {
+      const prefix = `${base}models/phase2/`
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith(prefix)) return next()
+        const filename = decodeURIComponent(req.url.slice(prefix.length))
+        const filePath = join(phase2Dir, filename)
+        if (!existsSync(filePath)) return next()
+        try {
+          const content = readFileSync(filePath, 'utf-8')
+          res.setHeader('Content-Type', 'application/json')
+          res.end(content)
+        } catch {
+          next()
+        }
+      })
+    },
+  }
+}
+
 /** demo/public/ の静的ファイルを SPA フォールバックより先に配信 */
 function servePublicEarly(): Plugin {
   let base = '/horkew/'
@@ -303,7 +332,7 @@ function servePublicEarly(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), serveStats(), servePublicEarly(), serveScenarios(), serveSkollModels(), serveSkollZeroModels(), servePretrainSnapshots()],
+  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), serveStats(), servePublicEarly(), serveScenarios(), serveSkollModels(), serveSkollZeroModels(), servePhase2Models(), servePretrainSnapshots()],
   root: 'demo',
   base: '/horkew/',
   server: { port: 5375, strictPort: true },

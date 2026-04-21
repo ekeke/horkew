@@ -128,6 +128,29 @@ function post(msg: FromWorkerMessage): void {
   }
 }
 
+/** Phase 2 checkpoint を fetch して Pure JS TransformerNetwork に展開 (decideDayClaim 等の head を含む) */
+async function fetchPhase2Network(relativeFile: string): Promise<TransformerNetwork | null> {
+  try {
+    const res = await fetch(`models/phase2/${relativeFile}`)
+    if (!res.ok) return null
+    const data = await res.json()
+    const net = new TransformerNetwork(data.config, inferObservationMode(data.config.inputSize))
+    const weights = new Map<string, Float32Array>()
+    for (const [name, b64] of Object.entries(data.weights as Record<string, string>)) {
+      const binary = atob(b64)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      weights.set(name, new Float32Array(bytes.buffer))
+    }
+    net.loadWeights(weights)
+    console.log(`[phase2] loaded ${relativeFile}`)
+    return net
+  } catch (err) {
+    console.warn(`[phase2] failed to load ${relativeFile}:`, err)
+    return null
+  }
+}
+
 /** checkpoint を fetch して Pure JS TransformerNetwork + MasonZeroNetwork wrapper に展開 */
 async function fetchMasonZeroNetwork(slot: string): Promise<MasonZeroNetwork | null> {
   // 優先: /horkew/models/zero/{slot}.json (trained skoll-zero)
@@ -171,10 +194,13 @@ async function buildSkollZeroAgents(
     buffer: new TrainingBuffer(),
     selectionMode: 'argmax' as const,
   }
+  // Phase 2 pretrained head (villager/claim) を village slot に注入。未配置なら null で素通し。
+  const villagerClaimNet = await fetchPhase2Network('villager-claim.json')
   for (const slot of ZERO_SLOTS) {
     const mzNet = await fetchMasonZeroNetwork(slot)
     if (!mzNet) continue
-    const opts = { nn: mzNet, ...commonOpts }
+    const phase2Net = slot === 'village' ? (villagerClaimNet ?? undefined) : undefined
+    const opts = { nn: mzNet, phase2Net, ...commonOpts }
     const agent: RoleZeroAgent =
       slot === 'mason' ? new MasonZeroAgent(opts)
       : slot === 'village' ? new VillageZeroAgent(opts)
