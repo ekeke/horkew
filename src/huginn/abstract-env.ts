@@ -17,8 +17,8 @@
  * - 報酬 = desire[eliminated] + 食言ペナルティ
  */
 
-import type { HuginnInput, AgentId, Message } from './types.ts'
-import { COMMIT_VIOLATION_PENALTY, DESIGNATION_VIOLATION_PENALTY, DESIRE_HIGH_BASE } from './types.ts'
+import type { HuginnInput, AgentId, Message, RoleName, KnowledgeMap } from './types.ts'
+import { COMMIT_VIOLATION_PENALTY, DESIGNATION_VIOLATION_PENALTY, DESIRE_HIGH_BASE, ROLE_VOCABULARY } from './types.ts'
 import type { Rng } from './rng.ts'
 import { detectCommitViolation, type Trace } from './protocol.ts'
 
@@ -85,6 +85,12 @@ export type EnvConfig = {
   /** 指定進行: final vote の許容集合 (論理 seat). 集合外に投票した learner は DESIGNATION_VIOLATION_PENALTY.
    *  「ラン指定」(村の民意で範囲内から吊り先を選ぶ) をプロトコルに落としたもの. 集合内は desire/primary で判断する. */
   designatedTargets?: AgentId[]
+  /** knowledge: 各 viewer 視点の役職可能性集合 (論理 seat). 設定時:
+   *    - desire 生成は team 非依存の primary-only モード (HIGH for primary, MID for others, LOW なし)
+   *    - 各 HuginnInput.knowledgeByOther に viewer 視点の possibility set が入る
+   *    - observation には role multi-hot 3 features/seat が encoded される
+   *  未設定時 (既存シナリオ): desire は従来 teams ベース, knowledgeByOther は全 seat 全役職可能で埋まる. */
+  knowledge?: KnowledgeMap
 }
 
 // desire は「ちょっとしたヒント」程度の shaping signal として使う. outcomeRewards override の
@@ -278,6 +284,32 @@ export class AbstractGame {
     const isDesignationTargetByActual = new Array<boolean>(N).fill(false)
     for (const actual of this.actualDesignatedTargets) isDesignationTargetByActual[actual] = true
 
+    // knowledge: 論理 seat ベースの config を実 seat の Set<RoleName>[][] に変換.
+    // knowledgeByActual[viewerActual][otherActual] = possibility set.
+    // 未指定の (viewer, other) ペアは「全 RoleName 可能」(完全不明) でデフォルト.
+    const useKnowledgeMode = this.config.knowledge !== undefined
+    const knowledgeByActual: Set<RoleName>[][] = new Array(N)
+    for (let v = 0; v < N; v++) {
+      knowledgeByActual[v] = new Array(N)
+      for (let o = 0; o < N; o++) {
+        knowledgeByActual[v][o] = new Set(ROLE_VOCABULARY)
+      }
+    }
+    if (this.config.knowledge) {
+      for (const [viewerLogicalStr, perOther] of Object.entries(this.config.knowledge)) {
+        const viewerActual = actualOfLogical[Number(viewerLogicalStr)]
+        for (const [otherLogicalStr, roles] of Object.entries(perOther)) {
+          const otherActual = actualOfLogical[Number(otherLogicalStr)]
+          for (const r of roles) {
+            if (!ROLE_VOCABULARY.includes(r as RoleName)) {
+              throw new Error(`unknown role '${r}' in knowledge[${viewerLogicalStr}][${otherLogicalStr}]`)
+            }
+          }
+          knowledgeByActual[viewerActual][otherActual] = new Set(roles as RoleName[])
+        }
+      }
+    }
+
     const noiseScale = NOISE_AMP * (1 - this.config.desireCorrelation)
     const inputs: HuginnInput[] = []
     for (let self = 0; self < N; self++) {
@@ -292,7 +324,11 @@ export class AbstractGame {
           continue
         }
         let base: number
-        if (this.config.primaryFromBots) {
+        if (useKnowledgeMode) {
+          // knowledge config 設定時: primary-only mode. desire に team 情報を漏らさない.
+          // HIGH for primary, MID for others. LOW (teammate signal) は使わない.
+          base = (i === myPrimary) ? HIGH_BASE : MID_BASE
+        } else if (this.config.primaryFromBots) {
           // ABCD 学習グループ: 同じ学習 agent は LOW、bot のうち myPrimary は HIGH、他 bot は MID
           if (this.isLearning(i)) {
             base = LOW_BASE
@@ -314,8 +350,15 @@ export class AbstractGame {
         desire[i] = clamp01(base + noise)
       }
       // participants[i] === i なので isDesignationTargetByActual をそのまま index で使える.
-      // 同一配列を全 self で共有 (指定は全員に見える共有観測、各 input で readonly).
-      inputs.push({ self, participants, desire, excluded, isDesignationTarget: isDesignationTargetByActual })
+      // knowledgeByOther は viewer 視点 (= self) の row を取り出す.
+      inputs.push({
+        self,
+        participants,
+        desire,
+        excluded,
+        isDesignationTarget: isDesignationTargetByActual,
+        knowledgeByOther: knowledgeByActual[self],
+      })
     }
     this.inputs = inputs
     return inputs

@@ -843,6 +843,199 @@ export function wolfPPIgnoreDesignation(): Scenario {
 }
 
 // ============================================================
+// Tier 2: knowledge を使った hidden role シナリオ
+// ============================================================
+
+/**
+ * 狼陣営 PP + 狂信が hidden (狼から識別不能) シナリオ.
+ *
+ * Logical seat assignments:
+ *   s0 = villager (村1, fixedVote→s2 bot)
+ *   s1 = villager (村2, fixedVote→s2 bot)
+ *   s2 = werewolf (狼1, learner)
+ *   s3 = werewolf (狼2, learner)
+ *   s4 = fanatic  (狂信, learner)
+ *
+ * Knowledge:
+ *   - 狼から見て狂信 = 村と区別不能 (possibility = ['villager', 'fanatic'])
+ *   - 狂信から見て狼 = 確定識別 (possibility = ['werewolf']). 狂信は常に狼を知る.
+ *   - 狼同士は確定識別.
+ *
+ * Desire: knowledge 設定時の primary-only モード.
+ *   - primaryCandidates=[0,1] で各 learner 独立に村 seat を primary.
+ *   - desire HIGH on primary, MID on others. team 情報は漏らさない.
+ *
+ * 学習課題:
+ *   - 3 wolf-team learner が独立 random primary (村 s0 or s1)
+ *   - knowledge multi-hot で「自分が狼だ」と互いに認識可能 (狼同士)、狂信は村と区別不能
+ *   - comm で primary を擦り合わせて村 seat 単独吊り (PP) を達成
+ *   - designation penalty -0.2 を飲んで陣営勝利 +1.0 → +0.8 each (狼) / +0.8 each (狂信)
+ *
+ * 理論最大: 3 learner * 0.8 / 5 = 0.48
+ *
+ * 比較対象: wolfFanaticPPKnown (狼が狂信を識別できる版).
+ */
+export function wolfFanaticPPHidden(): Scenario {
+  const envConfig: EnvConfig = {
+    numAgents: 5,
+    agentRoles: [
+      { type: 'fixedVote', target: 2 },   // s0 村 (fixedVote→狼 s2)
+      { type: 'fixedVote', target: 2 },   // s1 村 (fixedVote→狼 s2)
+      'learning',                          // s2 狼1
+      'learning',                          // s3 狼2
+      'learning',                          // s4 狂信 (今回 learner)
+    ],
+    teams: [[0, 1], [2, 3, 4]],            // 村 vs 狼陣営 (狂信 reward 同盟)
+    primaryCandidates: [0, 1],             // 各 learner 独立に村 seat を primary
+    designatedTargets: [2, 3],             // 村視点で狼 2 体を指定
+    randomizeRolesPerGame: true,
+    desireCorrelation: 0.7,
+    kRounds: 4,
+    rewardMode: 'eliminated',
+    consensusBonus: 0,
+    knowledge: {
+      // s2 狼1 視点: 狼2 確定、狂信は村と区別不能、村も同じく不明
+      2: {
+        3: ['werewolf'],
+        4: ['villager', 'fanatic'],
+        0: ['villager', 'fanatic'],
+        1: ['villager', 'fanatic'],
+      },
+      // s3 狼2 視点: s2 と対称
+      3: {
+        2: ['werewolf'],
+        4: ['villager', 'fanatic'],
+        0: ['villager', 'fanatic'],
+        1: ['villager', 'fanatic'],
+      },
+      // s4 狂信 視点: 狼を確定識別、村も villager と確定
+      4: {
+        2: ['werewolf'],
+        3: ['werewolf'],
+        0: ['villager'],
+        1: ['villager'],
+      },
+      // s0, s1 (村 bot) は学習しないので knowledge 省略 (default 全 role 可能で埋まる、observation も使わない)
+    },
+    outcomeRewards: {
+      '0': { rewardByTeam: { 0: 0.0, 1: 1.0 }, label: '村 s0 吊り → PP 成立 (狼陣営勝利)' },
+      '1': { rewardByTeam: { 0: 0.0, 1: 1.0 }, label: '村 s1 吊り → PP 成立 (狼陣営勝利)' },
+      '2': { rewardByTeam: { 0: 1.0, 1: 0.0 }, label: '狼 s2 吊り → 村勝利' },
+      '3': { rewardByTeam: { 0: 1.0, 1: 0.0 }, label: '狼 s3 吊り → 村勝利' },
+      '4': { rewardByTeam: { 0: 0.0, 1: 0.0 }, label: '狂信 s4 吊り → 双方 lose' },
+      '0,1': { rewardByTeam: { 0: 0.0, 1: 1.0 }, label: '村村 tie → どちらが死んでも PP 成立' },
+      '0,2': { rewardByTeam: { 0: 0.5, 1: 0.5 }, label: '村+狼 tie → 50%' },
+      '0,3': { rewardByTeam: { 0: 0.5, 1: 0.5 }, label: '村+狼 tie → 50%' },
+      '0,4': { rewardByTeam: { 0: 0.0, 1: 0.5 }, label: '村+狂信 tie → 50% PP' },
+      '1,2': { rewardByTeam: { 0: 0.5, 1: 0.5 }, label: '村+狼 tie → 50%' },
+      '1,3': { rewardByTeam: { 0: 0.5, 1: 0.5 }, label: '村+狼 tie → 50%' },
+      '1,4': { rewardByTeam: { 0: 0.0, 1: 0.5 }, label: '村+狂信 tie → 50% PP' },
+      '2,3': { rewardByTeam: { 0: 1.0, 1: 0.0 }, label: '狼 tie → 村勝利確定' },
+      '2,4': { rewardByTeam: { 0: 0.5, 1: 0.0 }, label: '狼+狂信 tie' },
+      '3,4': { rewardByTeam: { 0: 0.5, 1: 0.0 }, label: '狼+狂信 tie' },
+    },
+  }
+  return {
+    name: 'wolfFanaticPPHidden',
+    description:
+      '狼陣営 PP + 狂信が狼から識別不能 (hidden) の初期状態シナリオ. 5 agent (2 村 bot + 2 狼 learner + 狂信 learner). ' +
+      '狼から見て狂信は村と区別不能 (knowledge: ["villager", "fanatic"])、狂信は常に狼確定. ' +
+      '3 learner が独立 random 村 primary、comm で擦り合わせて村単独吊りを目指す.',
+    learningObjective:
+      'desire は primary-only (team 漏洩なし)、knowledge は multi-hot で role 候補集合を観測. ' +
+      '狼は狂信を村と誤認しがち、狂信は狼を知っているので狼の動きをガイド可能. ' +
+      'comm で 3 learner が同じ村 seat に集約 → PP 成立で各 +0.8 (penalty -0.2 + 陣営勝 1.0).',
+    envConfig,
+    analysis: {
+      N: 5,
+      learningAgentCount: 3,
+      botAgentCount: 2,
+      majority: 3,
+      expectedWinRateOnFullCoordination: 1.0,
+    },
+    roles: [
+      { seat: 0, label: '村1',   kind: 'bot',      team: 'village',  winCondition: '狼全滅', suggestedVoteTarget: '狼 s2 (designation)',     knowledge: { 2: ['werewolf'], 3: ['werewolf'], 4: ['fanatic'] } },
+      { seat: 1, label: '村2',   kind: 'bot',      team: 'village',  winCondition: '狼全滅', suggestedVoteTarget: '狼 s2 (designation)',     knowledge: { 2: ['werewolf'], 3: ['werewolf'], 4: ['fanatic'] } },
+      { seat: 2, label: '狼1',   kind: 'learning', team: 'werewolf', winCondition: 'PP',     suggestedVoteTarget: '村 seat (defy + 同調)',   knowledge: { 3: ['werewolf'], 4: ['villager', 'fanatic'], 0: ['villager', 'fanatic'], 1: ['villager', 'fanatic'] } },
+      { seat: 3, label: '狼2',   kind: 'learning', team: 'werewolf', winCondition: 'PP',     suggestedVoteTarget: '村 seat (defy + 同調)',   knowledge: { 2: ['werewolf'], 4: ['villager', 'fanatic'], 0: ['villager', 'fanatic'], 1: ['villager', 'fanatic'] } },
+      { seat: 4, label: '狂信',  kind: 'learning', team: 'werewolf', winCondition: '狼陣営勝利', suggestedVoteTarget: '村 seat (狼に追従)',  knowledge: { 2: ['werewolf'], 3: ['werewolf'], 0: ['villager'], 1: ['villager'] } },
+    ],
+    outcomes: [
+      {
+        label: '3 learner が同じ村 seat に集約 (理論最適)',
+        voteTally: 's0(or s1): 3, 狼 s2: 2',
+        result: '村 single elim → PP 成立、各 learner +0.8',
+        learnerWinRate: 1.0,
+      },
+      {
+        label: '狼が狂信を間違って吊る (識別失敗)',
+        voteTally: 's4: 2 (狼×2), s2: 2 (村), 狂信→ どこか',
+        result: '狂信吊りで陣営敗、狼 each penalty -0.2',
+        learnerWinRate: 0.0,
+      },
+    ],
+  }
+}
+
+/**
+ * 狼陣営 PP + 狼が狂信を確定識別 (Known) シナリオ.
+ *
+ * wolfFanaticPPHidden と同じ構成だが、狼の knowledge が「狂信 = ['fanatic']、村 = ['villager']」と確定.
+ * これは「途中で狂信が deduce された後の状態」の snapshot. 比較対象 baseline.
+ *
+ * 学習課題: 3 learner 全員が role を確定識別済 → comm を使えば trivial に村 seat へ集約可能.
+ * Hidden 版との差分が「knowledge 観測の効果」を測る.
+ */
+export function wolfFanaticPPKnown(): Scenario {
+  const hidden = wolfFanaticPPHidden()
+  const envConfig: EnvConfig = {
+    ...hidden.envConfig,
+    knowledge: {
+      // s2 狼1: 狼2、狂信、村全員を確定識別
+      2: {
+        3: ['werewolf'],
+        4: ['fanatic'],
+        0: ['villager'],
+        1: ['villager'],
+      },
+      // s3 狼2: 同様
+      3: {
+        2: ['werewolf'],
+        4: ['fanatic'],
+        0: ['villager'],
+        1: ['villager'],
+      },
+      // s4 狂信: Hidden 版と同じ (狂信は元から狼を知ってる)
+      4: {
+        2: ['werewolf'],
+        3: ['werewolf'],
+        0: ['villager'],
+        1: ['villager'],
+      },
+    },
+  }
+  return {
+    ...hidden,
+    name: 'wolfFanaticPPKnown',
+    description:
+      '狼陣営 PP + 狼が狂信を確定識別 (Known) シナリオ. wolfFanaticPPHidden と同構成、狼の knowledge のみ差分 ' +
+      '(狂信を ["fanatic"]、村を ["villager"] と確定). 「狂信 deduce 後」の state を表現. Hidden との学習速度・収束差を測定.',
+    learningObjective:
+      '全 learner が役職を確定識別済. comm で 3 wolf-team learner が同じ村 seat に集約するのみ. ' +
+      'Hidden 版と比較して knowledge 観測が学習速度を上げるかを検証.',
+    envConfig,
+    roles: [
+      hidden.roles[0],
+      hidden.roles[1],
+      // 狼1, 狼2 の knowledge を確定版に更新
+      { ...hidden.roles[2], knowledge: { 3: ['werewolf'], 4: ['fanatic'], 0: ['villager'], 1: ['villager'] } },
+      { ...hidden.roles[3], knowledge: { 2: ['werewolf'], 4: ['fanatic'], 0: ['villager'], 1: ['villager'] } },
+      hidden.roles[4],
+    ],
+  }
+}
+
+// ============================================================
 // Catalog
 // ============================================================
 
@@ -856,4 +1049,6 @@ export const catalog: Record<string, () => Scenario> = {
   pair2designatedSingle,
   trio3designatedRange,
   wolfPPIgnoreDesignation,
+  wolfFanaticPPHidden,
+  wolfFanaticPPKnown,
 }

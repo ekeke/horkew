@@ -72,7 +72,8 @@ describe('legal mask', () => {
     excluded[self] = true
     for (const i of excludedIdx) excluded[i] = true
     const isDesignationTarget = new Array<boolean>(N).fill(false)
-    return { self, participants, desire, excluded, isDesignationTarget }
+    const knowledgeByOther = Array.from({ length: N }, () => new Set<'villager' | 'werewolf' | 'fanatic'>(['villager', 'werewolf', 'fanatic']))
+    return { self, participants, desire, excluded, isDesignationTarget, knowledgeByOther }
   }
 
   it('SILENT always allowed, self/excluded excluded as PROPOSE/COMMIT target', () => {

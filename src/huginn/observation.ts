@@ -4,7 +4,7 @@
  */
 
 import type { Observation } from './types.ts'
-import { MAX_AGENTS, DESIRE_HIGH_BASE } from './types.ts'
+import { MAX_AGENTS, DESIRE_HIGH_BASE, ROLE_VOCABULARY } from './types.ts'
 
 /** raw desire 値 (reward scale 0〜0.1) を observation 用 0〜1 に正規化する.
  *  NN の他 features (0〜1 normalized) と magnitude を揃えて attention が埋もれないようにする. */
@@ -38,7 +38,9 @@ export const CLS_FEATURE_DIMS = 8
 //  10: offersYouVoteCount — このゲームで「i に "You vote" と要請する」offer の count / 10
 //                           unanimous offer(X,X) は両方に加算. split offer(X,Y) は別々の seat に加算.
 //  11: isDesignationTarget — 指定進行の許容投票先集合に i が含まれるなら 1. ゲーム開始時から不変、全 agent 共有.
-export const AGENT_FEATURE_DIMS = 12
+//  12-14: knowledgeRolePossible_{villager,werewolf,fanatic} — multi-hot. self 視点で seat i がその role の可能性
+//                                                            ありと観測されたら 1. ROLE_VOCABULARY 順に対応.
+export const AGENT_FEATURE_DIMS = 12 + ROLE_VOCABULARY.length
 
 export type ObservationIntermediate = {
   cls: Float32Array
@@ -61,6 +63,12 @@ export function collectObservation(obs: Observation, kRounds: number): Observati
     agents[off + 4] = Math.min(violations, 5) / 5
     agents[off + 8] = i / MAX_AGENTS
     agents[off + 11] = input.isDesignationTarget[i] ? 1 : 0
+    // knowledge multi-hot: ROLE_VOCABULARY 順に対応する 3 features.
+    // self や excluded など knowledgeByOther が空 Set のケースは全 0、デフォルト「全 role 可能」なら全 1.
+    const possible = input.knowledgeByOther[i]
+    for (let r = 0; r < ROLE_VOCABULARY.length; r++) {
+      agents[off + 12 + r] = possible.has(ROLE_VOCABULARY[r]) ? 1 : 0
+    }
   }
 
   for (const entry of obs.messageHistory) {

@@ -16,6 +16,16 @@ export type Message =
   | { type: 'reject'; offerRef: number }
   | { type: 'commit'; target: AgentId }
 
+/** 役職名の語彙. Retar 流の英語 role 名集合.
+ *  knowledge config の possibility set の値はこのいずれか. */
+export const ROLE_VOCABULARY = ['villager', 'werewolf', 'fanatic'] as const
+export type RoleName = typeof ROLE_VOCABULARY[number]
+
+/** Knowledge possibility map: viewer seat → (other seat → 可能性のある役職集合).
+ *  例: { 2: { 3: ['werewolf'], 4: ['villager', 'fanatic'] } } は
+ *  「s2 視点で s3 は確定 werewolf、s4 は villager か fanatic のどちらか不明」を表す. */
+export type KnowledgeMap = Record<AgentId, Record<AgentId, RoleName[]>>
+
 export type HuginnInput = {
   self: AgentId
   participants: AgentId[]   // ソート済み (昇順)
@@ -24,6 +34,10 @@ export type HuginnInput = {
   /** 指定進行の指定対象集合. length === participants.length. この集合外への投票は DESIGNATION_VIOLATION_PENALTY.
    *  集合全体が空なら指定なし（どこに投票してもペナルティなし）. 全 agent で同じ内容（共有観測）. */
   isDesignationTarget: boolean[]
+  /** knowledge: self 視点で各 seat (実 seat index) の可能性役職集合.
+   *  knowledgeByOther[i] = i seat の可能性 RoleName 集合. self や excluded には empty Set を入れる.
+   *  env config に knowledge 未指定なら全 seat 全役職可能 (全 RoleName) で埋める. */
+  knowledgeByOther: Set<RoleName>[]
 }
 
 export type HuginnOutput = {
