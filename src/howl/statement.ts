@@ -435,8 +435,8 @@ const allVillageRoles: Role[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekoma
 
 function extractRoles(claim: string): { roles: Role[], negative: boolean } {
   const negative = new RegExp(`^${V.denial}`).test(claim)
-  // 素村CO = deny all village power roles
-  if (new RegExp(V.plainVillager).test(claim)) {
+  // 素村CO / 村人CO = deny all village power roles
+  if (new RegExp(V.plainVillager).test(claim) || new RegExp(V.villager).test(claim)) {
     return { roles: allVillageRoles, negative: true }
   }
   const roleMap: [RegExp, Role][] = [

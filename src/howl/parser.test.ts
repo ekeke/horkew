@@ -769,7 +769,7 @@ Bob　Dave`
   })
 })
 
-describe('plain villager CO (素村CO)', () => {
+describe('plain villager CO (素村CO / 村人CO)', () => {
   function findAsserts(text: string) {
     return parse(text).statements
       .filter((s: any) => s.type === 'assert')
@@ -798,14 +798,14 @@ Bob　素村人CO`
     assert.deepStrictEqual(a.roles.sort(), ['bodyguard', 'mason', 'medium', 'nekomata', 'seer'])
   })
 
-  test('村人CO is nonVillage (not plain villager)', () => {
+  test('村人CO is treated as plain villager (denies all village power roles)', () => {
     const text = `++Alice,Bob,Charlie
 噛み Alice
 Bob　村人CO`
     const asserts = findAsserts(text)
     assert.strictEqual(asserts.length, 1)
     const a = asserts[0].assertions[0]
-    assert.deepStrictEqual(a.roles, ['nonVillage'])
-    assert.strictEqual(a.negative, undefined)
+    assert.strictEqual(a.negative, true)
+    assert.deepStrictEqual(a.roles.sort(), ['bodyguard', 'mason', 'medium', 'nekomata', 'seer'])
   })
 })

@@ -67,13 +67,14 @@ const reason = explain(villageStatus, setup, seat, role)
 
 プレイヤーの宣言行動から導かれる制約。
 
-#### 2.1 村人CO → 村役職ではない
+#### 2.1 素村CO / 村人CO → 村役職ではない
 
-村人COした席は特殊な村役職（占い・霊媒・狩人・共有・猫又）を持たない。真の村役職なら村人COはしないという前提。
+素村CO (`素村CO`, `素村人CO`, `村人CO`) した席は特殊な村役職（占い・霊媒・狩人・共有・猫又）を持たない。真の村役職なら素村COはしないという前提。
 
-- **条件**: `claimingRole === 'villager'`
+Howl parser は 3 記法を同じ assertion へ正規化（`roles=['seer','medium','bodyguard','mason','nekomata'], negative=true`）し、bridge が `deniedRoles` へ展開する。Retar は `deniedRoles` を読んで 5 役職を possibility から除外する。
+
 - **否定**: `seer`, `medium`, `bodyguard`, `mason`, `nekomata`
-- **例**: 「村人COしているため占い師ではありえない」
+- **例**: 「素村COしているため占い師ではありえない」
 
 #### 2.2 降参CO → 村陣営ではない
 

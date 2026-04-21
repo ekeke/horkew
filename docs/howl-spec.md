@@ -349,12 +349,13 @@ Multiple roles in a single CO denote a multi-role claim (ギドラ). The player 
 アリス: 猫狩CO    # "I am either nekomata or bodyguard"
 ```
 
-#### Plain Villager CO (素村CO)
+#### Plain Villager CO (素村CO / 村人CO)
 
-`素村CO` (or `素村人CO`) denies all village power roles at once — equivalent to claiming "I am none of seer, medium, bodyguard, mason, or nekomata."
+`素村CO`, `素村人CO`, and `村人CO` all deny every village power role at once — equivalent to claiming "I am none of seer, medium, bodyguard, mason, or nekomata."
 
 ```
 ボブ: 素村CO      # denies seer, medium, bodyguard, mason, nekomata
+チャーリー: 村人CO  # same effect
 ```
 
 #### Medium Target Auto-fill
