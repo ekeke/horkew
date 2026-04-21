@@ -221,6 +221,22 @@ const currentDayField = StateField.define<number>({
   },
 })
 
+// ---- ゲーム進行統計 (CO report 数の上限算出用) ----
+
+export type GameStats = { day: number, executions: number }
+
+export const setGameStats = StateEffect.define<GameStats>()
+
+const gameStatsField = StateField.define<GameStats>({
+  create() { return { day: 1, executions: 0 } },
+  update(stats, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setGameStats)) return e.value
+    }
+    return stats
+  },
+})
+
 // ---- 候補型と文脈型 ----
 
 type Category = 'player' | 'player_start' | 'role' | 'action' | 'arrow' | 'co_role' | 'denial_co_role' | 'standalone' | 'result' | 'gameresult' | 'day'
@@ -373,6 +389,12 @@ const claimingRoleToCoType: Record<string, CoType> = {
  * 行の先頭プレイヤーのCO種別を判定する。
  * まずVillageStatusのCO情報を参照し、未登録なら行テキストのCOキーワードで判定する。
  */
+// CO キーワード検出用の正規表現 (Howl vocabulary の短形式も含む)
+const seerCoRe      = new RegExp(`${V.seer}CO`, 'i')
+const mediumCoRe    = new RegExp(`${V.medium}CO`, 'i')
+const bodyguardCoRe = new RegExp(`${V.bodyguard}CO`, 'i')
+const masonCoRe     = new RegExp(`${V.mason}CO`, 'i')
+
 function detectCoType(lineText: string, players: PlayerEntry[]): CoType {
   // VillageStatus: 行頭のプレイヤー名からCO種別を取得
   const firstToken = lineText.match(/^(\S+)/)?.[1]
@@ -384,11 +406,34 @@ function detectCoType(lineText: string, players: PlayerEntry[]): CoType {
   }
 
   // フォールバック: 行テキストのCOキーワードで判定 (CO宣言行)
-  if (lineText.includes('占い師CO')) return 'seer'
-  if (lineText.includes('霊媒師CO') || lineText.includes('霊媒CO')) return 'medium'
-  if (lineText.includes('狩人CO')) return 'bodyguard'
-  if (lineText.includes('共有者CO') || lineText.includes('共有CO')) return 'mason'
+  if (seerCoRe.test(lineText)) return 'seer'
+  if (mediumCoRe.test(lineText)) return 'medium'
+  if (bodyguardCoRe.test(lineText)) return 'bodyguard'
+  if (masonCoRe.test(lineText)) return 'mason'
   return 'other'
+}
+
+// CO type ごとに、ゲーム進行状況から報告可能な結果数の上限を返す
+function maxReportable(coType: CoType, stats: GameStats): number {
+  if (coType === 'seer' || coType === 'bodyguard') return Math.max(0, stats.day - 1)
+  if (coType === 'medium') return stats.executions
+  return Infinity // mason, other は上限なし
+}
+
+// 現行 CO 行内で既に報告済みの結果数を数える
+// seer/medium は結果マーカー ○●白黒 の出現数、bodyguard はターゲット（日付以外のトークン）数
+function countReportedInCo(lineText: string, coType: CoType): number {
+  const coMatch = lineText.match(new RegExp(`(?:${V.seer}|${V.medium}|${V.bodyguard}|${V.mason})CO`, 'i'))
+  if (!coMatch || coMatch.index === undefined) return 0
+  const afterCo = lineText.slice(coMatch.index + coMatch[0].length)
+  if (coType === 'seer' || coType === 'medium') {
+    return (afterCo.match(/[○●白黒]/g) ?? []).length
+  }
+  if (coType === 'bodyguard') {
+    const tokens = afterCo.split(new RegExp(`[\\s${V.delimiterClass}]+`)).filter(t => t.length > 0)
+    return tokens.filter(t => !dayTokenRe.test(t)).length
+  }
+  return 0
 }
 
 // ---- 文脈推定 ----
@@ -397,7 +442,7 @@ function detectCoType(lineText: string, players: PlayerEntry[]): CoType {
  * カーソル前の行テキストから、次に来るべき候補カテゴリを推定する。
  * null を返した場合、チェーン補完は起動しない。
  */
-function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] | null {
+function inferContext(beforeCursor: string, players: PlayerEntry[], stats: GameStats): Category[] | null {
   const trimmed = beforeCursor.trimEnd()
   if (trimmed === '') {
     // 行頭: プレイヤー名 + 行頭専用名 + アクション(転置記法) + スタンドアロンKW + 試合結果
@@ -409,6 +454,12 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
   if (!lastTokenMatch) return ['player', 'player_start', 'action', 'standalone', 'gameresult']
   const lastToken = lastTokenMatch[0]
 
+  // CO 結果数の上限を超えたら chain を打ち切る ヘルパ
+  const capReached = (coType: CoType): boolean => {
+    if (coType === 'other' || coType === 'mason') return false
+    return countReportedInCo(trimmed, coType) >= maxReportable(coType, stats)
+  }
+
   // アクション: 行頭なら転置記法 → プレイヤー名、プレイヤー名の後なら → チェーン終了
   if (actionLabels.has(lastToken)) {
     const beforeAction = trimmed.slice(0, trimmed.length - lastToken.length).trimEnd()
@@ -419,6 +470,7 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
   // 日付トークン (1日目, 2d, etc.) → CO種別に応じた候補
   if (dayTokenRe.test(lastToken)) {
     const coType = detectCoType(trimmed, players)
+    if (capReached(coType)) return null
     if (coType === 'medium') return ['result']
     if (coType === 'seer' || coType === 'bodyguard') return ['player']
     return null
@@ -428,6 +480,7 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
   if (resultLabels.has(lastToken)) {
     if (!hasCoKeyword(trimmed)) return null // 結果報告行: 1結果で終了
     const coType = detectCoType(trimmed, players)
+    if (capReached(coType)) return null
     if (coType === 'medium') return ['day', 'result']
     return ['day', 'player']
   }
@@ -438,6 +491,7 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
   // 役職名CO / 非役職名CO → CO種別に応じた候補
   if (coRoleLabels.has(lastToken)) {
     const coType = detectCoType(trimmed, players)
+    if (capReached(coType)) return null
     if (coType === 'medium') return ['day', 'result']
     return ['day', 'player']
   }
@@ -473,10 +527,16 @@ function inferContext(beforeCursor: string, players: PlayerEntry[]): Category[] 
         if (coType === 'mason') return ['player']
         if (coType === 'bodyguard') {
           if (!hasCoKeyword(trimmed)) return null // 結果報告行: 1護衛先で終了
+          if (capReached(coType)) return null
           return ['day', 'player']
         }
-        if (coType === 'medium') return ['day', 'result']
-        return ['result'] // seer: プレイヤー名の直後は結果 (日付はプレイヤーの前)
+        if (coType === 'medium') {
+          if (capReached(coType)) return null
+          return ['day', 'result']
+        }
+        // seer: プレイヤー名の直後は結果
+        if (capReached(coType)) return null
+        return ['result']
       }
     }
 
@@ -625,6 +685,7 @@ const howlCompletionSource: CompletionSource = (context) => {
   const players = context.state.field(playerListField)
   const setup = context.state.field(setupField)
   const currentDay = context.state.field(currentDayField)
+  const gameStats = context.state.field(gameStatsField)
   const playerCandidates = buildPlayerCandidates(players)
   const dayCandidates = buildDayCandidates(currentDay)
 
@@ -641,10 +702,10 @@ const howlCompletionSource: CompletionSource = (context) => {
     const line = context.state.doc.lineAt(context.pos)
     const beforeCursor = line.text.slice(0, context.pos - line.from)
 
-    // スペースまたは行頭でなければ補完しない
-    if (beforeCursor.length > 0 && !beforeCursor.endsWith(' ')) return null
+    // スペースまたは行頭でなければ補完しない (半角/全角 space, tab を許容)
+    if (beforeCursor.length > 0 && !/[ 　\t]$/.test(beforeCursor)) return null
 
-    const categories = inferContext(beforeCursor, players)
+    const categories = inferContext(beforeCursor, players, gameStats)
     if (!categories) return null
 
     let filtered = filterByCategories(allCandidates, categories)
@@ -691,7 +752,7 @@ const howlCompletionSource: CompletionSource = (context) => {
   // 入力中の単語より前のテキストで文脈を推定
   const line = context.state.doc.lineAt(word.from)
   const beforeWord = line.text.slice(0, word.from - line.from)
-  const categories = inferContext(beforeWord, players)
+  const categories = inferContext(beforeWord, players, gameStats)
 
   // 文脈フィルタ適用 (null = 文完成、補完停止)
   if (!categories) return null
@@ -747,6 +808,7 @@ export const howlCompletionExtension: Extension = [
   playerListField,
   setupField,
   currentDayField,
+  gameStatsField,
   autocompletion({
     override: [videoTimestampCompletionSource, howlCompletionSource],
     activateOnTyping: true,

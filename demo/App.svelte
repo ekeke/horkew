@@ -1537,6 +1537,7 @@
           editorModule!.setPlayerList.of(playerList),
           editorModule!.setSetup.of(setup),
           editorModule!.setCurrentDay.of(vs.day),
+          editorModule!.setGameStats.of({ day: vs.day, executions: vs.executions.size }),
         ] })
       }
       cursorLine = effectiveCursorLine
