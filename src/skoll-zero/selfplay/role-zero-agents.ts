@@ -13,7 +13,7 @@
  */
 
 import type { DecisionContext, TeamDecisionContext } from '../../fenrir/src/agents/agent.ts'
-import type { DayClaim, NightAction } from '../../lupa/types.ts'
+import type { NightAction } from '../../lupa/types.ts'
 import {
   encodeObservation,
   encodeCollectiveWolfObservation,
@@ -25,32 +25,12 @@ import { runMCTS, DEFAULT_MCTS_CONFIG, type Faction, type MCTSConfig } from '../
 import { argmaxFromVisits, sampleFromVisits, normalizeVisits } from './policy-utils.ts'
 import { RoleZeroAgent } from './role-zero-agent.ts'
 import type { RootObs } from './observation.ts'
-import { argmaxIndex, claimTypeFromIdx, mergeClaimTypeWithSuper } from '../../skoll/phase2/action-decoders.ts'
 
 /** Village 視点 (villager/seer/medium/bodyguard/nekomata): standard obs、village faction */
 export class VillageZeroAgent extends RoleZeroAgent {
   protected override faction(): Faction { return 'village' }
   protected override captureObservation(ctx: DecisionContext): RootObs {
     return encodeObservation(ctx)
-  }
-
-  /**
-   * 昼 CO: phase2Nets に `${ctx.myRole}-claim` checkpoint があれば NN claim head で type を
-   * 決定し、補助情報 (target/result 等) は super の heuristic 結果から借用してマージ。
-   * 該当 checkpoint 無しは super (RuleBasedAgent) に委譲。
-   */
-  override decideDayClaim(ctx: DecisionContext): DayClaim {
-    const superDecision = super.decideDayClaim(ctx)
-    const claimNet = this.zeroOpts.phase2Nets?.get(`${ctx.myRole}-claim`)
-    if (!claimNet) return superDecision
-    const obs = encodeObservation(ctx)
-    const logits = claimNet.forward(obs).policies.get('claim')
-    if (!logits) return superDecision
-    const argmax = argmaxIndex(logits)
-    const merged = mergeClaimTypeWithSuper(argmax, superDecision)
-    // eslint-disable-next-line no-console
-    console.log(`[phase2-village seat=${ctx.mySeat} role=${ctx.myRole}] claim argmax=${argmax} (${claimTypeFromIdx(argmax)}) super=${superDecision.type} → ${merged.type}`)
-    return merged
   }
 
   /**

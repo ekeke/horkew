@@ -11,6 +11,8 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
+import type { DayClaim } from '../../lupa/types.ts'
+import type { LeadershipResponse, Proposal } from '../../fenrir/src/leadership.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import { buildPossibilitiesFromRetar } from '../../skoll/unified.ts'
 import { createSimState } from '../simulator/world-state.ts'
@@ -18,6 +20,7 @@ import { Determinizer } from '../mcts/determinize.ts'
 import { runMCTS, DEFAULT_MCTS_CONFIG, type Faction, type MCTSConfig, type MCTSResult } from '../mcts/ismcts.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
+import { argmaxIndex, mergeClaimTypeWithSuper, leaderFromIdx } from '../../skoll/phase2/action-decoders.ts'
 import { TrainingBuffer } from './buffer.ts'
 import type { RootObs } from './observation.ts'
 import { normalizeVisits, sampleFromVisits, argmaxFromVisits } from './policy-utils.ts'
@@ -132,6 +135,69 @@ export abstract class RoleZeroAgent extends SkollMasterAgent {
     return this.zeroOpts.selectionMode === 'argmax'
       ? argmaxFromVisits(result.visits)
       : sampleFromVisits(result.visits, () => ctx.rng.next())
+  }
+
+  // ============================================================
+  // Phase 2 pretrained head hooks
+  //
+  // 各 decide* は NN head 出力があれば argmax を採用、無ければ super (heuristic) に
+  // 委譲。`phase2Nets` は key `${role}-${method}` で lookup する。captureObservation を
+  // 使って観測を作るので wolf は team obs、他は individual obs になる。
+  // ============================================================
+
+  /** phase2Nets から `${role}-${method}` checkpoint の forward 結果を取得。無ければ null。 */
+  protected forwardPhase2(method: string, ctx: DecisionContext): ReturnType<TransformerNetwork['forward']> | null {
+    const net = this.zeroOpts.phase2Nets?.get(`${ctx.myRole}-${method}`)
+    if (!net) return null
+    const obs = this.captureObservation(ctx)
+    return net.forward(obs)
+  }
+
+  override decideDayClaim(ctx: DecisionContext): DayClaim {
+    const superDecision = super.decideDayClaim(ctx)
+    const logits = this.forwardPhase2('claim', ctx)?.policies.get('claim')
+    if (!logits) return superDecision
+    return mergeClaimTypeWithSuper(argmaxIndex(logits), superDecision)
+  }
+
+  override decideForecast(ctx: DecisionContext): DayClaim {
+    const superDecision = super.decideForecast(ctx)
+    // forecast は claim head (10 次元 softmax) を共有する設計 (METHOD_HEAD_MAP 参照)
+    const logits = this.forwardPhase2('forecast', ctx)?.policies.get('claim')
+    if (!logits) return superDecision
+    return mergeClaimTypeWithSuper(argmaxIndex(logits), superDecision)
+  }
+
+  override decideDefensiveClaim(ctx: DecisionContext): DayClaim {
+    const superDecision = super.decideDefensiveClaim(ctx)
+    const logits = this.forwardPhase2('defensive_claim', ctx)?.policies.get('claim')
+    if (!logits) return superDecision
+    return mergeClaimTypeWithSuper(argmaxIndex(logits), superDecision)
+  }
+
+  override decideLeadershipResponse(ctx: DecisionContext, proposal: Proposal): LeadershipResponse {
+    const superDecision = super.decideLeadershipResponse(ctx, proposal)
+    const logits = this.forwardPhase2('leader', ctx)?.policies.get('leader')
+    if (!logits) return superDecision
+    return leaderFromIdx(argmaxIndex(logits)) ?? superDecision
+  }
+
+  override decideProposal(ctx: DecisionContext): Proposal | null {
+    const superDecision = super.decideProposal(ctx)
+    if (!superDecision) return null
+    // propose head は per-seat sigmoid (14 次元)。最もスコアが高い alive/非自席 を target に。
+    // type は super の heuristic (decideCommanderProposal) の判断を継承する。
+    const logits = this.forwardPhase2('propose', ctx)?.policies.get('propose')
+    if (!logits) return superDecision
+    const aliveSet = new Set(ctx.alivePlayers)
+    let bestSeat = superDecision.target
+    let bestScore = -Infinity
+    for (let i = 0; i < logits.length; i++) {
+      const seat = i + 1  // observation.ts の per-seat layout: index i → seat i+1
+      if (!aliveSet.has(seat) || seat === ctx.mySeat) continue
+      if (logits[i] > bestScore) { bestScore = logits[i]; bestSeat = seat }
+    }
+    return { ...superDecision, target: bestSeat }
   }
 }
 

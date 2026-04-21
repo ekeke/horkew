@@ -7,6 +7,7 @@
  */
 
 import type { DayClaim } from '../../lupa/types.ts'
+import type { LeadershipResponse } from '../../fenrir/src/leadership.ts'
 import { CLAIM } from '../../fenrir/src/action.ts'
 
 /** claim head index → DayClaim type 文字列。FAKE_CO (8) など対応外は null。 */
@@ -58,4 +59,12 @@ export function mergeClaimTypeWithSuper(
   if (nnType === 'bodyguard_co') return { type: 'bodyguard_co', targets: [] }
   if (superDecision.type === nnType) return superDecision
   return superDecision
+}
+
+/** leader head index → LeadershipResponse。encodeLeader の逆 (0:follow / 1:defy / 2:no_response)。 */
+export function leaderFromIdx(idx: number): LeadershipResponse | null {
+  if (idx === 0) return 'follow'
+  if (idx === 1) return 'defy'
+  if (idx === 2) return 'no_response'
+  return null
 }
