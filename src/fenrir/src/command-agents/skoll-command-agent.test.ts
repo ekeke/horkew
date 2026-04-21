@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { SystemRole } from '../../../types/index.ts'
-import type { GameState, PlayerState, GameEvent } from '../../../lupa/types.ts'
+import type { GameState, PlayerState, GameEvent, DayClaim } from '../../../lupa/types.ts'
 import type { GameConfig } from '../../../lupa/handlers.ts'
 import { runGame } from '../../../lupa/engine.ts'
 import {
@@ -523,6 +523,144 @@ test('SkollCommandAgent: discussion villain NN claim=seer_co 但し legal 不整
   const result = await agent.decide(state, 3, legal)
   assert.equal(result.cmd.type, 'skip')
   // NN 経路は null を返し、lookahead fallback に落ちる
+  assert.doesNotMatch(result.log ?? '', /\(NN\)/)
+})
+
+// ============================================================
+// 真役職の NN claim head 経路 (seer / medium / bodyguard / nekomata / mason)
+// ============================================================
+
+test('SkollCommandAgent: discussion 真 seer NN claim=none → hide', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'none' })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  stubRetarCache(state)
+  // seat 1 = seer (未 CO)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'seer_co', results: [] } },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.equal(result.cmd.type, 'skip')
+  assert.match(result.log ?? '', /\[seer\/zero\]/)
+  assert.match(result.log ?? '', /hide \(NN claim=none\)/)
+})
+
+test('SkollCommandAgent: discussion 真 seer NN claim=seer_co → CO', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'seer_co', results: [] })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'seer_co', results: [] } },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.equal(result.cmd.type, 'role_co')
+  assert.equal((result.cmd as { claim: DayClaim }).claim.type, 'seer_co')
+  assert.match(result.log ?? '', /\[seer\/zero\] CO seer_co \(NN\)/)
+})
+
+test('SkollCommandAgent: discussion 真 medium NN claim=medium_co → CO', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'medium_co' })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  // seat 2 を medium に置き換え
+  state.players[1].role = 'medium'
+  state.executionHistory = new Map()
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'medium_co' } },
+  ]
+  const result = await agent.decide(state, 2, legal)
+  assert.equal(result.cmd.type, 'role_co')
+  assert.equal((result.cmd as { claim: DayClaim }).claim.type, 'medium_co')
+  assert.match(result.log ?? '', /\[medium\/zero\] CO medium_co \(NN\)/)
+})
+
+test('SkollCommandAgent: discussion 真 medium NN claim=none → hide (lookahead スキップ)', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'none' })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  state.players[1].role = 'medium'
+  state.executionHistory = new Map()
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'medium_co' } },
+  ]
+  const result = await agent.decide(state, 2, legal)
+  assert.equal(result.cmd.type, 'skip')
+  assert.match(result.log ?? '', /\[medium\/zero\] hide \(NN claim=none\)/)
+  // 既存 lookahead log が出ないことを確認 (NN 経路で decide が完結)
+  assert.doesNotMatch(result.log ?? '', /hide=.*>= co=/)
+})
+
+test('SkollCommandAgent: discussion 真 bodyguard NN claim=bodyguard_co → CO', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'bodyguard_co', targets: [] })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  state.players[1].role = 'bodyguard'
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'bodyguard_co', targets: [] } },
+  ]
+  const result = await agent.decide(state, 2, legal)
+  assert.equal(result.cmd.type, 'role_co')
+  assert.equal((result.cmd as { claim: DayClaim }).claim.type, 'bodyguard_co')
+  assert.match(result.log ?? '', /\[bodyguard\/zero\] CO bodyguard_co \(NN\)/)
+})
+
+test('SkollCommandAgent: discussion 真 nekomata NN claim=none → hide', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'none' })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  state.players[1].role = 'nekomata'
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'nekomata_co' } },
+  ]
+  const result = await agent.decide(state, 2, legal)
+  assert.equal(result.cmd.type, 'skip')
+  assert.match(result.log ?? '', /\[nekomata\/zero\] hide \(NN claim=none\)/)
+})
+
+test('SkollCommandAgent: discussion 真 mason NN claim=mason_co → CO with partner', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'mason_co', partner: 4 })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  // seat 2 と seat 4 を mason に設定
+  state.players[1].role = 'mason'
+  state.players[3].role = 'mason'
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'mason_co', partner: 4 } },
+  ]
+  const result = await agent.decide(state, 2, legal)
+  assert.equal(result.cmd.type, 'role_co')
+  assert.equal((result.cmd as { claim: DayClaim }).claim.type, 'mason_co')
+  assert.match(result.log ?? '', /\[mason\/zero\] CO mason_co \(NN\)/)
+})
+
+test('SkollCommandAgent: discussion 真 medium NN claim=forecast → lookahead にフォールスルー', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'forecast', target: 3 })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  state.players[1].role = 'medium'
+  state.executionHistory = new Map()
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'medium_co' } },
+  ]
+  const result = await agent.decide(state, 2, legal)
+  // NN は unexpected type を返したので lookahead にフォールスルー。
+  // FakeClaimZeroMaster.analyzeVote=null なので最終的に hide (unavailable)
+  assert.equal(result.cmd.type, 'skip')
   assert.doesNotMatch(result.log ?? '', /\(NN\)/)
 })
 
