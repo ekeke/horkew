@@ -19,6 +19,8 @@ import {
 import { CommandAdapter } from '../adapters/command/command-adapter.ts'
 import { SkollCommandAgent } from './skoll-command-agent.ts'
 import { RandomCommandAgent } from './random-command-agent.ts'
+import { SkollMasterAgent } from '../../../skoll/skoll-master-agent.ts'
+import type { DecisionContext } from '../agents/agent.ts'
 
 // ============================================================
 // 固定 fallback: 常に legal[0] を返す（テスト決定性）
@@ -274,6 +276,156 @@ test('SkollCommandAgent: vote legal が空 → no-vote-legal fallback', async ()
   const legal: Command[] = [{ type: 'skip' }]  // vote 無し
   const result = await agent.decide(state, 1, legal)
   assert.match(result.log ?? '', /no-vote-legal/)
+})
+
+// ============================================================
+// MCTS 経路 (RoleZeroAgent master 差し替え) のテスト
+// ============================================================
+
+/**
+ * RoleZeroAgent を模した最小スタブ。
+ * - forceFallback=true: MCTS 失敗扱い (lastMCTS=null) + super.decideVote (analyzeVote) に委譲
+ * - それ以外: voteSeat を返しつつ visits を保持 → getLastMCTSResult で返す
+ */
+class FakeZeroMaster extends SkollMasterAgent {
+  private lastMCTS: { visits: Map<number, number> } | null = null
+  private readonly fakeOpts: {
+    voteSeat: number
+    visits: Map<number, number>
+    forceFallback?: boolean
+  }
+  constructor(opts: {
+    voteSeat: number
+    visits: Map<number, number>
+    forceFallback?: boolean
+  }) {
+    super({})
+    this.fakeOpts = opts
+  }
+  override decideVote(ctx: DecisionContext): number {
+    if (this.fakeOpts.forceFallback) {
+      this.lastMCTS = null
+      return super.decideVote(ctx)
+    }
+    this.lastMCTS = { visits: this.fakeOpts.visits }
+    return this.fakeOpts.voteSeat
+  }
+  // stub retarCache では world-analysis が動かないので analyzeVote 経路を無効化。
+  // command-agent は null を受けて voteFallback に落とす想定。
+  override analyzeVote(): null {
+    return null
+  }
+  getLastMCTSResult(): { visits: Map<number, number> } | null {
+    return this.lastMCTS
+  }
+}
+
+/** 最小 retarCache を state.ext に注入して buildDecisionContext を通過させる */
+function stubRetarCache(state: GameState<CommandAdapterExt>): void {
+  const possibilities = new Map<number, Set<SystemRole>>()
+  for (const p of state.players) {
+    possibilities.set(p.seat, new Set<SystemRole>([p.role]))
+  }
+  state.ext.retarCache = {
+    possibilities,
+    lastArtifacts: { vs: {}, setup: new Map() },
+    computedAtEventCount: 0,
+  }
+}
+
+test('SkollCommandAgent: vote MCTS 成功 → [role/zero] ログで bestSeat を採用', async () => {
+  const master = new FakeZeroMaster({
+    voteSeat: 3,
+    visits: new Map([[3, 70], [2, 20], [4, 10]]),
+  })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('vote')
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'vote', target: 2 },
+    { type: 'vote', target: 3 },
+    { type: 'vote', target: 4 },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.deepEqual(result.cmd, { type: 'vote', target: 3 })
+  assert.match(result.log ?? '', /\[village\/zero\]/)
+  assert.match(result.log ?? '', /bestVote=seat3/)
+  assert.match(result.log ?? '', /s3=0\.70/)
+})
+
+test('SkollCommandAgent: vote MCTS fallback (visits 空) → analyzeVote 経路', async () => {
+  const master = new FakeZeroMaster({
+    voteSeat: 3,
+    visits: new Map(),
+    forceFallback: true,
+  })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('vote')
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'vote', target: 2 },
+    { type: 'vote', target: 3 },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  // MCTS が null → analyzeVote 経路 (FakeZeroMaster は analyzeVote も null) → no-analysis fallback
+  assert.doesNotMatch(result.log ?? '', /\[village\/zero\]/)
+  assert.match(result.log ?? '', /no-analysis/)
+})
+
+test('SkollCommandAgent: vote MCTS top-1 が legal 外 → analyzeVote 経路にフォールスルー', async () => {
+  const master = new FakeZeroMaster({
+    voteSeat: 99,  // 存在しない席 (legal に含まれない)
+    visits: new Map([[99, 60], [3, 30], [2, 10]]),
+  })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('vote')
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'vote', target: 2 },
+    { type: 'vote', target: 3 },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  // zero 経路は top-1=99 が legal 外 → analyzeVote 経路へ → FakeZeroMaster.analyzeVote=null → no-analysis
+  assert.doesNotMatch(result.log ?? '', /\[village\/zero\]/)
+  assert.match(result.log ?? '', /no-analysis/)
+})
+
+test('SkollCommandAgent: commander MCTS top1 dominant → designate_execution', async () => {
+  const master = new FakeZeroMaster({
+    voteSeat: 3,
+    visits: new Map([[3, 90], [2, 7], [4, 3]]),
+  })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('commander')
+  stubRetarCache(state)
+  // seer(seat1) は生存・未 CO だが findUnclaimedRoleCategory で事前に処理される。
+  // そのため legal に request_co を含めないことで Step B に進ませる。
+  const legal: Command[] = [
+    { type: 'designate_execution', target: 2 },
+    { type: 'designate_execution', target: 3 },
+    { type: 'designate_execution', target: 4 },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.deepEqual(result.cmd, { type: 'designate_execution', target: 3 })
+  assert.match(result.log ?? '', /\(commander\/zero\) designate seat3/)
+})
+
+test('SkollCommandAgent: commander MCTS top1/top2 接近 → designate_runoff', async () => {
+  const master = new FakeZeroMaster({
+    voteSeat: 3,
+    visits: new Map([[3, 42], [2, 38], [4, 20]]),  // top1-top2 = 0.04 < 0.08
+  })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('commander')
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'designate_execution', target: 2 },
+    { type: 'designate_execution', target: 3 },
+    { type: 'designate_runoff', targets: [2, 3] },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.equal(result.cmd.type, 'designate_runoff')
+  assert.match(result.log ?? '', /\(commander\/zero\) runoff seat3\/seat2/)
 })
 
 test('SkollCommandAgent: legal 空なら throw', async () => {

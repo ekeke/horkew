@@ -48,6 +48,49 @@ const RUNOFF_THRESHOLD = 0.05
 /** top-2 も含めて runoff 候補となる最低スコア（どちらもノイズ級は無視） */
 const MIN_RUNOFF_SCORE = 0.1
 
+/**
+ * MCTS 経路 (zero master) の runoff 判定閾値。
+ * visits を normalize した確率分布での (top1.prob - top2.prob) < これ なら runoff 候補。
+ * MCTS は top-1 に visit を集中させやすいので analyze スコア用の 0.05 より広めに取る。
+ */
+const MCTS_RUNOFF_PROB_DIFF = 0.08
+/** MCTS 経路 top-2 の最低 visit 確率 (ノイズ級の二位を runoff に出さない) */
+const MCTS_MIN_RUNOFF_PROB = 0.15
+
+/** MCTS master 判定用の最小型 (skoll-zero を import しないための構造型) */
+type ZeroMCTSResult = { visits: Map<number, number> }
+
+/**
+ * master が MCTS 結果を提供できるか duck-type 判定。
+ * RoleZeroAgent が `getLastMCTSResult()` を実装している前提。
+ * 一致パターン: `src/skoll-zero/huginn-adapter/huginn-vote-adapter.ts` の hasLastMCTSResult。
+ */
+function hasMCTSSupport(
+  m: SkollMasterAgent,
+): m is SkollMasterAgent & { getLastMCTSResult(): ZeroMCTSResult | null } {
+  return typeof (m as unknown as { getLastMCTSResult?: unknown }).getLastMCTSResult === 'function'
+}
+
+/** visits (Map<seat, count>) を prob 降順の配列にする */
+function rankVisits(
+  visits: Map<number, number>,
+): Array<{ seat: number, prob: number }> {
+  let total = 0
+  for (const v of visits.values()) total += v
+  if (total <= 0) return []
+  const ranked: Array<{ seat: number, prob: number }> = []
+  for (const [seat, v] of visits) ranked.push({ seat, prob: v / total })
+  ranked.sort((a, b) => b.prob - a.prob)
+  return ranked
+}
+
+/** log 用 top-3 表示: "s3=0.62 s5=0.21 s7=0.10" */
+function formatTop3(ranked: ReadonlyArray<{ seat: number, prob: number }>): string {
+  return ranked.slice(0, 3)
+    .map(r => `s${r.seat}=${r.prob.toFixed(2)}`)
+    .join(' ')
+}
+
 /** fake 占い populate 時の top 候補（log 出力用） */
 type FakeDivineCandidate = { target: number, result: 'human' | 'wolf', score: number }
 
@@ -129,6 +172,27 @@ export class SkollCommandAgent implements CommandAgent {
       return this.voteFallback(state, mySeat, voteLegal, 'no-retar-cache', events)
     }
 
+    const perspective = labelForRole(player.role)
+
+    // MCTS 経路 (master が RoleZeroAgent の場合): まず decideVote で MCTS を走らせる。
+    // MCTS 成功 (visits 非空) & top-1 が voteLegal に含まれる場合はそれを採用。
+    // 失敗 or legal 外なら既存の analyzeVote 経路にフォールスルーする。
+    if (hasMCTSSupport(this.master)) {
+      const bestSeat = this.master.decideVote(ctx)
+      const mcts = this.master.getLastMCTSResult()
+      if (mcts && mcts.visits.size > 0) {
+        const match = voteLegal.find(c => c.target === bestSeat)
+        if (match) {
+          const ranked = rankVisits(mcts.visits)
+          return {
+            cmd: match,
+            log: `[${perspective}/zero] bestVote=seat${bestSeat} p=${ranked[0].prob.toFixed(2)} (${formatTop3(ranked)})`,
+          }
+        }
+        // top-1 が legal 外 → analyzeVote 経路にフォールスルー (下で heuristic を再試行)
+      }
+    }
+
     const analysis = this.master.analyzeVote(ctx)
     if (!analysis || analysis.bestVote === null) {
       return this.voteFallback(state, mySeat, voteLegal, 'no-analysis', events)
@@ -143,7 +207,6 @@ export class SkollCommandAgent implements CommandAgent {
       )
     }
 
-    const perspective = labelForRole(player.role)
     const best = analysis.candidates.find(c => c.seat === analysis.bestVote)
     const bestScore = best?.score ?? 0
     const worldsStr = analysis.totalWorlds != null ? ` worlds=${analysis.totalWorlds}` : ''
@@ -997,6 +1060,13 @@ export class SkollCommandAgent implements CommandAgent {
       return this.commanderSkipOrFallback(state, mySeat, legal, 'no-retar-cache', events)
     }
 
+    // MCTS 経路 (zero master): visits から top-1/top-2 分布を直接引く。
+    // designate 可能な legal が揃えば採用、無ければ既存 analyzeVote 経路にフォールスルー。
+    if (hasMCTSSupport(this.master)) {
+      const zeroResult = this.tryCommanderFromMCTS(player, ctx, legal)
+      if (zeroResult) return zeroResult
+    }
+
     const analysis = this.master.analyzeVote(ctx)
     if (!analysis || analysis.bestVote === null) {
       return this.commanderSkipOrFallback(state, mySeat, legal, 'no-analysis', events)
@@ -1046,6 +1116,62 @@ export class SkollCommandAgent implements CommandAgent {
       cmd: designateCmd,
       log: `(commander) designate seat${analysis.bestVote}${worldsStr} score=${bestScore.toFixed(3)}`,
     }
+  }
+
+  /**
+   * MCTS 経路で commander の指名を試みる。成功時のみ DecisionResult を返す。
+   * 失敗時 (master 非 MCTS 対応 / MCTS fallback / legal 不整合) は null を返し、
+   * 呼び出し側は既存 analyzeVote 経路にフォールスルーする。
+   */
+  private tryCommanderFromMCTS(
+    player: PlayerState,
+    ctx: DecisionContext,
+    legal: readonly Command[],
+  ): DecisionResult | null {
+    if (!hasMCTSSupport(this.master)) return null
+    // decideVote 内で MCTS を走らせ、visits を getter 経由で回収する。
+    this.master.decideVote(ctx)
+    const mcts = this.master.getLastMCTSResult()
+    if (!mcts || mcts.visits.size === 0) return null
+
+    const aliveSet = new Set(ctx.alivePlayers)
+    const ranked = rankVisits(mcts.visits).filter(r =>
+      aliveSet.has(r.seat) && r.seat !== player.seat,
+    )
+    const top1 = ranked[0]
+    const top2 = ranked[1]
+    if (!top1) return null
+
+    // Runoff: 接近 + 二位が有意なら 2 席指定
+    if (top2
+        && top1.prob - top2.prob < MCTS_RUNOFF_PROB_DIFF
+        && top2.prob > MCTS_MIN_RUNOFF_PROB) {
+      const runoffCmd = legal.find(c =>
+        c.type === 'designate_runoff'
+        && c.targets.length === 2
+        && c.targets.includes(top1.seat)
+        && c.targets.includes(top2.seat),
+      )
+      if (runoffCmd) {
+        const diff = top1.prob - top2.prob
+        return {
+          cmd: runoffCmd,
+          log: `(commander/zero) runoff seat${top1.seat}/seat${top2.seat} diff=${diff.toFixed(3)}`,
+        }
+      }
+    }
+    // 通常: top-1 を designate_execution
+    const designateCmd = legal.find(c =>
+      c.type === 'designate_execution' && c.target === top1.seat,
+    )
+    if (designateCmd) {
+      return {
+        cmd: designateCmd,
+        log: `(commander/zero) designate seat${top1.seat} p=${top1.prob.toFixed(2)} (${formatTop3(ranked)})`,
+      }
+    }
+    // legal 不整合: analyzeVote 経路にフォールスルー
+    return null
   }
 
   /**
