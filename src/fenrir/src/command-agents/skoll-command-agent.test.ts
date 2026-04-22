@@ -783,6 +783,40 @@ test('SkollCommandAgent: cco 真 seer NN claim=forecast → 既存 heuristic (�
   assert.doesNotMatch(result.log ?? '', /\(NN\)/)
 })
 
+test('SkollCommandAgent: cco 真 seer claim=none + defense=seer_co → cco_full (defense override)', async () => {
+  const master = new FakeDefenseZeroMaster(
+    { type: 'none' },
+    { type: 'seer_co', results: [] },
+  )
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('cco')
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'cco_skip' },
+    { type: 'cco_full', claim: { type: 'seer_co', results: [] } },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.equal(result.cmd.type, 'cco_full')
+  assert.match(result.log ?? '', /\(cco\)\[seer\/zero\] CO seer_co \(defense\)/)
+})
+
+test('SkollCommandAgent: cco 真 bodyguard claim=none + defense=none → cco_skip (両方 skip)', async () => {
+  const master = new FakeDefenseZeroMaster({ type: 'none' }, { type: 'none' })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('cco')
+  state.players[1].role = 'bodyguard'
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'cco_skip' },
+    { type: 'cco_full', claim: { type: 'bodyguard_co', targets: [] } },
+  ]
+  const result = await agent.decide(state, 2, legal)
+  assert.equal(result.cmd.type, 'cco_skip')
+  // 両方 skip の場合は primary の skip が最終 (NN claim tag)
+  assert.match(result.log ?? '', /\(cco\)\[bodyguard\/zero\] skip \(NN claim=none\)/)
+  assert.doesNotMatch(result.log ?? '', /\(defense claim=none\)/)
+})
+
 test('SkollCommandAgent: cco villain は NN 経路を踏まず既存通り cco_skip', async () => {
   const master = new FakeClaimZeroMaster({ type: 'seer_co', results: [] })
   const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
