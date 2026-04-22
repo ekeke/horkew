@@ -484,11 +484,15 @@ async function startGame(opts: StartGameOptions): Promise<void> {
     },
   })
 
+  // 14D猫は再投票ルール (full_revote). GameConfig.revoteConfig が未指定だと lupa
+  // engine が default 'random_tied' (= 決戦・ランダム解決) に落ちるため、ここで明示.
+  // lupaConfig と同一設定を共有する.
   const config: GameConfig = {
     roles: rolesMap,
     seed,
     hasFirstGhost: opts.hasFirstGhost,
     nameStyle: 'random',
+    revoteConfig: lupaConfig.revoteConfig,
   }
 
   try {

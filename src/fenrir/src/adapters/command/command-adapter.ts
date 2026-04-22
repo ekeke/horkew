@@ -235,10 +235,11 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
       return votes
     }
 
-    // 投票候補を確定（lupa の candidates 優先、次に runoff、最後に全生存）
-    const candidates = ctx.candidates
-      ?? ext.runoffCandidates
-      ?? alive.map(p => p.seat)
+    // 投票候補を確定.
+    // 14D猫ルールでは「同票→再投票」でも候補を絞らず全員対象で投票し直す.
+    // lupa の ctx.candidates は tied 席のみを渡してくるが (決戦式)、command-play は
+    // 進行役のラン指定 (ext.runoffCandidates) が無い限り全員候補で再投票する.
+    const candidates = ext.runoffCandidates ?? alive.map(p => p.seat)
 
     // 投票フェーズへ遷移し、候補をセット（legalCommands が参照）
     ext.currentPhase = 'vote'
