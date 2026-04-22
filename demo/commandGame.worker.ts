@@ -17,7 +17,7 @@ import type { GameEvent, GameState, VillageResult, LupaConfig } from '../src/lup
 import type { GameConfig } from '../src/lupa/handlers.ts'
 import { runGame } from '../src/lupa/engine.ts'
 import { formatHowl } from '../src/lupa/format.ts'
-import { CommandAdapter } from '../src/fenrir/src/adapters/command/command-adapter.ts'
+import { CommandAdapter, type VoteCollector } from '../src/fenrir/src/adapters/command/command-adapter.ts'
 import type { CommandAdapterExt, Command } from '../src/fenrir/src/adapters/command/command-types.ts'
 import type { CommandAgent } from '../src/fenrir/src/command-agents/command-agent.ts'
 import { SkollCommandAgent } from '../src/fenrir/src/command-agents/skoll-command-agent.ts'
@@ -25,6 +25,11 @@ import { AsyncRemoteAgent } from '../src/fenrir/src/command-agents/async-remote-
 import type { FenrirExtEvent } from '../src/fenrir/src/events.ts'
 import { TransformerNetwork } from '../src/fenrir/src/ml/transformer-network.ts'
 import { inferObservationMode } from '../src/fenrir/src/observation.ts'
+import { createHuginnVoteCollector } from '../src/fenrir/src/adapters/command/huginn-vote-collector.ts'
+import { TrainableNetwork as HuginnTrainableNetwork } from '../src/huginn/trainable-network.ts'
+import { buildVocabLayout } from '../src/huginn/message-vocab.ts'
+import { MAX_AGENTS as HUGINN_MAX_AGENTS, OFFER_REF_WINDOW as HUGINN_OFFER_REF_WINDOW } from '../src/huginn/types.ts'
+import { importWeights as importHuginnWeights, CHECKPOINT_VERSION as HUGINN_CHECKPOINT_VERSION, type HuginnCheckpoint } from '../src/huginn/checkpoint.ts'
 import { MasonZeroNetwork } from '../src/skoll-zero/network/mason-zero.ts'
 import { MasonZeroAgent } from '../src/skoll-zero/selfplay/mason-zero-agent.ts'
 import {
@@ -48,6 +53,16 @@ export type StartGameOptions = {
   humanRoleIsMultiSeat: boolean
   /** activityLog 保持件数 */
   activityLogLimit: number
+  /**
+   * Huginn 交渉投票を有効化するオプション.
+   * 指定されると CommandAdapter.onVote が huginn runRounds に差し替わり、
+   * 交渉メッセージと finalVote が comment event として UI ログに流れる.
+   */
+  huginnVoting?: {
+    enabled: boolean
+    /** scenario 名 (例: 'pair2v2Block'). 未指定 / fetch 失敗 / vocab 不一致なら random init. */
+    scenarioName?: string
+  }
 }
 
 export type PendingPayload = {
@@ -248,6 +263,57 @@ async function buildSkollZeroAgents(
   return out
 }
 
+// ============================================================
+// Huginn network 構築 (voteCollector 用)
+// ============================================================
+
+/**
+ * Huginn TrainableNetwork を組み立てる.
+ *   - scenarioName 指定時: `/horkew/models/huginn/scenarios/{name}.json` を fetch
+ *     - 成功 & vocabSize が MAX_AGENTS 基準と一致 → importWeights で復元
+ *     - vocabSize 不一致 / fetch 失敗 → ログ出して random init にフォールバック
+ *   - 指定なし: random init
+ *
+ * MAX_AGENTS=15 固定で vocab を作るので N≤15 の人狼卓で使い回せる設計.
+ * ただし現状の orch-huginn 学習は scenario の実 N で vocab を作るため、
+ * N≠15 の checkpoint は vocabSize 不一致で random にフォールバックする.
+ */
+async function buildHuginnNetwork(scenarioName?: string): Promise<HuginnTrainableNetwork> {
+  const layout = buildVocabLayout(HUGINN_MAX_AGENTS, HUGINN_OFFER_REF_WINDOW)
+  const expectedVocabSize = layout.vocabSize
+
+  if (scenarioName) {
+    try {
+      const res = await fetch(`models/huginn/scenarios/${scenarioName}.json`)
+      if (res.ok) {
+        const ckpt = await res.json() as HuginnCheckpoint
+        if (ckpt.version !== HUGINN_CHECKPOINT_VERSION) {
+          console.warn(`[huginn] checkpoint version ${ckpt.version} unsupported (expected ${HUGINN_CHECKPOINT_VERSION}) → random init`)
+        } else if (ckpt.config.vocabSize !== expectedVocabSize) {
+          console.warn(`[huginn] vocabSize ${ckpt.config.vocabSize} from ${scenarioName} does not match MAX_AGENTS-based ${expectedVocabSize} → random init`)
+        } else {
+          const net = new HuginnTrainableNetwork(ckpt.config)
+          importHuginnWeights(net, ckpt.weights)
+          console.log(`[huginn] loaded ${scenarioName} (dModel=${ckpt.config.dModel}, layers=${ckpt.config.numLayers}, vocabSize=${ckpt.config.vocabSize})`)
+          return net
+        }
+      } else {
+        console.warn(`[huginn] fetch models/huginn/scenarios/${scenarioName}.json failed (${res.status}) → random init`)
+      }
+    } catch (e) {
+      console.warn(`[huginn] error loading ${scenarioName}:`, e)
+    }
+  }
+  console.log(`[huginn] using random-init network (dModel=64, layers=2, vocabSize=${expectedVocabSize})`)
+  return new HuginnTrainableNetwork({
+    dModel: 64,
+    numLayers: 2,
+    numHeads: 4,
+    dFf: 128,
+    vocabSize: expectedVocabSize,
+  })
+}
+
 function roleToSlot(role: SystemRole): ZeroSlot | null {
   switch (role) {
     case 'mason': return 'mason'
@@ -317,6 +383,47 @@ async function startGame(opts: StartGameOptions): Promise<void> {
     }
   })
 
+  // CommandAdapter.onEventEmitted と Huginn voteCollector の emitEvent で共通利用するクロージャ.
+  // liveEvents 配列への記録 + activityLog 更新 + post(event) を一括で行う.
+  const emitEvent = (event: GameEvent | FenrirExtEvent): void => {
+    liveEvents.push(event)
+    if (event.type === 'comment') {
+      const text = (event as { text: string }).text
+      recentComments.push(text)
+      if (recentComments.length > opts.activityLogLimit) {
+        recentComments.splice(0, recentComments.length - opts.activityLogLimit)
+      }
+    }
+
+    let editorText = ''
+    if (stateRef) {
+      try {
+        editorText = formatHowl(liveEvents as GameEvent[], stateRef, lupaConfig)
+      } catch { /* mid-game format 不可なことがある */ }
+    }
+
+    if (!stateRef) return  // onSetup 前は何も送らない
+    post({
+      type: 'event',
+      event,
+      state: snapshotState(stateRef),
+      editorText,
+      activityLog: [...recentComments],
+    })
+  }
+
+  // Huginn 交渉投票が enabled なら voteCollector を組み立てる (checkpoint fetch or random init).
+  let huginnVoteCollector: VoteCollector | undefined = undefined
+  if (opts.huginnVoting?.enabled) {
+    const huginnNetwork = await buildHuginnNetwork(opts.huginnVoting.scenarioName)
+    huginnVoteCollector = createHuginnVoteCollector({
+      network: huginnNetwork,
+      sampling: 'stochastic',
+      seed: seed + 7,
+      emitEvent,
+    })
+  }
+
   const adapter = new CommandAdapter({
     agents,
     defaultAgent: new SkollCommandAgent({ seed: seed + 1 }),
@@ -326,34 +433,8 @@ async function startGame(opts: StartGameOptions): Promise<void> {
     onStateReady: (state) => {
       stateRef = state
     },
-    onEventEmitted: (event) => {
-      liveEvents.push(event)
-      if (event.type === 'comment') {
-        const text = (event as { text: string }).text
-        recentComments.push(text)
-        if (recentComments.length > opts.activityLogLimit) {
-          recentComments.splice(0, recentComments.length - opts.activityLogLimit)
-        }
-      }
-
-      // editorText 再生成（失敗は無視）
-      let editorText = ''
-      if (stateRef) {
-        try {
-          editorText = formatHowl(liveEvents as GameEvent[], stateRef, lupaConfig)
-        } catch { /* mid-game format 不可なことがある */ }
-      }
-
-      if (!stateRef) return  // onSetup 前は何も送らない
-
-      post({
-        type: 'event',
-        event,
-        state: snapshotState(stateRef),
-        editorText,
-        activityLog: [...recentComments],
-      })
-    },
+    onEventEmitted: emitEvent,
+    voteCollector: huginnVoteCollector,
     onRolesAssigned: (seatRoles) => {
       // 人間席の割当
       const matchedSeats: number[] = []

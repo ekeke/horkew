@@ -27,23 +27,33 @@ export type HuginnCheckpoint = {
 
 // ============================================================
 // base64 ↔ Float32Array (little-endian、Node/browser どちらでも動く)
+// Node 16+ / modern browser で atob / btoa が globalThis に存在する前提.
+// Buffer には依存しないので browser / web worker でも loadCheckpoint できる.
 // ============================================================
 
 function encodeFloat32(arr: Float32Array): string {
-  // Float32Array.buffer を直接 Buffer で包んで base64 へ.
-  const view = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength)
-  return Buffer.from(view).toString('base64')
+  const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength)
+  let binary = ''
+  // String.fromCharCode を 0x8000 ずつチャンクで呼ぶ (大きい Float32Array で stack overflow を防ぐ)
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const slice = bytes.subarray(i, Math.min(i + CHUNK, bytes.length))
+    binary += String.fromCharCode.apply(null, Array.from(slice))
+  }
+  return btoa(binary)
 }
 
 function decodeFloat32(b64: string): Float32Array {
-  const buf = Buffer.from(b64, 'base64')
-  if (buf.byteLength % 4 !== 0) {
-    throw new Error(`decodeFloat32: buffer length ${buf.byteLength} not divisible by 4`)
+  const binary = atob(b64)
+  if (binary.length % 4 !== 0) {
+    throw new Error(`decodeFloat32: byte length ${binary.length} not divisible by 4`)
   }
-  const out = new Float32Array(buf.byteLength / 4)
-  for (let i = 0; i < out.length; i++) {
-    out[i] = buf.readFloatLE(i * 4)
-  }
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  // bytes.buffer の byteOffset が 4 の倍数とは限らないので DataView で安全に読む.
+  const out = new Float32Array(bytes.byteLength / 4)
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  for (let i = 0; i < out.length; i++) out[i] = view.getFloat32(i * 4, true)
   return out
 }
 

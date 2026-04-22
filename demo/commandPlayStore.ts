@@ -44,6 +44,12 @@ export type StartGameOptions = {
   /** 日ごとの初手犠牲（hasFirstGhost）。14D猫などで true */
   hasFirstGhost?: boolean
   seed?: number
+  /** Huginn 交渉投票モード. 未指定 / enabled=false なら従来の per-agent 投票. */
+  huginnVoting?: {
+    enabled: boolean
+    /** 学習済み scenario 名 (例: 'pair2v2Block'). 未指定または vocab 不一致なら random init. */
+    scenarioName?: string
+  }
 }
 
 export type CommandPlayStoreState = {
@@ -239,6 +245,7 @@ export class CommandPlayStore {
       seed: opts.seed,
       humanRoleIsMultiSeat: MULTI_SEAT_ROLES.has(opts.humanRole),
       activityLogLimit: ACTIVITY_LOG_LIMIT,
+      huginnVoting: opts.huginnVoting,
     }
     worker.postMessage({ type: 'start', opts: startOpts } satisfies ToWorkerMessage)
 

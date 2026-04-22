@@ -83,29 +83,28 @@ export function createHuginnVoteCollector(config: HuginnVoteCollectorConfig): Vo
       { kRounds: rounds, sampling, rng },
     )
 
-    // 交渉メッセージを UI ログに流す (1 発話 = 1 comment event)
-    if (emit) {
-      for (const { round, sender, message } of trace.messageHistory) {
-        const text = formatHuginnMessage(state.day, round, sender, message)
-        emit({ type: 'comment', text })
-      }
+    // comment event は lupa engine の events 配列にも push する (formatHowl 出力に反映させる)
+    // + 指定されていれば emit callback にも通知する (UI ログ更新用).
+    const pushComment = (text: string): void => {
+      const ev: GameEvent = { type: 'comment', text }
+      ;(ctx.events as (GameEvent | FenrirExtEvent)[]).push(ev)
+      if (emit) emit(ev)
+    }
+
+    // 交渉メッセージを流す (1 発話 = 1 comment event)
+    for (const { round, sender, message } of trace.messageHistory) {
+      pushComment(formatHuginnMessage(state.day, round, sender, message))
     }
 
     // finalVote を Map として返す. applyCommand と判断ログは collector の責務.
     const votes = new Map<number, number>()
-    ctx.events  // referenced for eslint (未使用警告抑制) — events は emit 経由で反映する
     for (let i = 0; i < alive.length; i++) {
       const player = alive[i]
       const target = participants[trace.perAgent[i].finalVoteIdx]
       votes.set(player.seat, target)
       const voteCmd: Command = { type: 'vote', target }
       applyCommand(state, player.seat, voteCmd)
-      if (emit) {
-        emit({
-          type: 'comment',
-          text: `D${state.day} vote seat${player.seat}(${player.role}) → seat${target} (huginn finalVote)`,
-        })
-      }
+      pushComment(`D${state.day} vote seat${player.seat}(${player.role}) → seat${target} (huginn finalVote)`)
     }
     return votes
   }

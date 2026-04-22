@@ -274,6 +274,46 @@ function serveStats(): Plugin {
 }
 
 /**
+ * Huginn 学習済みチェックポイント (tmp/orch-huginn-*/phases/00-huginn/ckpt-huginn-{scenario}/final.json)
+ * を /horkew/models/huginn/scenarios/{scenario}.json で配信。dev only。
+ *
+ * 最新 mtime の tmp/orch-huginn-* を自動選択するので、`tmp/orch-huginn-v2` で学習中でも
+ * 完了した scenario の final.json が随時読める。
+ */
+function serveHuginnModels(): Plugin {
+  let base = '/horkew/'
+  return {
+    name: 'serve-huginn-models',
+    configResolved(config) { base = config.base },
+    configureServer(server) {
+      const prefix = `${base}models/huginn/scenarios/`
+      server.middlewares.use((req, res, next) => {
+        if (!req.url?.startsWith(prefix)) return next()
+        const filename = decodeURIComponent(req.url.slice(prefix.length))
+        const scenarioName = filename.replace(/\.json$/, '')
+        try {
+          if (!existsSync(orchBase)) return next()
+          const candidates = readdirSync(orchBase)
+            .filter(d => d.startsWith('orch-huginn-'))
+            .map(d => join(orchBase, d))
+            .filter(p => existsSync(p) && statSync(p).isDirectory())
+            .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+          for (const baseDir of candidates) {
+            const finalPath = join(baseDir, 'phases', '00-huginn', `ckpt-huginn-${scenarioName}`, 'final.json')
+            if (existsSync(finalPath)) {
+              res.setHeader('Content-Type', 'application/json')
+              res.end(readFileSync(finalPath, 'utf-8'))
+              return
+            }
+          }
+        } catch { /* fall through */ }
+        return next()
+      })
+    },
+  }
+}
+
+/**
  * Phase 2 pretrained checkpoints (tmp/phase2-pretrain-v1/{role}-{method}.json) を
  * /horkew/models/phase2/{file}.json で配信。dev only（tmp/ は .gitignore）。
  */
@@ -332,7 +372,7 @@ function servePublicEarly(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), serveStats(), servePublicEarly(), serveScenarios(), serveSkollModels(), serveSkollZeroModels(), servePhase2Models(), servePretrainSnapshots()],
+  plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), serveStats(), servePublicEarly(), serveScenarios(), serveSkollModels(), serveSkollZeroModels(), servePhase2Models(), serveHuginnModels(), servePretrainSnapshots()],
   root: 'demo',
   base: '/horkew/',
   server: { port: 5375, strictPort: true },
