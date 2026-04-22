@@ -442,12 +442,10 @@ export class SkollCommandAgent implements CommandAgent {
       }
     }
 
-    // NN 経路: master が Phase 2 claim head を持つなら argmax 済みの DayClaim を使う。
+    // NN 経路: claim head 主判定 + defensive_claim で hide→CO override
     // NN が unsupported type / legal 外を返した場合は既存 lookahead にフォールスルー。
-    if (hasPhase2Head(this.master, 'claim', player.role)) {
-      const nnResult = this.tryVillainCoFromClaimHead(state, player, legal, events)
-      if (nnResult) return nnResult
-    }
+    const nnResult = this.tryVillainCoWithDefense(state, player, legal, events)
+    if (nnResult) return nnResult
 
     type Opt = 'hide' | 'seer' | 'medium' | 'bodyguard' | 'nekomata'
     const options: Opt[] = ['hide', 'seer', 'medium', 'bodyguard', 'nekomata']
@@ -509,25 +507,33 @@ export class SkollCommandAgent implements CommandAgent {
   }
 
   /**
-   * master.decideDayClaim (Phase 2 claim head 経由) で villain の CO 種類を決定。
-   * 対応可能な type (seer_co/medium_co/bodyguard_co/nekomata_co/none) かつ legal に一致する
-   * 場合のみ DecisionResult を返す。それ以外は null で既存 lookahead にフォールスルー。
-   * retarCache 不在時 (ctx==null) は NN 経路を踏まず null を返し、lookahead 経路の
-   * 「skoll unavailable」処理に揃える。
+   * villain の CO 種類を Phase 2 claim / defensive_claim head 経由で決定。
+   *   - method='claim': master.decideDayClaim → 通常 CO 判定
+   *   - method='defensive_claim': master.decideDefensiveClaim → RuleBasedAgent 側は villain で
+   *     常に 'none' を返すが、NN 蒸留で微小なシグナルが残る可能性を拾う。
+   * retarCache 不在時 (ctx==null) は NN 経路を踏まず null で既存 lookahead にフォールスルー。
    */
   private tryVillainCoFromClaimHead(
     state: Readonly<GameState<CommandAdapterExt>>,
     player: PlayerState,
     legal: readonly Command[],
     events: AgentEvents,
+    method: 'claim' | 'defensive_claim' = 'claim',
   ): DecisionResult | null {
+    if (!hasPhase2Head(this.master, method, player.role)) return null
     const ctx = this.buildDecisionContext(state, player, events, 'day')
     if (!ctx) return null
     let claim: DayClaim
-    try { claim = this.master.decideDayClaim(ctx) } catch { return null }
+    try {
+      claim = method === 'defensive_claim'
+        ? this.master.decideDefensiveClaim(ctx)
+        : this.master.decideDayClaim(ctx)
+    } catch { return null }
+
+    const tag = method === 'defensive_claim' ? 'defense' : 'NN'
 
     if (claim.type === 'none') {
-      return skipOrFirst(legal, `(discussion)[${player.role}/zero] hide (NN claim=none)`)
+      return skipOrFirst(legal, `(discussion)[${player.role}/zero] hide (${tag} claim=none)`)
     }
     const claimType = mapVillainCoType(claim.type)
     if (!claimType) return null
@@ -535,8 +541,26 @@ export class SkollCommandAgent implements CommandAgent {
     if (!coCmd) return null
     return {
       cmd: coCmd,
-      log: `(discussion)[${player.role}/zero] CO ${claimType} (NN)`,
+      log: `(discussion)[${player.role}/zero] CO ${claimType} (${tag})`,
     }
+  }
+
+  /**
+   * villain の二段判定: claim head 主 + defensive_claim で hide→CO override を試みる。
+   * 真役職の tryTrueCoWithDefense と同じ構造。
+   */
+  private tryVillainCoWithDefense(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    legal: readonly Command[],
+    events: AgentEvents,
+  ): DecisionResult | null {
+    const claimResult = this.tryVillainCoFromClaimHead(state, player, legal, events, 'claim')
+    if (claimResult && claimResult.cmd.type === 'skip') {
+      const defense = this.tryVillainCoFromClaimHead(state, player, legal, events, 'defensive_claim')
+      if (defense && defense.cmd.type !== 'skip') return defense
+    }
+    return claimResult
   }
 
   /**

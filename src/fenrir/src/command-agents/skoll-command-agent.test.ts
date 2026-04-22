@@ -828,6 +828,24 @@ class FakeDefenseZeroMaster extends SkollMasterAgent {
   }
 }
 
+test('SkollCommandAgent: discussion villain claim=none + defense=seer_co → CO (defense override)', async () => {
+  const master = new FakeDefenseZeroMaster(
+    { type: 'none' },
+    { type: 'seer_co', results: [] },
+  )
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  stubRetarCache(state)
+  // seat 3 = werewolf
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_co', claim: { type: 'seer_co', results: [] } },
+  ]
+  const result = await agent.decide(state, 3, legal)
+  assert.equal(result.cmd.type, 'role_co')
+  assert.match(result.log ?? '', /\[werewolf\/zero\] CO seer_co \(defense\)/)
+})
+
 test('SkollCommandAgent: discussion 真 seer claim=none + defense=seer_co → CO (defense override)', async () => {
   const master = new FakeDefenseZeroMaster(
     { type: 'none' },
