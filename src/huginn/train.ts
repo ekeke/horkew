@@ -15,7 +15,7 @@ import {
   logProbOf,
   softmax,
 } from './trainable-network.ts'
-import { saveCheckpoint } from './checkpoint.ts'
+import { saveCheckpoint } from './checkpoint-fs.ts'
 import {
   AbstractGame,
   type EnvConfig,

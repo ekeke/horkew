@@ -1,5 +1,5 @@
 /**
- * TrainableNetwork の checkpoint save/load.
+ * TrainableNetwork の checkpoint 形式定義 + in-memory import/export (browser-safe).
  *
  * ファイル形式 (fenrir 既存 phase2 と揃える):
  *   {
@@ -8,12 +8,11 @@
  *     "weights": { "<name>.W": "<base64>", "<name>.b": "<base64>", ... }
  *   }
  *
- * 依存: node:fs のみ. huginn 独立モジュールの境界を保つ.
+ * このファイルは browser / web worker からも import 可 (node:fs 非依存).
+ * ファイル save/load の fs 依存部は `./checkpoint-fs.ts` に切り出してある.
  * 重み名は stable (層構造に対応) にして backbone 流用時のキー一致を可能にする.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
 import { TrainableNetwork, type TrainableConfig } from './trainable-network.ts'
 import type { Linear, LayerNorm } from './transformer.ts'
 
@@ -151,27 +150,6 @@ export function importWeights(network: TrainableNetwork, weights: Record<string,
   loadLinear('head_value', network.headValue, weights)
 }
 
-// ============================================================
-// save/load エントリポイント
-// ============================================================
-
-export function saveCheckpoint(network: TrainableNetwork, path: string): void {
-  const checkpoint: HuginnCheckpoint = {
-    version: CHECKPOINT_VERSION,
-    config: { ...network.config },
-    weights: exportWeights(network),
-  }
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, JSON.stringify(checkpoint))
-}
-
-export function loadCheckpoint(path: string): { network: TrainableNetwork; config: TrainableConfig } {
-  const raw = readFileSync(path, 'utf-8')
-  const checkpoint = JSON.parse(raw) as HuginnCheckpoint
-  if (checkpoint.version !== CHECKPOINT_VERSION) {
-    throw new Error(`loadCheckpoint: unsupported version ${checkpoint.version} (expected ${CHECKPOINT_VERSION})`)
-  }
-  const network = new TrainableNetwork(checkpoint.config)
-  importWeights(network, checkpoint.weights)
-  return { network, config: checkpoint.config }
-}
+// save/load (fs 依存) は `./checkpoint-fs.ts` を使う — このファイルは browser-safe に保つ.
+// TrainableConfig を使わない場合でも型を上位へ re-export できるよう明示する.
+export type { TrainableConfig }

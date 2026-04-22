@@ -12,9 +12,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TrainableNetwork } from './trainable-network.ts'
 import {
-  exportWeights, importWeights, saveCheckpoint, loadCheckpoint,
+  exportWeights, importWeights,
   CHECKPOINT_VERSION, type HuginnCheckpoint,
 } from './checkpoint.ts'
+import { saveCheckpoint, loadCheckpoint } from './checkpoint-fs.ts'
 import { buildVocabLayout } from './message-vocab.ts'
 import { MAX_AGENTS, OFFER_REF_WINDOW } from './types.ts'
 import { CLS_FEATURE_DIMS, AGENT_FEATURE_DIMS } from './observation.ts'

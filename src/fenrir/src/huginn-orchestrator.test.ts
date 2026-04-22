@@ -17,7 +17,7 @@ import {
   huginnCheckpointDir,
   huginnPhaseDoneFile,
 } from './huginn-orchestrator.ts'
-import { loadCheckpoint } from '../../huginn/checkpoint.ts'
+import { loadCheckpoint } from '../../huginn/checkpoint-fs.ts'
 import { catalog } from '../../huginn/scenarios.ts'
 
 function makeTmpBase(): string {
