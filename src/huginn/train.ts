@@ -74,6 +74,8 @@ export type TrainConfig = {
   optimizer?: 'sgd' | 'adam'     // default 'sgd'
   entropyBonus?: number          // default 0. policy entropy を最大化する方向の regularizer.
                                  //   β > 0 で smoother policy, exploration 促進
+  /** Global L2 gradient clip norm. 0 / 未指定ならクリップしない. 安定化のため通常は 1.0-5.0. */
+  gradClipNorm?: number
   /** checkpoint 保存先ディレクトリ. 未指定なら保存しない. */
   checkpointDir?: string
   /** N iter ごとに `${checkpointDir}/iter{N}.json` を保存.
@@ -272,10 +274,35 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
       }
     }
 
-    if ((config.optimizer ?? 'sgd') === 'adam') {
-      network.applyStepAdam(config.lr, totalSteps)
-    } else {
-      network.applyStep(config.lr, totalSteps)
+    // NaN ガード: backward 終了後に勾配の健全性を確認. 壊れた勾配を適用すると
+    // 重みが NaN になり以降の全 iter が無意味になるため、skip してログに残す.
+    let skippedStep = false
+    if (network.hasNonFiniteGrad()) {
+      log(`  [warn] iter ${iter + 1}: non-finite gradient detected → applyStep skipped`)
+      network.zeroAllGrads()
+      skippedStep = true
+    }
+
+    // Gradient clipping (skip 済みなら不要). global L2 norm > clip で全勾配を scale.
+    if (!skippedStep && config.gradClipNorm !== undefined && config.gradClipNorm > 0) {
+      const norm = network.gradNorm()
+      if (norm > config.gradClipNorm) {
+        network.scaleGrads(config.gradClipNorm / norm)
+      }
+    }
+
+    if (!skippedStep) {
+      if ((config.optimizer ?? 'sgd') === 'adam') {
+        network.applyStepAdam(config.lr, totalSteps)
+      } else {
+        network.applyStep(config.lr, totalSteps)
+      }
+    }
+
+    // 重みが NaN に陥ったら以降は全て無意味. 即時中断して呼び出し側に通知.
+    if (network.hasNonFiniteWeights()) {
+      log(`  [fatal] iter ${iter + 1}: network weights became non-finite → aborting training`)
+      break
     }
 
     const numAgentRewards = N * config.gamesPerIter

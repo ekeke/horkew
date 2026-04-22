@@ -148,6 +148,88 @@ export class TrainableNetwork {
     adamLinear(this.headValue, lr, divisor, opts)
     this.encoder.applyStepAdam(lr, divisor, opts)
   }
+
+  // ============================================================
+  // 勾配ユーティリティ (NaN ガード / L2 クリップ / 全層 zero grad)
+  // 各層の parameter / grad を列挙して操作する. applyStep から独立しているため、
+  // 学習ループは (1) backward → (2) NaN check → (3) norm clip → (4) applyStep の順に呼べる.
+  // ============================================================
+
+  private allLinears(): Linear[] {
+    const layers: Linear[] = [this.projCls, this.projAgent]
+    for (const block of this.encoder.blocks) {
+      layers.push(block.attn.wq, block.attn.wk, block.attn.wv, block.attn.wo)
+      layers.push(block.ffn.fc1, block.ffn.fc2)
+    }
+    layers.push(this.headMessage, this.headVote, this.headValue)
+    return layers
+  }
+
+  private allLayerNorms(): LayerNorm[] {
+    const norms: LayerNorm[] = []
+    for (const block of this.encoder.blocks) norms.push(block.ln1, block.ln2)
+    norms.push(this.encoder.finalLN)
+    return norms
+  }
+
+  /** 全パラメータの勾配 L2 norm. */
+  gradNorm(): number {
+    let sumSq = 0
+    for (const l of this.allLinears()) {
+      for (let i = 0; i < l.weightGrads.length; i++) sumSq += l.weightGrads[i] * l.weightGrads[i]
+      for (let i = 0; i < l.biasGrads.length; i++) sumSq += l.biasGrads[i] * l.biasGrads[i]
+    }
+    for (const n of this.allLayerNorms()) {
+      for (let i = 0; i < n.scaleGrads.length; i++) sumSq += n.scaleGrads[i] * n.scaleGrads[i]
+      for (let i = 0; i < n.biasGrads.length; i++) sumSq += n.biasGrads[i] * n.biasGrads[i]
+    }
+    return Math.sqrt(sumSq)
+  }
+
+  /** 任意の勾配が NaN / Inf なら true. */
+  hasNonFiniteGrad(): boolean {
+    for (const l of this.allLinears()) {
+      for (const g of l.weightGrads) if (!Number.isFinite(g)) return true
+      for (const g of l.biasGrads) if (!Number.isFinite(g)) return true
+    }
+    for (const n of this.allLayerNorms()) {
+      for (const g of n.scaleGrads) if (!Number.isFinite(g)) return true
+      for (const g of n.biasGrads) if (!Number.isFinite(g)) return true
+    }
+    return false
+  }
+
+  /** 任意の重みが NaN / Inf なら true. ラン全体の死活判定に使う. */
+  hasNonFiniteWeights(): boolean {
+    for (const l of this.allLinears()) {
+      for (const w of l.weights) if (!Number.isFinite(w)) return true
+      for (const b of l.biases) if (!Number.isFinite(b)) return true
+    }
+    for (const n of this.allLayerNorms()) {
+      for (const s of n.scale) if (!Number.isFinite(s)) return true
+      for (const b of n.bias) if (!Number.isFinite(b)) return true
+    }
+    return false
+  }
+
+  /** 全勾配を係数倍する (clip 用). */
+  scaleGrads(factor: number): void {
+    if (factor === 1) return
+    for (const l of this.allLinears()) {
+      for (let i = 0; i < l.weightGrads.length; i++) l.weightGrads[i] *= factor
+      for (let i = 0; i < l.biasGrads.length; i++) l.biasGrads[i] *= factor
+    }
+    for (const n of this.allLayerNorms()) {
+      for (let i = 0; i < n.scaleGrads.length; i++) n.scaleGrads[i] *= factor
+      for (let i = 0; i < n.biasGrads.length; i++) n.biasGrads[i] *= factor
+    }
+  }
+
+  /** 全勾配をゼロクリア. NaN 検出時の skip 用. */
+  zeroAllGrads(): void {
+    for (const l of this.allLinears()) l.zeroGrad()
+    for (const n of this.allLayerNorms()) n.zeroGrad()
+  }
 }
 
 export function softmax(logits: Float32Array): Float32Array {

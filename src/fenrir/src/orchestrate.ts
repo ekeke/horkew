@@ -114,6 +114,10 @@ type OrchestratorConfig = {
   huginnCheckpointInterval?: number
   huginnGreedyEvalEvery?: number
   huginnGreedyEvalGames?: number
+  huginnOptimizer?: 'sgd' | 'adam'
+  huginnValueLossWeight?: number
+  huginnEntropyBonus?: number
+  huginnGradClip?: number
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -187,6 +191,10 @@ function parseArgs(): OrchestratorConfig {
       case '--huginn-checkpoint-interval': config.huginnCheckpointInterval = parseInt(args[++i]); break
       case '--huginn-greedy-eval-every': config.huginnGreedyEvalEvery = parseInt(args[++i]); break
       case '--huginn-greedy-eval-games': config.huginnGreedyEvalGames = parseInt(args[++i]); break
+      case '--huginn-optimizer': config.huginnOptimizer = args[++i] as 'sgd' | 'adam'; break
+      case '--huginn-value-loss-weight': config.huginnValueLossWeight = parseFloat(args[++i]); break
+      case '--huginn-entropy-bonus': config.huginnEntropyBonus = parseFloat(args[++i]); break
+      case '--huginn-grad-clip': config.huginnGradClip = parseFloat(args[++i]); break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -235,6 +243,10 @@ Huginn 専用 (--curriculum huginn):
   --huginn-checkpoint-interval <n>  N iter ごとに iter{N}.json 保存 (default: 0=final のみ)
   --huginn-greedy-eval-every <n>    N iter ごとに greedy eval (default: 0=無効)
   --huginn-greedy-eval-games <n>    greedy eval 1 回あたりのゲーム数 (default: 32)
+  --huginn-optimizer <sgd|adam>     オプティマイザ (default: sgd)。adam は lr 小さめ推奨 (1e-3)
+  --huginn-value-loss-weight <f>    value loss の重み (default: 1.0)。爆発時は 0.5 / 0.1 等
+  --huginn-entropy-bonus <f>        policy entropy 正則化 (default: 0.01)
+  --huginn-grad-clip <f>            Global L2 gradient clip norm (default: 0=無効、推奨 1.0-5.0)
   --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
   --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled)
                            ⚠ batch×14×5×n×4.8KB がメモリに蓄積。batch=64 なら n≤40 推奨 (≈1GB)
@@ -1057,6 +1069,10 @@ async function main(): Promise<void> {
       greedyEvalEvery: config.huginnGreedyEvalEvery,
       greedyEvalGames: config.huginnGreedyEvalGames,
       checkpointInterval: config.huginnCheckpointInterval,
+      optimizer: config.huginnOptimizer,
+      valueLossWeight: config.huginnValueLossWeight,
+      entropyBonus: config.huginnEntropyBonus,
+      gradClipNorm: config.huginnGradClip,
       skeleton: config.skeleton,
       log,
     }

@@ -39,6 +39,12 @@ export type HuginnOrchestratorConfig = {
   greedyEvalGames?: number
   entropyBonus?: number
   normalizeAdvantage?: boolean
+  /** 'sgd' (default) | 'adam'. lr=0.05 で発散するときは adam + lr=1e-3 を推奨. */
+  optimizer?: 'sgd' | 'adam'
+  /** value loss の重み (default: 1.0). value head 爆発時は 0.5 / 0.1 に下げる. */
+  valueLossWeight?: number
+  /** Global L2 gradient clip norm. 0/未指定なら無効. 推奨 1.0-5.0. */
+  gradClipNorm?: number
   /** N iter ごとに intermediate checkpoint を書く. 0/未指定なら書かない. */
   checkpointInterval?: number
   /** 最小 iter で全パイプを通すための skeleton フラグ (orchestrate.ts --skeleton 対応). */
@@ -133,6 +139,9 @@ export function runHuginnCurriculum(config: HuginnOrchestratorConfig): {
     greedyEvalGames: config.greedyEvalGames ?? 32,
     normalizeAdvantage: config.normalizeAdvantage ?? true,
     entropyBonus: config.entropyBonus ?? 0.01,
+    optimizer: config.optimizer,
+    valueLossWeight: config.valueLossWeight,
+    gradClipNorm: config.gradClipNorm,
     checkpointDir,
     checkpointInterval: config.checkpointInterval ?? 0,
     onIteration: (entry) => progressCallback(entry),
