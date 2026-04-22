@@ -13,10 +13,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   runHuginnCurriculum,
+  runHuginnCatalogAll,
   huginnCheckpointDir,
   huginnPhaseDoneFile,
 } from './huginn-orchestrator.ts'
 import { loadCheckpoint } from '../../huginn/checkpoint.ts'
+import { catalog } from '../../huginn/scenarios.ts'
 
 function makeTmpBase(): string {
   return mkdtempSync(join(tmpdir(), 'huginn-orch-'))
@@ -111,6 +113,68 @@ describe('huginn-orchestrator skeleton run', () => {
         }),
         /--huginn-scenario required/,
       )
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('checkpointLabel routes checkpoint to ckpt-huginn-{label}/ subdir', () => {
+    const base = makeTmpBase()
+    try {
+      const { checkpointDir } = runHuginnCurriculum({
+        checkpointBase: base,
+        scenarios: ['pair2v2Block'],
+        iterations: 999,
+        gamesPerIter: 999,
+        lr: 0.01,
+        dModel: 16,
+        numLayers: 1,
+        numHeads: 2,
+        dFf: 32,
+        seed: 3,
+        skeleton: true,
+        checkpointLabel: 'pair2v2Block',
+        markPhaseDone: false,
+        log: () => {},
+      })
+      assert.ok(checkpointDir.endsWith('ckpt-huginn-pair2v2Block'), `got ${checkpointDir}`)
+      assert.ok(existsSync(join(checkpointDir, 'final.json')))
+      // markPhaseDone:false なので phase.done が書かれていないこと
+      assert.ok(!existsSync(huginnPhaseDoneFile(base)), 'phase.done should not be written when markPhaseDone=false')
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('runHuginnCatalogAll writes each scenario into its own subdir + one phase.done', () => {
+    const base = makeTmpBase()
+    try {
+      const { perScenario } = runHuginnCatalogAll({
+        checkpointBase: base,
+        iterations: 999,       // skeleton で 2 iter に上書き
+        gamesPerIter: 999,     // skeleton で 2 games/iter に上書き
+        lr: 0.01,
+        dModel: 16,
+        numLayers: 1,
+        numHeads: 2,
+        dFf: 32,
+        seed: 11,
+        skeleton: true,
+        log: () => {},
+      })
+
+      const catalogNames = Object.keys(catalog)
+      assert.strictEqual(perScenario.length, catalogNames.length, 'should train every catalog scenario')
+
+      // 各 scenario の final.json が該当 subdir に存在
+      for (const name of catalogNames) {
+        const expectedDir = huginnCheckpointDir(base, name)
+        const finalPath = join(expectedDir, 'final.json')
+        assert.ok(existsSync(finalPath), `missing final.json for scenario ${name}: ${finalPath}`)
+      }
+
+      // phase.done は auto-all 終了時に 1 つだけ書かれる
+      assert.ok(existsSync(huginnPhaseDoneFile(base)), 'phase.done should be written after all scenarios')
     } finally {
       rmSync(base, { recursive: true, force: true })
     }

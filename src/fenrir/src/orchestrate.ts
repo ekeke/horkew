@@ -222,7 +222,9 @@ Options:
   --skeleton               最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用)
 
 Huginn 専用 (--curriculum huginn):
-  --huginn-scenario <a,b>   シナリオ名 (catalog key、カンマ区切り mix 可)。必須
+  --huginn-scenario <a,b>   シナリオ名 (catalog key、カンマ区切り mix 可)。
+                            省略時は catalog 全 scenario を順次個別学習 (auto-all モード)。
+                            その場合の checkpoint は ckpt-huginn-{scenarioName}/ に分離
   --huginn-iters <n>        学習 iteration 数 (default: 500)
   --huginn-games-per-iter <n> 1 iter あたりのゲーム数 (default: 32)
   --huginn-lr <f>           学習率 (default: 0.05)
@@ -890,15 +892,9 @@ function log(msg: string): void {
 // ============================================================
 
 function validateConfig(config: OrchestratorConfig): void {
-  // huginn は fenrir の evalInterval/chunkSize 等の制約を使わない独立カリキュラム
-  if (config.curriculum === 'huginn') {
-    if (!config.huginnScenarios || config.huginnScenarios.length === 0) {
-      console.error('設定エラー:')
-      console.error('  - --curriculum huginn には --huginn-scenario <name[,name...]> が必須')
-      process.exit(1)
-    }
-    return
-  }
+  // huginn は fenrir の evalInterval/chunkSize 等の制約を使わない独立カリキュラム.
+  // --huginn-scenario 未指定時は catalog 全 scenario を順次学習する (auto-all モード).
+  if (config.curriculum === 'huginn') return
   const errors: string[] = []
   if (config.evalInterval > config.chunkSize) {
     errors.push(`evalInterval (${config.evalInterval}) > chunkSize (${config.chunkSize}): eval がチャンク内で1回も走らない`)
@@ -1047,10 +1043,9 @@ async function main(): Promise<void> {
 
   // === Huginn カリキュラム: 独立ループ (fenrir モデル非依存) ===
   if (config.curriculum === 'huginn') {
-    const { runHuginnCurriculum } = await import('./huginn-orchestrator.ts')
-    runHuginnCurriculum({
+    const scenarios = config.huginnScenarios ?? []
+    const baseHuginnConfig = {
       checkpointBase: config.checkpointBase,
-      scenarios: config.huginnScenarios ?? [],
       iterations: config.huginnIterations ?? 500,
       gamesPerIter: config.huginnGamesPerIter ?? 32,
       lr: config.huginnLr ?? 0.05,
@@ -1064,7 +1059,15 @@ async function main(): Promise<void> {
       checkpointInterval: config.huginnCheckpointInterval,
       skeleton: config.skeleton,
       log,
-    })
+    }
+    if (scenarios.length === 0) {
+      // auto-all: catalog 全 scenario を順次個別学習
+      const { runHuginnCatalogAll } = await import('./huginn-orchestrator.ts')
+      runHuginnCatalogAll(baseHuginnConfig)
+    } else {
+      const { runHuginnCurriculum } = await import('./huginn-orchestrator.ts')
+      runHuginnCurriculum({ ...baseHuginnConfig, scenarios })
+    }
     shutdownCleanup('completed')
     log(`${BOLD}Huginn Training complete!${RESET}`)
     return

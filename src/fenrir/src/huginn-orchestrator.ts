@@ -47,6 +47,12 @@ export type HuginnOrchestratorConfig = {
   onIteration?: (entry: IterationLog) => void
   /** 標準出力ログを差し替える (default: console.log). テスト用. */
   log?: (line: string) => void
+  /** scenario 別 checkpoint subdir 名. 未指定なら `ckpt-huginn/`, 指定時は `ckpt-huginn-{label}/`.
+   *  auto-all モード (runHuginnCatalogAll) が scenario ごとに使う. */
+  checkpointLabel?: string
+  /** phase.done マーカーを書くかどうか (default: true).
+   *  auto-all モードは各 scenario 呼び出しで false、最後に外部でまとめて書く. */
+  markPhaseDone?: boolean
 }
 
 const HUGINN_PHASE_DIR_NAME = '00-huginn'
@@ -56,8 +62,9 @@ export function huginnPhaseDir(checkpointBase: string): string {
   return join(checkpointBase, 'phases', HUGINN_PHASE_DIR_NAME)
 }
 
-export function huginnCheckpointDir(checkpointBase: string): string {
-  return join(huginnPhaseDir(checkpointBase), `ckpt-${HUGINN_MODEL_NAME}`)
+export function huginnCheckpointDir(checkpointBase: string, label?: string): string {
+  const subdir = label ? `ckpt-${HUGINN_MODEL_NAME}-${label}` : `ckpt-${HUGINN_MODEL_NAME}`
+  return join(huginnPhaseDir(checkpointBase), subdir)
 }
 
 export function huginnPhaseDoneFile(checkpointBase: string): string {
@@ -98,7 +105,7 @@ export function runHuginnCurriculum(config: HuginnOrchestratorConfig): {
     }
   }
 
-  const checkpointDir = huginnCheckpointDir(config.checkpointBase)
+  const checkpointDir = huginnCheckpointDir(config.checkpointBase, config.checkpointLabel)
   mkdirSync(checkpointDir, { recursive: true })
 
   const skeleton = !!config.skeleton
@@ -134,8 +141,45 @@ export function runHuginnCurriculum(config: HuginnOrchestratorConfig): {
 
   const { history } = train(trainConfig)
 
-  writeFileSync(huginnPhaseDoneFile(config.checkpointBase), new Date().toISOString())
+  if (config.markPhaseDone !== false) {
+    writeFileSync(huginnPhaseDoneFile(config.checkpointBase), new Date().toISOString())
+  }
   return { history, checkpointDir }
+}
+
+// ============================================================
+// auto-all: catalog の全 scenario を順次個別学習
+// ============================================================
+
+export type HuginnCatalogAllConfig = Omit<HuginnOrchestratorConfig, 'scenarios' | 'checkpointLabel' | 'markPhaseDone'>
+
+export function runHuginnCatalogAll(config: HuginnCatalogAllConfig): {
+  perScenario: Array<{ scenario: string; history: IterationLog[]; checkpointDir: string }>
+} {
+  const scenarioNames = Object.keys(catalog)
+  if (scenarioNames.length === 0) {
+    throw new Error('runHuginnCatalogAll: catalog is empty')
+  }
+
+  const log = config.log ?? ((line: string) => console.log(line))
+  const perScenario: Array<{ scenario: string; history: IterationLog[]; checkpointDir: string }> = []
+
+  for (let i = 0; i < scenarioNames.length; i++) {
+    const name = scenarioNames[i]
+    log(`\n[huginn-all] (${i + 1}/${scenarioNames.length}) scenario=${name}`)
+    const result = runHuginnCurriculum({
+      ...config,
+      scenarios: [name],
+      checkpointLabel: name,
+      markPhaseDone: false,
+      log,
+    })
+    perScenario.push({ scenario: name, history: result.history, checkpointDir: result.checkpointDir })
+  }
+
+  writeFileSync(huginnPhaseDoneFile(config.checkpointBase), new Date().toISOString())
+  log(`\n[huginn-all] complete. ${scenarioNames.length} scenarios trained.`)
+  return { perScenario }
 }
 
 // ============================================================
