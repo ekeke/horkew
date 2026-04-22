@@ -12,7 +12,7 @@
 
 import type { SystemRole, ResolvedRules } from '../../../../types/index.ts'
 import type {
-  GameState, GameEvent, NightAction, DayClaim,
+  GameState, GameEvent, NightAction, DayClaim, PlayerState,
 } from '../../../../lupa/types.ts'
 import type {
   GameHandlers, PhaseContext, VoteContext, PreVoteResult,
@@ -39,6 +39,25 @@ import type { CommandAgent } from '../../command-agents/command-agent.ts'
 // ============================================================
 // コンフィグ
 // ============================================================
+
+/**
+ * onVote の投票収集ロジックを差し替えるためのフック.
+ *
+ * designated 強制 / candidate 確定 / voteCandidates セットは CommandAdapter 側で
+ * 既存通り行い、「各 agent に decide を問う」部分だけ差し替えたい場合に使う.
+ *
+ * 戻り値:
+ *   - Map<seat, target>: そのまま採用 (applyCommand や emitDecisionLog は collector の責務)
+ *   - null: 既存の「各 agent に decide を問う」パスにフォールバック
+ */
+export type VoteCollector = (
+  ctx: VoteContext<FenrirExtEvent, CommandAdapterExt>,
+  params: {
+    state: GameState<CommandAdapterExt>
+    candidates: readonly number[]
+    alive: readonly PlayerState[]
+  },
+) => Promise<Map<number, number> | null>
 
 export type CommandAdapterConfig = {
   /** 席ごとの Agent。未登録席は defaultAgent を使う */
@@ -69,6 +88,12 @@ export type CommandAdapterConfig = {
    * snapshot するために使う。lupa state は in-place 更新されるため、一度捕捉すれば以降参照可能。
    */
   onStateReady?: (state: GameState<CommandAdapterExt>) => void
+  /**
+   * 投票収集の差し替えフック. 指定時は onVote の「各 agent に decide を問う」部分の
+   * 代わりに呼ばれる. null を返すとフォールバックして既存パスが走る.
+   * designated 強制投票はこのフックを呼ぶ前に既存ロジックで処理される.
+   */
+  voteCollector?: VoteCollector
 }
 
 const DEFAULT_MAX_PREVOTE_STEPS = 200
@@ -217,6 +242,16 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
     // 投票フェーズへ遷移し、候補をセット（legalCommands が参照）
     ext.currentPhase = 'vote'
     ext.voteCandidates = [...candidates]
+
+    // voteCollector フック: 指定されていれば既存の per-agent 投票を飛ばして
+    // collector の戻り値 (Map<seat, target>) をそのまま採用. null なら fallback.
+    if (this.config.voteCollector) {
+      const collected = await this.config.voteCollector(ctx, { state, candidates, alive })
+      if (collected !== null) {
+        ext.voteCandidates = null
+        return collected
+      }
+    }
 
     // 各生存席に agent.decide で投票先を問う
     for (const p of alive) {
