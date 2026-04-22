@@ -273,16 +273,16 @@ function serveStats(): Plugin {
   }
 }
 
-/**
+/*
  * Huginn 学習済みチェックポイントの配信。dev only。
  *
- * 最新 mtime の tmp/orch-huginn-* を自動選択する。
+ * 最新 mtime の `tmp/orch-huginn-<RUN>` を自動選択する。
  *
  * ルート:
  *   /horkew/models/huginn/final.json
- *     → tmp/orch-huginn-*/phases/00-huginn/ckpt-huginn/final.json (mix 学習、実プレイ用)
+ *     -> tmp/orch-huginn-<RUN>/phases/00-huginn/ckpt-huginn/final.json (mix 学習、実プレイ用)
  *   /horkew/models/huginn/scenarios/{name}.json
- *     → tmp/orch-huginn-*/phases/00-huginn/ckpt-huginn-{name}/final.json (scenario 別、評価用)
+ *     -> tmp/orch-huginn-<RUN>/phases/00-huginn/ckpt-huginn-{name}/final.json (scenario 別、評価用)
  */
 function serveHuginnModels(): Plugin {
   let base = '/horkew/'
