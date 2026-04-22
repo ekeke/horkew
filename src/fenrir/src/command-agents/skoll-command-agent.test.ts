@@ -513,6 +513,76 @@ test('SkollCommandAgent: discussion villain NN claim=forecast → lookahead に�
   assert.doesNotMatch(result.log ?? '', /\(NN\)/)
 })
 
+/**
+ * Phase 2 forecast head を持つ master のスタブ。
+ * hasPhase2Head('forecast', *) が true、decideForecast が固定値を返す。
+ */
+class FakeForecastZeroMaster extends SkollMasterAgent {
+  private readonly forecastClaim: DayClaim
+  constructor(forecastClaim: DayClaim) {
+    super({})
+    this.forecastClaim = forecastClaim
+  }
+  hasPhase2Head(method: string, _role: SystemRole): boolean {
+    return method === 'forecast'
+  }
+  override decideForecast(_ctx: DecisionContext): DayClaim {
+    return this.forecastClaim
+  }
+  override analyzeVote(): null {
+    return null
+  }
+}
+
+test('SkollCommandAgent: discussion 真 seer 全報告済み + forecast head 発火 → forecast report', async () => {
+  const master = new FakeForecastZeroMaster({ type: 'forecast', target: 3 })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  // seat 1 = seer、CO 済で divineHistory 空 (= 全報告済み)
+  state.players[0].claimedRole = 'seer'
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_result_report', claim: { type: 'forecast', target: 2 } },
+    { type: 'role_result_report', claim: { type: 'forecast', target: 3 } },
+    { type: 'role_result_report', claim: { type: 'forecast', target: 4 } },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.equal(result.cmd.type, 'role_result_report')
+  assert.equal((result.cmd as { claim: DayClaim }).claim.type, 'forecast')
+  assert.match(result.log ?? '', /\[seer\/zero\] forecast seat3 \(NN\)/)
+})
+
+test('SkollCommandAgent: discussion 真 seer 全報告済み + forecast head が none → skip (既存挙動)', async () => {
+  const master = new FakeForecastZeroMaster({ type: 'none' })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  state.players[0].claimedRole = 'seer'
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_result_report', claim: { type: 'forecast', target: 2 } },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.equal(result.cmd.type, 'skip')
+  assert.match(result.log ?? '', /all-reported skip/)
+})
+
+test('SkollCommandAgent: discussion 真 seer forecast head 未登録 → skip (既存挙動)', async () => {
+  // forecast head を持たない master → NN 経路に入らず、既存の all-reported skip に落ちる
+  const agent = new SkollCommandAgent({ fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  state.players[0].claimedRole = 'seer'
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_result_report', claim: { type: 'forecast', target: 2 } },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.equal(result.cmd.type, 'skip')
+  assert.match(result.log ?? '', /all-reported skip/)
+})
+
 test('SkollCommandAgent: discussion villain NN claim=seer_co 但し legal 不整合 → フォールスルー', async () => {
   const master = new FakeClaimZeroMaster({ type: 'seer_co', results: [] })
   const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
@@ -644,6 +714,88 @@ test('SkollCommandAgent: discussion 真 mason NN claim=mason_co → CO with part
   assert.equal(result.cmd.type, 'role_co')
   assert.equal((result.cmd as { claim: DayClaim }).claim.type, 'mason_co')
   assert.match(result.log ?? '', /\[mason\/zero\] CO mason_co \(NN\)/)
+})
+
+// ============================================================
+// CCO フェーズの NN claim head 経路
+// ============================================================
+
+test('SkollCommandAgent: cco 真 seer NN claim=seer_co → cco_full', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'seer_co', results: [] })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('cco')
+  stubRetarCache(state)
+  // seat 1 = seer (未 CO)
+  const legal: Command[] = [
+    { type: 'cco_skip' },
+    { type: 'cco_full', claim: { type: 'seer_co', results: [] } },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.equal(result.cmd.type, 'cco_full')
+  assert.equal((result.cmd as { claim: DayClaim }).claim.type, 'seer_co')
+  assert.match(result.log ?? '', /\(cco\)\[seer\/zero\] CO seer_co \(NN\)/)
+})
+
+test('SkollCommandAgent: cco 真 seer NN claim=none → cco_skip', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'none' })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('cco')
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'cco_skip' },
+    { type: 'cco_full', claim: { type: 'seer_co', results: [] } },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  assert.equal(result.cmd.type, 'cco_skip')
+  assert.match(result.log ?? '', /\(cco\)\[seer\/zero\] skip \(NN claim=none\)/)
+})
+
+test('SkollCommandAgent: cco 真 mason NN claim=mason_co → cco_full with partner', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'mason_co', partner: 4 })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('cco')
+  state.players[1].role = 'mason'
+  state.players[3].role = 'mason'
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'cco_skip' },
+    { type: 'cco_full', claim: { type: 'mason_co', partner: 4 } },
+  ]
+  const result = await agent.decide(state, 2, legal)
+  assert.equal(result.cmd.type, 'cco_full')
+  assert.equal((result.cmd as { claim: DayClaim }).claim.type, 'mason_co')
+  assert.match(result.log ?? '', /\(cco\)\[mason\/zero\] CO mason_co \(NN\)/)
+})
+
+test('SkollCommandAgent: cco 真 seer NN claim=forecast → 既存 heuristic (無条件 cco_full) にフォールスルー', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'forecast', target: 3 })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('cco')
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'cco_skip' },
+    { type: 'cco_full', claim: { type: 'seer_co', results: [] } },
+  ]
+  const result = await agent.decide(state, 1, legal)
+  // NN は forecast (unexpected) を返したので既存 heuristic で無条件 cco_full
+  assert.equal(result.cmd.type, 'cco_full')
+  assert.match(result.log ?? '', /\(cco\)\[seer\] true-role last-chance CO/)
+  assert.doesNotMatch(result.log ?? '', /\(NN\)/)
+})
+
+test('SkollCommandAgent: cco villain は NN 経路を踏まず既存通り cco_skip', async () => {
+  const master = new FakeClaimZeroMaster({ type: 'seer_co', results: [] })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('cco')
+  stubRetarCache(state)
+  // seat 3 = werewolf。villain は trueCoClaimType が null なので NN 経路を踏まない
+  const legal: Command[] = [
+    { type: 'cco_skip' },
+    { type: 'cco_full', claim: { type: 'seer_co', results: [] } },
+  ]
+  const result = await agent.decide(state, 3, legal)
+  assert.equal(result.cmd.type, 'cco_skip')
+  assert.match(result.log ?? '', /\(cco\)\[werewolf\] stay-silent skip/)
 })
 
 test('SkollCommandAgent: discussion 真 medium NN claim=forecast → lookahead にフォールスルー', async () => {

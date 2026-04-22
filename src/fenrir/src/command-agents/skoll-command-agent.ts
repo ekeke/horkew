@@ -72,14 +72,18 @@ function hasMCTSSupport(
 }
 
 /**
- * master が Phase 2 NN の claim head を持つか duck-type 判定。
+ * master が Phase 2 NN の指定 method head を持つか duck-type 判定。
  * RoleZeroAgent.hasPhase2Head(method, role) が登録済み checkpoint の有無を返す。
  */
-function hasPhase2ClaimHead(m: SkollMasterAgent, role: SystemRole): boolean {
+function hasPhase2Head(
+  m: SkollMasterAgent,
+  method: string,
+  role: SystemRole,
+): boolean {
   const fn = (m as unknown as { hasPhase2Head?: unknown }).hasPhase2Head
   if (typeof fn !== 'function') return false
   try {
-    return (fn as (method: string, role: SystemRole) => boolean).call(m, 'claim', role)
+    return (fn as (method: string, role: SystemRole) => boolean).call(m, method, role)
   } catch {
     return false
   }
@@ -440,7 +444,7 @@ export class SkollCommandAgent implements CommandAgent {
 
     // NN 経路: master が Phase 2 claim head を持つなら argmax 済みの DayClaim を使う。
     // NN が unsupported type / legal 外を返した場合は既存 lookahead にフォールスルー。
-    if (hasPhase2ClaimHead(this.master, player.role)) {
+    if (hasPhase2Head(this.master, 'claim', player.role)) {
       const nnResult = this.tryVillainCoFromClaimHead(state, player, legal, events)
       if (nnResult) return nnResult
     }
@@ -550,7 +554,7 @@ export class SkollCommandAgent implements CommandAgent {
     events: AgentEvents,
     expectedClaimType: 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' | 'mason_co',
   ): DecisionResult | null {
-    if (!hasPhase2ClaimHead(this.master, player.role)) return null
+    if (!hasPhase2Head(this.master, 'claim', player.role)) return null
     const ctx = this.buildDecisionContext(state, player, events, 'day')
     if (!ctx) return null
     let claim: DayClaim
@@ -900,7 +904,9 @@ export class SkollCommandAgent implements CommandAgent {
       }
     }
 
-    // 全部報告済み → skip
+    // 全部報告済み: forecast head が発火すれば予告、それ以外は skip
+    const forecastResult = this.tryForecastFromHead(state, player, legal, events)
+    if (forecastResult) return forecastResult
     return skipOrFirst(legal, '(discussion)[seer] all-reported skip')
   }
 
@@ -1089,6 +1095,89 @@ export class SkollCommandAgent implements CommandAgent {
     return skipOrFirst(legal, `(discussion)[${player.role}] hide skip`)
   }
 
+  /**
+   * master.decideForecast 経由で seer の予告 (forecast) を決定。
+   * NN forecast head は claim head 系 (10 次元) を再利用した設計で、
+   * argmax が 'forecast' のとき super.decideForecast の target とマージして
+   * {type:'forecast', target} を返す。'none' / 他 type → null でフォールスルー
+   * (呼び出し元は skip を返す)。
+   * Phase 2 forecast checkpoint 未登録 / retarCache 無し / throw → null。
+   */
+  private tryForecastFromHead(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    legal: readonly Command[],
+    events: AgentEvents,
+  ): DecisionResult | null {
+    if (!hasPhase2Head(this.master, 'forecast', player.role)) return null
+    const ctx = this.buildDecisionContext(state, player, events, 'day')
+    if (!ctx) return null
+    let claim: DayClaim
+    try { claim = this.master.decideForecast(ctx) } catch { return null }
+    if (claim.type !== 'forecast') return null
+    const reportCmd = legal.find(c =>
+      c.type === 'role_result_report'
+      && c.claim.type === 'forecast'
+      && c.claim.target === claim.target,
+    )
+    if (!reportCmd) return null
+    return {
+      cmd: reportCmd,
+      log: `(discussion)[${player.role}/zero] forecast seat${claim.target} (NN)`,
+    }
+  }
+
+  /**
+   * CCO フェーズ用: master.decideDayClaim の判断を cco_full / cco_skip に変換。
+   *   - NN が 'none' → cco_skip with `[role/zero] skip (NN claim=none)` log
+   *   - NN が expectedClaimType → legal の cco_full を採用 (mason_co は partner 解決)
+   *   - unexpected type → null で既存 heuristic (無条件 cco_full) にフォールスルー
+   *   - NN claim head 未登録 / retarCache 無し / throw → null でフォールスルー
+   * discussion 用の tryTrueCoFromClaimHead とロジックは類似だが、cmd type が
+   * cco_full、skip cmd type が cco_skip、log prefix が (cco) で異なる。
+   */
+  private tryCcoFromClaimHead(
+    state: Readonly<GameState<CommandAdapterExt>>,
+    player: PlayerState,
+    legal: readonly Command[],
+    events: AgentEvents,
+    expectedClaimType: 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' | 'mason_co',
+  ): DecisionResult | null {
+    if (!hasPhase2Head(this.master, 'claim', player.role)) return null
+    const ctx = this.buildDecisionContext(state, player, events, 'day')
+    if (!ctx) return null
+    let claim: DayClaim
+    try { claim = this.master.decideDayClaim(ctx) } catch { return null }
+
+    if (claim.type === 'none') {
+      const skipCmd = legal.find(c => c.type === 'cco_skip')
+      if (!skipCmd) return null
+      return {
+        cmd: skipCmd,
+        log: `(cco)[${player.role}/zero] skip (NN claim=none)`,
+      }
+    }
+    if (claim.type !== expectedClaimType) return null
+
+    let ccoCmd: Command | undefined
+    if (expectedClaimType === 'mason_co') {
+      const partner = state.players.find(p => p.role === 'mason' && p.seat !== player.seat)
+      if (!partner) return null
+      ccoCmd = legal.find(c =>
+        c.type === 'cco_full'
+        && c.claim.type === 'mason_co'
+        && c.claim.partner === partner.seat,
+      )
+    } else {
+      ccoCmd = legal.find(c => c.type === 'cco_full' && c.claim.type === expectedClaimType)
+    }
+    if (!ccoCmd) return null
+    return {
+      cmd: ccoCmd,
+      log: `(cco)[${player.role}/zero] CO ${expectedClaimType} (NN)`,
+    }
+  }
+
   // ============================================================
   // CCO: 真役職未 CO なら cco_full、villain/その他は cco_skip
   // ============================================================
@@ -1106,6 +1195,10 @@ export class SkollCommandAgent implements CommandAgent {
     if (!player.claimedRole) {
       const targetClaimType = trueCoClaimType(player.role)
       if (targetClaimType) {
+        // NN 経路: master が claim head を持つなら NN で cco_full / cco_skip を判断
+        const nnResult = this.tryCcoFromClaimHead(state, player, legal, events, targetClaimType)
+        if (nnResult) return nnResult
+
         let ccoCmd: Command | undefined
         if (player.role === 'mason') {
           // 真相方席の mason_co を選ぶ
