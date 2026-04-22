@@ -274,39 +274,66 @@ function serveStats(): Plugin {
 }
 
 /**
- * Huginn 学習済みチェックポイント (tmp/orch-huginn-*/phases/00-huginn/ckpt-huginn-{scenario}/final.json)
- * を /horkew/models/huginn/scenarios/{scenario}.json で配信。dev only。
+ * Huginn 学習済みチェックポイントの配信。dev only。
  *
- * 最新 mtime の tmp/orch-huginn-* を自動選択するので、`tmp/orch-huginn-v2` で学習中でも
- * 完了した scenario の final.json が随時読める。
+ * 最新 mtime の tmp/orch-huginn-* を自動選択する。
+ *
+ * ルート:
+ *   /horkew/models/huginn/final.json
+ *     → tmp/orch-huginn-*/phases/00-huginn/ckpt-huginn/final.json (mix 学習、実プレイ用)
+ *   /horkew/models/huginn/scenarios/{name}.json
+ *     → tmp/orch-huginn-*/phases/00-huginn/ckpt-huginn-{name}/final.json (scenario 別、評価用)
  */
 function serveHuginnModels(): Plugin {
   let base = '/horkew/'
+
+  const findLatestOrchHuginnBases = (): string[] => {
+    if (!existsSync(orchBase)) return []
+    return readdirSync(orchBase)
+      .filter(d => d.startsWith('orch-huginn-'))
+      .map(d => join(orchBase, d))
+      .filter(p => existsSync(p) && statSync(p).isDirectory())
+      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+  }
+
   return {
     name: 'serve-huginn-models',
     configResolved(config) { base = config.base },
     configureServer(server) {
-      const prefix = `${base}models/huginn/scenarios/`
+      const scenarioPrefix = `${base}models/huginn/scenarios/`
+      const mixPath = `${base}models/huginn/final.json`
       server.middlewares.use((req, res, next) => {
-        if (!req.url?.startsWith(prefix)) return next()
-        const filename = decodeURIComponent(req.url.slice(prefix.length))
-        const scenarioName = filename.replace(/\.json$/, '')
-        try {
-          if (!existsSync(orchBase)) return next()
-          const candidates = readdirSync(orchBase)
-            .filter(d => d.startsWith('orch-huginn-'))
-            .map(d => join(orchBase, d))
-            .filter(p => existsSync(p) && statSync(p).isDirectory())
-            .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
-          for (const baseDir of candidates) {
-            const finalPath = join(baseDir, 'phases', '00-huginn', `ckpt-huginn-${scenarioName}`, 'final.json')
-            if (existsSync(finalPath)) {
-              res.setHeader('Content-Type', 'application/json')
-              res.end(readFileSync(finalPath, 'utf-8'))
-              return
+        if (!req.url) return next()
+        // mix 統合 NN
+        if (req.url === mixPath || req.url.startsWith(`${mixPath}?`)) {
+          try {
+            for (const baseDir of findLatestOrchHuginnBases()) {
+              const finalPath = join(baseDir, 'phases', '00-huginn', 'ckpt-huginn', 'final.json')
+              if (existsSync(finalPath)) {
+                res.setHeader('Content-Type', 'application/json')
+                res.end(readFileSync(finalPath, 'utf-8'))
+                return
+              }
             }
-          }
-        } catch { /* fall through */ }
+          } catch { /* fall through */ }
+          return next()
+        }
+        // scenario 別 NN
+        if (req.url.startsWith(scenarioPrefix)) {
+          const filename = decodeURIComponent(req.url.slice(scenarioPrefix.length))
+          const scenarioName = filename.replace(/\.json$/, '')
+          try {
+            for (const baseDir of findLatestOrchHuginnBases()) {
+              const finalPath = join(baseDir, 'phases', '00-huginn', `ckpt-huginn-${scenarioName}`, 'final.json')
+              if (existsSync(finalPath)) {
+                res.setHeader('Content-Type', 'application/json')
+                res.end(readFileSync(finalPath, 'utf-8'))
+                return
+              }
+            }
+          } catch { /* fall through */ }
+          return next()
+        }
         return next()
       })
     },

@@ -180,22 +180,26 @@ describe('huginn-orchestrator skeleton run', () => {
     }
   })
 
-  it('throws when mixed scenarios differ in numAgents', () => {
+  it('accepts mixed scenarios with different numAgents (MAX_AGENTS padding)', () => {
     const base = makeTmpBase()
     try {
-      // pair2v2Block (N=4) と trio3v2Block (N=5) は numAgents 不一致
-      assert.throws(
-        () => runHuginnCurriculum({
-          checkpointBase: base,
-          scenarios: ['pair2v2Block', 'trio3v2Block'],
-          iterations: 1,
-          gamesPerIter: 1,
-          lr: 0.01,
-          skeleton: true,
-          log: () => {},
-        }),
-        /share numAgents/,
-      )
+      // pair2v2Block (N=4) と trio3v2Block (N=5) を mix. MAX_AGENTS padding で許容される.
+      const { history, checkpointDir } = runHuginnCurriculum({
+        checkpointBase: base,
+        scenarios: ['pair2v2Block', 'trio3v2Block'],
+        iterations: 999,
+        gamesPerIter: 999,
+        lr: 0.01,
+        dModel: 16,
+        numLayers: 1,
+        numHeads: 2,
+        dFf: 32,
+        seed: 5,
+        skeleton: true,
+        log: () => {},
+      })
+      assert.strictEqual(history.length, 2)
+      assert.ok(existsSync(join(checkpointDir, 'final.json')))
     } finally {
       rmSync(base, { recursive: true, force: true })
     }

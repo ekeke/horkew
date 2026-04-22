@@ -29,6 +29,7 @@ import { buildVocabLayout, decodeMessage, buildLegalMask } from './message-vocab
 import { type Trace } from './protocol.ts'
 import {
   K_ROUNDS,
+  MAX_AGENTS,
   OFFER_REF_WINDOW,
   type Message,
   type Observation,
@@ -102,10 +103,11 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
   const rng = new Rng(config.seed)
 
   if (config.envConfigs.length === 0) throw new Error('envConfigs must have at least one entry')
-  const N = config.envConfigs[0].numAgents
+  // 全 env を MAX_AGENTS 長に padding して共通 vocab で扱うため、numAgents 一致制約は廃止.
+  // ただし各 scenario の numAgents は MAX_AGENTS 以下である必要 (padding できないため).
   for (const ec of config.envConfigs) {
-    if (ec.numAgents !== N) {
-      throw new Error(`mix requires same numAgents; got [${config.envConfigs.map(e => e.numAgents).join(', ')}]`)
+    if (ec.numAgents > MAX_AGENTS) {
+      throw new Error(`numAgents ${ec.numAgents} exceeds MAX_AGENTS (${MAX_AGENTS})`)
     }
   }
   const envs = config.envConfigs.map(ec => new AbstractGame(ec, rng))
@@ -121,7 +123,8 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
     return mixWeights.length - 1
   }
 
-  const layout = buildVocabLayout(N, OFFER_REF_WINDOW)
+  // vocab は MAX_AGENTS 基準で固定. すべての scenario を padding 後に同じ layout で扱う.
+  const layout = buildVocabLayout(MAX_AGENTS, OFFER_REF_WINDOW)
   const dModel = config.dModel ?? 64
   const numLayers = config.numLayers ?? 2
   const numHeads = config.numHeads ?? 4
@@ -132,7 +135,8 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
   })
 
   log(`# Huginn training (Transformer)`)
-  log(`N=${N}, K=${K_ROUNDS}, vocabSize=${layout.vocabSize}, dModel=${dModel}, layers=${numLayers}, heads=${numHeads}`)
+  const scenarioNsStr = config.envConfigs.map(ec => ec.numAgents).join(',')
+  log(`padded N=${MAX_AGENTS} (scenarios N=${scenarioNsStr}), K=${K_ROUNDS}, vocabSize=${layout.vocabSize}, dModel=${dModel}, layers=${numLayers}, heads=${numHeads}`)
   log(`iterations=${config.iterations}, gamesPerIter=${config.gamesPerIter}, lr=${config.lr}`)
   if (envs.length > 1) {
     log(`mix: ${mixNames.map((n, i) => `${n}(w=${mixWeights[i]})`).join(', ')}`)
@@ -164,7 +168,8 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
       const envIdx = envs.length === 1 ? 0 : sampleEnvIdx()
       const result = rolloutGame(network, envs[envIdx], layout, rng, true)
       rolloutBatch.push({ result, envIdx })
-      for (let a = 0; a < N; a++) {
+      const resultN = result.envResult.rewards.length
+      for (let a = 0; a < resultN; a++) {
         const ret = result.envResult.rewards[a]
         perEnvRewardSum[envIdx] += ret
         perEnvAgentCount[envIdx] += 1
@@ -185,7 +190,8 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
     let initialValueCount = 0
     let initialValueSqSum = 0
     for (const { result } of rolloutBatch) {
-      for (let a = 0; a < N; a++) {
+      const resultN = result.envResult.rewards.length
+      for (let a = 0; a < resultN; a++) {
         const steps = result.perAgentSteps[a]
         if (steps.length === 0) continue
         const v0 = steps[0].value
@@ -200,7 +206,8 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
 
     // Phase 2: backward
     for (const { result } of rolloutBatch) {
-      for (let a = 0; a < N; a++) {
+      const resultN = result.envResult.rewards.length
+      for (let a = 0; a < resultN; a++) {
         const steps = result.perAgentSteps[a]
         const ret = result.envResult.rewards[a]
 
@@ -266,7 +273,7 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
         if (result.envResult.commitViolations[a]) violationCount++
       }
 
-      for (let a = 0; a < N; a++) {
+      for (let a = 0; a < resultN; a++) {
         for (const m of result.perAgentMessages[a]) {
           msgTypeAccum[m.type]++
           totalMsgs++
@@ -305,9 +312,12 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
       break
     }
 
-    const numAgentRewards = N * config.gamesPerIter
-    const meanReward = totalReward / numAgentRewards
-    const violationRate = violationCount / numAgentRewards
+    const numAgentRewards = rolloutBatch.reduce(
+      (s, { result }) => s + result.envResult.rewards.length, 0,
+    )
+    const denom = Math.max(1, numAgentRewards)
+    const meanReward = totalReward / denom
+    const violationRate = violationCount / denom
     const msgTypeFractions: Record<string, number> = {}
     for (const k of Object.keys(msgTypeAccum)) {
       msgTypeFractions[k] = totalMsgs > 0 ? msgTypeAccum[k] / totalMsgs : 0
@@ -367,7 +377,7 @@ function rolloutGame(
   perAgentMessages: Message[][]
   envResult: StepResult
 } {
-  const inputs = env.reset()
+  const inputs = env.reset({ padToMaxAgents: true })
   const N = inputs.length
   const messageHistory: { round: number; sender: AgentId; message: Message }[] = []
   const pastViolations = new Map<AgentId, number>()
@@ -483,7 +493,7 @@ function greedyEval(
   let total = 0
   let count = 0
   for (let g = 0; g < numGames; g++) {
-    const inputs = env.reset()
+    const inputs = env.reset({ padToMaxAgents: true })
     const N = inputs.length
     const messageHistory: { round: number; sender: AgentId; message: Message }[] = []
     const pastViolations = new Map<AgentId, number>()

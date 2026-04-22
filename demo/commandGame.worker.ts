@@ -269,41 +269,44 @@ async function buildSkollZeroAgents(
 
 /**
  * Huginn TrainableNetwork を組み立てる.
- *   - scenarioName 指定時: `/horkew/models/huginn/scenarios/{name}.json` を fetch
- *     - 成功 & vocabSize が MAX_AGENTS 基準と一致 → importWeights で復元
- *     - vocabSize 不一致 / fetch 失敗 → ログ出して random init にフォールバック
- *   - 指定なし: random init
+ *   - scenarioName 未指定 (デフォルト): `/horkew/models/huginn/final.json` から
+ *     mix 統合学習の checkpoint を fetch (実プレイ用).
+ *   - scenarioName 指定時: `/horkew/models/huginn/scenarios/{name}.json` から
+ *     scenario 別 checkpoint を fetch (個別評価用).
+ *   - 失敗 / vocab 不一致 → random init にフォールバック.
  *
- * MAX_AGENTS=15 固定で vocab を作るので N≤15 の人狼卓で使い回せる設計.
- * ただし現状の orch-huginn 学習は scenario の実 N で vocab を作るため、
- * N≠15 の checkpoint は vocabSize 不一致で random にフォールバックする.
+ * Vocab は MAX_AGENTS=15 基準で固定. N≤15 の人狼卓で同じ NN が使い回せる.
  */
 async function buildHuginnNetwork(scenarioName?: string): Promise<HuginnTrainableNetwork> {
   const layout = buildVocabLayout(HUGINN_MAX_AGENTS, HUGINN_OFFER_REF_WINDOW)
   const expectedVocabSize = layout.vocabSize
 
-  if (scenarioName) {
-    try {
-      const res = await fetch(`models/huginn/scenarios/${scenarioName}.json`)
-      if (res.ok) {
-        const ckpt = await res.json() as HuginnCheckpoint
-        if (ckpt.version !== HUGINN_CHECKPOINT_VERSION) {
-          console.warn(`[huginn] checkpoint version ${ckpt.version} unsupported (expected ${HUGINN_CHECKPOINT_VERSION}) → random init`)
-        } else if (ckpt.config.vocabSize !== expectedVocabSize) {
-          console.warn(`[huginn] vocabSize ${ckpt.config.vocabSize} from ${scenarioName} does not match MAX_AGENTS-based ${expectedVocabSize} → random init`)
-        } else {
-          const net = new HuginnTrainableNetwork(ckpt.config)
-          importHuginnWeights(net, ckpt.weights)
-          console.log(`[huginn] loaded ${scenarioName} (dModel=${ckpt.config.dModel}, layers=${ckpt.config.numLayers}, vocabSize=${ckpt.config.vocabSize})`)
-          return net
-        }
+  const url = scenarioName
+    ? `models/huginn/scenarios/${scenarioName}.json`
+    : 'models/huginn/final.json'
+  const label = scenarioName ?? 'mixed-final'
+
+  try {
+    const res = await fetch(url)
+    if (res.ok) {
+      const ckpt = await res.json() as HuginnCheckpoint
+      if (ckpt.version !== HUGINN_CHECKPOINT_VERSION) {
+        console.warn(`[huginn] checkpoint version ${ckpt.version} unsupported (expected ${HUGINN_CHECKPOINT_VERSION}) → random init`)
+      } else if (ckpt.config.vocabSize !== expectedVocabSize) {
+        console.warn(`[huginn] vocabSize ${ckpt.config.vocabSize} from ${label} does not match MAX_AGENTS-based ${expectedVocabSize} → random init`)
       } else {
-        console.warn(`[huginn] fetch models/huginn/scenarios/${scenarioName}.json failed (${res.status}) → random init`)
+        const net = new HuginnTrainableNetwork(ckpt.config)
+        importHuginnWeights(net, ckpt.weights)
+        console.log(`[huginn] loaded ${label} (dModel=${ckpt.config.dModel}, layers=${ckpt.config.numLayers}, vocabSize=${ckpt.config.vocabSize})`)
+        return net
       }
-    } catch (e) {
-      console.warn(`[huginn] error loading ${scenarioName}:`, e)
+    } else {
+      console.warn(`[huginn] fetch ${url} failed (${res.status}) → random init`)
     }
+  } catch (e) {
+    console.warn(`[huginn] error loading ${label}:`, e)
   }
+
   console.log(`[huginn] using random-init network (dModel=64, layers=2, vocabSize=${expectedVocabSize})`)
   return new HuginnTrainableNetwork({
     dModel: 64,

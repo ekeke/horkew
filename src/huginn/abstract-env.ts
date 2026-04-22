@@ -18,7 +18,7 @@
  */
 
 import type { HuginnInput, AgentId, Message, RoleName, KnowledgeMap } from './types.ts'
-import { COMMIT_VIOLATION_PENALTY, DESIGNATION_VIOLATION_PENALTY, DESIRE_HIGH_BASE, ROLE_VOCABULARY } from './types.ts'
+import { COMMIT_VIOLATION_PENALTY, DESIGNATION_VIOLATION_PENALTY, DESIRE_HIGH_BASE, MAX_AGENTS, ROLE_VOCABULARY } from './types.ts'
 import type { Rng } from './rng.ts'
 import { detectCommitViolation, type Trace } from './protocol.ts'
 
@@ -164,7 +164,14 @@ export class AbstractGame {
     return this._actualOfLogical[logical]
   }
 
-  reset(): HuginnInput[] {
+  /**
+   * ゲームを初期化して各 agent の HuginnInput を返す.
+   *
+   * `padToMaxAgents: true` を指定すると、全 HuginnInput を MAX_AGENTS 長に
+   * padding する. 余剰枠は実存しないダミー seat で excluded=true 固定.
+   * 複数 N が混在する mix 学習で vocab layout を揃えるために使う.
+   */
+  reset(options?: { padToMaxAgents?: boolean }): HuginnInput[] {
     const N = this.config.numAgents
     const participants = Array.from({ length: N }, (_, i) => i)
 
@@ -374,8 +381,11 @@ export class AbstractGame {
         knowledgeByOther: knowledgeByActual[self],
       })
     }
-    this.inputs = inputs
-    return inputs
+    const finalInputs = options?.padToMaxAgents && N < MAX_AGENTS
+      ? padInputsToMaxAgents(inputs, N)
+      : inputs
+    this.inputs = finalInputs
+    return finalInputs
   }
 
   getPrimaryByTeam(): Map<number, AgentId> {
@@ -599,4 +609,50 @@ export function scriptedBotVoteIdx(
       return tryIdxOf(role.primary) ?? randomNonExcluded()
     }
   }
+}
+
+/**
+ * HuginnInput 配列を MAX_AGENTS 長に padding する.
+ *
+ * 余剰枠 (index N..MAX_AGENTS-1) は:
+ *   - participants: N, N+1, ..., MAX_AGENTS-1 (実 seat と被らない連番ダミー)
+ *   - excluded: true (投票・発話対象外)
+ *   - desire: 0 (MID より下で目立たない)
+ *   - knowledgeByOther: empty Set (情報なし)
+ *   - isDesignationTarget: false
+ *
+ * Mix 学習で異なる numAgents を持つ scenario を同一 vocab layout で扱うために使う.
+ * env.step() 側も this.inputs を参照するため、participants index が padded でも
+ * finalVoteIdx は excluded mask で実 seat 範囲に制限される前提.
+ */
+export function padInputsToMaxAgents(
+  inputs: HuginnInput[],
+  actualN: number,
+): HuginnInput[] {
+  if (actualN >= MAX_AGENTS) return inputs
+  const padCount = MAX_AGENTS - actualN
+  const padSeats = Array.from({ length: padCount }, (_, k) => actualN + k)
+  return inputs.map(input => {
+    const participants = [...input.participants, ...padSeats]
+    const excluded = [...input.excluded, ...new Array<boolean>(padCount).fill(true)]
+    const desire = new Float64Array(MAX_AGENTS)
+    desire.set(input.desire)  // 残りは 0
+    const isDesignationTarget = [
+      ...input.isDesignationTarget,
+      ...new Array<boolean>(padCount).fill(false),
+    ]
+    const knowledgeByOther = [
+      ...input.knowledgeByOther,
+      ...Array.from({ length: padCount }, () => new Set<RoleName>()),
+    ]
+    return {
+      self: input.self,
+      viewerRole: input.viewerRole,
+      participants,
+      desire,
+      excluded,
+      isDesignationTarget,
+      knowledgeByOther,
+    }
+  })
 }

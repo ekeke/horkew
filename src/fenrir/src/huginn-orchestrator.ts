@@ -102,14 +102,7 @@ export function runHuginnCurriculum(config: HuginnOrchestratorConfig): {
 
   const envConfigs = scenarios.map(s => s.envConfig)
   const mixNames = scenarios.map(s => s.name)
-  const n0 = envConfigs[0].numAgents
-  for (const ec of envConfigs) {
-    if (ec.numAgents !== n0) {
-      throw new Error(
-        `runHuginnCurriculum: mixed scenarios must share numAgents (got ${envConfigs.map(e => e.numAgents).join(', ')})`,
-      )
-    }
-  }
+  // numAgents 不一致は train.ts の MAX_AGENTS padding で吸収されるため許可する.
 
   const checkpointDir = huginnCheckpointDir(config.checkpointBase, config.checkpointLabel)
   mkdirSync(checkpointDir, { recursive: true })
@@ -157,7 +150,8 @@ export function runHuginnCurriculum(config: HuginnOrchestratorConfig): {
 }
 
 // ============================================================
-// auto-all: catalog の全 scenario を順次個別学習
+// catalog 全 scenario を「個別 NN」で学習する旧モード (scenario 選択プレイ用).
+// scenario ごとに ckpt-huginn-{name}/ に書き出す. Mix 統合版は runHuginnMixedAll.
 // ============================================================
 
 export type HuginnCatalogAllConfig = Omit<HuginnOrchestratorConfig, 'scenarios' | 'checkpointLabel' | 'markPhaseDone'>
@@ -189,6 +183,38 @@ export function runHuginnCatalogAll(config: HuginnCatalogAllConfig): {
   writeFileSync(huginnPhaseDoneFile(config.checkpointBase), new Date().toISOString())
   log(`\n[huginn-all] complete. ${scenarioNames.length} scenarios trained.`)
   return { perScenario }
+}
+
+// ============================================================
+// catalog 全 scenario を「1 NN」に mix 統合学習する (実プレイ向け).
+// MAX_AGENTS=15 padding で異なる N のシナリオを同時学習可能.
+// 出力は checkpointBase/phases/00-huginn/ckpt-huginn/final.json (label なし).
+// ============================================================
+
+export function runHuginnMixedAll(config: HuginnCatalogAllConfig): {
+  history: IterationLog[]
+  checkpointDir: string
+  scenarios: string[]
+} {
+  const scenarioNames = Object.keys(catalog)
+  if (scenarioNames.length === 0) {
+    throw new Error('runHuginnMixedAll: catalog is empty')
+  }
+  const log = config.log ?? ((line: string) => console.log(line))
+  log(`[huginn-mixed] mix training on ${scenarioNames.length} scenarios: ${scenarioNames.join(', ')}`)
+  const result = runHuginnCurriculum({
+    ...config,
+    scenarios: scenarioNames,
+    // label 無し → ckpt-huginn/final.json に出力
+    markPhaseDone: true,
+    log,
+  })
+  log(`[huginn-mixed] complete. checkpoint: ${result.checkpointDir}/final.json`)
+  return {
+    history: result.history,
+    checkpointDir: result.checkpointDir,
+    scenarios: scenarioNames,
+  }
 }
 
 // ============================================================

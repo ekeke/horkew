@@ -23,15 +23,6 @@
     hasFirstGhost: true,
   }
 
-  // Huginn 交渉投票で使う scenario 名一覧 (src/huginn/scenarios.ts catalog と一致).
-  // 現在の学習中 orch-huginn-v2 の出力に対応する名前.
-  const HUGINN_SCENARIOS = [
-    'pair2v2Block', 'pair2v2Split', 'pair2v2SplitMentor',
-    'trio3v2Block', 'trio3v2BlockMentored', 'trio3v2Mentor',
-    'pair2designatedSingle', 'trio3designatedRange', 'wolfPPIgnoreDesignation',
-    'wolfFanaticPPHidden', 'wolfFanaticPPKnown',
-  ] as const
-
   // 人間が選択できる役職と、全席操作か 1 席操作かの区別
   const HUMAN_ROLE_OPTIONS: Array<{ value: SystemRole, label: string, multiSeat: boolean }> = [
     { value: 'seer', label: '占い師', multiSeat: false },
@@ -63,7 +54,6 @@
   let seedInput: string = $state('')
   let startError: string | null = $state(null)
   let huginnEnabled: boolean = $state(false)
-  let huginnScenario: string = $state(HUGINN_SCENARIOS[0])
 
   async function onStartGame() {
     startError = null
@@ -77,9 +67,7 @@
         roles: roleConfig,
         hasFirstGhost: PRESET_14D_NEKO.hasFirstGhost,
         seed: Number.isFinite(seed) ? seed : undefined,
-        huginnVoting: huginnEnabled
-          ? { enabled: true, scenarioName: huginnScenario }
-          : undefined,
+        huginnVoting: huginnEnabled ? { enabled: true } : undefined,
       })
     } catch (e) {
       startError = String(e instanceof Error ? e.message : e)
@@ -714,16 +702,8 @@
           Huginn 交渉投票（実験）
         </label>
         {#if huginnEnabled}
-          <label>
-            scenario:
-            <select bind:value={huginnScenario}>
-              {#each HUGINN_SCENARIOS as s (s)}
-                <option value={s}>{s}</option>
-              {/each}
-            </select>
-          </label>
           <span class="huginn-note">
-            vocab 不一致なら random init にフォールバック（DevTools Console で [huginn] ログ確認）
+            mix 学習済 NN (models/huginn/final.json) を使用. 未配置なら random init にフォールバック.
           </span>
         {/if}
       </div>

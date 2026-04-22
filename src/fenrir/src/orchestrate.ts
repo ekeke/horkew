@@ -231,8 +231,9 @@ Options:
 
 Huginn 専用 (--curriculum huginn):
   --huginn-scenario <a,b>   シナリオ名 (catalog key、カンマ区切り mix 可)。
-                            省略時は catalog 全 scenario を順次個別学習 (auto-all モード)。
-                            その場合の checkpoint は ckpt-huginn-{scenarioName}/ に分離
+                            省略時は catalog 全 scenario を MAX_AGENTS=15 padding で mix 統合学習
+                            (1 個の NN、ckpt-huginn/final.json)。実プレイ向け.
+                            明示指定時は ckpt-huginn-{name}/ に分離 (個別 scenario 評価向け).
   --huginn-iters <n>        学習 iteration 数 (default: 500)
   --huginn-games-per-iter <n> 1 iter あたりのゲーム数 (default: 32)
   --huginn-lr <f>           学習率 (default: 0.05)
@@ -1077,9 +1078,10 @@ async function main(): Promise<void> {
       log,
     }
     if (scenarios.length === 0) {
-      // auto-all: catalog 全 scenario を順次個別学習
-      const { runHuginnCatalogAll } = await import('./huginn-orchestrator.ts')
-      runHuginnCatalogAll(baseHuginnConfig)
+      // デフォルト: catalog 全 scenario を MAX_AGENTS padding で mix 統合学習 → 1 個の NN.
+      // 結果は ckpt-huginn/final.json (label なし) で、demo の実プレイで使用する.
+      const { runHuginnMixedAll } = await import('./huginn-orchestrator.ts')
+      runHuginnMixedAll(baseHuginnConfig)
     } else {
       const { runHuginnCurriculum } = await import('./huginn-orchestrator.ts')
       runHuginnCurriculum({ ...baseHuginnConfig, scenarios })
