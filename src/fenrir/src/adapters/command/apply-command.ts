@@ -107,6 +107,8 @@ function applyCommanderPhase(
       ext.discussionQueue = []
       // 当日の request_co 履歴に追加（同カテゴリを同日に再要求しないため）
       ext.requestedCategoriesThisDay.add(cmd.category)
+      // UI バナー用のアクティブセットにも追加。一巡完了 → commander 遷移時に clear.
+      ext.activeCoRequests.push(cmd.category)
       return
     case 'designate_execution':
       ext.designatedTarget = cmd.target

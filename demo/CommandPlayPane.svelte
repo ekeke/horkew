@@ -115,12 +115,27 @@
           break
       }
     }
-    return { gs, ext, day, phase, commander, activeSeat }
+    const designated = ext?.designatedTarget ?? null
+    const runoff = ext?.runoffCandidates ?? null
+    const coRequests = ext?.activeCoRequests ? [...ext.activeCoRequests] : []
+    return { gs, ext, day, phase, commander, activeSeat, designated, runoff, coRequests }
   })
 
   const phaseLabel = $derived(view.phase)
   const commanderSeat = $derived(view.commander)
   const activeSeat = $derived(view.activeSeat)
+
+  /** CO 要求カテゴリの日本語ラベル */
+  function coRequestJa(c: string): string {
+    switch (c) {
+      case 'seer': return '占い'
+      case 'medium': return '霊能'
+      case 'bodyguard': return '狩人'
+      case 'nekomata': return '猫又'
+      case 'nekomata_bodyguard_grelan': return '猫狩ギドラ'
+      default: return c
+    }
+  }
 
   /** フェーズの日本語ラベル */
   function phaseJa(p: string): string {
@@ -733,6 +748,31 @@
       </div>
     </section>
 
+    <!-- 進行役の指示: 吊り指定 / ラン指定 / CO 要求を目立つ枠で表示 -->
+    {#if view.designated !== null || (view.runoff && view.runoff.length > 0) || view.coRequests.length > 0}
+      <section class="commander-order">
+        <h3>進行役の指示</h3>
+        {#if view.designated !== null}
+          <div class="order-item order-execute">
+            <span class="order-label">吊り指定</span>
+            <strong>{nameOf(view.designated)}</strong>
+          </div>
+        {/if}
+        {#if view.runoff && view.runoff.length > 0}
+          <div class="order-item order-runoff">
+            <span class="order-label">ラン指定</span>
+            <strong>{view.runoff.map(nameOf).join(' / ')}</strong>
+          </div>
+        {/if}
+        {#if view.coRequests.length > 0}
+          <div class="order-item order-request">
+            <span class="order-label">CO要求</span>
+            <strong>{view.coRequests.map(coRequestJa).join(' / ')}</strong>
+          </div>
+        {/if}
+      </section>
+    {/if}
+
     <!-- 活動フィード: 最新 N 件の判断ログを小窓で表示（死後観戦にも有用） -->
     {#if state.activityLog.length > 0}
       <section class="activity">
@@ -1126,6 +1166,45 @@
     font-size: 12px;
     padding: 16px;
   }
+
+  .commander-order {
+    border-left: 4px solid var(--ctp-yellow, var(--color-accent));
+    background: var(--ctp-surface1, var(--color-surface));
+    padding: 10px 12px;
+  }
+
+  .commander-order h3 {
+    margin-top: 0;
+    color: var(--ctp-yellow, var(--color-accent));
+    letter-spacing: 0.05em;
+  }
+
+  .order-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 14px;
+  }
+
+  .order-item + .order-item {
+    border-top: 1px dashed var(--color-border);
+  }
+
+  .order-label {
+    min-width: 72px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--ctp-base, var(--color-bg));
+    background: var(--ctp-yellow, var(--color-accent));
+    text-align: center;
+  }
+
+  .order-execute .order-label { background: var(--ctp-red, var(--ctp-peach)); }
+  .order-runoff .order-label { background: var(--ctp-peach, var(--ctp-yellow)); }
+  .order-request .order-label { background: var(--ctp-sky, var(--ctp-blue)); }
 
   .activity {
     background: var(--ctp-mantle, var(--color-surface));

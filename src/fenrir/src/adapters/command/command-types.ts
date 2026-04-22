@@ -126,6 +126,13 @@ export type CommandAdapterExt = {
    */
   requestedCategoriesThisDay: Set<CoRequestCategory>
   /**
+   * 「現在アクティブな (= まだ一巡処理中の) CO 要求」のカテゴリ配列。
+   * request_co で push され、discussion が一巡完了 → commander フェーズに戻るときに clear する。
+   * UI でバナー表示対象として使う。requestedCategoriesThisDay は履歴用で消さない一方、
+   * こちらは表示用で一巡後に消える。
+   */
+  activeCoRequests: CoRequestCategory[]
+  /**
    * 人外の騙り割当。初回 villain discussion turn で決定され、以降不変。
    * Map<seat, claim> の形式。'hide' は潜伏（何も CO しない）。
    * 割り当てられた役職を CO し、以後その役職として結果報告を続ける。
@@ -151,6 +158,7 @@ export function createCommandAdapterExt(): CommandAdapterExt {
     voteCandidates: null,
     retarCache: null,
     requestedCategoriesThisDay: new Set(),
+    activeCoRequests: [],
     villainClaimPlan: new Map(),
   }
 }
