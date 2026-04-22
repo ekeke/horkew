@@ -6,6 +6,7 @@
  * policy gradient と value loss を計算してパラメータを更新する。
  */
 
+import { join } from 'node:path'
 import {
   TrainableNetwork,
   type ForwardCache,
@@ -14,6 +15,7 @@ import {
   logProbOf,
   softmax,
 } from './trainable-network.ts'
+import { saveCheckpoint } from './checkpoint.ts'
 import {
   AbstractGame,
   type EnvConfig,
@@ -72,6 +74,13 @@ export type TrainConfig = {
   optimizer?: 'sgd' | 'adam'     // default 'sgd'
   entropyBonus?: number          // default 0. policy entropy を最大化する方向の regularizer.
                                  //   β > 0 で smoother policy, exploration 促進
+  /** checkpoint 保存先ディレクトリ. 未指定なら保存しない. */
+  checkpointDir?: string
+  /** N iter ごとに `${checkpointDir}/iter{N}.json` を保存.
+   *  0 / 未指定なら intermediate checkpoint は書かない. 終了時は別途 final.json を保存. */
+  checkpointInterval?: number
+  /** 各 iter 終了時に呼ばれる hook (オーケストレータから進捗を拾うため). */
+  onIteration?: (entry: IterationLog, network: TrainableNetwork) => void
 }
 
 export type IterationLog = {
@@ -303,6 +312,18 @@ export function train(config: TrainConfig): { history: IterationLog[]; network: 
 
     history.push(entry)
     log(formatLog(entry))
+
+    if (config.onIteration) config.onIteration(entry, network)
+
+    if (config.checkpointDir && config.checkpointInterval && config.checkpointInterval > 0) {
+      if ((iter + 1) % config.checkpointInterval === 0) {
+        saveCheckpoint(network, join(config.checkpointDir, `iter${iter + 1}.json`))
+      }
+    }
+  }
+
+  if (config.checkpointDir) {
+    saveCheckpoint(network, join(config.checkpointDir, 'final.json'))
   }
 
   return { history, network }

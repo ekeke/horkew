@@ -101,7 +101,19 @@ type OrchestratorConfig = {
   wre?: string
   /** WRE再学習間隔 (iteration数、0=再学習無効)。サンプルバッファが batch×14×5×n×4.8KB 蓄積するため batch=64 なら n≤40 推奨 */
   wreRefresh: number
-  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero'
+  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn'
+  /** huginn 専用パラメータ (curriculum === 'huginn' のときのみ参照) */
+  huginnScenarios?: string[]
+  huginnIterations?: number
+  huginnGamesPerIter?: number
+  huginnLr?: number
+  huginnDModel?: number
+  huginnNumLayers?: number
+  huginnNumHeads?: number
+  huginnDff?: number
+  huginnCheckpointInterval?: number
+  huginnGreedyEvalEvery?: number
+  huginnGreedyEvalGames?: number
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -163,7 +175,18 @@ function parseArgs(): OrchestratorConfig {
         break
       }
       case '--wre-refresh': config.wreRefresh = parseInt(args[++i]); break
-      case '--curriculum': config.curriculum = args[++i] as 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero'; break
+      case '--curriculum': config.curriculum = args[++i] as 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn'; break
+      case '--huginn-scenario': config.huginnScenarios = args[++i].split(',').map(s => s.trim()).filter(Boolean); break
+      case '--huginn-iters': config.huginnIterations = parseInt(args[++i]); break
+      case '--huginn-games-per-iter': config.huginnGamesPerIter = parseInt(args[++i]); break
+      case '--huginn-lr': config.huginnLr = parseFloat(args[++i]); break
+      case '--huginn-dmodel': config.huginnDModel = parseInt(args[++i]); break
+      case '--huginn-layers': config.huginnNumLayers = parseInt(args[++i]); break
+      case '--huginn-heads': config.huginnNumHeads = parseInt(args[++i]); break
+      case '--huginn-dff': config.huginnDff = parseInt(args[++i]); break
+      case '--huginn-checkpoint-interval': config.huginnCheckpointInterval = parseInt(args[++i]); break
+      case '--huginn-greedy-eval-every': config.huginnGreedyEvalEvery = parseInt(args[++i]); break
+      case '--huginn-greedy-eval-games': config.huginnGreedyEvalGames = parseInt(args[++i]); break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -195,8 +218,21 @@ Options:
   --strategy-only          戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
   --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
   --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
-  --curriculum <name>      カリキュラム選択: default | brain-battle | bb-plus | skoll-pretrain | skoll-zero (default: default)
+  --curriculum <name>      カリキュラム選択: default | brain-battle | bb-plus | skoll-pretrain | skoll-zero | huginn (default: default)
   --skeleton               最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用)
+
+Huginn 専用 (--curriculum huginn):
+  --huginn-scenario <a,b>   シナリオ名 (catalog key、カンマ区切り mix 可)。必須
+  --huginn-iters <n>        学習 iteration 数 (default: 500)
+  --huginn-games-per-iter <n> 1 iter あたりのゲーム数 (default: 32)
+  --huginn-lr <f>           学習率 (default: 0.05)
+  --huginn-dmodel <n>       モデル次元 (default: 64)
+  --huginn-layers <n>       Transformer 層数 (default: 2)
+  --huginn-heads <n>        Attention head 数 (default: 4)
+  --huginn-dff <n>          FFN 次元 (default: 128)
+  --huginn-checkpoint-interval <n>  N iter ごとに iter{N}.json 保存 (default: 0=final のみ)
+  --huginn-greedy-eval-every <n>    N iter ごとに greedy eval (default: 0=無効)
+  --huginn-greedy-eval-games <n>    greedy eval 1 回あたりのゲーム数 (default: 32)
   --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
   --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled)
                            ⚠ batch×14×5×n×4.8KB がメモリに蓄積。batch=64 なら n≤40 推奨 (≈1GB)
@@ -792,6 +828,22 @@ async function selectStartMode(config: OrchestratorConfig): Promise<void> {
     return
   }
 
+  // --curriculum huginn: 既存 phase UI をスキップ (huginn 独自 layout)。
+  // --checkpoint-base 未指定なら train-status.json から前回ベースを拾うか、無ければ新規。
+  if (config.curriculum === 'huginn') {
+    if (!config.checkpointBase) {
+      const status = readTrainStatus()
+      if (status?.checkpointBase && existsSync(status.checkpointBase)) {
+        config.checkpointBase = status.checkpointBase
+        log(`Huginn: using previous base ${config.checkpointBase}`)
+      } else {
+        config.checkpointBase = nextCheckpointBase()
+        log(`Huginn new run: ${config.checkpointBase}`)
+      }
+    }
+    return
+  }
+
   // --resume が明示指定されている場合は従来動作（後方互換）
   if (config.resume) {
     if (!config.checkpointBase) {
@@ -838,6 +890,15 @@ function log(msg: string): void {
 // ============================================================
 
 function validateConfig(config: OrchestratorConfig): void {
+  // huginn は fenrir の evalInterval/chunkSize 等の制約を使わない独立カリキュラム
+  if (config.curriculum === 'huginn') {
+    if (!config.huginnScenarios || config.huginnScenarios.length === 0) {
+      console.error('設定エラー:')
+      console.error('  - --curriculum huginn には --huginn-scenario <name[,name...]> が必須')
+      process.exit(1)
+    }
+    return
+  }
   const errors: string[] = []
   if (config.evalInterval > config.chunkSize) {
     errors.push(`evalInterval (${config.evalInterval}) > chunkSize (${config.chunkSize}): eval がチャンク内で1回も走らない`)
@@ -981,6 +1042,31 @@ async function main(): Promise<void> {
     })
     shutdownCleanup('completed')
     log(`${BOLD}Skoll Zero complete!${RESET}`)
+    return
+  }
+
+  // === Huginn カリキュラム: 独立ループ (fenrir モデル非依存) ===
+  if (config.curriculum === 'huginn') {
+    const { runHuginnCurriculum } = await import('./huginn-orchestrator.ts')
+    runHuginnCurriculum({
+      checkpointBase: config.checkpointBase,
+      scenarios: config.huginnScenarios ?? [],
+      iterations: config.huginnIterations ?? 500,
+      gamesPerIter: config.huginnGamesPerIter ?? 32,
+      lr: config.huginnLr ?? 0.05,
+      dModel: config.huginnDModel,
+      numLayers: config.huginnNumLayers,
+      numHeads: config.huginnNumHeads,
+      dFf: config.huginnDff,
+      seed: 42,
+      greedyEvalEvery: config.huginnGreedyEvalEvery,
+      greedyEvalGames: config.huginnGreedyEvalGames,
+      checkpointInterval: config.huginnCheckpointInterval,
+      skeleton: config.skeleton,
+      log,
+    })
+    shutdownCleanup('completed')
+    log(`${BOLD}Huginn Training complete!${RESET}`)
     return
   }
 
