@@ -687,6 +687,10 @@ export class SkollCommandAgent implements CommandAgent {
         }
       }
     }
+    // 全 fake 報告済み: forecast head が発火すれば予告、それ以外は skip
+    // (fake seer は claimedRole='seer' なので super.decideForecast は通る)
+    const forecastResult = this.tryForecastFromHead(state, player, legal, events)
+    if (forecastResult) return forecastResult
     return skipOrFirst(legal, '(discussion)[fake-seer] all-reported skip')
   }
 

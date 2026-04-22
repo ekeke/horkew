@@ -553,6 +553,31 @@ test('SkollCommandAgent: discussion 真 seer 全報告済み + forecast head 発
   assert.match(result.log ?? '', /\[seer\/zero\] forecast seat3 \(NN\)/)
 })
 
+test('SkollCommandAgent: discussion fake seer 全報告済み + forecast head → forecast report', async () => {
+  const master = new FakeForecastZeroMaster({ type: 'forecast', target: 4 })
+  const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
+  const state = makeState('discussion')
+  // seat 3 = werewolf、fake seer CO 済で fakeDivineHistory 1 件が既報告状態
+  state.players[2].claimedRole = 'seer'
+  state.players[2].fakeDivineHistory = new Map([[0, { target: 2, result: 'human' }]])
+  state.day = 1
+  stubRetarCache(state)
+  const legal: Command[] = [
+    { type: 'skip' },
+    { type: 'role_result_report', claim: { type: 'seer_result', target: 2, result: 'human' } },
+    { type: 'role_result_report', claim: { type: 'forecast', target: 4 } },
+  ]
+  const reportEvent = {
+    type: 'seer_claim',
+    actor: 3,
+    results: [{ target: 2, result: 'human' as const }],
+  } as GameEvent
+  const result = await agent.decide(state, 3, legal, [reportEvent])
+  assert.equal(result.cmd.type, 'role_result_report')
+  assert.equal((result.cmd as { claim: DayClaim }).claim.type, 'forecast')
+  assert.match(result.log ?? '', /\[werewolf\/zero\] forecast seat4 \(NN\)/)
+})
+
 test('SkollCommandAgent: discussion 真 seer 全報告済み + forecast head が none → skip (既存挙動)', async () => {
   const master = new FakeForecastZeroMaster({ type: 'none' })
   const agent = new SkollCommandAgent({ master, fallback: new FixedFallback() })
