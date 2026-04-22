@@ -412,7 +412,11 @@ async function startGame(opts: StartGameOptions): Promise<void> {
     })
   }
 
+  // defaultAgent は adapter と collector で共有 (どちらも seed+1 で決定性を揃える)
+  const adapterDefaultAgent = new SkollCommandAgent({ seed: seed + 1 })
+
   // Huginn 交渉投票が enabled なら voteCollector を組み立てる (checkpoint fetch or random init).
+  // agents Map は onRolesAssigned で populate されるが、参照渡しなので collector 呼び出し時には埋まっている.
   let huginnVoteCollector: VoteCollector | undefined = undefined
   if (opts.huginnVoting?.enabled) {
     const huginnNetwork = await buildHuginnNetwork(opts.huginnVoting.scenarioName)
@@ -421,12 +425,14 @@ async function startGame(opts: StartGameOptions): Promise<void> {
       sampling: 'stochastic',
       seed: seed + 7,
       emitEvent,
+      agents,
+      defaultAgent: adapterDefaultAgent,
     })
   }
 
   const adapter = new CommandAdapter({
     agents,
-    defaultAgent: new SkollCommandAgent({ seed: seed + 1 }),
+    defaultAgent: adapterDefaultAgent,
     roles: rolesMap,
     seed,
     preferredCommanderSeats: humanSeatsForCommander,

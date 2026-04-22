@@ -16,6 +16,8 @@ import { createHuginnVoteCollector } from './huginn-vote-collector.ts'
 import { TrainableNetwork } from '../../../../huginn/trainable-network.ts'
 import { buildVocabLayout } from '../../../../huginn/message-vocab.ts'
 import { MAX_AGENTS, OFFER_REF_WINDOW } from '../../../../huginn/types.ts'
+import type { CommandAgent, DecisionResult } from '../../command-agents/command-agent.ts'
+import type { Command } from './command-types.ts'
 
 function makePlayer(seat: number, role: SystemRole, alive = true): PlayerState {
   return {
@@ -139,6 +141,86 @@ test('huginn collector: alive 0 なら空 Map', async () => {
   const votes = await collector(ctx, { state, candidates: [], alive: [] })
   assert.ok(votes !== null)
   assert.equal(votes!.size, 0)
+})
+
+class FakeMCTSAgent implements CommandAgent {
+  readonly name = 'fake-mcts'
+  decideCalledFor: number[] = []
+  private mcts: { visits: Map<number, number> } | null
+  constructor(mcts: { visits: Map<number, number> } | null = null) {
+    this.mcts = mcts
+  }
+  async decide(
+    _state: unknown,
+    seat: number,
+    legal: readonly Command[],
+    _events: unknown,
+  ): Promise<DecisionResult> {
+    this.decideCalledFor.push(seat)
+    return { cmd: legal[0], log: 'fake decide' }
+  }
+  getLastMCTSResult(): { visits: Map<number, number> } | null {
+    return this.mcts
+  }
+}
+
+test('huginn collector: agents 指定時は各 alive seat で decide が呼ばれる', async () => {
+  const state = makeState([
+    makePlayer(1, 'villager'),
+    makePlayer(2, 'villager'),
+    makePlayer(3, 'werewolf'),
+    makePlayer(4, 'fanatic'),
+  ])
+  const alive = state.players.filter(p => p.alive)
+  const candidates = alive.map(p => p.seat)
+
+  const mcts = { visits: new Map<number, number>([[3, 20], [4, 5]]) }
+  const defaultAgent = new FakeMCTSAgent(mcts)
+
+  const collector = createHuginnVoteCollector({
+    network: makeNetwork(),
+    sampling: 'argmax',
+    defaultAgent,
+  })
+  const ctx = makeVoteContext(state)
+  const votes = await collector(ctx, { state, candidates, alive })
+
+  // 各 alive seat で decide が呼ばれ、戻り値は votes に反映
+  assert.ok(votes !== null)
+  assert.equal(defaultAgent.decideCalledFor.length, alive.length)
+  for (const p of alive) {
+    assert.ok(defaultAgent.decideCalledFor.includes(p.seat), `seat ${p.seat} で decide が呼ばれていない`)
+  }
+})
+
+test('huginn collector: retarCache 経由の knowledge で throw せず map が返る', async () => {
+  const state = makeState([
+    makePlayer(1, 'villager'),
+    makePlayer(2, 'werewolf'),
+    makePlayer(3, 'bodyguard'),
+  ])
+  const alive = state.players.filter(p => p.alive)
+  const candidates = alive.map(p => p.seat)
+
+  // retarCache に可能性集合を流し込む (1=村人確定、2=狼確定、3=狩人/占い/猫又いずれか)
+  state.ext.retarCache = {
+    possibilities: new Map<number, Set<string>>([
+      [1, new Set(['villager'])],
+      [2, new Set(['werewolf'])],
+      [3, new Set(['bodyguard', 'seer', 'nekomata'])],
+    ]) as unknown as Map<number, Set<import('../../../../types/index.ts').SystemRole>>,
+    lastArtifacts: null,
+    computedAtEventCount: 0,
+  }
+
+  const collector = createHuginnVoteCollector({
+    network: makeNetwork(),
+    sampling: 'argmax',
+  })
+  const ctx = makeVoteContext(state)
+  const votes = await collector(ctx, { state, candidates, alive })
+  assert.ok(votes !== null)
+  assert.equal(votes!.size, alive.length)
 })
 
 test('huginn collector: candidates 外への投票は起きない (excluded mask)', async () => {

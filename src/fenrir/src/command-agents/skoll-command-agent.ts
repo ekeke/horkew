@@ -132,6 +132,16 @@ export class SkollCommandAgent implements CommandAgent {
     this.name = options.name ?? 'skoll'
   }
 
+  /**
+   * 最後に走行した MCTS の visits 分布を返す.
+   * master が RoleZeroAgent 等で MCTS をサポートする場合のみ非 null.
+   * huginn-vote-collector が投票分布から desire (primary 吊り候補) を組む際に使う.
+   */
+  getLastMCTSResult(): ZeroMCTSResult | null {
+    if (!hasMCTSSupport(this.master)) return null
+    return this.master.getLastMCTSResult()
+  }
+
   async decide(
     state: Readonly<GameState<CommandAdapterExt>>,
     mySeat: number,
