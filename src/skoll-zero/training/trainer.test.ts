@@ -20,6 +20,7 @@ import {
 import { loadCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { DEFAULT_SKOLL_ZERO_TRAIN_CONFIG } from './schedule.ts'
 import { SkollZeroTrainer, groupRecordsByHead, recordsToBatchInputs } from './trainer.ts'
+import { trainOutcomeSLBucket, OUTCOME_SL_HEAD_TYPES, type TrainerSlot } from './multi-trainer.ts'
 
 /** テスト用の seat/role 数 (MASON_COLLECTIVE input size) を取得 */
 function getInputSize(): number {
@@ -532,5 +533,185 @@ describe('trainOutcomeWeightedSL', () => {
       masks: [mask],
     }), /per-seat softmax head 'nonexistent' not found/)
     tfNet.dispose()
+  })
+})
+
+describe('OUTCOME_SL_HEAD_TYPES', () => {
+  it('全 outcome-SL head が登録されている', () => {
+    assert.equal(OUTCOME_SL_HEAD_TYPES.claim, 'globalSoftmax')
+    assert.equal(OUTCOME_SL_HEAD_TYPES.comm, 'globalSoftmax')
+    assert.equal(OUTCOME_SL_HEAD_TYPES.leader, 'globalSoftmax')
+    assert.equal(OUTCOME_SL_HEAD_TYPES.target, 'perSeatSoftmax')
+    assert.equal(OUTCOME_SL_HEAD_TYPES.propose, 'perSeatSigmoid')
+    assert.equal(OUTCOME_SL_HEAD_TYPES.predict, 'perSeatSigmoid')
+  })
+
+  it('MCTS-π head は含まれない (誤登録防止)', () => {
+    assert.equal(OUTCOME_SL_HEAD_TYPES.vote, undefined)
+    assert.equal(OUTCOME_SL_HEAD_TYPES.attack, undefined)
+    assert.equal(OUTCOME_SL_HEAD_TYPES.divine, undefined)
+    assert.equal(OUTCOME_SL_HEAD_TYPES.guard, undefined)
+  })
+})
+
+describe('trainOutcomeSLBucket', () => {
+  /** outcome-SL bucket テスト用の slot fixture (mason_collective config) */
+  function makeSlot(withRefNet: boolean, seed: number) {
+    const pureNet = createSkollZeroNetwork()
+    const tfNet = createSkollZeroTfNetwork(1e-2)
+    tfNet.loadWeights(pureNet.cloneWeights())
+    const masonZeroNet = new MasonZeroNetwork(pureNet, { zeroValueHead: false })
+    const buffer = new TrainingBuffer()
+    const slot: TrainerSlot = { masonZeroNet, tfNet, buffer }
+    if (withRefNet) {
+      const refNet = createSkollZeroNetwork()
+      refNet.loadWeights(pureNet.cloneWeights())
+      slot.refNet = refNet
+    }
+    const inputSize = pureNet.config.inputSize
+    const rng = makeRng(seed)
+    const mkObs = () => {
+      const obs = new Float32Array(inputSize)
+      for (let i = 0; i < inputSize; i++) obs[i] = (rng() - 0.5) * 0.1
+      return obs
+    }
+    return { slot, mkObs }
+  }
+
+  /** outcome-SL softmax record (claim/comm/leader/target 用) */
+  function mkSoftmaxRecord(opts: {
+    obs: Float32Array
+    actionIndex: number
+    z: number
+    headName: TrainingRecord['headName']
+    masonSeat?: number
+    alive?: number
+  }): TrainingRecord {
+    return {
+      obs: opts.obs,
+      day: 1,
+      masonSeat: opts.masonSeat ?? 1,
+      alive: opts.alive ?? aliveOf([1, 2, 3, 4, 5]),
+      headName: opts.headName,
+      actionIndex: opts.actionIndex,
+      z: opts.z,
+    }
+  }
+
+  /** outcome-SL sigmoid record (propose/predict 用) */
+  function mkSigmoidRecord(opts: {
+    obs: Float32Array
+    actionMultiHot: Uint8Array
+    z: number
+    headName: TrainingRecord['headName']
+  }): TrainingRecord {
+    return {
+      obs: opts.obs,
+      day: 1,
+      masonSeat: 1,
+      alive: aliveOf([1, 2, 3, 4, 5]),
+      headName: opts.headName,
+      actionMultiHot: opts.actionMultiHot,
+      z: opts.z,
+    }
+  }
+
+  it('globalSoftmax (claim): loss 有限、refNet 無しなら klLoss=0', () => {
+    const { slot, mkObs } = makeSlot(false, 111)
+    const bucket: TrainingRecord[] = [
+      mkSoftmaxRecord({ obs: mkObs(), actionIndex: 2, z: 1, headName: 'claim' }),
+      mkSoftmaxRecord({ obs: mkObs(), actionIndex: 5, z: -1, headName: 'claim' }),
+    ]
+    const res = trainOutcomeSLBucket(slot, 'claim', 'globalSoftmax', bucket, 0.1)
+    assert.ok(res, 'result non-null')
+    assert.ok(Number.isFinite(res!.loss), `loss finite (got ${res!.loss})`)
+    assert.ok(Number.isFinite(res!.policyLoss), 'policyLoss finite')
+    assert.equal(res!.klLoss, 0, 'klLoss=0 without refNet')
+    assert.equal(res!.valueLoss, 0, 'valueLoss always 0 for outcome-SL')
+    slot.tfNet.dispose()
+  })
+
+  it('perSeatSoftmax (target): legal mask が alive & ~masonSeat で構築される', () => {
+    const { slot, mkObs } = makeSlot(false, 222)
+    const bucket: TrainingRecord[] = [
+      mkSoftmaxRecord({
+        obs: mkObs(),
+        actionIndex: 3,  // seat 4 (0-indexed)
+        z: 1,
+        headName: 'target',
+        masonSeat: 1,
+        alive: aliveOf([1, 2, 3, 4, 5]),
+      }),
+    ]
+    const res = trainOutcomeSLBucket(slot, 'target', 'perSeatSoftmax', bucket, 0)
+    assert.ok(res, 'result non-null')
+    assert.ok(Number.isFinite(res!.loss), 'loss finite')
+    slot.tfNet.dispose()
+  })
+
+  it('perSeatSigmoid (predict): Uint8Array actionMultiHot を変換して loss 計算', () => {
+    const { slot, mkObs } = makeSlot(false, 333)
+    const multiHot = new Uint8Array(14 * 11)
+    multiHot[5] = 1
+    multiHot[20] = 1
+    const bucket: TrainingRecord[] = [
+      mkSigmoidRecord({ obs: mkObs(), actionMultiHot: multiHot, z: 1, headName: 'predict' }),
+    ]
+    const res = trainOutcomeSLBucket(slot, 'predict', 'perSeatSigmoid', bucket, 0)
+    assert.ok(res, 'result non-null')
+    assert.ok(Number.isFinite(res!.loss), 'loss finite')
+    slot.tfNet.dispose()
+  })
+
+  it('refNet + klCoeff>0 で klLoss が計上される (初期は ~0 の数値ノイズ程度)', () => {
+    const { slot, mkObs } = makeSlot(true, 444)
+    const bucket: TrainingRecord[] = [
+      mkSoftmaxRecord({ obs: mkObs(), actionIndex: 2, z: 1, headName: 'claim' }),
+      mkSoftmaxRecord({ obs: mkObs(), actionIndex: 4, z: 0, headName: 'claim' }),
+    ]
+    const res = trainOutcomeSLBucket(slot, 'claim', 'globalSoftmax', bucket, 0.1)
+    assert.ok(res, 'result non-null')
+    assert.ok(Number.isFinite(res!.klLoss), 'klLoss finite')
+    // refNet と tfNet は同じ weights で開始するので klLoss はほぼ 0 (Pure JS ↔ TF の数値差のみ)
+    assert.ok(Math.abs(res!.klLoss) < 0.5, `klLoss small at start (got ${res!.klLoss})`)
+    slot.tfNet.dispose()
+  })
+
+  it('action 情報欠損 bucket は null を返す', () => {
+    const { slot, mkObs } = makeSlot(false, 555)
+    // actionIndex も actionMultiHot も持たない (MCTS-π record)
+    const bucket: TrainingRecord[] = [{
+      obs: mkObs(),
+      day: 1,
+      masonSeat: 1,
+      alive: aliveOf([1, 2, 3]),
+      headName: 'claim',
+      z: 1,
+      // actionIndex 未設定
+    }]
+    const res = trainOutcomeSLBucket(slot, 'claim', 'globalSoftmax', bucket, 0)
+    assert.equal(res, null, '無効 bucket は null')
+    slot.tfNet.dispose()
+  })
+
+  it('混在 bucket: action あり record のみ使い、無し record は捨てる', () => {
+    const { slot, mkObs } = makeSlot(false, 666)
+    const bucket: TrainingRecord[] = [
+      mkSoftmaxRecord({ obs: mkObs(), actionIndex: 2, z: 1, headName: 'claim' }),
+      // 混ざった不正 record (action 無し)
+      {
+        obs: mkObs(),
+        day: 1,
+        masonSeat: 1,
+        alive: aliveOf([1, 2, 3]),
+        headName: 'claim',
+        z: 0,
+      },
+      mkSoftmaxRecord({ obs: mkObs(), actionIndex: 5, z: -1, headName: 'claim' }),
+    ]
+    const res = trainOutcomeSLBucket(slot, 'claim', 'globalSoftmax', bucket, 0)
+    assert.ok(res, '有効 record 2 件で loss 計算')
+    assert.ok(Number.isFinite(res!.loss), 'loss finite')
+    slot.tfNet.dispose()
   })
 })

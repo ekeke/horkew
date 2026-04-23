@@ -33,6 +33,17 @@ export type SkollZeroTrainConfig = {
   rootDirichletEps: number
   /** Trainer の RNG seed (batch sampling, self-play 初期 seed) */
   rngSeed: number
+  /**
+   * Phase 3: Outcome-weighted SL の有効化。
+   * true の場合、非 MCTS head (claim/comm/leader/target/propose/predict) の buffer bucket に
+   * 対して trainOutcomeWeightedSL を呼ぶ。false では従来の MCTS-π のみ学習。
+   */
+  enableOutcomeSL: boolean
+  /**
+   * Outcome-SL 時の KL anchor 係数 (pretrained refNet への発散ペナルティ)。
+   * 0 で KL 計算をスキップ。plan §3 の初期値 = 0.1。
+   */
+  klCoeff: number
 }
 
 export const DEFAULT_SKOLL_ZERO_TRAIN_CONFIG: SkollZeroTrainConfig = {
@@ -47,4 +58,6 @@ export const DEFAULT_SKOLL_ZERO_TRAIN_CONFIG: SkollZeroTrainConfig = {
   rootDirichletAlpha: 0.3,
   rootDirichletEps: 0.25,
   rngSeed: 42,
+  enableOutcomeSL: false,
+  klCoeff: 0.1,
 }

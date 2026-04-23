@@ -118,6 +118,14 @@ type OrchestratorConfig = {
   huginnValueLossWeight?: number
   huginnEntropyBonus?: number
   huginnGradClip?: number
+  /** skoll-zero カリキュラム専用パラメータ (curriculum === 'skoll-zero' のときのみ参照) */
+  skollZeroOutcomeSL?: boolean
+  skollZeroKlCoeff?: number
+  skollZeroRounds?: number
+  skollZeroGamesPerRound?: number
+  skollZeroRollouts?: number
+  skollZeroStepsPerRound?: number
+  skollZeroBatchSize?: number
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -195,6 +203,13 @@ function parseArgs(): OrchestratorConfig {
       case '--huginn-value-loss-weight': config.huginnValueLossWeight = parseFloat(args[++i]); break
       case '--huginn-entropy-bonus': config.huginnEntropyBonus = parseFloat(args[++i]); break
       case '--huginn-grad-clip': config.huginnGradClip = parseFloat(args[++i]); break
+      case '--skoll-zero-outcome-sl': config.skollZeroOutcomeSL = true; break
+      case '--skoll-zero-kl-coeff': config.skollZeroKlCoeff = parseFloat(args[++i]); break
+      case '--skoll-zero-rounds': config.skollZeroRounds = parseInt(args[++i]); break
+      case '--skoll-zero-games': config.skollZeroGamesPerRound = parseInt(args[++i]); break
+      case '--skoll-zero-rollouts': config.skollZeroRollouts = parseInt(args[++i]); break
+      case '--skoll-zero-steps': config.skollZeroStepsPerRound = parseInt(args[++i]); break
+      case '--skoll-zero-batch': config.skollZeroBatchSize = parseInt(args[++i]); break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -248,6 +263,15 @@ Huginn 専用 (--curriculum huginn):
   --huginn-value-loss-weight <f>    value loss の重み (default: 1.0)。爆発時は 0.5 / 0.1 等
   --huginn-entropy-bonus <f>        policy entropy 正則化 (default: 0.01)
   --huginn-grad-clip <f>            Global L2 gradient clip norm (default: 0=無効、推奨 1.0-5.0)
+
+Skoll-Zero 専用 (--curriculum skoll-zero):
+  --skoll-zero-rounds <n>   学習 round 数 (default: 30)
+  --skoll-zero-games <n>    1 round あたりの self-play ゲーム数 (default: 30)
+  --skoll-zero-rollouts <n> MCTS rollout 数 (default: 50)
+  --skoll-zero-steps <n>    1 round あたりの train step 数 (default: 40)
+  --skoll-zero-batch <n>    PPO/SL batch size (default: 32)
+  --skoll-zero-outcome-sl   Phase 3 Outcome-weighted SL head 学習を有効化 (default: 無効)
+  --skoll-zero-kl-coeff <f> Outcome-SL 時の KL anchor 係数 (default: 0.1、0 で KL 無効)
   --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
   --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled)
                            ⚠ batch×14×5×n×4.8KB がメモリに蓄積。batch=64 なら n≤40 推奨 (≈1GB)
@@ -1066,6 +1090,13 @@ async function main(): Promise<void> {
     await runSkollZero({
       checkpointBase: config.checkpointBase,
       learningRate: config.learningRate,
+      ...(config.skollZeroOutcomeSL !== undefined ? { enableOutcomeSL: config.skollZeroOutcomeSL } : {}),
+      ...(config.skollZeroKlCoeff !== undefined ? { klCoeff: config.skollZeroKlCoeff } : {}),
+      ...(config.skollZeroRounds !== undefined ? { rounds: config.skollZeroRounds } : {}),
+      ...(config.skollZeroGamesPerRound !== undefined ? { gamesPerRound: config.skollZeroGamesPerRound } : {}),
+      ...(config.skollZeroRollouts !== undefined ? { rollouts: config.skollZeroRollouts } : {}),
+      ...(config.skollZeroStepsPerRound !== undefined ? { stepsPerRound: config.skollZeroStepsPerRound } : {}),
+      ...(config.skollZeroBatchSize !== undefined ? { batchSize: config.skollZeroBatchSize } : {}),
     })
     shutdownCleanup('completed')
     log(`${BOLD}Skoll Zero complete!${RESET}`)
