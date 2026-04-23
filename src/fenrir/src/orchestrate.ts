@@ -126,6 +126,15 @@ type OrchestratorConfig = {
   skollZeroRollouts?: number
   skollZeroStepsPerRound?: number
   skollZeroBatchSize?: number
+  /** skoll-zero-pretrain カリキュラム専用パラメータ (Phase 2.5 consolidation) */
+  skollzpDataDir?: string
+  skollzpBaseline?: string
+  skollzpEpochs?: number
+  skollzpBatchSize?: number
+  skollzpPatience?: number
+  skollzpEvalRatio?: number
+  skollzpOnlyRole?: string
+  skollzpSkipMethods?: string[]
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -210,6 +219,14 @@ function parseArgs(): OrchestratorConfig {
       case '--skoll-zero-rollouts': config.skollZeroRollouts = parseInt(args[++i]); break
       case '--skoll-zero-steps': config.skollZeroStepsPerRound = parseInt(args[++i]); break
       case '--skoll-zero-batch': config.skollZeroBatchSize = parseInt(args[++i]); break
+      case '--skollzp-data-dir': config.skollzpDataDir = args[++i]; break
+      case '--skollzp-baseline': config.skollzpBaseline = args[++i]; break
+      case '--skollzp-epochs': config.skollzpEpochs = parseInt(args[++i]); break
+      case '--skollzp-batch': config.skollzpBatchSize = parseInt(args[++i]); break
+      case '--skollzp-patience': config.skollzpPatience = parseInt(args[++i]); break
+      case '--skollzp-eval-ratio': config.skollzpEvalRatio = parseFloat(args[++i]); break
+      case '--skollzp-role': config.skollzpOnlyRole = args[++i]; break
+      case '--skollzp-skip-methods': config.skollzpSkipMethods = args[++i].split(',').map(s => s.trim()).filter(Boolean); break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -272,6 +289,16 @@ Skoll-Zero 専用 (--curriculum skoll-zero):
   --skoll-zero-batch <n>    PPO/SL batch size (default: 32)
   --skoll-zero-outcome-sl   Phase 3 Outcome-weighted SL head 学習を有効化 (default: 無効)
   --skoll-zero-kl-coeff <f> Outcome-SL 時の KL anchor 係数 (default: 0.1、0 で KL 無効)
+
+Skoll-Zero-Pretrain 専用 (--curriculum skoll-zero-pretrain、Phase 2.5 multi-head consolidation):
+  --skollzp-data-dir <dir>  Phase 2 収集済 JSONL ディレクトリ (default: tmp/phase2-data-v1)
+  --skollzp-baseline <path> Phase 2 single-head summary.json で diff 計算 (default: tmp/phase2-pretrain-v1/summary.json)
+  --skollzp-epochs <n>      最大 epoch 数 (default: trainer.ts の DEFAULT_MULTIHEAD_OPTIONS)
+  --skollzp-batch <n>       batch size
+  --skollzp-patience <n>    early stopping patience
+  --skollzp-eval-ratio <f>  eval split 比率
+  --skollzp-role <name>     単一役職のみ実行 (debug 用)
+  --skollzp-skip-methods <a,b> カンマ区切りで method を除外
   --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
   --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled)
                            ⚠ batch×14×5×n×4.8KB がメモリに蓄積。batch=64 なら n≤40 推奨 (≈1GB)
@@ -1109,6 +1136,14 @@ async function main(): Promise<void> {
     await runSkollZeroPretrain({
       checkpointBase: config.checkpointBase,
       learningRate: config.learningRate,
+      ...(config.skollzpDataDir !== undefined ? { dataDir: config.skollzpDataDir } : {}),
+      ...(config.skollzpBaseline !== undefined ? { baselineSummary: config.skollzpBaseline } : {}),
+      ...(config.skollzpEpochs !== undefined ? { epochs: config.skollzpEpochs } : {}),
+      ...(config.skollzpBatchSize !== undefined ? { batchSize: config.skollzpBatchSize } : {}),
+      ...(config.skollzpPatience !== undefined ? { patience: config.skollzpPatience } : {}),
+      ...(config.skollzpEvalRatio !== undefined ? { evalRatio: config.skollzpEvalRatio } : {}),
+      ...(config.skollzpOnlyRole !== undefined ? { onlyRole: config.skollzpOnlyRole } : {}),
+      ...(config.skollzpSkipMethods !== undefined ? { skipMethods: config.skollzpSkipMethods } : {}),
     })
     shutdownCleanup('completed')
     log(`${BOLD}Skoll Zero Pretrain complete!${RESET}`)
