@@ -9,8 +9,8 @@
  * - checkpoint 保存 (既存 saveCheckpoint 形式)
  */
 
-import { readFileSync, mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { readFileSync, mkdirSync, existsSync, statSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { TfTransformerNetwork } from '../../fenrir/src/ml/nn-tf-transformer.ts'
 import { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 import { saveCheckpoint, loadNetworkFromCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
@@ -291,7 +291,7 @@ export async function trainPhase2Head(opts: TrainerOptions): Promise<TrainerResu
  *
  * 注: mask は loaded sample にある場合のみ per-seat softmax で適用。
  */
-function evalHead(
+export function evalHead(
   net: TransformerNetwork,
   samples: LoadedSample[],
   spec: MethodSpec,
@@ -360,6 +360,229 @@ function evalHead(
     ? correct / Math.max(1, labelCount)
     : correct / Math.max(1, sampleCount)
   return { loss, accuracy }
+}
+
+// ============================================================================
+// Multi-head joint training (Phase 2.5 consolidation)
+// ============================================================================
+
+export type MultiHeadMethodResult = {
+  method: string
+  samples: number
+  trainSamples: number
+  evalSamples: number
+  bestEvalLoss: number
+  bestEvalAcc: number
+}
+
+export type MultiHeadEpochPerMethod = {
+  trainLoss: number
+  trainAcc: number
+  evalLoss: number
+  evalAcc: number
+}
+
+export type MultiHeadEpochResult = {
+  epoch: number
+  totalTrainLoss: number
+  totalEvalLoss: number
+  perMethod: Map<string, MultiHeadEpochPerMethod>
+}
+
+export type MultiHeadTrainerOptions = {
+  role: string
+  dataDir: string
+  outputCheckpointPath?: string
+  batchSize: number
+  epochs: number
+  learningRate: number
+  evalRatio: number
+  patience: number
+  seed: number
+  /** 除外する method (debug 用) */
+  skipMethods?: string[]
+  /** データ無しでも throw せず空 result を返す */
+  skipIfNoData?: boolean
+}
+
+export const DEFAULT_MULTIHEAD_OPTIONS: Omit<MultiHeadTrainerOptions, 'role' | 'dataDir'> = {
+  batchSize: 128,
+  epochs: 20,
+  learningRate: 3e-4,
+  evalRatio: 0.1,
+  patience: 5,
+  seed: 42,
+}
+
+export type MultiHeadTrainerResult = {
+  perMethod: Map<string, MultiHeadMethodResult>
+  epochHistory: MultiHeadEpochResult[]
+  bestEpoch: number
+  bestTotalEvalLoss: number
+}
+
+/**
+ * 1 role の全 method を 1 NN に join supervised learn する (Phase 2.5 consolidation)。
+ *
+ * - `{dataDir}/{role}/{method}.jsonl` を全 method 分 load
+ * - 各 method で train/eval split (共通 evalRatio)
+ * - epoch 内で全 method の minibatch を interleave (method-shuffle)
+ * - trainSupervisedHead は 1 batch = 1 method で dispatch
+ * - early stop: sum_m evalLoss[m] が patience epoch 改善なしで停止
+ * - best weights (sum eval loss 最小) を outputCheckpointPath に保存
+ */
+export async function trainPhase2MultiHead(
+  opts: MultiHeadTrainerOptions,
+): Promise<MultiHeadTrainerResult> {
+  const rng = makeRng(opts.seed)
+  const skip = new Set(opts.skipMethods ?? [])
+
+  type Bucket = {
+    method: string
+    spec: MethodSpec
+    trainSet: LoadedSample[]
+    evalSet: LoadedSample[]
+  }
+  const buckets: Bucket[] = []
+
+  const methods = Object.keys(METHOD_HEAD_MAP).sort()
+  for (const method of methods) {
+    if (skip.has(method)) continue
+    const spec = METHOD_HEAD_MAP[method]
+    const inputPath = join(opts.dataDir, opts.role, `${method}.jsonl`)
+    if (!existsSync(inputPath)) continue
+    if (statSync(inputPath).size === 0) continue
+
+    const samples = loadJsonlSamples(inputPath, spec)
+    if (samples.length === 0) continue
+
+    shuffleInPlace(samples, rng)
+    const evalN = Math.max(1, Math.floor(samples.length * opts.evalRatio))
+    const evalSet = samples.slice(0, evalN)
+    const trainSet = samples.slice(evalN)
+    buckets.push({ method, spec, trainSet, evalSet })
+  }
+
+  if (buckets.length === 0) {
+    if (opts.skipIfNoData) {
+      return { perMethod: new Map(), epochHistory: [], bestEpoch: -1, bestTotalEvalLoss: Infinity }
+    }
+    throw new Error(`no method data found under ${opts.dataDir}/${opts.role}`)
+  }
+
+  const config = configForRole(opts.role)
+  const mode = obsModeForRole(opts.role)
+  const tfNet = new TfTransformerNetwork(config, opts.learningRate, mode)
+  const evalNet = new TransformerNetwork(config, mode)
+
+  const bestPerMethod = new Map<string, MultiHeadMethodResult>()
+  const epochHistory: MultiHeadEpochResult[] = []
+  let bestEpoch = -1
+  let bestTotalEvalLoss = Infinity
+  let bestWeights: Map<string, Float32Array> | null = null
+  let patienceCounter = 0
+
+  for (let epoch = 0; epoch < opts.epochs; epoch++) {
+    // 各 bucket の train を shuffle し、(methodIdx, batchStart) を列挙
+    const batchIndex: Array<{ methodIdx: number, start: number }> = []
+    for (let m = 0; m < buckets.length; m++) {
+      shuffleInPlace(buckets[m].trainSet, rng)
+      for (let start = 0; start < buckets[m].trainSet.length; start += opts.batchSize) {
+        batchIndex.push({ methodIdx: m, start })
+      }
+    }
+    // minibatch 順を method 間で interleave
+    shuffleInPlace(batchIndex, rng)
+
+    type PerMethodAcc = { trainLoss: number, trainAcc: number, trainN: number, evalLoss: number, evalAcc: number }
+    const perMethod = new Map<string, PerMethodAcc>()
+    for (const b of buckets) {
+      perMethod.set(b.method, { trainLoss: 0, trainAcc: 0, trainN: 0, evalLoss: 0, evalAcc: 0 })
+    }
+
+    for (const { methodIdx, start } of batchIndex) {
+      const bucket = buckets[methodIdx]
+      const batch = bucket.trainSet.slice(start, Math.min(start + opts.batchSize, bucket.trainSet.length))
+      const out = tfNet.trainSupervisedHead({
+        observations: batch.map(s => s.observation),
+        labels: batch.map(s => s.label),
+        masks: bucket.spec.headType === 'perSeatSoftmax' ? batch.map(s => s.mask!) : undefined,
+        headName: bucket.spec.headName,
+        headType: bucket.spec.headType,
+      })
+      const pm = perMethod.get(bucket.method)!
+      pm.trainLoss += out.loss * batch.length
+      pm.trainAcc += out.accuracy * batch.length
+      pm.trainN += batch.length
+    }
+
+    // Eval: TF → Pure JS sync → forward per method
+    evalNet.loadWeights(tfNet.cloneWeights())
+
+    let totalTrainLoss = 0
+    let totalEvalLoss = 0
+    for (const b of buckets) {
+      const pm = perMethod.get(b.method)!
+      pm.trainLoss /= Math.max(1, pm.trainN)
+      pm.trainAcc /= Math.max(1, pm.trainN)
+      const ev = evalHead(evalNet, b.evalSet, b.spec)
+      pm.evalLoss = ev.loss
+      pm.evalAcc = ev.accuracy
+      totalTrainLoss += pm.trainLoss
+      totalEvalLoss += pm.evalLoss
+    }
+
+    const logLine = buckets.map(b => {
+      const pm = perMethod.get(b.method)!
+      return `${b.method}=acc${pm.evalAcc.toFixed(3)}`
+    }).join(' ')
+    process.stderr.write(
+      `[phase2-multi ${opts.role}] epoch ${epoch + 1}/${opts.epochs} ` +
+      `trainLossSum=${totalTrainLoss.toFixed(4)} evalLossSum=${totalEvalLoss.toFixed(4)} ${logLine}\n`,
+    )
+
+    const epochPerMethod = new Map<string, MultiHeadEpochPerMethod>()
+    for (const [k, v] of perMethod) {
+      epochPerMethod.set(k, { trainLoss: v.trainLoss, trainAcc: v.trainAcc, evalLoss: v.evalLoss, evalAcc: v.evalAcc })
+    }
+    epochHistory.push({ epoch: epoch + 1, totalTrainLoss, totalEvalLoss, perMethod: epochPerMethod })
+
+    if (totalEvalLoss < bestTotalEvalLoss) {
+      bestTotalEvalLoss = totalEvalLoss
+      bestEpoch = epoch + 1
+      bestWeights = tfNet.cloneWeights()
+      patienceCounter = 0
+      for (const b of buckets) {
+        const pm = perMethod.get(b.method)!
+        bestPerMethod.set(b.method, {
+          method: b.method,
+          samples: b.trainSet.length + b.evalSet.length,
+          trainSamples: b.trainSet.length,
+          evalSamples: b.evalSet.length,
+          bestEvalLoss: pm.evalLoss,
+          bestEvalAcc: pm.evalAcc,
+        })
+      }
+    } else {
+      patienceCounter++
+      if (patienceCounter >= opts.patience) {
+        process.stderr.write(`[phase2-multi ${opts.role}] early stop at epoch ${epoch + 1}\n`)
+        break
+      }
+    }
+  }
+
+  if (opts.outputCheckpointPath && bestWeights) {
+    evalNet.loadWeights(bestWeights)
+    mkdirSync(dirname(opts.outputCheckpointPath), { recursive: true })
+    saveCheckpoint(evalNet, opts.outputCheckpointPath, {
+      iteration: bestEpoch,
+      // multi-head では単一 scalar の acc が無いので metadata は 0 (per-method は summary.json 側に出す)
+      winRate: 0,
+    })
+  }
+
+  return { perMethod: bestPerMethod, epochHistory, bestEpoch, bestTotalEvalLoss }
 }
 
 // ============================================================================

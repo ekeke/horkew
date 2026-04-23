@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -9,7 +9,9 @@ import {
   loadJsonlSamples,
   configForRole,
   obsModeForRole,
+  trainPhase2MultiHead,
 } from './trainer.ts'
+import { OBSERVATION_SIZE } from '../../fenrir/src/observation.ts'
 
 test('METHOD_HEAD_MAP covers all collector-emitted methods', () => {
   const expectedMethods = [
@@ -133,6 +135,111 @@ test('loadJsonlSamples: sigmoid head preserves multi-hot vector', () => {
     assert.strictEqual(loaded[0].label[9], 1)
     assert.strictEqual(loaded[0].label[0], 0)
     assert.strictEqual(loaded[0].mask, undefined, 'sigmoid should not use mask')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ============================================================================
+// Multi-head joint training
+// ============================================================================
+
+/** テスト用: villager (individual obs) で claim + propose の fake data を書き出す */
+function writeFakeVillagerData(baseDir: string): void {
+  mkdirSync(join(baseDir, 'villager'), { recursive: true })
+  const obsZeros = new Array(OBSERVATION_SIZE).fill(0)
+
+  // claim: globalSoftmax 10dim
+  const claimLines: string[] = []
+  for (let i = 0; i < 40; i++) {
+    claimLines.push(JSON.stringify({
+      role: 'villager', method: 'claim',
+      obs: obsZeros, actionIdx: i % 2 === 0 ? 3 : 4,
+      meta: { gameId: 0, day: 1, seat: 1, alive: 0x7FFE },
+    }))
+  }
+  writeFileSync(join(baseDir, 'villager', 'claim.jsonl'), claimLines.join('\n'))
+
+  // propose: perSeatSigmoid 14dim
+  const proposeVec = new Array(14).fill(0)
+  proposeVec[2] = 1
+  proposeVec[5] = 1
+  const proposeLines: string[] = []
+  for (let i = 0; i < 40; i++) {
+    proposeLines.push(JSON.stringify({
+      role: 'villager', method: 'propose',
+      obs: obsZeros, actionVec: proposeVec,
+      meta: { gameId: 0, day: 1, seat: 1, alive: 0x7FFE },
+    }))
+  }
+  writeFileSync(join(baseDir, 'villager', 'propose.jsonl'), proposeLines.join('\n'))
+}
+
+test('trainPhase2MultiHead: 2 method joint で両 head が学習され checkpoint が保存される', async () => {
+  const dir = join(tmpdir(), `phase2-multi-${Date.now()}-${Math.floor(Math.random() * 1e6)}`)
+  const ckptPath = join(dir, 'villager.json')
+  try {
+    writeFakeVillagerData(dir)
+
+    const result = await trainPhase2MultiHead({
+      role: 'villager',
+      dataDir: dir,
+      outputCheckpointPath: ckptPath,
+      batchSize: 16,
+      epochs: 3,
+      learningRate: 3e-4,
+      evalRatio: 0.2,
+      patience: 5,
+      seed: 42,
+    })
+
+    assert.strictEqual(result.perMethod.size, 2, 'should have 2 methods in result')
+    assert.ok(result.perMethod.has('claim'), 'claim method should be in result')
+    assert.ok(result.perMethod.has('propose'), 'propose method should be in result')
+    assert.ok(result.bestEpoch >= 1, `bestEpoch should be >= 1, got ${result.bestEpoch}`)
+    assert.ok(Number.isFinite(result.bestTotalEvalLoss), 'bestTotalEvalLoss should be finite')
+    assert.ok(existsSync(ckptPath), 'checkpoint should be written')
+
+    const claimResult = result.perMethod.get('claim')!
+    assert.ok(claimResult.trainSamples > 0, 'claim train samples > 0')
+    assert.ok(claimResult.evalSamples > 0, 'claim eval samples > 0')
+
+    const proposeResult = result.perMethod.get('propose')!
+    assert.ok(proposeResult.trainSamples > 0, 'propose train samples > 0')
+    assert.ok(proposeResult.evalSamples > 0, 'propose eval samples > 0')
+
+    // epochHistory が epoch ごとの perMethod を持つ
+    assert.ok(result.epochHistory.length >= 1)
+    for (const e of result.epochHistory) {
+      assert.ok(e.perMethod.has('claim'))
+      assert.ok(e.perMethod.has('propose'))
+      assert.ok(Number.isFinite(e.totalEvalLoss))
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('trainPhase2MultiHead: skipMethods で指定した method は学習対象から除外される', async () => {
+  const dir = join(tmpdir(), `phase2-multi-skip-${Date.now()}-${Math.floor(Math.random() * 1e6)}`)
+  try {
+    writeFakeVillagerData(dir)
+
+    const result = await trainPhase2MultiHead({
+      role: 'villager',
+      dataDir: dir,
+      batchSize: 16,
+      epochs: 2,
+      learningRate: 3e-4,
+      evalRatio: 0.2,
+      patience: 5,
+      seed: 42,
+      skipMethods: ['propose'],
+    })
+
+    assert.strictEqual(result.perMethod.size, 1, 'should have only claim after skipping propose')
+    assert.ok(result.perMethod.has('claim'))
+    assert.ok(!result.perMethod.has('propose'), 'propose should be excluded')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
