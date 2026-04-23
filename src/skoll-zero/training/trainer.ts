@@ -235,8 +235,10 @@ export function recordsToBatchInputs(records: readonly TrainingRecord[]): {
     valueTargets[i] = r.z
 
     const pi = new Float32Array(SEATS)
-    for (const [seat, prob] of r.pi) {
-      if (seat >= 1 && seat <= SEATS) pi[seat - 1] = prob
+    if (r.pi) {
+      for (const [seat, prob] of r.pi) {
+        if (seat >= 1 && seat <= SEATS) pi[seat - 1] = prob
+      }
     }
     policyTargets[i] = pi
 

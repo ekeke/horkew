@@ -14,7 +14,7 @@
  */
 import type { DayClaim } from '../../lupa/types.ts'
 import type { Signal, RolePrediction } from '../../fenrir/src/communication.ts'
-import type { LeadershipResponse } from '../../fenrir/src/leadership.ts'
+import type { LeadershipResponse, Proposal } from '../../fenrir/src/leadership.ts'
 import { CLAIM } from '../../fenrir/src/action.ts'
 import { SEATS, NUM_ROLES, ROLE_INDEX } from '../../fenrir/src/observation.ts'
 
@@ -91,6 +91,19 @@ export function encodeLeader(resp: LeadershipResponse): number {
     case 'defy': return 1
     case 'no_response': return 2
   }
+}
+
+/**
+ * Proposal.target → propose head の 14 dim multi-hot (単席のみ 1)。
+ * Phase 3 capture hook 用。RoleZeroAgent.decideProposal は 1 seat を target に選ぶので
+ * 常に単席 one-hot になる (複数提案は別 Proposal インスタンスで表現)。
+ */
+export function encodeProposal(proposal: Proposal): Uint8Array {
+  const out = new Uint8Array(SEATS)
+  if (proposal.target >= 1 && proposal.target <= SEATS) {
+    out[proposal.target - 1] = 1
+  }
+  return out
 }
 
 /**

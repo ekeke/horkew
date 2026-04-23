@@ -118,7 +118,7 @@ describe('runSelfPlayGame: dummy NN で end-to-end', () => {
       }
       // π の合計が 1 (visits があれば)
       for (const r of recs) {
-        if (r.pi.size > 0) {
+        if (r.pi && r.pi.size > 0) {
           let sum = 0
           for (const p of r.pi.values()) sum += p
           assert.ok(Math.abs(sum - 1) < 1e-6, `π 合計 = 1 (実測 ${sum})`)

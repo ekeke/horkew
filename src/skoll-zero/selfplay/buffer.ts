@@ -1,23 +1,52 @@
 import type { HeadName } from '../mcts/nn.ts'
 import type { RootObs } from './observation.ts'
 
+/**
+ * 1 意思決定点で buffer に蓄積するレコード。
+ *
+ * 2 系統の学習対象を持つ:
+ * - **MCTS-π head** (vote/attack/divine/guard): visits + pi を持つ、CE(π) + MSE(z) で学習
+ * - **Outcome-SL head** (claim/comm/leader/propose/predict/target): actionIndex or actionMultiHot を持つ、
+ *   outcome-weighted CE + KL anchor で学習 (Phase 3 で導入)
+ *
+ * どちらの系統かは headName で判定する。
+ */
 export type PendingRecord = {
   obs: RootObs
-  /** action (対象 seat) → MCTS visit 数 */
-  visits: Map<number, number>
-  /** 正規化済み policy target π = N(a) / Σ N(b) */
-  pi: Map<number, number>
   day: number
   masonSeat: number
   /** 決定時点の生存 bitmask (1-based)。legal action mask を Float32Array に変換するのに使う */
   alive: number
-  /** この記録が学習すべき head 名 (vote/attack/divine/guard)。trainer が head ごとに分割 */
+  /** この記録が学習すべき head 名。trainer が head ごとに分割 */
   headName: HeadName
+  /** MCTS-π head 用: action (対象 seat) → visit 数。Outcome-SL head では undefined。 */
+  visits?: Map<number, number>
+  /** MCTS-π head 用: 正規化済み policy target π = N(a) / Σ N(b)。Outcome-SL head では undefined。 */
+  pi?: Map<number, number>
+  /** Outcome-SL softmax head 用 (claim/comm/leader/target): 選んだ action の index (0-based)。 */
+  actionIndex?: number
+  /** Outcome-SL sigmoid head 用 (propose/predict/bodyguard_targets): 選んだ action の multi-hot。 */
+  actionMultiHot?: Uint8Array
 }
 
 export type TrainingRecord = PendingRecord & {
-  /** ゲーム終了時に貼られる value target [-1.3, +1] (mason 視点) */
+  /** ゲーム終了時に貼られる value target [-1.3, +1] (faction 視点) */
   z: number
+}
+
+/** MCTS-π head かどうか (vote/attack/divine/guard) */
+export function isMctsHead(headName: HeadName): boolean {
+  return headName === 'vote' || headName === 'attack' || headName === 'divine' || headName === 'guard'
+}
+
+/** Outcome-SL softmax head かどうか (claim/comm/leader/target) */
+export function isOutcomeSoftmaxHead(headName: HeadName): boolean {
+  return headName === 'claim' || headName === 'comm' || headName === 'leader' || headName === 'target'
+}
+
+/** Outcome-SL sigmoid head かどうか (propose/predict) */
+export function isOutcomeSigmoidHead(headName: HeadName): boolean {
+  return headName === 'propose' || headName === 'predict'
 }
 
 /**
