@@ -247,3 +247,11 @@ rmdir .committing
 ## Constraints
 
 - ユーザーはPythonが嫌い。Pythonは使わない。
+- **学習系クライアントは必ず fenrir の学習カリキュラムフレームワーク (orchestrate) に乗せる**。
+  - 対象: TF.js で NN を学習する全てのスクリプト (pretrain, fine-tune, self-play, 消費プロジェクトの学習 CLI 含む — skoll / skoll-zero / huginn など fenrir 外でも同じ)
+  - 独立 CLI (`node --experimental-strip-types path/to/script.ts`) として学習ループを書くのは禁止
+  - 理由:
+    - **Resume 粒度**: orchestrate は iter/epoch 粒度の checkpoint + 再開を提供する。独自 CLI だと中断時のやり直しコストが大きい
+    - **OOM リスク**: orchestrate のエントリポイント (`npm run train:orchestrate`) が `TF_FORCE_GPU_ALLOW_GROWTH=true` を自動設定する。直接 `node` を呼ぶとこの保護が効かず GPU VRAM 全取りで OOM になり得る
+    - **UI/進捗の統一性**: `train-status.json` / `train-progress.json` / `train-history.jsonl` / eval_log.jsonl の道標が全ラン横断で揃う。`/fenrir-onboard` で即座に状況把握できる
+  - 新規学習フェーズを足す場合は `src/fenrir/src/orchestrate.ts` と `phase-runner.ts` にフェーズを追加し、`CurriculumName` の型に乗せる

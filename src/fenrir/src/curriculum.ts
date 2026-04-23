@@ -230,8 +230,11 @@ export type PhaseStep = PretrainStep | TransferStep | TrainingStep
 // ============================================================
 
 /** カリキュラム名: 'default' = 本流, 'brain-battle' = BB, 'bb-plus' = BB+個別役職学習,
- *  'skoll-pretrain' = skoll を教師にした vote head 教師あり pretrain（独立パイプライン） */
-export type CurriculumName = 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero'
+ *  'skoll-pretrain' = skoll を教師にした vote head 教師あり pretrain（独立パイプライン）,
+ *  'skoll-zero' = AlphaZero 系 multi-agent self-play,
+ *  'skoll-zero-pretrain' = skoll-zero Phase 2.5 multi-head consolidation (役職別 10 NN join SL),
+ *  'huginn' = 交渉投票 NN の独立学習 */
+export type CurriculumName = 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn' | 'skoll-zero-pretrain'
 
 export type CurriculumOptions = {
   phase1Only?: boolean

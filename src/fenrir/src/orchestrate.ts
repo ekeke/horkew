@@ -101,7 +101,7 @@ type OrchestratorConfig = {
   wre?: string
   /** WRE再学習間隔 (iteration数、0=再学習無効)。サンプルバッファが batch×14×5×n×4.8KB 蓄積するため batch=64 なら n≤40 推奨 */
   wreRefresh: number
-  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn'
+  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn' | 'skoll-zero-pretrain'
   /** huginn 専用パラメータ (curriculum === 'huginn' のときのみ参照) */
   huginnScenarios?: string[]
   huginnIterations?: number
@@ -179,7 +179,7 @@ function parseArgs(): OrchestratorConfig {
         break
       }
       case '--wre-refresh': config.wreRefresh = parseInt(args[++i]); break
-      case '--curriculum': config.curriculum = args[++i] as 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn'; break
+      case '--curriculum': config.curriculum = args[++i] as 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn' | 'skoll-zero-pretrain'; break
       case '--huginn-scenario': config.huginnScenarios = args[++i].split(',').map(s => s.trim()).filter(Boolean); break
       case '--huginn-iters': config.huginnIterations = parseInt(args[++i]); break
       case '--huginn-games-per-iter': config.huginnGamesPerIter = parseInt(args[++i]); break
@@ -226,7 +226,7 @@ Options:
   --strategy-only          戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
   --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
   --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
-  --curriculum <name>      カリキュラム選択: default | brain-battle | bb-plus | skoll-pretrain | skoll-zero | huginn (default: default)
+  --curriculum <name>      カリキュラム選択: default | brain-battle | bb-plus | skoll-pretrain | skoll-zero | skoll-zero-pretrain | huginn (default: default)
   --skeleton               最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用)
 
 Huginn 専用 (--curriculum huginn):
@@ -859,6 +859,24 @@ async function selectStartMode(config: OrchestratorConfig): Promise<void> {
     return
   }
 
+  // --curriculum skoll-zero-pretrain: phase runner が final.json ベースで役職粒度 resume を処理する。
+  // orchestrate 層ではプロンプトをスキップし、指定または前回 base をそのまま使う。
+  if (config.curriculum === 'skoll-zero-pretrain') {
+    if (!config.checkpointBase) {
+      const status = readTrainStatus()
+      if (status?.checkpointBase && existsSync(status.checkpointBase)) {
+        config.checkpointBase = status.checkpointBase
+        log(`Skoll-Zero-Pretrain: using previous base ${config.checkpointBase}`)
+      } else {
+        config.checkpointBase = nextCheckpointBase()
+        log(`Skoll-Zero-Pretrain new run: ${config.checkpointBase}`)
+      }
+    } else {
+      log(`Skoll-Zero-Pretrain: using ${config.checkpointBase}`)
+    }
+    return
+  }
+
   // --resume が明示指定されている場合は従来動作（後方互換）
   if (config.resume) {
     if (!config.checkpointBase) {
@@ -1051,6 +1069,18 @@ async function main(): Promise<void> {
     })
     shutdownCleanup('completed')
     log(`${BOLD}Skoll Zero complete!${RESET}`)
+    return
+  }
+
+  // === Skoll-Zero-Pretrain カリキュラム: Phase 2.5 multi-head consolidation ===
+  if (config.curriculum === 'skoll-zero-pretrain') {
+    const { runSkollZeroPretrain } = await import('../../skoll/phase2/phase-runner.ts')
+    await runSkollZeroPretrain({
+      checkpointBase: config.checkpointBase,
+      learningRate: config.learningRate,
+    })
+    shutdownCleanup('completed')
+    log(`${BOLD}Skoll Zero Pretrain complete!${RESET}`)
     return
   }
 
