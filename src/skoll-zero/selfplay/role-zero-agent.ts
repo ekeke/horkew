@@ -1,12 +1,20 @@
 /**
  * RoleZeroAgent — 役職汎用 zero エージェント抽象基底。
  *
- * 設計:
- *   - decideVote で ISMCTS + NN、(obs, π) を buffer に蓄積
- *   - 役職ごとに違うのは (a) 観測エンコード、(b) 陣営 (faction)、(c) 除外席
- *   - それ以外 (Determinizer, MCTS, fallback) は共通
+ * ## Agent / Module 3 層分離 (2026-04-23 リファクタ、M0.5)
  *
- * サブクラス例: MasonZeroAgent / VillageZeroAgent / WolfZeroTeamAgent 等。
+ * 旧 RoleZeroAgent は NN / MCTS / buffer 記録も直接抱えていた。リファクタ後:
+ * - **Agent 層 (このファイル)**: lupa decide\* interface 実装、super (heuristic) との merge、
+ *   selectionMode (sample/argmax) による action 選択
+ * - **Module 層 (`../module/`)**: NN forward / MCTS 実行 / buffer 蓄積 / phase2 head 管理
+ *
+ * Agent はコンストラクタで Module を受け取り、decide\* 内で呼び出すだけ。
+ * 詳細は `tasks/skoll-zero-module-extraction.md` 参照。
+ *
+ * ## サブクラスの作り方
+ *
+ * subclass は `super(module, selectionMode)` を呼ぶだけ。abstract method は無い。
+ * 役職別の obs encoding と faction は Module 側 (MasonSkollZeroModule 等) に寄せる。
  */
 
 import type { SystemRole } from '../../types/index.ts'
@@ -14,54 +22,62 @@ import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import type { DayClaim } from '../../lupa/types.ts'
 import type { LeadershipResponse, Proposal } from '../../fenrir/src/leadership.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
-import { buildPossibilitiesFromRetar } from '../../skoll/unified.ts'
-import { createSimState } from '../simulator/world-state.ts'
-import { Determinizer } from '../mcts/determinize.ts'
-import { runMCTS, DEFAULT_MCTS_CONFIG, type Faction, type MCTSConfig, type MCTSResult } from '../mcts/ismcts.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
+import type { MCTSConfig, MCTSResult } from '../mcts/ismcts.ts'
 import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
-import { argmaxIndex, mergeClaimTypeWithSuper, leaderFromIdx } from '../../skoll/phase2/action-decoders.ts'
-import { TrainingBuffer } from './buffer.ts'
-import type { RootObs } from './observation.ts'
-import { normalizeVisits, sampleFromVisits, argmaxFromVisits } from './policy-utils.ts'
+import { mergeClaimTypeWithSuper, leaderFromIdx } from '../../skoll/phase2/action-decoders.ts'
+import type { TrainingBuffer } from './buffer.ts'
+import { argmaxFromVisits, sampleFromVisits } from './policy-utils.ts'
+import type { SkollZeroModule, ActionMethod } from '../module/skoll-zero-module.ts'
 
+/**
+ * Agent コンストラクタに渡す options。
+ *
+ * Module を直接渡す (`module` フィールド) 形と、legacy に Module 生成に必要な
+ * 原材料を渡す形の両方をサポートする。サブクラスは内部で Module を構築する
+ * 方針を取るため `module` フィールドは通常使わない。
+ */
 export type RoleZeroAgentOptions = {
+  /** 形勢判断 NN (MCTS node expand 用)。Module が受け取る */
   nn: MasonZeroNN
+  /** 役職分布 */
   setup: Map<SystemRole, number>
+  /** 学習データ buffer。Module が所有 */
   buffer: TrainingBuffer
+  /** MCTS hyperparams */
   mctsConfig?: MCTSConfig
+  /** 行動選択モード: 'sample' (training) or 'argmax' (eval) */
   selectionMode?: 'sample' | 'argmax'
+  /** Determinizer の世界数上限 */
   determinizerMaxWorlds?: number
-  /**
-   * Phase 2 pretrained heads: key は `${role}-${method}` (例 'villager-claim', 'werewolf-comm')。
-   * 役職別 checkpoint を実行時に ctx.myRole で切り替える用途。未登録の key は undefined が返り、
-   * 呼び出し側は super の heuristic にフォールバックする。
-   */
+  /** Phase 2 pretrained heads: key は `${role}-${method}` */
   phase2Nets?: Map<string, TransformerNetwork>
 }
 
 /**
- * ISMCTS ベースの zero agent 基底。サブクラスは `faction` と `captureObservation()`
- * をオーバーライドするだけ。
+ * ISMCTS ベースの zero agent 基底。
+ * サブクラスは対応する Module を init して super に渡す。
  */
 export abstract class RoleZeroAgent extends SkollMasterAgent {
-  protected readonly zeroOpts: Required<Omit<RoleZeroAgentOptions, 'nn' | 'setup' | 'buffer' | 'mctsConfig' | 'phase2Nets'>>
-    & Pick<RoleZeroAgentOptions, 'nn' | 'setup' | 'buffer' | 'mctsConfig' | 'phase2Nets'>
+  /** skoll-zero Module (NN + MCTS + buffer の塊) */
+  protected readonly module: SkollZeroModule
+  /** 行動選択モード */
+  protected readonly selectionMode: 'sample' | 'argmax'
 
-  /** 何度 MCTS を実行したか (debug) */
-  mctsCalls = 0
-  /** 何度 fallback に落ちたか (debug) */
-  fallbackCalls = 0
+  constructor(module: SkollZeroModule, selectionMode: 'sample' | 'argmax' = 'sample') {
+    super({})
+    this.module = module
+    this.selectionMode = selectionMode
+  }
 
-  /**
-   * 直近の decideVote で得た MCTS 結果。fallback 経路では null。
-   * huginn-adapter 等の外部 consumer が policy (visits) を取得するために使う。
-   */
-  protected lastMCTSResult: MCTSResult | null = null
+  // ========== Module への passthrough (debug / adapter 向け公開) ==========
 
-  /** 直近の MCTS 結果を取得 (fallback 時は null) */
+  get mctsCalls(): number { return this.module.mctsCalls }
+  get fallbackCalls(): number { return this.module.fallbackCalls }
+
+  /** 直近の MCTS 結果を取得 (fallback 時は null) — huginn-adapter 等が参照 */
   getLastMCTSResult(): MCTSResult | null {
-    return this.lastMCTSResult
+    return this.module.lastMCTSResult
   }
 
   /**
@@ -69,148 +85,66 @@ export abstract class RoleZeroAgent extends SkollMasterAgent {
    * SkollCommandAgent 等の外部 consumer が NN 経路の発火可否を duck-type 判定するのに使う。
    */
   hasPhase2Head(method: string, role: SystemRole): boolean {
-    return this.zeroOpts.phase2Nets?.has(`${role}-${method}`) ?? false
+    return this.module.hasPhase2Head(method, role)
   }
 
-  constructor(opts: RoleZeroAgentOptions) {
-    super({})
-    this.zeroOpts = {
-      nn: opts.nn,
-      setup: opts.setup,
-      buffer: opts.buffer,
-      mctsConfig: opts.mctsConfig,
-      selectionMode: opts.selectionMode ?? 'sample',
-      determinizerMaxWorlds: opts.determinizerMaxWorlds ?? 100000,
-      phase2Nets: opts.phase2Nets,
-    }
-  }
-
-  /** この役職の所属陣営 (value 符号計算に使う) */
-  protected abstract faction(): Faction
-
-  /** DecisionContext → NN 入力観測 (役職ごとに encodeObservation のバリアントを使う) */
-  protected abstract captureObservation(ctx: DecisionContext): RootObs
+  // ========== lupa decide\* interface ==========
 
   override decideVote(ctx: DecisionContext): number {
-    this.lastMCTSResult = null
-    if (!ctx.globalRetarPossibilities) {
-      this.fallbackCalls++
-      return super.decideVote(ctx)
-    }
-
-    const possibilities = buildPossibilitiesFromRetar(ctx.globalRetarPossibilities, this.zeroOpts.setup)
-    const determinizer = new Determinizer(possibilities, this.zeroOpts.setup, this.zeroOpts.determinizerMaxWorlds)
-    if (determinizer.isOverflow() || determinizer.size() === 0) {
-      this.fallbackCalls++
-      return super.decideVote(ctx)
-    }
-
-    const sampleWorld = determinizer.sample(() => ctx.rng.next())
-    if (!sampleWorld) {
-      this.fallbackCalls++
-      return super.decideVote(ctx)
-    }
-    const alive = aliveBitmask(ctx.alivePlayers)
-    const infoState = createSimState(sampleWorld, alive, ctx.day, 'day')
-    const rootObs = this.captureObservation(ctx)
-
-    const mctsConfig: MCTSConfig = this.zeroOpts.mctsConfig
-      ? { ...this.zeroOpts.mctsConfig, rng: () => ctx.rng.next() }
-      : { ...DEFAULT_MCTS_CONFIG, rng: () => ctx.rng.next() }
-
-    const result = runMCTS(
-      rootObs, infoState, ctx.mySeat, determinizer, this.zeroOpts.nn, mctsConfig, this.faction(),
-    )
-    if (result.visits.size === 0) {
-      this.fallbackCalls++
-      return super.decideVote(ctx)
-    }
-
-    this.mctsCalls++
-    this.lastMCTSResult = result
-
-    const pi = normalizeVisits(result.visits)
-    this.zeroOpts.buffer.appendPending({
-      obs: rootObs,
-      visits: result.visits,
-      pi,
-      day: ctx.day,
-      masonSeat: ctx.mySeat,  // PendingRecord の masonSeat フィールドは「決定者の席」として流用
-      alive,
-      headName: 'vote',
-    })
-
-    return this.zeroOpts.selectionMode === 'argmax'
+    const result = this.module.proposeVote(ctx)
+    if (!result) return super.decideVote(ctx)
+    return this.selectionMode === 'argmax'
       ? argmaxFromVisits(result.visits)
       : sampleFromVisits(result.visits, () => ctx.rng.next())
   }
 
-  // ============================================================
-  // Phase 2 pretrained head hooks
-  //
-  // 各 decide* は NN head 出力があれば argmax を採用、無ければ super (heuristic) に
-  // 委譲。`phase2Nets` は key `${role}-${method}` で lookup する。captureObservation を
-  // 使って観測を作るので wolf は team obs、他は individual obs になる。
-  // ============================================================
-
-  /** phase2Nets から `${role}-${method}` checkpoint の forward 結果を取得。無ければ null。 */
-  protected forwardPhase2(method: string, ctx: DecisionContext): ReturnType<TransformerNetwork['forward']> | null {
-    const net = this.zeroOpts.phase2Nets?.get(`${ctx.myRole}-${method}`)
-    if (!net) return null
-    const obs = this.captureObservation(ctx)
-    return net.forward(obs)
-  }
-
   override decideDayClaim(ctx: DecisionContext): DayClaim {
-    const superDecision = super.decideDayClaim(ctx)
-    const logits = this.forwardPhase2('claim', ctx)?.policies.get('claim')
-    if (!logits) return superDecision
-    return mergeClaimTypeWithSuper(argmaxIndex(logits), superDecision)
+    return this.decideWithClaimHead(ctx, 'claim', () => super.decideDayClaim(ctx))
   }
 
   override decideForecast(ctx: DecisionContext): DayClaim {
-    const superDecision = super.decideForecast(ctx)
-    // forecast は claim head (10 次元 softmax) を共有する設計 (METHOD_HEAD_MAP 参照)
-    const logits = this.forwardPhase2('forecast', ctx)?.policies.get('claim')
-    if (!logits) return superDecision
-    return mergeClaimTypeWithSuper(argmaxIndex(logits), superDecision)
+    return this.decideWithClaimHead(ctx, 'forecast', () => super.decideForecast(ctx))
   }
 
   override decideDefensiveClaim(ctx: DecisionContext): DayClaim {
-    const superDecision = super.decideDefensiveClaim(ctx)
-    const logits = this.forwardPhase2('defensive_claim', ctx)?.policies.get('claim')
-    if (!logits) return superDecision
-    return mergeClaimTypeWithSuper(argmaxIndex(logits), superDecision)
+    return this.decideWithClaimHead(ctx, 'defensive_claim', () => super.decideDefensiveClaim(ctx))
   }
 
   override decideLeadershipResponse(ctx: DecisionContext, proposal: Proposal): LeadershipResponse {
     const superDecision = super.decideLeadershipResponse(ctx, proposal)
-    const logits = this.forwardPhase2('leader', ctx)?.policies.get('leader')
-    if (!logits) return superDecision
-    return leaderFromIdx(argmaxIndex(logits)) ?? superDecision
+    const r = this.module.predictAction('leader', ctx)
+    if (!r || r.actionIdx === undefined) return superDecision
+    return leaderFromIdx(r.actionIdx) ?? superDecision
   }
 
   override decideProposal(ctx: DecisionContext): Proposal | null {
     const superDecision = super.decideProposal(ctx)
     if (!superDecision) return null
-    // propose head は per-seat sigmoid (14 次元)。最もスコアが高い alive/非自席 を target に。
-    // type は super の heuristic (decideCommanderProposal) の判断を継承する。
-    const logits = this.forwardPhase2('propose', ctx)?.policies.get('propose')
-    if (!logits) return superDecision
+    // propose head は per-seat sigmoid (14 次元)。最もスコアが高い alive/非自席 を target に
+    const r = this.module.predictAction('propose', ctx)
+    if (!r) return superDecision
     const aliveSet = new Set(ctx.alivePlayers)
     let bestSeat = superDecision.target
     let bestScore = -Infinity
-    for (let i = 0; i < logits.length; i++) {
-      const seat = i + 1  // encodeSeatMultiHot と対応: seat N は out[N-1] に書かれる
+    for (let i = 0; i < r.logits.length; i++) {
+      const seat = i + 1
       if (!aliveSet.has(seat) || seat === ctx.mySeat) continue
-      if (logits[i] > bestScore) { bestScore = logits[i]; bestSeat = seat }
+      if (r.logits[i] > bestScore) { bestScore = r.logits[i]; bestSeat = seat }
     }
     return { ...superDecision, target: bestSeat }
   }
-}
 
-function aliveBitmask(alivePlayers: number[]): number {
-  let mask = 0
-  for (const seat of alivePlayers) mask |= (1 << seat)
-  return mask
+  // ========== internal helper ==========
+
+  /** claim / forecast / defensive_claim を claim head の argmax → mergeClaimTypeWithSuper */
+  private decideWithClaimHead(
+    ctx: DecisionContext,
+    method: ActionMethod,
+    superFn: () => DayClaim,
+  ): DayClaim {
+    const superDecision = superFn()
+    const r = this.module.predictAction(method, ctx)
+    if (!r || r.actionIdx === undefined) return superDecision
+    return mergeClaimTypeWithSuper(r.actionIdx, superDecision)
+  }
 }
