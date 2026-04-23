@@ -8,6 +8,7 @@
   }
 
   let {
+    open,
     entries,
     activeKey,
     pendingKeys,
@@ -16,12 +17,12 @@
     onRename,
     onDelete,
     onUndoDelete,
-    onClose,
     onCreateNew,
     onStartTrial,
     formatDate,
     displayName,
   }: {
+    open: boolean
     entries: { key: string, entry: FileEntry }[]
     activeKey: string
     pendingKeys: Set<string>
@@ -30,7 +31,6 @@
     onRename: (key: string, newTitle: string) => void
     onDelete: (key: string) => void
     onUndoDelete: (key: string) => void
-    onClose: () => void
     onCreateNew: () => void
     onStartTrial: () => void
     formatDate: (ms: number) => string
@@ -70,19 +70,13 @@
   }
 </script>
 
-<aside class="file-sidebar">
+<aside class="file-sidebar" class:closed={!open} aria-hidden={!open}>
   <header class="file-sidebar-header">
     <span class="file-sidebar-title">ファイル</span>
     {#if trialMode}
       <span class="file-sidebar-trial-badge">お試し中</span>
     {/if}
     <div class="file-sidebar-spacer"></div>
-    <button
-      class="file-sidebar-close"
-      onclick={onClose}
-      title="サイドバーを閉じる"
-      aria-label="閉じる"
-    >&larr;</button>
   </header>
 
   <div class="file-sidebar-body">
@@ -159,6 +153,13 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    transition: width 220ms ease, min-width 220ms ease, border-right-width 220ms ease;
+  }
+
+  .file-sidebar.closed {
+    width: 0;
+    min-width: 0;
+    border-right-width: 0;
   }
 
   .file-sidebar-header {
@@ -191,22 +192,6 @@
 
   .file-sidebar-spacer {
     flex: 1;
-  }
-
-  .file-sidebar-close {
-    background: transparent;
-    color: var(--color-text-faint);
-    border: none;
-    padding: 2px 8px;
-    font-size: 14px;
-    cursor: pointer;
-    border-radius: 3px;
-    line-height: 1;
-  }
-
-  .file-sidebar-close:hover {
-    color: var(--color-text);
-    background: var(--color-surface);
   }
 
   .file-sidebar-body {

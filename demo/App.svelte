@@ -1749,9 +1749,13 @@
 
 <div class="layout skin-{skin}">
   <header class="header">
-    {#if !sidebarOpen}
-    <button class="header-btn sidebar-toggle" onclick={toggleSidebar} title="サイドバーを開く" aria-label="サイドバーを開く">&#x2630;</button>
-    {/if}
+    <button
+      class="header-btn sidebar-toggle"
+      class:sidebar-toggle-open={sidebarOpen}
+      onclick={toggleSidebar}
+      title={sidebarOpen ? 'サイドバーを閉じる' : 'サイドバーを開く'}
+      aria-label="サイドバー切替"
+    >&#x2630;</button>
 
     <span class="header-subtitle">人狼メモ・解析ツール</span>
     <span class="header-title" class:title-flash={titleFlash} onclick={onTitleTap}>Horkew</span>
@@ -1759,6 +1763,8 @@
     {#if trialMode}
       <span class="trial-banner">お試しモード</span>
       {#if activeKey}<button class="header-btn trial-exit" onclick={exitTrialMode}>戻る</button>{/if}
+    {:else if activeKey && fileIndex[activeKey]}
+      <span class="header-active-file" title={displayName(fileIndex[activeKey])}>{displayName(fileIndex[activeKey])}</span>
     {/if}
     <button class="header-btn" onclick={openNewModal}>新規作成</button>
 
@@ -2056,23 +2062,21 @@
   {/snippet}
 
   <div class="body-row">
-    {#if sidebarOpen}
-      <FileSidebar
-        entries={entries}
-        activeKey={activeKey}
-        pendingKeys={pendingDeleteKeys}
-        trialMode={trialMode}
-        onSelect={switchTo}
-        onRename={renameFile}
-        onDelete={startPendingDelete}
-        onUndoDelete={undoPendingDelete}
-        onClose={toggleSidebar}
-        onCreateNew={openNewModal}
-        onStartTrial={() => handleStartTrial(TUTORIAL_TEXT)}
-        {formatDate}
-        {displayName}
-      />
-    {/if}
+    <FileSidebar
+      open={sidebarOpen}
+      entries={entries}
+      activeKey={activeKey}
+      pendingKeys={pendingDeleteKeys}
+      trialMode={trialMode}
+      onSelect={switchTo}
+      onRename={renameFile}
+      onDelete={startPendingDelete}
+      onUndoDelete={undoPendingDelete}
+      onCreateNew={openNewModal}
+      onStartTrial={() => handleStartTrial(TUTORIAL_TEXT)}
+      {formatDate}
+      {displayName}
+    />
     <div class="body-main">
 
   {#if debugMode === 'debug'}
@@ -2436,6 +2440,22 @@
     padding: 4px 10px;
     font-size: 14px;
     line-height: 1;
+  }
+
+  .sidebar-toggle-open {
+    background: var(--color-surface-hover);
+    color: var(--color-accent);
+  }
+
+  .header-active-file {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 260px;
+    padding: 0 6px;
   }
 
   .header {
