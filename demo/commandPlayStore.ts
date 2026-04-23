@@ -30,6 +30,7 @@ import type { FenrirExtEvent } from '../src/fenrir/src/events.ts'
 import type {
   FromWorkerMessage, ToWorkerMessage,
   StartGameOptions as WorkerStartOptions,
+  HuginnPendingPayload,
 } from './commandGame.worker.ts'
 
 // ============================================================
@@ -78,6 +79,8 @@ export type CommandPlayStoreState = {
    * event emit および pending 更新のたびにインクリメント。
    */
   tick: number
+  /** Huginn 交渉投票で Human の発話/finalVote を待っている pending 要求 (worker モードのみ). */
+  huginnPending: HuginnPendingPayload | null
 }
 
 /** activityLog に保持する直近 comment の件数（worker 側にも同値を渡す） */
@@ -162,6 +165,14 @@ export class CommandPlayStore {
       }
     }
     this.doSubmit(cmd)
+  }
+
+  /** Huginn 交渉投票の発話 / finalVote 入力を worker に送る (worker モードのみ). */
+  submitHuginn(value: number): void {
+    if (!this.worker) {
+      throw new Error('CommandPlayStore.submitHuginn: worker モードでのみ使用可能')
+    }
+    this.worker.postMessage({ type: 'huginn_submit', value } satisfies ToWorkerMessage)
   }
 
   private doSubmit(cmd: Command): void {
@@ -313,6 +324,20 @@ export class CommandPlayStore {
         this.setState({
           ...this.state,
           pending: null,
+          tick: this.state.tick + 1,
+        })
+        return
+      case 'huginn_pending':
+        this.setState({
+          ...this.state,
+          huginnPending: msg.payload,
+          tick: this.state.tick + 1,
+        })
+        return
+      case 'huginn_pending_cleared':
+        this.setState({
+          ...this.state,
+          huginnPending: null,
           tick: this.state.tick + 1,
         })
         return
@@ -527,6 +552,7 @@ export class CommandPlayStore {
       editorText: '',
       activityLog: [],
       tick: 0,
+      huginnPending: null,
     }
   }
 

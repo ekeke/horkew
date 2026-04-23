@@ -25,10 +25,19 @@ import { AsyncRemoteAgent } from '../src/fenrir/src/command-agents/async-remote-
 import type { FenrirExtEvent } from '../src/fenrir/src/events.ts'
 import { TransformerNetwork } from '../src/fenrir/src/ml/transformer-network.ts'
 import { inferObservationMode } from '../src/fenrir/src/observation.ts'
-import { createHuginnVoteCollector } from '../src/fenrir/src/adapters/command/huginn-vote-collector.ts'
+import {
+  createHuginnVoteCollector,
+  type HuginnHumanBridge,
+  type HuginnHumanBridgeReq,
+} from '../src/fenrir/src/adapters/command/huginn-vote-collector.ts'
 import { TrainableNetwork as HuginnTrainableNetwork } from '../src/huginn/trainable-network.ts'
-import { buildVocabLayout } from '../src/huginn/message-vocab.ts'
-import { MAX_AGENTS as HUGINN_MAX_AGENTS, OFFER_REF_WINDOW as HUGINN_OFFER_REF_WINDOW } from '../src/huginn/types.ts'
+import { buildVocabLayout, type VocabLayout } from '../src/huginn/message-vocab.ts'
+import {
+  MAX_AGENTS as HUGINN_MAX_AGENTS,
+  OFFER_REF_WINDOW as HUGINN_OFFER_REF_WINDOW,
+  type Message as HuginnMessage,
+  type RoleName as HuginnRoleName,
+} from '../src/huginn/types.ts'
 import { importWeights as importHuginnWeights, CHECKPOINT_VERSION as HUGINN_CHECKPOINT_VERSION, type HuginnCheckpoint } from '../src/huginn/checkpoint.ts'
 import { MasonZeroNetwork } from '../src/skoll-zero/network/mason-zero.ts'
 import { MasonZeroAgent } from '../src/skoll-zero/selfplay/mason-zero-agent.ts'
@@ -71,9 +80,35 @@ export type PendingPayload = {
   legal: Command[]
 }
 
+/**
+ * Huginn bridge 要求の UI 用 payload 型.
+ * HuginnHumanBridgeReq を worker→main に post するにあたり、Uint8Array などの
+ * TypedArray を plain array に変換した「シリアライズ可能」版.
+ */
+export type HuginnPendingPayload =
+  | {
+      type: 'message'
+      self: number
+      round: number
+      legalMask: number[]
+      layout: VocabLayout
+      participants: number[]
+      messageHistory: Array<{ round: number; sender: number; message: HuginnMessage }>
+      viewerRole: HuginnRoleName
+    }
+  | {
+      type: 'vote'
+      self: number
+      mask: number[]
+      numAgents: number
+      participants: number[]
+      viewerRole: HuginnRoleName
+    }
+
 export type ToWorkerMessage =
   | { type: 'start', opts: StartGameOptions }
   | { type: 'submit', cmd: Command }
+  | { type: 'huginn_submit', value: number }
 
 export type FromWorkerMessage =
   | {
@@ -85,6 +120,8 @@ export type FromWorkerMessage =
     }
   | { type: 'pending', payload: PendingPayload }
   | { type: 'pendingCleared' }
+  | { type: 'huginn_pending', payload: HuginnPendingPayload }
+  | { type: 'huginn_pending_cleared' }
   | {
       type: 'event',
       event: GameEvent | FenrirExtEvent,
@@ -107,6 +144,8 @@ export type FromWorkerMessage =
 
 let asyncAgent: AsyncRemoteAgent | null = null
 let gameInFlight = false
+/** Huginn bridge 用の pending resolver. 1 リクエスト in-flight を前提に単一スロット. */
+let huginnPendingResolve: ((value: number) => void) | null = null
 
 self.onmessage = (ev: MessageEvent<ToWorkerMessage>) => {
   const msg = ev.data
@@ -120,6 +159,7 @@ self.onmessage = (ev: MessageEvent<ToWorkerMessage>) => {
       post({ type: 'error', message: String((err as Error).message ?? err) })
       gameInFlight = false
       asyncAgent = null
+      huginnPendingResolve = null
     })
   } else if (msg.type === 'submit') {
     if (!asyncAgent) {
@@ -131,6 +171,16 @@ self.onmessage = (ev: MessageEvent<ToWorkerMessage>) => {
     } catch (err) {
       post({ type: 'error', message: `submit failed: ${String((err as Error).message ?? err)}` })
     }
+  } else if (msg.type === 'huginn_submit') {
+    console.log('[huginn/worker] huginn_submit received, value=', msg.value)
+    if (!huginnPendingResolve) {
+      post({ type: 'error', message: 'huginn_submit: no pending bridge request' })
+      return
+    }
+    const resolve = huginnPendingResolve
+    huginnPendingResolve = null
+    post({ type: 'huginn_pending_cleared' })
+    resolve(msg.value)
   }
 }
 
@@ -418,8 +468,45 @@ async function startGame(opts: StartGameOptions): Promise<void> {
   // defaultAgent は adapter と collector で共有 (どちらも seed+1 で決定性を揃える)
   const adapterDefaultAgent = new SkollCommandAgent({ seed: seed + 1 })
 
+  // Huginn bridge: worker → main の pending 送信 + submit の resolve を繋ぐ.
+  // huginnHumanBridge は collector の各 round / finalVote で呼ばれる.
+  const huginnHumanBridge: HuginnHumanBridge = (req: HuginnHumanBridgeReq) => {
+    console.log(`[huginn/worker] bridge req type=${req.type} self=seat${req.self}${req.type === 'message' ? ` round=${req.round}` : ''}`)
+    const payload: HuginnPendingPayload = req.type === 'message'
+      ? {
+          type: 'message',
+          self: req.self,
+          round: req.round,
+          legalMask: Array.from(req.legalMask),
+          layout: req.layout,
+          participants: [...req.participants],
+          messageHistory: req.messageHistory.map(e => ({
+            round: e.round, sender: e.sender, message: e.message,
+          })),
+          viewerRole: req.viewerRole,
+        }
+      : {
+          type: 'vote',
+          self: req.self,
+          mask: Array.from(req.mask),
+          numAgents: req.numAgents,
+          participants: [...req.participants],
+          viewerRole: req.viewerRole,
+        }
+    return new Promise<number>((resolve) => {
+      huginnPendingResolve = resolve
+      try {
+        post({ type: 'huginn_pending', payload })
+        console.log('[huginn/worker] huginn_pending posted')
+      } catch (err) {
+        console.error('[huginn/worker] failed to post huginn_pending', err)
+      }
+    })
+  }
+
   // Huginn 交渉投票が enabled なら voteCollector を組み立てる (checkpoint fetch or random init).
-  // agents Map は onRolesAssigned で populate されるが、参照渡しなので collector 呼び出し時には埋まっている.
+  // agents Map / humanSeatsForCommander は onRolesAssigned で populate されるが、参照渡しなので
+  // collector 呼び出し時には埋まっている.
   let huginnVoteCollector: VoteCollector | undefined = undefined
   if (opts.huginnVoting?.enabled) {
     const huginnNetwork = await buildHuginnNetwork(opts.huginnVoting.scenarioName)
@@ -430,6 +517,8 @@ async function startGame(opts: StartGameOptions): Promise<void> {
       emitEvent,
       agents,
       defaultAgent: adapterDefaultAgent,
+      humanSeats: humanSeatsForCommander,
+      humanBridge: huginnHumanBridge,
     })
   }
 

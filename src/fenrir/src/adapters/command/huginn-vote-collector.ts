@@ -24,12 +24,29 @@ import { applyCommand } from './apply-command.ts'
 import { legalCommands } from './legal-commands.ts'
 import type { TrainableNetwork } from '../../../../huginn/trainable-network.ts'
 import { runRounds } from '../../../../huginn/protocol.ts'
+import type { Trace, AgentTrace } from '../../../../huginn/protocol.ts'
+import { encodeObservation } from '../../../../huginn/observation.ts'
+import {
+  buildVocabLayout,
+  buildLegalMask,
+  decodeMessage,
+  type VocabLayout,
+} from '../../../../huginn/message-vocab.ts'
+import {
+  applyMask,
+  sampleArgmax,
+  sampleStochastic,
+} from '../../../../huginn/trainable-network.ts'
 import {
   K_ROUNDS,
+  MAX_AGENTS,
+  OFFER_REF_WINDOW,
   DESIRE_HIGH_BASE,
   ROLE_VOCABULARY,
+  type AgentId,
   type HuginnInput,
   type Message,
+  type Observation,
   type RoleName,
 } from '../../../../huginn/types.ts'
 import { Rng as HuginnRng } from '../../../../huginn/rng.ts'
@@ -61,7 +78,41 @@ export type HuginnVoteCollectorConfig = {
   agents?: ReadonlyMap<number, CommandAgent>
   /** agents に登録のない席用のデフォルト. 省略可. */
   defaultAgent?: CommandAgent
+  /**
+   * Human 制御下の席集合. これらの席の発話と finalVote は humanBridge から取得する.
+   * 未指定 or 空 Set → 全席 NN 駆動 (従来動作).
+   */
+  humanSeats?: ReadonlySet<number>
+  /**
+   * Human の入力を取得する bridge. humanSeats が非空のとき必須.
+   * - 'message' req: K ラウンド毎に呼ばれ、tokenId (layout.vocabSize 内) を返す.
+   * - 'vote' req: K ラウンド終了後に呼ばれ、vote idx (participants index) を返す.
+   */
+  humanBridge?: HuginnHumanBridge
 }
+
+/** Human bridge に渡るリクエスト型 (message 発話 or finalVote). */
+export type HuginnHumanBridgeReq =
+  | {
+      type: 'message'
+      self: number
+      round: number
+      legalMask: Uint8Array
+      layout: VocabLayout
+      participants: readonly number[]
+      messageHistory: readonly { round: number; sender: number; message: Message }[]
+      viewerRole: RoleName
+    }
+  | {
+      type: 'vote'
+      self: number
+      mask: Uint8Array
+      numAgents: number
+      participants: readonly number[]
+      viewerRole: RoleName
+    }
+
+export type HuginnHumanBridge = (req: HuginnHumanBridgeReq) => Promise<number>
 
 export function createHuginnVoteCollector(config: HuginnVoteCollectorConfig): VoteCollector {
   const rounds = config.rounds ?? K_ROUNDS
@@ -73,16 +124,25 @@ export function createHuginnVoteCollector(config: HuginnVoteCollectorConfig): Vo
     const { state, candidates, alive } = params
     if (alive.length === 0) return new Map()
 
-    // participants は全 seat (死亡者含む、sorted). huginn vocab の layout は participants.length
-    // に依存するので、1 ゲーム中で layout が揺れないよう全 seat を含める.
-    const participants = state.players.map(p => p.seat).sort((a, b) => a - b)
+    // participants は全 seat (死亡者含む、sorted) + MAX_AGENTS まで dummy padding.
+    // vocab layout が MAX_AGENTS=15 基準で固定されているため、participants.length も
+    // MAX_AGENTS に揃えないと decodeMessage で participants[N..] が undefined になる.
+    // padding seat は負数 (実 seat は正数なので被らない) で常に excluded=true にする.
+    const actualSeats = state.players.map(p => p.seat).sort((a, b) => a - b)
+    const actualN = actualSeats.length
+    const participants: number[] = [...actualSeats]
+    for (let k = actualN; k < MAX_AGENTS; k++) participants.push(-(k - actualN + 1))
     const aliveSet = new Set(alive.map(p => p.seat))
     const candidatesSet = new Set(candidates)
 
-    // agent.decide を走らせて MCTS を取得 (agents 未指定ならスキップ → flat MID)
+    // agent.decide を走らせて MCTS を取得 (agents 未指定ならスキップ → flat MID).
+    // 人間席 (humanSeats) はスキップする: 人間の agent は AsyncRemoteAgent で
+    // vote UI pending を発火してしまい、collector のフローから外れるため.
+    // 人間席は MCTS も不要 (desire は flat MID で扱う).
     const mctsBySeat = new Map<number, MCTSVisits | null>()
     if (config.agents || config.defaultAgent) {
       for (const player of alive) {
+        if (config.humanSeats?.has(player.seat)) continue
         const agent = config.agents?.get(player.seat) ?? config.defaultAgent
         if (!agent) continue
         const legal = legalCommands(state, player.seat)
@@ -100,7 +160,8 @@ export function createHuginnVoteCollector(config: HuginnVoteCollectorConfig): Vo
     // per-viewer retar (viewer の真役職を assumption に入れる) は将来の拡張.
     const knowledgeByOther = buildKnowledgeFromRetarCache(state.ext.retarCache, participants)
 
-    // HuginnInput 構築
+    // HuginnInput 構築. participants は MAX_AGENTS 長 padding 済.
+    // excluded は padding seat (index >= actualN) を常に true、実 seat は死亡/self/候補外で true.
     const inputs: HuginnInput[] = alive.map(player => {
       const mcts = mctsBySeat.get(player.seat) ?? null
       const teammates = collectTeammatesFromState(state, player.seat)
@@ -109,7 +170,8 @@ export function createHuginnVoteCollector(config: HuginnVoteCollectorConfig): Vo
         viewerRole: player.role as RoleName,
         participants,
         desire: buildDesire(mcts, teammates, participants),
-        excluded: participants.map(seat => {
+        excluded: participants.map((seat, i) => {
+          if (i >= actualN) return true  // padding seat は常に除外
           if (!aliveSet.has(seat)) return true
           if (seat === player.seat) return true
           if (!candidatesSet.has(seat)) return true
@@ -120,13 +182,18 @@ export function createHuginnVoteCollector(config: HuginnVoteCollectorConfig): Vo
       }
     })
 
-    // K ラウンド交渉 + 同時 finalVote
-    const trace = runRounds(
-      inputs,
-      config.network,
-      new Map(),
-      { kRounds: rounds, sampling, rng },
-    )
+    // K ラウンド交渉 + 同時 finalVote.
+    // humanSeats が空なら runRounds 一発、非空なら段階実行 (各 agent 発話で bridge を問う).
+    const humanSeats = config.humanSeats
+    const humanBridge = config.humanBridge
+    const hasHuman = !!humanSeats && humanSeats.size > 0 && !!humanBridge
+    const trace: Trace = hasHuman
+      ? await runRoundsWithHumans(
+          inputs, config.network,
+          { kRounds: rounds, sampling, rng },
+          humanSeats!, humanBridge!,
+        )
+      : runRounds(inputs, config.network, new Map(), { kRounds: rounds, sampling, rng })
 
     // comment event は lupa engine の events 配列にも push する (formatHowl 出力に反映させる)
     // + 指定されていれば emit callback にも通知する (UI ログ更新用).
@@ -289,4 +356,131 @@ function formatHuginnMessage(day: number, round: number, sender: number, m: Mess
     case 'commit':
       return `${head}: commit seat${m.target}`
   }
+}
+
+// ============================================================
+// runRoundsWithHumans — runRounds の段階実行版 (Human 席あり)
+// ============================================================
+
+/**
+ * Human 席の決定は humanBridge に問い合わせる. NPC 席は NN forward + sample で従来通り.
+ * 既存 `huginn/protocol.ts:runRounds` と同じ state 管理 (messageHistory / pastViolations は
+ * 空 Map 固定) だが、agent ごとの tokenId / voteIdx 決定で isHuman 分岐する.
+ */
+async function runRoundsWithHumans(
+  inputs: HuginnInput[],
+  network: TrainableNetwork,
+  opts: { kRounds: number; sampling: 'argmax' | 'stochastic'; rng?: HuginnRng },
+  humanSeats: ReadonlySet<number>,
+  humanBridge: HuginnHumanBridge,
+): Promise<Trace> {
+  const numActors = inputs.length
+  if (numActors === 0) throw new Error('runRoundsWithHumans: no inputs')
+  const layout = buildVocabLayout(MAX_AGENTS, OFFER_REF_WINDOW)
+  const pastCommitViolations = new Map<AgentId, number>()
+
+  const messageHistory: { round: number; sender: AgentId; message: Message }[] = []
+  const perAgent: AgentTrace[] = inputs.map(input => ({
+    agent: input.self,
+    steps: [],
+    messages: [],
+    finalVoteIdx: 0,
+    finalVoteLogProb: 0,
+    finalVoteValue: 0,
+  }))
+
+  for (let round = 0; round < opts.kRounds; round++) {
+    const roundMessages: Message[] = []
+    for (let a = 0; a < numActors; a++) {
+      const input = inputs[a]
+      const obs: Observation = {
+        input,
+        roundNumber: round,
+        messageHistory,
+        pastCommitViolations,
+      }
+      const enc = encodeObservation(obs, opts.kRounds)
+      const { msgLogits } = network.forward(enc.cls, enc.agents, enc.numAgents)
+      const recentOffers = countRecentOffersSimple(messageHistory, layout.offerRefWindow)
+      const mask = buildLegalMask(input, recentOffers, layout)
+      const masked = applyMask(msgLogits, mask)
+
+      let tokenId: number
+      if (humanSeats.has(input.self)) {
+        tokenId = await humanBridge({
+          type: 'message',
+          self: input.self,
+          round,
+          legalMask: mask,
+          layout,
+          participants: input.participants,
+          messageHistory,
+          viewerRole: input.viewerRole,
+        })
+        // 防御的: legal mask 違反なら argmax にフォールバック
+        if (tokenId < 0 || tokenId >= layout.vocabSize || mask[tokenId] === 0) {
+          tokenId = sampleArgmax(masked)
+        }
+      } else {
+        tokenId = (opts.sampling === 'argmax' || !opts.rng)
+          ? sampleArgmax(masked)
+          : sampleStochastic(masked, () => opts.rng!.next())
+      }
+      const message = decodeMessage(tokenId, input.participants, layout)
+      perAgent[a].messages.push(message)
+      roundMessages.push(message)
+    }
+    for (let a = 0; a < numActors; a++) {
+      messageHistory.push({ round, sender: inputs[a].self, message: roundMessages[a] })
+    }
+  }
+
+  // finalVote
+  for (let a = 0; a < numActors; a++) {
+    const input = inputs[a]
+    const obs: Observation = {
+      input,
+      roundNumber: opts.kRounds,
+      messageHistory,
+      pastCommitViolations,
+    }
+    const enc = encodeObservation(obs, opts.kRounds)
+    const { voteLogits } = network.forward(enc.cls, enc.agents, enc.numAgents)
+    const voteMask = new Uint8Array(enc.numAgents)
+    for (let i = 0; i < enc.numAgents; i++) voteMask[i] = input.excluded[i] ? 0 : 1
+    const masked = applyMask(voteLogits, voteMask)
+
+    let idx: number
+    if (humanSeats.has(input.self)) {
+      idx = await humanBridge({
+        type: 'vote',
+        self: input.self,
+        mask: voteMask,
+        numAgents: enc.numAgents,
+        participants: input.participants,
+        viewerRole: input.viewerRole,
+      })
+      if (idx < 0 || idx >= enc.numAgents || voteMask[idx] === 0) {
+        idx = sampleArgmax(masked)
+      }
+    } else {
+      idx = (opts.sampling === 'argmax' || !opts.rng)
+        ? sampleArgmax(masked)
+        : sampleStochastic(masked, () => opts.rng!.next())
+    }
+    perAgent[a].finalVoteIdx = idx
+  }
+
+  return { perAgent, messageHistory }
+}
+
+function countRecentOffersSimple(
+  history: { message: Message }[],
+  window: number,
+): number {
+  let count = 0
+  for (let i = history.length - 1; i >= 0 && count < window; i--) {
+    if (history[i].message.type === 'offer') count++
+  }
+  return count
 }

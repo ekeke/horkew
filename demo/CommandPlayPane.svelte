@@ -9,6 +9,8 @@
     commandPlayStore,
     type CommandPlayStoreState,
   } from './commandPlayStore.ts'
+  import { decodeMessage } from '../src/huginn/message-vocab.ts'
+  import type { Message as HuginnMessage } from '../src/huginn/types.ts'
 
   // ==========================================================
   // 役職プリセット: 14D猫のみ（るる鯛標準）
@@ -124,6 +126,62 @@
   const phaseLabel = $derived(view.phase)
   const commanderSeat = $derived(view.commander)
   const activeSeat = $derived(view.activeSeat)
+
+  // ==========================================================
+  // Huginn 交渉 UI
+  // ==========================================================
+
+  /** Message を人間読みラベルに整形 (選択肢ボタンのテキスト). */
+  function formatHuginnMessageLabel(m: HuginnMessage): string {
+    switch (m.type) {
+      case 'silent': return 'silent (沈黙)'
+      case 'propose': return `propose seat${m.target} p${m.priority} ${m.heat}`
+      case 'offer': return `offer (i→seat${m.iVote}, you→seat${m.youVote})`
+      case 'accept': return `accept offer#${m.offerRef}`
+      case 'reject': return `reject offer#${m.offerRef}`
+      case 'commit': return `commit seat${m.target}`
+    }
+  }
+
+  /** type 別にオプションをグループ化する (UI で type ごとに表示するため). */
+  type HuginnMessageOption = { tokenId: number, message: HuginnMessage, label: string }
+
+  const huginnMessageOptions = $derived.by<HuginnMessageOption[]>(() => {
+    void state.tick
+    const p = state.huginnPending
+    if (!p || p.type !== 'message') return []
+    const options: HuginnMessageOption[] = []
+    for (let i = 0; i < p.legalMask.length; i++) {
+      if (p.legalMask[i]) {
+        const msg = decodeMessage(i, p.participants, p.layout)
+        options.push({ tokenId: i, message: msg, label: formatHuginnMessageLabel(msg) })
+      }
+    }
+    return options
+  })
+
+  const huginnMessageGroups = $derived.by(() => {
+    const groups: Record<HuginnMessage['type'], HuginnMessageOption[]> = {
+      silent: [], propose: [], offer: [], accept: [], reject: [], commit: [],
+    }
+    for (const opt of huginnMessageOptions) groups[opt.message.type].push(opt)
+    return groups
+  })
+
+  const huginnVoteOptions = $derived.by<Array<{ idx: number, seat: number }>>(() => {
+    void state.tick
+    const p = state.huginnPending
+    if (!p || p.type !== 'vote') return []
+    const options: Array<{ idx: number, seat: number }> = []
+    for (let i = 0; i < p.numAgents; i++) {
+      if (p.mask[i]) options.push({ idx: i, seat: p.participants[i] })
+    }
+    return options
+  })
+
+  function submitHuginnValue(value: number): void {
+    commandPlayStore.submitHuginn(value)
+  }
 
   /** CO 要求カテゴリの日本語ラベル */
   function coRequestJa(c: string): string {
@@ -773,6 +831,58 @@
       </section>
     {/if}
 
+    <!-- Huginn 交渉: Human の発話 / finalVote 入力待ち (debug/A3) -->
+    {#if state.huginnPending && state.huginnPending.type === 'message'}
+      <section class="huginn-input">
+        <h3>Huginn 発話入力 — seat{state.huginnPending.self} R{state.huginnPending.round + 1}</h3>
+        <div class="huginn-group">
+          <span class="huginn-group-label">silent</span>
+          {#each huginnMessageGroups.silent as opt (opt.tokenId)}
+            <button class="huginn-opt" onclick={() => submitHuginnValue(opt.tokenId)}>{opt.label}</button>
+          {/each}
+        </div>
+        <div class="huginn-group">
+          <span class="huginn-group-label">propose</span>
+          {#each huginnMessageGroups.propose as opt (opt.tokenId)}
+            <button class="huginn-opt" onclick={() => submitHuginnValue(opt.tokenId)}>{opt.label}</button>
+          {/each}
+        </div>
+        <div class="huginn-group">
+          <span class="huginn-group-label">offer</span>
+          {#each huginnMessageGroups.offer as opt (opt.tokenId)}
+            <button class="huginn-opt" onclick={() => submitHuginnValue(opt.tokenId)}>{opt.label}</button>
+          {/each}
+        </div>
+        <div class="huginn-group">
+          <span class="huginn-group-label">accept/reject</span>
+          {#each huginnMessageGroups.accept as opt (opt.tokenId)}
+            <button class="huginn-opt" onclick={() => submitHuginnValue(opt.tokenId)}>{opt.label}</button>
+          {/each}
+          {#each huginnMessageGroups.reject as opt (opt.tokenId)}
+            <button class="huginn-opt" onclick={() => submitHuginnValue(opt.tokenId)}>{opt.label}</button>
+          {/each}
+        </div>
+        <div class="huginn-group">
+          <span class="huginn-group-label">commit</span>
+          {#each huginnMessageGroups.commit as opt (opt.tokenId)}
+            <button class="huginn-opt" onclick={() => submitHuginnValue(opt.tokenId)}>{opt.label}</button>
+          {/each}
+        </div>
+      </section>
+    {/if}
+    {#if state.huginnPending && state.huginnPending.type === 'vote'}
+      <section class="huginn-input">
+        <h3>Huginn finalVote — seat{state.huginnPending.self}</h3>
+        <div class="huginn-vote-row">
+          {#each huginnVoteOptions as opt (opt.idx)}
+            <button class="huginn-opt" onclick={() => submitHuginnValue(opt.idx)}>
+              {nameOf(opt.seat)}
+            </button>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
     <!-- 活動フィード: 最新 N 件の判断ログを小窓で表示（死後観戦にも有用） -->
     {#if state.activityLog.length > 0}
       <section class="activity">
@@ -1205,6 +1315,60 @@
   .order-execute .order-label { background: var(--ctp-red, var(--ctp-peach)); }
   .order-runoff .order-label { background: var(--ctp-peach, var(--ctp-yellow)); }
   .order-request .order-label { background: var(--ctp-sky, var(--ctp-blue)); }
+
+  .huginn-input {
+    border-left: 4px solid var(--ctp-mauve, var(--color-accent));
+    background: var(--ctp-surface1, var(--color-surface));
+    padding: 10px 12px;
+  }
+
+  .huginn-input h3 {
+    margin-top: 0;
+    color: var(--ctp-mauve, var(--color-accent));
+    letter-spacing: 0.05em;
+  }
+
+  .huginn-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 4px 0;
+    font-size: 12px;
+  }
+
+  .huginn-group + .huginn-group {
+    border-top: 1px dashed var(--color-border);
+  }
+
+  .huginn-group-label {
+    min-width: 88px;
+    font-weight: 600;
+    color: var(--ctp-mauve, var(--color-accent));
+    font-size: 11px;
+  }
+
+  .huginn-vote-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 0;
+  }
+
+  .huginn-opt {
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-size: 11px;
+    padding: 3px 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg);
+    color: var(--color-text);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .huginn-opt:hover {
+    background: var(--ctp-surface2, var(--color-surface));
+  }
 
   .activity {
     background: var(--ctp-mantle, var(--color-surface));
