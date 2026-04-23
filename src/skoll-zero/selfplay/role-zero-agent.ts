@@ -112,7 +112,7 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
 
   override decideLeadershipResponse(ctx: DecisionContext, proposal: Proposal): LeadershipResponse {
     const superDecision = super.decideLeadershipResponse(ctx, proposal)
-    const r = this.module.predictAction('leader', ctx)
+    const r = this.module.predictAction('leader', ctx, { record: this.shouldRecord() })
     if (!r || r.actionIdx === undefined) return superDecision
     return leaderFromIdx(r.actionIdx) ?? superDecision
   }
@@ -121,7 +121,7 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
     const superDecision = super.decideProposal(ctx)
     if (!superDecision) return null
     // propose head は per-seat sigmoid (14 次元)。最もスコアが高い alive/非自席 を target に
-    const r = this.module.predictAction('propose', ctx)
+    const r = this.module.predictAction('propose', ctx, { record: this.shouldRecord() })
     if (!r) return superDecision
     const aliveSet = new Set(ctx.alivePlayers)
     let bestSeat = superDecision.target
@@ -136,6 +136,11 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
 
   // ========== internal helper ==========
 
+  /** training (selectionMode='sample') 時のみ buffer 記録。eval 時は capture しない */
+  protected shouldRecord(): boolean {
+    return this.selectionMode === 'sample'
+  }
+
   /** claim / forecast / defensive_claim を claim head の argmax → mergeClaimTypeWithSuper */
   private decideWithClaimHead(
     ctx: DecisionContext,
@@ -143,7 +148,7 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
     superFn: () => DayClaim,
   ): DayClaim {
     const superDecision = superFn()
-    const r = this.module.predictAction(method, ctx)
+    const r = this.module.predictAction(method, ctx, { record: this.shouldRecord() })
     if (!r || r.actionIdx === undefined) return superDecision
     return mergeClaimTypeWithSuper(r.actionIdx, superDecision)
   }

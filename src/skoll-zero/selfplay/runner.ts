@@ -13,6 +13,7 @@ import { MasonRoleAgent } from './mason-zero-agent.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import type { MCTSConfig } from '../mcts/ismcts.ts'
 import { outcomeToMasonValue } from '../mcts/ismcts.ts'
+import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 
 /** Phase 1 デフォルト配役 (bb-eval.ts と同じ 14 席構成) */
 export const DEFAULT_ROLES: Map<SystemRole, number> = new Map<SystemRole, number>([
@@ -31,6 +32,13 @@ export type SelfPlayConfig = {
   selectionMode?: 'sample' | 'argmax'
   /** game seed */
   seed: number
+  /**
+   * Phase 2 pretrained head を mason seat に注入する場合のマップ。
+   * key: `${role}-${method}` (例 'mason-claim', 'mason-comm')。
+   * 注入すると decideDayClaim / decideProposal 等で NN の argmax が発火し、
+   * selectionMode='sample' 時は outcome-SL record が buffer に蓄積される。
+   */
+  phase2Nets?: Map<string, TransformerNetwork>
 }
 
 export type SelfPlayResult = {
@@ -63,6 +71,7 @@ export async function runSelfPlayGame(config: SelfPlayConfig): Promise<SelfPlayR
     buffer,
     mctsConfig: config.mctsConfig,
     selectionMode: config.selectionMode ?? 'sample',
+    phase2Nets: config.phase2Nets,
   })
 
   const defaultAgent = new SkollMasterAgent()

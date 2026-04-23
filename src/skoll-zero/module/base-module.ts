@@ -28,8 +28,9 @@ import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { RootObs } from '../selfplay/observation.ts'
 import { normalizeVisits } from '../selfplay/policy-utils.ts'
-import type {
-  SkollZeroModule, ActionMethod, McctsProposal, ActionPrediction,
+import {
+  type SkollZeroModule, type ActionMethod, type McctsProposal, type ActionPrediction,
+  headNameForActionMethod,
 } from './skoll-zero-module.ts'
 
 export type BaseSkollZeroModuleOptions = {
@@ -107,7 +108,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
   predictAction(
     method: ActionMethod,
     ctx: DecisionContext,
-    _opts?: { record?: boolean },
+    opts?: { record?: boolean },
   ): ActionPrediction | null {
     const net = this.phase2Nets?.get(`${ctx.myRole}-${method}`)
     if (!net) return null
@@ -123,9 +124,32 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     const isSigmoid = method === 'propose' || method === 'predict'
     const actionIdx = isSigmoid ? undefined : argmaxIndex(logits)
 
-    // TODO (Phase 3 M1): record=true 時に buffer.appendPending で outcome-SL record を蓄積
-    // 現時点では predict は frozen forward のみ (非学習経路)
-    // if (record === true) { ... }
+    // Phase 3 M1 capture hook: record=true で outcome-SL 用 record を buffer に蓄積。
+    // softmax head は actionIndex、sigmoid head は logits > 0 の multi-hot。
+    // capture 対象の head は method → headNameForActionMethod で一意に決まる。
+    if (opts?.record === true) {
+      const alive = aliveBitmask(ctx.alivePlayers)
+      const headName = headNameForActionMethod(method)
+      if (isSigmoid) {
+        // logits は pre-sigmoid の raw score、> 0 で「positive にする」判断
+        const multiHot = new Uint8Array(logits.length)
+        for (let i = 0; i < logits.length; i++) {
+          multiHot[i] = logits[i] > 0 ? 1 : 0
+        }
+        this.buffer.appendPending({
+          obs, day: ctx.day, masonSeat: ctx.mySeat, alive,
+          headName,
+          actionMultiHot: multiHot,
+        })
+      } else if (actionIdx !== undefined && actionIdx >= 0) {
+        this.buffer.appendPending({
+          obs, day: ctx.day, masonSeat: ctx.mySeat, alive,
+          headName,
+          actionIndex: actionIdx,
+        })
+      }
+      // actionIdx が -1 (encode 不能) の場合は記録しない (capturing-agents.ts のパターン踏襲)
+    }
 
     return { logits, actionIdx, obs }
   }
