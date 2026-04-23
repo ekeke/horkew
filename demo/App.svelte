@@ -24,6 +24,7 @@
   import PretrainPane from './PretrainPane.svelte'
   import StatsPane from './StatsPane.svelte'
   import CommandPlayPane from './CommandPlayPane.svelte'
+  import FileSidebar from './FileSidebar.svelte'
   import { commandPlayStore } from './commandPlayStore.ts'
   import './theme.css'
   import { runGame } from '../src/lupa/engine.ts'
@@ -115,12 +116,13 @@
     devMode: boolean
     debug: DebugLayout
     panes: Record<PaneId, boolean>
+    sidebarOpen: boolean
   }
 
   const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, gmorkDebug: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false, commandPlay: false }
 
   function loadSettings(): Settings {
-    const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: 'off', panes: { ...defaultPanes } }
+    const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: 'off', panes: { ...defaultPanes }, sidebarOpen: true }
     try {
       const stored = localStorage.getItem(SETTINGS_KEY)
       if (stored) {
@@ -150,7 +152,7 @@
   function fileEntries(): { key: string, entry: FileEntry }[] {
     return Object.entries(fileIndex)
       .map(([key, entry]) => ({ key, entry }))
-      .sort((a, b) => b.entry.createdAt - a.entry.createdAt)
+      .sort((a, b) => b.entry.updatedAt - a.entry.updatedAt)
   }
 
   function loadText(key: string): string {
@@ -158,14 +160,22 @@
   }
 
   function saveText(key: string, text: string) {
+    const stored = localStorage.getItem(STORAGE_PREFIX + key)
+    const existed = fileIndex[key] !== undefined
+    const unchanged = existed && stored === text
+    if (unchanged) {
+      if (settings.active !== key) updateSettings({ active: key })
+      return
+    }
     localStorage.setItem(STORAGE_PREFIX + key, text)
     const now = Date.now()
-    if (fileIndex[key]) {
+    if (existed) {
       fileIndex[key].updatedAt = now
     } else {
       fileIndex[key] = { createdAt: now, updatedAt: now }
     }
     saveIndex(fileIndex)
+    entries = fileEntries()
     if (settings.active !== key) updateSettings({ active: key })
   }
 
@@ -178,8 +188,70 @@
     }
   }
 
+  function renameFile(key: string, newTitle: string) {
+    const entry = fileIndex[key]
+    if (!entry) return
+    const trimmed = newTitle.trim()
+    entry.title = trimmed || undefined
+    entry.updatedAt = Date.now()
+    saveIndex(fileIndex)
+    entries = fileEntries()
+  }
+
+  const PENDING_DELETE_MS = 5000
+  let pendingDeletes = $state(new Map<string, { timer: ReturnType<typeof setTimeout> }>())
+  let pendingDeleteKeys = $derived(new Set(pendingDeletes.keys()))
+
+  function startPendingDelete(key: string) {
+    if (pendingDeletes.has(key)) return
+    const timer = setTimeout(() => confirmPendingDelete(key), PENDING_DELETE_MS)
+    pendingDeletes.set(key, { timer })
+    pendingDeletes = new Map(pendingDeletes)
+  }
+
+  function undoPendingDelete(key: string) {
+    const entry = pendingDeletes.get(key)
+    if (!entry) return
+    clearTimeout(entry.timer)
+    pendingDeletes.delete(key)
+    pendingDeletes = new Map(pendingDeletes)
+  }
+
+  function confirmPendingDelete(key: string) {
+    if (!pendingDeletes.has(key)) return
+    pendingDeletes.delete(key)
+    pendingDeletes = new Map(pendingDeletes)
+    const wasActive = activeKey === key
+    deleteText(key)
+    entries = fileEntries()
+    if (wasActive) {
+      const next = entries.find(e => !pendingDeletes.has(e.key))
+      if (next) {
+        switchTo(next.key)
+      } else {
+        activeKey = ''
+        input = ''
+        updateSettings({ active: '' })
+        setEditorContent('')
+        rawStatements = ''
+        analyzerJson = ''
+        parsedLines = []
+        analysisSeats = []
+        analysisColumns = []
+        analysisError = ''
+        assumptions = new Map()
+      }
+    }
+  }
+
+  function toggleSidebar() {
+    sidebarOpen = !sidebarOpen
+    updateSettings({ sidebarOpen })
+  }
+
   let entries = $state(fileEntries())
   let activeKey = $state(settings.active)
+  let sidebarOpen = $state(settings.sidebarOpen)
   const overlayChannel = new BroadcastChannel('horkew-overlay')
   let obsRoom: string | null = $state(null)
   let obsSocket: WebSocket | null = $state(null)
@@ -399,6 +471,7 @@
   }
 
   let input = $state(activeKey ? loadText(activeKey) : '')
+  let isActivePendingDelete = $derived(!!activeKey && pendingDeletes.has(activeKey))
   let rawStatements = $state('')
   let analyzerJson = $state('')
   let parsedLines: StringifiedLine[] = $state([])
@@ -883,35 +956,6 @@
     showModal = false
   }
 
-  function deleteCurrent() {
-    if (!activeKey) return
-    deleteText(activeKey)
-    entries = fileEntries()
-    if (entries.length > 0) {
-      switchTo(entries[0].key)
-    } else {
-      activeKey = ''
-      input = ''
-      updateSettings({ active: '' })
-    }
-    rawStatements = ''
-    analyzerJson = ''
-    parsedLines = []
-    analysisSeats = []
-    analysisColumns = []
-    analysisError = ''
-    assumptions = new Map()
-  }
-
-  function onSelectChange(e: Event) {
-    const value = (e.target as HTMLSelectElement).value
-    if (value === '__trial__') {
-      handleStartTrial(TUTORIAL_TEXT)
-    } else if (value) {
-      switchTo(value)
-    }
-  }
-
   function togglePane(id: PaneId) {
     paneVisible[id] = !paneVisible[id]
     updateSettings({ panes: paneVisible })
@@ -1034,10 +1078,11 @@
     })
   })
 
-  // 実行中フラグ変化 → エディタの編集可否を切替
+  // エディタの編集可否: cmd-play 実行中 / 動画同期中 / アクティブファイル削除保留中 のいずれかで read-only
   $effect(() => {
     if (!editorView || !editorModule) return
-    editorModule.setEditable(editorView, !cmdPlayRunning)
+    const editable = !cmdPlayRunning && !videoSyncActive && !isActivePendingDelete
+    editorModule.setEditable(editorView, editable)
   })
 
   // Initialize CM6 editor when parent element is available (lazy-loaded)
@@ -1686,13 +1731,6 @@
     }
   }
 
-  // Toggle editor readonly based on sync mode
-  $effect(() => {
-    if (editorView && editorModule) {
-      editorModule.setEditable(editorView, !videoSyncActive)
-    }
-  })
-
   // Video sync: when currentTime changes, update cursorLine from timestamps
   let lastVideoCursorLine = -1
   $effect(() => {
@@ -1711,29 +1749,18 @@
 
 <div class="layout skin-{skin}">
   <header class="header">
+    {#if !sidebarOpen}
+    <button class="header-btn sidebar-toggle" onclick={toggleSidebar} title="サイドバーを開く" aria-label="サイドバーを開く">&#x2630;</button>
+    {/if}
+
     <span class="header-subtitle">人狼メモ・解析ツール</span>
     <span class="header-title" class:title-flash={titleFlash} onclick={onTitleTap}>Horkew</span>
 
     {#if trialMode}
-    <span class="trial-banner">お試しモード</span>
-    {#if activeKey}<button class="header-btn trial-exit" onclick={exitTrialMode}>戻る</button>{/if}
-    <button class="header-btn trial-new" onclick={openNewModal}>新規作成</button>
-    {:else}
-    <select class="header-select" value={activeKey} onchange={onSelectChange}>
-      {#if entries.length === 0}
-        <option value="">---</option>
-      {:else}
-        {#each entries as { key, entry }}
-          <option value={key}>{displayName(entry)}</option>
-        {/each}
-      {/if}
-      <option disabled>──────────</option>
-      <option value="__trial__">お試しモード（保存なし）</option>
-    </select>
-
-    <button class="header-btn" onclick={deleteCurrent} disabled={!activeKey} title="Delete">Del</button>
-    <button class="header-btn" onclick={openNewModal}>新規作成</button>
+      <span class="trial-banner">お試しモード</span>
+      {#if activeKey}<button class="header-btn trial-exit" onclick={exitTrialMode}>戻る</button>{/if}
     {/if}
+    <button class="header-btn" onclick={openNewModal}>新規作成</button>
 
     <div class="header-spacer"></div>
 
@@ -1905,6 +1932,14 @@
             <span class="editor-toolbar-hint">全選択して圧縮テキストを貼り付けると自動展開</span>
           </div>
           <div class="input-editor" bind:this={editorParent}></div>
+          {#if isActivePendingDelete}
+            <div class="pending-delete-overlay">
+              <div class="pending-delete-banner">
+                <span>削除保留中</span>
+                <button class="pending-delete-undo" onclick={() => activeKey && undoPendingDelete(activeKey)}>取り消す</button>
+              </div>
+            </div>
+          {/if}
         {:else}
           <div class="pane-placeholder"><span>新規作成ボタンから開始してください</span></div>
         {/if}
@@ -2019,6 +2054,26 @@
       </div>
     </section>
   {/snippet}
+
+  <div class="body-row">
+    {#if sidebarOpen}
+      <FileSidebar
+        entries={entries}
+        activeKey={activeKey}
+        pendingKeys={pendingDeleteKeys}
+        trialMode={trialMode}
+        onSelect={switchTo}
+        onRename={renameFile}
+        onDelete={startPendingDelete}
+        onUndoDelete={undoPendingDelete}
+        onClose={toggleSidebar}
+        onCreateNew={openNewModal}
+        onStartTrial={() => handleStartTrial(TUTORIAL_TEXT)}
+        {formatDate}
+        {displayName}
+      />
+    {/if}
+    <div class="body-main">
 
   {#if debugMode === 'debug'}
   <div class="panes">
@@ -2253,6 +2308,9 @@
   </div>
   {/if}
 
+    </div>
+  </div>
+
   {#if videoFullscreen && videoId}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="vf-overlay" onkeydown={onFullscreenKeydown}>
@@ -2360,6 +2418,24 @@
     flex-direction: column;
     height: 100vh;
     font-family: system-ui, -apple-system, sans-serif;
+  }
+
+  .body-row {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .body-main {
+    flex: 1;
+    display: flex;
+    min-width: 0;
+  }
+
+  .sidebar-toggle {
+    padding: 4px 10px;
+    font-size: 14px;
+    line-height: 1;
   }
 
   .header {
@@ -3179,6 +3255,45 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    position: relative;
+  }
+
+  .pending-delete-overlay {
+    position: absolute;
+    inset: 0;
+    background: var(--color-overlay-backdrop);
+    z-index: 10;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 16px;
+  }
+
+  .pending-delete-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--color-text);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  }
+
+  .pending-delete-undo {
+    background: transparent;
+    border: 1px solid var(--color-border-strong);
+    color: var(--color-accent);
+    padding: 3px 10px;
+    font-size: 11px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  .pending-delete-undo:hover {
+    background: var(--color-surface);
   }
 
   .editor-toolbar {
