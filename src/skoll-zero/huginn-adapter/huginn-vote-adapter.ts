@@ -9,7 +9,7 @@
  *   3. huginn.runRounds() で全 seat 一斉に交渉投票
  *   4. Trace.perAgent[i].finalVoteIdx を participants[idx] で seat に戻して Map<seat, target>
  *
- * TeamAgent (wolf/mason) は bypass し、個別 `agents` Map に登録された RoleZeroAgent を呼ぶ (案 R)。
+ * TeamAgent (wolf/mason) は bypass し、個別 `agents` Map に登録された SkollZeroRoleAgent を呼ぶ (案 R)。
  * executionPlans は参照しない (案 I)。
  */
 

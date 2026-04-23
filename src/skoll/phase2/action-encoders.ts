@@ -95,7 +95,7 @@ export function encodeLeader(resp: LeadershipResponse): number {
 
 /**
  * Proposal.target → propose head の 14 dim multi-hot (単席のみ 1)。
- * Phase 3 capture hook 用。RoleZeroAgent.decideProposal は 1 seat を target に選ぶので
+ * Phase 3 capture hook 用。SkollZeroRoleAgent.decideProposal は 1 seat を target に選ぶので
  * 常に単席 one-hot になる (複数提案は別 Proposal インスタンスで表現)。
  */
 export function encodeProposal(proposal: Proposal): Uint8Array {

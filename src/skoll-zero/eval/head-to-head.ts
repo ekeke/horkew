@@ -1,12 +1,12 @@
 /**
- * M6: MasonZeroAgent vs baseline の head-to-head 評価。
+ * M6: MasonRoleAgent vs baseline の head-to-head 評価。
  *
  * 2 席の mason を被験者として置き、他 12 席を SkollMasterAgent (heuristic) 固定で
  * 同じ seed 列を 2 variant で回し、村陣営勝率を比較する。
  *
  * Variant:
  *   - baseline:  mason 席も SkollMasterAgent
- *   - mason_zero: mason 席に MasonZeroAgent (ISMCTS + warm-start NN)
+ *   - mason_zero: mason 席に MasonRoleAgent (ISMCTS + warm-start NN)
  *
  * 用例:
  *   node --experimental-strip-types src/skoll-zero/eval/head-to-head.ts \
@@ -25,7 +25,7 @@ import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import { resolveRules } from '../../howl/ruleset.ts'
 import { loadNetworkFromCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
-import { MasonZeroAgent } from '../selfplay/mason-zero-agent.ts'
+import { MasonRoleAgent } from '../selfplay/mason-zero-agent.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import { captureObs } from '../selfplay/observation.ts'
 import { DEFAULT_MCTS_CONFIG, type MCTSConfig } from '../mcts/ismcts.ts'
@@ -43,7 +43,7 @@ export type VariantConfig = {
   /**
    * モード: 省略 = baseline (SkollMasterAgent heuristic)
    *        'policy_only' = MCTS skip、NN policy head の argmax のみ
-   *        'zero' = 通常の MasonZeroAgent (ISMCTS)
+   *        'zero' = 通常の MasonRoleAgent (ISMCTS)
    */
   mode?: 'policy_only' | 'zero'
   /** mode='zero' 時のみ使う */
@@ -129,7 +129,7 @@ class PolicyOnlyMasonAgent extends SkollMasterAgent {
   }
 }
 
-type VoteAgent = MasonZeroAgent | PolicyOnlyMasonAgent
+type VoteAgent = MasonRoleAgent | PolicyOnlyMasonAgent
 
 async function runSingleGame(
   seed: number,
@@ -160,8 +160,8 @@ async function runSingleGame(
     handlers,
   )
 
-  const mctsCalls = masonAgent instanceof MasonZeroAgent ? masonAgent.mctsCalls : 0
-  const fallbackCalls = masonAgent instanceof MasonZeroAgent ? masonAgent.fallbackCalls : 0
+  const mctsCalls = masonAgent instanceof MasonRoleAgent ? masonAgent.mctsCalls : 0
+  const fallbackCalls = masonAgent instanceof MasonRoleAgent ? masonAgent.fallbackCalls : 0
   const voteCalls = masonAgent instanceof PolicyOnlyMasonAgent ? masonAgent.voteCalls : 0
   return {
     result: result.state.result ?? 'draw',
@@ -196,7 +196,7 @@ function makeVariantAgentFactory(
   if (variant.mode === 'zero' && variant.zero) {
     const cfg = variant.zero
     const mctsConfig: MCTSConfig = { ...DEFAULT_MCTS_CONFIG, nRollouts: cfg.rollouts }
-    return () => new MasonZeroAgent({
+    return () => new MasonRoleAgent({
       nn: pool.getNet(cfg.zeroValueHead),
       setup: DEFAULT_ROLES,
       buffer: new TrainingBuffer(),

@@ -1,7 +1,7 @@
 /**
  * WolfSkollZeroModule — wolf_collective 観測 (1212 dims) + wolf faction。
  *
- * 旧 `WolfZeroAgent` の Module 相当。個別 wolf の DecisionContext から team obs を復元。
+ * 旧 `WolfRoleAgent` の Module 相当。個別 wolf の DecisionContext から team obs を復元。
  */
 
 import type { DecisionContext, TeamDecisionContext } from '../../fenrir/src/agents/agent.ts'

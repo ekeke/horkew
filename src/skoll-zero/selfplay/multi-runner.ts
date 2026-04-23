@@ -2,7 +2,7 @@
  * Multi-agent self-play runner。
  *
  * 6 つの slot (mason / village / wolf / fanatic / hamster / immoralist) ごとに
- * 独立した NN + buffer を持ち、1 ゲームで該当席に対応する RoleZeroAgent を配置する。
+ * 独立した NN + buffer を持ち、1 ゲームで該当席に対応する SkollZeroRoleAgent を配置する。
  * slot が設定されていない席は SkollMasterAgent (heuristic) を使う。
  *
  * ゲーム終了時、各 buffer の pending records を各 faction 視点の z で finalize。
@@ -20,11 +20,11 @@ import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import { outcomeToValue, type Faction, type MCTSConfig } from '../mcts/ismcts.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import { TrainingBuffer } from './buffer.ts'
-import { MasonZeroAgent } from './mason-zero-agent.ts'
+import { MasonRoleAgent } from './mason-zero-agent.ts'
 import {
-  VillageZeroAgent, WolfZeroAgent, FanaticZeroAgent, HamsterZeroAgent, ImmoralistZeroAgent,
+  VillageRoleAgent, WolfRoleAgent, FanaticRoleAgent, HamsterRoleAgent, ImmoralistRoleAgent,
 } from './role-zero-agents.ts'
-import { RoleZeroAgent } from './role-zero-agent.ts'
+import { SkollZeroRoleAgent } from './role-zero-agent.ts'
 
 export type GameResult = 'villager_won' | 'werewolf_won' | 'werehamster_won' | 'draw' | null
 
@@ -108,7 +108,7 @@ function buildAgent(
   slot: AgentSlot,
   setup: Map<SystemRole, number>,
   cfg: MultiAgentSelfPlayConfig,
-): RoleZeroAgent {
+): SkollZeroRoleAgent {
   const opts = {
     nn: slot.nn,
     setup,
@@ -117,12 +117,12 @@ function buildAgent(
     selectionMode: cfg.selectionMode ?? 'sample',
   }
   switch (slotKey) {
-    case 'mason': return new MasonZeroAgent(opts)
-    case 'village': return new VillageZeroAgent(opts)
-    case 'wolf': return new WolfZeroAgent(opts)
-    case 'fanatic': return new FanaticZeroAgent(opts)
-    case 'hamster': return new HamsterZeroAgent(opts)
-    case 'immoralist': return new ImmoralistZeroAgent(opts)
+    case 'mason': return new MasonRoleAgent(opts)
+    case 'village': return new VillageRoleAgent(opts)
+    case 'wolf': return new WolfRoleAgent(opts)
+    case 'fanatic': return new FanaticRoleAgent(opts)
+    case 'hamster': return new HamsterRoleAgent(opts)
+    case 'immoralist': return new ImmoralistRoleAgent(opts)
   }
 }
 
@@ -141,7 +141,7 @@ export async function runMultiAgentSelfPlayGame(
   const roles = cfg.roles ?? DEFAULT_ROLES
 
   // 各 slot につき agent を 1 個、seat 毎に同じインスタンスを共有
-  const agentsBySlot = new Map<keyof SlotMap, RoleZeroAgent>()
+  const agentsBySlot = new Map<keyof SlotMap, SkollZeroRoleAgent>()
   const preSize = new Map<keyof SlotMap, number>()
   const slotKeys: (keyof SlotMap)[] = ['mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist']
   for (const key of slotKeys) {

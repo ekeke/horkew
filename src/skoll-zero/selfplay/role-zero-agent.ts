@@ -1,9 +1,9 @@
 /**
- * RoleZeroAgent — 役職汎用 zero エージェント抽象基底。
+ * SkollZeroRoleAgent — 役職汎用 zero エージェント抽象基底。
  *
  * ## Agent / Module 3 層分離 (2026-04-23 リファクタ、M0.5)
  *
- * 旧 RoleZeroAgent は NN / MCTS / buffer 記録も直接抱えていた。リファクタ後:
+ * 旧 SkollZeroRoleAgent は NN / MCTS / buffer 記録も直接抱えていた。リファクタ後:
  * - **Agent 層 (このファイル)**: lupa decide\* interface 実装、super (heuristic) との merge、
  *   selectionMode (sample/argmax) による action 選択
  * - **Module 層 (`../module/`)**: NN forward / MCTS 実行 / buffer 蓄積 / phase2 head 管理
@@ -37,7 +37,7 @@ import type { SkollZeroModule, ActionMethod } from '../module/skoll-zero-module.
  * 原材料を渡す形の両方をサポートする。サブクラスは内部で Module を構築する
  * 方針を取るため `module` フィールドは通常使わない。
  */
-export type RoleZeroAgentOptions = {
+export type SkollZeroRoleAgentOptions = {
   /** 形勢判断 NN (MCTS node expand 用)。Module が受け取る */
   nn: MasonZeroNN
   /** 役職分布 */
@@ -58,7 +58,7 @@ export type RoleZeroAgentOptions = {
  * ISMCTS ベースの zero agent 基底。
  * サブクラスは対応する Module を init して super に渡す。
  */
-export abstract class RoleZeroAgent extends SkollMasterAgent {
+export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
   /** skoll-zero Module (NN + MCTS + buffer の塊) */
   protected readonly module: SkollZeroModule
   /** 行動選択モード */

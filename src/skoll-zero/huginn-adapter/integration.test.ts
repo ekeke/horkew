@@ -20,10 +20,10 @@ import { runGame } from '../../lupa/engine.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import { DummyNN } from '../mcts/nn.ts'
-import { MasonZeroAgent } from '../selfplay/mason-zero-agent.ts'
+import { MasonRoleAgent } from '../selfplay/mason-zero-agent.ts'
 import {
-  VillageZeroAgent, WolfZeroAgent, FanaticZeroAgent,
-  HamsterZeroAgent, ImmoralistZeroAgent,
+  VillageRoleAgent, WolfRoleAgent, FanaticRoleAgent,
+  HamsterRoleAgent, ImmoralistRoleAgent,
 } from '../selfplay/role-zero-agents.ts'
 import { TrainableNetwork } from '../../huginn/trainable-network.ts'
 import { buildVocabLayout } from '../../huginn/message-vocab.ts'
@@ -40,12 +40,12 @@ function createZeroAgent(role: SystemRole, opts: {
 }): Agent {
   const baseOpts = { ...opts, selectionMode: 'argmax' as const }
   switch (role) {
-    case 'mason': return new MasonZeroAgent(baseOpts)
-    case 'werewolf': return new WolfZeroAgent(baseOpts)
-    case 'fanatic': return new FanaticZeroAgent(baseOpts)
-    case 'werehamster': return new HamsterZeroAgent(baseOpts)
-    case 'immoralist': return new ImmoralistZeroAgent(baseOpts)
-    default: return new VillageZeroAgent(baseOpts)  // villager/seer/medium/bodyguard/nekomata
+    case 'mason': return new MasonRoleAgent(baseOpts)
+    case 'werewolf': return new WolfRoleAgent(baseOpts)
+    case 'fanatic': return new FanaticRoleAgent(baseOpts)
+    case 'werehamster': return new HamsterRoleAgent(baseOpts)
+    case 'immoralist': return new ImmoralistRoleAgent(baseOpts)
+    default: return new VillageRoleAgent(baseOpts)  // villager/seer/medium/bodyguard/nekomata
   }
 }
 

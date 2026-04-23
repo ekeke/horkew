@@ -1,7 +1,7 @@
 /**
  * Village / Wolf / Fanatic / Hamster / Immoralist 用の zero agent。
  *
- * いずれも RoleZeroAgent を継承し、対応する SkollZeroModule を constructor で init する。
+ * いずれも SkollZeroRoleAgent を継承し、対応する SkollZeroModule を constructor で init する。
  *
  * ## 役職別 Module 対応
  *
@@ -17,7 +17,7 @@
 
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import type { NightAction } from '../../lupa/types.ts'
-import { RoleZeroAgent, type RoleZeroAgentOptions } from './role-zero-agent.ts'
+import { SkollZeroRoleAgent, type SkollZeroRoleAgentOptions } from './role-zero-agent.ts'
 import { argmaxFromVisits, sampleFromVisits } from './policy-utils.ts'
 import {
   VillageIndividualModule,
@@ -27,8 +27,8 @@ import {
 import { WolfSkollZeroModule } from '../module/wolf-module.ts'
 
 /** Village 視点 (villager/seer/medium/bodyguard/nekomata): individual obs、village faction */
-export class VillageZeroAgent extends RoleZeroAgent {
-  constructor(opts: RoleZeroAgentOptions) {
+export class VillageRoleAgent extends SkollZeroRoleAgent {
+  constructor(opts: SkollZeroRoleAgentOptions) {
     const module = new VillageIndividualModule({
       nn: opts.nn,
       setup: opts.setup,
@@ -61,8 +61,8 @@ export class VillageZeroAgent extends RoleZeroAgent {
 }
 
 /** Wolf 視点: wolf_collective obs、wolf faction。各 wolf 席が独立に MCTS を回す近似 */
-export class WolfZeroAgent extends RoleZeroAgent {
-  constructor(opts: RoleZeroAgentOptions) {
+export class WolfRoleAgent extends SkollZeroRoleAgent {
+  constructor(opts: SkollZeroRoleAgentOptions) {
     const module = new WolfSkollZeroModule({
       nn: opts.nn,
       setup: opts.setup,
@@ -90,8 +90,8 @@ export class WolfZeroAgent extends RoleZeroAgent {
 }
 
 /** Fanatic 視点: standard obs、wolf faction (狼勝ち = +1) */
-export class FanaticZeroAgent extends RoleZeroAgent {
-  constructor(opts: RoleZeroAgentOptions) {
+export class FanaticRoleAgent extends SkollZeroRoleAgent {
+  constructor(opts: SkollZeroRoleAgentOptions) {
     const module = new FanaticIndividualModule({
       nn: opts.nn,
       setup: opts.setup,
@@ -105,8 +105,8 @@ export class FanaticZeroAgent extends RoleZeroAgent {
 }
 
 /** Hamster 視点: standard obs、hamster faction */
-export class HamsterZeroAgent extends RoleZeroAgent {
-  constructor(opts: RoleZeroAgentOptions) {
+export class HamsterRoleAgent extends SkollZeroRoleAgent {
+  constructor(opts: SkollZeroRoleAgentOptions) {
     const module = new ThirdIndividualModule({
       nn: opts.nn,
       setup: opts.setup,
@@ -120,8 +120,8 @@ export class HamsterZeroAgent extends RoleZeroAgent {
 }
 
 /** Immoralist 視点: standard obs、hamster faction (狐勝ち = +1) */
-export class ImmoralistZeroAgent extends RoleZeroAgent {
-  constructor(opts: RoleZeroAgentOptions) {
+export class ImmoralistRoleAgent extends SkollZeroRoleAgent {
+  constructor(opts: SkollZeroRoleAgentOptions) {
     const module = new ThirdIndividualModule({
       nn: opts.nn,
       setup: opts.setup,

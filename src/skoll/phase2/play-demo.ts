@@ -1,7 +1,7 @@
 /**
  * Phase 2 hook の動作確認 demo。
  *
- * fullAdapter で 1 ゲーム回し、villager 席に VillageZeroAgent + phase2Net を
+ * fullAdapter で 1 ゲーム回し、villager 席に VillageRoleAgent + phase2Net を
  * 注入。decideDayClaim の console.log で NN の claim head 出力が実際の判断に
  * 流れていることを観察する。
  *
@@ -18,7 +18,7 @@ import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from '../../fenrir/src/adapters/full-adapter.ts'
 import { SkollMasterAgent } from '../skoll-master-agent.ts'
 import { loadNetworkFromCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
-import { VillageZeroAgent } from '../../skoll-zero/selfplay/role-zero-agents.ts'
+import { VillageRoleAgent } from '../../skoll-zero/selfplay/role-zero-agents.ts'
 import { TrainingBuffer } from '../../skoll-zero/selfplay/buffer.ts'
 import { DummyNN } from '../../skoll-zero/mcts/nn.ts'
 
@@ -40,7 +40,7 @@ export async function runPlayDemo(opts: PlayDemoOptions): Promise<void> {
 
   const roles = DEFAULT_ROLES
   const buffer = new TrainingBuffer()
-  const villageAgent = new VillageZeroAgent({
+  const villageAgent = new VillageRoleAgent({
     nn: new DummyNN(),
     setup: roles,
     buffer,

@@ -279,11 +279,11 @@ test('SkollCommandAgent: vote legal が空 → no-vote-legal fallback', async ()
 })
 
 // ============================================================
-// MCTS 経路 (RoleZeroAgent master 差し替え) のテスト
+// MCTS 経路 (SkollZeroRoleAgent master 差し替え) のテスト
 // ============================================================
 
 /**
- * RoleZeroAgent を模した最小スタブ。
+ * SkollZeroRoleAgent を模した最小スタブ。
  * - forceFallback=true: MCTS 失敗扱い (lastMCTS=null) + super.decideVote (analyzeVote) に委譲
  * - それ以外: voteSeat を返しつつ visits を保持 → getLastMCTSResult で返す
  */

@@ -40,12 +40,12 @@ import {
 } from '../src/huginn/types.ts'
 import { importWeights as importHuginnWeights, CHECKPOINT_VERSION as HUGINN_CHECKPOINT_VERSION, type HuginnCheckpoint } from '../src/huginn/checkpoint.ts'
 import { MasonZeroNetwork } from '../src/skoll-zero/network/mason-zero.ts'
-import { MasonZeroAgent } from '../src/skoll-zero/selfplay/mason-zero-agent.ts'
+import { MasonRoleAgent } from '../src/skoll-zero/selfplay/mason-zero-agent.ts'
 import {
-  VillageZeroAgent, WolfZeroAgent, FanaticZeroAgent,
-  HamsterZeroAgent, ImmoralistZeroAgent,
+  VillageRoleAgent, WolfRoleAgent, FanaticRoleAgent,
+  HamsterRoleAgent, ImmoralistRoleAgent,
 } from '../src/skoll-zero/selfplay/role-zero-agents.ts'
-import type { RoleZeroAgent } from '../src/skoll-zero/selfplay/role-zero-agent.ts'
+import type { SkollZeroRoleAgent } from '../src/skoll-zero/selfplay/role-zero-agent.ts'
 import { TrainingBuffer } from '../src/skoll-zero/selfplay/buffer.ts'
 
 // ============================================================
@@ -274,13 +274,13 @@ const SLOT_ROLES: Record<ZeroSlot, SystemRole[]> = {
 }
 
 /**
- * 6 slot の skoll-zero NN をロードして RoleZeroAgent の Map を返す。
+ * 6 slot の skoll-zero NN をロードして SkollZeroRoleAgent の Map を返す。
  * 失敗した slot は null のまま、呼び出し側で heuristic にフォールバック。
  */
 async function buildSkollZeroAgents(
   rolesMap: Map<SystemRole, number>,
-): Promise<Map<ZeroSlot, RoleZeroAgent>> {
-  const out = new Map<ZeroSlot, RoleZeroAgent>()
+): Promise<Map<ZeroSlot, SkollZeroRoleAgent>> {
+  const out = new Map<ZeroSlot, SkollZeroRoleAgent>()
   const commonOpts = {
     setup: rolesMap,
     buffer: new TrainingBuffer(),
@@ -301,13 +301,13 @@ async function buildSkollZeroAgents(
       phase2Nets: phase2Nets.size > 0 ? phase2Nets : undefined,
       ...commonOpts,
     }
-    const agent: RoleZeroAgent =
-      slot === 'mason' ? new MasonZeroAgent(opts)
-      : slot === 'village' ? new VillageZeroAgent(opts)
-      : slot === 'wolf' ? new WolfZeroAgent(opts)
-      : slot === 'fanatic' ? new FanaticZeroAgent(opts)
-      : slot === 'hamster' ? new HamsterZeroAgent(opts)
-      : new ImmoralistZeroAgent(opts)
+    const agent: SkollZeroRoleAgent =
+      slot === 'mason' ? new MasonRoleAgent(opts)
+      : slot === 'village' ? new VillageRoleAgent(opts)
+      : slot === 'wolf' ? new WolfRoleAgent(opts)
+      : slot === 'fanatic' ? new FanaticRoleAgent(opts)
+      : slot === 'hamster' ? new HamsterRoleAgent(opts)
+      : new ImmoralistRoleAgent(opts)
     out.set(slot, agent)
   }
   return out

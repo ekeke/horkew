@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { TrainingBuffer } from './buffer.ts'
 import { DummyNN } from '../mcts/nn.ts'
 import { runSelfPlayGame, runSelfPlayBatch, DEFAULT_ROLES } from './runner.ts'
-import { MasonZeroAgent } from './mason-zero-agent.ts'
+import { MasonRoleAgent } from './mason-zero-agent.ts'
 import { normalizeVisits, sampleFromVisits, argmaxFromVisits } from './policy-utils.ts'
 
 describe('TrainingBuffer', () => {
@@ -80,9 +80,9 @@ describe('policy-utils', () => {
   })
 })
 
-describe('RoleZeroAgent.getLastMCTSResult', () => {
+describe('SkollZeroRoleAgent.getLastMCTSResult', () => {
   it('初期状態では null', () => {
-    const agent = new MasonZeroAgent({
+    const agent = new MasonRoleAgent({
       nn: new DummyNN(),
       setup: DEFAULT_ROLES,
       buffer: new TrainingBuffer(),

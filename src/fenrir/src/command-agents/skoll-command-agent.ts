@@ -35,7 +35,7 @@ export type SkollCommandAgentOptions = {
   /** 決定性確保用の seed（fallback 生成時と内部 rng に渡す） */
   seed?: number
   /**
-   * 事前構築済みの SkollMasterAgent (MasonZeroAgent 等の継承クラスを差込む用途)。
+   * 事前構築済みの SkollMasterAgent (MasonRoleAgent 等の継承クラスを差込む用途)。
    * 指定されると skollOptions は無視される。
    */
   master?: SkollMasterAgent
@@ -62,7 +62,7 @@ type ZeroMCTSResult = { visits: Map<number, number> }
 
 /**
  * master が MCTS 結果を提供できるか duck-type 判定。
- * RoleZeroAgent が `getLastMCTSResult()` を実装している前提。
+ * SkollZeroRoleAgent が `getLastMCTSResult()` を実装している前提。
  * 一致パターン: `src/skoll-zero/huginn-adapter/huginn-vote-adapter.ts` の hasLastMCTSResult。
  */
 function hasMCTSSupport(
@@ -73,7 +73,7 @@ function hasMCTSSupport(
 
 /**
  * master が Phase 2 NN の指定 method head を持つか duck-type 判定。
- * RoleZeroAgent.hasPhase2Head(method, role) が登録済み checkpoint の有無を返す。
+ * SkollZeroRoleAgent.hasPhase2Head(method, role) が登録済み checkpoint の有無を返す。
  */
 function hasPhase2Head(
   m: SkollMasterAgent,
@@ -134,7 +134,7 @@ export class SkollCommandAgent implements CommandAgent {
 
   /**
    * 最後に走行した MCTS の visits 分布を返す.
-   * master が RoleZeroAgent 等で MCTS をサポートする場合のみ非 null.
+   * master が SkollZeroRoleAgent 等で MCTS をサポートする場合のみ非 null.
    * huginn-vote-collector が投票分布から desire (primary 吊り候補) を組む際に使う.
    */
   getLastMCTSResult(): ZeroMCTSResult | null {
@@ -202,7 +202,7 @@ export class SkollCommandAgent implements CommandAgent {
 
     const perspective = labelForRole(player.role)
 
-    // MCTS 経路 (master が RoleZeroAgent の場合): まず decideVote で MCTS を走らせる。
+    // MCTS 経路 (master が SkollZeroRoleAgent の場合): まず decideVote で MCTS を走らせる。
     // MCTS 成功 (visits 非空) & top-1 が voteLegal に含まれる場合はそれを採用。
     // 失敗 or legal 外なら既存の analyzeVote 経路にフォールスルーする。
     if (hasMCTSSupport(this.master)) {

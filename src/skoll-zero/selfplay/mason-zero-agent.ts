@@ -1,16 +1,16 @@
 /**
- * MasonZeroAgent — mason 視点の zero agent。
+ * MasonRoleAgent — mason 視点の zero agent。
  *
- * Agent 層は RoleZeroAgent の薄い wrapper、MCTS/NN 詳細は MasonSkollZeroModule に委譲。
+ * Agent 層は SkollZeroRoleAgent の薄い wrapper、MCTS/NN 詳細は MasonSkollZeroModule に委譲。
  */
 
-import { RoleZeroAgent, type RoleZeroAgentOptions } from './role-zero-agent.ts'
+import { SkollZeroRoleAgent, type SkollZeroRoleAgentOptions } from './role-zero-agent.ts'
 import { MasonSkollZeroModule } from '../module/mason-module.ts'
 
-export type MasonZeroAgentOptions = RoleZeroAgentOptions
+export type MasonRoleAgentOptions = SkollZeroRoleAgentOptions
 
-export class MasonZeroAgent extends RoleZeroAgent {
-  constructor(opts: MasonZeroAgentOptions) {
+export class MasonRoleAgent extends SkollZeroRoleAgent {
+  constructor(opts: MasonRoleAgentOptions) {
     const module = new MasonSkollZeroModule({
       nn: opts.nn,
       setup: opts.setup,

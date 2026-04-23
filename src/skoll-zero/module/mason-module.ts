@@ -1,7 +1,7 @@
 /**
  * MasonSkollZeroModule — mason_collective 観測 (1030 dims) + village faction。
  *
- * 旧 `MasonZeroAgent` の Module 相当。共通ロジックは BaseSkollZeroModule。
+ * 旧 `MasonZeroAgent` (現 MasonRoleAgent) の Module 相当。共通ロジックは BaseSkollZeroModule。
  */
 
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'

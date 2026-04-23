@@ -9,7 +9,7 @@ import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from '../../fenrir/src/adapters/full-adapter.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import { TrainingBuffer } from './buffer.ts'
-import { MasonZeroAgent } from './mason-zero-agent.ts'
+import { MasonRoleAgent } from './mason-zero-agent.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import type { MCTSConfig } from '../mcts/ismcts.ts'
 import { outcomeToMasonValue } from '../mcts/ismcts.ts'
@@ -47,7 +47,7 @@ export type SelfPlayResult = {
 /**
  * 1 ゲームの self-play 実行。
  *
- * - mason 席（2 席）: MasonZeroAgent (MCTS + buffer 蓄積)
+ * - mason 席（2 席）: MasonRoleAgent (MCTS + buffer 蓄積)
  * - その他 12 席: SkollMasterAgent (heuristic)
  * - ゲーム終了後、buffer を z (mason 視点 outcome value) で finalize
  */
@@ -57,7 +57,7 @@ export async function runSelfPlayGame(config: SelfPlayConfig): Promise<SelfPlayR
   const initialSize = buffer.size()
 
   const agents = new Map<number, Agent>()
-  const masonAgent = new MasonZeroAgent({
+  const masonAgent = new MasonRoleAgent({
     nn: config.nn,
     setup: roles,
     buffer,

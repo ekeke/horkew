@@ -7,7 +7,7 @@
  * - `FanaticIndividualModule` (faction: wolf) — fanatic
  * - `ThirdIndividualModule` (faction: hamster) — werehamster / immoralist で共用 class
  *
- * 旧 VillageZeroAgent / FanaticZeroAgent / HamsterZeroAgent / ImmoralistZeroAgent の Module 相当。
+ * 旧 Village/Fanatic/Hamster/Immoralist ZeroAgent (現 RoleAgent) の Module 相当。
  */
 
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
