@@ -155,11 +155,13 @@ export function makeSpoiler(player: string, role: string): SpoilerStatement {
  */
 export function makeSeerCO(
   actor: string,
-  results: Array<{ target: string; result: Species }> = [],
+  results: Array<{ day?: number; target: string; result: Species }> = [],
 ): AssertStatement {
   const assertions: Assertion[] = [{ player: actor, roles: ['seer'] }]
   for (const r of results) {
-    assertions.push({ player: actor, target: r.target, result: r.result })
+    const assertion: Assertion = { player: actor, target: r.target, result: r.result }
+    if (r.day !== undefined) assertion.day = r.day
+    assertions.push(assertion)
   }
   return makeAssert(actor, assertions)
 }
@@ -332,10 +334,12 @@ function serializeAssert(stmt: AssertStatement): string {
         }
       }
     } else if (a.target) {
+      // 夜番号を 1-indexed の "{N}D " プレフィックスで出力 (howl パーサは dayNumber+dayUnit を受理)
+      const dayPrefix = a.day !== undefined ? `${a.day + 1}D ` : ''
       if (a.action === 'guard') {
-        historyParts.push(`${a.target}護衛`)
+        historyParts.push(`${dayPrefix}${a.target}護衛`)
       } else if (a.result) {
-        historyParts.push(`${a.target}${speciesGlyph(a.result)}`)
+        historyParts.push(`${dayPrefix}${a.target}${speciesGlyph(a.result)}`)
       }
     }
   }

@@ -185,8 +185,8 @@ test('legalCommands: 真 seer は divineHistory 付き honest CO バリアント
   assert.ok(honest, 'honest バリアント (results 2件) が存在')
   if (honest && honest.type === 'role_co' && honest.claim.type === 'seer_co') {
     assert.deepEqual(honest.claim.results, [
-      { target: 3, result: 'human' },
-      { target: 4, result: 'wolf' },
+      { day: 0, target: 3, result: 'human' },
+      { day: 1, target: 4, result: 'wolf' },
     ], 'day 昇順で results が並ぶ')
   }
 })

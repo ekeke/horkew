@@ -426,10 +426,9 @@ export class BrainBattleAdapter extends StrategyBaseAdapter {
         if (!alreadyClaimed) {
           // First day claiming seer: CO with all accumulated fake results
           this.setFakeResult(player, day, entry.fakeTarget, entry.fakeResult)
-          const results = [...player.fakeDivineHistory.values()].map(r => ({
-            target: r.target,
-            result: r.result,
-          }))
+          const results = [...player.fakeDivineHistory.entries()]
+            .sort(([a], [b]) => a - b)
+            .map(([night, r]) => ({ day: night, target: r.target, result: r.result }))
           return { type: 'seer_co', results }
         }
         // Already claimed seer: report today's result

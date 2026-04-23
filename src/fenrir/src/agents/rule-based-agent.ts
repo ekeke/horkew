@@ -668,7 +668,7 @@ function decideSeerClaim(ctx: DecisionContext): DayClaim {
     if (night0Result && night0Result.result === 'wolf') {
       const results = Array.from(myPlayer.divineHistory.entries())
         .sort((a, b) => a[0] - b[0])
-        .map(([, v]) => ({ target: v.target, result: v.result }))
+        .map(([day, v]) => ({ day, target: v.target, result: v.result }))
       return { type: 'seer_co', results }
     }
 
@@ -705,7 +705,7 @@ function decideSeerClaim(ctx: DecisionContext): DayClaim {
   // 初回CO: 全結果つき
   const results = Array.from(myPlayer.divineHistory.entries())
     .sort((a, b) => a[0] - b[0])
-    .map(([, v]) => ({ target: v.target, result: v.result }))
+    .map(([day, v]) => ({ day, target: v.target, result: v.result }))
   return { type: 'seer_co', results }
 }
 
@@ -1130,7 +1130,7 @@ function decideWerewolfClaim(ctx: DecisionContext): DayClaim {
       revalidateFakeDivineHistory(myPlayer, ctx)
       const results = Array.from(myPlayer.fakeDivineHistory.entries())
         .sort((a, b) => a[0] - b[0])
-        .map(([, v]) => ({ target: v.target, result: v.result }))
+        .map(([day, v]) => ({ day, target: v.target, result: v.result }))
       return { type: 'seer_co', results }
     } else if (r < 0.75) {
       // 霊能騙り (20%)
@@ -1157,7 +1157,7 @@ function decideWerewolfClaim(ctx: DecisionContext): DayClaim {
     revalidateFakeDivineHistory(myPlayer, ctx)
     const results = Array.from(myPlayer.fakeDivineHistory.entries())
       .sort((a, b) => a[0] - b[0])
-      .map(([, v]) => ({ target: v.target, result: v.result }))
+      .map(([day, v]) => ({ day, target: v.target, result: v.result }))
     return { type: 'seer_co', results }
   }
 
@@ -1579,7 +1579,7 @@ function decideFanaticClaim(ctx: DecisionContext): DayClaim {
     revalidateFakeDivineHistory(myPlayer, ctx)
     const results = Array.from(myPlayer.fakeDivineHistory.entries())
       .sort((a, b) => a[0] - b[0])
-      .map(([, v]) => ({ target: v.target, result: v.result }))
+      .map(([day, v]) => ({ day, target: v.target, result: v.result }))
     return { type: 'seer_co', results }
   } else if (r < 0.70) {
     // 霊能騙り (20%)
@@ -1789,7 +1789,7 @@ function decideHamsterClaim(ctx: DecisionContext): DayClaim {
     revalidateFakeDivineHistory(myPlayer, ctx)
     const results = Array.from(myPlayer.fakeDivineHistory.entries())
       .sort((a, b) => a[0] - b[0])
-      .map(([, v]) => ({ target: v.target, result: v.result }))
+      .map(([day, v]) => ({ day, target: v.target, result: v.result }))
     return { type: 'seer_co', results }
   } else if (r < 0.70) {
     // 霊能騙り (30%)
@@ -1920,7 +1920,7 @@ function decideImmoralistClaim(ctx: DecisionContext): DayClaim {
     revalidateFakeDivineHistory(myPlayer, ctx)
     const results = Array.from(myPlayer.fakeDivineHistory.entries())
       .sort((a, b) => a[0] - b[0])
-      .map(([, v]) => ({ target: v.target, result: v.result }))
+      .map(([day, v]) => ({ day, target: v.target, result: v.result }))
     return { type: 'seer_co', results }
   } else if (r < 0.85) {
     // 霊能騙り

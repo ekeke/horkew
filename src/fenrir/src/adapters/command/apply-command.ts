@@ -7,8 +7,29 @@
  * 本関数は Command Adapter 内部の state machine（フェーズ・キュー・履歴）のみを管理する。
  */
 
-import type { GameState } from '../../../../lupa/types.ts'
+import type { DayClaim, GameState } from '../../../../lupa/types.ts'
 import type { Command, CommandAdapterExt, CommandPhase } from './command-types.ts'
+
+/** discussionTrigger の reason に入れる日本語ラベル (role_co / role_result_report 用). */
+function summarizeClaimJa(claim: DayClaim): string {
+  switch (claim.type) {
+    case 'seer_co': {
+      if (claim.results.length === 0) return '占い CO'
+      const details = claim.results
+        .map(r => `${r.day + 1}D seat${r.target}${r.result === 'human' ? '白' : '黒'}`)
+        .join(' ')
+      return `占い CO ${details}`
+    }
+    case 'seer_result': return `占い結果 seat${claim.target} ${claim.result === 'human' ? '白' : '黒'}`
+    case 'medium_co': return '霊能 CO'
+    case 'medium_result': return `霊能結果 ${claim.result === 'human' ? '白' : '黒'}`
+    case 'bodyguard_co': return '狩人 CO'
+    case 'mason_co': return `共有 CO (相方 seat${claim.partner})`
+    case 'nekomata_co': return '猫又 CO'
+    case 'forecast': return `予告 seat${claim.target}`
+    case 'none': return '(none)'
+  }
+}
 
 /**
  * コマンドをアダプタ状態に適用する。
@@ -85,6 +106,9 @@ function applyDiscussionPhase(
     // 他の生存者を再シャッフルしてキュー末尾に積み直す責務はアダプタ側（Rng を持つ層）
     // ここではフラグ的に discussionQueue を空にしておく（アダプタが埋める）
     // → Phase 3 のアダプタ実装で再構築する想定。
+    // UI バナー用にトリガーを記録 (一巡完了で adapter が clear する)
+    const kind = cmd.type === 'role_co' ? 'CO' : '結果報告'
+    ext.discussionTrigger = { seat, reason: `${kind}: ${summarizeClaimJa(cmd.claim)}` }
     return
   }
 }

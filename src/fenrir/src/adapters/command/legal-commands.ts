@@ -310,7 +310,7 @@ function roleMatchingCOs(
       if (player.divineHistory.size > 0) {
         const honestResults = [...player.divineHistory.entries()]
           .sort(([a], [b]) => a - b)
-          .map(([, e]) => ({ target: e.target, result: e.result }))
+          .map(([day, e]) => ({ day, target: e.target, result: e.result }))
         list.push(makeCoCmd(outer, { type: 'seer_co', results: honestResults }))
       }
       list.push(makeCoCmd(outer, { type: 'seer_co', results: [] }))

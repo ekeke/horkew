@@ -324,12 +324,12 @@ export function decodeClaim(
     case CLAIM.SEER_CO: {
       const results = Array.from(player.divineHistory.entries())
         .sort((a, b) => a[0] - b[0])
-        .map(([, v]) => ({ target: v.target, result: v.result }))
+        .map(([day, v]) => ({ day, target: v.target, result: v.result }))
       // 偽占いの場合
       if (player.fakeDivineHistory.size > 0) {
         const fakeResults = Array.from(player.fakeDivineHistory.entries())
           .sort((a, b) => a[0] - b[0])
-          .map(([, v]) => ({ target: v.target, result: v.result }))
+          .map(([day, v]) => ({ day, target: v.target, result: v.result }))
         return { type: 'seer_co', results: fakeResults.length > 0 ? fakeResults : results }
       }
       return { type: 'seer_co', results }

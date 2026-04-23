@@ -12,7 +12,7 @@ export function forceTrueRoleCO(
     case 'seer': {
       const results = Array.from(player.divineHistory.entries())
         .sort((a, b) => a[0] - b[0])
-        .map(([, v]) => ({ target: v.target, result: v.result }))
+        .map(([day, v]) => ({ day, target: v.target, result: v.result }))
       return { type: 'seer_co', results }
     }
     case 'medium':

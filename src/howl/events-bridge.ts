@@ -41,7 +41,7 @@ function resolveSeat(dict: FlexibleDictionary, name: string): number | null {
   return Number(results[0])
 }
 
-function processAssert(stmt: AssertStatement, dict: FlexibleDictionary): GameEvent[] {
+function processAssert(stmt: AssertStatement, dict: FlexibleDictionary, currentDay: number): GameEvent[] {
   const actor = resolveSeat(dict, stmt.actor)
   if (actor === null) return []
 
@@ -59,14 +59,16 @@ function processAssert(stmt: AssertStatement, dict: FlexibleDictionary): GameEve
 
   for (const role of claimAssertion.roles) {
     if (role === 'seer') {
-      const results: Array<{ target: number, result: EnumSpecies }> = []
+      const results: Array<{ day: number, target: number, result: EnumSpecies }> = []
+      // assertion に明示的な day (1D/2日目 等) があればそれを、無ければ statement day - 1 を fallback.
+      const fallbackDay = Math.max(0, currentDay - 1)
       for (const a of restAssertions) {
         if (!a.target || !a.result) continue
         const targetSeat = resolveSeat(dict, a.target)
         if (targetSeat === null) continue
         const resolved = SPECIES_MAP[a.result]
         if (!resolved) continue
-        results.push({ target: targetSeat, result: resolved })
+        results.push({ day: a.day ?? fallbackDay, target: targetSeat, result: resolved })
       }
       events.push({ type: 'seer_claim', actor, results })
     } else if (role === 'medium') {
@@ -174,7 +176,7 @@ export function statementsToPublicEvents(
         break
       }
       case 'assert': {
-        const evs = processAssert(stmt as AssertStatement, dict)
+        const evs = processAssert(stmt as AssertStatement, dict, currentDay)
         for (const e of evs) emit(e)
         break
       }

@@ -31,6 +31,7 @@ export function cloneCommandAdapterExt(ext: CommandAdapterExt): CommandAdapterEx
     requestedCategoriesThisDay: new Set(ext.requestedCategoriesThisDay),
     activeCoRequests: [...ext.activeCoRequests],
     villainClaimPlan: new Map(ext.villainClaimPlan),
+    discussionTrigger: ext.discussionTrigger ? { ...ext.discussionTrigger } : null,
   }
 }
 

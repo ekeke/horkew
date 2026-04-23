@@ -14,6 +14,8 @@ export type Assertion = {
   negative?: boolean
   result?: Species
   action?: 'guard'
+  /** 結果が属する夜番号 (0-indexed). 占い結果の日付表記 (例: `1D target○`) のソースになる. */
+  day?: number
 }
 
 export type Statement = {
@@ -475,6 +477,11 @@ export function parseAssertStatement(text: string, line: number): AssertStatemen
         const actionText = m.groups.action
         const assertion: Assertion = { player: actor }
         if (target) assertion.target = target
+        if (m.groups.day !== undefined) {
+          // 日数プレフィックス (1D, 2日目 等) を 0-indexed の夜番号に正規化
+          const n = parseInt(m.groups.day.replace(/[０-９]/g, c => String(c.charCodeAt(0) - 0xFEE0)), 10)
+          if (!Number.isNaN(n) && n >= 1) assertion.day = n - 1
+        }
         if (new RegExp(V.guard).test(actionText)) {
           assertion.action = 'guard'
         } else {

@@ -142,6 +142,7 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
     ext.preVoteStepCount = 0
     ext.requestedCategoriesThisDay.clear()
     ext.activeCoRequests = []
+    ext.discussionTrigger = null
 
     const actions = new Map<number, NightAction>()
     for (const p of alivePlayers(state)) {
@@ -387,8 +388,9 @@ export class CommandAdapter implements GameHandlers<FenrirExtEvent, CommandAdapt
     // キュー空: 全員連続 skip かどうか
     const aliveSeats = alivePlayers(state).map(p => p.seat)
     if (isDiscussionExhausted(ext, aliveSeats)) {
-      // 一巡完了: commander へ戻るか vote へ. この時点で CO 要求 UI バナーは消す.
+      // 一巡完了: commander へ戻るか vote へ. CO 要求 / discussion トリガー UI バナーも消す.
       ext.activeCoRequests = []
+      ext.discussionTrigger = null
       if (ext.commander !== null) {
         ext.currentPhase = 'commander'
       } else {

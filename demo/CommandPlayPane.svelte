@@ -120,7 +120,8 @@
     const designated = ext?.designatedTarget ?? null
     const runoff = ext?.runoffCandidates ?? null
     const coRequests = ext?.activeCoRequests ? [...ext.activeCoRequests] : []
-    return { gs, ext, day, phase, commander, activeSeat, designated, runoff, coRequests }
+    const discussionTrigger = ext?.discussionTrigger ?? null
+    return { gs, ext, day, phase, commander, activeSeat, designated, runoff, coRequests, discussionTrigger }
   })
 
   const phaseLabel = $derived(view.phase)
@@ -681,9 +682,11 @@
     const base = claimTypeLabel(String(c.type))
     switch (c.type) {
       case 'seer_co': {
-        const results = (c.results as Array<{ target: number, result: string }> | undefined) ?? []
+        const results = (c.results as Array<{ day: number, target: number, result: string }> | undefined) ?? []
         if (results.length === 0) return base
-        const rs = results.map(r => `${nameOf(r.target)}${r.result === 'wolf' ? '●' : '○'}`).join(' ')
+        const rs = results
+          .map(r => `${r.day + 1}D ${nameOf(r.target)}${r.result === 'wolf' ? '●' : '○'}`)
+          .join(' ')
         return `${base} (${rs})`
       }
       case 'medium_co': {
@@ -828,6 +831,18 @@
             <strong>{view.coRequests.map(coRequestJa).join(' / ')}</strong>
           </div>
         {/if}
+      </section>
+    {/if}
+
+    <!-- 直近の発言: 進行役指示以外で discussion queue を回した行動 (CO / 結果報告) -->
+    {#if view.discussionTrigger}
+      <section class="discussion-trigger">
+        <h3>直近の発言</h3>
+        <div class="order-item">
+          <span class="order-label trigger-label">起点</span>
+          <strong>{nameOf(view.discussionTrigger.seat)}</strong>
+          <span class="trigger-reason">{view.discussionTrigger.reason}</span>
+        </div>
       </section>
     {/if}
 
@@ -1315,6 +1330,26 @@
   .order-execute .order-label { background: var(--ctp-red, var(--ctp-peach)); }
   .order-runoff .order-label { background: var(--ctp-peach, var(--ctp-yellow)); }
   .order-request .order-label { background: var(--ctp-sky, var(--ctp-blue)); }
+
+  .discussion-trigger {
+    border-left: 4px solid var(--ctp-green, var(--color-accent));
+    background: var(--ctp-surface1, var(--color-surface));
+    padding: 10px 12px;
+  }
+
+  .discussion-trigger h3 {
+    margin-top: 0;
+    color: var(--ctp-green, var(--color-accent));
+    letter-spacing: 0.05em;
+  }
+
+  .trigger-label { background: var(--ctp-green, var(--color-accent)); }
+
+  .trigger-reason {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-left: 4px;
+  }
 
   .huginn-input {
     border-left: 4px solid var(--ctp-mauve, var(--color-accent));

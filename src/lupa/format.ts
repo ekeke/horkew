@@ -91,9 +91,9 @@ export function formatHowl(events: readonly any[], state: GameState, config: Lup
           lines.push('')
         }
         const resultsStr = event.results
-          .map((r: any) => `${playerName(r.target)}${r.result === 'human' ? '○' : '●'}`)
+          .map((r: any) => `${r.day + 1}D ${playerName(r.target)}${r.result === 'human' ? '○' : '●'}`)
           .join(' ')
-        lines.push(`${playerName(event.actor)} 占いCO ${resultsStr}`)
+        lines.push(`${playerName(event.actor)} 占いCO${resultsStr ? ' ' + resultsStr : ''}`)
         break
       }
       case 'seer_result': {

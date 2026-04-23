@@ -88,8 +88,8 @@ function eventToLines(
 
     case 'seer_claim': {
       const results = ev.results
-        .map(r => ({ target: name(r.target), result: speciesOf(r.result) }))
-        .filter((r): r is { target: string; result: Species } => r.result !== null)
+        .map(r => ({ day: r.day, target: name(r.target), result: speciesOf(r.result) }))
+        .filter((r): r is { day: number; target: string; result: Species } => r.result !== null)
       return [serializeStatement(makeSeerCO(name(ev.actor), results))]
     }
 

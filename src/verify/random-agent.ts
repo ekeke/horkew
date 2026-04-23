@@ -356,7 +356,7 @@ function decideSeerClaim(
 
   const results = Array.from(seer.divineHistory.entries())
     .sort((a, b) => a[0] - b[0])
-    .map(([, v]) => ({ target: v.target, result: v.result }))
+    .map(([day, v]) => ({ day, target: v.target, result: v.result }))
   return { type: 'seer_co', results }
 }
 
@@ -413,7 +413,7 @@ function decideFakeSeerClaim(
   }
   const results = Array.from(player.fakeDivineHistory.entries())
     .sort((a, b) => a[0] - b[0])
-    .map(([, v]) => ({ target: v.target, result: v.result }))
+    .map(([day, v]) => ({ day, target: v.target, result: v.result }))
   return { type: 'seer_co', results }
 }
 
@@ -545,7 +545,7 @@ function initFakeSeerCO(
   }
   const results = Array.from(player.fakeDivineHistory.entries())
     .sort((a, b) => a[0] - b[0])
-    .map(([, v]) => ({ target: v.target, result: v.result }))
+    .map(([night, v]) => ({ day: night, target: v.target, result: v.result }))
   player.claimedRole = 'seer'
   player.claimedDay = day
   return { type: 'seer_co', results }

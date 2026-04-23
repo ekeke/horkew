@@ -86,7 +86,7 @@ export type NightAction =
   | { type: 'none' }
 
 export type DayClaim =
-  | { type: 'seer_co', results: Array<{ target: number, result: EnumSpecies }> }
+  | { type: 'seer_co', results: Array<{ day: number, target: number, result: EnumSpecies }> }
   | { type: 'seer_result', target: number, result: EnumSpecies }
   | { type: 'medium_co', pastResults?: EnumSpecies[] }
   | { type: 'medium_result', result: EnumSpecies }
@@ -100,7 +100,7 @@ export type GameEvent =
   | { type: 'night_kill', target: number }
   | { type: 'fox_kill', target: number }
   | { type: 'peace' }
-  | { type: 'seer_claim', actor: number, results: Array<{ target: number, result: EnumSpecies }> }
+  | { type: 'seer_claim', actor: number, results: Array<{ day: number, target: number, result: EnumSpecies }> }
   | { type: 'seer_result', actor: number, target: number, result: EnumSpecies }
   | { type: 'medium_claim', actor: number, pastResults?: EnumSpecies[] }
   | { type: 'medium_result', actor: number, result: EnumSpecies }

@@ -138,7 +138,19 @@ export type CommandAdapterExt = {
    * 割り当てられた役職を CO し、以後その役職として結果報告を続ける。
    */
   villainClaimPlan: Map<number, VillainClaimAssignment>
+  /**
+   * 現在の discussion queue 再構築の「きっかけ」(直近の CO / 結果報告).
+   * role_co / role_result_report で誰かが発言した際に set され、
+   * その発言を起点に他生存者に発話機会が回ることを UI で見せるための表示.
+   * 新日 (onNight) と discussion 一巡完了 (stepDiscussion 収束) で clear.
+   * commander の指示 (request_co / designate_*) は別途 activeCoRequests /
+   * designatedTarget / runoffCandidates に出るため ここには入れない.
+   */
+  discussionTrigger: DiscussionTrigger | null
 }
+
+/** discussion を回すきっかけとなった行動. seat は発言者、reason は日本語ラベル. */
+export type DiscussionTrigger = { seat: number; reason: string }
 
 /** 人外の騙り戦略 */
 export type VillainClaimAssignment = 'seer' | 'medium' | 'bodyguard' | 'nekomata' | 'hide'
@@ -160,6 +172,7 @@ export function createCommandAdapterExt(): CommandAdapterExt {
     requestedCategoriesThisDay: new Set(),
     activeCoRequests: [],
     villainClaimPlan: new Map(),
+    discussionTrigger: null,
   }
 }
 
