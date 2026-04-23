@@ -366,3 +366,171 @@ describe('trainMasonZero: multi-head 分離学習', () => {
     tfNet.dispose()
   })
 })
+
+describe('trainOutcomeWeightedSL', () => {
+  /** 共通 fixture: deterministic obs / legal mask / chosen action */
+  function makeFixture(seed: number) {
+    const masonZeroNet = new MasonZeroNetwork()
+    const tfNet = createSkollZeroTfNetwork(1e-2)
+    tfNet.loadWeights(masonZeroNet.net.cloneWeights())
+    const inputSize = masonZeroNet.net.config.inputSize
+    const rng = makeRng(seed)
+    const obs = new Float32Array(inputSize)
+    for (let i = 0; i < inputSize; i++) obs[i] = (rng() - 0.5) * 0.1
+    const mask = new Float32Array(14)
+    for (let i = 0; i < 14; i++) mask[i] = -1e9
+    for (let i = 1; i <= 4; i++) mask[i] = 0  // seats 2..5 legal
+    return { masonZeroNet, tfNet, obs, mask }
+  }
+
+  it('perSeatSoftmax: advantage>0 で選んだ action の確率が上がる', () => {
+    const { masonZeroNet, tfNet, obs, mask } = makeFixture(101)
+    const actionIdx = 1  // seat 2
+    const before = masonZeroNet.net.forward(obs).policies.get('vote')!.slice()
+    for (let s = 0; s < 20; s++) {
+      tfNet.trainOutcomeWeightedSL({
+        observations: [obs],
+        outcomes: [1],
+        baseline: 0,
+        headName: 'vote',
+        headType: 'perSeatSoftmax',
+        actionIndices: [actionIdx],
+        masks: [mask],
+      })
+    }
+    masonZeroNet.net.loadWeights(tfNet.cloneWeights())
+    const after = masonZeroNet.net.forward(obs).policies.get('vote')!
+    assert.ok(after[actionIdx] > before[actionIdx],
+      `logit 上昇 (before=${before[actionIdx].toFixed(4)} → after=${after[actionIdx].toFixed(4)})`)
+    tfNet.dispose()
+  })
+
+  it('perSeatSoftmax: advantage<0 で選んだ action の確率が下がる', () => {
+    const { masonZeroNet, tfNet, obs, mask } = makeFixture(202)
+    const actionIdx = 2  // seat 3
+    const before = masonZeroNet.net.forward(obs).policies.get('vote')!.slice()
+    for (let s = 0; s < 20; s++) {
+      tfNet.trainOutcomeWeightedSL({
+        observations: [obs],
+        outcomes: [-1],
+        baseline: 0,
+        headName: 'vote',
+        headType: 'perSeatSoftmax',
+        actionIndices: [actionIdx],
+        masks: [mask],
+      })
+    }
+    masonZeroNet.net.loadWeights(tfNet.cloneWeights())
+    const after = masonZeroNet.net.forward(obs).policies.get('vote')!
+    assert.ok(after[actionIdx] < before[actionIdx],
+      `logit 下降 (before=${before[actionIdx].toFixed(4)} → after=${after[actionIdx].toFixed(4)})`)
+    tfNet.dispose()
+  })
+
+  it('globalSoftmax (claim): loss 有限かつ KL 無指定時 klLoss=0', () => {
+    const { tfNet, obs } = makeFixture(303)
+    const res = tfNet.trainOutcomeWeightedSL({
+      observations: [obs, obs],
+      outcomes: [1, -1],
+      baseline: 0,
+      headName: 'claim',
+      headType: 'globalSoftmax',
+      actionIndices: [3, 5],
+    })
+    assert.ok(Number.isFinite(res.loss), `loss finite (got ${res.loss})`)
+    assert.ok(Number.isFinite(res.policyLoss), 'policyLoss finite')
+    assert.equal(res.klLoss, 0, 'klLoss=0 when refLogits omitted')
+    tfNet.dispose()
+  })
+
+  it('perSeatSigmoid (predict): multi-hot action で loss 有限', () => {
+    const { tfNet, obs } = makeFixture(404)
+    const outputSize = 14 * 11  // predict = 154
+    const multiHot = new Float32Array(outputSize)
+    multiHot[0] = 1  // seat 1, role 0
+    multiHot[23] = 1
+    const res = tfNet.trainOutcomeWeightedSL({
+      observations: [obs],
+      outcomes: [1],
+      baseline: 0,
+      headName: 'predict',
+      headType: 'perSeatSigmoid',
+      actionMultiHot: [multiHot],
+    })
+    assert.ok(Number.isFinite(res.loss), 'loss finite')
+    assert.ok(Number.isFinite(res.policyLoss), 'policyLoss finite')
+    assert.equal(res.klLoss, 0, 'klLoss=0 when refLogits omitted')
+    tfNet.dispose()
+  })
+
+  it('KL anchor: refLogits=自分の logits なら klLoss が十分小さい (差が大きい時との比較)', () => {
+    const { masonZeroNet, tfNet, obs, mask } = makeFixture(505)
+    // Pure JS と TF の forward には微小な数値差があるので、
+    // "self-KL" と "mismatched KL" を相対比較する
+    const pureLogits = masonZeroNet.net.forward(obs).policies.get('vote')!
+    const selfRef = new Float32Array(pureLogits)
+    const farRef = new Float32Array(pureLogits)
+    farRef[1] += 3  // seat 2 の logit を 3 ずらす
+
+    const resSelf = tfNet.trainOutcomeWeightedSL({
+      observations: [obs],
+      outcomes: [1],
+      baseline: 1,  // advantage = 0 にして policy loss を排除
+      headName: 'vote',
+      headType: 'perSeatSoftmax',
+      actionIndices: [1],
+      masks: [mask],
+      refLogits: [selfRef],
+      klCoeff: 1.0,
+    })
+    // weights を戻して second run に備える
+    tfNet.loadWeights(masonZeroNet.net.cloneWeights())
+    const resFar = tfNet.trainOutcomeWeightedSL({
+      observations: [obs],
+      outcomes: [1],
+      baseline: 1,
+      headName: 'vote',
+      headType: 'perSeatSoftmax',
+      actionIndices: [1],
+      masks: [mask],
+      refLogits: [farRef],
+      klCoeff: 1.0,
+    })
+    assert.ok(Number.isFinite(resSelf.klLoss), 'self klLoss finite')
+    assert.ok(Number.isFinite(resFar.klLoss), 'far klLoss finite')
+    assert.ok(resFar.klLoss > resSelf.klLoss * 10,
+      `KL(far) >> KL(self) (self=${resSelf.klLoss.toFixed(5)}, far=${resFar.klLoss.toFixed(5)})`)
+    tfNet.dispose()
+  })
+
+  it('空バッチは早期 return', () => {
+    const { tfNet } = makeFixture(707)
+    const res = tfNet.trainOutcomeWeightedSL({
+      observations: [],
+      outcomes: [],
+      baseline: 0,
+      headName: 'vote',
+      headType: 'perSeatSoftmax',
+      actionIndices: [],
+      masks: [],
+    })
+    assert.equal(res.loss, 0)
+    assert.equal(res.policyLoss, 0)
+    assert.equal(res.klLoss, 0)
+    tfNet.dispose()
+  })
+
+  it('存在しない head は例外', () => {
+    const { tfNet, obs, mask } = makeFixture(808)
+    assert.throws(() => tfNet.trainOutcomeWeightedSL({
+      observations: [obs],
+      outcomes: [1],
+      baseline: 0,
+      headName: 'nonexistent',
+      headType: 'perSeatSoftmax',
+      actionIndices: [1],
+      masks: [mask],
+    }), /per-seat softmax head 'nonexistent' not found/)
+    tfNet.dispose()
+  })
+})
