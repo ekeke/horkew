@@ -19,16 +19,12 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
-import type { DayClaim } from '../../lupa/types.ts'
-import type { LeadershipResponse, Proposal } from '../../fenrir/src/leadership.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import type { MCTSConfig, MCTSResult } from '../mcts/ismcts.ts'
-import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
-import { mergeClaimTypeWithSuper, leaderFromIdx } from '../../skoll/phase2/action-decoders.ts'
 import type { TrainingBuffer } from './buffer.ts'
 import { argmaxFromVisits, sampleFromVisits } from './policy-utils.ts'
-import type { SkollZeroModule, ActionMethod } from '../module/skoll-zero-module.ts'
+import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
 
 /**
  * Agent コンストラクタに渡す options。
@@ -50,8 +46,6 @@ export type SkollZeroRoleAgentOptions = {
   selectionMode?: 'sample' | 'argmax'
   /** Determinizer の世界数上限 */
   determinizerMaxWorlds?: number
-  /** Phase 2 pretrained heads: key は `${role}-${method}` */
-  phase2Nets?: Map<string, TransformerNetwork>
 }
 
 /**
@@ -80,14 +74,6 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
     return this.module.lastMCTSResult
   }
 
-  /**
-   * phase2Nets に `${role}-${method}` checkpoint が登録されているか。
-   * SkollCommandAgent 等の外部 consumer が NN 経路の発火可否を duck-type 判定するのに使う。
-   */
-  hasPhase2Head(method: string, role: SystemRole): boolean {
-    return this.module.hasPhase2Head(method, role)
-  }
-
   // ========== lupa decide\* interface ==========
 
   override decideVote(ctx: DecisionContext): number {
@@ -96,60 +82,5 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
     return this.selectionMode === 'argmax'
       ? argmaxFromVisits(result.visits)
       : sampleFromVisits(result.visits, () => ctx.rng.next())
-  }
-
-  override decideDayClaim(ctx: DecisionContext): DayClaim {
-    return this.decideWithClaimHead(ctx, 'claim', () => super.decideDayClaim(ctx))
-  }
-
-  override decideForecast(ctx: DecisionContext): DayClaim {
-    return this.decideWithClaimHead(ctx, 'forecast', () => super.decideForecast(ctx))
-  }
-
-  override decideDefensiveClaim(ctx: DecisionContext): DayClaim {
-    return this.decideWithClaimHead(ctx, 'defensive_claim', () => super.decideDefensiveClaim(ctx))
-  }
-
-  override decideLeadershipResponse(ctx: DecisionContext, proposal: Proposal): LeadershipResponse {
-    const superDecision = super.decideLeadershipResponse(ctx, proposal)
-    const r = this.module.predictAction('leader', ctx, { record: this.shouldRecord() })
-    if (!r || r.actionIdx === undefined) return superDecision
-    return leaderFromIdx(r.actionIdx) ?? superDecision
-  }
-
-  override decideProposal(ctx: DecisionContext): Proposal | null {
-    const superDecision = super.decideProposal(ctx)
-    if (!superDecision) return null
-    // propose head は per-seat sigmoid (14 次元)。最もスコアが高い alive/非自席 を target に
-    const r = this.module.predictAction('propose', ctx, { record: this.shouldRecord() })
-    if (!r) return superDecision
-    const aliveSet = new Set(ctx.alivePlayers)
-    let bestSeat = superDecision.target
-    let bestScore = -Infinity
-    for (let i = 0; i < r.logits.length; i++) {
-      const seat = i + 1
-      if (!aliveSet.has(seat) || seat === ctx.mySeat) continue
-      if (r.logits[i] > bestScore) { bestScore = r.logits[i]; bestSeat = seat }
-    }
-    return { ...superDecision, target: bestSeat }
-  }
-
-  // ========== internal helper ==========
-
-  /** training (selectionMode='sample') 時のみ buffer 記録。eval 時は capture しない */
-  protected shouldRecord(): boolean {
-    return this.selectionMode === 'sample'
-  }
-
-  /** claim / forecast / defensive_claim を claim head の argmax → mergeClaimTypeWithSuper */
-  private decideWithClaimHead(
-    ctx: DecisionContext,
-    method: ActionMethod,
-    superFn: () => DayClaim,
-  ): DayClaim {
-    const superDecision = superFn()
-    const r = this.module.predictAction(method, ctx, { record: this.shouldRecord() })
-    if (!r || r.actionIdx === undefined) return superDecision
-    return mergeClaimTypeWithSuper(r.actionIdx, superDecision)
   }
 }

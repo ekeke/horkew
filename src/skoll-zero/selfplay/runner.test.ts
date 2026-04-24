@@ -5,8 +5,6 @@ import { DummyNN } from '../mcts/nn.ts'
 import { runSelfPlayGame, runSelfPlayBatch, DEFAULT_ROLES } from './runner.ts'
 import { MasonRoleAgent } from './mason-zero-agent.ts'
 import { normalizeVisits, sampleFromVisits, argmaxFromVisits } from './policy-utils.ts'
-import { createSkollZeroNetwork } from '../network/config.ts'
-import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 
 describe('TrainingBuffer', () => {
   it('appendPending → finalize で z が貼られる', () => {
@@ -127,60 +125,6 @@ describe('runSelfPlayGame: dummy NN で end-to-end', () => {
         }
       }
     }
-  })
-
-  it('phase2Nets capture hook: claim head の outcome-SL record が buffer に蓄積される', async () => {
-    const buffer = new TrainingBuffer()
-    const nn = new DummyNN()
-    // mason 席に mason-claim head checkpoint を注入 (random init で十分、挙動確認のみ)
-    const masonClaimNet: TransformerNetwork = createSkollZeroNetwork()
-    const phase2Nets = new Map<string, TransformerNetwork>([['mason-claim', masonClaimNet]])
-
-    const result = await runSelfPlayGame({
-      nn,
-      buffer,
-      seed: 100,
-      mctsConfig: { cPuct: 1.5, nRollouts: 30, rng: Math.random },
-      selectionMode: 'sample',  // capture hook が発火する条件
-      phase2Nets,
-    })
-
-    assert.ok(['villager_won', 'werewolf_won', 'werehamster_won', 'draw'].includes(result.result ?? ''))
-
-    // buffer には vote head (MCTS) + claim head (outcome-SL) の 2 種類が混在
-    const records = buffer.records()
-    const voteCount = records.filter(r => r.headName === 'vote').length
-    const claimCount = records.filter(r => r.headName === 'claim').length
-
-    assert.ok(voteCount > 0, `vote head records 1 件以上 (実測 ${voteCount})`)
-    assert.ok(claimCount > 0, `claim head records 1 件以上 (capture hook 発火、実測 ${claimCount})`)
-
-    // claim head records は actionIndex を持つ (softmax head の capture)
-    for (const r of records.filter(r => r.headName === 'claim')) {
-      assert.ok(r.actionIndex !== undefined, 'claim head は actionIndex を持つ')
-      assert.ok(r.actionIndex >= 0 && r.actionIndex < 10, `actionIndex は 0-9 の範囲 (実測 ${r.actionIndex})`)
-      assert.equal(r.visits, undefined, 'outcome-SL record は visits を持たない')
-      assert.equal(r.pi, undefined, 'outcome-SL record は pi を持たない')
-    }
-  })
-
-  it('phase2Nets capture hook: selectionMode=argmax では capture されない', async () => {
-    const buffer = new TrainingBuffer()
-    const nn = new DummyNN()
-    const masonClaimNet: TransformerNetwork = createSkollZeroNetwork()
-    const phase2Nets = new Map<string, TransformerNetwork>([['mason-claim', masonClaimNet]])
-
-    await runSelfPlayGame({
-      nn,
-      buffer,
-      seed: 100,
-      mctsConfig: { cPuct: 1.5, nRollouts: 30, rng: Math.random },
-      selectionMode: 'argmax',  // eval mode: record しない
-      phase2Nets,
-    })
-
-    const claimCount = buffer.records().filter(r => r.headName === 'claim').length
-    assert.equal(claimCount, 0, 'eval mode では claim head record なし')
   })
 
   it('runSelfPlayBatch: 3 games 連続実行', async () => {

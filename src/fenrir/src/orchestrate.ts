@@ -101,7 +101,7 @@ type OrchestratorConfig = {
   wre?: string
   /** WRE再学習間隔 (iteration数、0=再学習無効)。サンプルバッファが batch×14×5×n×4.8KB 蓄積するため batch=64 なら n≤40 推奨 */
   wreRefresh: number
-  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn' | 'skoll-zero-pretrain'
+  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn'
   /** huginn 専用パラメータ (curriculum === 'huginn' のときのみ参照) */
   huginnScenarios?: string[]
   huginnIterations?: number
@@ -119,22 +119,11 @@ type OrchestratorConfig = {
   huginnEntropyBonus?: number
   huginnGradClip?: number
   /** skoll-zero カリキュラム専用パラメータ (curriculum === 'skoll-zero' のときのみ参照) */
-  skollZeroOutcomeSL?: boolean
-  skollZeroKlCoeff?: number
   skollZeroRounds?: number
   skollZeroGamesPerRound?: number
   skollZeroRollouts?: number
   skollZeroStepsPerRound?: number
   skollZeroBatchSize?: number
-  /** skoll-zero-pretrain カリキュラム専用パラメータ (Phase 2.5 consolidation) */
-  skollzpDataDir?: string
-  skollzpBaseline?: string
-  skollzpEpochs?: number
-  skollzpBatchSize?: number
-  skollzpPatience?: number
-  skollzpEvalRatio?: number
-  skollzpOnlyRole?: string
-  skollzpSkipMethods?: string[]
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -196,7 +185,7 @@ function parseArgs(): OrchestratorConfig {
         break
       }
       case '--wre-refresh': config.wreRefresh = parseInt(args[++i]); break
-      case '--curriculum': config.curriculum = args[++i] as 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn' | 'skoll-zero-pretrain'; break
+      case '--curriculum': config.curriculum = args[++i] as 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn'; break
       case '--huginn-scenario': config.huginnScenarios = args[++i].split(',').map(s => s.trim()).filter(Boolean); break
       case '--huginn-iters': config.huginnIterations = parseInt(args[++i]); break
       case '--huginn-games-per-iter': config.huginnGamesPerIter = parseInt(args[++i]); break
@@ -212,21 +201,11 @@ function parseArgs(): OrchestratorConfig {
       case '--huginn-value-loss-weight': config.huginnValueLossWeight = parseFloat(args[++i]); break
       case '--huginn-entropy-bonus': config.huginnEntropyBonus = parseFloat(args[++i]); break
       case '--huginn-grad-clip': config.huginnGradClip = parseFloat(args[++i]); break
-      case '--skoll-zero-outcome-sl': config.skollZeroOutcomeSL = true; break
-      case '--skoll-zero-kl-coeff': config.skollZeroKlCoeff = parseFloat(args[++i]); break
       case '--skoll-zero-rounds': config.skollZeroRounds = parseInt(args[++i]); break
       case '--skoll-zero-games': config.skollZeroGamesPerRound = parseInt(args[++i]); break
       case '--skoll-zero-rollouts': config.skollZeroRollouts = parseInt(args[++i]); break
       case '--skoll-zero-steps': config.skollZeroStepsPerRound = parseInt(args[++i]); break
       case '--skoll-zero-batch': config.skollZeroBatchSize = parseInt(args[++i]); break
-      case '--skollzp-data-dir': config.skollzpDataDir = args[++i]; break
-      case '--skollzp-baseline': config.skollzpBaseline = args[++i]; break
-      case '--skollzp-epochs': config.skollzpEpochs = parseInt(args[++i]); break
-      case '--skollzp-batch': config.skollzpBatchSize = parseInt(args[++i]); break
-      case '--skollzp-patience': config.skollzpPatience = parseInt(args[++i]); break
-      case '--skollzp-eval-ratio': config.skollzpEvalRatio = parseFloat(args[++i]); break
-      case '--skollzp-role': config.skollzpOnlyRole = args[++i]; break
-      case '--skollzp-skip-methods': config.skollzpSkipMethods = args[++i].split(',').map(s => s.trim()).filter(Boolean); break
       case '--help': case '-h': showHelp(); break
     }
   }
@@ -258,7 +237,7 @@ Options:
   --strategy-only          戦略NNのみ学習、行動はルールベース (Step 1 bootstrap)
   --mini-batch <n>         PPOミニバッチサイズ (default: ${DEFAULT_TRAINING_CONFIG.miniBatchSize})
   --inspect-interval <n>   inspect サンプリング間隔: N ゲームに1回保存 (default: 0=無効)
-  --curriculum <name>      カリキュラム選択: default | brain-battle | bb-plus | skoll-pretrain | skoll-zero | skoll-zero-pretrain | huginn (default: default)
+  --curriculum <name>      カリキュラム選択: default | brain-battle | bb-plus | skoll-pretrain | skoll-zero | huginn (default: default)
   --skeleton               最小イテレーションで全パイプラインを通す (プラットフォームバグ検出用)
 
 Huginn 専用 (--curriculum huginn):
@@ -287,18 +266,6 @@ Skoll-Zero 専用 (--curriculum skoll-zero):
   --skoll-zero-rollouts <n> MCTS rollout 数 (default: 50)
   --skoll-zero-steps <n>    1 round あたりの train step 数 (default: 40)
   --skoll-zero-batch <n>    PPO/SL batch size (default: 32)
-  --skoll-zero-outcome-sl   Phase 3 Outcome-weighted SL head 学習を有効化 (default: 無効)
-  --skoll-zero-kl-coeff <f> Outcome-SL 時の KL anchor 係数 (default: 0.1、0 で KL 無効)
-
-Skoll-Zero-Pretrain 専用 (--curriculum skoll-zero-pretrain、Phase 2.5 multi-head consolidation):
-  --skollzp-data-dir <dir>  Phase 2 収集済 JSONL ディレクトリ (default: tmp/phase2-data-v1)
-  --skollzp-baseline <path> Phase 2 single-head summary.json で diff 計算 (default: tmp/phase2-pretrain-v1/summary.json)
-  --skollzp-epochs <n>      最大 epoch 数 (default: trainer.ts の DEFAULT_MULTIHEAD_OPTIONS)
-  --skollzp-batch <n>       batch size
-  --skollzp-patience <n>    early stopping patience
-  --skollzp-eval-ratio <f>  eval split 比率
-  --skollzp-role <name>     単一役職のみ実行 (debug 用)
-  --skollzp-skip-methods <a,b> カンマ区切りで method を除外
   --wre [path]             WRE PBRS reward shaping (default: tmp/winrate/checkpoints/winrate-final.json)
   --wre-refresh <n>        WRE re-training interval in iterations (default: 0=disabled)
                            ⚠ batch×14×5×n×4.8KB がメモリに蓄積。batch=64 なら n≤40 推奨 (≈1GB)
@@ -910,20 +877,20 @@ async function selectStartMode(config: OrchestratorConfig): Promise<void> {
     return
   }
 
-  // --curriculum skoll-zero-pretrain: phase runner が final.json ベースで役職粒度 resume を処理する。
+  // --curriculum skoll-zero: phase runner が phase.done と {slot}/final.json で resume を処理する。
   // orchestrate 層ではプロンプトをスキップし、指定または前回 base をそのまま使う。
-  if (config.curriculum === 'skoll-zero-pretrain') {
+  if (config.curriculum === 'skoll-zero') {
     if (!config.checkpointBase) {
       const status = readTrainStatus()
       if (status?.checkpointBase && existsSync(status.checkpointBase)) {
         config.checkpointBase = status.checkpointBase
-        log(`Skoll-Zero-Pretrain: using previous base ${config.checkpointBase}`)
+        log(`Skoll-Zero: using previous base ${config.checkpointBase}`)
       } else {
         config.checkpointBase = nextCheckpointBase()
-        log(`Skoll-Zero-Pretrain new run: ${config.checkpointBase}`)
+        log(`Skoll-Zero new run: ${config.checkpointBase}`)
       }
     } else {
-      log(`Skoll-Zero-Pretrain: using ${config.checkpointBase}`)
+      log(`Skoll-Zero: using ${config.checkpointBase}`)
     }
     return
   }
@@ -1117,8 +1084,6 @@ async function main(): Promise<void> {
     await runSkollZero({
       checkpointBase: config.checkpointBase,
       learningRate: config.learningRate,
-      ...(config.skollZeroOutcomeSL !== undefined ? { enableOutcomeSL: config.skollZeroOutcomeSL } : {}),
-      ...(config.skollZeroKlCoeff !== undefined ? { klCoeff: config.skollZeroKlCoeff } : {}),
       ...(config.skollZeroRounds !== undefined ? { rounds: config.skollZeroRounds } : {}),
       ...(config.skollZeroGamesPerRound !== undefined ? { gamesPerRound: config.skollZeroGamesPerRound } : {}),
       ...(config.skollZeroRollouts !== undefined ? { rollouts: config.skollZeroRollouts } : {}),
@@ -1127,26 +1092,6 @@ async function main(): Promise<void> {
     })
     shutdownCleanup('completed')
     log(`${BOLD}Skoll Zero complete!${RESET}`)
-    return
-  }
-
-  // === Skoll-Zero-Pretrain カリキュラム: Phase 2.5 multi-head consolidation ===
-  if (config.curriculum === 'skoll-zero-pretrain') {
-    const { runSkollZeroPretrain } = await import('../../skoll/phase2/phase-runner.ts')
-    await runSkollZeroPretrain({
-      checkpointBase: config.checkpointBase,
-      learningRate: config.learningRate,
-      ...(config.skollzpDataDir !== undefined ? { dataDir: config.skollzpDataDir } : {}),
-      ...(config.skollzpBaseline !== undefined ? { baselineSummary: config.skollzpBaseline } : {}),
-      ...(config.skollzpEpochs !== undefined ? { epochs: config.skollzpEpochs } : {}),
-      ...(config.skollzpBatchSize !== undefined ? { batchSize: config.skollzpBatchSize } : {}),
-      ...(config.skollzpPatience !== undefined ? { patience: config.skollzpPatience } : {}),
-      ...(config.skollzpEvalRatio !== undefined ? { evalRatio: config.skollzpEvalRatio } : {}),
-      ...(config.skollzpOnlyRole !== undefined ? { onlyRole: config.skollzpOnlyRole } : {}),
-      ...(config.skollzpSkipMethods !== undefined ? { skipMethods: config.skollzpSkipMethods } : {}),
-    })
-    shutdownCleanup('completed')
-    log(`${BOLD}Skoll Zero Pretrain complete!${RESET}`)
     return
   }
 

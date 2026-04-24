@@ -35,7 +35,6 @@ export class VillageRoleAgent extends SkollZeroRoleAgent {
       buffer: opts.buffer,
       mctsConfig: opts.mctsConfig,
       determinizerMaxWorlds: opts.determinizerMaxWorlds,
-      phase2Nets: opts.phase2Nets,
     })
     super(module, opts.selectionMode ?? 'sample')
   }
@@ -69,7 +68,6 @@ export class WolfRoleAgent extends SkollZeroRoleAgent {
       buffer: opts.buffer,
       mctsConfig: opts.mctsConfig,
       determinizerMaxWorlds: opts.determinizerMaxWorlds,
-      phase2Nets: opts.phase2Nets,
     })
     super(module, opts.selectionMode ?? 'sample')
   }
@@ -98,7 +96,6 @@ export class FanaticRoleAgent extends SkollZeroRoleAgent {
       buffer: opts.buffer,
       mctsConfig: opts.mctsConfig,
       determinizerMaxWorlds: opts.determinizerMaxWorlds,
-      phase2Nets: opts.phase2Nets,
     })
     super(module, opts.selectionMode ?? 'sample')
   }
@@ -113,7 +110,6 @@ export class HamsterRoleAgent extends SkollZeroRoleAgent {
       buffer: opts.buffer,
       mctsConfig: opts.mctsConfig,
       determinizerMaxWorlds: opts.determinizerMaxWorlds,
-      phase2Nets: opts.phase2Nets,
     })
     super(module, opts.selectionMode ?? 'sample')
   }
@@ -128,7 +124,6 @@ export class ImmoralistRoleAgent extends SkollZeroRoleAgent {
       buffer: opts.buffer,
       mctsConfig: opts.mctsConfig,
       determinizerMaxWorlds: opts.determinizerMaxWorlds,
-      phase2Nets: opts.phase2Nets,
     })
     super(module, opts.selectionMode ?? 'sample')
   }

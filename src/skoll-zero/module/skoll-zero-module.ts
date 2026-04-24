@@ -4,15 +4,14 @@
  * ## 位置づけ
  *
  * Agent / Module / Adapter 3 層分離 (`tasks/skoll-zero-module-extraction.md` 参照) の
- * Module 層。Agent (1 seat 1 instance) から呼ばれ、形勢判断 NN と行動影響予測 NN の
- * 結果を返す。自分の TrainingBuffer を所有し、学習データ収集も担当する。
+ * Module 層。Agent (1 seat 1 instance) から呼ばれ、形勢判断 NN の結果を返す。
+ * 自分の TrainingBuffer を所有し、学習データ収集も担当する。
  *
  * ## 責務
  *
  * - Day action の policy 提案 (ISMCTS + vote head)
  * - Night action の policy 提案 (ISMCTS + divine/guard/attack head)
- * - Phase 2 pretrained head の forward (claim/comm/leader/target/propose/predict)
- * - 学習データ (obs, visits/π, or actionIdx) を buffer に蓄積
+ * - 学習データ (obs, visits, π) を buffer に蓄積
  * - ゲーム終了時の finalize (z を全 pending に貼る)
  *
  * ## 非責務
@@ -31,20 +30,8 @@
 
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import type { MCTSResult } from '../mcts/ismcts.ts'
-import type { HeadName } from '../mcts/nn.ts'
 import type { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { RootObs } from '../selfplay/observation.ts'
-
-/** Phase 2 pretrained head の method 名 (action-encoders.ts / METHOD_HEAD_MAP と対応) */
-export type ActionMethod =
-  | 'claim'
-  | 'forecast'
-  | 'defensive_claim'
-  | 'comm'
-  | 'leader'
-  | 'propose'
-  | 'predict'
-  | 'target'
 
 /** proposeVote / proposeNightAction の返り値 — MCTS 結果の共通型 */
 export type McctsProposal = {
@@ -55,16 +42,6 @@ export type McctsProposal = {
   /** Module 所有者の faction 視点の value */
   value: number
   /** キャプチャされた obs (Agent が再利用するため返す、Module は内部で buffer 記録済み) */
-  obs: RootObs
-}
-
-/** predictAction の返り値 — Phase 2 head forward 結果 */
-export type ActionPrediction = {
-  /** head の生 logits (softmax 前、sigmoid 前) */
-  logits: Float32Array
-  /** softmax head の argmax index。sigmoid head では undefined */
-  actionIdx?: number
-  /** キャプチャされた obs */
   obs: RootObs
 }
 
@@ -97,19 +74,6 @@ export interface SkollZeroModule {
   ): McctsProposal | null
 
   /**
-   * Phase 2 pretrained head の forward。
-   *
-   * - method は claim/forecast/defensive_claim/comm/leader/propose/predict/target
-   * - role に対応する Phase 2 checkpoint が未登録なら null を返す (Agent は heuristic に)
-   * - record=true なら (obs, actionIdx | actionMultiHot) を buffer に蓄積 (Phase 3 で有効化)
-   */
-  predictAction(
-    method: ActionMethod,
-    ctx: DecisionContext,
-    opts?: { record?: boolean },
-  ): ActionPrediction | null
-
-  /**
    * ゲーム終了時に pending records に z を貼って finalized へ移送。
    * Adapter / self-play runner が呼ぶ。
    */
@@ -129,25 +93,4 @@ export interface SkollZeroModule {
 
   /** debug: MCTS fallback 回数 (retar 無効 / overflow 等) */
   readonly fallbackCalls: number
-
-  /**
-   * Phase 2 pretrained head が登録済みかを role × method で問い合わせる。
-   * SkollCommandAgent の duck-type 判定 (hasPhase2Head) 用。
-   */
-  hasPhase2Head(method: string, role: string): boolean
-}
-
-/** head 名から action method に変換。buffer 記録時の headName として使う */
-export function headNameForActionMethod(method: ActionMethod): HeadName {
-  switch (method) {
-    case 'claim':
-    case 'forecast':
-    case 'defensive_claim':
-      return 'claim'  // forecast / defensive_claim も claim head (10 dim) を共有
-    case 'comm': return 'comm'
-    case 'leader': return 'leader'
-    case 'propose': return 'propose'
-    case 'predict': return 'predict'
-    case 'target': return 'target'
-  }
 }

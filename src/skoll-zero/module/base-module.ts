@@ -24,14 +24,10 @@ import {
   type Faction, type MCTSConfig, type MCTSResult,
 } from '../mcts/ismcts.ts'
 import type { MasonZeroNN, HeadName } from '../mcts/nn.ts'
-import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { RootObs } from '../selfplay/observation.ts'
 import { normalizeVisits } from '../selfplay/policy-utils.ts'
-import {
-  type SkollZeroModule, type ActionMethod, type McctsProposal, type ActionPrediction,
-  headNameForActionMethod,
-} from './skoll-zero-module.ts'
+import type { SkollZeroModule, McctsProposal } from './skoll-zero-module.ts'
 
 export type BaseSkollZeroModuleOptions = {
   /** 形勢判断 NN (MCTS node expand 用 policy/value)。MasonZeroNetwork 等 */
@@ -44,11 +40,6 @@ export type BaseSkollZeroModuleOptions = {
   mctsConfig?: MCTSConfig
   /** Determinizer の世界数上限 (overflow 時は fallback) */
   determinizerMaxWorlds?: number
-  /**
-   * Phase 2 pretrained heads: key は `${role}-${method}` (例 'villager-claim')。
-   * 役職別 checkpoint を実行時に ctx.myRole で切り替える。未登録の key は undefined。
-   */
-  phase2Nets?: Map<string, TransformerNetwork>
 }
 
 /**
@@ -71,7 +62,6 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
   protected readonly setup: Map<SystemRole, number>
   protected readonly mctsConfig: MCTSConfig | undefined
   protected readonly determinizerMaxWorlds: number
-  protected readonly phase2Nets: Map<string, TransformerNetwork> | undefined
 
   constructor(opts: BaseSkollZeroModuleOptions) {
     this.nn = opts.nn
@@ -79,7 +69,6 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     this.buffer = opts.buffer
     this.mctsConfig = opts.mctsConfig
     this.determinizerMaxWorlds = opts.determinizerMaxWorlds ?? 100000
-    this.phase2Nets = opts.phase2Nets
   }
 
   /** 役職別 obs encoder。サブクラスで実装 */
@@ -105,55 +94,6 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     return this.runMctsProposal(ctx, mode, excludedMask, opts?.record ?? true)
   }
 
-  predictAction(
-    method: ActionMethod,
-    ctx: DecisionContext,
-    opts?: { record?: boolean },
-  ): ActionPrediction | null {
-    const net = this.phase2Nets?.get(`${ctx.myRole}-${method}`)
-    if (!net) return null
-    const obs = this.captureObs(ctx)
-    const output = net.forward(obs)
-
-    // method → head 名 (forecast と defensive_claim は claim head を共有)
-    const headKey = (method === 'forecast' || method === 'defensive_claim') ? 'claim' : method
-    const logits = output.policies.get(headKey)
-    if (!logits) return null
-
-    // softmax head のみ actionIdx を計算 (sigmoid/multi-hot head は別経路)
-    const isSigmoid = method === 'propose' || method === 'predict'
-    const actionIdx = isSigmoid ? undefined : argmaxIndex(logits)
-
-    // Phase 3 M1 capture hook: record=true で outcome-SL 用 record を buffer に蓄積。
-    // softmax head は actionIndex、sigmoid head は logits > 0 の multi-hot。
-    // capture 対象の head は method → headNameForActionMethod で一意に決まる。
-    if (opts?.record === true) {
-      const alive = aliveBitmask(ctx.alivePlayers)
-      const headName = headNameForActionMethod(method)
-      if (isSigmoid) {
-        // logits は pre-sigmoid の raw score、> 0 で「positive にする」判断
-        const multiHot = new Uint8Array(logits.length)
-        for (let i = 0; i < logits.length; i++) {
-          multiHot[i] = logits[i] > 0 ? 1 : 0
-        }
-        this.buffer.appendPending({
-          obs, day: ctx.day, masonSeat: ctx.mySeat, alive,
-          headName,
-          actionMultiHot: multiHot,
-        })
-      } else if (actionIdx !== undefined && actionIdx >= 0) {
-        this.buffer.appendPending({
-          obs, day: ctx.day, masonSeat: ctx.mySeat, alive,
-          headName,
-          actionIndex: actionIdx,
-        })
-      }
-      // actionIdx が -1 (encode 不能) の場合は記録しない (capturing-agents.ts のパターン踏襲)
-    }
-
-    return { logits, actionIdx, obs }
-  }
-
   finalize(z: number): void {
     this.buffer.finalize(z)
   }
@@ -162,14 +102,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     // pending だけクリア (finalized は保持、次 round の学習用)
     // TrainingBuffer に reset() はあるが finalized も消すため、
     // pending だけクリアする API が無い → finalize(NaN) で捨てるのは不正確
-    // 設計判断: reset は「新ゲーム開始時に pending を捨てる」用途なので、
-    // Module レベルでは buffer の内部 state に触れる。
     // 今は pending を空にする API が buffer に無いので、buffer.reset() は慎重に使う。
-    // Phase 3 M1 で必要になったら buffer に clearPending() を追加する。
-  }
-
-  hasPhase2Head(method: string, role: string): boolean {
-    return this.phase2Nets?.has(`${role}-${method}`) ?? false
   }
 
   // ============================================================
@@ -258,17 +191,4 @@ function aliveBitmask(alivePlayers: number[]): number {
   let mask = 0
   for (const seat of alivePlayers) mask |= (1 << seat)
   return mask
-}
-
-/** logits の argmax index (同値は最小 index) */
-function argmaxIndex(logits: Float32Array): number {
-  let maxIdx = 0
-  let maxVal = logits[0]
-  for (let i = 1; i < logits.length; i++) {
-    if (logits[i] > maxVal) {
-      maxVal = logits[i]
-      maxIdx = i
-    }
-  }
-  return maxIdx
 }

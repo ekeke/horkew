@@ -48,13 +48,6 @@ export type SkollZeroPhaseOptions = {
   batchSize: number
   learningRate: number
   seed: number
-  /**
-   * Phase 3: Outcome-weighted SL head (claim/comm/leader/target/propose/predict) 学習を有効化。
-   * false では従来の MCTS-π head のみ学習。
-   */
-  enableOutcomeSL: boolean
-  /** Outcome-SL 時の KL anchor 係数。0 で KL 計算スキップ */
-  klCoeff: number
 }
 
 export const DEFAULT_SKOLL_ZERO_PHASE_OPTIONS: SkollZeroPhaseOptions = {
@@ -66,8 +59,6 @@ export const DEFAULT_SKOLL_ZERO_PHASE_OPTIONS: SkollZeroPhaseOptions = {
   batchSize: 32,
   learningRate: 3e-4,
   seed: 42,
-  enableOutcomeSL: false,
-  klCoeff: 0.1,
 }
 
 function envOverrides(): Partial<SkollZeroPhaseOptions> {
@@ -79,8 +70,6 @@ function envOverrides(): Partial<SkollZeroPhaseOptions> {
   if (process.env.SKOLLZ_BATCH) out.batchSize = parseInt(process.env.SKOLLZ_BATCH, 10)
   if (process.env.SKOLLZ_LR) out.learningRate = parseFloat(process.env.SKOLLZ_LR)
   if (process.env.SKOLLZ_SEED) out.seed = parseInt(process.env.SKOLLZ_SEED, 10)
-  if (process.env.SKOLLZ_OUTCOME_SL) out.enableOutcomeSL = process.env.SKOLLZ_OUTCOME_SL === '1'
-  if (process.env.SKOLLZ_KL_COEFF) out.klCoeff = parseFloat(process.env.SKOLLZ_KL_COEFF)
   return out
 }
 
@@ -104,8 +93,6 @@ function buildSlot(
   phaseDir: string,
   slotKey: keyof MultiTrainerSlots,
   lr: number,
-  enableOutcomeSL: boolean,
-  klCoeff: number,
 ): MultiTrainerSlots[keyof MultiTrainerSlots] {
   // Pure JS 推論用 + TF.js 学習用
   let pureNet
@@ -141,18 +128,7 @@ function buildSlot(
   tfNet.loadWeights(pureNet.cloneWeights())
   const masonZeroNet = new MasonZeroNetwork(pureNet, { zeroValueHead: false })
 
-  // Outcome-SL 有効時、同アーキテクチャの frozen refNet を初期重みで作って KL anchor に使う。
-  // refNet は学習中も一切更新されない。
-  let refNet: typeof pureNet | undefined
-  if (enableOutcomeSL && klCoeff > 0) {
-    if (slotKey === 'mason') refNet = createSkollZeroNetwork()
-    else if (slotKey === 'wolf') refNet = createWolfZeroNetwork()
-    else refNet = createStandardZeroNetwork()
-    refNet.loadWeights(pureNet.cloneWeights())
-    log(`${slotKey}: refNet initialized (outcome-SL KL anchor, klCoeff=${klCoeff})`)
-  }
-
-  return { masonZeroNet, tfNet, buffer: new TrainingBuffer(), refNet }
+  return { masonZeroNet, tfNet, buffer: new TrainingBuffer() }
 }
 
 export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): Promise<void> {
@@ -170,13 +146,10 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
 
   log(`output: ${phaseDir}`)
   log(`rounds=${options.rounds} games/round=${options.gamesPerRound} rollouts=${options.rollouts} steps/round=${options.stepsPerRound}`)
-  if (options.enableOutcomeSL) {
-    log(`outcome-SL enabled (klCoeff=${options.klCoeff})`)
-  }
 
   const slots: MultiTrainerSlots = {}
   for (const key of SLOT_KEYS) {
-    slots[key] = buildSlot(phaseDir, key, options.learningRate, options.enableOutcomeSL, options.klCoeff)
+    slots[key] = buildSlot(phaseDir, key, options.learningRate)
   }
 
   const config = {
@@ -187,8 +160,6 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     gamesPerRound: options.gamesPerRound,
     mctsRollouts: options.rollouts,
     rngSeed: options.seed,
-    enableOutcomeSL: options.enableOutcomeSL,
-    klCoeff: options.klCoeff,
   }
   const trainer = new MultiSkollZeroTrainer({ slots, config })
 
@@ -202,8 +173,7 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     for (const key of SLOT_KEYS) {
       const s = stats.perSlot[key]
       if (!s) continue
-      const klPart = options.enableOutcomeSL ? ` kl=${s.avgKlLoss.toFixed(3)}` : ''
-      log(`  ${key.padEnd(11)} +${s.recordsAdded} buf=${s.bufferSize} steps=${s.stepsRun} loss=${s.avgLoss.toFixed(4)}${klPart}`)
+      log(`  ${key.padEnd(11)} +${s.recordsAdded} buf=${s.bufferSize} steps=${s.stepsRun} loss=${s.avgLoss.toFixed(4)}`)
     }
     writeRoundMeta(phaseDir, stats)
     roundSummaries.push({ round: r, outcomes: stats.outcomes })

@@ -14,9 +14,8 @@ import { join } from 'node:path'
 
 import type { MasonZeroNetwork } from '../network/mason-zero.ts'
 import type { TfTransformerNetwork } from '../../fenrir/src/ml/nn-tf-transformer.ts'
-import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 import { saveCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
-import { TrainingBuffer, isMctsHead, type TrainingRecord } from '../selfplay/buffer.ts'
+import { TrainingBuffer } from '../selfplay/buffer.ts'
 import {
   runMultiAgentSelfPlayBatch,
   type SlotMap,
@@ -24,129 +23,14 @@ import {
   type MultiAgentSelfPlayResult,
 } from '../selfplay/multi-runner.ts'
 import type { MCTSConfig } from '../mcts/ismcts.ts'
-import type { HeadName } from '../mcts/nn.ts'
 import { groupRecordsByHead, recordsToBatchInputs } from './trainer.ts'
 import type { SkollZeroTrainConfig } from './schedule.ts'
-
-/** SEATS=14 per-seat mask 幅 */
-const SEATS = 14
-const ILLEGAL_MASK_VALUE = -1e9
-
-/**
- * Outcome-SL 対象 head と nn-tf-transformer の headType 対応表。
- * MCTS-π head (vote/attack/divine/guard) はここに含めない。
- */
-const OUTCOME_SL_HEAD_TYPES: Record<string, 'globalSoftmax' | 'perSeatSoftmax' | 'perSeatSigmoid'> = {
-  claim: 'globalSoftmax',
-  comm: 'globalSoftmax',
-  leader: 'globalSoftmax',
-  target: 'perSeatSoftmax',
-  propose: 'perSeatSigmoid',
-  predict: 'perSeatSigmoid',
-}
-
-export { OUTCOME_SL_HEAD_TYPES }
-
-/**
- * Outcome-SL bucket 1 つを学習する。refNet があれば KL anchor を有効化。
- *
- * - softmax head (claim/comm/leader/target): actionIndex を action indices に
- * - sigmoid head (propose/predict): actionMultiHot (Uint8Array) を Float32Array に変換
- * - baseline: bucket 内の z の平均
- * - refLogits: slot.refNet.forward(obs).policies.get(headName) — head 固有の raw logits
- *
- * 行動を記録していない record (actionIndex / actionMultiHot 欠損) は捨てる。
- * valueLoss は outcome-SL 経路では更新しないため 0 を返す。
- *
- * モジュール関数として export しており、trainRound から呼ぶのと同じ単位で
- * 独立してテスト可能。
- */
-export function trainOutcomeSLBucket(
-  slot: TrainerSlot,
-  headName: HeadName,
-  headType: 'globalSoftmax' | 'perSeatSoftmax' | 'perSeatSigmoid',
-  bucket: readonly TrainingRecord[],
-  klCoeff: number,
-): { loss: number, policyLoss: number, valueLoss: number, klLoss: number } | null {
-  const isSigmoid = headType === 'perSeatSigmoid'
-  const needsMask = headType === 'perSeatSoftmax'
-
-  // action を持つ record のみ残す
-  const valid: TrainingRecord[] = []
-  for (const r of bucket) {
-    if (isSigmoid) {
-      if (r.actionMultiHot) valid.push(r)
-    } else {
-      if (r.actionIndex !== undefined) valid.push(r)
-    }
-  }
-  if (valid.length === 0) return null
-
-  const observations: Float32Array[] = valid.map(r => r.obs)
-  const outcomes = valid.map(r => r.z)
-  const baseline = outcomes.reduce((a, b) => a + b, 0) / outcomes.length
-
-  // refLogits: refNet があれば forward して head 固有の logits を取得
-  let refLogits: Float32Array[] | undefined
-  if (slot.refNet && klCoeff > 0) {
-    refLogits = valid.map(r => {
-      const out = slot.refNet!.forward(r.obs)
-      const logits = out.policies.get(headName)
-      if (!logits) throw new Error(`refNet has no head '${headName}'`)
-      // 新規 Float32Array にコピーして Pure JS net が共有する内部 buffer を汚さない
-      return new Float32Array(logits)
-    })
-  }
-
-  let actionIndices: number[] | undefined
-  let actionMultiHot: Float32Array[] | undefined
-  let masks: Float32Array[] | undefined
-  if (isSigmoid) {
-    actionMultiHot = valid.map(r => {
-      const src = r.actionMultiHot!
-      const dst = new Float32Array(src.length)
-      for (let i = 0; i < src.length; i++) dst[i] = src[i]
-      return dst
-    })
-  } else {
-    actionIndices = valid.map(r => r.actionIndex!)
-    if (needsMask) {
-      masks = valid.map(r => {
-        const mask = new Float32Array(SEATS)
-        const legalMask = r.alive & ~(1 << r.masonSeat)
-        for (let s = 1; s <= SEATS; s++) {
-          mask[s - 1] = (legalMask & (1 << s)) !== 0 ? 0 : ILLEGAL_MASK_VALUE
-        }
-        return mask
-      })
-    }
-  }
-
-  const res = slot.tfNet.trainOutcomeWeightedSL({
-    observations,
-    outcomes,
-    baseline,
-    headName,
-    headType,
-    actionIndices,
-    actionMultiHot,
-    masks,
-    refLogits,
-    klCoeff,
-  })
-  return { loss: res.loss, policyLoss: res.policyLoss, valueLoss: 0, klLoss: res.klLoss }
-}
 
 export type TrainerSlot = {
   /** Pure JS 推論用 (self-play で使用) */
   masonZeroNet: MasonZeroNetwork
   /** TF.js 学習用 */
   tfNet: TfTransformerNetwork
-  /**
-   * Pretrained frozen reference net (Phase 3 outcome-SL KL anchor 用)。
-   * 省略すると KL anchor は計算されず、policy loss のみ。
-   */
-  refNet?: TransformerNetwork
   /** 教師データ buffer */
   buffer: TrainingBuffer
   /** true なら train step / sync / checkpoint 上書きを skip (self-play では使う) */
@@ -175,11 +59,6 @@ export type MultiRoundStats = {
     avgLoss: number
     avgPolicyLoss: number
     avgValueLoss: number
-    /**
-     * Phase 3 outcome-SL の KL anchor loss 平均 (outcome-SL bucket のみで計上)。
-     * enableOutcomeSL=false または outcome-SL bucket が無い場合は 0。
-     */
-    avgKlLoss: number
     checkpointPath: string
   }>>
 }
@@ -257,49 +136,35 @@ export class MultiSkollZeroTrainer {
       const recordsAdded = slot.buffer.size() - (preSize.get(key) ?? 0)
       const bufferExpired = slot.buffer.expireOldest(this.config.bufferCapacity)
 
-      let lossSum = 0, policyLossSum = 0, valueLossSum = 0, klLossSum = 0, stepsWithData = 0
+      let lossSum = 0, policyLossSum = 0, valueLossSum = 0, stepsWithData = 0
       if (!slot.frozen) {
         for (let s = 0; s < this.config.stepsPerRound; s++) {
           const records = slot.buffer.sample(this.config.batchSize, this.rng)
           if (records.length === 0) break
-          // head 別にバケット分割し、head 種別で dispatch:
-          //   MCTS-π head (vote/attack/divine/guard) → trainMasonZero
-          //   Outcome-SL head (claim/comm/leader/target/propose/predict) → trainOutcomeWeightedSL
+          // head 別にバケット分割し、MCTS-π head (vote/attack/divine/guard) を trainMasonZero で学習
           const groups = groupRecordsByHead(records)
-          let stepLoss = 0, stepPolicyLoss = 0, stepValueLoss = 0, stepKlLoss = 0, headsTrained = 0
+          let stepLoss = 0, stepPolicyLoss = 0, stepValueLoss = 0, headsTrained = 0
           for (const [headName, bucket] of groups) {
             if (bucket.length === 0) continue
-            if (isMctsHead(headName)) {
-              const { observations, policyTargets, masks, valueTargets } = recordsToBatchInputs(bucket)
-              const res = slot.tfNet.trainMasonZero({
-                observations,
-                policyTargets,
-                masks,
-                valueTargets,
-                valueCoeff: this.config.valueCoeff,
-                headName,
-              })
-              stepLoss += res.loss
-              stepPolicyLoss += res.policyLoss
-              stepValueLoss += res.valueLoss
-              headsTrained++
-            } else if (this.config.enableOutcomeSL) {
-              const headType = OUTCOME_SL_HEAD_TYPES[headName]
-              if (!headType) continue  // 未知 head 名は skip
-              const res = trainOutcomeSLBucket(slot, headName, headType, bucket, this.config.klCoeff)
-              if (!res) continue
-              stepLoss += res.loss
-              stepPolicyLoss += res.policyLoss
-              stepKlLoss += res.klLoss
-              headsTrained++
-            }
+            const { observations, policyTargets, masks, valueTargets } = recordsToBatchInputs(bucket)
+            const res = slot.tfNet.trainMasonZero({
+              observations,
+              policyTargets,
+              masks,
+              valueTargets,
+              valueCoeff: this.config.valueCoeff,
+              headName,
+            })
+            stepLoss += res.loss
+            stepPolicyLoss += res.policyLoss
+            stepValueLoss += res.valueLoss
+            headsTrained++
           }
           if (headsTrained === 0) break
           // head 間で loss を平均して step として計上 (record 数で重み付けは将来検討)
           lossSum += stepLoss / headsTrained
           policyLossSum += stepPolicyLoss / headsTrained
           valueLossSum += stepValueLoss / headsTrained
-          klLossSum += stepKlLoss / headsTrained
           stepsWithData++
         }
         // sync TF → Pure JS
@@ -309,7 +174,6 @@ export class MultiSkollZeroTrainer {
       const avgLoss = stepsWithData > 0 ? lossSum / stepsWithData : 0
       const avgPolicyLoss = stepsWithData > 0 ? policyLossSum / stepsWithData : 0
       const avgValueLoss = stepsWithData > 0 ? valueLossSum / stepsWithData : 0
-      const avgKlLoss = stepsWithData > 0 ? klLossSum / stepsWithData : 0
 
       const checkpointPath = this.saveSlotCheckpoint(outputDir, roundId, key, slot.masonZeroNet)
       perSlot[key] = {
@@ -320,7 +184,6 @@ export class MultiSkollZeroTrainer {
         avgLoss,
         avgPolicyLoss,
         avgValueLoss,
-        avgKlLoss,
         checkpointPath,
       }
     }

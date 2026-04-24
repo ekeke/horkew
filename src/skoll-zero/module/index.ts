@@ -6,11 +6,8 @@
 
 export type {
   SkollZeroModule,
-  ActionMethod,
   McctsProposal,
-  ActionPrediction,
 } from './skoll-zero-module.ts'
-export { headNameForActionMethod } from './skoll-zero-module.ts'
 export { BaseSkollZeroModule } from './base-module.ts'
 export type { BaseSkollZeroModuleOptions } from './base-module.ts'
 export { MasonSkollZeroModule } from './mason-module.ts'

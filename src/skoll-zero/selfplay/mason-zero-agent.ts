@@ -17,7 +17,6 @@ export class MasonRoleAgent extends SkollZeroRoleAgent {
       buffer: opts.buffer,
       mctsConfig: opts.mctsConfig,
       determinizerMaxWorlds: opts.determinizerMaxWorlds,
-      phase2Nets: opts.phase2Nets,
     })
     super(module, opts.selectionMode ?? 'sample')
   }
