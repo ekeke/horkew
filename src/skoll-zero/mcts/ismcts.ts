@@ -1,8 +1,8 @@
 import type { GameOutcome } from '../../hati/simulate.ts'
 import { cloneSimState, createSimState } from '../simulator/world-state.ts'
 import type { SimState } from '../simulator/world-state.ts'
-import { runRollout, stepDayNightCycle } from '../simulator/rollout-sim.ts'
-import type { NightOverride } from '../simulator/rollout-sim.ts'
+import { stepDayNightCycle } from '../simulator/rollout-sim.ts'
+import type { DayDecision, NightDecision } from '../simulator/rollout-sim.ts'
 import { createTreeNode, totalChildVisits } from './node.ts'
 import type { TreeNode } from './node.ts'
 import type { Determinizer } from './determinize.ts'
@@ -206,9 +206,9 @@ function runOneRollout(
       return
     }
     if (!isMasonAlive(state, decisionSeat)) {
-      // 決定者死亡: tree はこれ以上分岐しない、heuristic rollout で終端まで
-      const finalOutcome = runRollout(cloneSimState(state))
-      backup(path, outcomeToValue(finalOutcome, faction))
+      // 決定者死亡: heuristic rollout は廃止したので NN value で leaf 評価
+      const { value } = nn.forward(rootObs, state, decisionSeat, headNameForMode(actionMode))
+      backup(path, value)
       return
     }
     if (!node.expanded) {
@@ -223,16 +223,11 @@ function runOneRollout(
       backup(path, 0)
       return
     }
-    // step: root action の適用。actionMode ごとに正しい override を組み立てる。
-    // 木の深い部分 (isRoot=false) は常に day vote override で扱う (標準動作)。
+    // step: root action の適用。actionMode ごとに day/night decision を組み立てる。
+    // 木の深い部分 (isRoot=false) は常に day vote として扱う (標準動作)。
     const nextState = cloneSimState(state)
-    if (isRoot && actionMode !== 'vote') {
-      const nightOverride = buildNightOverride(actionMode, decisionSeat, action)
-      stepDayNightCycle(nextState, null, nightOverride)
-    } else {
-      const override = new Map<number, number>([[decisionSeat, action]])
-      stepDayNightCycle(nextState, override, null)
-    }
+    const { day: dayDec, night: nightDec } = buildDecisions(isRoot ? actionMode : 'vote', action)
+    stepDayNightCycle(nextState, dayDec, nightDec)
     isRoot = false
     let child = node.children.get(action)
     if (!child) {
@@ -246,14 +241,27 @@ function runOneRollout(
 }
 
 /**
- * root 夜行動 (attack/divine/guard) を stepDayNightCycle に渡す NightOverride に変換。
+ * action mode + action を stepDayNightCycle に渡す DayDecision / NightDecision に変換。
+ *
+ * - vote: 決定者の投票をそのまま「集団意思決定としての処刑先」とみなす単純化
+ *   （heuristic による集票は廃止済み）
+ * - attack/divine/guard: 夜行動、day はスキップ
+ * - divine の複数 seer 対応は未実装（14d-neko では seer は 1 人前提）
  */
-function buildNightOverride(mode: RootActionMode, decisionSeat: number, action: number): NightOverride {
+function buildDecisions(
+  mode: RootActionMode,
+  action: number,
+): { day: DayDecision, night: NightDecision } {
+  const emptyNight: NightDecision = { attackTarget: null, guardTarget: null, seerTargets: [] }
   switch (mode) {
-    case 'attack': return { attackTarget: action }
-    case 'divine': return { seerDivines: new Map([[decisionSeat, action]]) }
-    case 'guard':  return { guardTarget: action }
-    case 'vote':   return {}
+    case 'vote':
+      return { day: { executedSeat: action }, night: emptyNight }
+    case 'attack':
+      return { day: { executedSeat: -1 }, night: { attackTarget: action, guardTarget: null, seerTargets: [] } }
+    case 'divine':
+      return { day: { executedSeat: -1 }, night: { attackTarget: null, guardTarget: null, seerTargets: [action] } }
+    case 'guard':
+      return { day: { executedSeat: -1 }, night: { attackTarget: null, guardTarget: action, seerTargets: [] } }
   }
 }
 
