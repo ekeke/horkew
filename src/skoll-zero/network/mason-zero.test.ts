@@ -1,21 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
 import { MasonZeroNetwork } from './mason-zero.ts'
-import { loadSkollSupervisedWeights } from './warm-start.ts'
 import { createSimState } from '../simulator/world-state.ts'
 import { MASON_COLLECTIVE_OBSERVATION_SIZE } from '../../fenrir/src/observation.ts'
-import {
-  SKOLL_ZERO_NETWORK_CONFIG,
-  STANDARD_ZERO_NETWORK_CONFIG,
-  WOLF_ZERO_NETWORK_CONFIG,
-  createSkollZeroNetwork,
-  createStandardZeroNetwork,
-  createWolfZeroNetwork,
-} from './config.ts'
-import { loadCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
-
-const SKOLL_SL_CKPT = 'tmp/skoll-mb-large-v2/phases/00-skoll-supervised/ckpt-mason_collective/collective_final.json'
 
 function aliveOf(seats: number[]): number {
   let mask = 0

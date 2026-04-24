@@ -13,7 +13,7 @@
  */
 
 import type { SystemRole } from '../../../types/index.ts'
-import type { GameState, NightAction, PlayerState, GameEvent, DayClaim } from '../../../lupa/types.ts'
+import type { GameState, NightAction, PlayerState, GameEvent } from '../../../lupa/types.ts'
 import { Rng } from '../../../lupa/random.ts'
 import { alivePlayers } from '../../../lupa/roles.ts'
 import { resolveRules } from '../../../howl/ruleset.ts'
@@ -69,24 +69,6 @@ function hasMCTSSupport(
   m: SkollMasterAgent,
 ): m is SkollMasterAgent & { getLastMCTSResult(): ZeroMCTSResult | null } {
   return typeof (m as unknown as { getLastMCTSResult?: unknown }).getLastMCTSResult === 'function'
-}
-
-/**
- * master が Phase 2 NN の指定 method head を持つか duck-type 判定。
- * SkollZeroRoleAgent.hasPhase2Head(method, role) が登録済み checkpoint の有無を返す。
- */
-function hasPhase2Head(
-  m: SkollMasterAgent,
-  method: string,
-  role: SystemRole,
-): boolean {
-  const fn = (m as unknown as { hasPhase2Head?: unknown }).hasPhase2Head
-  if (typeof fn !== 'function') return false
-  try {
-    return (fn as (method: string, role: SystemRole) => boolean).call(m, method, role)
-  } catch {
-    return false
-  }
 }
 
 /** visits (Map<seat, count>) を prob 降順の配列にする */
@@ -452,11 +434,6 @@ export class SkollCommandAgent implements CommandAgent {
       }
     }
 
-    // NN 経路: claim head 主判定 + defensive_claim で hide→CO override
-    // NN が unsupported type / legal 外を返した場合は既存 lookahead にフォールスルー。
-    const nnResult = this.tryVillainCoWithDefense(state, player, legal, events)
-    if (nnResult) return nnResult
-
     type Opt = 'hide' | 'seer' | 'medium' | 'bodyguard' | 'nekomata'
     const options: Opt[] = ['hide', 'seer', 'medium', 'bodyguard', 'nekomata']
     let best: Opt = 'hide'
@@ -517,140 +494,6 @@ export class SkollCommandAgent implements CommandAgent {
   }
 
   /**
-   * villain の CO 種類を Phase 2 claim / defensive_claim head 経由で決定。
-   *   - method='claim': master.decideDayClaim → 通常 CO 判定
-   *   - method='defensive_claim': master.decideDefensiveClaim → RuleBasedAgent 側は villain で
-   *     常に 'none' を返すが、NN 蒸留で微小なシグナルが残る可能性を拾う。
-   * retarCache 不在時 (ctx==null) は NN 経路を踏まず null で既存 lookahead にフォールスルー。
-   */
-  private tryVillainCoFromClaimHead(
-    state: Readonly<GameState<CommandAdapterExt>>,
-    player: PlayerState,
-    legal: readonly Command[],
-    events: AgentEvents,
-    method: 'claim' | 'defensive_claim' = 'claim',
-  ): DecisionResult | null {
-    if (!hasPhase2Head(this.master, method, player.role)) return null
-    const ctx = this.buildDecisionContext(state, player, events, 'day')
-    if (!ctx) return null
-    let claim: DayClaim
-    try {
-      claim = method === 'defensive_claim'
-        ? this.master.decideDefensiveClaim(ctx)
-        : this.master.decideDayClaim(ctx)
-    } catch { return null }
-
-    const tag = method === 'defensive_claim' ? 'defense' : 'NN'
-
-    if (claim.type === 'none') {
-      return skipOrFirst(legal, `(discussion)[${player.role}/zero] hide (${tag} claim=none)`)
-    }
-    const claimType = mapVillainCoType(claim.type)
-    if (!claimType) return null
-    const coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === claimType)
-    if (!coCmd) return null
-    return {
-      cmd: coCmd,
-      log: `(discussion)[${player.role}/zero] CO ${claimType} (${tag})`,
-    }
-  }
-
-  /**
-   * villain の二段判定: claim head 主 + defensive_claim で hide→CO override を試みる。
-   * 真役職の tryTrueCoWithDefense と同じ構造。
-   */
-  private tryVillainCoWithDefense(
-    state: Readonly<GameState<CommandAdapterExt>>,
-    player: PlayerState,
-    legal: readonly Command[],
-    events: AgentEvents,
-  ): DecisionResult | null {
-    const claimResult = this.tryVillainCoFromClaimHead(state, player, legal, events, 'claim')
-    if (claimResult && claimResult.cmd.type === 'skip') {
-      const defense = this.tryVillainCoFromClaimHead(state, player, legal, events, 'defensive_claim')
-      if (defense && defense.cmd.type !== 'skip') return defense
-    }
-    return claimResult
-  }
-
-  /**
-   * 真役職の CO 判定を Phase 2 claim / defensive_claim head 経由で行う。
-   *   - method='claim': master.decideDayClaim → 通常 CO 判定
-   *   - method='defensive_claim': master.decideDefensiveClaim → 脅威検知時の緊急 CO
-   * 挙動 (両 method 共通):
-   *   - NN が 'none' → hide (skip) with `(${tag} claim=none)` log
-   *   - NN が expectedClaimType → legal の role_co を採用
-   *   - NN が expectedClaimType 以外 (forecast 等) → null でフォールスルー
-   *   - NN head 未登録 / retarCache 無し / throw → null でフォールスルー
-   * mason_co は partner 指定必須のため state から真相方席を引いて legal を絞る。
-   */
-  private tryTrueCoFromClaimHead(
-    state: Readonly<GameState<CommandAdapterExt>>,
-    player: PlayerState,
-    legal: readonly Command[],
-    events: AgentEvents,
-    expectedClaimType: 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' | 'mason_co',
-    method: 'claim' | 'defensive_claim' = 'claim',
-  ): DecisionResult | null {
-    if (!hasPhase2Head(this.master, method, player.role)) return null
-    const ctx = this.buildDecisionContext(state, player, events, 'day')
-    if (!ctx) return null
-    let claim: DayClaim
-    try {
-      claim = method === 'defensive_claim'
-        ? this.master.decideDefensiveClaim(ctx)
-        : this.master.decideDayClaim(ctx)
-    } catch { return null }
-
-    const tag = method === 'defensive_claim' ? 'defense' : 'NN'
-
-    if (claim.type === 'none') {
-      return skipOrFirst(legal, `(discussion)[${player.role}/zero] hide (${tag} claim=none)`)
-    }
-    if (claim.type !== expectedClaimType) return null
-
-    let coCmd: Command | undefined
-    if (expectedClaimType === 'mason_co') {
-      const partner = state.players.find(p => p.role === 'mason' && p.seat !== player.seat)
-      if (!partner) return null
-      coCmd = legal.find(c =>
-        c.type === 'role_co'
-        && c.claim.type === 'mason_co'
-        && c.claim.partner === partner.seat,
-      )
-    } else {
-      coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === expectedClaimType)
-    }
-    if (!coCmd) return null
-    return {
-      cmd: coCmd,
-      log: `(discussion)[${player.role}/zero] CO ${expectedClaimType} (${tag})`,
-    }
-  }
-
-  /**
-   * 真役職の二段判定: 主に claim head、hide 判定時は defensive_claim head で override 可。
-   * (NN claim head が hide と判断しても、defensive_claim head が脅威を検知して CO と
-   * 判断する場合は CO を採用する)
-   */
-  private tryTrueCoWithDefense(
-    state: Readonly<GameState<CommandAdapterExt>>,
-    player: PlayerState,
-    legal: readonly Command[],
-    events: AgentEvents,
-    expectedClaimType: 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' | 'mason_co',
-  ): DecisionResult | null {
-    const claimResult = this.tryTrueCoFromClaimHead(state, player, legal, events, expectedClaimType, 'claim')
-    // claim 結果が hide (skip) なら defensive_claim で override を試みる
-    if (claimResult && claimResult.cmd.type === 'skip') {
-      const defense = this.tryTrueCoFromClaimHead(state, player, legal, events, expectedClaimType, 'defensive_claim')
-      if (defense && defense.cmd.type !== 'skip') return defense
-    }
-    return claimResult
-  }
-
-
-  /**
    * 騙り占い: 未 CO → seer_co 空、CO 済 → fakeDivineHistory を日数分に満たしつつ未報告分を report。
    * target は非狼席からランダム（skoll は未活用、将来的に wolf-perspective で優先席選択を強化）。
    */
@@ -697,10 +540,7 @@ export class SkollCommandAgent implements CommandAgent {
         }
       }
     }
-    // 全 fake 報告済み: forecast head が発火すれば予告、それ以外は skip
-    // (fake seer は claimedRole='seer' なので super.decideForecast は通る)
-    const forecastResult = this.tryForecastFromHead(state, player, legal, events)
-    if (forecastResult) return forecastResult
+    // 全 fake 報告済み: skip
     return skipOrFirst(legal, '(discussion)[fake-seer] all-reported skip')
   }
 
@@ -926,16 +766,12 @@ export class SkollCommandAgent implements CommandAgent {
 
   /** 真 seer: 未 CO → seer_co、CO 済 → 未報告の占い結果を順次 report、全て済みなら skip */
   private discussionSeer(
-    state: Readonly<GameState<CommandAdapterExt>>,
+    _state: Readonly<GameState<CommandAdapterExt>>,
     player: PlayerState,
     legal: readonly Command[],
     events: AgentEvents,
   ): DecisionResult {
     if (!player.claimedRole) {
-      // NN 経路: claim head 主判定 + defensive_claim で hide→CO override
-      const nnResult = this.tryTrueCoWithDefense(state, player, legal, events, 'seer_co')
-      if (nnResult) return nnResult
-
       const coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === 'seer_co')
       if (coCmd) return { cmd: coCmd, log: '(discussion)[seer] true-role initial CO' }
     }
@@ -973,9 +809,7 @@ export class SkollCommandAgent implements CommandAgent {
       }
     }
 
-    // 全部報告済み: forecast head が発火すれば予告、それ以外は skip
-    const forecastResult = this.tryForecastFromHead(state, player, legal, events)
-    if (forecastResult) return forecastResult
+    // 全部報告済み: skip
     return skipOrFirst(legal, '(discussion)[seer] all-reported skip')
   }
 
@@ -995,10 +829,6 @@ export class SkollCommandAgent implements CommandAgent {
     if (!player.claimedRole) {
       const coCmd = legal.find(c => c.type === 'role_co' && c.claim.type === 'medium_co')
       if (!coCmd) return skipOrFirst(legal, '(discussion)[medium] no-co-legal skip')
-
-      // NN 経路: claim head 主判定 + defensive_claim で hide→CO override
-      const nnResult = this.tryTrueCoWithDefense(state, player, legal, events, 'medium_co')
-      if (nnResult) return nnResult
 
       const hideScore = this.currentSkollScore(state, player, events)
       const coEvent: GameEvent = { type: 'medium_claim', actor: player.seat } as GameEvent
@@ -1089,10 +919,6 @@ export class SkollCommandAgent implements CommandAgent {
       return skipOrFirst(legal, `(discussion)[${tag}] no-co-legal skip`)
     }
 
-    // NN 経路: claim head 主判定 + defensive_claim で hide→CO override
-    const nnResult = this.tryTrueCoWithDefense(state, player, legal, events, claimType)
-    if (nnResult) return nnResult
-
     const hideScore = this.currentSkollScore(state, player, events)
     const coEvent: GameEvent = claimType === 'bodyguard_co'
       ? { type: 'bodyguard_claim', actor: player.seat, targets: [] } as GameEvent
@@ -1134,13 +960,9 @@ export class SkollCommandAgent implements CommandAgent {
     state: Readonly<GameState<CommandAdapterExt>>,
     player: PlayerState,
     legal: readonly Command[],
-    events: AgentEvents,
+    _events: AgentEvents,
   ): DecisionResult {
     if (!player.claimedRole) {
-      // NN 経路: claim head 主判定 + defensive_claim で hide→CO override
-      const nnResult = this.tryTrueCoWithDefense(state, player, legal, events, 'mason_co')
-      if (nnResult) return nnResult
-
       const partner = state.players.find(p => p.role === 'mason' && p.seat !== player.seat)
       if (partner) {
         const coCmd = legal.find(c =>
@@ -1164,115 +986,6 @@ export class SkollCommandAgent implements CommandAgent {
     return skipOrFirst(legal, `(discussion)[${player.role}] hide skip`)
   }
 
-  /**
-   * master.decideForecast 経由で seer の予告 (forecast) を決定。
-   * NN forecast head は claim head 系 (10 次元) を再利用した設計で、
-   * argmax が 'forecast' のとき super.decideForecast の target とマージして
-   * {type:'forecast', target} を返す。'none' / 他 type → null でフォールスルー
-   * (呼び出し元は skip を返す)。
-   * Phase 2 forecast checkpoint 未登録 / retarCache 無し / throw → null。
-   */
-  private tryForecastFromHead(
-    state: Readonly<GameState<CommandAdapterExt>>,
-    player: PlayerState,
-    legal: readonly Command[],
-    events: AgentEvents,
-  ): DecisionResult | null {
-    if (!hasPhase2Head(this.master, 'forecast', player.role)) return null
-    const ctx = this.buildDecisionContext(state, player, events, 'day')
-    if (!ctx) return null
-    let claim: DayClaim
-    try { claim = this.master.decideForecast(ctx) } catch { return null }
-    if (claim.type !== 'forecast') return null
-    const reportCmd = legal.find(c =>
-      c.type === 'role_result_report'
-      && c.claim.type === 'forecast'
-      && c.claim.target === claim.target,
-    )
-    if (!reportCmd) return null
-    return {
-      cmd: reportCmd,
-      log: `(discussion)[${player.role}/zero] forecast seat${claim.target} (NN)`,
-    }
-  }
-
-  /**
-   * CCO フェーズ用: master.decideDayClaim / decideDefensiveClaim の判断を
-   * cco_full / cco_skip に変換。
-   *   - method='claim': 通常 CO 判定
-   *   - method='defensive_claim': 脅威検知時の緊急 CO (CCO は last-chance CO なので高関連)
-   *   - NN が 'none' → cco_skip with `[role/zero] skip (${tag} claim=none)` log
-   *   - NN が expectedClaimType → legal の cco_full を採用 (mason_co は partner 解決)
-   *   - unexpected type → null で既存 heuristic (無条件 cco_full) にフォールスルー
-   */
-  private tryCcoFromClaimHead(
-    state: Readonly<GameState<CommandAdapterExt>>,
-    player: PlayerState,
-    legal: readonly Command[],
-    events: AgentEvents,
-    expectedClaimType: 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' | 'mason_co',
-    method: 'claim' | 'defensive_claim' = 'claim',
-  ): DecisionResult | null {
-    if (!hasPhase2Head(this.master, method, player.role)) return null
-    const ctx = this.buildDecisionContext(state, player, events, 'day')
-    if (!ctx) return null
-    let claim: DayClaim
-    try {
-      claim = method === 'defensive_claim'
-        ? this.master.decideDefensiveClaim(ctx)
-        : this.master.decideDayClaim(ctx)
-    } catch { return null }
-
-    const tag = method === 'defensive_claim' ? 'defense' : 'NN'
-
-    if (claim.type === 'none') {
-      const skipCmd = legal.find(c => c.type === 'cco_skip')
-      if (!skipCmd) return null
-      return {
-        cmd: skipCmd,
-        log: `(cco)[${player.role}/zero] skip (${tag} claim=none)`,
-      }
-    }
-    if (claim.type !== expectedClaimType) return null
-
-    let ccoCmd: Command | undefined
-    if (expectedClaimType === 'mason_co') {
-      const partner = state.players.find(p => p.role === 'mason' && p.seat !== player.seat)
-      if (!partner) return null
-      ccoCmd = legal.find(c =>
-        c.type === 'cco_full'
-        && c.claim.type === 'mason_co'
-        && c.claim.partner === partner.seat,
-      )
-    } else {
-      ccoCmd = legal.find(c => c.type === 'cco_full' && c.claim.type === expectedClaimType)
-    }
-    if (!ccoCmd) return null
-    return {
-      cmd: ccoCmd,
-      log: `(cco)[${player.role}/zero] CO ${expectedClaimType} (${tag})`,
-    }
-  }
-
-  /**
-   * CCO 用の二段判定: claim head 主 + defensive_claim で skip→CO override を試みる。
-   * discussion 用の tryTrueCoWithDefense と同じ構造。
-   */
-  private tryCcoWithDefense(
-    state: Readonly<GameState<CommandAdapterExt>>,
-    player: PlayerState,
-    legal: readonly Command[],
-    events: AgentEvents,
-    expectedClaimType: 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' | 'mason_co',
-  ): DecisionResult | null {
-    const claimResult = this.tryCcoFromClaimHead(state, player, legal, events, expectedClaimType, 'claim')
-    if (claimResult && claimResult.cmd.type === 'cco_skip') {
-      const defense = this.tryCcoFromClaimHead(state, player, legal, events, expectedClaimType, 'defensive_claim')
-      if (defense && defense.cmd.type !== 'cco_skip') return defense
-    }
-    return claimResult
-  }
-
   // ============================================================
   // CCO: 真役職未 CO なら cco_full、villain/その他は cco_skip
   // ============================================================
@@ -1290,10 +1003,6 @@ export class SkollCommandAgent implements CommandAgent {
     if (!player.claimedRole) {
       const targetClaimType = trueCoClaimType(player.role)
       if (targetClaimType) {
-        // NN 経路: claim head 主判定 + defensive_claim で skip→CO override
-        const nnResult = this.tryCcoWithDefense(state, player, legal, events, targetClaimType)
-        if (nnResult) return nnResult
-
         let ccoCmd: Command | undefined
         if (player.role === 'mason') {
           // 真相方席の mason_co を選ぶ
@@ -1618,22 +1327,6 @@ function skipOrFirst(legal: readonly Command[], log: string): DecisionResult {
     throw new Error(`skipOrFirst: 'skip' missing in discussion legal (${log})`)
   }
   return { cmd: skip, log }
-}
-
-/**
- * DayClaim.type → villain 初期 CO で対応可能な role_co claim type。
- * mason_co / forecast / *_result 等は villain の CO 選択には使えないので null。
- */
-function mapVillainCoType(
-  type: DayClaim['type'],
-): 'seer_co' | 'medium_co' | 'bodyguard_co' | 'nekomata_co' | null {
-  switch (type) {
-    case 'seer_co':      return 'seer_co'
-    case 'medium_co':    return 'medium_co'
-    case 'bodyguard_co': return 'bodyguard_co'
-    case 'nekomata_co':  return 'nekomata_co'
-    default: return null
-  }
 }
 
 /** 役職 → cco_full で使う真 CO の claim type（村騙り可能性のある役職は null） */
