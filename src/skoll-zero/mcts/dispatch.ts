@@ -1,0 +1,165 @@
+/**
+ * ModuleBundle dispatch — phase + state から「どの Module の どの head を呼ぶか」を決める。
+ *
+ * MCTS rollout が phase ごとに actor 役職を判定し、対応する Module の policy/value head を
+ * 呼ぶための機構。Stage 2 で `runMCTS` がこれを使って Module を切り替える。
+ */
+
+import type { SystemRole } from '../../types/index.ts'
+import type { SimState } from '../simulator/world-state.ts'
+import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
+import type { HeadName } from './nn.ts'
+
+/**
+ * 役職 Module の集合。MCTS は phase に応じてこのうちの 1 つを選んで forward を呼ぶ。
+ *
+ * - mason: mason 役職 (mason_collective 観測)
+ * - wolf: werewolf (wolf_collective 観測)
+ * - standard: villager / seer / medium / bodyguard / nekomata 共有 (individual 観測)
+ * - fanatic: fanatic (fanatic 観測、village_predict/trust 注入)
+ * - hamster: werehamster (individual 観測、hamster faction)
+ * - immoralist: immoralist (individual 観測、hamster faction)
+ *
+ * Stage 2 では各 Module が独自の NN + buffer を持つ前提。Module 不在 (undefined) の場合は
+ * fallback として decisionSeat の Module で代用する (近似)。
+ */
+export type ModuleBundle = {
+  mason?: SkollZeroModule
+  wolf?: SkollZeroModule
+  standard?: SkollZeroModule
+  fanatic?: SkollZeroModule
+  hamster?: SkollZeroModule
+  immoralist?: SkollZeroModule
+}
+
+/** 役職 → Module bucket */
+export type ModuleBucket = keyof ModuleBundle
+
+/** SystemRole → Module bucket の mapping */
+export function bucketForRole(role: SystemRole): ModuleBucket | null {
+  switch (role) {
+    case 'mason': return 'mason'
+    case 'werewolf': return 'wolf'
+    case 'villager':
+    case 'seer':
+    case 'medium':
+    case 'bodyguard':
+    case 'nekomata':
+      return 'standard'
+    case 'fanatic': return 'fanatic'
+    case 'werehamster': return 'hamster'
+    case 'immoralist': return 'immoralist'
+    default: return null  // possessed 等は Stage 2 では学習対象外
+  }
+}
+
+/**
+ * dispatch 結果: どの Module / actor / head で expand するか + viewer 視点。
+ */
+export type DispatchResult = {
+  module: SkollZeroModule
+  actorSeat: number
+  actorRole: SystemRole
+  headName: HeadName
+}
+
+/**
+ * 現在の phase と state から actor 役職を決定し、対応 Module を返す。
+ *
+ * Stage 2 暫定:
+ * - day phase の actor は decisionSeat (集団意思決定の代理)
+ * - night_attack の actor は生存 wolf の lowest seat
+ * - night_divine の actor は生存 真 seer の lowest seat
+ * - night_guard の actor は生存 真 bg seat
+ * - claim_* / morning は default skip 扱いなので null を返す (実 dispatch は Stage 3)
+ *
+ * @param state rollout state (world / alive を参照)
+ * @param decisionSeat MCTS の root 決定者
+ * @param bundle 役職 Module 集合
+ * @returns dispatch 可能なら結果、不可能なら null (skip 扱い)
+ */
+export function dispatchForPhase(
+  state: SimState,
+  decisionSeat: number,
+  bundle: ModuleBundle,
+): DispatchResult | null {
+  const world = state.world
+  switch (state.phase) {
+    case 'day': {
+      const role = world.roles[decisionSeat]
+      const module = pickModule(bundle, role)
+      if (!module) return null
+      return { module, actorSeat: decisionSeat, actorRole: role, headName: 'execute' }
+    }
+    case 'night_attack': {
+      const wolfSeat = lowestSeat(world.wolfMask & state.alive)
+      if (wolfSeat < 0) return null
+      const module = bundle.wolf
+      if (!module) return null
+      return { module, actorSeat: wolfSeat, actorRole: 'werewolf', headName: 'attack' }
+    }
+    case 'night_divine': {
+      const seerSeat = lowestSeat(world.seerMask & state.alive)
+      if (seerSeat < 0) return null
+      const module = bundle.standard
+      if (!module) return null
+      return { module, actorSeat: seerSeat, actorRole: 'seer', headName: 'divine' }
+    }
+    case 'night_guard': {
+      const bgSeat = world.bodyguardSeat
+      if (bgSeat < 0 || (state.alive & (1 << bgSeat)) === 0) return null
+      const module = bundle.standard
+      if (!module) return null
+      return { module, actorSeat: bgSeat, actorRole: 'bodyguard', headName: 'guard' }
+    }
+    case 'morning':
+    case 'claim_seer_true':
+    case 'claim_medium_true':
+    case 'claim_bg_true':
+    case 'claim_nekomata_true':
+    case 'claim_mason':
+    case 'claim_seer_fake':
+    case 'claim_medium_fake':
+    case 'claim_bg_fake':
+    case 'claim_nekomata_fake':
+      // Stage 2 では default skip。Stage 3 で実 dispatch を入れる。
+      return null
+    case 'terminal':
+      return null
+  }
+}
+
+/** 役職に対応する Module を bundle から取り出す (null 安全) */
+function pickModule(bundle: ModuleBundle, role: SystemRole): SkollZeroModule | undefined {
+  const bucket = bucketForRole(role)
+  if (!bucket) return undefined
+  return bundle[bucket]
+}
+
+/** mask の最下位 set bit に対応する seat (なければ -1) */
+function lowestSeat(mask: number): number {
+  if (mask === 0) return -1
+  const bit = mask & (-mask)
+  return 31 - Math.clz32(bit)
+}
+
+/**
+ * faction 変換: actor faction で得た value を decision faction で評価する value に変換。
+ *
+ * 3 陣営 ゲームでは「actor 視点の +1」が「decision 視点の何になるか」を決める。
+ * 現時点 (Stage 2 暫定) は単純な符号変換:
+ * - 同一 faction → そのまま
+ * - 異 faction → 符号反転 (zero-sum 近似)
+ *
+ * Stage 4 で per-phase faction 動的切替に拡張する際、ここを「世界・状態を見た正確な変換」に
+ * 置換する。
+ */
+export function convertValueAcrossFaction(
+  value: number,
+  actorFaction: 'village' | 'wolf' | 'hamster',
+  decisionFaction: 'village' | 'wolf' | 'hamster',
+): number {
+  if (actorFaction === decisionFaction) return value
+  // 異 faction: 単純な符号反転 (Stage 2 暫定)
+  return -value
+}

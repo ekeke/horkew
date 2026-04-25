@@ -17,16 +17,20 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import { buildPossibilitiesFromRetar } from '../../skoll/unified.ts'
-import { createSimState } from '../simulator/world-state.ts'
+import type { SimState } from '../simulator/world-state.ts'
 import { Determinizer } from '../mcts/determinize.ts'
 import {
   runMCTS, DEFAULT_MCTS_CONFIG,
   type Faction, type MCTSConfig, type MCTSResult,
 } from '../mcts/ISMCTS.ts'
-import type { MasonZeroNN, HeadName } from '../mcts/nn.ts'
+import type { MasonZeroNN, HeadName, NNOutput } from '../mcts/nn.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { RootObs } from '../selfplay/observation.ts'
 import { normalizeVisits } from '../selfplay/policy-utils.ts'
+import type { ObservationMode } from '../../fenrir/src/observation.ts'
+import { encodeFromSimState, type RolloutInvariants } from '../observation/from-sim-state.ts'
+import { buildInitialSimState, buildInvariants } from '../observation/from-ctx.ts'
+import type { ModuleBundle } from '../mcts/dispatch.ts'
 import type { SkollZeroModule, McctsProposal } from './skoll-zero-module.ts'
 
 export type BaseSkollZeroModuleOptions = {
@@ -71,27 +75,78 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     this.determinizerMaxWorlds = opts.determinizerMaxWorlds ?? 100000
   }
 
-  /** 役職別 obs encoder。サブクラスで実装 */
+  /** 役職別 obs encoder (DecisionContext 経由、root snapshot 用)。サブクラスで実装 */
   abstract captureObs(ctx: DecisionContext): RootObs
 
-  /** MCTS value backup の faction 視点。サブクラスで実装 */
-  protected abstract faction(): Faction
+  /** MCTS value backup の faction 視点。Stage 2 で public 化 (interface 露出) */
+  abstract faction(): Faction
 
-  proposeVote(ctx: DecisionContext, opts?: { record?: boolean }): McctsProposal | null {
-    return this.runMctsProposal(ctx, 'execute', 0, opts?.record ?? true)
+  /**
+   * SimState 経路の観測モード。サブクラスで指定:
+   * - mason: 'mason_collective'
+   * - wolf: 'wolf_collective'
+   * - village/individual: 'individual'
+   * - fanatic: 'fanatic'
+   */
+  protected abstract observationMode(): ObservationMode
+
+  /** SimState + actor 視点で動的に観測を生成 (Stage 2 ModuleBundle 用) */
+  encodeStateObs(
+    state: SimState,
+    actorSeat: number,
+    actorRole: SystemRole,
+    invariants: RolloutInvariants,
+  ): RootObs {
+    return encodeFromSimState(state, actorSeat, actorRole, this.observationMode(), invariants)
+  }
+
+  /** SimState から動的に encode した obs で NN forward */
+  forwardAt(
+    state: SimState,
+    actorSeat: number,
+    actorRole: SystemRole,
+    headName: HeadName,
+    invariants: RolloutInvariants,
+  ): NNOutput {
+    const obs = this.encodeStateObs(state, actorSeat, actorRole, invariants)
+    return this.nn.forward(obs, state, actorSeat, headName)
+  }
+
+  /**
+   * Stage 2: 役職 Module 集合 (bundle) を受け取り、phase ごとに dispatch する MCTS。
+   * bundle が省略された場合は「自身の Module を全 bucket に充てる」フォールバックで動作 (Stage 1 互換)。
+   */
+  proposeVote(
+    ctx: DecisionContext,
+    opts?: { record?: boolean, bundle?: ModuleBundle },
+  ): McctsProposal | null {
+    const bundle = opts?.bundle ?? this.singletonBundle()
+    return this.runMctsProposal(ctx, bundle, 'execute', 0, opts?.record ?? true)
   }
 
   proposeNightAction(
     ctx: DecisionContext,
     mode: 'divine' | 'guard' | 'attack',
-    opts?: { record?: boolean },
+    opts?: { record?: boolean, bundle?: ModuleBundle },
   ): McctsProposal | null {
     // 夜行動の除外席: 自席は常に除外、wolf の attack は teammates も除外
     let excludedMask = 1 << ctx.mySeat
     if (mode === 'attack') {
       for (const s of ctx.wolfTeammates ?? []) excludedMask |= 1 << s
     }
-    return this.runMctsProposal(ctx, mode, excludedMask, opts?.record ?? true)
+    const bundle = opts?.bundle ?? this.singletonBundle()
+    return this.runMctsProposal(ctx, bundle, mode, excludedMask, opts?.record ?? true)
+  }
+
+  /**
+   * Bundle 省略時のフォールバック: 自身を全 bucket に充てる。
+   * Stage 1 互換維持用 (mason だけで rollout 全部回す等)。
+   */
+  protected singletonBundle(): ModuleBundle {
+    return {
+      mason: this, wolf: this, standard: this,
+      fanatic: this, hamster: this, immoralist: this,
+    }
   }
 
   finalize(z: number): void {
@@ -118,6 +173,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
    */
   private runMctsProposal(
     ctx: DecisionContext,
+    bundle: ModuleBundle,
     actionMode: 'execute' | 'divine' | 'guard' | 'attack',
     excludedMask: number,
     record: boolean,
@@ -135,24 +191,28 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
       return null
     }
 
+    // sampleWorld は SimState 構築用のプレースホルダ。runMCTS 内の makeRolloutState で
+    // 各 rollout ごとに別 world に差し替えられる。
     const sampleWorld = determinizer.sample(() => ctx.rng.next())
     if (!sampleWorld) {
       this.fallbackCalls++
       return null
     }
 
-    const alive = aliveBitmask(ctx.alivePlayers)
-    // phase は ISMCTS 側 (makeRolloutState) で actionMode から決定するので、
-    // ここで指定しても上書きされる。createSimState の default ('morning') のまま渡す。
-    const infoState = createSimState(sampleWorld, alive, ctx.day)
+    // root SimState (ctx 由来の claims/divineLog/deathLog/guardLog 等を埋めた SimState) と
+    // rollout 不変情報 (signal counts / retar / tsumi 等) を構築。
+    const rootSimState = buildInitialSimState(ctx, sampleWorld)
+    const invariants = buildInvariants(ctx)
+    // root snapshot 用の obs (buffer 記録に使う、現状は決定者の Module の captureObs)
     const rootObs = this.captureObs(ctx)
+    const alive = aliveBitmask(ctx.alivePlayers)
 
     const mctsConfig: MCTSConfig = this.mctsConfig
       ? { ...this.mctsConfig, rng: () => ctx.rng.next() }
       : { ...DEFAULT_MCTS_CONFIG, rng: () => ctx.rng.next() }
 
     const result = runMCTS(
-      rootObs, infoState, ctx.mySeat, determinizer, this.nn, mctsConfig, this.faction(),
+      rootSimState, ctx.mySeat, determinizer, bundle, invariants, mctsConfig,
       { actionMode, excludedMask: actionMode === 'execute' ? 0 : excludedMask },
     )
 
@@ -182,7 +242,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     return {
       visits: result.visits,
       pi,
-      value: 0,  // MCTS root value は result に持たせる設計ではないので 0 固定。将来必要なら result.root の Q 平均から取得
+      value: 0,
       obs: rootObs,
     }
   }

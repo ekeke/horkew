@@ -28,10 +28,14 @@
  * 知らずに呼べる。
  */
 
+import type { SystemRole } from '../../types/index.ts'
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
-import type { MCTSResult } from '../mcts/ISMCTS.ts'
+import type { Faction, MCTSResult } from '../mcts/ISMCTS.ts'
+import type { HeadName, NNOutput } from '../mcts/nn.ts'
 import type { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { RootObs } from '../selfplay/observation.ts'
+import type { SimState } from '../simulator/world-state.ts'
+import type { RolloutInvariants } from '../observation/from-sim-state.ts'
 
 /** proposeVote / proposeNightAction の返り値 — MCTS 結果の共通型 */
 export type McctsProposal = {
@@ -93,4 +97,52 @@ export interface SkollZeroModule {
 
   /** debug: MCTS fallback 回数 (retar 無効 / overflow 等) */
   readonly fallbackCalls: number
+
+  // ============================================================
+  // Stage 2: ModuleBundle dispatch 用 interface
+  // ============================================================
+
+  /**
+   * Module の faction (value backup の符号変換に使用)。
+   *
+   * - village: mason / villager / seer / medium / bodyguard / nekomata
+   * - wolf: werewolf / fanatic
+   * - hamster: werehamster / immoralist
+   */
+  faction(): Faction
+
+  /**
+   * SimState + actor 視点で動的に観測を encode (rollout 中に呼ばれる)。
+   *
+   * 各 Module は自身の観測モード (mason_collective / wolf_collective / individual / fanatic)
+   * を知っているので、encoderType を引数で取らない。
+   *
+   * @param state rollout dynamic state (alive / claims / divineLog 等が SimState に乗ってる)
+   * @param actorSeat 観測の主体 (Module dispatch で決まる、必ずしも root の決定者ではない)
+   * @param actorRole actor の SystemRole (世界由来)
+   * @param invariants rollout 不変情報 (signal counts / retar / tsumi / etc.)
+   */
+  encodeStateObs(
+    state: SimState,
+    actorSeat: number,
+    actorRole: SystemRole,
+    invariants: RolloutInvariants,
+  ): RootObs
+
+  /**
+   * SimState から動的に encode した obs で NN forward を呼ぶ。
+   *
+   * @param state rollout dynamic state
+   * @param actorSeat 観測の主体
+   * @param actorRole actor の SystemRole
+   * @param headName 呼び出す head (phase に対応)
+   * @param invariants rollout 不変情報
+   */
+  forwardAt(
+    state: SimState,
+    actorSeat: number,
+    actorRole: SystemRole,
+    headName: HeadName,
+    invariants: RolloutInvariants,
+  ): NNOutput
 }

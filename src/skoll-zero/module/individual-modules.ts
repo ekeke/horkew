@@ -12,7 +12,7 @@
 
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import type { Faction } from '../mcts/ISMCTS.ts'
-import { encodeObservation } from '../../fenrir/src/observation.ts'
+import { encodeObservation, encodeFanaticObservation, type ObservationMode } from '../../fenrir/src/observation.ts'
 import type { RootObs } from '../selfplay/observation.ts'
 import { BaseSkollZeroModule } from './base-module.ts'
 
@@ -21,15 +21,17 @@ export class VillageIndividualModule extends BaseSkollZeroModule {
   captureObs(ctx: DecisionContext): RootObs {
     return encodeObservation(ctx)
   }
-  protected faction(): Faction { return 'village' }
+  faction(): Faction { return 'village' }
+  protected observationMode(): ObservationMode { return 'individual' }
 }
 
-/** Fanatic: individual obs, wolf faction (狼勝ち = +1) */
+/** Fanatic: individual obs + village_predict/trust 注入, wolf faction (狼勝ち = +1) */
 export class FanaticIndividualModule extends BaseSkollZeroModule {
   captureObs(ctx: DecisionContext): RootObs {
-    return encodeObservation(ctx)
+    return encodeFanaticObservation(ctx)
   }
-  protected faction(): Faction { return 'wolf' }
+  faction(): Faction { return 'wolf' }
+  protected observationMode(): ObservationMode { return 'fanatic' }
 }
 
 /** Third 陣営 (werehamster / immoralist): individual obs, hamster faction (狐勝ち = +1) */
@@ -37,5 +39,6 @@ export class ThirdIndividualModule extends BaseSkollZeroModule {
   captureObs(ctx: DecisionContext): RootObs {
     return encodeObservation(ctx)
   }
-  protected faction(): Faction { return 'hamster' }
+  faction(): Faction { return 'hamster' }
+  protected observationMode(): ObservationMode { return 'individual' }
 }

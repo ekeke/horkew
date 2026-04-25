@@ -45,7 +45,7 @@ const PER_SEAT_SIZE = 1 + (NUM_ROLES + 1) + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 
 const SEAT_SECTION_SIZE = SEATS * PER_SEAT_SIZE  // 336
 const PRIVATE_SIZE = SEATS + SEATS + 1 + SEATS + 1  // divine_results + wolf_teammates + mason_partner + guard_history + known_hamster = 43
 const REVOTE_SIZE = 1 + SEATS  // revote_round + revote_candidates_mask = 15
-const HISTORY_DAY_SIZE = SEATS * 5  // per day: voted_for, executed, killed, claimed, signaled = 70
+export const HISTORY_DAY_SIZE = SEATS * 5  // per day: voted_for, executed, killed, claimed, signaled = 70
 const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 210
 
 // Retar可能性: per-seat × roles (0/1)
@@ -740,10 +740,10 @@ export const WOLF_COLLECTIVE_OBSERVATION_SIZE = OBSERVATION_SIZE + WOLF_COLLECTI
 export const MASON_COLLECTIVE_OBSERVATION_SIZE = OBSERVATION_SIZE + COLLECTIVE_GLOBAL_EXTRA
 
 // 集団用オフセット (OBSERVATION_SIZE基準)
-const COLLECTIVE_TEAM_SIZE_START = OBSERVATION_SIZE
-const WOLF_FAKE_DIVINE_START = COLLECTIVE_TEAM_SIZE_START + 1
-const WOLF_VILLAGE_PREDICT_START = WOLF_FAKE_DIVINE_START + WOLF_COLLECTIVE_FAKE_DIVINE_SIZE
-const WOLF_VILLAGE_TRUST_START = WOLF_VILLAGE_PREDICT_START + WOLF_COLLECTIVE_VILLAGE_PREDICT_SIZE
+export const COLLECTIVE_TEAM_SIZE_START = OBSERVATION_SIZE
+export const WOLF_FAKE_DIVINE_START = COLLECTIVE_TEAM_SIZE_START + 1
+export const WOLF_VILLAGE_PREDICT_START = WOLF_FAKE_DIVINE_START + WOLF_COLLECTIVE_FAKE_DIVINE_SIZE
+export const WOLF_VILLAGE_TRUST_START = WOLF_VILLAGE_PREDICT_START + WOLF_COLLECTIVE_VILLAGE_PREDICT_SIZE
 
 /** 狼集団 Seat token特徴量次元: individual(71) + village_predict(11) + village_trust(1) + fake_divine(1) */
 export const WOLF_COLLECTIVE_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1 + 1  // 84
@@ -779,8 +779,8 @@ export function inferObservationMode(inputSize: number): ObservationMode {
 }
 
 // 狂信者オフセット (OBSERVATION_SIZE基準)
-const FANATIC_VILLAGE_PREDICT_START = OBSERVATION_SIZE
-const FANATIC_VILLAGE_TRUST_START = FANATIC_VILLAGE_PREDICT_START + FANATIC_VILLAGE_PREDICT_SIZE
+export const FANATIC_VILLAGE_PREDICT_START = OBSERVATION_SIZE
+export const FANATIC_VILLAGE_TRUST_START = FANATIC_VILLAGE_PREDICT_START + FANATIC_VILLAGE_PREDICT_SIZE
 
 /** 狂信者 Seat token特徴量次元: individual(71) + village_predict(11) + village_trust(1) */
 export const FANATIC_SEAT_FEATURES = SEAT_TOKEN_FEATURES + NUM_ROLES + 1  // 83
@@ -806,8 +806,10 @@ const MY_ROLE_OFFSET_IN_GLOBAL = 3
 
 /**
  * 集団観測の共通処理: 個人観測をベースに is_me→is_my_team, my_role→zeros に変換
+ *
+ * skoll-zero の SimState 経路 obs encoder からも再利用するため export する。
  */
-function overrideForCollective(obs: Float32Array, teamSeats: number[]): void {
+export function overrideForCollective(obs: Float32Array, teamSeats: number[]): void {
   const teamSet = new Set(teamSeats)
 
   // my_role(11) をゼロ化 — 集団は単一役職を持たない

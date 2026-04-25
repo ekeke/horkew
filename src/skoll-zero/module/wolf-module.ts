@@ -6,7 +6,7 @@
 
 import type { DecisionContext, TeamDecisionContext } from '../../fenrir/src/agents/agent.ts'
 import type { Faction } from '../mcts/ISMCTS.ts'
-import { encodeCollectiveWolfObservation } from '../../fenrir/src/observation.ts'
+import { encodeCollectiveWolfObservation, type ObservationMode } from '../../fenrir/src/observation.ts'
 import type { RootObs } from '../selfplay/observation.ts'
 import { BaseSkollZeroModule } from './base-module.ts'
 
@@ -14,7 +14,8 @@ export class WolfSkollZeroModule extends BaseSkollZeroModule {
   captureObs(ctx: DecisionContext): RootObs {
     return buildWolfTeamObs(ctx)
   }
-  protected faction(): Faction { return 'wolf' }
+  faction(): Faction { return 'wolf' }
+  protected observationMode(): ObservationMode { return 'wolf_collective' }
 }
 
 /**

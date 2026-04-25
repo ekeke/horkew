@@ -2,7 +2,7 @@ import { applyExecution, applyFollowDeaths, checkOutcome, simulateNight } from '
 import { popCount32, seatsFromMask } from '../../hati/types.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
 import type { World } from '../../hati/types.ts'
-import type { SimState, Phase, FakeDivineColor } from './world-state.ts'
+import type { SimState, Phase, FakeDivineColor, DivineColor } from './world-state.ts'
 
 /**
  * 1 phase 分の意思決定 action。phase ごとに必要な情報だけを持つ
@@ -219,8 +219,15 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
     case 'day': {
       assertActionType(action, 'execute')
       if (action.target >= 0) {
+        const beforeAlive = state.alive
         state.alive = applyExecution(state.alive, action.target)
+        state.deathLog.push({ day: state.day, seat: action.target, cause: 'execute' })
         state.alive = applyFollowDeaths(state.alive, state.world)
+        // applyFollowDeaths で追加死亡した seat (immoralist の後追い等) を log
+        const followMask = beforeAlive & ~state.alive & ~(1 << action.target)
+        for (const seat of seatsFromMask(followMask)) {
+          state.deathLog.push({ day: state.day, seat, cause: 'follow' })
+        }
       }
       const outcome = checkOutcome(state.world, state.alive)
       if (outcome !== 'ongoing') {
@@ -241,8 +248,14 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
     case 'night_guard': {
       assertActionType(action, 'guard')
       state.pendingGuard = action.target >= 0 ? action.target : null
+      // 護衛履歴を log (真 bg 視点の私的情報)
+      if (state.pendingGuard !== null) {
+        state.guardLog.push({ day: state.day, target: state.pendingGuard })
+      }
       // 夜 3 行動を一括解決
       const wolfBiteTarget = state.pendingAttack ?? -1
+      const beforeAlive = state.alive
+      const aliveSeers = state.world.seerMask & beforeAlive
       const result = simulateNight(
         state.world,
         state.alive,
@@ -252,6 +265,51 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
       )
       state.alive = result.nextAlive
       state.alive = applyFollowDeaths(state.alive, state.world)
+
+      // 死亡 log: 死因を判定
+      // - 呪殺: 占い対象の狐 (pendingDivineTargets に含まれる werehamster)
+      // - 噛み: wolfBiteTarget (護衛成功なら除外)
+      // - 道連れ: 噛まれた猫又に対する随伴狼 (現実装は 1 wolf のみ反撃モデル)
+      // - 後追い: その他 (immoralist の hamster 死亡後追い等)
+      const deadMask = beforeAlive & ~state.alive
+      const cursedTargets = new Set<number>()
+      for (const t of state.pendingDivineTargets) {
+        if (t >= 0 && state.world.roleIds[t] === RoleBitIndex.werehamster && (deadMask & (1 << t))) {
+          cursedTargets.add(t)
+        }
+      }
+      const guardSucceeded = state.pendingGuard !== null
+        && state.pendingGuard === wolfBiteTarget
+        && state.world.bodyguardSeat >= 0
+        && (beforeAlive & (1 << state.world.bodyguardSeat)) !== 0
+      for (const seat of seatsFromMask(deadMask)) {
+        let cause: 'execute' | 'night_kill' | 'follow' | 'curse' | 'nekomata_revenge'
+        if (cursedTargets.has(seat)) cause = 'curse'
+        else if (seat === wolfBiteTarget && !guardSucceeded) cause = 'night_kill'
+        else if (state.world.roleIds[seat] === RoleBitIndex.werewolf
+          && wolfBiteTarget >= 0
+          && state.world.roleIds[wolfBiteTarget] === RoleBitIndex.nekomata) cause = 'nekomata_revenge'
+        else cause = 'follow'
+        state.deathLog.push({ day: state.day, seat, cause })
+      }
+
+      // 真占い結果の log: 生存中の seer のみが結果を観測
+      // simulateNight と同じ順序 (seerMask の low-bit 順) で pendingDivineTargets を割り当て
+      let seerIdx = 0
+      let scan = aliveSeers
+      while (scan !== 0) {
+        const bit = scan & (-scan)
+        const seerSeat = 31 - Math.clz32(bit)
+        scan ^= bit
+        const target = state.pendingDivineTargets[seerIdx++]
+        if (target !== undefined && target >= 0 && (state.alive & (1 << seerSeat))) {
+          const color: DivineColor = state.world.roleIds[target] === RoleBitIndex.werewolf ? 'wolf' : 'human'
+          const log = state.divineLog.get(seerSeat) ?? []
+          log.push({ day: state.day, target, color })
+          state.divineLog.set(seerSeat, log)
+        }
+      }
+
       const outcome = checkOutcome(state.world, state.alive)
       if (outcome !== 'ongoing') {
         state.outcome = outcome

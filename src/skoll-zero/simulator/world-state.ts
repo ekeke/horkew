@@ -32,14 +32,47 @@ export type Phase =
   | 'night_guard'
   | 'terminal'
 
-/** 偽占い結果 (狼/狂が報告する偽報告) */
-export type FakeDivineColor = 'human' | 'wolf'
+/** 占い結果 (真偽どちらも) — 観測上の色 */
+export type DivineColor = 'human' | 'wolf'
+
+/** 偽占い結果 (狼/狂が報告する偽報告) — 既存名は互換のため維持 */
+export type FakeDivineColor = DivineColor
 
 /** 偽占い履歴の 1 件 */
 export type FakeDivineEntry = {
   day: number
   target: number
   color: FakeDivineColor
+}
+
+/** 真占い履歴の 1 件 (世界固定で導出される、actor=seer の私的観測) */
+export type DivineEntry = {
+  day: number
+  target: number
+  color: DivineColor
+}
+
+/** 死亡原因 (deathLog 用) */
+export type DeathCause = 'execute' | 'night_kill' | 'follow' | 'curse' | 'nekomata_revenge'
+
+/** 死亡履歴の 1 件 */
+export type DeathEntry = {
+  day: number
+  seat: number
+  cause: DeathCause
+}
+
+/** 投票履歴の 1 件 (Stage 2 では voteLog は空配列で OK、Stage 5 で集団意思決定の追加情報) */
+export type VoteEntry = {
+  day: number
+  voter: number
+  target: number
+}
+
+/** 護衛履歴の 1 件 (bodyguard の私的情報、obs に出る) */
+export type GuardEntry = {
+  day: number
+  target: number
 }
 
 /** CO 状態の 1 件 */
@@ -75,8 +108,17 @@ export type SimState = {
 
   /** seat → CO 内容 (真/偽の役職表明) */
   claims: Map<number, ClaimEntry>
-  /** seerSeat → 偽占い結果の履歴。真 seer は world から導出するため state に持たない */
+  /** seerSeat → 偽占い結果の履歴 (狼/狂の偽報告) */
   fakeDivineHistory: Map<number, FakeDivineEntry[]>
+
+  /** seerSeat → 真占い結果の履歴 (世界固定で導出、actor=seer の私的観測) */
+  divineLog: Map<number, DivineEntry[]>
+  /** 死亡履歴 (execute / night_kill / follow / curse / nekomata_revenge) */
+  deathLog: DeathEntry[]
+  /** 投票履歴 (Stage 2 では空、Stage 5 で集団意思決定で活用) */
+  voteLog: VoteEntry[]
+  /** 護衛履歴 (真 bg の私的情報) */
+  guardLog: GuardEntry[]
 }
 
 /**
@@ -102,6 +144,10 @@ export function createSimState(
     pendingDivineTargets: [],
     claims: new Map(),
     fakeDivineHistory: new Map(),
+    divineLog: new Map(),
+    deathLog: [],
+    voteLog: [],
+    guardLog: [],
   }
 }
 
@@ -118,6 +164,10 @@ export function cloneSimState(state: SimState): SimState {
   for (const [seat, entries] of state.fakeDivineHistory) {
     fakeDivineHistory.set(seat, entries.map(e => ({ day: e.day, target: e.target, color: e.color })))
   }
+  const divineLog = new Map<number, DivineEntry[]>()
+  for (const [seat, entries] of state.divineLog) {
+    divineLog.set(seat, entries.map(e => ({ day: e.day, target: e.target, color: e.color })))
+  }
   return {
     world: state.world,
     alive: state.alive,
@@ -129,6 +179,10 @@ export function cloneSimState(state: SimState): SimState {
     pendingDivineTargets: state.pendingDivineTargets.slice(),
     claims,
     fakeDivineHistory,
+    divineLog,
+    deathLog: state.deathLog.map(e => ({ day: e.day, seat: e.seat, cause: e.cause })),
+    voteLog: state.voteLog.map(e => ({ day: e.day, voter: e.voter, target: e.target })),
+    guardLog: state.guardLog.map(e => ({ day: e.day, target: e.target })),
   }
 }
 
