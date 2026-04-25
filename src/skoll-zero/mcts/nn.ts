@@ -43,13 +43,13 @@ export type NNOutput = {
  * - `predict`: 配役予想 (per-seat sigmoid 154)
  */
 export type HeadName =
-  | 'vote' | 'attack' | 'divine' | 'guard' | 'target'
+  | 'execute' | 'attack' | 'divine' | 'guard' | 'target'
   | 'claim' | 'comm' | 'leader'
   | 'propose' | 'predict'
 
 export interface MasonZeroNN {
   /**
-   * @param headName どの per-seat head から policy を取り出すか (default 'vote')。
+   * @param headName どの per-seat head から policy を取り出すか (default 'execute')。
    *   該当 head を持たないネットで非対応 head 名が渡された場合は実装が throw する。
    */
   forward(rootObs: RootObservation, state: SimState, masonSeat: number, headName?: HeadName): NNOutput
@@ -65,7 +65,7 @@ export interface MasonZeroNN {
  * rootObs / headName は無視（DummyNN は観測と head に依存しない）。
  */
 export class DummyNN implements MasonZeroNN {
-  forward(_rootObs: RootObservation, state: SimState, masonSeat: number, _headName: HeadName = 'vote'): NNOutput {
+  forward(_rootObs: RootObservation, state: SimState, masonSeat: number, _headName: HeadName = 'execute'): NNOutput {
     const policy = new Map<number, number>()
     let mask = state.alive & ~(1 << masonSeat)
     const candidates: number[] = []

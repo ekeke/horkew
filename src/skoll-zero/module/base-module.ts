@@ -78,7 +78,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
   protected abstract faction(): Faction
 
   proposeVote(ctx: DecisionContext, opts?: { record?: boolean }): McctsProposal | null {
-    return this.runMctsProposal(ctx, 'vote', 0, opts?.record ?? true)
+    return this.runMctsProposal(ctx, 'execute', 0, opts?.record ?? true)
   }
 
   proposeNightAction(
@@ -118,7 +118,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
    */
   private runMctsProposal(
     ctx: DecisionContext,
-    actionMode: 'vote' | 'divine' | 'guard' | 'attack',
+    actionMode: 'execute' | 'divine' | 'guard' | 'attack',
     excludedMask: number,
     record: boolean,
   ): McctsProposal | null {
@@ -142,7 +142,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     }
 
     const alive = aliveBitmask(ctx.alivePlayers)
-    const phase = actionMode === 'vote' ? 'day' : 'night'
+    const phase = actionMode === 'execute' ? 'day' : 'night'
     const infoState = createSimState(sampleWorld, alive, ctx.day, phase)
     const rootObs = this.captureObs(ctx)
 
@@ -152,7 +152,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
 
     const result = runMCTS(
       rootObs, infoState, ctx.mySeat, determinizer, this.nn, mctsConfig, this.faction(),
-      { actionMode, excludedMask: actionMode === 'vote' ? 0 : excludedMask },
+      { actionMode, excludedMask: actionMode === 'execute' ? 0 : excludedMask },
     )
 
     if (result.visits.size === 0) {

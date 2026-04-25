@@ -51,7 +51,7 @@ function makeRecord(opts: {
     masonSeat: opts.masonSeat,
     alive: opts.alive,
     z: opts.z,
-    headName: opts.headName ?? 'vote',
+    headName: opts.headName ?? 'execute',
   }
 }
 
@@ -229,8 +229,8 @@ describe('SkollZeroTrainer', () => {
       const restored = reloaded.forward(testObs)
       assert.ok(Math.abs(original.value - restored.value) < 1e-6,
         `value 一致 (orig=${original.value}, restored=${restored.value})`)
-      const origVote = original.policies.get('vote')!
-      const restVote = restored.policies.get('vote')!
+      const origVote = original.policies.get('execute')!
+      const restVote = restored.policies.get('execute')!
       for (let i = 0; i < origVote.length; i++) {
         assert.ok(Math.abs(origVote[i] - restVote[i]) < 1e-6,
           `vote[${i}] 一致 (orig=${origVote[i]}, restored=${restVote[i]})`)
@@ -255,11 +255,11 @@ describe('groupRecordsByHead', () => {
       headName,
     })
     const records: TrainingRecord[] = [
-      rec('vote', 2), rec('attack', 3), rec('vote', 4),
+      rec('execute', 2), rec('attack', 3), rec('execute', 4),
       rec('divine', 5), rec('guard', 2), rec('attack', 5),
     ]
     const groups = groupRecordsByHead(records)
-    assert.equal(groups.get('vote')?.length, 2)
+    assert.equal(groups.get('execute')?.length, 2)
     assert.equal(groups.get('attack')?.length, 2)
     assert.equal(groups.get('divine')?.length, 1)
     assert.equal(groups.get('guard')?.length, 1)
@@ -311,7 +311,7 @@ describe('trainMasonZero: multi-head 分離学習', () => {
       masks: [mask, mask, mask, mask],
       valueTargets: [1, 1, 1, 1],
       valueCoeff: 1.0,
-      headName: 'vote',
+      headName: 'execute',
     })
     assert.ok(Number.isFinite(resVote.loss), 'vote head loss finite')
 

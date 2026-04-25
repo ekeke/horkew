@@ -109,7 +109,7 @@ class PolicyOnlyMasonAgent extends SkollMasterAgent {
     this.voteCalls++
     const obs = captureObs(ctx)
     const result = this.nn.net.forward(obs)
-    const logits = result.policies.get('vote')
+    const logits = result.policies.get('execute')
     if (!logits) return super.decideVote(ctx)
 
     const excluded = new Set<number>([ctx.mySeat])

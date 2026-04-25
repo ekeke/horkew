@@ -30,7 +30,7 @@ import { HEAD_SIZES } from '../../fenrir/src/action.ts'
 export const SKOLL_ZERO_NETWORK_CONFIG: NetworkConfig = {
   inputSize: MASON_COLLECTIVE_OBSERVATION_SIZE,
   heads: {
-    vote: HEAD_SIZES.vote,
+    execute: HEAD_SIZES.vote,
   },
   transformer: {
     dModel: 64,
@@ -46,7 +46,7 @@ export const SKOLL_ZERO_NETWORK_CONFIG: NetworkConfig = {
     planVocabSize: 0,
     seatFeatures: MASON_COLLECTIVE_SEAT_FEATURES,
     clsFeatures: MASON_COLLECTIVE_CLS_FEATURES,
-    perSeatHeads: ['vote'],
+    perSeatHeads: ['execute'],
   },
 }
 
@@ -66,7 +66,7 @@ export function createSkollZeroNetwork(): TransformerNetwork {
 export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
   inputSize: OBSERVATION_SIZE,
   heads: {
-    vote: HEAD_SIZES.vote,
+    execute: HEAD_SIZES.vote,
     divine: HEAD_SIZES.vote,
     guard: HEAD_SIZES.vote,
   },
@@ -84,7 +84,7 @@ export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
     planVocabSize: 0,
     seatFeatures: SEAT_TOKEN_FEATURES,
     clsFeatures: CLS_FEATURES,
-    perSeatHeads: ['vote', 'divine', 'guard'],
+    perSeatHeads: ['execute', 'divine', 'guard'],
   },
 }
 
@@ -98,7 +98,7 @@ export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
 export const WOLF_ZERO_NETWORK_CONFIG: NetworkConfig = {
   inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
   heads: {
-    vote: HEAD_SIZES.vote,
+    execute: HEAD_SIZES.vote,
     attack: HEAD_SIZES.vote,
   },
   transformer: {
@@ -115,7 +115,7 @@ export const WOLF_ZERO_NETWORK_CONFIG: NetworkConfig = {
     planVocabSize: 0,
     seatFeatures: WOLF_COLLECTIVE_SEAT_FEATURES,
     clsFeatures: WOLF_COLLECTIVE_CLS_FEATURES,
-    perSeatHeads: ['vote', 'attack'],
+    perSeatHeads: ['execute', 'attack'],
   },
 }
 

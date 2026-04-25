@@ -41,7 +41,7 @@ export class MasonZeroNetwork implements MasonZeroNN {
     }
   }
 
-  forward(rootObs: RootObservation, state: SimState, masonSeat: number, headName: HeadName = 'vote'): NNOutput {
+  forward(rootObs: RootObservation, state: SimState, masonSeat: number, headName: HeadName = 'execute'): NNOutput {
     const result = this.net.forward(rootObs)
     const logits = result.policies.get(headName)
     if (!logits) {

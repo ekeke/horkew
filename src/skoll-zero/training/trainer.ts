@@ -102,6 +102,7 @@ export class SkollZeroTrainer {
       masks,
       valueTargets,
       valueCoeff: this.config.valueCoeff,
+      headName: 'execute',
     })
     return { ...res, batchSize: records.length }
   }

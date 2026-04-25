@@ -9,7 +9,7 @@
  * 将来 night action 等を加える際の拡張余地として discriminated union にしておく。
  */
 export type MasonAction =
-  | { type: 'vote', target: number }
+  | { type: 'execute', target: number }
 
 /**
  * 1 night 分の全プレイヤー night action（heuristic で決定済み）。

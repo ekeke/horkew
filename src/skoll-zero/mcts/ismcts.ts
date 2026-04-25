@@ -51,14 +51,14 @@ export type MCTSResult = {
  */
 /**
  * MCTS の root action 種別。
- * - 'vote' (default): day フェーズで投票先 seat を選ぶ
+ * - 'execute' (default): day フェーズで投票先 seat を選ぶ
  * - 'attack': night フェーズで噛み先 seat を選ぶ (wolf 用)
  * - 'divine': night フェーズで占い先 seat を選ぶ (seer 用)
  * - 'guard':  night フェーズで護衛先 seat を選ぶ (bodyguard 用)
  *
- * head 名は action mode と 1:1 対応（'vote' → 'vote' head 等）。
+ * head 名は action mode と 1:1 対応（'execute' → 'execute' head 等）。
  */
-export type RootActionMode = 'vote' | 'attack' | 'divine' | 'guard'
+export type RootActionMode = 'execute' | 'attack' | 'divine' | 'guard'
 
 /** action mode → NN forward で使う head 名 */
 function headNameForMode(mode: RootActionMode): HeadName {
@@ -75,10 +75,10 @@ export function runMCTS(
   config: MCTSConfig = DEFAULT_MCTS_CONFIG,
   /** value を評価する陣営視点 (default: village、mason/村側全般) */
   faction: Faction = 'village',
-  /** root action 種別 (default 'vote') と NN policy から除外する席 bitmask (wolf 仲間等) */
+  /** root action 種別 (default 'execute') と NN policy から除外する席 bitmask (wolf 仲間等) */
   opts: { actionMode?: RootActionMode, excludedMask?: number } = {},
 ): MCTSResult {
-  const actionMode = opts.actionMode ?? 'vote'
+  const actionMode = opts.actionMode ?? 'execute'
   const excludedMask = opts.excludedMask ?? 0
   const root = createTreeNode()
   if (determinizer.isOverflow()) {
@@ -226,7 +226,7 @@ function runOneRollout(
     // step: root action の適用。actionMode ごとに day/night decision を組み立てる。
     // 木の深い部分 (isRoot=false) は常に day vote として扱う (標準動作)。
     const nextState = cloneSimState(state)
-    const { day: dayDec, night: nightDec } = buildDecisions(isRoot ? actionMode : 'vote', action)
+    const { day: dayDec, night: nightDec } = buildDecisions(isRoot ? actionMode : 'execute', action)
     stepDayNightCycle(nextState, dayDec, nightDec)
     isRoot = false
     let child = node.children.get(action)
@@ -254,7 +254,7 @@ function buildDecisions(
 ): { day: DayDecision, night: NightDecision } {
   const emptyNight: NightDecision = { attackTarget: null, guardTarget: null, seerTargets: [] }
   switch (mode) {
-    case 'vote':
+    case 'execute':
       return { day: { executedSeat: action }, night: emptyNight }
     case 'attack':
       return { day: { executedSeat: -1 }, night: { attackTarget: action, guardTarget: null, seerTargets: [] } }
@@ -268,7 +268,7 @@ function buildDecisions(
 /**
  * node に対し NN forward → edge を初期化、value を返す。
  * excludedMask で指定された seat (wolf 仲間等) は policy から除外し、残りを renormalize する。
- * headName で policy を読み出す head を切り替える (default 'vote')。
+ * headName で policy を読み出す head を切り替える (default 'execute')。
  */
 function expandWithNN(
   node: TreeNode,
@@ -277,7 +277,7 @@ function expandWithNN(
   nn: MasonZeroNN,
   rootObs: RootObservation,
   excludedMask: number = 0,
-  headName: HeadName = 'vote',
+  headName: HeadName = 'execute',
 ): number {
   const { policy, value } = nn.forward(rootObs, state, masonSeat, headName)
   // excludedMask の seat を除外 + renormalize

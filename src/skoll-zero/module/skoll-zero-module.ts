@@ -56,7 +56,7 @@ export interface SkollZeroModule {
    * 昼の投票先を ISMCTS で提案。
    *
    * - retar 無効 / determinizer overflow 時は null を返す (Agent は heuristic にフォールバック)
-   * - record=true (default) なら buffer に (obs, visits, π) を 'vote' head で蓄積
+   * - record=true (default) なら buffer に (obs, visits, π) を 'execute' head で蓄積
    * - record=false なら buffer に書かない (eval モード用)
    */
   proposeVote(ctx: DecisionContext, opts?: { record?: boolean }): McctsProposal | null
