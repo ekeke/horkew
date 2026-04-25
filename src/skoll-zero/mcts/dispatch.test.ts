@@ -127,13 +127,56 @@ describe('dispatchForPhase', () => {
     assert.equal(r, null)
   })
 
-  it('claim_*/morning は Stage 2 では null (default skip)', () => {
+  it('Stage 3: claim_*_true は該当真役職不在で null', () => {
     const world = makeWorld({ 1: 'mason', 2: 'werewolf' })
     const state = createSimState(world, aliveOf([1, 2]), 1, 'claim_seer_true')
+    // 真 seer 不在
     assert.equal(dispatchForPhase(state, 1, bundle), null)
-    state.phase = 'claim_seer_fake'
-    assert.equal(dispatchForPhase(state, 1, bundle), null)
-    state.phase = 'morning'
+  })
+
+  it('Stage 3: claim_seer_true は真 seer module + claim_true head へ dispatch', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_seer_true')
+    const r = dispatchForPhase(state, 1, bundle)
+    assert.equal(r?.module, stdMod)
+    assert.equal(r?.actorSeat, 1)
+    assert.equal(r?.actorRole, 'seer')
+    assert.equal(r?.headName, 'claim_true')
+  })
+
+  it('Stage 3: claim_mason は mason module + claim_true head へ dispatch', () => {
+    const world = makeWorld({ 1: 'mason', 2: 'mason', 3: 'werewolf' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_mason')
+    const r = dispatchForPhase(state, 1, bundle)
+    assert.equal(r?.module, masonMod)
+    assert.equal(r?.actorSeat, 1)
+    assert.equal(r?.actorRole, 'mason')
+    assert.equal(r?.headName, 'claim_true')
+  })
+
+  it('Stage 3: claim_seer_fake は wolf module + claim_fake head へ dispatch', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'werewolf' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_seer_fake')
+    const r = dispatchForPhase(state, 1, bundle)
+    assert.equal(r?.module, wolfMod)
+    assert.equal(r?.actorSeat, 2) // 最低位 wolf
+    assert.equal(r?.actorRole, 'werewolf')
+    assert.equal(r?.headName, 'claim_fake')
+  })
+
+  it('Stage 3: morning は morningPending[0] + wolf module + morning head', () => {
+    const world = makeWorld({ 1: 'villager', 2: 'werewolf', 3: 'werewolf' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'morning')
+    state.morningPending = [3, 2] // FIFO 先頭は seat 3
+    const r = dispatchForPhase(state, 1, bundle)
+    assert.equal(r?.module, wolfMod)
+    assert.equal(r?.actorSeat, 3)
+    assert.equal(r?.headName, 'morning')
+  })
+
+  it('Stage 3: morningPending 空で null', () => {
+    const world = makeWorld({ 1: 'villager', 2: 'werewolf' })
+    const state = createSimState(world, aliveOf([1, 2]), 1, 'morning')
     assert.equal(dispatchForPhase(state, 1, bundle), null)
   })
 

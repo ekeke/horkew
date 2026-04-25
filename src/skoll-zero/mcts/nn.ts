@@ -34,6 +34,11 @@ export type NNOutput = {
  * - `divine`: seer の占い先
  * - `guard`: bodyguard の護衛先
  *
+ * Stage 3 (MCTS global heads):
+ * - `claim_true`: 真役職の真 CO 判断 (2-dim: skip / CO)
+ * - `claim_fake`: 狼/狂の偽 CO 判断 (15-dim: skip + claimer seat)
+ * - `morning`: 偽占い報告 (28-dim: target_idx × {human, wolf})
+ *
  * Phase 2 (NN-direct、MCTS 不使用):
  * - `target`: 占い/護衛/forecast/defensiveClaim target (per-seat softmax)
  * - `claim`: 昼 claim (categorical 10)
@@ -44,6 +49,7 @@ export type NNOutput = {
  */
 export type HeadName =
   | 'execute' | 'attack' | 'divine' | 'guard' | 'target'
+  | 'claim_true' | 'claim_fake' | 'morning'
   | 'claim' | 'comm' | 'leader'
   | 'propose' | 'predict'
 

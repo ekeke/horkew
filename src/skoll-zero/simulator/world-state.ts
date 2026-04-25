@@ -119,6 +119,13 @@ export type SimState = {
   voteLog: VoteEntry[]
   /** 護衛履歴 (真 bg の私的情報) */
   guardLog: GuardEntry[]
+
+  /**
+   * morning phase で当日まだ偽占い報告をしていない偽 seer の seat キュー (FIFO)。
+   * Stage 3 で導入: morning は 1 actor あたり 1 step (28 actions = target × color) で
+   * 処理し、queue が空になったら次 phase へ。night_guard 後の翌日遷移時に再 populate される。
+   */
+  morningPending: number[]
 }
 
 /**
@@ -148,6 +155,7 @@ export function createSimState(
     deathLog: [],
     voteLog: [],
     guardLog: [],
+    morningPending: [],
   }
 }
 
@@ -183,6 +191,7 @@ export function cloneSimState(state: SimState): SimState {
     deathLog: state.deathLog.map(e => ({ day: e.day, seat: e.seat, cause: e.cause })),
     voteLog: state.voteLog.map(e => ({ day: e.day, voter: e.voter, target: e.target })),
     guardLog: state.guardLog.map(e => ({ day: e.day, target: e.target })),
+    morningPending: state.morningPending.slice(),
   }
 }
 

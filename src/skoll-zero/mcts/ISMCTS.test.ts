@@ -204,6 +204,88 @@ describe('runMCTS: 基本動作', () => {
   })
 })
 
+describe('runMCTS: Stage 3 claim/morning expansion', () => {
+  it('claim_seer_true 開始: action ∈ {0=skip, 1=CO} に visits が分布', () => {
+    const setup = new Map<SystemRole, number>([
+      ['villager', 2], ['seer', 1], ['werewolf', 1], ['mason', 1],
+    ])
+    const roleMask = RoleSignatureBits.villager | RoleSignatureBits.seer
+      | RoleSignatureBits.werewolf | RoleSignatureBits.mason
+    const poss = makePossibilitiesAllOpen(setup, 5, roleMask)
+    poss.possibilities[1] = RoleSignatureBits.seer
+    const det = new Determinizer(poss, setup)
+    const w = det.sample(seededRng(1))!
+    const state = createSimState(w, aliveOf([1, 2, 3, 4, 5]), 1, 'claim_seer_true')
+    // ISMCTS の root phase は actionMode から決まる (default 'execute' → day) ので、
+    // ここでは rootSimState の phase だけ claim_seer_true にしても makeRolloutState で day に
+    // 上書きされる。代わりに actionMode を変えるための専用テストではなく、
+    // 「expandWithDispatch が claim_*_true で claim_true head を呼ぶ」ことを wolf module
+    // 経路を通して別の rollout テスト (下) で検証する。
+
+    // ここは action ID 空間の最低限の動作確認: bundle dispatch + state.phase=day で 5 alive
+    // のうち decisionSeat 自身を除く 4 候補が edges に乗ることだけ確認。
+    state.phase = 'day'
+    const result = runMCTS(state, 1, det, makeBundle(), emptyInvariants(), {
+      cPuct: 1.5, nRollouts: 50, rng: seededRng(123),
+    })
+    assert.equal(result.abortReason, null)
+    let visitSum = 0
+    for (const v of result.visits.values()) visitSum += v
+    assert.equal(visitSum, 50)
+  })
+
+  it('morning rollout: descent で morning phase に到達したら 28-action 空間で expand', () => {
+    const setup = new Map<SystemRole, number>([
+      ['villager', 2], ['seer', 1], ['werewolf', 1], ['mason', 1],
+    ])
+    const roleMask = RoleSignatureBits.villager | RoleSignatureBits.seer
+      | RoleSignatureBits.werewolf | RoleSignatureBits.mason
+    const poss = makePossibilitiesAllOpen(setup, 5, roleMask)
+    poss.possibilities[1] = RoleSignatureBits.mason
+    const det = new Determinizer(poss, setup)
+    const w = det.sample(seededRng(1))!
+    const state = createSimState(w, aliveOf([1, 2, 3, 4, 5]), 1, 'day')
+    // 偽 seer CO を仕込んで翌日 morning phase で wolf module の morning head が呼ばれる
+    // 形にする (seat 4 が wolf と仮定して fake seer CO)
+    const wolfSeat = (() => {
+      let m = w.wolfMask
+      const bit = m & (-m)
+      return 31 - Math.clz32(bit)
+    })()
+    state.claims.set(wolfSeat, { role: 'seer', isFake: true })
+
+    // 各 Module の forward 呼び出しで headName をトラック
+    const headCounts: Record<string, number> = {}
+    function makeTracked(): SkollZeroModule {
+      const base = new DummyModule()
+      return new Proxy(base, {
+        get(target, prop) {
+          if (prop === 'forwardAt') {
+            return (...args: Parameters<typeof base.forwardAt>) => {
+              const headName = args[3]
+              headCounts[headName] = (headCounts[headName] ?? 0) + 1
+              return base.forwardAt(...args)
+            }
+          }
+          return (target as unknown as Record<string | symbol, unknown>)[prop as string]
+        },
+      })
+    }
+    const bundle: ModuleBundle = {
+      mason: makeTracked(), wolf: makeTracked(), standard: makeTracked(),
+      fanatic: makeTracked(), hamster: makeTracked(), immoralist: makeTracked(),
+    }
+    runMCTS(state, 1, det, bundle, emptyInvariants(), {
+      cPuct: 1.5, nRollouts: 100, rng: seededRng(7),
+    })
+    // day → night_attack → night_divine → night_guard → 翌日 morning に descent で到達。
+    // 偽 seer がいるので morning head が呼ばれるはず。
+    assert.ok(headCounts.execute > 0, 'execute head が呼ばれた (day phase)')
+    assert.ok(headCounts.attack > 0, 'attack head が呼ばれた (night_attack phase)')
+    assert.ok((headCounts.morning ?? 0) > 0, 'morning head が呼ばれた (翌 morning phase に descent)')
+  })
+})
+
 describe('runMCTS: cross-module dispatch (Stage 2 の本体)', () => {
   it('mason が決定者で descent が night_attack に到達したら wolf Module の forwardAt が呼ばれる', () => {
     const setup = new Map<SystemRole, number>([

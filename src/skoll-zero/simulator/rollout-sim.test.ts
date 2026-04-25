@@ -8,6 +8,7 @@ import {
   stepPhase, advancePhase, shouldSkipPhase,
   legalExecuteActions, legalAttackActions, legalDivineActions, legalGuardActions,
   legalClaimTrueActions, legalClaimFakeActions, legalMorningActions,
+  enterMorningPhase,
 } from './rollout-sim.ts'
 
 /** テスト用 world 構築ヘルパー */
@@ -57,10 +58,11 @@ describe('shouldSkipPhase', () => {
     assert.equal(shouldSkipPhase(state), true)
   })
 
-  it('morning は偽 seer CO 1 件以上で skip しない', () => {
+  it('morning は偽 seer CO 1 件以上 + enterMorningPhase で skip しない', () => {
     const world = makeWorld({ 1: 'villager', 2: 'werewolf' })
     const state = createSimState(world, aliveOf([1, 2]), 1, 'morning')
     state.claims.set(2, { role: 'seer', isFake: true })
+    enterMorningPhase(state)
     assert.equal(shouldSkipPhase(state), false)
   })
 
@@ -409,33 +411,52 @@ describe('legalClaimFakeActions', () => {
   })
 })
 
-describe('legalMorningActions', () => {
-  it('偽 seer 1 人で alive × color の組合せ', () => {
+describe('legalMorningActions (per-actor)', () => {
+  it('morningPending 先頭 actor 1 人分の alive × color = 28 actions (alive 3 × color 2 = 6)', () => {
     const world = makeWorld({ 1: 'villager', 2: 'werewolf', 3: 'villager' })
     const state = createSimState(world, aliveOf([1, 2, 3]), 2, 'morning')
     state.claims.set(2, { role: 'seer', isFake: true })
+    enterMorningPhase(state)
     const actions = legalMorningActions(state)
-    // alive 3 × color 2 = 6
-    assert.equal(actions.length, 6)
+    assert.equal(actions.length, 6) // alive 3 × color 2
+    // 全 action が seerSeat=2 (queue 先頭) について報告
+    for (const a of actions) {
+      assert.equal(a.type === 'morning' && a.reports.length === 1 && a.reports[0].seerSeat, 2)
+    }
   })
 
-  it('偽 seer 0 人で空配列', () => {
+  it('morningPending 空で空配列', () => {
     const world = makeWorld({ 1: 'villager', 2: 'werewolf' })
     const state = createSimState(world, aliveOf([1, 2]), 1, 'morning')
     assert.equal(legalMorningActions(state).length, 0)
   })
 
-  it('偽 seer 2 人で cartesian product (28 × 28 = 784 が出ないよう小さい alive で確認)', () => {
+  it('偽 seer 2 人でも 1 step あたり先頭 actor 分のみ (爆発しない)', () => {
     const world = makeWorld({ 1: 'werewolf', 2: 'fanatic' })
     const state = createSimState(world, aliveOf([1, 2]), 1, 'morning')
     state.claims.set(1, { role: 'seer', isFake: true })
     state.claims.set(2, { role: 'seer', isFake: true })
+    enterMorningPhase(state)
     const actions = legalMorningActions(state)
-    // (alive 2 × color 2)^2 = 16
-    assert.equal(actions.length, 16)
-    // 各 action は reports 配列が 2 件
+    // alive 2 × color 2 = 4 (cartesian でなく per-actor)
+    assert.equal(actions.length, 4)
     for (const a of actions) {
-      assert.equal(a.type === 'morning' && a.reports.length, 2)
+      assert.equal(a.type === 'morning' && a.reports.length === 1 && a.reports[0].seerSeat, 1)
     }
+  })
+
+  it('1 actor 処理後に queue が短縮し次 actor へ進む', () => {
+    const world = makeWorld({ 1: 'werewolf', 2: 'fanatic' })
+    const state = createSimState(world, aliveOf([1, 2]), 1, 'morning')
+    state.claims.set(1, { role: 'seer', isFake: true })
+    state.claims.set(2, { role: 'seer', isFake: true })
+    enterMorningPhase(state)
+    assert.deepEqual(state.morningPending, [1, 2])
+    stepPhase(state, { type: 'morning', reports: [{ seerSeat: 1, target: 2, color: 'wolf' }] })
+    assert.equal(state.phase, 'morning') // まだ留まる
+    assert.deepEqual(state.morningPending, [2])
+    stepPhase(state, { type: 'morning', reports: [{ seerSeat: 2, target: 1, color: 'human' }] })
+    assert.notEqual(state.phase, 'morning') // 全消費で次 phase へ
+    assert.deepEqual(state.morningPending, [])
   })
 })

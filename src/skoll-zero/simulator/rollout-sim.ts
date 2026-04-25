@@ -94,13 +94,10 @@ function trueClaimRole(phase: Phase): 'seer' | 'medium' | 'bodyguard' | 'nekomat
 export function shouldSkipPhase(state: SimState): boolean {
   const { world, alive, phase, claims } = state
   switch (phase) {
-    case 'morning': {
-      let hasFakeSeer = false
-      for (const entry of claims.values()) {
-        if (entry.role === 'seer' && entry.isFake) { hasFakeSeer = true; break }
-      }
-      return !hasFakeSeer
-    }
+    case 'morning':
+      // Stage 3: morningPending が空なら skip。populating は stepPhase の night_guard 終端 +
+      // テスト等が enterMorningPhase で行う
+      return state.morningPending.length === 0
     case 'claim_seer_true':
     case 'claim_medium_true':
     case 'claim_bg_true':
@@ -176,14 +173,20 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
   if (state.phase === 'terminal') return state
 
   switch (state.phase) {
-    case 'morning':
+    case 'morning': {
       assertActionType(action, 'morning')
+      // Stage 3: 1 step あたり 1 actor 分の report を処理。morningPending FIFO から消費。
       for (const r of action.reports) {
         const list = state.fakeDivineHistory.get(r.seerSeat) ?? []
         list.push({ day: state.day, target: r.target, color: r.color })
         state.fakeDivineHistory.set(r.seerSeat, list)
+        const idx = state.morningPending.indexOf(r.seerSeat)
+        if (idx >= 0) state.morningPending.splice(idx, 1)
       }
+      // 残 actor がいれば morning に留まる (advance しない)
+      if (state.morningPending.length > 0) return state
       break
+    }
     case 'claim_seer_true':
     case 'claim_medium_true':
     case 'claim_bg_true':
@@ -316,11 +319,12 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
         state.phase = 'terminal'
         return state
       }
-      // 翌日へ。pending をクリア
+      // 翌日へ。pending をクリア + 翌 morning の queue を populate
       state.day += 1
       state.pendingAttack = null
       state.pendingGuard = null
       state.pendingDivineTargets = []
+      enterMorningPhase(state)
       break
     }
   }
@@ -427,50 +431,41 @@ export function legalClaimFakeActions(state: SimState): PhaseAction[] {
 }
 
 /**
- * morning phase の legal morning actions。偽 seer CO 済の各 actor ごとに
- * (target × color) を cartesian product で列挙し、reports 配列の組合せを返す。
+ * morning phase の legal morning actions (Stage 3: per-actor)。
  *
- * 偽 seer 0 人なら空配列 (skip 条件)、1 人なら (alive 数 × 2) 個の単要素 reports、
- * N 人なら指数的に増える。MCTS 側は legal 集合の大きさで rollout 計算量を決める。
+ * morningPending FIFO の先頭 actor 1 人分について、alive seats × {human, wolf} =
+ * 28 actions を返す (各 action は単一 reports 要素を持つ)。
+ *
+ * morningPending 空 (skip 条件) では空配列を返す。
  */
 export function legalMorningActions(state: SimState): PhaseAction[] {
-  // 偽 seer の actor 一覧 (CO 順に並べたいが Map の挿入順を信じる)
-  const fakeSeers: number[] = []
-  for (const [seat, entry] of state.claims) {
-    if (entry.role === 'seer' && entry.isFake) fakeSeers.push(seat)
-  }
-  if (fakeSeers.length === 0) return []
-
-  // 各 actor ごとの (target, color) 候補 = alive seats × {human, wolf}
+  if (state.morningPending.length === 0) return []
+  const actor = state.morningPending[0]
   const colors: FakeDivineColor[] = ['human', 'wolf']
-  const aliveSeats = seatsFromMask(state.alive)
-  const perActor: Array<Array<{ target: number, color: FakeDivineColor }>> = fakeSeers.map(() => {
-    const opts: Array<{ target: number, color: FakeDivineColor }> = []
-    for (const t of aliveSeats) {
-      for (const c of colors) opts.push({ target: t, color: c })
-    }
-    return opts
-  })
-
-  // cartesian product
   const out: PhaseAction[] = []
-  const indices = new Array(fakeSeers.length).fill(0)
-  while (true) {
-    const reports = fakeSeers.map((seerSeat, i) => ({
-      seerSeat,
-      target: perActor[i][indices[i]].target,
-      color: perActor[i][indices[i]].color,
-    }))
-    out.push({ type: 'morning', reports })
-    // increment
-    let k = indices.length - 1
-    while (k >= 0) {
-      indices[k] += 1
-      if (indices[k] < perActor[k].length) break
-      indices[k] = 0
-      k -= 1
+  for (const t of seatsFromMask(state.alive)) {
+    for (const c of colors) {
+      out.push({ type: 'morning', reports: [{ seerSeat: actor, target: t, color: c }] })
     }
-    if (k < 0) break
   }
   return out
+}
+
+/**
+ * morning phase 開始時に morningPending を populate する。
+ *
+ * 偽 seer CO 済 (claims に role='seer', isFake=true) かつ生存中の actor を
+ * claims の挿入順 (= CO した順) で queue に積む。
+ *
+ * 呼び出しタイミング:
+ * - stepPhase の night_guard 終端 (翌 morning へ遷移する直前)
+ * - 初期 SimState で phase='morning' から開始したい場合 (主にテスト)
+ */
+export function enterMorningPhase(state: SimState): void {
+  state.morningPending = []
+  for (const [seat, entry] of state.claims) {
+    if (entry.role === 'seer' && entry.isFake && (state.alive & (1 << seat)) !== 0) {
+      state.morningPending.push(seat)
+    }
+  }
 }

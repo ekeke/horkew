@@ -4,6 +4,7 @@ import { cloneSimState } from '../simulator/world-state.ts'
 import type { SimState, Phase } from '../simulator/world-state.ts'
 import { stepPhase, advancePhase } from '../simulator/rollout-sim.ts'
 import type { PhaseAction } from '../simulator/rollout-sim.ts'
+import { RoleBitIndex } from '../../retar/possibilities.ts'
 import { createTreeNode, totalChildVisits } from './node.ts'
 import type { TreeNode } from './node.ts'
 import type { Determinizer } from './determinize.ts'
@@ -13,6 +14,8 @@ import {
   type ModuleBundle,
 } from './dispatch.ts'
 import type { RolloutInvariants } from '../observation/from-sim-state.ts'
+
+const RoleBitIndexFanatic = RoleBitIndex.fanatic
 
 /**
  * MCTS の hyperparams。c_puct は AlphaZero default 中央値 1.5。
@@ -279,7 +282,7 @@ function runOneRollout(
       return
     }
     const nextState = cloneSimState(state)
-    stepPhase(nextState, buildPhaseActionFor(state.phase, action))
+    stepPhase(nextState, buildPhaseActionFor(state, action))
     isRoot = false
     let child = node.children.get(action)
     if (!child) {
@@ -293,7 +296,8 @@ function runOneRollout(
 }
 
 /**
- * 現 phase に応じた default action (claim/morning の skip 通過用)。
+ * 現 phase に応じた default action。Stage 3 では dispatch=null の場合の安全側 fallback
+ * (本来は claim/morning も含め全 phase で dispatch が機能する前提)。
  */
 function defaultActionForPhase(phase: Phase): PhaseAction {
   switch (phase) {
@@ -319,18 +323,124 @@ function defaultActionForPhase(phase: Phase): PhaseAction {
 }
 
 /**
- * dispatch 対象 phase で UCB に渡せる action shape を組み立てる。
- * Stage 2 では day/night_* のみ expand されるので、それらの phase に対応する action 型のみ。
+ * UCB action ID → PhaseAction 変換。phase ごとに ID 空間が異なる:
+ *
+ * | phase | action ID | 意味 |
+ * |---|---|---|
+ * | day / night_attack / night_divine / night_guard | 1..14 / -1 | target seat or -1 |
+ * | claim_*_true | 0 / 1 | skip / CO |
+ * | claim_*_fake | 0 / 1..14 | skip / claimer seat |
+ * | morning | 0..27 | target_idx × 2 + color (0=human, 1=wolf) |
+ *
+ * morning の場合は state.morningPending[0] を seerSeat として使う。
  */
-function buildPhaseActionFor(phase: Phase, action: number): PhaseAction {
-  switch (phase) {
+function buildPhaseActionFor(state: SimState, action: number): PhaseAction {
+  switch (state.phase) {
     case 'day': return { type: 'execute', target: action }
     case 'night_attack': return { type: 'attack', target: action }
     case 'night_divine': return { type: 'divine', target: action }
     case 'night_guard': return { type: 'guard', target: action }
-    default:
-      // claim/morning は default skip で expand されない前提 (Stage 1-2)。
-      return defaultActionForPhase(phase)
+    case 'claim_seer_true':
+    case 'claim_medium_true':
+    case 'claim_bg_true':
+    case 'claim_nekomata_true':
+    case 'claim_mason':
+      return { type: 'claim_true', willClaim: action === 1 }
+    case 'claim_seer_fake':
+    case 'claim_medium_fake':
+    case 'claim_bg_fake':
+    case 'claim_nekomata_fake':
+      return action === 0
+        ? { type: 'claim_fake', willClaim: false }
+        : { type: 'claim_fake', willClaim: true, claimerSeat: action }
+    case 'morning': {
+      const seerSeat = state.morningPending[0] ?? -1
+      const targetSeat = (action >> 1) + 1
+      const color = (action & 1) === 0 ? 'human' : 'wolf'
+      return { type: 'morning', reports: [{ seerSeat, target: targetSeat, color }] }
+    }
+    case 'terminal':
+      return defaultActionForPhase('terminal')
+  }
+}
+
+/**
+ * 現 phase の legal action ID 集合を返す。
+ *
+ * - day / night_*: alive seat 1..14 (actor 自身を除く、night_guard は -1=無護衛も含む)
+ * - claim_*_true: {0=skip, 1=CO}
+ * - claim_*_fake: {0=skip} ∪ 未 CO 生存 wolf/fanatic seat
+ * - morning: 28 ID = alive target seats × {human, wolf}
+ *
+ * @param state 現 state (morningPending 等を参照)
+ * @param actorSeat dispatch.actorSeat (一部 phase で除外対象)
+ */
+function legalActionIdsForPhase(state: SimState, actorSeat: number): Set<number> {
+  const out = new Set<number>()
+  switch (state.phase) {
+    case 'day':
+    case 'night_attack':
+    case 'night_divine': {
+      // alive 全席 (actor 除く)
+      let mask = state.alive & ~(1 << actorSeat)
+      while (mask !== 0) {
+        const bit = mask & (-mask)
+        out.add(31 - Math.clz32(bit))
+        mask ^= bit
+      }
+      return out
+    }
+    case 'night_guard': {
+      let mask = state.alive & ~(1 << actorSeat)
+      while (mask !== 0) {
+        const bit = mask & (-mask)
+        out.add(31 - Math.clz32(bit))
+        mask ^= bit
+      }
+      out.add(-1) // 無護衛
+      return out
+    }
+    case 'claim_seer_true':
+    case 'claim_medium_true':
+    case 'claim_bg_true':
+    case 'claim_nekomata_true':
+    case 'claim_mason':
+      out.add(0)
+      out.add(1)
+      return out
+    case 'claim_seer_fake':
+    case 'claim_medium_fake':
+    case 'claim_bg_fake':
+    case 'claim_nekomata_fake': {
+      out.add(0) // skip
+      // 未 CO の wolf + fanatic 生存 seat
+      const w = state.world
+      let fanaticMask = 0
+      for (let s = 1; s < w.roleIds.length; s++) {
+        if (w.roleIds[s] === RoleBitIndexFanatic) fanaticMask |= (1 << s)
+      }
+      let mask = (w.wolfMask | fanaticMask) & state.alive
+      for (const seat of state.claims.keys()) mask &= ~(1 << seat)
+      while (mask !== 0) {
+        const bit = mask & (-mask)
+        out.add(31 - Math.clz32(bit))
+        mask ^= bit
+      }
+      return out
+    }
+    case 'morning': {
+      let mask = state.alive
+      while (mask !== 0) {
+        const bit = mask & (-mask)
+        const targetSeat = 31 - Math.clz32(bit)
+        out.add((targetSeat - 1) * 2 + 0) // human
+        out.add((targetSeat - 1) * 2 + 1) // wolf
+        mask ^= bit
+      }
+      return out
+    }
+    case 'terminal':
+      return out
   }
 }
 
@@ -355,36 +465,47 @@ function expandWithDispatch(
   const out = dispatch.module.forwardAt(
     state, dispatch.actorSeat, dispatch.actorRole, dispatch.headName, invariants,
   )
-  // legal action mask: 自席除外 + excludedMask
-  // dispatch.actorSeat (の自身席) は phase によって意味が異なる:
-  // - day: decisionSeat 自身は legal でない (自分に投票しない)
-  // - night_attack: actor (wolf) 自身は legal でない (狼が自分を噛まない)
-  // - 基本的には actor 自身を除外する。root では更に excludedMask (wolf teammates 等) を適用
-  const baseExcluded = (1 << dispatch.actorSeat) | (isRoot ? excludedMask : 0)
-  let sum = 0
-  const filtered: Array<[number, number]> = []
-  for (const [action, prior] of out.policy) {
-    if ((baseExcluded >>> action) & 1) continue
-    filtered.push([action, prior])
-    sum += prior
+  // phase ごとに legal action ID 集合が異なるため、phase-aware に filter する。
+  // seat-based phase (day/night_*) では追加で excludedMask (wolf teammates 等) を root のみ適用。
+  const legalRaw = legalActionIdsForPhase(state, dispatch.actorSeat)
+  const seatBased = isSeatBasedPhase(state.phase)
+  // excludedMask 適用 (seat-based phase の root のみ)
+  const legal = new Set<number>()
+  for (const action of legalRaw) {
+    if (seatBased && isRoot && excludedMask !== 0
+      && action >= 1 && action <= 31
+      && ((excludedMask >>> action) & 1)) continue
+    legal.add(action)
   }
-  if (filtered.length === 0) {
-    // 全除外: 元の policy をそのまま使う
-    for (const [action, prior] of out.policy) {
-      if (!node.edges.has(action)) {
-        node.edges.set(action, { visits: 0, totalValue: 0, prior })
-      }
+  if (legal.size === 0) {
+    node.expanded = true
+    return convertValueAcrossFaction(out.value, dispatch.module.faction(), decisionFaction)
+  }
+  // NN policy が legal action に与える prior を集計
+  let providedSum = 0
+  for (const [action, prior] of out.policy) {
+    if (legal.has(action)) providedSum += prior
+  }
+  // 全 legal action に edge を作る (NN policy 不在のものも uniform で補填して MCTS 探索可能に)
+  const uniform = 1 / legal.size
+  for (const action of legal) {
+    if (node.edges.has(action)) continue
+    let prior: number
+    if (providedSum > 0) {
+      prior = (out.policy.get(action) ?? 0) / providedSum
+    } else {
+      prior = uniform
     }
-  } else {
-    const norm = sum > 0 ? 1 / sum : 1 / filtered.length
-    for (const [action, prior] of filtered) {
-      if (!node.edges.has(action)) {
-        node.edges.set(action, { visits: 0, totalValue: 0, prior: sum > 0 ? prior * norm : norm })
-      }
-    }
+    node.edges.set(action, { visits: 0, totalValue: 0, prior })
   }
   node.expanded = true
   return convertValueAcrossFaction(out.value, dispatch.module.faction(), decisionFaction)
+}
+
+/** seat-based phase かどうか (excludedMask 適用判定用) */
+function isSeatBasedPhase(phase: Phase): boolean {
+  return phase === 'day' || phase === 'night_attack'
+    || phase === 'night_divine' || phase === 'night_guard'
 }
 
 /**
