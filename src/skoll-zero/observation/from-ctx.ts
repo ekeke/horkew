@@ -60,6 +60,11 @@ export function buildInitialSimState(ctx: DecisionContext, world: World): SimSta
           }
           state.fakeDivineHistory.set(event.actor, list)
         }
+        // TODO(stage-3+): isFake=false の場合、event.results を divineLog に push する
+        // 必要がある (viewer 自身の seer の場合は myPlayer.divineHistory 経由で別途
+        // 入るが、他者の真 seer の publicly visible な CO results は現状 SimState に
+        // 入らず、collectFromSimState の black/white 集計で 0 になる)。
+        // 詳細: src/skoll-zero/observation/parity.test.ts の D3 / tasks/todo.md
         break
       }
       case 'seer_result': {

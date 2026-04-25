@@ -41,12 +41,12 @@ export function encodeTrueRoles(players: Array<{ seat: number, role: string }>):
 
 // セクションサイズ
 const GLOBAL_SIZE = 2 + 1 + NUM_ROLES + 1 + 1 + 1 + 1 + 1  // day, phase, alive_ratio, role_onehot, commander, progress, demand_wolf_co_count, rope_margin, alive_parity = 19
-const PER_SEAT_SIZE = 1 + (NUM_ROLES + 1) + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 // alive, claimed_role, is_me, black_count, white_count, vote_received, suspicion, trust, execute_proposal, is_commander, accuse_wolf, accuse_fox, vote_intent, nominate_commander = 25
+export const PER_SEAT_SIZE = 1 + (NUM_ROLES + 1) + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 // alive, claimed_role, is_me, black_count, white_count, vote_received, suspicion, trust, execute_proposal, is_commander, accuse_wolf, accuse_fox, vote_intent, nominate_commander = 25
 const SEAT_SECTION_SIZE = SEATS * PER_SEAT_SIZE  // 336
 const PRIVATE_SIZE = SEATS + SEATS + 1 + SEATS + 1  // divine_results + wolf_teammates + mason_partner + guard_history + known_hamster = 43
-const REVOTE_SIZE = 1 + SEATS  // revote_round + revote_candidates_mask = 15
+export const REVOTE_SIZE = 1 + SEATS  // revote_round + revote_candidates_mask = 15
 export const HISTORY_DAY_SIZE = SEATS * 5  // per day: voted_for, executed, killed, claimed, signaled = 70
-const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 210
+export const HISTORY_SIZE = HISTORY_WINDOW * HISTORY_DAY_SIZE  // 210
 
 // Retar可能性: per-seat × roles (0/1)
 const RETAR_POSSIBILITIES_SIZE = SEATS * NUM_ROLES  // 154
@@ -76,17 +76,21 @@ export const OBSERVATION_SIZE = GLOBAL_SIZE + SEAT_SECTION_SIZE + PRIVATE_SIZE +
 
 // セクション開始オフセット
 const GLOBAL_START = 0
-const PER_SEAT_START = GLOBAL_SIZE
+export const PER_SEAT_START = GLOBAL_SIZE
 const PRIVATE_START = PER_SEAT_START + SEAT_SECTION_SIZE
 const DIVINE_START = PRIVATE_START
 const WOLF_TEAM_START = DIVINE_START + SEATS
 const MASON_PARTNER_START = WOLF_TEAM_START + SEATS
 const GUARD_HISTORY_START = MASON_PARTNER_START + 1
 const KNOWN_HAMSTER_START = GUARD_HISTORY_START + SEATS
-const REVOTE_START = PRIVATE_START + PRIVATE_SIZE
+export const REVOTE_START = PRIVATE_START + PRIVATE_SIZE
 const REVOTE_ROUND_START = REVOTE_START
 const REVOTE_CANDIDATES_START = REVOTE_START + 1
-const HISTORY_START = REVOTE_START + REVOTE_SIZE
+export const HISTORY_START = REVOTE_START + REVOTE_SIZE
+/** seat 内 black_count のオフセット (alive 1 + claim_onehot NUM_ROLES + claim_null 1 + is_me 1 = 14) */
+export const BLACK_OFFSET_IN_SEAT = 1 + NUM_ROLES + 1 + 1
+/** seat 内 white_count のオフセット */
+export const WHITE_OFFSET_IN_SEAT = BLACK_OFFSET_IN_SEAT + 1
 const RETAR_START = HISTORY_START + HISTORY_SIZE
 const GLOBAL_RETAR_START = RETAR_START + RETAR_POSSIBILITIES_SIZE
 const PLAN_APPROVED_START = GLOBAL_RETAR_START + GLOBAL_RETAR_SIZE

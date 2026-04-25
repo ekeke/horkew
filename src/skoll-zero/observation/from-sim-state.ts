@@ -251,9 +251,13 @@ export function collectFromSimState(
   }
 
   // ========== history (直近 3 日分) ==========
+  // TODO(stage-3+): ctx 経路 (collectObservation) は各イベントを「全 3 windows に
+  // smear」する仕様 (イベントに day 情報が無いため)。SimState 経路は deathLog.day で
+  // 厳密に振り分けるため、両者は構造的に一致しない。さらに claim/vote/signal の各
+  // 列は day 情報が claims・signalCounts に乗っていないため未実装。
+  // 詳細: src/skoll-zero/observation/parity.test.ts の D2 / tasks/todo.md
   const history = new Float32Array(HISTORY_WINDOW * HISTORY_DAY_SIZE)
   const currentDay = state.day
-  // execute / kill (deathLog 由来)
   for (const e of state.deathLog) {
     for (let w = 0; w < HISTORY_WINDOW; w++) {
       const histDay = currentDay - HISTORY_WINDOW + w + 1
@@ -265,11 +269,6 @@ export function collectFromSimState(
       else history[dayBase + slot * 5 + 2] = 1
     }
   }
-  // claim (claims から導出 — 当日 CO とは限らない、Stage 2 では 「claims に乗ってる seat はその day で CO 済」と粗い扱い)
-  // ただし claims は累積で「いつ CO したか」の day 情報を持たない。Stage 2 で記録するか?
-  // → claim の day を SimState に持たせていないので、Stage 2 では history の claimed 列は埋めない (0 のまま)
-  // vote: voteLog 由来 (Stage 2 では voteLog 空 → 0)
-  // signal: signalCounts は累積のみで day 別に分解できない → 0
 
   // ========== rope margin ==========
   let ropeMargin = invariants.ropeMargin
@@ -296,6 +295,9 @@ export function collectFromSimState(
       guardedSeats,
       knownHamster,
     },
+    // TODO(stage-3+): SimState に revote 状態 (round/candidates) を持たせる。
+    // 現状ハードコード 0/[] のため、ctx.revoteRound != null の場面で発散する。
+    // 詳細: src/skoll-zero/observation/parity.test.ts の D1 / tasks/todo.md
     revote: {
       round: 0,
       candidates: [],
