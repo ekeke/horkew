@@ -5,7 +5,7 @@ import { Possibilities, RoleSignatureBits } from '../../retar/possibilities.ts'
 import { createSimState } from '../simulator/world-state.ts'
 import { Determinizer } from './determinize.ts'
 import { DummyNN } from './nn.ts'
-import { runMCTS, outcomeToMasonValue, DEFAULT_MCTS_CONFIG } from './ismcts.ts'
+import { runMCTS, outcomeToMasonValue, DEFAULT_MCTS_CONFIG } from './ISMCTS.ts'
 
 /** seed 化された xorshift32 PRNG（テスト再現性のため） */
 function seededRng(seed: number): () => number {

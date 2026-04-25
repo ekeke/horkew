@@ -11,8 +11,8 @@ import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import { TrainingBuffer } from './buffer.ts'
 import { MasonRoleAgent } from './mason-zero-agent.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
-import type { MCTSConfig } from '../mcts/ismcts.ts'
-import { outcomeToMasonValue } from '../mcts/ismcts.ts'
+import type { MCTSConfig } from '../mcts/ISMCTS.ts'
+import { outcomeToMasonValue } from '../mcts/ISMCTS.ts'
 
 /** Phase 1 デフォルト配役 (bb-eval.ts と同じ 14 席構成) */
 export const DEFAULT_ROLES: Map<SystemRole, number> = new Map<SystemRole, number>([

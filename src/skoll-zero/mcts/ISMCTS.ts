@@ -1,8 +1,8 @@
 import type { GameOutcome } from '../../hati/simulate.ts'
 import { cloneSimState, createSimState } from '../simulator/world-state.ts'
-import type { SimState } from '../simulator/world-state.ts'
-import { stepDayNightCycle } from '../simulator/rollout-sim.ts'
-import type { DayDecision, NightDecision } from '../simulator/rollout-sim.ts'
+import type { SimState, Phase } from '../simulator/world-state.ts'
+import { stepPhase, advancePhase } from '../simulator/rollout-sim.ts'
+import type { PhaseAction } from '../simulator/rollout-sim.ts'
 import { createTreeNode, totalChildVisits } from './node.ts'
 import type { TreeNode } from './node.ts'
 import type { Determinizer } from './determinize.ts'
@@ -40,42 +40,123 @@ export type MCTSResult = {
 }
 
 /**
- * mason の 1 vote 決定点で MCTS を実行し、root の visit 分布を返す。
+ * MCTS の root action 種別。Stage 1 で 15 phase 化された後も、root の意思決定は
+ * 4 種のうちのどれか (day=execute / night の 3 種) に対応する。
  *
- * @param rootObs MCTS 開始時にキャプチャした生観測（rollout 中固定）
- * @param infoState mason の情報集合 state（world は仮置き、rollout ごとに上書き）
- * @param masonSeat decide する mason 席
- * @param determinizer determinized world サンプラ
- * @param nn policy + value 評価器
- * @param config MCTS hyperparams
- */
-/**
- * MCTS の root action 種別。
- * - 'execute' (default): day フェーズで投票先 seat を選ぶ
- * - 'attack': night フェーズで噛み先 seat を選ぶ (wolf 用)
- * - 'divine': night フェーズで占い先 seat を選ぶ (seer 用)
- * - 'guard':  night フェーズで護衛先 seat を選ぶ (bodyguard 用)
+ * - 'execute': day フェーズで処刑先 seat を選ぶ
+ * - 'attack' : night_attack フェーズで噛み先 seat を選ぶ (wolf 用)
+ * - 'divine' : night_divine フェーズで占い先 seat を選ぶ (seer 用)
+ * - 'guard'  : night_guard  フェーズで護衛先 seat を選ぶ (bodyguard 用)
  *
- * head 名は action mode と 1:1 対応（'execute' → 'execute' head 等）。
+ * Stage 2-3 で claim_* / morning も意思決定対象に加わる予定だが、Stage 1 では
+ * これら phase は default action で通過させて expand しない。
  */
 export type RootActionMode = 'execute' | 'attack' | 'divine' | 'guard'
 
-/** action mode → NN forward で使う head 名 */
-function headNameForMode(mode: RootActionMode): HeadName {
-  return mode
+/** action mode → MCTS root を置く initial phase */
+function phaseFromActionMode(mode: RootActionMode): Phase {
+  switch (mode) {
+    case 'execute': return 'day'
+    case 'attack': return 'night_attack'
+    case 'divine': return 'night_divine'
+    case 'guard': return 'night_guard'
+  }
 }
 
+/** phase → NN forward で使う head 名。expand 対象 phase のみ意味を持つ */
+function headNameForPhase(phase: Phase): HeadName {
+  switch (phase) {
+    case 'day': return 'execute'
+    case 'night_attack': return 'attack'
+    case 'night_divine': return 'divine'
+    case 'night_guard': return 'guard'
+    // Stage 1 では claim/morning は expand されないため、ここに来ない想定。
+    // 安全のため execute に fallback。
+    default: return 'execute'
+  }
+}
+
+/**
+ * Stage 1 の暫定挙動: claim_* / morning phase は default action で通過させる
+ * (expand しない)。Stage 2-3 で Module dispatch を入れた時に有効化する。
+ */
+function isAutoSkipPhase(phase: Phase): boolean {
+  return phase === 'morning'
+    || phase === 'claim_seer_true'
+    || phase === 'claim_medium_true'
+    || phase === 'claim_bg_true'
+    || phase === 'claim_nekomata_true'
+    || phase === 'claim_mason'
+    || phase === 'claim_seer_fake'
+    || phase === 'claim_medium_fake'
+    || phase === 'claim_bg_fake'
+    || phase === 'claim_nekomata_fake'
+}
+
+/**
+ * 現 phase に応じた default PhaseAction を組み立てる。expand 対象 phase では
+ * UCB で選んだ action seat を target に、Stage 1 暫定 phase では「何もしない」
+ * default action を返す。
+ */
+function buildPhaseAction(phase: Phase, action: number): PhaseAction {
+  switch (phase) {
+    case 'day': return { type: 'execute', target: action }
+    case 'night_attack': return { type: 'attack', target: action }
+    case 'night_divine': return { type: 'divine', target: action }
+    case 'night_guard': return { type: 'guard', target: action }
+    case 'morning': return { type: 'morning', reports: [] }
+    case 'claim_seer_true':
+    case 'claim_medium_true':
+    case 'claim_bg_true':
+    case 'claim_nekomata_true':
+    case 'claim_mason':
+      return { type: 'claim_true', willClaim: false }
+    case 'claim_seer_fake':
+    case 'claim_medium_fake':
+    case 'claim_bg_fake':
+    case 'claim_nekomata_fake':
+      return { type: 'claim_fake', willClaim: false }
+    case 'terminal':
+      throw new Error('buildPhaseAction: phase is terminal')
+  }
+}
+
+/**
+ * 1 rollout の root state を構築。actionMode に対応する初期 phase に置き、
+ * skip 条件を満たす auto-skip phase は advancePhase で前進させる。
+ */
+function makeRolloutState(
+  world: import('../../hati/types.ts').World,
+  alive: number,
+  day: number,
+  actionMode: RootActionMode,
+): SimState {
+  const state = createSimState(world, alive, day, phaseFromActionMode(actionMode))
+  // 開始 phase が skip 条件を満たすケース (例: night_divine で真 seer 全員死亡) は前進
+  advancePhase(state)
+  return state
+}
+
+/**
+ * mason の 1 vote 決定点で MCTS を実行し、root の visit 分布を返す。
+ *
+ * @param rootObs MCTS 開始時にキャプチャした生観測（rollout 中固定）
+ * @param infoState 決定者の情報集合 state（world は仮置き、rollout ごとに上書き）
+ * @param decisionSeat 決定する席
+ * @param determinizer determinized world サンプラ
+ * @param nn policy + value 評価器
+ * @param config MCTS hyperparams
+ * @param faction value 評価視点 (default: village)
+ * @param opts root action 種別 + NN policy から除外する席 bitmask
+ */
 export function runMCTS(
   rootObs: RootObservation,
   infoState: SimState,
-  /** 決定者の席 (MCTS 木の root action を選ぶ seat) */
   decisionSeat: number,
   determinizer: Determinizer,
   nn: MasonZeroNN,
   config: MCTSConfig = DEFAULT_MCTS_CONFIG,
-  /** value を評価する陣営視点 (default: village、mason/村側全般) */
   faction: Faction = 'village',
-  /** root action 種別 (default 'execute') と NN policy から除外する席 bitmask (wolf 仲間等) */
   opts: { actionMode?: RootActionMode, excludedMask?: number } = {},
 ): MCTSResult {
   const actionMode = opts.actionMode ?? 'execute'
@@ -94,16 +175,16 @@ export function runMCTS(
   if (!firstWorld) {
     return { root, visits: new Map(), abortReason: 'no_consistent_world' }
   }
-  const rootState = createSimState(firstWorld, infoState.alive, infoState.day, infoState.phase as 'day' | 'night')
+  const rootState = makeRolloutState(firstWorld, infoState.alive, infoState.day, actionMode)
   if (rootState.phase !== 'terminal' && isMasonAlive(rootState, decisionSeat)) {
-    expandWithNN(root, rootState, decisionSeat, nn, rootObs, excludedMask, headNameForMode(actionMode))
+    expandWithNN(root, rootState, decisionSeat, nn, rootObs, excludedMask, headNameForPhase(rootState.phase))
     applyRootDirichletNoise(root, config)
   }
   for (let i = 0; i < config.nRollouts; i++) {
     const world = determinizer.sample(config.rng)
     if (!world) break
-    const rolloutState = createSimState(world, infoState.alive, infoState.day, infoState.phase as 'day' | 'night')
-    runOneRollout(root, rolloutState, decisionSeat, nn, rootObs, config, faction, actionMode, excludedMask)
+    const rolloutState = makeRolloutState(world, infoState.alive, infoState.day, actionMode)
+    runOneRollout(root, rolloutState, decisionSeat, nn, rootObs, config, faction, excludedMask)
   }
   return { root, visits: collectRootVisits(root), abortReason: null }
 }
@@ -179,10 +260,13 @@ function sampleNormal(rng: () => number): number {
 /**
  * 1 rollout: tree descent → expand → evaluate → backup。
  *
- * - terminal なら outcome → mason value で backup
- * - mason 死亡 leaf なら heuristic rollout で終端到達 → outcome → backup
+ * Stage 1 の暫定挙動:
+ * - 実 expand 対象 phase: day / night_attack / night_divine / night_guard
+ * - claim_* / morning は default action で stepPhase 直呼び (木に edge は登らない)
+ * - terminal なら outcome → faction value で backup
+ * - 決定者死亡 leaf なら NN value で leaf 評価
  * - 未展開 leaf なら NN 評価 → backup
- * - 展開済 node なら UCB で action 選択 → step → 子 node に descent
+ * - 展開済 node なら UCB で action 選択 → stepPhase → 子 node に descent
  */
 function runOneRollout(
   root: TreeNode,
@@ -192,7 +276,6 @@ function runOneRollout(
   rootObs: RootObservation,
   config: MCTSConfig,
   faction: Faction,
-  actionMode: RootActionMode,
   excludedMask: number,
 ): void {
   const path: { node: TreeNode, action: number }[] = []
@@ -206,15 +289,23 @@ function runOneRollout(
       return
     }
     if (!isMasonAlive(state, decisionSeat)) {
-      // 決定者死亡: heuristic rollout は廃止したので NN value で leaf 評価
-      const { value } = nn.forward(rootObs, state, decisionSeat, headNameForMode(actionMode))
+      // 決定者死亡: NN value で leaf 評価
+      const { value } = nn.forward(rootObs, state, decisionSeat, headNameForPhase(state.phase))
       backup(path, value)
       return
     }
+    // Stage 1: claim_* / morning は default action で通過 (expand しない)
+    if (isAutoSkipPhase(state.phase)) {
+      stepPhase(state, buildPhaseAction(state.phase, -1))
+      continue
+    }
     if (!node.expanded) {
-      // root 以外の展開は通常の自席除外 + vote head (標準動作)。
-      // root のみ actionMode/excludedMask を適用済み (呼び出し側で expandWithNN 済み)。
-      const value = expandWithNN(node, state, decisionSeat, nn, rootObs, isRoot ? excludedMask : 0)
+      // root のみ excludedMask を適用、descent では自席除外のみ
+      const value = expandWithNN(
+        node, state, decisionSeat, nn, rootObs,
+        isRoot ? excludedMask : 0,
+        headNameForPhase(state.phase),
+      )
       backup(path, value)
       return
     }
@@ -223,11 +314,8 @@ function runOneRollout(
       backup(path, 0)
       return
     }
-    // step: root action の適用。actionMode ごとに day/night decision を組み立てる。
-    // 木の深い部分 (isRoot=false) は常に day vote として扱う (標準動作)。
     const nextState = cloneSimState(state)
-    const { day: dayDec, night: nightDec } = buildDecisions(isRoot ? actionMode : 'execute', action)
-    stepDayNightCycle(nextState, dayDec, nightDec)
+    stepPhase(nextState, buildPhaseAction(nextState.phase, action))
     isRoot = false
     let child = node.children.get(action)
     if (!child) {
@@ -241,34 +329,9 @@ function runOneRollout(
 }
 
 /**
- * action mode + action を stepDayNightCycle に渡す DayDecision / NightDecision に変換。
- *
- * - vote: 決定者の投票をそのまま「集団意思決定としての処刑先」とみなす単純化
- *   （heuristic による集票は廃止済み）
- * - attack/divine/guard: 夜行動、day はスキップ
- * - divine の複数 seer 対応は未実装（14d-neko では seer は 1 人前提）
- */
-function buildDecisions(
-  mode: RootActionMode,
-  action: number,
-): { day: DayDecision, night: NightDecision } {
-  const emptyNight: NightDecision = { attackTarget: null, guardTarget: null, seerTargets: [] }
-  switch (mode) {
-    case 'execute':
-      return { day: { executedSeat: action }, night: emptyNight }
-    case 'attack':
-      return { day: { executedSeat: -1 }, night: { attackTarget: action, guardTarget: null, seerTargets: [] } }
-    case 'divine':
-      return { day: { executedSeat: -1 }, night: { attackTarget: null, guardTarget: null, seerTargets: [action] } }
-    case 'guard':
-      return { day: { executedSeat: -1 }, night: { attackTarget: null, guardTarget: action, seerTargets: [] } }
-  }
-}
-
-/**
  * node に対し NN forward → edge を初期化、value を返す。
  * excludedMask で指定された seat (wolf 仲間等) は policy から除外し、残りを renormalize する。
- * headName で policy を読み出す head を切り替える (default 'execute')。
+ * headName で policy を読み出す head を切り替える。
  */
 function expandWithNN(
   node: TreeNode,
@@ -276,8 +339,8 @@ function expandWithNN(
   masonSeat: number,
   nn: MasonZeroNN,
   rootObs: RootObservation,
-  excludedMask: number = 0,
-  headName: HeadName = 'execute',
+  excludedMask: number,
+  headName: HeadName,
 ): number {
   const { policy, value } = nn.forward(rootObs, state, masonSeat, headName)
   // excludedMask の seat を除外 + renormalize
@@ -329,7 +392,7 @@ function selectActionUCB(node: TreeNode, cPuct: number): number {
   return bestAction
 }
 
-/** path 全体の edge stats を value で更新（mason 視点で同符号） */
+/** path 全体の edge stats を value で更新（決定者視点で同符号） */
 function backup(path: { node: TreeNode, action: number }[], value: number): void {
   for (const { node, action } of path) {
     const edge = node.edges.get(action)

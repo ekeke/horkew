@@ -25,7 +25,7 @@ import type { TrainingRecord } from '../selfplay/buffer.ts'
 import type { HeadName } from '../mcts/nn.ts'
 import { runSelfPlayBatch } from '../selfplay/runner.ts'
 import type { SelfPlayResult } from '../selfplay/runner.ts'
-import type { MCTSConfig } from '../mcts/ismcts.ts'
+import type { MCTSConfig } from '../mcts/ISMCTS.ts'
 import type { SkollZeroTrainConfig } from './schedule.ts'
 
 const ILLEGAL_MASK_VALUE = -1e9

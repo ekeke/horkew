@@ -23,7 +23,7 @@ import type { StrategyBaseAdapterConfig } from '../../fenrir/src/adapters/adapte
 import { StrategyBaseAdapter } from '../../fenrir/src/adapters/strategy-base-adapter.ts'
 import { buildPlayerView } from '../../lupa/player-view.ts'
 import { alivePlayers } from '../../lupa/roles.ts'
-import type { MCTSResult } from '../mcts/ismcts.ts'
+import type { MCTSResult } from '../mcts/ISMCTS.ts'
 import type { HuginnInput, RoleName } from '../../huginn/types.ts'
 import { K_ROUNDS } from '../../huginn/types.ts'
 import { runRounds } from '../../huginn/protocol.ts'

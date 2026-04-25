@@ -22,7 +22,7 @@ import {
   type AgentSlot,
   type MultiAgentSelfPlayResult,
 } from '../selfplay/multi-runner.ts'
-import type { MCTSConfig } from '../mcts/ismcts.ts'
+import type { MCTSConfig } from '../mcts/ISMCTS.ts'
 import { groupRecordsByHead, recordsToBatchInputs } from './trainer.ts'
 import type { SkollZeroTrainConfig } from './schedule.ts'
 

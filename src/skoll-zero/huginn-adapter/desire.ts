@@ -10,7 +10,7 @@
  * 定数は huginn/abstract-env.ts の内部 const と一致させる (import 境界のため複製)。
  */
 
-import type { MCTSResult } from '../mcts/ismcts.ts'
+import type { MCTSResult } from '../mcts/ISMCTS.ts'
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import { DESIRE_HIGH_BASE } from '../../huginn/types.ts'
 

@@ -5,7 +5,7 @@
  */
 
 import type { DecisionContext, TeamDecisionContext } from '../../fenrir/src/agents/agent.ts'
-import type { Faction } from '../mcts/ismcts.ts'
+import type { Faction } from '../mcts/ISMCTS.ts'
 import { encodeCollectiveWolfObservation } from '../../fenrir/src/observation.ts'
 import type { RootObs } from '../selfplay/observation.ts'
 import { BaseSkollZeroModule } from './base-module.ts'

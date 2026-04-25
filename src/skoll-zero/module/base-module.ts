@@ -22,7 +22,7 @@ import { Determinizer } from '../mcts/determinize.ts'
 import {
   runMCTS, DEFAULT_MCTS_CONFIG,
   type Faction, type MCTSConfig, type MCTSResult,
-} from '../mcts/ismcts.ts'
+} from '../mcts/ISMCTS.ts'
 import type { MasonZeroNN, HeadName } from '../mcts/nn.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { RootObs } from '../selfplay/observation.ts'
@@ -142,8 +142,9 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     }
 
     const alive = aliveBitmask(ctx.alivePlayers)
-    const phase = actionMode === 'execute' ? 'day' : 'night'
-    const infoState = createSimState(sampleWorld, alive, ctx.day, phase)
+    // phase は ISMCTS 側 (makeRolloutState) で actionMode から決定するので、
+    // ここで指定しても上書きされる。createSimState の default ('morning') のまま渡す。
+    const infoState = createSimState(sampleWorld, alive, ctx.day)
     const rootObs = this.captureObs(ctx)
 
     const mctsConfig: MCTSConfig = this.mctsConfig

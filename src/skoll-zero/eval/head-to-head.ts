@@ -28,7 +28,7 @@ import { MasonZeroNetwork } from '../network/mason-zero.ts'
 import { MasonRoleAgent } from '../selfplay/mason-zero-agent.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import { captureObs } from '../selfplay/observation.ts'
-import { DEFAULT_MCTS_CONFIG, type MCTSConfig } from '../mcts/ismcts.ts'
+import { DEFAULT_MCTS_CONFIG, type MCTSConfig } from '../mcts/ISMCTS.ts'
 import { SEATS } from '../../fenrir/src/observation.ts'
 
 const DEFAULT_ROLES: Map<SystemRole, number> = new Map<SystemRole, number>([

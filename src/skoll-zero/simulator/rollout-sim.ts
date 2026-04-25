@@ -1,75 +1,418 @@
 import { applyExecution, applyFollowDeaths, checkOutcome, simulateNight } from '../../hati/simulate.ts'
-import type { SimState } from './world-state.ts'
+import { popCount32, seatsFromMask } from '../../hati/types.ts'
+import { RoleBitIndex } from '../../retar/possibilities.ts'
+import type { World } from '../../hati/types.ts'
+import type { SimState, Phase, FakeDivineColor } from './world-state.ts'
 
 /**
- * 1 day の集団意思決定。heuristic 経由ではなく、呼び出し側が処刑先 seat を直接渡す。
- * `executedSeat` が -1 なら処刑スキップ（abstain）。
+ * 1 phase 分の意思決定 action。phase ごとに必要な情報だけを持つ
+ * discriminated union。MCTS 側は state.phase を見て対応する type の
+ * action を組み立てて stepPhase に渡す。
+ *
+ * - morning: 偽 seer CO 済の各偽占い師ごとに「target + color」を報告。複数 CO 者がいれば cartesian
+ * - claim_true: 真役職者の CO/潜伏 (2 択)
+ * - claim_fake: 狼/狂の偽 CO/見送り (skip + 各 claimer 候補)
+ * - execute: day の処刑先 (集団意思決定として 1 seat)
+ * - attack: 狼の噛み先 (1 seat)
+ * - divine: 真 seer の占い先 (1 seat)
+ * - guard: 真 bg の護衛先 (1 seat、null = 無護衛)
  */
-export type DayDecision = {
-  executedSeat: number
+export type PhaseAction =
+  | { type: 'morning', reports: Array<{ seerSeat: number, target: number, color: FakeDivineColor }> }
+  | { type: 'claim_true', willClaim: boolean }
+  | { type: 'claim_fake', willClaim: false }
+  | { type: 'claim_fake', willClaim: true, claimerSeat: number }
+  | { type: 'execute', target: number }
+  | { type: 'attack', target: number }
+  | { type: 'divine', target: number }
+  | { type: 'guard', target: number }
+
+const MASON_ROLE_ID = RoleBitIndex.mason
+const FANATIC_ROLE_ID = RoleBitIndex.fanatic
+
+/** roles 配列から指定 role の seat ビットマスクを構築 (mason / fanatic は World に直接 mask が無い) */
+function maskOfRoleId(world: World, roleId: number): number {
+  let mask = 0
+  for (let s = 1; s < world.roleIds.length; s++) {
+    if (world.roleIds[s] === roleId) mask |= (1 << s)
+  }
+  return mask
+}
+
+/** その phase の「真役職」生存マスクを返す */
+function trueRoleMask(world: World, phase: Phase, alive: number): number {
+  switch (phase) {
+    case 'claim_seer_true': return world.seerMask & alive
+    case 'claim_medium_true': return world.mediumMask & alive
+    case 'claim_bg_true': return world.bodyguardSeat >= 0 && (alive & (1 << world.bodyguardSeat)) ? (1 << world.bodyguardSeat) : 0
+    case 'claim_nekomata_true': return world.nekomataMask & alive
+    case 'claim_mason': return maskOfRoleId(world, MASON_ROLE_ID) & alive
+    default: return 0
+  }
+}
+
+/** wolf + fanatic の生存マスク (偽 CO の actor 候補) */
+function fakeActorMask(world: World, alive: number): number {
+  return (world.wolfMask | maskOfRoleId(world, FANATIC_ROLE_ID)) & alive
+}
+
+/** その phase の偽 CO 対象 SystemRole 名 (claim を state.claims に書くため) */
+function fakeClaimRole(phase: Phase): 'seer' | 'medium' | 'bodyguard' | 'nekomata' | null {
+  switch (phase) {
+    case 'claim_seer_fake': return 'seer'
+    case 'claim_medium_fake': return 'medium'
+    case 'claim_bg_fake': return 'bodyguard'
+    case 'claim_nekomata_fake': return 'nekomata'
+    default: return null
+  }
+}
+
+/** その phase の真 CO 対象 SystemRole 名 */
+function trueClaimRole(phase: Phase): 'seer' | 'medium' | 'bodyguard' | 'nekomata' | 'mason' | null {
+  switch (phase) {
+    case 'claim_seer_true': return 'seer'
+    case 'claim_medium_true': return 'medium'
+    case 'claim_bg_true': return 'bodyguard'
+    case 'claim_nekomata_true': return 'nekomata'
+    case 'claim_mason': return 'mason'
+    default: return null
+  }
 }
 
 /**
- * 1 night の全行動。呼び出し側が全 action を明示する。heuristic fallback はない。
+ * phase が skip 条件を満たすか判定。skip は世界状態と CO 履歴から決まる。
  *
- * - `attackTarget`: 狼の噛み先 seat。null or -1 なら襲撃なし（狼不在や guard でブロックされた想定の上位扱い）
- * - `guardTarget`: bodyguard の護衛先 seat。null なら護衛なし
- * - `seerTargets`: seerMask の low-bit 順に並べた各占い師の対象 seat 配列。-1 なら占わない
+ * - morning: 偽 seer CO 済の actor が 0 → skip
+ * - claim_*_true: 真役職の未 CO 生存席が 0 → skip
+ * - claim_*_fake: 該当役職の偽 CO 既出 OR 未 CO の生存 wolf/fanatic が 0 → skip
+ * - day / night_attack / night_divine / night_guard / terminal: skip しない
+ *
+ * 注意: night_attack は狼全滅で skip 候補になりうるが、その状態は前の day の
+ * outcome 判定で既に terminal になっているはずなので発生しない前提。安全側で
+ * skip も認める。night_divine は真 seer 全員死亡で skip。
  */
-export type NightDecision = {
-  attackTarget: number | null
-  guardTarget: number | null
-  seerTargets: number[]
+export function shouldSkipPhase(state: SimState): boolean {
+  const { world, alive, phase, claims } = state
+  switch (phase) {
+    case 'morning': {
+      let hasFakeSeer = false
+      for (const entry of claims.values()) {
+        if (entry.role === 'seer' && entry.isFake) { hasFakeSeer = true; break }
+      }
+      return !hasFakeSeer
+    }
+    case 'claim_seer_true':
+    case 'claim_medium_true':
+    case 'claim_bg_true':
+    case 'claim_nekomata_true':
+    case 'claim_mason': {
+      const truthMask = trueRoleMask(world, phase, alive)
+      if (truthMask === 0) return true
+      let unclaimed = truthMask
+      for (const seat of claims.keys()) unclaimed &= ~(1 << seat)
+      return unclaimed === 0
+    }
+    case 'claim_seer_fake':
+    case 'claim_medium_fake':
+    case 'claim_bg_fake':
+    case 'claim_nekomata_fake': {
+      const role = fakeClaimRole(phase)!
+      // 既偽 CO 有なら skip (Stage 1 単純化: 同役職の重複偽 CO は扱わない)
+      for (const entry of claims.values()) {
+        if (entry.role === role && entry.isFake) return true
+      }
+      // 未 CO の生存 wolf/fanatic が 0 → skip
+      let unclaimedActors = fakeActorMask(world, alive)
+      for (const seat of claims.keys()) unclaimedActors &= ~(1 << seat)
+      return unclaimedActors === 0
+    }
+    case 'night_attack':
+      return (world.wolfMask & alive) === 0
+    case 'night_divine':
+      return (world.seerMask & alive) === 0
+    case 'day':
+    case 'night_guard':
+    case 'terminal':
+      return false
+  }
+}
+
+/** phase の物理的な次 phase (skip 判定なし) */
+function rawNextPhase(phase: Phase): Phase {
+  switch (phase) {
+    case 'morning': return 'claim_seer_true'
+    case 'claim_seer_true': return 'claim_medium_true'
+    case 'claim_medium_true': return 'claim_bg_true'
+    case 'claim_bg_true': return 'claim_nekomata_true'
+    case 'claim_nekomata_true': return 'claim_mason'
+    case 'claim_mason': return 'claim_seer_fake'
+    case 'claim_seer_fake': return 'claim_medium_fake'
+    case 'claim_medium_fake': return 'claim_bg_fake'
+    case 'claim_bg_fake': return 'claim_nekomata_fake'
+    case 'claim_nekomata_fake': return 'day'
+    case 'day': return 'night_attack'
+    case 'night_attack': return 'night_divine'
+    case 'night_divine': return 'night_guard'
+    case 'night_guard': return 'morning' // simulateNight 後に翌 morning へ
+    case 'terminal': return 'terminal'
+  }
+}
+
+/** skip ロジックを再帰的に適用し、最初に「skip しない」phase まで進める */
+export function advancePhase(state: SimState): void {
+  while (state.phase !== 'terminal' && shouldSkipPhase(state)) {
+    state.phase = rawNextPhase(state.phase)
+  }
 }
 
 /**
- * Day-Night サイクルを進める。全 action は呼び出し側が決定した前提で受ける。
+ * 1 phase 分の action を適用し、次 phase に進める。skip 連鎖もここで処理する。
  *
- * - state.phase が 'day' なら day.executedSeat を処刑し夜へ
- * - state.phase が 'night' なら day をスキップして夜行動だけ進める（root night action 用）
- * - state は in-place mutate（rollout 内で短命なため OK）
- *
- * 戻り値: mutate 後の同 state。state.phase が 'terminal' になっていれば state.outcome に勝敗が入る。
+ * - terminal なら no-op
+ * - phase と action.type の不一致は throw (caller の責任)
+ * - in-place mutate
  */
-export function stepDayNightCycle(
-  state: SimState,
-  day: DayDecision,
-  night: NightDecision,
-): SimState {
+export function stepPhase(state: SimState, action: PhaseAction): SimState {
   if (state.phase === 'terminal') return state
 
-  if (state.phase === 'day') {
-    if (day.executedSeat >= 0) {
-      state.alive = applyExecution(state.alive, day.executedSeat)
+  switch (state.phase) {
+    case 'morning':
+      assertActionType(action, 'morning')
+      for (const r of action.reports) {
+        const list = state.fakeDivineHistory.get(r.seerSeat) ?? []
+        list.push({ day: state.day, target: r.target, color: r.color })
+        state.fakeDivineHistory.set(r.seerSeat, list)
+      }
+      break
+    case 'claim_seer_true':
+    case 'claim_medium_true':
+    case 'claim_bg_true':
+    case 'claim_nekomata_true':
+    case 'claim_mason': {
+      assertActionType(action, 'claim_true')
+      if (action.willClaim) {
+        const role = trueClaimRole(state.phase)!
+        const truthMask = trueRoleMask(state.world, state.phase, state.alive)
+        let unclaimed = truthMask
+        for (const seat of state.claims.keys()) unclaimed &= ~(1 << seat)
+        // Stage 1 暫定: 未 CO の真役職席のうち最低位 seat を actor とする。
+        // 実際の actor 選択 (複数同一役職時) は Stage 3 で MCTS が扱う。
+        if (unclaimed !== 0) {
+          const lowBit = unclaimed & (-unclaimed)
+          const actorSeat = 31 - Math.clz32(lowBit)
+          state.claims.set(actorSeat, { role, isFake: false })
+        }
+      }
+      break
+    }
+    case 'claim_seer_fake':
+    case 'claim_medium_fake':
+    case 'claim_bg_fake':
+    case 'claim_nekomata_fake': {
+      assertActionType(action, 'claim_fake')
+      if (action.willClaim) {
+        const role = fakeClaimRole(state.phase)!
+        state.claims.set(action.claimerSeat, { role, isFake: true })
+      }
+      break
+    }
+    case 'day': {
+      assertActionType(action, 'execute')
+      if (action.target >= 0) {
+        state.alive = applyExecution(state.alive, action.target)
+        state.alive = applyFollowDeaths(state.alive, state.world)
+      }
+      const outcome = checkOutcome(state.world, state.alive)
+      if (outcome !== 'ongoing') {
+        state.outcome = outcome
+        state.phase = 'terminal'
+        return state
+      }
+      break
+    }
+    case 'night_attack':
+      assertActionType(action, 'attack')
+      state.pendingAttack = action.target
+      break
+    case 'night_divine':
+      assertActionType(action, 'divine')
+      if (action.target >= 0) state.pendingDivineTargets.push(action.target)
+      break
+    case 'night_guard': {
+      assertActionType(action, 'guard')
+      state.pendingGuard = action.target >= 0 ? action.target : null
+      // 夜 3 行動を一括解決
+      const wolfBiteTarget = state.pendingAttack ?? -1
+      const result = simulateNight(
+        state.world,
+        state.alive,
+        wolfBiteTarget,
+        state.pendingGuard,
+        state.pendingDivineTargets,
+      )
+      state.alive = result.nextAlive
       state.alive = applyFollowDeaths(state.alive, state.world)
+      const outcome = checkOutcome(state.world, state.alive)
+      if (outcome !== 'ongoing') {
+        state.outcome = outcome
+        state.phase = 'terminal'
+        return state
+      }
+      // 翌日へ。pending をクリア
+      state.day += 1
+      state.pendingAttack = null
+      state.pendingGuard = null
+      state.pendingDivineTargets = []
+      break
     }
-    const outcome = checkOutcome(state.world, state.alive)
-    if (outcome !== 'ongoing') {
-      state.outcome = outcome
-      state.phase = 'terminal'
-      return state
-    }
-    state.phase = 'night'
   }
 
-  if (night.attackTarget !== null && night.attackTarget >= 0) {
-    const result = simulateNight(
-      state.world,
-      state.alive,
-      night.attackTarget,
-      night.guardTarget,
-      night.seerTargets,
-    )
-    state.alive = result.nextAlive
-    state.alive = applyFollowDeaths(state.alive, state.world)
-  }
-  const outcome = checkOutcome(state.world, state.alive)
-  if (outcome !== 'ongoing') {
-    state.outcome = outcome
-    state.phase = 'terminal'
-    return state
-  }
-  state.day += 1
-  state.phase = 'day'
+  state.phase = rawNextPhase(state.phase)
+  advancePhase(state)
   return state
+}
+
+function assertActionType<T extends PhaseAction['type']>(
+  action: PhaseAction,
+  expected: T,
+): asserts action is Extract<PhaseAction, { type: T }> {
+  if (action.type !== expected) {
+    throw new Error(`stepPhase: expected action type ${expected}, got ${action.type}`)
+  }
+}
+
+// --- legal action 列挙 (D2 採用 Z による Stage 1 必須機能) ---
+
+/** day phase の legal execute actions。生存席 (-1 = skip) */
+export function legalExecuteActions(state: SimState): PhaseAction[] {
+  const out: PhaseAction[] = []
+  for (const seat of seatsFromMask(state.alive)) {
+    out.push({ type: 'execute', target: seat })
+  }
+  return out
+}
+
+/** night_attack phase の legal attack actions。狼が噛める seat 一覧 */
+export function legalAttackActions(state: SimState): PhaseAction[] {
+  const out: PhaseAction[] = []
+  const wolves = state.world.wolfMask & state.alive
+  if (wolves === 0) return out
+  let targets = state.alive & ~state.world.wolfMask
+  // LW (狼 1 匹) は猫又を噛むと道連れ全滅で負けるため除外
+  if (popCount32(wolves) === 1) {
+    let scan = targets
+    while (scan !== 0) {
+      const bit = scan & (-scan)
+      const seat = 31 - Math.clz32(bit)
+      if (state.world.roleIds[seat] === RoleBitIndex.nekomata) targets ^= bit
+      scan ^= bit
+    }
+  }
+  for (const seat of seatsFromMask(targets)) {
+    out.push({ type: 'attack', target: seat })
+  }
+  return out
+}
+
+/** night_divine phase の legal divine actions。真 seer の占い先一覧 */
+export function legalDivineActions(state: SimState): PhaseAction[] {
+  const out: PhaseAction[] = []
+  if ((state.world.seerMask & state.alive) === 0) return out
+  for (const seat of seatsFromMask(state.alive)) {
+    out.push({ type: 'divine', target: seat })
+  }
+  return out
+}
+
+/** night_guard phase の legal guard actions。真 bg の護衛先一覧 (-1 = 無護衛) */
+export function legalGuardActions(state: SimState): PhaseAction[] {
+  const out: PhaseAction[] = []
+  const bg = state.world.bodyguardSeat
+  if (bg < 0 || (state.alive & (1 << bg)) === 0) {
+    // bg 不在 → 護衛先選択肢は -1 (無護衛) 1 つのみ
+    out.push({ type: 'guard', target: -1 })
+    return out
+  }
+  // bg 自分自身は護衛できない (他席のみ)
+  for (const seat of seatsFromMask(state.alive & ~(1 << bg))) {
+    out.push({ type: 'guard', target: seat })
+  }
+  out.push({ type: 'guard', target: -1 })
+  return out
+}
+
+/**
+ * claim_*_true phase の legal claim_true actions。CO/潜伏の 2 択。
+ * skip 条件を満たす phase で呼ばれた場合は空配列を返す。
+ */
+export function legalClaimTrueActions(state: SimState): PhaseAction[] {
+  if (shouldSkipPhase(state)) return []
+  return [
+    { type: 'claim_true', willClaim: false },
+    { type: 'claim_true', willClaim: true },
+  ]
+}
+
+/**
+ * claim_*_fake phase の legal claim_fake actions。skip + 各 claimer 候補。
+ * skip 条件を満たす phase で呼ばれた場合は空配列を返す。
+ */
+export function legalClaimFakeActions(state: SimState): PhaseAction[] {
+  if (shouldSkipPhase(state)) return []
+  const out: PhaseAction[] = [{ type: 'claim_fake', willClaim: false }]
+  let unclaimed = fakeActorMask(state.world, state.alive)
+  for (const seat of state.claims.keys()) unclaimed &= ~(1 << seat)
+  for (const seat of seatsFromMask(unclaimed)) {
+    out.push({ type: 'claim_fake', willClaim: true, claimerSeat: seat })
+  }
+  return out
+}
+
+/**
+ * morning phase の legal morning actions。偽 seer CO 済の各 actor ごとに
+ * (target × color) を cartesian product で列挙し、reports 配列の組合せを返す。
+ *
+ * 偽 seer 0 人なら空配列 (skip 条件)、1 人なら (alive 数 × 2) 個の単要素 reports、
+ * N 人なら指数的に増える。MCTS 側は legal 集合の大きさで rollout 計算量を決める。
+ */
+export function legalMorningActions(state: SimState): PhaseAction[] {
+  // 偽 seer の actor 一覧 (CO 順に並べたいが Map の挿入順を信じる)
+  const fakeSeers: number[] = []
+  for (const [seat, entry] of state.claims) {
+    if (entry.role === 'seer' && entry.isFake) fakeSeers.push(seat)
+  }
+  if (fakeSeers.length === 0) return []
+
+  // 各 actor ごとの (target, color) 候補 = alive seats × {human, wolf}
+  const colors: FakeDivineColor[] = ['human', 'wolf']
+  const aliveSeats = seatsFromMask(state.alive)
+  const perActor: Array<Array<{ target: number, color: FakeDivineColor }>> = fakeSeers.map(() => {
+    const opts: Array<{ target: number, color: FakeDivineColor }> = []
+    for (const t of aliveSeats) {
+      for (const c of colors) opts.push({ target: t, color: c })
+    }
+    return opts
+  })
+
+  // cartesian product
+  const out: PhaseAction[] = []
+  const indices = new Array(fakeSeers.length).fill(0)
+  while (true) {
+    const reports = fakeSeers.map((seerSeat, i) => ({
+      seerSeat,
+      target: perActor[i][indices[i]].target,
+      color: perActor[i][indices[i]].color,
+    }))
+    out.push({ type: 'morning', reports })
+    // increment
+    let k = indices.length - 1
+    while (k >= 0) {
+      indices[k] += 1
+      if (indices[k] < perActor[k].length) break
+      indices[k] = 0
+      k -= 1
+    }
+    if (k < 0) break
+  }
+  return out
 }

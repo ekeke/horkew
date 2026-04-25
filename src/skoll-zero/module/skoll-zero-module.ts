@@ -29,7 +29,7 @@
  */
 
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
-import type { MCTSResult } from '../mcts/ismcts.ts'
+import type { MCTSResult } from '../mcts/ISMCTS.ts'
 import type { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { RootObs } from '../selfplay/observation.ts'
 

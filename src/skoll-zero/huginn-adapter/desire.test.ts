@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
-import type { MCTSResult } from '../mcts/ismcts.ts'
+import type { MCTSResult } from '../mcts/ISMCTS.ts'
 import { buildDesire } from './desire.ts'
 
 function makeCtx(overrides: Partial<DecisionContext>): DecisionContext {
