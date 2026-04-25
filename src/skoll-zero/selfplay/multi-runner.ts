@@ -18,6 +18,7 @@ import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from '../../fenrir/src/adapters/full-adapter.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import { outcomeToValue, type Faction, type MCTSConfig } from '../mcts/ISMCTS.ts'
+import type { FinalOutcome } from '../network/config.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import { TrainingBuffer } from './buffer.ts'
 import { MasonRoleAgent } from './mason-zero-agent.ts'
@@ -126,12 +127,25 @@ function buildAgent(
   }
 }
 
-function outcomeFromResult(result: GameResult, faction: Faction): number {
-  if (result === 'draw') return -0.5
-  const outcome = result === 'villager_won' ? 'village_win'
-    : result === 'werewolf_won' ? 'wolf_win'
-    : result === 'werehamster_won' ? 'hamster_win'
-    : null
+/**
+ * lupa GameResult → hati GameOutcome (Stage 4: outcome 分布 buffer 用)。
+ * Faction-independent — buffer 全 record で同じ outcome を共有する。
+ */
+function gameOutcomeFromResult(result: GameResult): FinalOutcome {
+  switch (result) {
+    case 'villager_won': return 'village_win'
+    case 'werewolf_won': return 'wolf_win'
+    case 'werehamster_won': return 'hamster_win'
+    case 'draw': return 'draw'
+    default: return 'draw'
+  }
+}
+
+/**
+ * Stats 用: outcome を faction 視点 scalar value に変換 (Stage 4 でも debug 表示で使う)。
+ */
+function factionValueFromResult(result: GameResult, faction: Faction): number {
+  const outcome = gameOutcomeFromResult(result)
   return outcomeToValue(outcome, faction)
 }
 
@@ -176,20 +190,21 @@ export async function runMultiAgentSelfPlayGame(
   )
   const result = gameResult.state.result
 
-  // 各 slot の buffer を faction 別 z で finalize
+  // Stage 4: 各 slot の buffer は faction 非依存の outcome で finalize (one-hot 4-vec)。
+  // stats の z は debug 用の faction 視点 scalar (実学習目標とは異なる)。
+  const outcome = gameOutcomeFromResult(result)
   const stats: MultiAgentSelfPlayResult['stats'] = {}
   for (const key of slotKeys) {
     const slot = cfg.slots[key]
     const agent = agentsBySlot.get(key)
     if (!slot || !agent) continue
     const faction = factionForSlot(key)
-    const z = outcomeFromResult(result, faction)
-    slot.buffer.finalize(z)
+    slot.buffer.finalize(outcome)
     stats[key] = {
       mctsCalls: agent.mctsCalls,
       fallbackCalls: agent.fallbackCalls,
       recordsAdded: slot.buffer.size() - (preSize.get(key) ?? 0),
-      z,
+      z: factionValueFromResult(result, faction),
     }
   }
 

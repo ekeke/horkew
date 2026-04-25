@@ -15,6 +15,7 @@
  */
 
 import type { SystemRole } from '../../types/index.ts'
+import type { FinalOutcome } from '../network/config.ts'
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import { buildPossibilitiesFromRetar } from '../../skoll/unified.ts'
 import type { SimState } from '../simulator/world-state.ts'
@@ -149,8 +150,8 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     }
   }
 
-  finalize(z: number): void {
-    this.buffer.finalize(z)
+  finalize(outcome: FinalOutcome): void {
+    this.buffer.finalize(outcome)
   }
 
   reset(): void {

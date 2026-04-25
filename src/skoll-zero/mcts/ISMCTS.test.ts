@@ -10,6 +10,7 @@ import type { ModuleBundle } from './dispatch.ts'
 import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
 import type { Faction } from './ISMCTS.ts'
 import type { NNOutput, HeadName, RootObservation } from './nn.ts'
+import { uniformOutcomeDist } from './nn.ts'
 import type { RolloutInvariants } from '../observation/from-sim-state.ts'
 import { emptyInvariants } from '../observation/from-sim-state.ts'
 
@@ -61,10 +62,11 @@ class DummyModule implements SkollZeroModule {
       cands.push(31 - Math.clz32(bit))
       mask ^= bit
     }
-    if (cands.length === 0) return { policy, value: 0 }
+    const outcomeDist = uniformOutcomeDist()
+    if (cands.length === 0) return { policy, outcomeDist }
     const p = 1 / cands.length
     for (const c of cands) policy.set(c, p)
-    return { policy, value: 0 }
+    return { policy, outcomeDist }
   }
   proposeVote(): null { return null }
   proposeNightAction(): null { return null }
@@ -106,11 +108,12 @@ describe('Determinizer', () => {
 })
 
 describe('DummyModule', () => {
-  it('uniform policy + value 0、自席は除外', () => {
+  it('uniform policy + uniform outcomeDist、自席は除外', () => {
     const dummy = new DummyModule()
     const state: SimState = createSimState({} as never, aliveOf([1, 2, 3, 4, 5]))
     const out = dummy.forwardAt(state, 2, 'mason', 'execute', emptyInvariants())
-    assert.equal(out.value, 0)
+    assert.equal(out.outcomeDist.length, 4)
+    for (const p of out.outcomeDist) assert.ok(Math.abs(p - 0.25) < 1e-9, 'uniform 0.25')
     assert.equal(out.policy.size, 4)
     let sum = 0
     for (const p of out.policy.values()) sum += p

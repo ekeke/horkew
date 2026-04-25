@@ -35,6 +35,32 @@ export const CLAIM_FAKE_HEAD_SIZE = 1 + SEATS  // 15
 /** morning: SEATS × 2 dim (target_idx × {human, wolf}) — global head, B-combined */
 export const MORNING_HEAD_SIZE = SEATS * 2  // 28
 
+// ============================================================
+// Stage 4: Outcome distribution value head
+// ============================================================
+
+/**
+ * skoll-zero が学習目標とする「終局時の結果」4 種。
+ *
+ * hati GameOutcome (village_win/wolf_win/hamster_win/ongoing) と異なり、
+ * - 'ongoing' は除外 (終局していない)
+ * - 'draw' は含む (lupa の引き分け結果に対応)
+ */
+export type FinalOutcome = 'village_win' | 'wolf_win' | 'hamster_win' | 'draw'
+
+/** outcome distribution head の outcome 順序 (config.outcomeDistOutputs = 4 に対応) */
+export const OUTCOME_ORDER: ReadonlyArray<FinalOutcome> = [
+  'village_win', 'wolf_win', 'hamster_win', 'draw',
+] as const
+
+/** outcome distribution head のサイズ (4 = 上記 OUTCOME_ORDER の長さ) */
+export const OUTCOME_DIST_SIZE = OUTCOME_ORDER.length  // 4
+
+/** outcome → OUTCOME_ORDER の index */
+export const OUTCOME_INDEX = new Map<FinalOutcome, number>(
+  OUTCOME_ORDER.map((o, i) => [o, i] as const),
+)
+
 /**
  * mason_brain と互換の MasonZeroNetwork 用 TransformerNetwork config。
  *
@@ -64,6 +90,7 @@ export const SKOLL_ZERO_NETWORK_CONFIG: NetworkConfig = {
     clsFeatures: MASON_COLLECTIVE_CLS_FEATURES,
     perSeatHeads: ['execute'],
   },
+  outcomeDistOutputs: OUTCOME_DIST_SIZE,
 }
 
 /** Pure JS (推論用)。ブラウザ可。 */
@@ -105,6 +132,7 @@ export const STANDARD_ZERO_NETWORK_CONFIG: NetworkConfig = {
     clsFeatures: CLS_FEATURES,
     perSeatHeads: ['execute', 'divine', 'guard'],
   },
+  outcomeDistOutputs: OUTCOME_DIST_SIZE,
 }
 
 /**
@@ -140,6 +168,7 @@ export const WOLF_ZERO_NETWORK_CONFIG: NetworkConfig = {
     clsFeatures: WOLF_COLLECTIVE_CLS_FEATURES,
     perSeatHeads: ['execute', 'attack'],
   },
+  outcomeDistOutputs: OUTCOME_DIST_SIZE,
 }
 
 /**
@@ -177,6 +206,7 @@ export const FANATIC_ZERO_NETWORK_CONFIG: NetworkConfig = {
     clsFeatures: FANATIC_CLS_FEATURES,
     perSeatHeads: ['execute'],
   },
+  outcomeDistOutputs: OUTCOME_DIST_SIZE,
 }
 
 export function createStandardZeroNetwork(): TransformerNetwork {

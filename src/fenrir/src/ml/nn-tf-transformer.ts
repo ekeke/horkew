@@ -231,6 +231,9 @@ export class TfTransformerNetwork {
   private nightClsB: tf.Variable | null = null
   private valueW: tf.Variable
   private valueB: tf.Variable
+  /** Outcome distribution head (Stage 4): config.outcomeDistOutputs 指定時のみ存在 */
+  private outcomeDistW: tf.Variable | null = null
+  private outcomeDistB: tf.Variable | null = null
 
   private allVariables: tf.Variable[]
   /** trunk + plan head のみ (supervised pretrain で他 head を凍結するため) */
@@ -428,11 +431,18 @@ export class TfTransformerNetwork {
     this.valueW = this.makeVar([dm, 1], dm, `${prefix}value_w`)
     this.valueB = this.makeZeroVar([1], `${prefix}value_b`)
     this.allVariables.push(this.valueW, this.valueB)
+    // Outcome distribution head (Stage 4): config.outcomeDistOutputs 指定時のみ
+    if (config.outcomeDistOutputs !== undefined && config.outcomeDistOutputs > 0) {
+      this.outcomeDistW = this.makeVar([dm, config.outcomeDistOutputs], dm, `${prefix}outcome_dist_w`)
+      this.outcomeDistB = this.makeZeroVar([config.outcomeDistOutputs], `${prefix}outcome_dist_b`)
+      this.allVariables.push(this.outcomeDistW, this.outcomeDistB)
+    }
 
-    // trunk + plan head のみ: action heads (h_*) と value head を除外
+    // trunk + plan head のみ: action heads (h_*)、value head、outcome dist head を除外
     this.trunkAndPlanVariables = this.allVariables.filter(v => {
       const n = v.name
       if (n.includes('value_')) return false
+      if (n.includes('outcome_dist_')) return false
       if (n.includes('_h_')) return false
       return true
     })
@@ -1390,26 +1400,32 @@ export class TfTransformerNetwork {
   }
 
   /**
-   * skoll-zero の AlphaZero 系 self-play loss。
+   * skoll-zero の AlphaZero 系 self-play loss (Stage 4: outcome distribution).
    *
-   * 入力は MCTS の visit 分布から得た π (policy target) と z (mason 視点 outcome value)。
+   * 入力は MCTS の visit 分布から得た π (policy target) と outcome categorical (one-hot)。
    * - policy: cross-entropy(π, softmax(vote_logits + mask))
-   * - value:  MSE(z, matMul(clsOut, valueW) + valueB)
+   * - value:  cross-entropy(outcome_one_hot, softmax(outcomeDistLogits))
    *
-   * mask は illegal 席に -1e9 を入れる加算形式（trainSupervisedHead と同形式）。
-   * L2 regularization は Phase 1 では省略（必要なら後日追加）。
+   * value head は outcome 分布 head (config.outcomeDistOutputs 必須、通常 4)。
+   * 学習目標は終局 outcome の確率分布で、faction 視点はここでは持たない (推論時に
+   * outcomeDistToFactionValue で陣営別 value に変換)。
+   *
+   * mask は illegal 席に -1e9 を入れる加算形式 (trainSupervisedHead と同形式)。
    */
   trainMasonZero(batch: {
     observations: Float32Array[]
     policyTargets: Float32Array[]   // [n, SEATS] normalized π (illegal seats = 0)
     masks: Float32Array[]           // [n, SEATS] additive: 0 legal / -1e9 illegal
-    valueTargets: number[]          // [n] z ∈ [-1.3, +1] (mason 視点)
+    outcomeTargets: Float32Array[]  // [n, outcomeDistOutputs] one-hot (or soft) outcome categorical
     valueCoeff?: number             // default 1.0
-    /** どの per-seat head を更新するか (default 'vote')。attack/divine/guard は zero-multi-head 用 */
+    /** どの per-seat head を更新するか (default 'vote') */
     headName?: string
   }): { loss: number, policyLoss: number, valueLoss: number } {
     const n = batch.observations.length
     if (n === 0) return { loss: 0, policyLoss: 0, valueLoss: 0 }
+    if (!this.outcomeDistW || !this.outcomeDistB) {
+      throw new Error('trainMasonZero: outcomeDistOutputs が config に設定されていません')
+    }
 
     const headName = batch.headName ?? 'vote'
     const voteHeadEntry = this.perSeatHeadWeights.get(headName)
@@ -1419,25 +1435,29 @@ export class TfTransformerNetwork {
     const voteHeadSize = this.config.heads[headName]
     if (voteHeadSize === undefined) throw new Error(`trainMasonZero: heads['${headName}'] size not in config`)
     const inputSize = this.config.inputSize
+    const outcomeSize = this.config.outcomeDistOutputs!
     const valueCoeff = batch.valueCoeff ?? 1.0
 
     const obsData = new Float32Array(n * inputSize)
     const policyData = new Float32Array(n * voteHeadSize)
     const maskData = new Float32Array(n * voteHeadSize)
-    const valueData = new Float32Array(n)
+    const outcomeData = new Float32Array(n * outcomeSize)
     for (let i = 0; i < n; i++) {
       obsData.set(batch.observations[i], i * inputSize)
       policyData.set(batch.policyTargets[i], i * voteHeadSize)
       maskData.set(batch.masks[i], i * voteHeadSize)
-      valueData[i] = batch.valueTargets[i]
+      outcomeData.set(batch.outcomeTargets[i], i * outcomeSize)
     }
 
     const result = { loss: 0, policyLoss: 0, valueLoss: 0 }
+    const odW = this.outcomeDistW
+    const odB = this.outcomeDistB
 
     const lossFunc = () => {
       const obsTensor = tf.tensor2d(obsData, [n, inputSize])
       const { clsOut, seatOutputs } = this.forwardTrunk(obsTensor)
 
+      // === Policy head (per-seat softmax + masked CE) ===
       const logits = this.perSeatLogits(seatOutputs, voteW, voteB)  // [n, SEATS]
       const maskTensor = tf.tensor2d(maskData, [n, voteHeadSize])
       const maskedLogits = tf.add(logits, maskTensor)
@@ -1446,9 +1466,12 @@ export class TfTransformerNetwork {
       const logProbs = tf.log(tf.add(probs, tf.scalar(1e-8)))
       const policyLoss = tf.neg(tf.mean(tf.sum(tf.mul(policyTensor, logProbs), 1))) as tf.Scalar
 
-      const valueOut = tf.add(tf.matMul(clsOut, this.valueW), this.valueB).squeeze([1])  // [n]
-      const valueTensor = tf.tensor1d(valueData)
-      const valueLoss = tf.mean(tf.squaredDifference(valueOut, valueTensor)) as tf.Scalar
+      // === Outcome distribution head (softmax + categorical CE) ===
+      const outcomeLogits = tf.add(tf.matMul(clsOut, odW), odB)  // [n, outcomeSize]
+      const outcomeProbs = tf.softmax(outcomeLogits)
+      const outcomeTensor = tf.tensor2d(outcomeData, [n, outcomeSize])
+      const outcomeLogProbs = tf.log(tf.add(outcomeProbs, tf.scalar(1e-8)))
+      const valueLoss = tf.neg(tf.mean(tf.sum(tf.mul(outcomeTensor, outcomeLogProbs), 1))) as tf.Scalar
 
       const totalLoss = tf.add(policyLoss, tf.mul(tf.scalar(valueCoeff), valueLoss)) as tf.Scalar
 
@@ -1677,6 +1700,10 @@ export class TfTransformerNetwork {
     }
     weights.set('value_w', this.valueW.dataSync() as Float32Array)
     weights.set('value_b', this.valueB.dataSync() as Float32Array)
+    if (this.outcomeDistW && this.outcomeDistB) {
+      weights.set('outcome_dist_w', this.outcomeDistW.dataSync() as Float32Array)
+      weights.set('outcome_dist_b', this.outcomeDistB.dataSync() as Float32Array)
+    }
 
     return weights
   }
@@ -1775,6 +1802,12 @@ export class TfTransformerNetwork {
       }
       this.valueW.assign(tf.tensor(weights.get('value_w')!, this.valueW.shape))
       this.valueB.assign(tf.tensor(weights.get('value_b')!, this.valueB.shape))
+      if (this.outcomeDistW && this.outcomeDistB) {
+        const odW = weights.get('outcome_dist_w')
+        const odB = weights.get('outcome_dist_b')
+        if (odW) this.outcomeDistW.assign(tf.tensor(odW, this.outcomeDistW.shape))
+        if (odB) this.outcomeDistB.assign(tf.tensor(odB, this.outcomeDistB.shape))
+      }
     })
   }
 

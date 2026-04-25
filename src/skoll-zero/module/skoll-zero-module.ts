@@ -29,6 +29,7 @@
  */
 
 import type { SystemRole } from '../../types/index.ts'
+import type { FinalOutcome } from '../network/config.ts'
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import type { Faction, MCTSResult } from '../mcts/ISMCTS.ts'
 import type { HeadName, NNOutput } from '../mcts/nn.ts'
@@ -78,10 +79,10 @@ export interface SkollZeroModule {
   ): McctsProposal | null
 
   /**
-   * ゲーム終了時に pending records に z を貼って finalized へ移送。
-   * Adapter / self-play runner が呼ぶ。
+   * ゲーム終了時に pending records に outcome one-hot を貼って finalized へ移送。
+   * Adapter / self-play runner が呼ぶ (Stage 4: outcome distribution 学習用)。
    */
-  finalize(z: number): void
+  finalize(outcome: FinalOutcome): void
 
   /** 新しいゲーム開始時に pending をクリア (既存 buffer の finalized は保持) */
   reset(): void

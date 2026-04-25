@@ -125,6 +125,15 @@ export type NetworkConfig = {
   heads: Record<string, number>  // head_name → output_size (softmax heads)
   sigmoidHeads?: Record<string, number>  // head_name → output_size (sigmoid heads)
   transformer: TransformerNetworkConfig
+  /**
+   * 終局 outcome 分布 head のサイズ (opt-in)。設定されると forward の戻り値に
+   * outcomeDist (softmax 済 Float32Array) が乗る。
+   *
+   * skoll-zero では 4 (village_win / wolf_win / hamster_win / draw) を指定し、
+   * value を陣営非依存の確率予測として学習させる (Stage 4)。
+   * 未指定 (undefined) なら従来通り scalar value のみ。
+   */
+  outcomeDistOutputs?: number
 }
 
 /** Transformerアーキテクチャ設定 */
@@ -159,7 +168,13 @@ export type TransformerNetworkConfig = {
 
 export type ForwardResult = {
   policies: Map<string, Float32Array>  // head_name → logits (pre-softmax)
-  value: number                         // scalar value estimate
+  value: number                         // scalar value estimate (legacy scalar head)
+  /**
+   * Outcome 分布 head の出力 (config.outcomeDistOutputs 指定時のみ存在)。
+   * softmax 済の確率分布 Float32Array (size = config.outcomeDistOutputs)。
+   * 順序は consumer が決める (skoll-zero は [village_win, wolf_win, hamster_win, draw])。
+   */
+  outcomeDist?: Float32Array
   // Autoregressive plan decoder outputs (unified, populated by TransformerNetwork)
   planActions?: number[]
   planLogProbs?: number[]

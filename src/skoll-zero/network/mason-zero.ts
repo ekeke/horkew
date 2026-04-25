@@ -2,20 +2,21 @@
  * MasonZeroNetwork: skoll-zero の mason 用 NN。
  *
  * - fenrir の `TransformerNetwork` (`mason_collective` config) をラップ
- * - `vote` head (14-dim per-seat) を policy head として流用
- * - value head は TransformerNetwork 標準の scalar (tanh 済み)
+ * - `execute` head (14-dim per-seat) を policy head として流用
+ * - value は Stage 4 で outcome 分布 head に置換 (4-vec softmax)
  *
  * forward:
  *   1. rootObs (1030-dim Float32Array) を TransformerNetwork.forward に投入
- *   2. vote logits を取得、state.alive & ~(1<<masonSeat) で masking
+ *   2. logits を取得、state.alive & ~(1<<masonSeat) で masking
  *   3. softmax で正規化 → policy Map<seat, prob>
- *   4. value はそのまま返す（tanh 済み）
+ *   4. outcomeDist (Float32Array(4)) をそのまま返す
  *
  * state は legal action mask にのみ使う。rollout 中の alive 変化は反映されるが、
  * rootObs 自体は MCTS 開始時の観測固定 (Phase 1 の割り切り)。
  */
 
 import type { HeadName, MasonZeroNN, NNOutput, RootObservation } from '../mcts/nn.ts'
+import { uniformOutcomeDist } from '../mcts/nn.ts'
 import type { SimState } from '../simulator/world-state.ts'
 import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 import { createSkollZeroNetwork } from './config.ts'
@@ -27,16 +28,14 @@ export class MasonZeroNetwork implements MasonZeroNN {
 
   /**
    * @param net  完成品の TransformerNetwork（省略時は fresh ネット）
-   * @param opts.zeroValueHead  true なら value head を zero reset (default true)。
-   *   false にすると warm-start 元の checkpoint が持つ value head をそのまま使う
-   *   (ablation 用: SL で学習した value signal が ISMCTS に効くか検証)。
+   * @param opts.zeroValueHead  true なら legacy scalar value head を zero reset (default true)。
+   *   outcomeDist head は warm-start 互換のため別途 zero init しない (random 初期化のまま、
+   *   学習で形成される)。
    */
   constructor(net?: TransformerNetwork, opts: { zeroValueHead?: boolean } = {}) {
     this.net = net ?? createSkollZeroNetwork()
     const zeroValueHead = opts.zeroValueHead ?? true
     if (zeroValueHead) {
-      // value head は skoll-zero では zero init が初期設計（tanh(0)=0）。
-      // 学習前 or warm start 時に中立評価を返すため。
       this.net.zeroInitValueHead()
     }
   }
@@ -47,20 +46,28 @@ export class MasonZeroNetwork implements MasonZeroNN {
     if (!logits) {
       throw new Error(`MasonZeroNetwork: head '${headName}' not found in policies`)
     }
-    const policy = softmaxMasked(logits, state.alive, masonSeat)
-    return { policy, value: result.value }
+    const perSeatHeads = this.net.config.transformer?.perSeatHeads ?? []
+    const isPerSeat = perSeatHeads.includes(headName)
+    // per-seat head: 14-dim logits, action ID = seat 1..14, alive & 自席除外で softmax
+    // global head (claim_true / claim_fake / morning): 全 logits で plain softmax、action ID = 0..N-1
+    const policy = isPerSeat
+      ? softmaxMaskedPerSeat(logits, state.alive, masonSeat)
+      : softmaxGlobal(logits)
+    // Stage 4: outcomeDist head が config で有効化されていれば取得、無ければ uniform
+    const outcomeDist = result.outcomeDist ?? uniformOutcomeDist()
+    return { policy, outcomeDist }
   }
 }
 
 /**
- * 生存非自席のみ softmax。dead / self は policy Map に出さない（prior=0 相当）。
+ * 生存非自席のみ softmax (per-seat head 用)。dead / self は policy Map に出さない (prior=0 相当)。
  *
  * 数値安定化のため max を引いてから exp。
  *
- * Seat 規約: `alive` ビットマスクは 1-based（bit 1 = seat 1）、vote logits は
- * 14-dim 0-indexed（logits[0] = seat 1 の logit）。policy Map の key は 1-based seat。
+ * Seat 規約: `alive` ビットマスクは 1-based (bit 1 = seat 1)、vote logits は
+ * 14-dim 0-indexed (logits[0] = seat 1 の logit)。policy Map の key は 1-based seat。
  */
-function softmaxMasked(logits: Float32Array, alive: number, masonSeat: number): Map<number, number> {
+function softmaxMaskedPerSeat(logits: Float32Array, alive: number, masonSeat: number): Map<number, number> {
   const legalMask = alive & ~(1 << masonSeat)
   const legal: number[] = []
   let m = legalMask
@@ -93,6 +100,34 @@ function softmaxMasked(logits: Float32Array, alive: number, masonSeat: number): 
   }
   for (let i = 0; i < legal.length; i++) {
     policy.set(legal[i], exps[i] / sumExp)
+  }
+  return policy
+}
+
+/**
+ * Global head 用の plain softmax。
+ *
+ * action ID = 0..N-1 (logits の index と一致)。legal mask は ISMCTS 側で適用するので
+ * ここでは全 logits を softmax して Map<actionId, prob> を返す。
+ */
+function softmaxGlobal(logits: Float32Array): Map<number, number> {
+  const policy = new Map<number, number>()
+  if (logits.length === 0) return policy
+  let maxLogit = -Infinity
+  for (const v of logits) if (v > maxLogit) maxLogit = v
+  let sumExp = 0
+  const exps = new Float32Array(logits.length)
+  for (let i = 0; i < logits.length; i++) {
+    exps[i] = Math.exp(logits[i] - maxLogit)
+    sumExp += exps[i]
+  }
+  if (sumExp === 0) {
+    const u = 1 / logits.length
+    for (let i = 0; i < logits.length; i++) policy.set(i, u)
+    return policy
+  }
+  for (let i = 0; i < logits.length; i++) {
+    policy.set(i, exps[i] / sumExp)
   }
   return policy
 }

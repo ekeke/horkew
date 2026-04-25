@@ -7,7 +7,7 @@ import { MasonRoleAgent } from './mason-zero-agent.ts'
 import { normalizeVisits, sampleFromVisits, argmaxFromVisits } from './policy-utils.ts'
 
 describe('TrainingBuffer', () => {
-  it('appendPending → finalize で z が貼られる', () => {
+  it('appendPending → finalize で outcomeTarget (one-hot 4-vec) が貼られる', () => {
     const buf = new TrainingBuffer()
     buf.appendPending({
       obs: new Float32Array(8),
@@ -20,10 +20,16 @@ describe('TrainingBuffer', () => {
     })
     assert.equal(buf.size(), 0)
     assert.equal(buf.pendingSize(), 1)
-    buf.finalize(1.0)
+    buf.finalize('village_win')
     assert.equal(buf.size(), 1)
     assert.equal(buf.pendingSize(), 0)
-    assert.equal(buf.records()[0].z, 1.0)
+    const rec = buf.records()[0]
+    assert.equal(rec.outcomeTarget.length, 4, 'outcomeTarget size = 4')
+    // OUTCOME_ORDER[0] = 'village_win' なので index 0 が 1
+    assert.equal(rec.outcomeTarget[0], 1)
+    assert.equal(rec.outcomeTarget[1], 0)
+    assert.equal(rec.outcomeTarget[2], 0)
+    assert.equal(rec.outcomeTarget[3], 0)
   })
 
   it('reset で全クリア', () => {
@@ -37,7 +43,7 @@ describe('TrainingBuffer', () => {
       alive: 0b10,
       headName: 'execute',
     })
-    buf.finalize(0.5)
+    buf.finalize('draw')
     assert.equal(buf.size(), 1)
     buf.reset()
     assert.equal(buf.size(), 0)
@@ -111,10 +117,13 @@ describe('runSelfPlayGame: dummy NN で end-to-end', () => {
       `records 数 (${result.recordsAdded}) = MCTS 呼び出し数 (${result.mctsCalls})`)
     if (result.recordsAdded > 0) {
       const recs = buffer.records()
-      // z が全 record で同値
-      const z = recs[0].z
+      // outcomeTarget が全 record で同値 (Stage 4: same outcome → same one-hot)
+      const refTarget = recs[0].outcomeTarget
       for (const r of recs) {
-        assert.equal(r.z, z, '全 record で z 一致')
+        assert.equal(r.outcomeTarget.length, 4)
+        for (let i = 0; i < 4; i++) {
+          assert.equal(r.outcomeTarget[i], refTarget[i], `全 record で outcomeTarget[${i}] 一致`)
+        }
       }
       // π の合計が 1 (visits があれば)
       for (const r of recs) {

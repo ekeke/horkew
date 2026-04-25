@@ -71,6 +71,8 @@ export class TransformerNetwork {
   private globalHeads: Map<string, DenseLayer>
   private globalSigmoidHeads: Map<string, DenseLayer>
   private valueHead: DenseLayer
+  /** 終局 outcome 分布 head (config.outcomeDistOutputs 指定時のみ存在、Stage 4) */
+  private outcomeDistHead: DenseLayer | null = null
 
   // Special: night head = per-seat + CLS
   private nightSeatHead: DenseLayer | null = null
@@ -221,6 +223,9 @@ export class TransformerNetwork {
     }
 
     this.valueHead = new DenseLayer(dm, 1)
+    if (config.outcomeDistOutputs !== undefined && config.outcomeDistOutputs > 0) {
+      this.outcomeDistHead = new DenseLayer(dm, config.outcomeDistOutputs)
+    }
 
     // Scratch buffers
     this._seatTokens = new Float32Array(seatSeqLen * dm)
@@ -606,12 +611,35 @@ export class TransformerNetwork {
       policies.set('plan', planLogits)
     }
 
-    // Value head
+    // Value head (legacy scalar)
     const rawValue = this.valueHead.forward(clsOut)
     const value = Math.tanh(rawValue[0])
 
+    // Outcome distribution head (Stage 4: opt-in via config.outcomeDistOutputs)
+    let outcomeDist: Float32Array | undefined
+    if (this.outcomeDistHead) {
+      const rawDist = this.outcomeDistHead.forward(clsOut)
+      // softmax で正規化 (numerical stability: max を引く)
+      let maxLogit = -Infinity
+      for (let i = 0; i < rawDist.length; i++) if (rawDist[i] > maxLogit) maxLogit = rawDist[i]
+      let sumExp = 0
+      const exps = new Float32Array(rawDist.length)
+      for (let i = 0; i < rawDist.length; i++) {
+        exps[i] = Math.exp(rawDist[i] - maxLogit)
+        sumExp += exps[i]
+      }
+      outcomeDist = new Float32Array(rawDist.length)
+      if (sumExp > 0) {
+        for (let i = 0; i < rawDist.length; i++) outcomeDist[i] = exps[i] / sumExp
+      } else {
+        const u = 1 / rawDist.length
+        for (let i = 0; i < rawDist.length; i++) outcomeDist[i] = u
+      }
+    }
+
     return {
       policies, value,
+      outcomeDist,
       planActions,
       planLogProbs,
     }
@@ -706,6 +734,10 @@ export class TransformerNetwork {
     }
     weights.set('value_w', new Float32Array(this.valueHead.weights))
     weights.set('value_b', new Float32Array(this.valueHead.biases))
+    if (this.outcomeDistHead) {
+      weights.set('outcome_dist_w', new Float32Array(this.outcomeDistHead.weights))
+      weights.set('outcome_dist_b', new Float32Array(this.outcomeDistHead.biases))
+    }
 
     return weights
   }
@@ -809,6 +841,12 @@ export class TransformerNetwork {
     }
     this.valueHead.weights.set(weights.get('value_w')!)
     this.valueHead.biases.set(weights.get('value_b')!)
+    if (this.outcomeDistHead) {
+      const odW = weights.get('outcome_dist_w')
+      const odB = weights.get('outcome_dist_b')
+      if (odW) this.outcomeDistHead.weights.set(odW)
+      if (odB) this.outcomeDistHead.biases.set(odB)
+    }
   }
 
   /** 総パラメータ数 */
@@ -834,6 +872,7 @@ export class TransformerNetwork {
     for (const head of this.globalHeads.values()) total += head.paramCount
     for (const head of this.globalSigmoidHeads.values()) total += head.paramCount
     total += this.valueHead.paramCount
+    if (this.outcomeDistHead) total += this.outcomeDistHead.paramCount
     return total
   }
 
@@ -893,6 +932,9 @@ export class TransformerNetwork {
     for (const head of this.globalHeads.values()) params.push(head.weights, head.biases)
     for (const head of this.globalSigmoidHeads.values()) params.push(head.weights, head.biases)
     params.push(this.valueHead.weights, this.valueHead.biases)
+    if (this.outcomeDistHead) {
+      params.push(this.outcomeDistHead.weights, this.outcomeDistHead.biases)
+    }
     return params
   }
 }

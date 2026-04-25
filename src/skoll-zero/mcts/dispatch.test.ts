@@ -4,7 +4,8 @@ import type { SystemRole } from '../../types/index.ts'
 import type { World } from '../../hati/types.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
 import { createSimState } from '../simulator/world-state.ts'
-import { dispatchForPhase, bucketForRole, convertValueAcrossFaction, type ModuleBundle } from './dispatch.ts'
+import { dispatchForPhase, bucketForRole, type ModuleBundle } from './dispatch.ts'
+import { outcomeDistToFactionValue } from './ISMCTS.ts'
 import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
 
 function makeWorld(assignments: Record<number, SystemRole>): World {
@@ -189,14 +190,26 @@ describe('dispatchForPhase', () => {
   })
 })
 
-describe('convertValueAcrossFaction', () => {
-  it('同一 faction はそのまま', () => {
-    assert.equal(convertValueAcrossFaction(0.7, 'village', 'village'), 0.7)
+describe('outcomeDistToFactionValue (Stage 4)', () => {
+  it('village_win=1 確定なら village 視点 +1, wolf 視点 -1, hamster 視点 -1', () => {
+    const dist = new Float32Array([1, 0, 0, 0]) // [village_win, wolf_win, hamster_win, draw]
+    assert.equal(outcomeDistToFactionValue(dist, 'village'), 1)
+    assert.equal(outcomeDistToFactionValue(dist, 'wolf'), -1)
+    assert.equal(outcomeDistToFactionValue(dist, 'hamster'), -1)
   })
-  it('village vs wolf は符号反転', () => {
-    assert.equal(convertValueAcrossFaction(0.7, 'wolf', 'village'), -0.7)
+  it('hamster_win=1 確定なら 3 陣営とも整合 (village -1.3, wolf -1.3, hamster +1)', () => {
+    const dist = new Float32Array([0, 0, 1, 0])
+    // outcomeToValue('hamster_win', 'village') = -1.3, ('hamster_win', 'wolf') = -1.3, ('hamster_win', 'hamster') = 1
+    assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'village') - (-1.3)) < 1e-6)
+    assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'wolf') - (-1.3)) < 1e-6)
+    assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'hamster') - 1) < 1e-6)
   })
-  it('wolf vs hamster は符号反転 (Stage 2 暫定)', () => {
-    assert.equal(convertValueAcrossFaction(1.0, 'wolf', 'hamster'), -1.0)
+  it('uniform 0.25 では各 faction の期待値は同じ outcomeToValue 平均と一致', () => {
+    const dist = new Float32Array([0.25, 0.25, 0.25, 0.25])
+    // village 視点: 0.25*(1) + 0.25*(-1) + 0.25*(-1.3) + 0.25*(0) = -0.325
+    assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'village') - (-0.325)) < 1e-6)
+  })
+  it('undefined dist で 0 を返す (fallback)', () => {
+    assert.equal(outcomeDistToFactionValue(undefined, 'village'), 0)
   })
 })

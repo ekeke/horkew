@@ -10,10 +10,11 @@ import type { TreeNode } from './node.ts'
 import type { Determinizer } from './determinize.ts'
 import type { World } from '../../hati/types.ts'
 import {
-  dispatchForPhase, convertValueAcrossFaction,
+  dispatchForPhase,
   type ModuleBundle,
 } from './dispatch.ts'
 import type { RolloutInvariants } from '../observation/from-sim-state.ts'
+import { OUTCOME_ORDER } from '../network/config.ts'
 
 const RoleBitIndexFanatic = RoleBitIndex.fanatic
 
@@ -257,7 +258,8 @@ function runOneRollout(
         return
       }
       const out = dispatch.module.forwardAt(state, dispatch.actorSeat, dispatch.actorRole, dispatch.headName, invariants)
-      const v = convertValueAcrossFaction(out.value, dispatch.module.faction(), decisionFaction)
+      // Stage 4: NN は outcome 分布を返す。decision faction 視点の scalar に変換して backup。
+      const v = outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
       backup(path, v)
       return
     }
@@ -479,7 +481,7 @@ function expandWithDispatch(
   }
   if (legal.size === 0) {
     node.expanded = true
-    return convertValueAcrossFaction(out.value, dispatch.module.faction(), decisionFaction)
+    return outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
   }
   // NN policy が legal action に与える prior を集計
   let providedSum = 0
@@ -499,7 +501,7 @@ function expandWithDispatch(
     node.edges.set(action, { visits: 0, totalValue: 0, prior })
   }
   node.expanded = true
-  return convertValueAcrossFaction(out.value, dispatch.module.faction(), decisionFaction)
+  return outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
 }
 
 /** seat-based phase かどうか (excludedMask 適用判定用) */
@@ -555,12 +557,18 @@ function collectRootVisits(root: TreeNode): Map<number, number> {
 export type Faction = 'village' | 'wolf' | 'hamster'
 
 /**
- * GameOutcome → 指定 faction 視点の value [-1.3, +1]。
+ * outcome → 指定 faction 視点の value [-1.3, +1]。
  *
- * 各陣営の視点で「自陣営勝ち = +1」「他 2 陣営のうち最悪 = -1.3」。
+ * 各陣営の視点で「自陣営勝ち = +1」「他 2 陣営のうち最悪 = -1.3」「引き分け / ongoing = 0」。
  * reward.ts と整合 (village 視点で hamster_win が最悪という慣例)。
+ *
+ * Stage 4: 'draw' (FinalOutcome) と 'ongoing' (GameOutcome) の両方を受けるため
+ * 引数型を広げる。両者とも 0 にマップされる。
  */
-export function outcomeToValue(outcome: GameOutcome | null, faction: Faction): number {
+export function outcomeToValue(
+  outcome: GameOutcome | 'draw' | null,
+  faction: Faction,
+): number {
   if (outcome == null) return 0
   switch (faction) {
     case 'village':
@@ -573,6 +581,28 @@ export function outcomeToValue(outcome: GameOutcome | null, faction: Faction): n
 }
 
 /** 互換: mason は village faction */
-export function outcomeToMasonValue(outcome: GameOutcome | null): number {
+export function outcomeToMasonValue(outcome: GameOutcome | 'draw' | null): number {
   return outcomeToValue(outcome, 'village')
+}
+
+/**
+ * Stage 4: outcome 分布 (Float32Array, 順序は network/config.ts の OUTCOME_ORDER) を
+ * 指定 faction 視点の scalar value に変換。
+ *
+ * `value(faction) = Σ_o P(o) × outcomeToValue(o, faction)`
+ *
+ * NN の outcomeDist 出力 (softmax 済) を直接受け取り、faction-aware な MCTS backup
+ * 用 scalar に整形する。陣営非依存の単一 distribution から派生するので、
+ * 3 faction の value は数学的に整合する (互いに矛盾しない)。
+ */
+export function outcomeDistToFactionValue(
+  dist: Float32Array | undefined,
+  faction: Faction,
+): number {
+  if (!dist) return 0
+  let v = 0
+  for (let i = 0; i < OUTCOME_ORDER.length && i < dist.length; i++) {
+    v += dist[i] * outcomeToValue(OUTCOME_ORDER[i], faction)
+  }
+  return v
 }

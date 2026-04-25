@@ -95,12 +95,12 @@ export class SkollZeroTrainer {
     if (records.length === 0) {
       return { loss: 0, policyLoss: 0, valueLoss: 0, batchSize: 0 }
     }
-    const { observations, policyTargets, masks, valueTargets } = recordsToBatchInputs(records)
+    const { observations, policyTargets, masks, outcomeTargets } = recordsToBatchInputs(records)
     const res = this.tfNet.trainMasonZero({
       observations,
       policyTargets,
       masks,
-      valueTargets,
+      outcomeTargets,
       valueCoeff: this.config.valueCoeff,
       headName: 'execute',
     })
@@ -217,23 +217,24 @@ export class SkollZeroTrainer {
  * buffer の record 配列を TF trainMasonZero が受ける Float32Array 群に変換。
  * - policyTargets[i][s-1] = pi.get(s) ?? 0
  * - masks[i][s-1] = 0 if legal (alive & ~masonSeat)、else ILLEGAL_MASK_VALUE
- * - observations, valueTargets は素通し
+ * - outcomeTargets[i] = record.outcomeTarget (Stage 4: outcome one-hot 4-vec)
+ * - observations は素通し
  */
 export function recordsToBatchInputs(records: readonly TrainingRecord[]): {
   observations: Float32Array[]
   policyTargets: Float32Array[]
   masks: Float32Array[]
-  valueTargets: number[]
+  outcomeTargets: Float32Array[]
 } {
   const observations: Float32Array[] = new Array(records.length)
   const policyTargets: Float32Array[] = new Array(records.length)
   const masks: Float32Array[] = new Array(records.length)
-  const valueTargets: number[] = new Array(records.length)
+  const outcomeTargets: Float32Array[] = new Array(records.length)
 
   for (let i = 0; i < records.length; i++) {
     const r = records[i]
     observations[i] = r.obs
-    valueTargets[i] = r.z
+    outcomeTargets[i] = r.outcomeTarget
 
     const pi = new Float32Array(SEATS)
     if (r.pi) {
@@ -251,7 +252,7 @@ export function recordsToBatchInputs(records: readonly TrainingRecord[]): {
     masks[i] = mask
   }
 
-  return { observations, policyTargets, masks, valueTargets }
+  return { observations, policyTargets, masks, outcomeTargets }
 }
 
 /**

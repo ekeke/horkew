@@ -1,10 +1,11 @@
 import type { HeadName } from '../mcts/nn.ts'
 import type { RootObs } from './observation.ts'
+import { OUTCOME_INDEX, OUTCOME_DIST_SIZE, type FinalOutcome } from '../network/config.ts'
 
 /**
  * 1 意思決定点で buffer に蓄積するレコード。
  *
- * MCTS-π head (vote/attack/divine/guard) で visits + pi を持つ。CE(π) + MSE(z) で学習。
+ * MCTS-π head で visits + pi を持つ。CE(π) policy loss + CE(outcome 分布) value loss で学習。
  */
 export type PendingRecord = {
   obs: RootObs
@@ -14,15 +15,19 @@ export type PendingRecord = {
   alive: number
   /** この記録が学習すべき head 名。trainer が head ごとに分割 */
   headName: HeadName
-  /** action (対象 seat) → visit 数 */
+  /** action → visit 数 (action ID 空間は phase ごとに異なる) */
   visits: Map<number, number>
   /** 正規化済み policy target π = N(a) / Σ N(b) */
   pi: Map<number, number>
 }
 
 export type TrainingRecord = PendingRecord & {
-  /** ゲーム終了時に貼られる value target [-1.3, +1] (faction 視点) */
-  z: number
+  /**
+   * 終局 outcome の one-hot Float32Array (size = OUTCOME_DIST_SIZE = 4)。
+   * 順序は network/config.ts の OUTCOME_ORDER。Stage 4: outcome distribution head の
+   * categorical CE loss target として使う。陣営非依存 (3 陣営どれでも同じレコードから学べる)。
+   */
+  outcomeTarget: Float32Array
 }
 
 /**
@@ -42,10 +47,18 @@ export class TrainingBuffer {
     this.pending.push(rec)
   }
 
-  /** ゲーム終了時に呼び出し、pending records に z を貼って finalized へ移送 */
-  finalize(z: number): void {
+  /**
+   * ゲーム終了時に呼び出し、pending records に outcome one-hot を貼って finalized へ移送。
+   *
+   * @param outcome 終局結果。OUTCOME_ORDER に含まれない (例: 'ongoing') 場合は uniform に
+   *   フォールバック (理論上発生しないが安全側)。
+   */
+  finalize(outcome: FinalOutcome): void {
+    const target = outcomeOneHot(outcome)
     for (const p of this.pending) {
-      this.finalized.push({ ...p, z })
+      // 各 record で独立した Float32Array を持たせる (mutate 防止)
+      const t = new Float32Array(target)
+      this.finalized.push({ ...p, outcomeTarget: t })
     }
     this.pending = []
   }
@@ -94,4 +107,13 @@ export class TrainingBuffer {
     this.pending = []
     this.finalized.length = 0
   }
+}
+
+/** FinalOutcome → one-hot Float32Array (size = OUTCOME_DIST_SIZE) */
+export function outcomeOneHot(outcome: FinalOutcome): Float32Array {
+  const out = new Float32Array(OUTCOME_DIST_SIZE)
+  const idx = OUTCOME_INDEX.get(outcome)
+  if (idx !== undefined) out[idx] = 1
+  // OUTCOME_ORDER に無い outcome (例: 'ongoing') はゼロのまま (理論上 finalize 時に来ない前提)
+  return out
 }

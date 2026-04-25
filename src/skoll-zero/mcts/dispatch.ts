@@ -217,23 +217,7 @@ function lowestSeat(mask: number): number {
   return 31 - Math.clz32(bit)
 }
 
-/**
- * faction 変換: actor faction で得た value を decision faction で評価する value に変換。
- *
- * 3 陣営 ゲームでは「actor 視点の +1」が「decision 視点の何になるか」を決める。
- * 現時点 (Stage 2 暫定) は単純な符号変換:
- * - 同一 faction → そのまま
- * - 異 faction → 符号反転 (zero-sum 近似)
- *
- * Stage 4 で per-phase faction 動的切替に拡張する際、ここを「世界・状態を見た正確な変換」に
- * 置換する。
- */
-export function convertValueAcrossFaction(
-  value: number,
-  actorFaction: 'village' | 'wolf' | 'hamster',
-  decisionFaction: 'village' | 'wolf' | 'hamster',
-): number {
-  if (actorFaction === decisionFaction) return value
-  // 異 faction: 単純な符号反転 (Stage 2 暫定)
-  return -value
-}
+// Stage 4: convertValueAcrossFaction は廃止。
+// NN は陣営非依存の outcome distribution を直接出力するため、actor/decision
+// faction 間の変換は不要になった。代わりに ISMCTS.ts の
+// `outcomeDistToFactionValue(dist, faction)` を使う。

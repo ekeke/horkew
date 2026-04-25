@@ -146,12 +146,12 @@ export class MultiSkollZeroTrainer {
           let stepLoss = 0, stepPolicyLoss = 0, stepValueLoss = 0, headsTrained = 0
           for (const [headName, bucket] of groups) {
             if (bucket.length === 0) continue
-            const { observations, policyTargets, masks, valueTargets } = recordsToBatchInputs(bucket)
+            const { observations, policyTargets, masks, outcomeTargets } = recordsToBatchInputs(bucket)
             const res = slot.tfNet.trainMasonZero({
               observations,
               policyTargets,
               masks,
-              valueTargets,
+              outcomeTargets,
               valueCoeff: this.config.valueCoeff,
               headName,
             })

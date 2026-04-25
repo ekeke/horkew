@@ -13,6 +13,7 @@ import { MasonRoleAgent } from './mason-zero-agent.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import type { MCTSConfig } from '../mcts/ISMCTS.ts'
 import { outcomeToMasonValue } from '../mcts/ISMCTS.ts'
+import type { FinalOutcome } from '../network/config.ts'
 
 /** Phase 1 デフォルト配役 (bb-eval.ts と同じ 14 席構成) */
 export const DEFAULT_ROLES: Map<SystemRole, number> = new Map<SystemRole, number>([
@@ -88,12 +89,12 @@ export async function runSelfPlayGame(config: SelfPlayConfig): Promise<SelfPlayR
   )
 
   const result = gameResult.state.result
-  const z = outcomeFromResult(result)
-  buffer.finalize(z)
+  const outcome = gameOutcomeFromResult(result)
+  buffer.finalize(outcome)
 
   return {
     result,
-    z,
+    z: outcomeToMasonValue(outcome),
     recordsAdded: buffer.size() - initialSize,
     mctsCalls: masonAgent.mctsCalls,
     fallbackCalls: masonAgent.fallbackCalls,
@@ -101,17 +102,16 @@ export async function runSelfPlayGame(config: SelfPlayConfig): Promise<SelfPlayR
 }
 
 /**
- * GameResult を mason 視点 value に変換。
- * lupa の `villager_won` / `werewolf_won` / `werehamster_won` / `draw` を
- * skoll-zero の outcomeToMasonValue 範囲にマップ。
+ * lupa の GameResult を hati GameOutcome (skoll-zero の OUTCOME_ORDER と整合) に変換。
+ * 'draw' は OUTCOME_ORDER に含まれるのでそのまま採用 (Stage 4 では outcomeTarget で one-hot)。
  */
-function outcomeFromResult(result: GameResult): number {
+function gameOutcomeFromResult(result: GameResult): FinalOutcome {
   switch (result) {
-    case 'villager_won': return outcomeToMasonValue('village_win')
-    case 'werewolf_won': return outcomeToMasonValue('wolf_win')
-    case 'werehamster_won': return outcomeToMasonValue('hamster_win')
-    case 'draw': return -0.5  // reward.ts と整合
-    default: return 0
+    case 'villager_won': return 'village_win'
+    case 'werewolf_won': return 'wolf_win'
+    case 'werehamster_won': return 'hamster_win'
+    case 'draw': return 'draw'
+    default: return 'draw'
   }
 }
 

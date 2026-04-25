@@ -15,12 +15,16 @@ function zeroObs(): Float32Array {
 }
 
 describe('MasonZeroNetwork: 基本 forward', () => {
-  it('forward が policy Map + value scalar を返す', () => {
+  it('forward が policy Map + outcomeDist (4-vec, sum=1) を返す', () => {
     const net = new MasonZeroNetwork()
     const state = createSimState({} as any, aliveOf([1, 2, 3, 4, 5]))
     const out = net.forward(zeroObs(), state, 1)
     assert.ok(out.policy instanceof Map)
-    assert.equal(typeof out.value, 'number')
+    assert.ok(out.outcomeDist instanceof Float32Array, 'outcomeDist is Float32Array')
+    assert.equal(out.outcomeDist.length, 4, 'outcomeDist size = 4')
+    let sum = 0
+    for (const p of out.outcomeDist) sum += p
+    assert.ok(Math.abs(sum - 1) < 1e-5, `outcomeDist sums to 1 (got ${sum})`)
   })
 
   it('合法 action のみが policy Map に入る（mason 自席と dead は除外）', () => {
@@ -40,11 +44,13 @@ describe('MasonZeroNetwork: 基本 forward', () => {
     assert.ok(Math.abs(sum - 1) < 1e-5, `policy 合計 = 1 (実測 ${sum})`)
   })
 
-  it('value head zero init → 初回 forward の value === 0', () => {
+  it('outcomeDist は softmax 済 (各要素 [0,1])', () => {
     const net = new MasonZeroNetwork()
     const state = createSimState({} as any, aliveOf([1, 2, 3, 4, 5]))
     const out = net.forward(zeroObs(), state, 1)
-    assert.equal(out.value, 0, 'value head zero init → tanh(0) = 0')
+    for (const p of out.outcomeDist) {
+      assert.ok(p >= 0 && p <= 1, `outcomeDist element in [0,1]: ${p}`)
+    }
   })
 
   it('全席生存 → policy Map.size = 13 (mason 自席のみ除外)', () => {

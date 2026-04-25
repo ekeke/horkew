@@ -13,16 +13,19 @@ export type RootObservation = Float32Array
 /**
  * mason_zero NN の interface。M3 で本物の NN に差し替え可能。
  *
- * - `policy`: action (vote 先 seat) → prior probability。合計は 1 想定
- * - `value`: mason 視点の状態価値 [-1, +1]
+ * - `policy`: action → prior probability。合計は 1 想定
+ * - `outcomeDist`: 終局 outcome の確率分布 (Stage 4)。
+ *   配列順は OUTCOME_ORDER (network/config.ts) で定義。skoll-zero では
+ *   [P_village_win, P_wolf_win, P_hamster_win, P_draw] の 4-vec。
+ *   value scalar への変換は ISMCTS 側で `outcomeDistToFactionValue` を使う。
  *
  * `rootObs` は MCTS 開始時にキャプチャ、rollout 中は固定。
  * `state.world` は determinized world（ISMCTS の rollout ごとに変わる）。
- * NN は root 観測で policy/value を評価、state は legal action mask にのみ使う。
+ * NN は root 観測で policy/outcomeDist を評価、state は legal action mask にのみ使う。
  */
 export type NNOutput = {
   policy: Map<number, number>
-  value: number
+  outcomeDist: Float32Array
 }
 
 /**
@@ -62,10 +65,10 @@ export interface MasonZeroNN {
 }
 
 /**
- * Dummy NN: uniform policy（全合法 action に等確率）+ value 0。
+ * Dummy NN: uniform policy（全合法 action に等確率）+ uniform outcome distribution。
  *
  * M2 では本物 NN がないので、UCB の探索項のみで木が広がる。
- * value=0 は「中立評価」を意味し、終端まで到達した rollout だけが backup
+ * outcomeDist は均等 (1/4) で「中立評価」、終端まで到達した rollout だけが backup
  * で確かな信号を返す。
  *
  * rootObs / headName は無視（DummyNN は観測と head に依存しない）。
@@ -80,11 +83,19 @@ export class DummyNN implements MasonZeroNN {
       candidates.push(31 - Math.clz32(bit))
       mask ^= bit
     }
-    if (candidates.length === 0) return { policy, value: 0 }
+    const outcomeDist = uniformOutcomeDist()
+    if (candidates.length === 0) return { policy, outcomeDist }
     const p = 1 / candidates.length
     for (const c of candidates) policy.set(c, p)
-    return { policy, value: 0 }
+    return { policy, outcomeDist }
   }
+}
+
+/** 均等な outcome distribution (4 outcomes、各 0.25) — DummyNN や fallback 用 */
+export function uniformOutcomeDist(): Float32Array {
+  const dist = new Float32Array(4)
+  dist.fill(0.25)
+  return dist
 }
 
 /** 生存非自席を全列挙（dummy NN と一致する legal action 集合） */

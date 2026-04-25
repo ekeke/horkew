@@ -31,7 +31,8 @@ function makeRecord(opts: {
   masonSeat: number
   alive: number
   pi: Map<number, number>
-  z: number
+  /** outcome (Stage 4: outcomeTarget one-hot に変換)。指定しなければ 'village_win' */
+  outcome?: 'village_win' | 'wolf_win' | 'hamster_win' | 'draw'
   day?: number
   rng?: () => number
   headName?: TrainingRecord['headName']
@@ -41,8 +42,11 @@ function makeRecord(opts: {
   const rng = opts.rng ?? Math.random
   for (let i = 0; i < inputSize; i++) obs[i] = (rng() - 0.5) * 0.1
   const visits = new Map<number, number>()
-  // 簡易: pi と同じ分布で visits も埋める (計100 visits)
   for (const [seat, p] of opts.pi) visits.set(seat, Math.round(p * 100))
+  // Stage 4: outcomeTarget は OUTCOME_ORDER の one-hot
+  const outcomeTarget = new Float32Array(4)
+  const outcomeIdx = { village_win: 0, wolf_win: 1, hamster_win: 2, draw: 3 }[opts.outcome ?? 'village_win']
+  outcomeTarget[outcomeIdx] = 1
   return {
     obs,
     visits,
@@ -50,7 +54,7 @@ function makeRecord(opts: {
     day: opts.day ?? 1,
     masonSeat: opts.masonSeat,
     alive: opts.alive,
-    z: opts.z,
+    outcomeTarget,
     headName: opts.headName ?? 'execute',
   }
 }
@@ -59,6 +63,13 @@ function aliveOf(seats: number[]): number {
   let mask = 0
   for (const s of seats) mask |= (1 << s)
   return mask
+}
+
+/** Stage 4: outcomeTarget one-hot 4-vec を index で組み立てるヘルパー */
+function oneHot(idx: number): Float32Array {
+  const out = new Float32Array(4)
+  if (idx >= 0 && idx < 4) out[idx] = 1
+  return out
 }
 
 /** 簡易 deterministic RNG */
@@ -75,28 +86,25 @@ function makeRng(seed: number): () => number {
 }
 
 describe('recordsToBatchInputs', () => {
-  it('visits Map → dense Float32Array (illegal seats = -1e9 in mask)', () => {
+  it('visits Map → dense Float32Array + outcomeTarget one-hot 4-vec', () => {
     const rec = makeRecord({
       masonSeat: 3,
-      alive: aliveOf([1, 2, 3, 4, 5]),  // seat 3 は mason 自身
+      alive: aliveOf([1, 2, 3, 4, 5]),
       pi: new Map([[1, 0.5], [4, 0.3], [5, 0.2]]),
-      z: 1.0,
+      outcome: 'village_win',
     })
-    const { policyTargets, masks, valueTargets } = recordsToBatchInputs([rec])
+    const { policyTargets, masks, outcomeTargets } = recordsToBatchInputs([rec])
     assert.equal(policyTargets.length, 1)
     assert.equal(policyTargets[0].length, 14)
     assert.equal(masks[0].length, 14)
 
-    // pi が正しくセットされているか (seat s は index s-1)。Float32 なので近似比較
     const approxEq = (a: number, b: number, msg: string) =>
       assert.ok(Math.abs(a - b) < 1e-6, `${msg} (got ${a}, want ${b})`)
     approxEq(policyTargets[0][0], 0.5, 'seat 1 → idx 0')
     approxEq(policyTargets[0][3], 0.3, 'seat 4 → idx 3')
     approxEq(policyTargets[0][4], 0.2, 'seat 5 → idx 4')
-    // pi に入ってない seat は 0
     assert.equal(policyTargets[0][1], 0, 'seat 2 not in pi → 0')
 
-    // mask: seat 1,2,4,5 legal (= 0)、seat 3 (mason), 6..14 illegal (= -1e9)
     assert.equal(masks[0][0], 0, 'seat 1 legal')
     assert.equal(masks[0][1], 0, 'seat 2 legal')
     assert.equal(masks[0][2], -1e9, 'seat 3 = mason self, illegal')
@@ -105,7 +113,12 @@ describe('recordsToBatchInputs', () => {
     assert.equal(masks[0][5], -1e9, 'seat 6 dead, illegal')
     assert.equal(masks[0][13], -1e9, 'seat 14 dead, illegal')
 
-    assert.equal(valueTargets[0], 1.0)
+    // Stage 4: outcomeTarget は OUTCOME_ORDER の one-hot
+    assert.equal(outcomeTargets[0].length, 4)
+    assert.equal(outcomeTargets[0][0], 1, 'village_win → idx 0')
+    assert.equal(outcomeTargets[0][1], 0)
+    assert.equal(outcomeTargets[0][2], 0)
+    assert.equal(outcomeTargets[0][3], 0)
   })
 })
 
@@ -121,12 +134,12 @@ describe('SkollZeroTrainer', () => {
         masonSeat: 1,
         alive: aliveOf([1, 2, 3, 4, 5]),
         pi: new Map([[2, 0.4], [3, 0.3], [4, 0.2], [5, 0.1]]),
-        z: 1.0,
+        outcome: 'village_win',
         rng,
       })
       buffer.appendPending(rec)
     }
-    buffer.finalize(1.0)
+    buffer.finalize('village_win')
 
     const trainer = new SkollZeroTrainer({
       masonZeroNet,
@@ -154,11 +167,11 @@ describe('SkollZeroTrainer', () => {
         masonSeat: 1,
         alive: aliveOf([1, 2, 3, 4, 5]),
         pi: new Map([[2, 0.7], [3, 0.1], [4, 0.1], [5, 0.1]]),
-        z: 1.0,
+        outcome: 'village_win',
         rng,
       }))
     }
-    buffer.finalize(1.0)
+    buffer.finalize('village_win')
 
     const trainer = new SkollZeroTrainer({
       masonZeroNet,
@@ -188,11 +201,11 @@ describe('SkollZeroTrainer', () => {
         masonSeat: 1,
         alive: aliveOf([1, 2, 3, 4, 5]),
         pi: new Map([[2, 0.5], [3, 0.5]]),
-        z: 1.0,
+        outcome: 'village_win',
         rng,
       }))
     }
-    buffer.finalize(1.0)
+    buffer.finalize('village_win')
     const trainer = new SkollZeroTrainer({
       masonZeroNet, tfNet, buffer,
       config: { ...DEFAULT_SKOLL_ZERO_TRAIN_CONFIG, batchSize: 4, rngSeed: 13 },
@@ -251,7 +264,7 @@ describe('groupRecordsByHead', () => {
       day: 1,
       masonSeat: 1,
       alive: 0b111110,
-      z: 0,
+      outcomeTarget: new Float32Array([1, 0, 0, 0]),
       headName,
     })
     const records: TrainingRecord[] = [
@@ -297,7 +310,7 @@ describe('trainMasonZero: multi-head 分離学習', () => {
       observations: [obs, obs, obs, obs],
       policyTargets: [pi, pi, pi, pi],
       masks: [mask, mask, mask, mask],
-      valueTargets: [1, 1, 1, 1],
+      outcomeTargets: [oneHot(0), oneHot(0), oneHot(0), oneHot(0)],
       valueCoeff: 1.0,
       headName: 'attack',
     })
@@ -309,7 +322,7 @@ describe('trainMasonZero: multi-head 分離学習', () => {
       observations: [obs, obs, obs, obs],
       policyTargets: [pi, pi, pi, pi],
       masks: [mask, mask, mask, mask],
-      valueTargets: [1, 1, 1, 1],
+      outcomeTargets: [oneHot(0), oneHot(0), oneHot(0), oneHot(0)],
       valueCoeff: 1.0,
       headName: 'execute',
     })
@@ -338,7 +351,7 @@ describe('trainMasonZero: multi-head 分離学習', () => {
         observations: [obs, obs],
         policyTargets: [pi, pi],
         masks: [mask, mask],
-        valueTargets: [0.5, 0.5],
+        outcomeTargets: [oneHot(0), oneHot(0)],
         valueCoeff: 1.0,
         headName,
       })
@@ -360,7 +373,7 @@ describe('trainMasonZero: multi-head 分離学習', () => {
       observations: [obs],
       policyTargets: [pi],
       masks: [mask],
-      valueTargets: [0],
+      outcomeTargets: [oneHot(0)],
       headName: 'attack',
     }), /head 'attack' not found/)
     tfNet.dispose()
