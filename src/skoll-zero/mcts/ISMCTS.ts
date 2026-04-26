@@ -557,13 +557,27 @@ function collectRootVisits(root: TreeNode): Map<number, number> {
 export type Faction = 'village' | 'wolf' | 'hamster'
 
 /**
- * outcome → 指定 faction 視点の value [-1.3, +1]。
+ * outcome → 指定 faction 視点の value [-2.5, +1]。
  *
- * 各陣営の視点で「自陣営勝ち = +1」「他 2 陣営のうち最悪 = -1.3」「引き分け / ongoing = 0」。
- * reward.ts と整合 (village 視点で hamster_win が最悪という慣例)。
+ * | outcome \ faction | village | wolf | hamster |
+ * |-------------------|--------:|-----:|--------:|
+ * | village_win       |    +1.0 | -1.0 |    -1.0 |
+ * | wolf_win          |    -1.0 | +1.0 |    -1.0 |
+ * | hamster_win       |    -2.5 | -1.5 |    +1.0 |
+ * | draw / ongoing    |     0   |   0  |       0 |
  *
- * Stage 4: 'draw' (FinalOutcome) と 'ongoing' (GameOutcome) の両方を受けるため
- * 引数型を広げる。両者とも 0 にマップされる。
+ * 設計: normal skoll (`world-analysis.ts` の `FOX_WIN_PENALTY` および
+ * `wolf-attack-analysis.ts` の `WOLF_FOX_WIN_PENALTY`) の思想を移植。
+ *
+ * - 村は狐排除を強く優先 (差 1.5: wolf_win=-1.0 → hamster_win=-2.5)
+ * - 狼は狐排除を「やや」優先 (差 0.5: village_win=-1.0 → hamster_win=-1.5)。
+ *   狼を村より弱いペナルティにすることで、狼が本職 (噛み) を放棄して
+ *   狐排除に執着する局所最適を防ぐ
+ * - 狐視点は対称的に他 2 陣営勝ち = -1.0 (狐自身は脅威評価が不要)
+ * - draw/ongoing は中立 0
+ *
+ * Stage 4: 'draw' (FinalOutcome) と 'ongoing' (GameOutcome) の両方を受ける。
+ * tanh range 制限は無く (outcome dist の dot product なので)、-2.5 でも安定。
  */
 export function outcomeToValue(
   outcome: GameOutcome | 'draw' | null,
@@ -572,11 +586,11 @@ export function outcomeToValue(
   if (outcome == null) return 0
   switch (faction) {
     case 'village':
-      return outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.0 : outcome === 'hamster_win' ? -1.3 : 0
+      return outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.0 : outcome === 'hamster_win' ? -2.5 : 0
     case 'wolf':
-      return outcome === 'wolf_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'hamster_win' ? -1.3 : 0
+      return outcome === 'wolf_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'hamster_win' ? -1.5 : 0
     case 'hamster':
-      return outcome === 'hamster_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'wolf_win' ? -1.3 : 0
+      return outcome === 'hamster_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'wolf_win' ? -1.0 : 0
   }
 }
 

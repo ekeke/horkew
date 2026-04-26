@@ -197,17 +197,17 @@ describe('outcomeDistToFactionValue (Stage 4)', () => {
     assert.equal(outcomeDistToFactionValue(dist, 'wolf'), -1)
     assert.equal(outcomeDistToFactionValue(dist, 'hamster'), -1)
   })
-  it('hamster_win=1 確定なら 3 陣営とも整合 (village -1.3, wolf -1.3, hamster +1)', () => {
+  it('hamster_win=1 確定なら 3 陣営とも整合 (village -2.5, wolf -1.5, hamster +1)', () => {
     const dist = new Float32Array([0, 0, 1, 0])
-    // outcomeToValue('hamster_win', 'village') = -1.3, ('hamster_win', 'wolf') = -1.3, ('hamster_win', 'hamster') = 1
-    assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'village') - (-1.3)) < 1e-6)
-    assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'wolf') - (-1.3)) < 1e-6)
+    // Stage 5: village 視点 -2.5 (狐排除を強く優先)、wolf 視点 -1.5 (狐執着を抑制)
+    assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'village') - (-2.5)) < 1e-6)
+    assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'wolf') - (-1.5)) < 1e-6)
     assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'hamster') - 1) < 1e-6)
   })
-  it('uniform 0.25 では各 faction の期待値は同じ outcomeToValue 平均と一致', () => {
+  it('uniform 0.25 では各 faction の期待値は outcomeToValue 平均と一致', () => {
     const dist = new Float32Array([0.25, 0.25, 0.25, 0.25])
-    // village 視点: 0.25*(1) + 0.25*(-1) + 0.25*(-1.3) + 0.25*(0) = -0.325
-    assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'village') - (-0.325)) < 1e-6)
+    // village 視点: 0.25*(1) + 0.25*(-1) + 0.25*(-2.5) + 0.25*(0) = -0.625
+    assert.ok(Math.abs(outcomeDistToFactionValue(dist, 'village') - (-0.625)) < 1e-6)
   })
   it('undefined dist で 0 を返す (fallback)', () => {
     assert.equal(outcomeDistToFactionValue(undefined, 'village'), 0)

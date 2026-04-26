@@ -83,10 +83,10 @@ function makeBundle(): ModuleBundle {
 }
 
 describe('outcomeToMasonValue', () => {
-  it('村勝 +1, 狼勝 -1, 狐勝 -1.3, ongoing 0', () => {
+  it('村勝 +1, 狼勝 -1, 狐勝 -2.5, ongoing 0 (Stage 5: 狐ペナルティ強化)', () => {
     assert.equal(outcomeToMasonValue('village_win'), 1.0)
     assert.equal(outcomeToMasonValue('wolf_win'), -1.0)
-    assert.equal(outcomeToMasonValue('hamster_win'), -1.3)
+    assert.equal(outcomeToMasonValue('hamster_win'), -2.5)
     assert.equal(outcomeToMasonValue('ongoing'), 0)
     assert.equal(outcomeToMasonValue(null), 0)
   })
