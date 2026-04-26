@@ -50,7 +50,7 @@ export class VillageRoleAgent extends SkollZeroRoleAgent {
   }
 
   private proposeNight(ctx: DecisionContext, mode: 'divine' | 'guard'): NightAction {
-    const r = this.module.proposeNightAction(ctx, mode)
+    const r = this.module.proposeNightAction(ctx, mode, this.proposeOpts())
     if (!r) return super.decideNightAction(ctx)
     const target = this.selectionMode === 'argmax'
       ? argmaxFromVisits(r.visits)
@@ -77,7 +77,7 @@ export class WolfRoleAgent extends SkollZeroRoleAgent {
    * Retar 無効 / Determinizer overflow 時は super (heuristic) に委譲。
    */
   override decideNightAction(ctx: DecisionContext): NightAction {
-    const r = this.module.proposeNightAction(ctx, 'attack')
+    const r = this.module.proposeNightAction(ctx, 'attack', this.proposeOpts())
     if (!r) return super.decideNightAction(ctx)
     const target = this.selectionMode === 'argmax'
       ? argmaxFromVisits(r.visits)

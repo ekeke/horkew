@@ -22,6 +22,7 @@ import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import type { MCTSConfig, MCTSResult } from '../mcts/ISMCTS.ts'
+import type { ModuleBundle } from '../mcts/dispatch.ts'
 import type { TrainingBuffer } from './buffer.ts'
 import { argmaxFromVisits, sampleFromVisits } from './policy-utils.ts'
 import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
@@ -57,6 +58,11 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
   protected readonly module: SkollZeroModule
   /** 行動選択モード */
   protected readonly selectionMode: 'sample' | 'argmax'
+  /**
+   * cross-module dispatch 用 ModuleBundle (multi-runner が注入)。
+   * 未注入時は base-module が singletonBundle にフォールバック (Stage 1 互換)。
+   */
+  protected bundle: ModuleBundle | undefined
 
   constructor(module: SkollZeroModule, selectionMode: 'sample' | 'argmax' = 'sample') {
     super({})
@@ -74,10 +80,25 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
     return this.module.lastMCTSResult
   }
 
+  /** 内部 Module を返す (multi-runner が ModuleBundle 構築時に取り出す) */
+  getModule(): SkollZeroModule {
+    return this.module
+  }
+
+  /** cross-module dispatch 用 ModuleBundle を注入する (multi-runner が呼ぶ) */
+  setBundle(bundle: ModuleBundle): void {
+    this.bundle = bundle
+  }
+
+  /** propose* に渡す opts。bundle 注入済なら載せる、未注入なら undefined */
+  protected proposeOpts(): { bundle: ModuleBundle } | undefined {
+    return this.bundle ? { bundle: this.bundle } : undefined
+  }
+
   // ========== lupa decide\* interface ==========
 
   override decideVote(ctx: DecisionContext): number {
-    const result = this.module.proposeVote(ctx)
+    const result = this.module.proposeVote(ctx, this.proposeOpts())
     if (!result) return super.decideVote(ctx)
     return this.selectionMode === 'argmax'
       ? argmaxFromVisits(result.visits)

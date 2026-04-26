@@ -186,6 +186,14 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     }
 
     const possibilities = buildPossibilitiesFromRetar(ctx.globalRetarPossibilities, this.setup)
+    // viewer 自身の seat-role は無条件で assumption に入れる (memory:
+    // feedback_viewer_role_assumption)。これを忘れると determinizer が viewer 役職と
+    // 矛盾する世界を sample し、`night_guard` 等 actor 不在の世界が混じって advancePhase
+    // が次 phase へ skip → root が想定外 phase で expand される。
+    if (!possibilities.fixRole(ctx.mySeat, ctx.myRole)) {
+      this.fallbackCalls++
+      return null
+    }
     const determinizer = new Determinizer(possibilities, this.setup, this.determinizerMaxWorlds)
     if (determinizer.isOverflow() || determinizer.size() === 0) {
       this.fallbackCalls++

@@ -32,6 +32,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { FinalOutcome } from '../network/config.ts'
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import type { Faction, MCTSResult } from '../mcts/ISMCTS.ts'
+import type { ModuleBundle } from '../mcts/dispatch.ts'
 import type { HeadName, NNOutput } from '../mcts/nn.ts'
 import type { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { RootObs } from '../selfplay/observation.ts'
@@ -63,19 +64,24 @@ export interface SkollZeroModule {
    * - retar 無効 / determinizer overflow 時は null を返す (Agent は heuristic にフォールバック)
    * - record=true (default) なら buffer に (obs, visits, π) を 'execute' head で蓄積
    * - record=false なら buffer に書かない (eval モード用)
+   * - bundle: Stage 3+ の cross-module dispatch 用。省略時は singletonBundle にフォールバック (Stage 1 互換)
    */
-  proposeVote(ctx: DecisionContext, opts?: { record?: boolean }): McctsProposal | null
+  proposeVote(
+    ctx: DecisionContext,
+    opts?: { record?: boolean, bundle?: ModuleBundle },
+  ): McctsProposal | null
 
   /**
    * 夜行動 (占い / 護衛 / 噛み) を ISMCTS で提案。
    *
    * mode は 'divine' (seer) / 'guard' (bodyguard) / 'attack' (wolf)。
    * 対応する head (divine/guard/attack) に buffer 蓄積する。
+   * bundle: cross-module dispatch 用 (proposeVote と同じ)。
    */
   proposeNightAction(
     ctx: DecisionContext,
     mode: 'divine' | 'guard' | 'attack',
-    opts?: { record?: boolean },
+    opts?: { record?: boolean, bundle?: ModuleBundle },
   ): McctsProposal | null
 
   /**

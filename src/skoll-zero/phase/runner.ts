@@ -24,11 +24,13 @@ import {
   createSkollZeroNetwork,
   createStandardZeroNetwork,
   createWolfZeroNetwork,
+  createFanaticZeroNetwork,
 } from '../network/config.ts'
 import {
   createSkollZeroTfNetwork,
   createStandardZeroTfNetwork,
   createWolfZeroTfNetwork,
+  createFanaticZeroTfNetwork,
 } from '../network/tf-config.ts'
 import { loadCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
@@ -103,7 +105,13 @@ function buildSlot(
   } else if (slotKey === 'wolf') {
     pureNet = createWolfZeroNetwork()
     tfNet = createWolfZeroTfNetwork(lr)
+  } else if (slotKey === 'fanatic') {
+    // FanaticIndividualModule.captureObs は encodeFanaticObservation (1197 dims、
+    // village_predict + village_trust 注入) を返すため、専用 NN config が必要。
+    pureNet = createFanaticZeroNetwork()
+    tfNet = createFanaticZeroTfNetwork(lr)
   } else {
+    // village / hamster / immoralist は individual obs (1029 dims)
     pureNet = createStandardZeroNetwork()
     tfNet = createStandardZeroTfNetwork(lr)
   }

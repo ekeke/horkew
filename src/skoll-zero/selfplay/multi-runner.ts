@@ -18,6 +18,7 @@ import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from '../../fenrir/src/adapters/full-adapter.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
 import { outcomeToValue, type Faction, type MCTSConfig } from '../mcts/ISMCTS.ts'
+import type { ModuleBundle } from '../mcts/dispatch.ts'
 import type { FinalOutcome } from '../network/config.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
 import { TrainingBuffer } from './buffer.ts'
@@ -164,6 +165,17 @@ export async function runMultiAgentSelfPlayGame(
     agentsBySlot.set(key, buildAgent(key, slot, roles, cfg))
     preSize.set(key, slot.buffer.size())
   }
+
+  // cross-module dispatch 用 ModuleBundle を構築して全 Agent に注入。
+  // SlotMap.village は ModuleBundle.standard に対応 (bucket 名差異)、他は同名。
+  const bundle: ModuleBundle = {}
+  const masonAgent = agentsBySlot.get('mason'); if (masonAgent) bundle.mason = masonAgent.getModule()
+  const villageAgent = agentsBySlot.get('village'); if (villageAgent) bundle.standard = villageAgent.getModule()
+  const wolfAgent = agentsBySlot.get('wolf'); if (wolfAgent) bundle.wolf = wolfAgent.getModule()
+  const fanaticAgent = agentsBySlot.get('fanatic'); if (fanaticAgent) bundle.fanatic = fanaticAgent.getModule()
+  const hamsterAgent = agentsBySlot.get('hamster'); if (hamsterAgent) bundle.hamster = hamsterAgent.getModule()
+  const immoralistAgent = agentsBySlot.get('immoralist'); if (immoralistAgent) bundle.immoralist = immoralistAgent.getModule()
+  for (const agent of agentsBySlot.values()) agent.setBundle(bundle)
 
   const agents = new Map<number, Agent>()
   const defaultAgent = new SkollMasterAgent()
