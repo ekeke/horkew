@@ -557,19 +557,21 @@ function collectRootVisits(root: TreeNode): Map<number, number> {
 export type Faction = 'village' | 'wolf' | 'hamster'
 
 /**
- * outcome → 指定 faction 視点の value [-2.5, +1]。
+ * outcome → 指定 faction 視点の value [-2.0, +1]。
  *
  * | outcome \ faction | village | wolf | hamster |
  * |-------------------|--------:|-----:|--------:|
  * | village_win       |    +1.0 | -1.0 |    -1.0 |
  * | wolf_win          |    -1.0 | +1.0 |    -1.0 |
- * | hamster_win       |    -2.5 | -1.5 |    +1.0 |
+ * | hamster_win       |    -2.0 | -1.5 |    +1.0 |
  * | draw / ongoing    |     0   |   0  |       0 |
  *
  * 設計: normal skoll (`world-analysis.ts` の `FOX_WIN_PENALTY` および
  * `wolf-attack-analysis.ts` の `WOLF_FOX_WIN_PENALTY`) の思想を移植。
  *
- * - 村は狐排除を強く優先 (差 1.5: wolf_win=-1.0 → hamster_win=-2.5)
+ * - 村は狐排除を優先 (差 1.0: wolf_win=-1.0 → hamster_win=-2.0)。
+ *   Stage 5 当初は -2.5 (差 1.5) だったが、30 round 学習で狼勝ち過剰
+ *   (村が狐排除に意識を向けすぎ狼警戒が落ちた疑い) のため -2.0 に緩和
  * - 狼は狐排除を「やや」優先 (差 0.5: village_win=-1.0 → hamster_win=-1.5)。
  *   狼を村より弱いペナルティにすることで、狼が本職 (噛み) を放棄して
  *   狐排除に執着する局所最適を防ぐ
@@ -577,7 +579,7 @@ export type Faction = 'village' | 'wolf' | 'hamster'
  * - draw/ongoing は中立 0
  *
  * Stage 4: 'draw' (FinalOutcome) と 'ongoing' (GameOutcome) の両方を受ける。
- * tanh range 制限は無く (outcome dist の dot product なので)、-2.5 でも安定。
+ * tanh range 制限は無く (outcome dist の dot product なので)、-2.0 でも安定。
  */
 export function outcomeToValue(
   outcome: GameOutcome | 'draw' | null,
@@ -586,7 +588,7 @@ export function outcomeToValue(
   if (outcome == null) return 0
   switch (faction) {
     case 'village':
-      return outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.0 : outcome === 'hamster_win' ? -2.5 : 0
+      return outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.0 : outcome === 'hamster_win' ? -2.0 : 0
     case 'wolf':
       return outcome === 'wolf_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'hamster_win' ? -1.5 : 0
     case 'hamster':
