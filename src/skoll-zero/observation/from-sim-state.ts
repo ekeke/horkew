@@ -25,7 +25,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { World } from '../../hati/types.ts'
 import { hasSeat, popCount32 } from '../../hati/types.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
-import { runRetarOnSimState, setupFromWorld } from './sim-state-to-vs.ts'
+import { runRetarOnSimState, setupFromWorld, simStateToVillageStatus } from './sim-state-to-vs.ts'
 import {
   collectObservation, packObservation, encodeCollectiveWolfObservation,
   encodeCollectiveMasonObservation, encodeFanaticObservation,
@@ -338,6 +338,56 @@ function mapOfSetsToRecord(
  * なる)。学習継続のため fallback で root snapshot を返す。
  */
 let warnedRetarFallback = false
+let debugDumpDone = false
+
+/**
+ * panic 時の SimState / VillageStatus を JSON で stderr に書き出す debug helper。
+ * 環境変数 RETAR_DEBUG_DUMP=1 で有効化。1 回だけ実行して止まる (大量 dump 回避)。
+ */
+function debugDumpOnPanic(
+  state: SimState,
+  viewerSeat: number | null,
+  viewerRole: SystemRole | null,
+  setup: Map<SystemRole, number>,
+  e: unknown,
+): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- node process global
+  const env = (globalThis as any).process?.env ?? {}
+  if (env.RETAR_DEBUG_DUMP !== '1' || debugDumpDone) return
+  debugDumpDone = true
+  const lines: string[] = ['=== Retar panic input dump ===']
+  lines.push(`error: ${e instanceof Error ? e.message : String(e)}`)
+  lines.push(`viewer: seat=${viewerSeat} role=${viewerRole}`)
+  lines.push(`day: ${state.day} phase: ${state.phase} alive: 0x${state.alive.toString(16)}`)
+  lines.push(`setup: ${JSON.stringify([...setup.entries()])}`)
+  lines.push(`claims: ${JSON.stringify([...state.claims.entries()])}`)
+  lines.push(`divineLog: ${JSON.stringify([...state.divineLog.entries()])}`)
+  lines.push(`fakeDivineHistory: ${JSON.stringify([...state.fakeDivineHistory.entries()])}`)
+  lines.push(`deathLog: ${JSON.stringify(state.deathLog)}`)
+  lines.push(`voteLog: ${JSON.stringify(state.voteLog)}`)
+  lines.push(`guardLog: ${JSON.stringify(state.guardLog)}`)
+  lines.push(`morningPending: ${JSON.stringify(state.morningPending)}`)
+  lines.push(`world.roles: ${JSON.stringify(state.world.roles)}`)
+  lines.push(`world.wolfMask: 0x${state.world.wolfMask.toString(16)}`)
+  lines.push(`world.hamsterMask: 0x${state.world.hamsterMask.toString(16)}`)
+  try {
+    const vs = simStateToVillageStatus(state)
+    lines.push(`vs.statuses: ${JSON.stringify([...vs.statuses.entries()].map(([k, v]) => [k, {
+      ...v,
+      actions: [...v.actions.entries()],
+      assertions: [...v.assertions.entries()],
+      forecasts: [...v.forecasts.entries()],
+    }]))}`)
+    lines.push(`vs.executions: ${JSON.stringify([...vs.executions.entries()])}`)
+    lines.push(`vs.kills: ${JSON.stringify([...vs.kills.entries()])}`)
+    lines.push(`vs.voteHistory: ${JSON.stringify([...vs.voteHistory.entries()])}`)
+    lines.push(`vs.claims: ${JSON.stringify([...vs.claims.entries()])}`)
+  } catch (vsErr) {
+    lines.push(`vs build failed: ${vsErr instanceof Error ? vsErr.message : String(vsErr)}`)
+  }
+  lines.push('=== end dump ===')
+  console.error(lines.join('\n'))
+}
 
 /**
  * viewer 視点の retarPossibilities を解決する。
@@ -357,6 +407,7 @@ function resolveSelfRetar(
   try {
     return runRetarOnSimState(state, setup, viewerSeat, viewerRole)
   } catch (e) {
+    debugDumpOnPanic(state, viewerSeat, viewerRole, setup, e)
     if (!warnedRetarFallback) {
       console.error(`[from-sim-state] Retar rollout failed, falling back to root snapshot: ${e instanceof Error ? e.message : String(e)}`)
       warnedRetarFallback = true
@@ -379,6 +430,7 @@ function resolveGlobalRetar(
   try {
     return runRetarOnSimState(state, setup)
   } catch (e) {
+    debugDumpOnPanic(state, null, null, setup, e)
     if (!warnedRetarFallback) {
       console.error(`[from-sim-state] Retar rollout failed, falling back to root snapshot: ${e instanceof Error ? e.message : String(e)}`)
       warnedRetarFallback = true

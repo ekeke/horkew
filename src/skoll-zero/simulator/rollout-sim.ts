@@ -28,6 +28,25 @@ export type PhaseAction =
   | { type: 'guard', target: number }
 
 const MASON_ROLE_ID = RoleBitIndex.mason
+
+/** 最大 seat 番号 (14 人村、seat 1..14)。target の range check に使う */
+const MAX_SEAT = 14
+
+/**
+ * 不正な action.target が来た時の警告 (panic を防ぐための defensive guard)。
+ * 上限を超えたら抑制する (大量出力回避)。
+ */
+let invalidTargetWarnCount = 0
+const INVALID_TARGET_WARN_LIMIT = 5
+function warnInvalidTarget(phase: string, target: number, context = ''): void {
+  if (invalidTargetWarnCount < INVALID_TARGET_WARN_LIMIT) {
+    console.error(`[stepPhase] invalid target out of seat range: phase=${phase} target=${target}${context ? ' ' + context : ''}`)
+    invalidTargetWarnCount++
+    if (invalidTargetWarnCount === INVALID_TARGET_WARN_LIMIT) {
+      console.error(`[stepPhase] further invalid target warnings suppressed (limit=${INVALID_TARGET_WARN_LIMIT})`)
+    }
+  }
+}
 const FANATIC_ROLE_ID = RoleBitIndex.fanatic
 
 /** roles 配列から指定 role の seat ビットマスクを構築 (mason / fanatic は World に直接 mask が無い) */
@@ -177,6 +196,10 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
       assertActionType(action, 'morning')
       // Stage 3: 1 step あたり 1 actor 分の report を処理。morningPending FIFO から消費。
       for (const r of action.reports) {
+        if (r.target < 1 || r.target > MAX_SEAT) {
+          warnInvalidTarget('morning', r.target, `seerSeat=${r.seerSeat}`)
+          continue
+        }
         const list = state.fakeDivineHistory.get(r.seerSeat) ?? []
         list.push({ day: state.day, target: r.target, color: r.color })
         state.fakeDivineHistory.set(r.seerSeat, list)
@@ -221,7 +244,7 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
     }
     case 'day': {
       assertActionType(action, 'execute')
-      if (action.target >= 0) {
+      if (action.target >= 1 && action.target <= MAX_SEAT) {
         const beforeAlive = state.alive
         state.alive = applyExecution(state.alive, action.target)
         state.deathLog.push({ day: state.day, seat: action.target, cause: 'execute' })
@@ -231,6 +254,8 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
         for (const seat of seatsFromMask(followMask)) {
           state.deathLog.push({ day: state.day, seat, cause: 'follow' })
         }
+      } else if (action.target >= 0) {
+        warnInvalidTarget('day', action.target)
       }
       const outcome = checkOutcome(state.world, state.alive)
       if (outcome !== 'ongoing') {
@@ -242,15 +267,29 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
     }
     case 'night_attack':
       assertActionType(action, 'attack')
-      state.pendingAttack = action.target
+      if (action.target >= 1 && action.target <= MAX_SEAT) {
+        state.pendingAttack = action.target
+      } else {
+        if (action.target >= 0) warnInvalidTarget('night_attack', action.target)
+        state.pendingAttack = null
+      }
       break
     case 'night_divine':
       assertActionType(action, 'divine')
-      if (action.target >= 0) state.pendingDivineTargets.push(action.target)
+      if (action.target >= 1 && action.target <= MAX_SEAT) {
+        state.pendingDivineTargets.push(action.target)
+      } else if (action.target >= 0) {
+        warnInvalidTarget('night_divine', action.target)
+      }
       break
     case 'night_guard': {
       assertActionType(action, 'guard')
-      state.pendingGuard = action.target >= 0 ? action.target : null
+      if (action.target >= 1 && action.target <= MAX_SEAT) {
+        state.pendingGuard = action.target
+      } else {
+        if (action.target >= 0) warnInvalidTarget('night_guard', action.target)
+        state.pendingGuard = null
+      }
       // 護衛履歴を log (真 bg 視点の私的情報)
       if (state.pendingGuard !== null) {
         state.guardLog.push({ day: state.day, target: state.pendingGuard })
