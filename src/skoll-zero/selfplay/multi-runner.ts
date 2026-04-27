@@ -13,7 +13,8 @@
 import type { SystemRole } from '../../types/index.ts'
 import type { Agent } from '../../fenrir/src/agents/agent.ts'
 import type { FenrirExtEvent } from '../../fenrir/src/events.ts'
-import type { GameHandlers } from '../../lupa/handlers.ts'
+import type { GameConfig, GameHandlers } from '../../lupa/handlers.ts'
+import type { GameEvent, GameState } from '../../lupa/types.ts'
 import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from '../../fenrir/src/adapters/full-adapter.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
@@ -57,6 +58,8 @@ export type MultiAgentSelfPlayConfig = {
   mctsConfig?: MCTSConfig
   selectionMode?: 'sample' | 'argmax'
   seed: number
+  /** true なら結果に events / state / config を乗せる (howl 出力等の診断用、学習中は false) */
+  collectGameRecord?: boolean
 }
 
 export type SlotStats = {
@@ -70,6 +73,12 @@ export type MultiAgentSelfPlayResult = {
   result: GameResult
   /** slot ごとの実行統計 (未設定の slot は undefined) */
   stats: Partial<Record<keyof SlotMap, SlotStats>>
+  /** collectGameRecord=true 時のみ。formatHowl(events, state, config) で howl 文字列に整形可能 */
+  record?: {
+    events: ReadonlyArray<GameEvent | FenrirExtEvent>
+    state: GameState
+    config: GameConfig
+  }
 }
 
 /** role → slot bucket mapping */
@@ -196,8 +205,9 @@ export async function runMultiAgentSelfPlayGame(
     },
   })
 
+  const gameConfig: GameConfig = { roles, seed: cfg.seed, hasFirstGhost: true }
   const gameResult = await runGame(
-    { roles, seed: cfg.seed, hasFirstGhost: true },
+    gameConfig,
     handlers as unknown as GameHandlers<FenrirExtEvent>,
   )
   const result = gameResult.state.result
@@ -220,7 +230,15 @@ export async function runMultiAgentSelfPlayGame(
     }
   }
 
-  return { result, stats }
+  const out: MultiAgentSelfPlayResult = { result, stats }
+  if (cfg.collectGameRecord) {
+    out.record = {
+      events: gameResult.events,
+      state: gameResult.state,
+      config: gameConfig,
+    }
+  }
+  return out
 }
 
 /** N ゲーム連続実行 (並列化なし) */
