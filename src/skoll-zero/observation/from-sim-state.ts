@@ -25,6 +25,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { World } from '../../hati/types.ts'
 import { hasSeat, popCount32 } from '../../hati/types.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
+import { runRetarOnSimState, setupFromWorld } from './sim-state-to-vs.ts'
 import {
   collectObservation, packObservation, encodeCollectiveWolfObservation,
   encodeCollectiveMasonObservation, encodeFanaticObservation,
@@ -63,6 +64,13 @@ export type RolloutInvariants = {
   planIndices: number[] | null
   /** frozen 村 NN 出力 (wolf/fanatic 集団観測で使用、未指定時は 0 埋め) */
   villageNNOutput?: VillageNNOutput
+  /** 配役 (rollout 中の Retar 再呼び出しに使う、未指定なら world 由来で導出) */
+  setup?: Map<SystemRole, number>
+  /**
+   * true なら observation 生成時に毎回 SimState から Retar を再実行する。
+   * false (default) なら invariants.retarPossibilities / globalRetarPossibilities を root snapshot として使う。
+   */
+  recomputeRetarInRollout?: boolean
 }
 
 /** signal の per-seat 累積カウンター (`collectObservation` 由来) */
@@ -304,8 +312,8 @@ export function collectFromSimState(
     },
     history: Array.from(history),
     retar: {
-      self: mapOfSetsToRecord(invariants.retarPossibilities),
-      global: mapOfSetsToRecord(invariants.globalRetarPossibilities),
+      self: mapOfSetsToRecord(resolveSelfRetar(state, viewerSeat, viewerRole, invariants)),
+      global: mapOfSetsToRecord(resolveGlobalRetar(state, invariants)),
     },
     plan: {
       indices: invariants.planIndices,
@@ -322,6 +330,34 @@ function mapOfSetsToRecord(
   const rec: Record<string, SystemRole[]> = {}
   for (const [seat, roles] of map) rec[String(seat)] = [...roles]
   return rec
+}
+
+/**
+ * viewer 視点の retarPossibilities を解決する。
+ * `invariants.recomputeRetarInRollout` が true なら SimState から Retar 再実行、
+ * false なら invariants の root snapshot を使う。
+ */
+function resolveSelfRetar(
+  state: SimState,
+  viewerSeat: number,
+  viewerRole: SystemRole,
+  invariants: RolloutInvariants,
+): Map<number, Set<SystemRole>> | null {
+  if (!invariants.recomputeRetarInRollout) return invariants.retarPossibilities
+  const setup = invariants.setup ?? setupFromWorld(state.world)
+  return runRetarOnSimState(state, setup, viewerSeat, viewerRole)
+}
+
+/**
+ * 公開情報のみの globalRetarPossibilities を解決する。assumption 無し。
+ */
+function resolveGlobalRetar(
+  state: SimState,
+  invariants: RolloutInvariants,
+): Map<number, Set<SystemRole>> | null {
+  if (!invariants.recomputeRetarInRollout) return invariants.globalRetarPossibilities
+  const setup = invariants.setup ?? setupFromWorld(state.world)
+  return runRetarOnSimState(state, setup)
 }
 
 /** Phase (15 種) → CollectedObservation の phase ('day' | 'night') */

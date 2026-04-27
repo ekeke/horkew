@@ -198,6 +198,18 @@ export function buildInvariants(ctx: DecisionContext): RolloutInvariants {
     ropeMargin = remainingExecutions - ctx.maxSurvivingNV
   }
 
+  // 環境変数 SKOLLZ_ROLLOUT_RETAR=1 で MCTS rollout 中の Retar 再実行を有効化。
+  // 有効時は setup を ctx.gameState.players から集計してフリーズし、毎 expand で
+  // SimState 由来の VillageStatus に対して Retar を呼ぶ (from-sim-state.ts 経路)。
+  const recomputeRetarInRollout = process.env.SKOLLZ_ROLLOUT_RETAR === '1'
+  let setup: Map<SystemRole, number> | undefined
+  if (recomputeRetarInRollout) {
+    setup = new Map<SystemRole, number>()
+    for (const player of ctx.gameState.players) {
+      setup.set(player.role, (setup.get(player.role) ?? 0) + 1)
+    }
+  }
+
   return {
     signalCounts,
     retarPossibilities: ctx.retarPossibilities,
@@ -208,6 +220,8 @@ export function buildInvariants(ctx: DecisionContext): RolloutInvariants {
     demandWolfCoCount,
     planIndices: ctx.planIndices,
     villageNNOutput: undefined,
+    setup,
+    recomputeRetarInRollout,
   }
 }
 
