@@ -454,12 +454,11 @@ function resolveNight(
     }
   }
 
-  // 護衛先を取得
-  let guardTarget: number | null = null
+  // 護衛先を取得 (複数狩人がいる場合は全 guard を集約 — 各狩人の意思決定は独立)
+  const guardTargets = new Set<number>()
   for (const { action } of actions) {
     if (action.type === 'guard') {
-      guardTarget = action.target
-      break
+      guardTargets.add(action.target)
     }
   }
 
@@ -490,8 +489,8 @@ function resolveNight(
 
     if (target.role === 'werehamster') {
       // 妖狐は襲撃されても死なない
-    } else if (guardTarget === chosenTarget) {
-      // 護衛成功
+    } else if (guardTargets.has(chosenTarget)) {
+      // 護衛成功 (どれかの狩人が守っていれば成功)
     } else if (target.role === 'nekomata') {
       // 猫又襲撃: 猫又は死亡、襲撃した狼のうちランダム 1 匹を道連れ
       killPlayer(state, chosenTarget)

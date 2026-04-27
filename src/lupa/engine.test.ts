@@ -1,8 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { SystemRole } from '../types/index.ts'
-import type { LupaConfig } from './types.ts'
-import type { GameConfig } from './handlers.ts'
+import type { LupaConfig, GameState, NightAction } from './types.ts'
+import type { GameConfig, GameHandlers } from './handlers.ts'
 import { runGame } from './engine.ts'
 import { makeRandomHandlers } from './test-helpers.ts'
 import { formatHowl } from './format.ts'
@@ -136,6 +136,88 @@ describe('lupa engine', () => {
       const unknowns = result.statements.filter(s => s.type === 'unknown')
       assert.equal(unknowns.length, 0, `seed ${seed}: unknown: ${unknowns.map((s: any) => s.raw).join(', ')}`)
     }
+  })
+
+  it('複数狩人の guard が独立に効く (猫又バグと同質の不備リグレッション)', async () => {
+    // シナリオ:
+    //   狼 2 人 → villager[0] を同 target で attack (合計 2 票)
+    //   狩人 A → 別 seat (狩人 B 自身) を guard
+    //   狩人 B → villager[0] (= attack target) を guard
+    //
+    // 期待: 狩人 B の guard が有効で villager[0] は守られる → night_kill 0
+    // バグあり (最初の guard のみ採用): 狩人 A の guard が選ばれる
+    //   → guardTarget != attack target → villager[0] 死亡 → night_kill 1
+    const config: GameConfig = {
+      roles: new Map<SystemRole, number>([
+        ['werewolf', 2], ['villager', 2], ['bodyguard', 2],
+      ]),
+      seed: 1,
+      hasFirstGhost: false,  // 初日犠牲者を無効化してシナリオ単純化
+    }
+
+    let nightCallCount = 0
+    let attackTargetSeat = -1
+    let seatRolesCaptured = new Map<number, SystemRole>()
+
+    const handlers: GameHandlers = {
+      onSetup(roles) { seatRolesCaptured = roles },
+      onNight(ctx) {
+        nightCallCount++
+        const actions = new Map<number, NightAction>()
+        if (nightCallCount === 1) return actions  // night 0: 何もしない
+
+        // night 1+: 役職別に seat を集めて決定的にアクションを組む
+        const state = ctx.state as GameState
+        const wolves: number[] = []
+        const guards: number[] = []
+        const villagers: number[] = []
+        for (const p of state.players) {
+          if (!p.alive) continue
+          if (p.role === 'werewolf') wolves.push(p.seat)
+          else if (p.role === 'bodyguard') guards.push(p.seat)
+          else if (p.role === 'villager') villagers.push(p.seat)
+        }
+        assert.ok(wolves.length === 2 && guards.length === 2 && villagers.length >= 1,
+          `Day 2 night の前提条件失敗: wolves=${wolves.length} guards=${guards.length} villagers=${villagers.length}`)
+
+        attackTargetSeat = villagers[0]
+        actions.set(wolves[0], { type: 'attack', target: attackTargetSeat })
+        actions.set(wolves[1], { type: 'attack', target: attackTargetSeat })  // 同 target で多数決確定
+        actions.set(guards[0], { type: 'guard', target: guards[1] })          // 「最初の」狩人は別 seat を guard
+        actions.set(guards[1], { type: 'guard', target: attackTargetSeat })   // 「2 人目の」狩人が attack target を guard
+        return actions
+      },
+      onDayClaims() { return new Map() },
+      onVote(ctx) {
+        // 決定的に「villager を吊る」: 役職を seatRolesCaptured で確認し villager を選ぶ
+        // (Day 1 で wolf/bodyguard が処刑されるとシナリオが崩れるため)
+        const villagerSeat = ctx.alivePlayers.find(s => seatRolesCaptured.get(s) === 'villager')!
+        const votes = new Map<number, number>()
+        for (const seat of ctx.alivePlayers) {
+          votes.set(seat, seat === villagerSeat
+            ? ctx.alivePlayers.find(s => s !== villagerSeat)!
+            : villagerSeat)
+        }
+        return votes
+      },
+    }
+
+    const { events } = await runGame(config, handlers)
+
+    // events 構造: ... [night0 occurrences] ... execution(Day1) ... [Day2 night events] ... execution(Day2) ...
+    // 最初の execution と次の execution の間が Day 2 (Day 2 night → Day 2 vote → Day 2 execution)
+    const firstExecIdx = events.findIndex(e => e.type === 'execution')
+    assert.ok(firstExecIdx >= 0, 'Day 1 の処刑 event が見つからない')
+    const secondExecIdx = events.findIndex((e, i) => i > firstExecIdx && e.type === 'execution')
+    const day2Events = events.slice(firstExecIdx + 1, secondExecIdx === -1 ? undefined : secondExecIdx)
+    const day2NightKills = day2Events.filter(e => e.type === 'night_kill')
+
+    assert.equal(
+      day2NightKills.length, 0,
+      `Day 2 night: attack target (seat ${attackTargetSeat}) が「2 人目の狩人」に守られているのに ` +
+      `night_kill が ${day2NightKills.length} 件発生した (target=${(day2NightKills[0] as { target?: number })?.target}). ` +
+      `「最初の guard」しか採用されないバグの兆候。`,
+    )
   })
 
   it('全役職入りゲームがパースできる', async () => {
