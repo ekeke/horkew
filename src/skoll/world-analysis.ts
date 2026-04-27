@@ -180,7 +180,7 @@ function computeScoresForWorld(
  * 「狼を全滅させるが狐が残る」処刑先を積極的に忌避させる。
  * 環境変数 FOX_WIN_PENALTY で上書き可能（例: FOX_WIN_PENALTY=-1）。
  */
-const FOX_WIN_PENALTY = Number(
+export const FOX_WIN_PENALTY = Number(
   (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.['FOX_WIN_PENALTY']
   ?? '-0.5',
 )

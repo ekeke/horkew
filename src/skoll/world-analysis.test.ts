@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { analyzeExecutionsByWorld } from './world-analysis.ts'
+import { analyzeExecutionsByWorld, FOX_WIN_PENALTY } from './world-analysis.ts'
 import { Possibilities, possibilityFromRoles } from '../retar/possibilities.ts'
 import type { VillageStatus, SeatStatus, SystemRole } from '../types/index.ts'
 
@@ -208,17 +208,17 @@ describe('analyzeExecutionsByWorld', () => {
     const result = analyzeExecutionsByWorld(possibilities, setup, vs)
     assert.equal(result.totalWorlds, 1)
 
-    // 狼吊り → hamster_win（村負け）
+    // 狼吊り → hamster_win（村負け、FOX_WIN_PENALTY が適用される）
     const s2 = result.executions.find(e => e.seat === 2)!
-    approx(s2.winRate, 0.0, '狼吊っても狐生存 → 狐勝ち')
+    approx(s2.winRate, FOX_WIN_PENALTY, '狼吊っても狐生存 → 狐勝ち (FOX_WIN_PENALTY)')
 
     // 狐吊り → 3人残り、狼1、狐0 → 夜→PP → 0
     const s3 = result.executions.find(e => e.seat === 3)!
     approx(s3.winRate, 0.0, '狐吊っても狼残る → PP')
 
-    // 村吊り → 狼+狐生存 → PP的に 2w+f=3 >= 3 → 0
+    // 村吊り → 残り {狼,狐} 2人。狼が狐を襲撃しても狐は死なないため hamster_win 確定
     const s1 = result.executions.find(e => e.seat === 1)!
-    approx(s1.winRate, 0.0, '村吊り → PP相当')
+    approx(s1.winRate, FOX_WIN_PENALTY, '村吊り → 狼+狐残り、狐は襲撃で死なず狐勝ち (FOX_WIN_PENALTY)')
   })
 
   it('狐生存: 狼吊り vs 狐吊り vs 村吊りで差が出る盤面', () => {
@@ -248,8 +248,8 @@ describe('analyzeExecutionsByWorld', () => {
     const s3 = result.executions.find(e => e.seat === 3)! // 狐吊り
     const s1 = result.executions.find(e => e.seat === 1)! // 村吊り
 
-    // 狼吊り: 狼全滅だが狐生存 → hamster_win (0.0)
-    approx(s2.winRate, 0.0, '狼吊り → 狐勝ち')
+    // 狼吊り: 狼全滅だが狐生存 → hamster_win (FOX_WIN_PENALTY)
+    approx(s2.winRate, FOX_WIN_PENALTY, '狼吊り → 狐勝ち (FOX_WIN_PENALTY)')
 
     // 狐吊り: 狼1残り、4人(狼1村3占1のうち村3＋占1)、夜→ongoing
     //   占い生存 → 呪殺なし（狐もういない）、狼発見なら勝率UP
