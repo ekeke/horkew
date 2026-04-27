@@ -156,7 +156,31 @@ export function simStateToVillageStatus(state: SimState): VillageStatus {
 }
 
 /**
- * SimState から Retar を実行し、各 seat の役職可能性を返す。
+ * 既構築の VillageStatus + setup から Retar を実行する低レベル API。
+ * 同じ SimState から global / viewer 両方の Retar を呼ぶときに VS 構築を 1 回化するために使う。
+ */
+export function runRetarOnVillageStatus(
+  vs: VillageStatus,
+  setup: Map<SystemRole, number>,
+  viewerSeat?: number,
+  viewerRole?: SystemRole,
+): Map<number, Set<SystemRole>> {
+  const assumptions = new Map<number, SystemRole>()
+  if (viewerSeat !== undefined && viewerRole !== undefined) {
+    assumptions.set(viewerSeat, viewerRole)
+  }
+  const options: AnalyzeOptions = {
+    ...DEFAULT_RETAR_OPTIONS,
+    assumptions,
+  }
+  const possibilities: Possibilities = lupaRunRetar(vs, setup, options)
+  return possibilitiesToMap(possibilities)
+}
+
+/**
+ * SimState から Retar を実行し、各 seat の役職可能性を返す (VS 構築を内包)。
+ * 単発呼び出し用ラッパ。同 SimState から global+viewer の 2 系統を呼ぶ場合は
+ * `simStateToVillageStatus` + `runRetarOnVillageStatus` を直接使って VS 構築を 1 回化すべき。
  *
  * @param state SimState
  * @param setup 配役。省略時は world から導出
@@ -172,20 +196,7 @@ export function runRetarOnSimState(
 ): Map<number, Set<SystemRole>> {
   const resolvedSetup = setup ?? setupFromWorld(state.world)
   const vs = simStateToVillageStatus(state)
-
-  const assumptions = new Map<number, SystemRole>()
-  if (viewerSeat !== undefined && viewerRole !== undefined) {
-    assumptions.set(viewerSeat, viewerRole)
-  }
-  const options: AnalyzeOptions = {
-    ...DEFAULT_RETAR_OPTIONS,
-    assumptions,
-  }
-
-  const possibilities: Possibilities = lupaRunRetar(vs, resolvedSetup, options)
-
-  // Possibilities → Map<seat, Set<role>> に変換
-  return possibilitiesToMap(possibilities)
+  return runRetarOnVillageStatus(vs, resolvedSetup, viewerSeat, viewerRole)
 }
 
 /** Possibilities インスタンス → Map<seat, Set<role>> 変換 */

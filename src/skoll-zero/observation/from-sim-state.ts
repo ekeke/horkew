@@ -25,7 +25,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { World } from '../../hati/types.ts'
 import { hasSeat, popCount32 } from '../../hati/types.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
-import { runRetarOnSimState, setupFromWorld, simStateToVillageStatus } from './sim-state-to-vs.ts'
+import { runRetarOnVillageStatus, setupFromWorld, simStateToVillageStatus } from './sim-state-to-vs.ts'
 import {
   collectObservation, packObservation, encodeCollectiveWolfObservation,
   encodeCollectiveMasonObservation, encodeFanaticObservation,
@@ -311,10 +311,13 @@ export function collectFromSimState(
       candidates: [],
     },
     history: Array.from(history),
-    retar: {
-      self: mapOfSetsToRecord(resolveSelfRetar(state, viewerSeat, viewerRole, invariants)),
-      global: mapOfSetsToRecord(resolveGlobalRetar(state, invariants)),
-    },
+    retar: (() => {
+      const r = resolveRetarBoth(state, viewerSeat, viewerRole, invariants)
+      return {
+        self: mapOfSetsToRecord(r.self),
+        global: mapOfSetsToRecord(r.global),
+      }
+    })(),
     plan: {
       indices: invariants.planIndices,
     },
@@ -390,52 +393,46 @@ function debugDumpOnPanic(
 }
 
 /**
- * viewer 視点の retarPossibilities を解決する。
+ * viewer 視点 + global 視点の retarPossibilities を 1 度の VS 構築でまとめて解決する。
  * `invariants.recomputeRetarInRollout` が true なら SimState から Retar 再実行、
  * false なら invariants の root snapshot を使う。
  *
+ * 最適化: 同 SimState から 2 系統 (assumption 違い) を呼ぶ場合、VillageStatus と
+ * setup は共有できる。`simStateToVillageStatus` を 1 回だけ呼んで使い回す。
+ *
  * Retar 呼び出しが失敗した場合 (WASM panic 等) は root snapshot にフォールバック。
  */
-function resolveSelfRetar(
+function resolveRetarBoth(
   state: SimState,
   viewerSeat: number,
   viewerRole: SystemRole,
   invariants: RolloutInvariants,
-): Map<number, Set<SystemRole>> | null {
-  if (!invariants.recomputeRetarInRollout) return invariants.retarPossibilities
+): {
+  self: Map<number, Set<SystemRole>> | null,
+  global: Map<number, Set<SystemRole>> | null,
+} {
+  if (!invariants.recomputeRetarInRollout) {
+    return {
+      self: invariants.retarPossibilities,
+      global: invariants.globalRetarPossibilities,
+    }
+  }
   const setup = invariants.setup ?? setupFromWorld(state.world)
   try {
-    return runRetarOnSimState(state, setup, viewerSeat, viewerRole)
+    const vs = simStateToVillageStatus(state)
+    const global = runRetarOnVillageStatus(vs, setup)
+    const self = runRetarOnVillageStatus(vs, setup, viewerSeat, viewerRole)
+    return { self, global }
   } catch (e) {
     debugDumpOnPanic(state, viewerSeat, viewerRole, setup, e)
     if (!warnedRetarFallback) {
       console.error(`[from-sim-state] Retar rollout failed, falling back to root snapshot: ${e instanceof Error ? e.message : String(e)}`)
       warnedRetarFallback = true
     }
-    return invariants.retarPossibilities
-  }
-}
-
-/**
- * 公開情報のみの globalRetarPossibilities を解決する。assumption 無し。
- *
- * Retar 呼び出しが失敗した場合は root snapshot にフォールバック。
- */
-function resolveGlobalRetar(
-  state: SimState,
-  invariants: RolloutInvariants,
-): Map<number, Set<SystemRole>> | null {
-  if (!invariants.recomputeRetarInRollout) return invariants.globalRetarPossibilities
-  const setup = invariants.setup ?? setupFromWorld(state.world)
-  try {
-    return runRetarOnSimState(state, setup)
-  } catch (e) {
-    debugDumpOnPanic(state, null, null, setup, e)
-    if (!warnedRetarFallback) {
-      console.error(`[from-sim-state] Retar rollout failed, falling back to root snapshot: ${e instanceof Error ? e.message : String(e)}`)
-      warnedRetarFallback = true
+    return {
+      self: invariants.retarPossibilities,
+      global: invariants.globalRetarPossibilities,
     }
-    return invariants.globalRetarPossibilities
   }
 }
 
