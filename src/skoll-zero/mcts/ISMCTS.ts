@@ -5,7 +5,7 @@ import type { SimState, Phase } from '../simulator/world-state.ts'
 import { stepPhase, advancePhase } from '../simulator/rollout-sim.ts'
 import type { PhaseAction } from '../simulator/rollout-sim.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
-import { createTreeNode, totalChildVisits } from './node.ts'
+import { createTreeNode, totalChildVisits, childKey } from './node.ts'
 import type { TreeNode } from './node.ts'
 import type { Determinizer } from './determinize.ts'
 import type { World } from '../../hati/types.ts'
@@ -17,6 +17,10 @@ import type { RolloutInvariants } from '../observation/from-sim-state.ts'
 import { OUTCOME_ORDER } from '../network/config.ts'
 
 const RoleBitIndexFanatic = RoleBitIndex.fanatic
+
+/** dispatch=null skip phase で child node を作るときに使う pseudo-action ID。
+ *  edges には登録しないので backup での影響なし。 */
+const SKIP_ACTION = -2
 
 /**
  * MCTS の hyperparams。c_puct は AlphaZero default 中央値 1.5。
@@ -85,40 +89,54 @@ export function runMCTS(
 ): MCTSResult {
   const actionMode = opts.actionMode ?? 'execute'
   const excludedMask = opts.excludedMask ?? 0
-  const root = createTreeNode()
   if (determinizer.isOverflow()) {
-    return { root, visits: new Map(), abortReason: 'determinizer_overflow' }
+    return { root: createTreeNode(), visits: new Map(), abortReason: 'determinizer_overflow' }
   }
   if (determinizer.size() === 0) {
-    return { root, visits: new Map(), abortReason: 'no_consistent_world' }
+    return { root: createTreeNode(), visits: new Map(), abortReason: 'no_consistent_world' }
   }
   const firstWorld = determinizer.sample(config.rng)
   if (!firstWorld) {
-    return { root, visits: new Map(), abortReason: 'no_consistent_world' }
+    return { root: createTreeNode(), visits: new Map(), abortReason: 'no_consistent_world' }
   }
 
   // decision faction を root world から決定 (Stage 2 では root world で固定)
   const decisionRole = firstWorld.roles[decisionSeat]
   const decisionFaction = factionForRole(decisionRole)
   if (!decisionFaction) {
-    return { root, visits: new Map(), abortReason: 'unknown_decision_role' }
+    return { root: createTreeNode(), visits: new Map(), abortReason: 'unknown_decision_role' }
   }
 
-  // root state: rootSimState の clone + world 差替
-  const rootState = makeRolloutState(rootSimState, firstWorld, actionMode)
-  if (rootState.phase !== 'terminal' && hasSeat(rootState.alive, decisionSeat)) {
-    const value = expandWithDispatch(root, rootState, decisionSeat, bundle, invariants, excludedMask, /*isRoot*/ true, decisionFaction)
-    if (value !== null) {
-      applyRootDirichletNoise(root, config)
-    }
-  }
+  // root を phase 別に管理する。makeRolloutState の advancePhase が world 状態に応じて
+  // skip するため、同じ actionMode でも world ごとに root の state.phase が違いうる。
+  // 同じ TreeNode を異なる phase で再利用すると edges (phase 依存の legal action ID) が
+  // 混在して target=16 等の不正値で WASM panic を引き起こすため、phase 別に root を分ける。
+  const roots = new Map<string, TreeNode>()
+  const targetPhase = phaseFromActionMode(actionMode)
+  let dirichletApplied = false
   for (let i = 0; i < config.nRollouts; i++) {
-    const world = determinizer.sample(config.rng)
+    const world = i === 0 ? firstWorld : determinizer.sample(config.rng)
     if (!world) break
     const rolloutState = makeRolloutState(rootSimState, world, actionMode)
+    let root = roots.get(rolloutState.phase)
+    if (!root) {
+      root = createTreeNode()
+      roots.set(rolloutState.phase, root)
+    }
+    // 初回 expand + Dirichlet noise は targetPhase の root にだけ適用 (1 回限り)
+    if (!dirichletApplied && rolloutState.phase === targetPhase
+      && rolloutState.phase !== 'terminal' && hasSeat(rolloutState.alive, decisionSeat)) {
+      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, /*isRoot*/ true, decisionFaction)
+      if (value !== null) {
+        applyRootDirichletNoise(root, config)
+      }
+      dirichletApplied = true
+    }
     runOneRollout(root, rolloutState, decisionSeat, bundle, invariants, config, decisionFaction, excludedMask)
   }
-  return { root, visits: collectRootVisits(root), abortReason: null }
+  // 戻り値は targetPhase の root に固定 (呼び出し元は actionMode 対応 phase の visit を期待)
+  const finalRoot = roots.get(targetPhase) ?? createTreeNode()
+  return { root: finalRoot, visits: collectRootVisits(finalRoot), abortReason: null }
 }
 
 /**
@@ -266,10 +284,19 @@ function runOneRollout(
     // dispatch で Module を選んで expand or descent
     const dispatch = dispatchForPhase(state, decisionSeat, bundle)
     if (!dispatch) {
-      // claim/morning phase が default skip で advancePhase 後にも引き続き dispatch=null は
-      // 本来発生しない (advancePhase で全 skip 候補を進めるため)。緊急回避: stepPhase で default
-      // action を入れて 1 phase 進める。Stage 3 で実 dispatch に置換される。
-      stepPhase(state, defaultActionForPhase(state.phase))
+      // 本来 advancePhase で全 skip 候補が進められるはずだが、何らかの理由で dispatch=null。
+      // 同じ node を異なる phase で再訪問する経路を避けるため、pseudo-action で child node に
+      // 進めて tree を分岐する (path には乗せないので tree statistics に影響しない)。
+      const nextState = cloneSimState(state)
+      stepPhase(nextState, defaultActionForPhase(state.phase))
+      const ck = childKey(SKIP_ACTION, nextState.phase)
+      let child = node.children.get(ck)
+      if (!child) {
+        child = createTreeNode()
+        node.children.set(ck, child)
+      }
+      node = child
+      state = nextState
       continue
     }
 
@@ -277,6 +304,11 @@ function runOneRollout(
       const value = expandWithDispatch(node, state, decisionSeat, bundle, invariants, isRoot ? excludedMask : 0, isRoot, decisionFaction)
       backup(path, value ?? 0)
       return
+    }
+    // 整合性検証: 同じ node を別 phase で訪れていないか (phase mismatch は children key
+    // で防いでいるはずだが、防御的に検証 + 万一の場合 reportPhaseMismatch でログ)
+    if (node.phase !== undefined && node.phase !== state.phase) {
+      reportPhaseMismatch(node.phase, state.phase, node.edges)
     }
     const action = selectActionUCB(node, config.cPuct)
     if (action < 0) {
@@ -286,10 +318,12 @@ function runOneRollout(
     const nextState = cloneSimState(state)
     stepPhase(nextState, buildPhaseActionFor(state, action))
     isRoot = false
-    let child = node.children.get(action)
+    // child key = `${action}:${nextState.phase}` で world 依存の next phase を分岐
+    const ck = childKey(action, nextState.phase)
+    let child = node.children.get(ck)
     if (!child) {
       child = createTreeNode()
-      node.children.set(action, child)
+      node.children.set(ck, child)
     }
     path.push({ node, action })
     node = child
@@ -481,6 +515,7 @@ function expandWithDispatch(
   }
   if (legal.size === 0) {
     node.expanded = true
+    node.phase = state.phase
     return outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
   }
   // NN policy が legal action に与える prior を集計
@@ -501,7 +536,24 @@ function expandWithDispatch(
     node.edges.set(action, { visits: 0, totalValue: 0, prior })
   }
   node.expanded = true
+  node.phase = state.phase
   return outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
+}
+
+/** Debug: phase mismatch (expandedPhase, currentPhase) のペアごとに最初の 1 回だけ警告 */
+const phaseMismatchSeen = new Set<string>()
+function reportPhaseMismatch(
+  expandedPhase: string,
+  currentPhase: string,
+  edges: Map<number, { prior: number, visits: number, totalValue: number }>,
+): void {
+  const key = `${expandedPhase}->${currentPhase}`
+  if (phaseMismatchSeen.has(key)) return
+  phaseMismatchSeen.add(key)
+  const actionIds = Array.from(edges.keys()).sort((a, b) => a - b)
+  const minId = actionIds.length > 0 ? actionIds[0] : '-'
+  const maxId = actionIds.length > 0 ? actionIds[actionIds.length - 1] : '-'
+  console.error(`[MCTS] phase mismatch: ${key} edgesCount=${edges.size} edgeIdRange=[${minId}..${maxId}]`)
 }
 
 /** seat-based phase かどうか (excludedMask 適用判定用) */

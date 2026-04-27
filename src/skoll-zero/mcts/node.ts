@@ -21,10 +21,18 @@ export type TreeEdge = {
 export type TreeNode = {
   /** action (vote 先 seat) → edge stats */
   edges: Map<number, TreeEdge>
-  /** action → child node */
-  children: Map<number, TreeNode>
+  /**
+   * `${action}:${childPhase}` → child node。
+   *
+   * 同じ親 + 同じ action でも、stepPhase 後の next phase は world に依存する
+   * (advancePhase の skip 判定が world 状態を見るため)。同じ child 表現に纏めると
+   * edges の phase 不整合が起きるので、child key に next phase を含めて分岐させる。
+   */
+  children: Map<string, TreeNode>
   /** 一度でも NN 評価されて edge が初期化されたか */
   expanded: boolean
+  /** expand 時の state.phase。children key の `:phase` 部と整合する。 */
+  phase?: string
 }
 
 export function createTreeNode(): TreeNode {
@@ -33,6 +41,11 @@ export function createTreeNode(): TreeNode {
     children: new Map(),
     expanded: false,
   }
+}
+
+/** child node の key を組み立てる。`${action}:${childPhase}` */
+export function childKey(action: number, childPhase: string): string {
+  return `${action}:${childPhase}`
 }
 
 /** node の child edges の visits 合計 */
