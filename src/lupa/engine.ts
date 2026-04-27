@@ -419,7 +419,7 @@ function resolveNight(
   actions: Array<{ player: PlayerState, action: NightAction }>,
   _events: unknown[],
   emit: EmitFn,
-  _rng: Rng,
+  rng: Rng,
 ): void {
   const name = (seat: number) => state.players.find(p => p.seat === seat)!.name
   const speciesLabel = (r: 'human' | 'wolf' | null) => r === 'human' ? '○' : r === 'wolf' ? '●' : '?'
@@ -463,26 +463,46 @@ function resolveNight(
     }
   }
 
-  // 襲撃処理
+  // 襲撃処理: 狼チームの襲撃先を多数決で 1 つに集約 (同票はランダム)。
+  // 個別の attack action はゲーム履歴 (上の comment emit) に残るが、実際に死ぬのは
+  // 集約された 1 target のみ。猫又道連れも襲撃した狼のうちランダム 1 匹だけ。
   let hadNightKill = foxKilled.size > 0
-  for (const { player: attacker, action } of actions) {
+  const attacksByTarget = new Map<number, PlayerState[]>()
+  for (const { player, action } of actions) {
     if (action.type !== 'attack') continue
-    const target = state.players.find(p => p.seat === action.target)!
+    const list = attacksByTarget.get(action.target) ?? []
+    list.push(player)
+    attacksByTarget.set(action.target, list)
+  }
+
+  if (attacksByTarget.size > 0) {
+    let maxVotes = 0
+    for (const list of attacksByTarget.values()) {
+      if (list.length > maxVotes) maxVotes = list.length
+    }
+    const tiedTargets: number[] = []
+    for (const [target, list] of attacksByTarget) {
+      if (list.length === maxVotes) tiedTargets.push(target)
+    }
+    const chosenTarget = tiedTargets.length === 1 ? tiedTargets[0] : rng.pick(tiedTargets)
+    const chosenAttackers = attacksByTarget.get(chosenTarget)!
+    const target = state.players.find(p => p.seat === chosenTarget)!
 
     if (target.role === 'werehamster') {
       // 妖狐は襲撃されても死なない
-    } else if (guardTarget === action.target) {
+    } else if (guardTarget === chosenTarget) {
       // 護衛成功
     } else if (target.role === 'nekomata') {
-      // 猫又襲撃: 猫又は死亡、襲撃した人狼を道連れ
-      killPlayer(state, action.target)
-      emit({ type: 'night_kill', target: action.target })
-      killPlayer(state, attacker.seat)
-      emit({ type: 'night_kill', target: attacker.seat })
+      // 猫又襲撃: 猫又は死亡、襲撃した狼のうちランダム 1 匹を道連れ
+      killPlayer(state, chosenTarget)
+      emit({ type: 'night_kill', target: chosenTarget })
+      const cursed = rng.pick(chosenAttackers)
+      killPlayer(state, cursed.seat)
+      emit({ type: 'night_kill', target: cursed.seat })
       hadNightKill = true
     } else {
-      killPlayer(state, action.target)
-      emit({ type: 'night_kill', target: action.target })
+      killPlayer(state, chosenTarget)
+      emit({ type: 'night_kill', target: chosenTarget })
       hadNightKill = true
     }
   }
