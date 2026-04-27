@@ -333,9 +333,18 @@ function mapOfSetsToRecord(
 }
 
 /**
+ * 初回だけエラーログを出すため。WASM Retar が panic した場合の fallback を発動した
+ * ことを開発者に通知する (rollout 中は数千回呼ばれるため、毎回 stderr に出すと膨大に
+ * なる)。学習継続のため fallback で root snapshot を返す。
+ */
+let warnedRetarFallback = false
+
+/**
  * viewer 視点の retarPossibilities を解決する。
  * `invariants.recomputeRetarInRollout` が true なら SimState から Retar 再実行、
  * false なら invariants の root snapshot を使う。
+ *
+ * Retar 呼び出しが失敗した場合 (WASM panic 等) は root snapshot にフォールバック。
  */
 function resolveSelfRetar(
   state: SimState,
@@ -345,11 +354,21 @@ function resolveSelfRetar(
 ): Map<number, Set<SystemRole>> | null {
   if (!invariants.recomputeRetarInRollout) return invariants.retarPossibilities
   const setup = invariants.setup ?? setupFromWorld(state.world)
-  return runRetarOnSimState(state, setup, viewerSeat, viewerRole)
+  try {
+    return runRetarOnSimState(state, setup, viewerSeat, viewerRole)
+  } catch (e) {
+    if (!warnedRetarFallback) {
+      console.error(`[from-sim-state] Retar rollout failed, falling back to root snapshot: ${e instanceof Error ? e.message : String(e)}`)
+      warnedRetarFallback = true
+    }
+    return invariants.retarPossibilities
+  }
 }
 
 /**
  * 公開情報のみの globalRetarPossibilities を解決する。assumption 無し。
+ *
+ * Retar 呼び出しが失敗した場合は root snapshot にフォールバック。
  */
 function resolveGlobalRetar(
   state: SimState,
@@ -357,7 +376,15 @@ function resolveGlobalRetar(
 ): Map<number, Set<SystemRole>> | null {
   if (!invariants.recomputeRetarInRollout) return invariants.globalRetarPossibilities
   const setup = invariants.setup ?? setupFromWorld(state.world)
-  return runRetarOnSimState(state, setup)
+  try {
+    return runRetarOnSimState(state, setup)
+  } catch (e) {
+    if (!warnedRetarFallback) {
+      console.error(`[from-sim-state] Retar rollout failed, falling back to root snapshot: ${e instanceof Error ? e.message : String(e)}`)
+      warnedRetarFallback = true
+    }
+    return invariants.globalRetarPossibilities
+  }
 }
 
 /** Phase (15 種) → CollectedObservation の phase ('day' | 'night') */
