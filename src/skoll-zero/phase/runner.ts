@@ -41,6 +41,7 @@ import {
   type MultiTrainerSlots,
 } from '../training/multi-trainer.ts'
 import { DEFAULT_SKOLL_ZERO_TRAIN_CONFIG } from '../training/schedule.ts'
+import { initSkollZeroWorkerPool, terminateSkollZeroWorkerPool } from '../parallel/index.ts'
 
 export type SkollZeroPhaseOptions = {
   checkpointBase: string
@@ -168,6 +169,10 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     slots[key] = buildSlot(phaseDir, key, options.learningRate)
   }
 
+  const numWorkersEnv = process.env.SKOLLZ_WORKERS
+  const numWorkers = numWorkersEnv ? parseInt(numWorkersEnv, 10) : undefined
+  initSkollZeroWorkerPool(numWorkers)
+
   const config = {
     ...DEFAULT_SKOLL_ZERO_TRAIN_CONFIG,
     learningRate: options.learningRate,
@@ -181,21 +186,24 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
 
   const roundSummaries: Array<{ round: number, outcomes: { villagerWon: number, werewolfWon: number, werehamsterWon: number, draw: number } }> = []
 
-  for (let r = 1; r <= options.rounds; r++) {
-    const t0 = Date.now()
-    const stats = await trainer.trainRound(r, phaseDir)
-    const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-    log(`round ${r}/${options.rounds} elapsed=${elapsed}s vill=${stats.outcomes.villagerWon} wolf=${stats.outcomes.werewolfWon} ham=${stats.outcomes.werehamsterWon} draw=${stats.outcomes.draw}`)
-    for (const key of SLOT_KEYS) {
-      const s = stats.perSlot[key]
-      if (!s) continue
-      log(`  ${key.padEnd(11)} +${s.recordsAdded} buf=${s.bufferSize} steps=${s.stepsRun} loss=${s.avgLoss.toFixed(4)}`)
+  try {
+    for (let r = 1; r <= options.rounds; r++) {
+      const t0 = Date.now()
+      const stats = await trainer.trainRound(r, phaseDir)
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
+      log(`round ${r}/${options.rounds} elapsed=${elapsed}s vill=${stats.outcomes.villagerWon} wolf=${stats.outcomes.werewolfWon} ham=${stats.outcomes.werehamsterWon} draw=${stats.outcomes.draw}`)
+      for (const key of SLOT_KEYS) {
+        const s = stats.perSlot[key]
+        if (!s) continue
+        log(`  ${key.padEnd(11)} +${s.recordsAdded} buf=${s.bufferSize} steps=${s.stepsRun} loss=${s.avgLoss.toFixed(4)}`)
+      }
+      writeRoundMeta(phaseDir, stats)
+      roundSummaries.push({ round: r, outcomes: stats.outcomes })
     }
-    writeRoundMeta(phaseDir, stats)
-    roundSummaries.push({ round: r, outcomes: stats.outcomes })
+  } finally {
+    terminateSkollZeroWorkerPool()
+    for (const key of SLOT_KEYS) slots[key]?.tfNet.dispose()
   }
-
-  for (const key of SLOT_KEYS) slots[key]?.tfNet.dispose()
 
   const summary = {
     options,

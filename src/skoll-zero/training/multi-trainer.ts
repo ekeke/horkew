@@ -24,6 +24,7 @@ import {
   type MultiAgentSelfPlayResult,
 } from '../selfplay/multi-runner.ts'
 import type { MCTSConfig } from '../mcts/ISMCTS.ts'
+import { runSelfPlayParallel, skollZeroWorkerPoolSize } from '../parallel/index.ts'
 import { groupRecordsByHead, recordsToBatchInputs } from './trainer.ts'
 import type { SkollZeroTrainConfig } from './schedule.ts'
 
@@ -112,26 +113,47 @@ export class MultiSkollZeroTrainer {
       if (this.slots[key]) preSize.set(key, this.slots[key]!.buffer.size())
     }
 
-    // self-play batch
+    // self-play batch — worker pool が init されていれば parallel、それ以外は既存の逐次経路
     const outcomes = { villagerWon: 0, werewolfWon: 0, werehamsterWon: 0, draw: 0 }
-    const onGameComplete = (_i: number, r: MultiAgentSelfPlayResult): void => {
-      switch (r.result) {
-        case 'villager_won': outcomes.villagerWon++; break
-        case 'werewolf_won': outcomes.werewolfWon++; break
-        case 'werehamster_won': outcomes.werehamsterWon++; break
-        case 'draw': outcomes.draw++; break
+    if (skollZeroWorkerPoolSize() > 0) {
+      const { outcomes: chunkOutcomes } = await runSelfPlayParallel(
+        {
+          slots: this.asSlotMap(),
+          seed: this.gameSeedCounter,
+          mctsConfig: {
+            cPuct: this.config.cPuct,
+            nRollouts: this.config.mctsRollouts,
+            rootDirichletAlpha: this.config.rootDirichletAlpha,
+            rootDirichletEps: this.config.rootDirichletEps,
+          },
+          selectionMode: 'sample',
+        },
+        this.config.gamesPerRound,
+      )
+      outcomes.villagerWon = chunkOutcomes.villagerWon
+      outcomes.werewolfWon = chunkOutcomes.werewolfWon
+      outcomes.werehamsterWon = chunkOutcomes.werehamsterWon
+      outcomes.draw = chunkOutcomes.draw
+    } else {
+      const onGameComplete = (_i: number, r: MultiAgentSelfPlayResult): void => {
+        switch (r.result) {
+          case 'villager_won': outcomes.villagerWon++; break
+          case 'werewolf_won': outcomes.werewolfWon++; break
+          case 'werehamster_won': outcomes.werehamsterWon++; break
+          case 'draw': outcomes.draw++; break
+        }
       }
+      await runMultiAgentSelfPlayBatch(
+        {
+          slots: this.asSlotMap(),
+          seed: this.gameSeedCounter,
+          mctsConfig,
+          selectionMode: 'sample',
+        },
+        this.config.gamesPerRound,
+        onGameComplete,
+      )
     }
-    await runMultiAgentSelfPlayBatch(
-      {
-        slots: this.asSlotMap(),
-        seed: this.gameSeedCounter,
-        mctsConfig,
-        selectionMode: 'sample',
-      },
-      this.config.gamesPerRound,
-      onGameComplete,
-    )
     this.gameSeedCounter += this.config.gamesPerRound
 
     // 各 slot で train + sync + checkpoint

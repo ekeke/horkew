@@ -68,6 +68,14 @@ export class TrainingBuffer {
     return this.finalized
   }
 
+  /**
+   * worker 経由で受け取った finalize 済み records を main buffer に merge する。
+   * worker 並列化 (parallel/) 専用。記録は既に outcomeTarget が貼られている前提。
+   */
+  appendFinalized(records: readonly TrainingRecord[]): void {
+    for (const r of records) this.finalized.push(r)
+  }
+
   size(): number {
     return this.finalized.length
   }
