@@ -32,6 +32,7 @@ import type { ObservationMode } from '../../fenrir/src/observation.ts'
 import { encodeFromSimState, type RolloutInvariants } from '../observation/from-sim-state.ts'
 import { buildInitialSimState, buildInvariants } from '../observation/from-ctx.ts'
 import type { ModuleBundle } from '../mcts/dispatch.ts'
+import { BENCH_ENABLED, benchEnd } from '../bench/profiler.ts'
 import type { SkollZeroModule, McctsProposal } from './skoll-zero-module.ts'
 
 export type BaseSkollZeroModuleOptions = {
@@ -109,8 +110,13 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     headName: HeadName,
     invariants: RolloutInvariants,
   ): NNOutput {
+    const t0 = BENCH_ENABLED ? performance.now() : 0
     const obs = this.encodeStateObs(state, actorSeat, actorRole, invariants)
-    return this.nn.forward(obs, state, actorSeat, headName)
+    if (BENCH_ENABLED) benchEnd('obs_encode', t0)
+    const t1 = BENCH_ENABLED ? performance.now() : 0
+    const result = this.nn.forward(obs, state, actorSeat, headName)
+    if (BENCH_ENABLED) benchEnd('nn_forward', t1)
+    return result
   }
 
   /**

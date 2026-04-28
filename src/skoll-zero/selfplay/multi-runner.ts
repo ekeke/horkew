@@ -22,6 +22,7 @@ import { outcomeToValue, type Faction, type MCTSConfig } from '../mcts/ISMCTS.ts
 import type { ModuleBundle } from '../mcts/dispatch.ts'
 import type { FinalOutcome } from '../network/config.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
+import { BENCH_ENABLED, benchDump, benchDumpPath, benchReset } from '../bench/profiler.ts'
 import { TrainingBuffer } from './buffer.ts'
 import { MasonRoleAgent } from './mason-zero-agent.ts'
 import {
@@ -238,6 +239,14 @@ export async function runMultiAgentSelfPlayGame(
       config: gameConfig,
     }
   }
+
+  // SKOLLZ_BENCH=1 のときは 1 game 完走ごとに category 別計測値を JSON dump し、
+  // 次 game の集計を独立させるために stats をリセット。
+  if (BENCH_ENABLED) {
+    benchDump(benchDumpPath(cfg.seed))
+    benchReset()
+  }
+
   return out
 }
 

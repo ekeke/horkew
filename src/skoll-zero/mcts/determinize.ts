@@ -2,6 +2,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { World } from '../../hati/types.ts'
 import { collectWorlds } from '../../hati/worlds.ts'
 import type { Possibilities } from '../../retar/possibilities.ts'
+import { BENCH_ENABLED, benchEnd } from '../bench/profiler.ts'
 
 /**
  * Retar possibilities から integral world を sampling する utility。
@@ -20,14 +21,22 @@ export class Determinizer {
     setup: Map<SystemRole, number>,
     maxWorlds: number = 100000,
   ) {
+    const t0 = BENCH_ENABLED ? performance.now() : 0
     this.worlds = collectWorlds(possibilities, setup, maxWorlds)
+    if (BENCH_ENABLED) benchEnd('world_enumerate', t0)
   }
 
   /** rng で uniform sample。世界数が 0 / overflow なら null */
   sample(rng: () => number = Math.random): World | null {
-    if (this.worlds === null || this.worlds.length === 0) return null
+    const t0 = BENCH_ENABLED ? performance.now() : 0
+    if (this.worlds === null || this.worlds.length === 0) {
+      if (BENCH_ENABLED) benchEnd('world_sample', t0)
+      return null
+    }
     const idx = Math.min(this.worlds.length - 1, Math.floor(rng() * this.worlds.length))
-    return this.worlds[idx]
+    const result = this.worlds[idx]
+    if (BENCH_ENABLED) benchEnd('world_sample', t0)
+    return result
   }
 
   /** 列挙した world 数。null（overflow）なら -1 */

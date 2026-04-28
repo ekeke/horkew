@@ -15,6 +15,7 @@ import {
 } from './dispatch.ts'
 import type { RolloutInvariants } from '../observation/from-sim-state.ts'
 import { OUTCOME_ORDER } from '../network/config.ts'
+import { BENCH_ENABLED, benchEnd } from '../bench/profiler.ts'
 
 const RoleBitIndexFanatic = RoleBitIndex.fanatic
 
@@ -87,16 +88,20 @@ export function runMCTS(
   config: MCTSConfig = DEFAULT_MCTS_CONFIG,
   opts: { actionMode?: RootActionMode, excludedMask?: number } = {},
 ): MCTSResult {
+  const tMctsStart = BENCH_ENABLED ? performance.now() : 0
   const actionMode = opts.actionMode ?? 'execute'
   const excludedMask = opts.excludedMask ?? 0
   if (determinizer.isOverflow()) {
+    if (BENCH_ENABLED) benchEnd('mcts_total', tMctsStart)
     return { root: createTreeNode(), visits: new Map(), abortReason: 'determinizer_overflow' }
   }
   if (determinizer.size() === 0) {
+    if (BENCH_ENABLED) benchEnd('mcts_total', tMctsStart)
     return { root: createTreeNode(), visits: new Map(), abortReason: 'no_consistent_world' }
   }
   const firstWorld = determinizer.sample(config.rng)
   if (!firstWorld) {
+    if (BENCH_ENABLED) benchEnd('mcts_total', tMctsStart)
     return { root: createTreeNode(), visits: new Map(), abortReason: 'no_consistent_world' }
   }
 
@@ -104,6 +109,7 @@ export function runMCTS(
   const decisionRole = firstWorld.roles[decisionSeat]
   const decisionFaction = factionForRole(decisionRole)
   if (!decisionFaction) {
+    if (BENCH_ENABLED) benchEnd('mcts_total', tMctsStart)
     return { root: createTreeNode(), visits: new Map(), abortReason: 'unknown_decision_role' }
   }
 
@@ -136,7 +142,9 @@ export function runMCTS(
   }
   // 戻り値は targetPhase の root に固定 (呼び出し元は actionMode 対応 phase の visit を期待)
   const finalRoot = roots.get(targetPhase) ?? createTreeNode()
-  return { root: finalRoot, visits: collectRootVisits(finalRoot), abortReason: null }
+  const result: MCTSResult = { root: finalRoot, visits: collectRootVisits(finalRoot), abortReason: null }
+  if (BENCH_ENABLED) benchEnd('mcts_total', tMctsStart)
+  return result
 }
 
 /**
@@ -263,7 +271,9 @@ function runOneRollout(
 
   while (true) {
     if (state.phase === 'terminal') {
+      const tBackup = BENCH_ENABLED ? performance.now() : 0
       backup(path, outcomeToValue(state.outcome, decisionFaction))
+      if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
       return
     }
     if (!hasSeat(state.alive, decisionSeat)) {
@@ -272,13 +282,17 @@ function runOneRollout(
       if (!dispatch) {
         // skip 連鎖で進められない (claim/morning が default skip だが、この phase で
         // dispatch=null は本来発生しない)。安全側で 0 backup。
+        const tBackup = BENCH_ENABLED ? performance.now() : 0
         backup(path, 0)
+        if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
         return
       }
       const out = dispatch.module.forwardAt(state, dispatch.actorSeat, dispatch.actorRole, dispatch.headName, invariants)
       // Stage 4: NN は outcome 分布を返す。decision faction 視点の scalar に変換して backup。
       const v = outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
+      const tBackup = BENCH_ENABLED ? performance.now() : 0
       backup(path, v)
+      if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
       return
     }
     // dispatch で Module を選んで expand or descent
@@ -287,8 +301,10 @@ function runOneRollout(
       // 本来 advancePhase で全 skip 候補が進められるはずだが、何らかの理由で dispatch=null。
       // 同じ node を異なる phase で再訪問する経路を避けるため、pseudo-action で child node に
       // 進めて tree を分岐する (path には乗せないので tree statistics に影響しない)。
+      const tStep = BENCH_ENABLED ? performance.now() : 0
       const nextState = cloneSimState(state)
       stepPhase(nextState, defaultActionForPhase(state.phase))
+      if (BENCH_ENABLED) benchEnd('step_phase', tStep)
       const ck = childKey(SKIP_ACTION, nextState.phase)
       let child = node.children.get(ck)
       if (!child) {
@@ -301,8 +317,12 @@ function runOneRollout(
     }
 
     if (!node.expanded) {
+      const tExpand = BENCH_ENABLED ? performance.now() : 0
       const value = expandWithDispatch(node, state, decisionSeat, bundle, invariants, isRoot ? excludedMask : 0, isRoot, decisionFaction)
+      if (BENCH_ENABLED) benchEnd('mcts_expand', tExpand)
+      const tBackup = BENCH_ENABLED ? performance.now() : 0
       backup(path, value ?? 0)
+      if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
       return
     }
     // 整合性検証: 同じ node を別 phase で訪れていないか (phase mismatch は children key
@@ -310,13 +330,19 @@ function runOneRollout(
     if (node.phase !== undefined && node.phase !== state.phase) {
       reportPhaseMismatch(node.phase, state.phase, node.edges)
     }
+    const tSelect = BENCH_ENABLED ? performance.now() : 0
     const action = selectActionUCB(node, config.cPuct)
+    if (BENCH_ENABLED) benchEnd('mcts_select', tSelect)
     if (action < 0) {
+      const tBackup = BENCH_ENABLED ? performance.now() : 0
       backup(path, 0)
+      if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
       return
     }
+    const tStep = BENCH_ENABLED ? performance.now() : 0
     const nextState = cloneSimState(state)
     stepPhase(nextState, buildPhaseActionFor(state, action))
+    if (BENCH_ENABLED) benchEnd('step_phase', tStep)
     isRoot = false
     // child key = `${action}:${nextState.phase}` で world 依存の next phase を分岐
     const ck = childKey(action, nextState.phase)

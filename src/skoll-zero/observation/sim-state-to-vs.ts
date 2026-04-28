@@ -14,6 +14,7 @@ import { hasSeat } from '../../hati/types.ts'
 import { lupaRunRetar, DEFAULT_RETAR_OPTIONS } from '../../fenrir/src/retar-bridge.ts'
 import type { AnalyzeOptions } from '../../retar/index.ts'
 import { Possibilities } from '../../retar/possibilities.ts'
+import { BENCH_ENABLED, benchEnd } from '../bench/profiler.ts'
 
 /** SimState.deathLog の DeathCause → CauseOfDeath (lupa types) */
 function mapDeathCause(cause: DeathCause): CauseOfDeath {
@@ -59,6 +60,7 @@ export function setupFromWorld(world: SimState['world']): Map<SystemRole, number
  * - roles (真役職): assumption として渡すため空 Map (viewer 視点で別途設定)
  */
 export function simStateToVillageStatus(state: SimState): VillageStatus {
+  const t0 = BENCH_ENABLED ? performance.now() : 0
   const statuses = new Map<number, SeatStatus>()
   const totalSeats = state.world.roles.length - 1
 
@@ -138,7 +140,7 @@ export function simStateToVillageStatus(state: SimState): VillageStatus {
     voteHistory.set(e.day, list)
   }
 
-  return {
+  const result: VillageStatus = {
     statuses,
     executions,
     kills,
@@ -153,6 +155,8 @@ export function simStateToVillageStatus(state: SimState): VillageStatus {
     finished: state.outcome != null && state.outcome !== 'ongoing',
     result: outcomeToResult(state.outcome),
   }
+  if (BENCH_ENABLED) benchEnd('vs_build', t0)
+  return result
 }
 
 /**
@@ -173,8 +177,13 @@ export function runRetarOnVillageStatus(
     ...DEFAULT_RETAR_OPTIONS,
     assumptions,
   }
+  const t0 = BENCH_ENABLED ? performance.now() : 0
   const possibilities: Possibilities = lupaRunRetar(vs, setup, options)
-  return possibilitiesToMap(possibilities)
+  if (BENCH_ENABLED) benchEnd('retar_wasm', t0)
+  const t1 = BENCH_ENABLED ? performance.now() : 0
+  const result = possibilitiesToMap(possibilities)
+  if (BENCH_ENABLED) benchEnd('retar_to_map', t1)
+  return result
 }
 
 /**
