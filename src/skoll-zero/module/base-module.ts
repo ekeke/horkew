@@ -120,6 +120,39 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
   }
 
   /**
+   * Batched forward (batched MCTS 用)。NN が `forwardBatch` を持つなら 1 回にまとめ、
+   * 持たなければ forwardAt を N 回呼ぶ fallback。
+   */
+  forwardBatchAt(
+    states: SimState[],
+    actorSeats: number[],
+    actorRoles: SystemRole[],
+    headName: HeadName,
+    invariants: RolloutInvariants,
+  ): NNOutput[] {
+    const N = states.length
+    if (N === 0) return []
+    if (!this.nn.forwardBatch) {
+      // fallback: forwardAt を順次
+      const outputs: NNOutput[] = []
+      for (let i = 0; i < N; i++) {
+        outputs.push(this.forwardAt(states[i], actorSeats[i], actorRoles[i], headName, invariants))
+      }
+      return outputs
+    }
+    const t0 = BENCH_ENABLED ? performance.now() : 0
+    const obsList: Float32Array[] = []
+    for (let i = 0; i < N; i++) {
+      obsList.push(this.encodeStateObs(states[i], actorSeats[i], actorRoles[i], invariants))
+    }
+    if (BENCH_ENABLED) benchEnd('obs_encode', t0)
+    const t1 = BENCH_ENABLED ? performance.now() : 0
+    const result = this.nn.forwardBatch(obsList, states, actorSeats, headName)
+    if (BENCH_ENABLED) benchEnd('nn_forward_batch', t1)
+    return result
+  }
+
+  /**
    * Stage 2: 役職 Module 集合 (bundle) を受け取り、phase ごとに dispatch する MCTS。
    * bundle が省略された場合は「自身の Module を全 bucket に充てる」フォールバックで動作 (Stage 1 互換)。
    */

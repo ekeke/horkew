@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
+import { TfMasonZeroNetwork } from '../network/tf-mason-zero.ts'
 import {
   createSkollZeroNetwork,
   createStandardZeroNetwork,
@@ -136,7 +137,14 @@ function buildSlot(
   tfNet.loadWeights(pureNet.cloneWeights())
   const masonZeroNet = new MasonZeroNetwork(pureNet, { zeroValueHead: false })
 
-  return { masonZeroNet, tfNet, buffer: new TrainingBuffer() }
+  // SKOLLZ_INFER_GPU=1 で self-play 推論を tfNet (TF.js GPU) に切替。
+  // tfNet 自体を wrap するため、学習で更新された重みは推論にも即反映される。
+  // 未指定なら inferNet=undefined で multi-trainer が masonZeroNet (Pure JS) を使う。
+  const useGpuInfer = process.env.SKOLLZ_INFER_GPU === '1'
+  const inferNet = useGpuInfer ? new TfMasonZeroNetwork(tfNet) : undefined
+  if (useGpuInfer) log(`${slotKey}: SKOLLZ_INFER_GPU=1 -> TfMasonZeroNetwork (TF.js GPU 推論)`)
+
+  return { masonZeroNet, tfNet, buffer: new TrainingBuffer(), inferNet }
 }
 
 export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): Promise<void> {

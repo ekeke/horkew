@@ -11,9 +11,12 @@ import type { Determinizer } from './determinize.ts'
 import type { World } from '../../hati/types.ts'
 import {
   dispatchForPhase,
+  type DispatchResult,
   type ModuleBundle,
 } from './dispatch.ts'
 import type { RolloutInvariants } from '../observation/from-sim-state.ts'
+import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
+import type { HeadName, NNOutput } from './nn.ts'
 import { OUTCOME_ORDER } from '../network/config.ts'
 import { BENCH_ENABLED, benchEnd } from '../bench/profiler.ts'
 
@@ -79,6 +82,21 @@ function phaseFromActionMode(mode: RootActionMode): Phase {
  * @param config MCTS hyperparams
  * @param opts root action 種別 + NN policy から除外する席 bitmask
  */
+/**
+ * SKOLLZ_BATCH_INFER 環境変数で batched MCTS を有効化。> 1 で同 Module 内 batch を
+ * 1 回の forwardBatch にまとめる。virtual loss で複数 rollout の path 集中を回避。
+ *
+ * 値:
+ * - 未指定 / 0 / 1: 従来 sequential 経路 (既存挙動維持)
+ * - 2 以上: batched 経路、その値を BATCH_SIZE として使う
+ */
+const BATCH_INFER_SIZE: number = (() => {
+  const raw = process.env.SKOLLZ_BATCH_INFER
+  if (!raw) return 1
+  const n = parseInt(raw, 10)
+  return Number.isFinite(n) && n > 1 ? n : 1
+})()
+
 export function runMCTS(
   rootSimState: SimState,
   decisionSeat: number,
@@ -88,6 +106,9 @@ export function runMCTS(
   config: MCTSConfig = DEFAULT_MCTS_CONFIG,
   opts: { actionMode?: RootActionMode, excludedMask?: number } = {},
 ): MCTSResult {
+  if (BATCH_INFER_SIZE > 1) {
+    return runBatchedMCTSImpl(rootSimState, decisionSeat, determinizer, bundle, invariants, config, opts, BATCH_INFER_SIZE)
+  }
   const tMctsStart = BENCH_ENABLED ? performance.now() : 0
   const actionMode = opts.actionMode ?? 'execute'
   const excludedMask = opts.excludedMask ?? 0
@@ -699,4 +720,322 @@ export function outcomeDistToFactionValue(
     v += dist[i] * outcomeToValue(OUTCOME_ORDER[i], faction)
   }
   return v
+}
+
+// ============================================================
+// Batched MCTS (SKOLLZ_BATCH_INFER > 1 で有効化)
+// ============================================================
+
+/**
+ * Virtual loss の単位。AlphaZero 標準: 各 path edge に visits=+1 / totalValue=-1 を
+ * 仮置きし、複数 rollout が同じ child action に集中するのを抑制。backup 時に revert。
+ */
+const VIRTUAL_LOSS_VISIT = 1
+const VIRTUAL_LOSS_VALUE = -1
+
+function applyVirtualLoss(path: Array<{ node: TreeNode, action: number }>): void {
+  for (const { node, action } of path) {
+    const edge = node.edges.get(action)
+    if (edge) {
+      edge.visits += VIRTUAL_LOSS_VISIT
+      edge.totalValue += VIRTUAL_LOSS_VALUE
+    }
+  }
+}
+
+function revertVirtualLoss(path: Array<{ node: TreeNode, action: number }>): void {
+  for (const { node, action } of path) {
+    const edge = node.edges.get(action)
+    if (edge) {
+      edge.visits -= VIRTUAL_LOSS_VISIT
+      edge.totalValue -= VIRTUAL_LOSS_VALUE
+    }
+  }
+}
+
+/** descentToLeaf の返り値 type */
+type LeafKind = 'terminal' | 'leaf_eval' | 'pending_expand' | 'invalid'
+
+type LeafInfo = {
+  kind: LeafKind
+  path: Array<{ node: TreeNode, action: number }>
+  state: SimState
+  node: TreeNode
+  dispatch?: DispatchResult
+  isRoot: boolean
+  /** terminal / invalid の即 backup 用 value (decision faction 視点) */
+  immediateValue?: number
+}
+
+/**
+ * root から leaf に到達するまで selectActionUCB + stepPhase で descent する。
+ * NN forward は呼ばない (caller が batch でまとめる)。
+ *
+ * leaf kind:
+ * - 'terminal': state.phase === 'terminal'。outcome から決まる value で即 backup
+ * - 'invalid': dispatch=null かつ skip 連鎖でも進めない、または selectAction で action<0
+ * - 'leaf_eval': 決定者死亡で leaf 評価が必要 (NN forward → backup、edges 触らない)
+ * - 'pending_expand': 未 expand の node に到達 (NN forward → expandEdges + backup)
+ */
+function descentToLeaf(
+  root: TreeNode,
+  initialState: SimState,
+  decisionSeat: number,
+  bundle: ModuleBundle,
+  config: MCTSConfig,
+  decisionFaction: Faction,
+): LeafInfo {
+  const path: Array<{ node: TreeNode, action: number }> = []
+  let node = root
+  let state = initialState
+
+  while (true) {
+    if (state.phase === 'terminal') {
+      return {
+        kind: 'terminal', path, state, node,
+        isRoot: path.length === 0,
+        immediateValue: outcomeToValue(state.outcome, decisionFaction),
+      }
+    }
+    if (!hasSeat(state.alive, decisionSeat)) {
+      const dispatch = dispatchForPhase(state, decisionSeat, bundle)
+      if (!dispatch) {
+        return { kind: 'invalid', path, state, node, isRoot: path.length === 0, immediateValue: 0 }
+      }
+      return { kind: 'leaf_eval', path, state, node, dispatch, isRoot: path.length === 0 }
+    }
+    const dispatch = dispatchForPhase(state, decisionSeat, bundle)
+    if (!dispatch) {
+      // skip 連鎖: pseudo-action で child node に進む (sequential 経路と同じ)
+      const tStep = BENCH_ENABLED ? performance.now() : 0
+      const nextState = cloneSimState(state)
+      stepPhase(nextState, defaultActionForPhase(state.phase))
+      if (BENCH_ENABLED) benchEnd('step_phase', tStep)
+      const ck = childKey(SKIP_ACTION, nextState.phase)
+      let child = node.children.get(ck)
+      if (!child) {
+        child = createTreeNode()
+        node.children.set(ck, child)
+      }
+      node = child
+      state = nextState
+      continue
+    }
+    if (!node.expanded) {
+      return { kind: 'pending_expand', path, state, node, dispatch, isRoot: path.length === 0 }
+    }
+    if (node.phase !== undefined && node.phase !== state.phase) {
+      reportPhaseMismatch(node.phase, state.phase, node.edges)
+    }
+    const tSelect = BENCH_ENABLED ? performance.now() : 0
+    const action = selectActionUCB(node, config.cPuct)
+    if (BENCH_ENABLED) benchEnd('mcts_select', tSelect)
+    if (action < 0) {
+      return { kind: 'invalid', path, state, node, isRoot: path.length === 0, immediateValue: 0 }
+    }
+    const tStep = BENCH_ENABLED ? performance.now() : 0
+    const nextState = cloneSimState(state)
+    stepPhase(nextState, buildPhaseActionFor(state, action))
+    if (BENCH_ENABLED) benchEnd('step_phase', tStep)
+    const ck = childKey(action, nextState.phase)
+    let child = node.children.get(ck)
+    if (!child) {
+      child = createTreeNode()
+      node.children.set(ck, child)
+    }
+    path.push({ node, action })
+    node = child
+    state = nextState
+  }
+}
+
+/**
+ * forward 結果 (policy) を受け取り、edges の初期化のみ行う。
+ * `expandWithDispatch` から forward 部分を除いた版で、batched MCTS で
+ * forwardBatch の結果を使って expand する用。
+ */
+function expandEdgesFromPolicy(
+  node: TreeNode,
+  state: SimState,
+  dispatch: DispatchResult,
+  policy: Map<number, number>,
+  excludedMask: number,
+  isRoot: boolean,
+): void {
+  const legalRaw = legalActionIdsForPhase(state, dispatch.actorSeat)
+  const seatBased = isSeatBasedPhase(state.phase)
+  const legal = new Set<number>()
+  for (const action of legalRaw) {
+    if (seatBased && isRoot && excludedMask !== 0
+      && action >= 1 && action <= 31
+      && ((excludedMask >>> action) & 1)) continue
+    legal.add(action)
+  }
+  if (legal.size === 0) {
+    node.expanded = true
+    node.phase = state.phase
+    return
+  }
+  let providedSum = 0
+  for (const [action, prior] of policy) {
+    if (legal.has(action)) providedSum += prior
+  }
+  const uniform = 1 / legal.size
+  for (const action of legal) {
+    if (node.edges.has(action)) continue
+    let prior: number
+    if (providedSum > 0) {
+      prior = (policy.get(action) ?? 0) / providedSum
+    } else {
+      prior = uniform
+    }
+    node.edges.set(action, { visits: 0, totalValue: 0, prior })
+  }
+  node.expanded = true
+  node.phase = state.phase
+}
+
+/** PendingLeaf: collected leaves で保持する LeafInfo + 元 rolloutState */
+type PendingLeaf = LeafInfo & { rolloutState: SimState }
+
+/**
+ * batched MCTS の本体。BATCH_INFER_SIZE > 1 のとき runMCTS から呼ばれる。
+ *
+ * 構造:
+ *   1. Setup (overflow/empty 早期 return、root world sample、decision faction 確定)
+ *   2. 初回 root expand + Dirichlet (sequential 経路と同じ条件で 1 回)
+ *   3. Batched loop: BATCH_SIZE 個 descent → group by (Module, headName) → forwardBatch → backup
+ */
+function runBatchedMCTSImpl(
+  rootSimState: SimState,
+  decisionSeat: number,
+  determinizer: Determinizer,
+  bundle: ModuleBundle,
+  invariants: RolloutInvariants,
+  config: MCTSConfig,
+  opts: { actionMode?: RootActionMode, excludedMask?: number },
+  batchSize: number,
+): MCTSResult {
+  const tMctsStart = BENCH_ENABLED ? performance.now() : 0
+  const actionMode = opts.actionMode ?? 'execute'
+  const excludedMask = opts.excludedMask ?? 0
+
+  if (determinizer.isOverflow()) {
+    if (BENCH_ENABLED) benchEnd('mcts_total', tMctsStart)
+    return { root: createTreeNode(), visits: new Map(), abortReason: 'determinizer_overflow' }
+  }
+  if (determinizer.size() === 0) {
+    if (BENCH_ENABLED) benchEnd('mcts_total', tMctsStart)
+    return { root: createTreeNode(), visits: new Map(), abortReason: 'no_consistent_world' }
+  }
+  const firstWorld = determinizer.sample(config.rng)
+  if (!firstWorld) {
+    if (BENCH_ENABLED) benchEnd('mcts_total', tMctsStart)
+    return { root: createTreeNode(), visits: new Map(), abortReason: 'no_consistent_world' }
+  }
+  const decisionRole = firstWorld.roles[decisionSeat]
+  const decisionFaction = factionForRole(decisionRole)
+  if (!decisionFaction) {
+    if (BENCH_ENABLED) benchEnd('mcts_total', tMctsStart)
+    return { root: createTreeNode(), visits: new Map(), abortReason: 'unknown_decision_role' }
+  }
+
+  const targetPhase = phaseFromActionMode(actionMode)
+  const roots = new Map<string, TreeNode>()
+
+  // 初回 root expand + Dirichlet (sequential と同じ条件で 1 回)
+  {
+    const rolloutState = makeRolloutState(rootSimState, firstWorld, actionMode)
+    let root = roots.get(rolloutState.phase)
+    if (!root) { root = createTreeNode(); roots.set(rolloutState.phase, root) }
+    if (rolloutState.phase === targetPhase
+      && rolloutState.phase !== 'terminal' && hasSeat(rolloutState.alive, decisionSeat)) {
+      const tExpand = BENCH_ENABLED ? performance.now() : 0
+      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, true, decisionFaction)
+      if (BENCH_ENABLED) benchEnd('mcts_expand', tExpand)
+      if (value !== null) applyRootDirichletNoise(root, config)
+    }
+  }
+
+  // Batched loop
+  let completed = 0
+  while (completed < config.nRollouts) {
+    const remaining = config.nRollouts - completed
+    const thisBatch = Math.min(batchSize, remaining)
+    const collected: PendingLeaf[] = []
+
+    // Phase 1: descent (collect leaves)
+    for (let b = 0; b < thisBatch; b++) {
+      const world = determinizer.sample(config.rng)
+      if (!world) break
+      const rolloutState = makeRolloutState(rootSimState, world, actionMode)
+      let root = roots.get(rolloutState.phase)
+      if (!root) { root = createTreeNode(); roots.set(rolloutState.phase, root) }
+
+      const leaf = descentToLeaf(root, rolloutState, decisionSeat, bundle, config, decisionFaction)
+      applyVirtualLoss(leaf.path)
+
+      if (leaf.kind === 'terminal' || leaf.kind === 'invalid') {
+        const tBackup = BENCH_ENABLED ? performance.now() : 0
+        backup(leaf.path, leaf.immediateValue ?? 0)
+        if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
+        revertVirtualLoss(leaf.path)
+        completed++
+      } else {
+        collected.push({ ...leaf, rolloutState })
+      }
+    }
+
+    if (collected.length === 0) {
+      if (completed >= config.nRollouts) break
+      continue
+    }
+
+    // Phase 2: group by (Module, headName)
+    const groupMap = new Map<SkollZeroModule, Map<HeadName, PendingLeaf[]>>()
+    for (const leaf of collected) {
+      const d = leaf.dispatch!
+      let perModule = groupMap.get(d.module)
+      if (!perModule) { perModule = new Map(); groupMap.set(d.module, perModule) }
+      let arr = perModule.get(d.headName)
+      if (!arr) { arr = []; perModule.set(d.headName, arr) }
+      arr.push(leaf)
+    }
+
+    // Phase 3: forwardBatchAt per (Module, headName) group
+    for (const [module, perHead] of groupMap) {
+      for (const [headName, leaves] of perHead) {
+        const tBatch = BENCH_ENABLED ? performance.now() : 0
+        const states = leaves.map(l => l.state)
+        const actorSeats = leaves.map(l => l.dispatch!.actorSeat)
+        const actorRoles = leaves.map(l => l.dispatch!.actorRole)
+        const outputs: NNOutput[] = module.forwardBatchAt
+          ? module.forwardBatchAt(states, actorSeats, actorRoles, headName, invariants)
+          : leaves.map((_l, i) => module.forwardAt(states[i], actorSeats[i], actorRoles[i], headName, invariants))
+        if (BENCH_ENABLED) benchEnd('batch_forward', tBatch)
+
+        // Phase 4: backup per leaf in group
+        for (let i = 0; i < leaves.length; i++) {
+          const leaf = leaves[i]
+          const out = outputs[i]
+          const value = outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
+          if (leaf.kind === 'pending_expand') {
+            const tExpand = BENCH_ENABLED ? performance.now() : 0
+            expandEdgesFromPolicy(leaf.node, leaf.state, leaf.dispatch!, out.policy, leaf.isRoot ? excludedMask : 0, leaf.isRoot)
+            if (BENCH_ENABLED) benchEnd('mcts_expand', tExpand)
+          }
+          const tBackup = BENCH_ENABLED ? performance.now() : 0
+          backup(leaf.path, value)
+          if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
+          revertVirtualLoss(leaf.path)
+          completed++
+        }
+      }
+    }
+  }
+
+  const finalRoot = roots.get(targetPhase) ?? createTreeNode()
+  const result: MCTSResult = { root: finalRoot, visits: collectRootVisits(finalRoot), abortReason: null }
+  if (BENCH_ENABLED) benchEnd('mcts_total', tMctsStart)
+  return result
 }

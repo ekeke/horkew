@@ -14,6 +14,7 @@ import { join } from 'node:path'
 
 import type { MasonZeroNetwork } from '../network/mason-zero.ts'
 import type { TfTransformerNetwork } from '../../fenrir/src/ml/nn-tf-transformer.ts'
+import type { MasonZeroNN } from '../mcts/nn.ts'
 import { saveCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import {
@@ -27,10 +28,16 @@ import { groupRecordsByHead, recordsToBatchInputs } from './trainer.ts'
 import type { SkollZeroTrainConfig } from './schedule.ts'
 
 export type TrainerSlot = {
-  /** Pure JS 推論用 (self-play で使用) */
+  /** Pure JS 推論用 (self-play で使用、default) */
   masonZeroNet: MasonZeroNetwork
   /** TF.js 学習用 */
   tfNet: TfTransformerNetwork
+  /**
+   * Optional: self-play 推論を masonZeroNet (Pure JS) ではなくこの NN で行う。
+   * SKOLLZ_INFER_GPU=1 で TfMasonZeroNetwork を構築して入れる経路。
+   * 未指定なら masonZeroNet が使われる (既存挙動)。
+   */
+  inferNet?: MasonZeroNN
   /** 教師データ buffer */
   buffer: TrainingBuffer
   /** true なら train step / sync / checkpoint 上書きを skip (self-play では使う) */
@@ -85,7 +92,7 @@ export class MultiSkollZeroTrainer {
     const out: SlotMap = {}
     for (const key of ['mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist'] as const) {
       const s = this.slots[key]
-      if (s) (out[key] as AgentSlot) = { nn: s.masonZeroNet, buffer: s.buffer }
+      if (s) (out[key] as AgentSlot) = { nn: s.inferNet ?? s.masonZeroNet, buffer: s.buffer }
     }
     return out
   }

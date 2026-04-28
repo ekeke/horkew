@@ -62,6 +62,22 @@ export interface MasonZeroNN {
    *   該当 head を持たないネットで非対応 head 名が渡された場合は実装が throw する。
    */
   forward(rootObs: RootObservation, state: SimState, masonSeat: number, headName?: HeadName): NNOutput
+
+  /**
+   * Batched forward (optional)。複数の (rootObs, state, actorSeat) を 1 batch で
+   * 推論する。同じ headName の inputs のみを 1 batch にまとめる前提 (caller 責任)。
+   *
+   * 実装が無い (undefined) ネットでは batched MCTS 側が forward を N 回呼んで fallback する。
+   * TF.js GPU 実装でのみ真の batch tensor forward を行い、レイテンシを N 倍まで償却する。
+   *
+   * 出力は inputs と同順、長さ等しい NNOutput[]。
+   */
+  forwardBatch?(
+    rootObsList: RootObservation[],
+    states: SimState[],
+    actorSeats: number[],
+    headName?: HeadName,
+  ): NNOutput[]
 }
 
 /**

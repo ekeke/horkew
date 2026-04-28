@@ -152,4 +152,19 @@ export interface SkollZeroModule {
     headName: HeadName,
     invariants: RolloutInvariants,
   ): NNOutput
+
+  /**
+   * Batched forward (optional)。同じ headName / Module で複数 leaf の forward を
+   * 1 回にまとめる。batched MCTS (`SKOLLZ_BATCH_INFER>1`) で呼ばれる。
+   *
+   * 入力配列は同順、長さ等しい。obs は `encodeStateObs` を内部で呼ぶ前提。
+   * NN が `forwardBatch` を持たなければ、Module 側で forwardAt を N 回呼ぶ fallback で良い。
+   */
+  forwardBatchAt?(
+    states: SimState[],
+    actorSeats: number[],
+    actorRoles: SystemRole[],
+    headName: HeadName,
+    invariants: RolloutInvariants,
+  ): NNOutput[]
 }

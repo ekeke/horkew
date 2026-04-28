@@ -804,6 +804,7 @@ export class TfTransformerNetwork {
   forward(input: Float32Array, _explore?: boolean): ForwardResult {
     const policies = new Map<string, Float32Array>()
     let value = 0
+    let outcomeDist: Float32Array | undefined
 
     tf.tidy(() => {
       const obsTensor = tf.tensor2d(input, [1, this.config.inputSize])
@@ -812,6 +813,14 @@ export class TfTransformerNetwork {
       const allLogits = this.computeAllHeadLogits(clsOut, seatOutputs)
       for (const [name, logits] of allLogits) {
         policies.set(name, logits.dataSync() as Float32Array)
+      }
+
+      // Outcome distribution head (Stage 4): config.outcomeDistOutputs 指定時のみ。
+      // Pure JS の TransformerNetwork.forward と挙動を揃えるため softmax 済を返す。
+      if (this.outcomeDistW && this.outcomeDistB) {
+        const odLogits = tf.add(tf.matMul(clsOut, this.outcomeDistW), this.outcomeDistB)
+        const odSoftmax = tf.softmax(odLogits)
+        outcomeDist = odSoftmax.dataSync() as Float32Array
       }
 
       // Plan logits via GRU decoder (2-phase: forward + endgame) — skip when numPlanTokens === 0
@@ -852,7 +861,72 @@ export class TfTransformerNetwork {
       value = Math.tanh(rawValue)
     })
 
-    return { policies, value }
+    return { policies, value, outcomeDist }
+  }
+
+  /**
+   * 複数サンプルを 1 batch tensor で推論。skoll-zero の batched MCTS が使う。
+   *
+   * forward と異なり plan head (autoregressive decoder) は出力しない。
+   * skoll-zero の MCTS は execute / attack / divine / guard / claim_* / morning の
+   * head のみを使うため。plan が必要なら forward (1 sample) を使うこと。
+   *
+   * 各サンプルは `inputs[i]` (Float32Array of inputSize)。出力は同順 ForwardResult[]。
+   */
+  forwardBatch(inputs: Float32Array[]): ForwardResult[] {
+    const N = inputs.length
+    if (N === 0) return []
+    if (N === 1) return [this.forward(inputs[0])]
+
+    const inputSize = this.config.inputSize
+    const batchData = new Float32Array(N * inputSize)
+    for (let i = 0; i < N; i++) {
+      batchData.set(inputs[i], i * inputSize)
+    }
+
+    const results: ForwardResult[] = []
+    for (let i = 0; i < N; i++) {
+      results.push({ policies: new Map<string, Float32Array>(), value: 0 })
+    }
+
+    tf.tidy(() => {
+      const obsTensor = tf.tensor2d(batchData, [N, inputSize])
+      const { clsOut, seatOutputs } = this.forwardTrunk(obsTensor)
+
+      // computeAllHeadLogits は batch 入力に対応している (matmul ベース)
+      const allLogits = this.computeAllHeadLogits(clsOut, seatOutputs)
+      for (const [name, logits] of allLogits) {
+        const data = logits.dataSync() as Float32Array
+        const dim = data.length / N
+        for (let i = 0; i < N; i++) {
+          const slice = new Float32Array(dim)
+          slice.set(data.subarray(i * dim, (i + 1) * dim))
+          results[i].policies.set(name, slice)
+        }
+      }
+
+      // outcomeDist (Stage 4) の per-sample 分解
+      if (this.outcomeDistW && this.outcomeDistB) {
+        const odLogits = tf.add(tf.matMul(clsOut, this.outcomeDistW), this.outcomeDistB)
+        const odSoftmax = tf.softmax(odLogits, -1)
+        const odData = odSoftmax.dataSync() as Float32Array
+        const odSize = odData.length / N
+        for (let i = 0; i < N; i++) {
+          const slice = new Float32Array(odSize)
+          slice.set(odData.subarray(i * odSize, (i + 1) * odSize))
+          results[i].outcomeDist = slice
+        }
+      }
+
+      // value head: [N, 1] → [N], tanh per-sample
+      const rawValues = tf.add(tf.matMul(clsOut, this.valueW), this.valueB).squeeze([1])
+      const valueData = rawValues.dataSync() as Float32Array
+      for (let i = 0; i < N; i++) {
+        results[i].value = Math.tanh(valueData[i])
+      }
+    })
+
+    return results
   }
 
   /**
