@@ -18,7 +18,7 @@
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import type { NightAction } from '../../lupa/types.ts'
 import { SkollZeroRoleAgent, type SkollZeroRoleAgentOptions } from './role-zero-agent.ts'
-import { argmaxFromVisits, sampleFromVisits } from './policy-utils.ts'
+import { argmaxFromVisits, sampleFromVisits, temperatureForAlive } from './policy-utils.ts'
 import {
   VillageIndividualModule,
   FanaticIndividualModule,
@@ -54,7 +54,11 @@ export class VillageRoleAgent extends SkollZeroRoleAgent {
     if (!r) return super.decideNightAction(ctx)
     const target = this.selectionMode === 'argmax'
       ? argmaxFromVisits(r.visits)
-      : sampleFromVisits(r.visits, () => ctx.rng.next())
+      : sampleFromVisits(
+          r.visits,
+          () => ctx.rng.next(),
+          temperatureForAlive(ctx.alivePlayers.length),
+        )
     return { type: mode, target }
   }
 }
@@ -81,7 +85,11 @@ export class WolfRoleAgent extends SkollZeroRoleAgent {
     if (!r) return super.decideNightAction(ctx)
     const target = this.selectionMode === 'argmax'
       ? argmaxFromVisits(r.visits)
-      : sampleFromVisits(r.visits, () => ctx.rng.next())
+      : sampleFromVisits(
+          r.visits,
+          () => ctx.rng.next(),
+          temperatureForAlive(ctx.alivePlayers.length),
+        )
     // 個別 Agent の NightAction は lupa 型 (attacker は team agent が決める)
     return { type: 'attack', target }
   }

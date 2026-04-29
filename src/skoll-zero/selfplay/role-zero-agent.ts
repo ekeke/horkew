@@ -24,7 +24,7 @@ import type { MasonZeroNN } from '../mcts/nn.ts'
 import type { MCTSConfig, MCTSResult } from '../mcts/ISMCTS.ts'
 import type { ModuleBundle } from '../mcts/dispatch.ts'
 import type { TrainingBuffer } from './buffer.ts'
-import { argmaxFromVisits, sampleFromVisits } from './policy-utils.ts'
+import { argmaxFromVisits, sampleFromVisits, temperatureForAlive } from './policy-utils.ts'
 import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
 
 /**
@@ -102,6 +102,10 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
     if (!result) return super.decideVote(ctx)
     return this.selectionMode === 'argmax'
       ? argmaxFromVisits(result.visits)
-      : sampleFromVisits(result.visits, () => ctx.rng.next())
+      : sampleFromVisits(
+          result.visits,
+          () => ctx.rng.next(),
+          temperatureForAlive(ctx.alivePlayers.length),
+        )
   }
 }
