@@ -101,8 +101,8 @@ impl VillageRetar {
         let last_deaths = find_last_deaths(&vs);
 
         // 初期化分岐
-        let initial_possibilities = if let Some(ref prior) = options.prior {
-            init_from_prior(prior, &options)
+        let initial_possibilities = if let Some(prior) = options.prior.clone() {
+            init_from_prior(&mut vs, &prior, &setup, &options, &night_kills_by_day, &last_deaths)
         } else {
             init_from_scratch(&mut vs, &setup, &options, &night_kills_by_day, &last_deaths)
         };
@@ -507,14 +507,7 @@ fn extract_hamster_death_info(vs: &VillageStatus) -> (Option<Day>, Option<CauseO
 }
 
 /// ゼロから初期化（従来のフルパス）
-fn init_from_scratch(
-    vs: &mut VillageStatus,
-    setup: &BTreeMap<SystemRole, u32>,
-    options: &AnalyzeOptions,
-    night_kills_by_day: &BTreeMap<Day, Vec<Seat>>,
-    last_deaths: &[Seat],
-) -> Possibilities {
-    // Apply hocus pocus
+fn apply_hocus_pocus(vs: &mut VillageStatus, options: &AnalyzeOptions) {
     for (&seat, _) in &options.hocus_pocus {
         if let Some(status) = vs.statuses.get_mut(&seat) {
             status.assertions.clear();
@@ -523,9 +516,13 @@ fn init_from_scratch(
             status.actions.clear();
         }
     }
+}
 
-    let mut initial_possibilities = Possibilities::from_setup(setup);
-
+fn apply_fixed_positions(
+    vs: &VillageStatus,
+    options: &AnalyzeOptions,
+    initial_possibilities: &mut Possibilities,
+) {
     // 処刑道連れが発生した日を事前収集（処刑者が猫又の可能性を残すため）
     let mut curse_days: BTreeSet<Day> = BTreeSet::new();
     for status in vs.statuses.values() {
@@ -536,7 +533,6 @@ fn init_from_scratch(
         }
     }
 
-    // Apply fixed positions
     let mut fixed_positions: BTreeMap<Seat, SystemRole> = BTreeMap::new();
 
     for (&seat, status) in vs.statuses.iter() {
@@ -614,53 +610,115 @@ fn init_from_scratch(
     for (&seat, &role) in &fixed_positions {
         initial_possibilities.fix_role(seat, role);
     }
+}
 
-    // Single night kill victims can't be wolves
+fn apply_single_night_kill_rule(
+    night_kills_by_day: &BTreeMap<Day, Vec<Seat>>,
+    initial_possibilities: &mut Possibilities,
+) {
     for killed in night_kills_by_day.values() {
         if killed.len() == 1 {
             initial_possibilities.deny_role(killed[0], SystemRole::Werewolf);
         }
     }
+}
 
-    // Apply game end constraints
+/// 現在の vs に役職スライド or 結果スライドが含まれているか検査する。
+/// スライドは「過去 valid だった世界線が無効化される or 過去 invalid だった世界線が解禁される」
+/// という非単調な変化を引き起こすため、prior の possibilities (= 過去前提で求めた役職集合の和) は
+/// チェーンの起点として安全に使えない。
+fn has_slides_in_vs(vs: &VillageStatus) -> bool {
+    for status in vs.statuses.values() {
+        if let Some(prev_claims) = &status.previous_claims {
+            if !prev_claims.is_empty() {
+                return true;
+            }
+        }
+        if let Some(prev_assertions) = &status.previous_assertions {
+            if !prev_assertions.is_empty() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn init_from_scratch(
+    vs: &mut VillageStatus,
+    setup: &BTreeMap<SystemRole, u32>,
+    options: &AnalyzeOptions,
+    night_kills_by_day: &BTreeMap<Day, Vec<Seat>>,
+    last_deaths: &[Seat],
+) -> Possibilities {
+    apply_hocus_pocus(vs, options);
+    let mut initial_possibilities = Possibilities::from_setup(setup);
+    apply_fixed_positions(vs, options, &mut initial_possibilities);
+    apply_single_night_kill_rule(night_kills_by_day, &mut initial_possibilities);
     apply_game_end_constraints(vs, last_deaths, &mut initial_possibilities);
-
     initial_possibilities
 }
 
-/// 事前計算済みpossibilitiesを基に、追加assumptionで再計算
+/// 事前計算済みpossibilitiesを基に、追加assumptionで再計算。
+/// prior は過去の時点で取得した結果でも良く、その場合は現在の vs に追加で発生した
+/// 制約 (新しい CO、CO無し処刑、特殊死因、単独夜死体、ゲーム終了制約 等) を
+/// monotonic な narrowing として prior の上から AND で適用する。
+///
+/// 例外: vs にスライドが含まれている場合、prior は安全に使えない。
+/// init_from_scratch にフォールバックして prior を破棄する (assumptions は維持)。
 fn init_from_prior(
+    vs: &mut VillageStatus,
     prior: &Possibilities,
+    setup: &BTreeMap<SystemRole, u32>,
     options: &AnalyzeOptions,
+    night_kills_by_day: &BTreeMap<Day, Vec<Seat>>,
+    last_deaths: &[Seat],
 ) -> Possibilities {
+    if has_slides_in_vs(vs) {
+        let initial_possibilities = init_from_scratch(vs, setup, options, night_kills_by_day, last_deaths);
+        // init_from_scratch 内の apply_fixed_positions は assumption の fix_role を silent に行うため、
+        // 不整合があった場合に明示的にエラーを投げるための事後検査。
+        for (&seat, &role) in &options.assumptions {
+            if !initial_possibilities.has_role(seat, role) {
+                panic!(
+                    "Prior-based re-analysis (slide-fallback): seat {} cannot be {:?}",
+                    seat, role
+                );
+            }
+        }
+        return initial_possibilities;
+    }
+
+    apply_hocus_pocus(vs, options);
+
     let mut initial_possibilities = prior.clone();
 
     // prior ビットマスクに合わせて setup カウントを同期し、確定席の伝播を実行
     initial_possibilities.refix();
 
-    let sorted_assumptions: BTreeMap<Seat, SystemRole> = options.assumptions.iter().map(|(&k, &v)| (k, v)).collect();
-    for (&seat, &role) in &sorted_assumptions {
+    // apply_fixed_positions が assumption を fix_role する際は失敗が silent なので、
+    // ここで prior に対する整合性を先に明示的に検査する
+    for (&seat, &role) in &options.assumptions {
         if !initial_possibilities.has_role(seat, role) {
             panic!(
                 "Prior-based re-analysis: seat {} cannot be {:?} (not in prior possibilities)",
                 seat, role
             );
         }
-        if !initial_possibilities.fix_role(seat, role) {
+    }
+
+    // 現在の vs から得られる制約 (新しい日に発生した CO/処刑/特殊死因/assumption/wolf_pair_denyals) を
+    // prior の possibilities に追加適用する。prior が古い時点のものでも、進んだ日の制約を取りこぼさない。
+    apply_fixed_positions(vs, options, &mut initial_possibilities);
+    apply_single_night_kill_rule(night_kills_by_day, &mut initial_possibilities);
+    apply_game_end_constraints(vs, last_deaths, &mut initial_possibilities);
+
+    // 全制約適用後、assumption が依然成立しているか検査 (特殊死因と矛盾するケース等を捕捉)
+    for (&seat, &role) in &options.assumptions {
+        if !initial_possibilities.has_role(seat, role) {
             panic!(
                 "Prior-based re-analysis: fix_role({}, {:?}) caused contradiction",
                 seat, role
             );
-        }
-    }
-
-    // 狼ペア否定の早期適用: 新assumptionで狼確定した場合
-    for &(seat_a, seat_b) in &options.wolf_pair_denyals {
-        if options.assumptions.get(&seat_a) == Some(&SystemRole::Werewolf) {
-            initial_possibilities.deny_role(seat_b, SystemRole::Werewolf);
-        }
-        if options.assumptions.get(&seat_b) == Some(&SystemRole::Werewolf) {
-            initial_possibilities.deny_role(seat_a, SystemRole::Werewolf);
         }
     }
 
