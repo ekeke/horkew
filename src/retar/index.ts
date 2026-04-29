@@ -173,8 +173,40 @@ export class VillageRetar {
     this.applyGameEndConstraints()
   }
 
-  // 事前計算済みanalyze結果を基に、追加assumptionで再計算
+  // 現在の vs に役職スライド or 結果スライドが含まれているか検査する。
+  // スライドは「過去 valid だった世界線が無効化される or 過去 invalid だった世界線が解禁される」
+  // という非単調な変化を引き起こすため、prior の possibilities (= 過去前提で求めた役職集合の和) は
+  // チェーンの起点として安全に使えない。
+  private hasSlidesInVs(): boolean {
+    for ( const status of this.vs.statuses.values() ) {
+      if ( status.previousClaims && status.previousClaims.length > 0 ) return true
+      if ( status.previousAssertions && status.previousAssertions.size > 0 ) return true
+    }
+    return false
+  }
+
+  // 事前計算済みanalyze結果を基に、追加assumptionで再計算。
+  // prior は過去の時点で取得した結果でも良く、その場合は現在の vs に追加で発生した
+  // 制約（新しい CO、CO無し処刑、特殊死因、単独夜死体、ゲーム終了制約 等）を
+  // monotonic な narrowing として prior の上から AND で適用する。
+  //
+  // 例外: vs にスライドが含まれている場合、prior は安全に使えない。
+  // initFromScratch にフォールバックして prior を破棄する（assumptions は維持）。
   private initFromPrior(prior: AnalyzedPossibilities) {
+    if ( this.hasSlidesInVs() ) {
+      this.initFromScratch(this.vs)
+      // initFromScratch 内の applyFixedPositions は assumption の fixRole を silent に行うため、
+      // 不整合があった場合に明示的にエラーを投げるための事後検査。
+      for ( const [seat, role] of this.options.assumptions.entries() ) {
+        if ( !this.initialPossibilities.hasRole(seat, role) ) {
+          throw new Error(`Prior-based re-analysis (slide-fallback): seat ${seat} cannot be ${role}`)
+        }
+      }
+      return
+    }
+
+    this.applyHocusPocus()
+
     this.initialPossibilities = new Possibilities(this.setup)
     for ( const [seat, roles] of prior.entries() ) {
       this.initialPossibilities.possibilities[seat] = possibilityFromRoles(roles)
@@ -183,22 +215,31 @@ export class VillageRetar {
     // prior ビットマスクに合わせて setup カウントを同期し、確定席の伝播を実行
     this.initialPossibilities.refix()
 
+    // applyFixedPositions が assumption を fixRole する際は失敗が silent なので、
+    // ここで prior に対する整合性を先に明示的に検査する
     for ( const [seat, role] of this.options.assumptions.entries() ) {
       if ( !this.initialPossibilities.hasRole(seat, role) ) {
         throw new Error(`Prior-based re-analysis: seat ${seat} cannot be ${role} (not in prior possibilities)`)
       }
-      if ( !this.initialPossibilities.fixRole(seat, role) ) {
-        throw new Error(`Prior-based re-analysis: fixRole(${seat}, ${role}) caused contradiction`)
+    }
+
+    // 現在の vs から得られる制約（新しい日に発生した CO/処刑/特殊死因/assumption/wolfPairDenyals）を
+    // prior の possibilities に追加適用する。prior が古い時点のものでも、進んだ日の制約を取りこぼさない。
+    this.applyFixedPositions(this.vs)
+
+    // 単独の夜死体は狼襲撃によるものなので、被害者は人狼ではない
+    for ( const [, killed] of this.nightKillsByDay ) {
+      if ( killed.length === 1 ) {
+        this.initialPossibilities.denyRole(killed[0], 'werewolf')
       }
     }
 
-    // 狼ペア否定の早期適用: 新assumptionで狼確定した場合
-    for ( const [seatA, seatB] of this.options.wolfPairDenyals ) {
-      if ( this.options.assumptions.get(seatA) === 'werewolf' ) {
-        this.initialPossibilities.denyRole(seatB, 'werewolf')
-      }
-      if ( this.options.assumptions.get(seatB) === 'werewolf' ) {
-        this.initialPossibilities.denyRole(seatA, 'werewolf')
+    this.applyGameEndConstraints()
+
+    // 全制約適用後、assumption が依然成立しているか検査（特殊死因と矛盾するケース等を捕捉）
+    for ( const [seat, role] of this.options.assumptions.entries() ) {
+      if ( !this.initialPossibilities.hasRole(seat, role) ) {
+        throw new Error(`Prior-based re-analysis: fixRole(${seat}, ${role}) caused contradiction`)
       }
     }
   }
