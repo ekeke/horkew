@@ -74,6 +74,11 @@ export type MultiRoundStats = {
 export type MultiSkollZeroTrainerOptions = {
   slots: MultiTrainerSlots
   config: SkollZeroTrainConfig
+  /**
+   * Resume 時に前回終了時点の gameSeedCounter を継承する。
+   * 未指定なら config.rngSeed で初期化 (新規ラン)。
+   */
+  initialGameSeedCounter?: number
 }
 
 export class MultiSkollZeroTrainer {
@@ -86,7 +91,12 @@ export class MultiSkollZeroTrainer {
     this.slots = opts.slots
     this.config = opts.config
     this.rng = makeRng(opts.config.rngSeed)
-    this.gameSeedCounter = opts.config.rngSeed
+    this.gameSeedCounter = opts.initialGameSeedCounter ?? opts.config.rngSeed
+  }
+
+  /** Resume 用: 現在の gameSeedCounter を取得 (round 完了時に persist して再起動時に復元) */
+  getGameSeedCounter(): number {
+    return this.gameSeedCounter
   }
 
   private asSlotMap(): SlotMap {

@@ -16,7 +16,7 @@
  *   SKOLLZ_LR, SKOLLZ_SEED, SKOLLZ_OUTCOME_SL (1 で有効), SKOLLZ_KL_COEFF
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
@@ -207,12 +207,37 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     mctsRollouts: options.rollouts,
     rngSeed: options.seed,
   }
-  const trainer = new MultiSkollZeroTrainer({ slots, config })
+
+  // Resume: phaseDir/resume.json があれば lastCompletedRound + 1 から再開、
+  // gameSeedCounter も復元する。weights は buildSlot 内で {slot}/final.json から resume 済み。
+  // TrainingBuffer は persist しないので空で再開 (1-2 round で再蓄積される)。
+  const resumeStatePath = join(phaseDir, 'resume.json')
+  let startRound = 1
+  let initialGameSeedCounter: number | undefined
+  if (existsSync(resumeStatePath)) {
+    try {
+      const raw = JSON.parse(readFileSync(resumeStatePath, 'utf-8')) as {
+        lastCompletedRound: number
+        gameSeedCounter: number
+      }
+      if (raw.lastCompletedRound >= options.rounds) {
+        log(`resume.json: 既に ${raw.lastCompletedRound} round 完了済み (target ${options.rounds})、追加 round なし`)
+      } else {
+        startRound = raw.lastCompletedRound + 1
+        initialGameSeedCounter = raw.gameSeedCounter
+        log(`resume: round ${startRound} から再開 (前回 ${raw.lastCompletedRound} 完了、gameSeedCounter=${raw.gameSeedCounter})`)
+      }
+    } catch (e) {
+      log(`WARN: resume.json 読み込み失敗、最初から開始: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const trainer = new MultiSkollZeroTrainer({ slots, config, initialGameSeedCounter })
 
   const roundSummaries: Array<{ round: number, outcomes: { villagerWon: number, werewolfWon: number, werehamsterWon: number, draw: number } }> = []
 
   try {
-    for (let r = 1; r <= options.rounds; r++) {
+    for (let r = startRound; r <= options.rounds; r++) {
       const rolloutRetar: boolean | undefined = offRounds > 0 ? r > offRounds : undefined
       const retarTag = rolloutRetar === undefined ? 'env' : (rolloutRetar ? 'on' : 'off')
       const t0 = Date.now()
@@ -226,6 +251,13 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
       }
       writeRoundMeta(phaseDir, stats)
       roundSummaries.push({ round: r, outcomes: stats.outcomes })
+
+      // Resume 用: round 完了時に resume.json を atomically 上書き
+      writeFileSync(resumeStatePath, JSON.stringify({
+        lastCompletedRound: r,
+        gameSeedCounter: trainer.getGameSeedCounter(),
+        timestamp: new Date().toISOString(),
+      }, null, 2))
     }
   } finally {
     terminateSkollZeroWorkerPool()
