@@ -120,6 +120,8 @@ export type ParallelSelfPlayConfig = Omit<MultiAgentSelfPlayConfig, 'mctsConfig'
   mctsConfig: Omit<SerializableMCTSConfig, 'rngSeed'>
   /** Stage 2+ で main 集約に使う想定。Stage 1 では worker に渡すだけ */
   batchInferSize?: number
+  /** カリキュラム制御: この round で retar rollout を有効化するか (未指定なら worker 起動時 env 維持) */
+  rolloutRetar?: boolean
 }
 
 /**
@@ -235,6 +237,7 @@ export function runSelfPlayParallel(
         seeds,
         forwardSABs,
         workerId,
+        rolloutRetar: cfg.rolloutRetar,
       }
       worker.postMessage(request)
     }

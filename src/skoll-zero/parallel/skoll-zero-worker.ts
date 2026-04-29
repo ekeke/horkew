@@ -85,6 +85,10 @@ parentPort.on('message', async (req: SelfPlayChunkRequest) => {
 })
 
 async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkResult> {
+  // カリキュラム: rolloutRetar が指定されたら env を上書き。from-ctx.ts:204 が読み取る。
+  if (req.rolloutRetar !== undefined) {
+    process.env.SKOLLZ_ROLLOUT_RETAR = req.rolloutRetar ? '1' : '0'
+  }
   const useProxy = req.forwardSABs !== undefined && req.workerId !== undefined
   const slots: SlotMap = {}
   for (const slotName of Object.keys(req.weights) as SlotName[]) {

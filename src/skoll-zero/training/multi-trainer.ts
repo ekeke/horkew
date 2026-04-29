@@ -98,7 +98,11 @@ export class MultiSkollZeroTrainer {
     return out
   }
 
-  async trainRound(roundId: number, outputDir: string): Promise<MultiRoundStats> {
+  async trainRound(
+    roundId: number,
+    outputDir: string,
+    opts: { rolloutRetar?: boolean } = {},
+  ): Promise<MultiRoundStats> {
     const mctsConfig: MCTSConfig = {
       cPuct: this.config.cPuct,
       nRollouts: this.config.mctsRollouts,
@@ -127,6 +131,7 @@ export class MultiSkollZeroTrainer {
             rootDirichletEps: this.config.rootDirichletEps,
           },
           selectionMode: 'sample',
+          rolloutRetar: opts.rolloutRetar,
         },
         this.config.gamesPerRound,
       )

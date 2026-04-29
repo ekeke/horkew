@@ -166,8 +166,16 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     return
   }
 
+  // カリキュラム: SKOLLZ_OFF_ROUNDS=N で「最初 N round は retar OFF、残り ON」を指示。
+  // 0 (default) なら全 round で worker 起動時 env (= SKOLLZ_ROLLOUT_RETAR) を維持 (後方互換)。
+  const offRoundsEnv = process.env.SKOLLZ_OFF_ROUNDS
+  const offRounds = offRoundsEnv ? parseInt(offRoundsEnv, 10) : 0
+
   log(`output: ${phaseDir}`)
   log(`rounds=${options.rounds} games/round=${options.gamesPerRound} rollouts=${options.rollouts} steps/round=${options.stepsPerRound}`)
+  if (offRounds > 0) {
+    log(`カリキュラム: 1..${offRounds} = retar OFF, ${offRounds + 1}..${options.rounds} = retar ON (SKOLLZ_OFF_ROUNDS=${offRounds})`)
+  }
 
   const slots: MultiTrainerSlots = {}
   for (const key of SLOT_KEYS) {
@@ -205,10 +213,12 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
 
   try {
     for (let r = 1; r <= options.rounds; r++) {
+      const rolloutRetar: boolean | undefined = offRounds > 0 ? r > offRounds : undefined
+      const retarTag = rolloutRetar === undefined ? 'env' : (rolloutRetar ? 'on' : 'off')
       const t0 = Date.now()
-      const stats = await trainer.trainRound(r, phaseDir)
+      const stats = await trainer.trainRound(r, phaseDir, { rolloutRetar })
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
-      log(`round ${r}/${options.rounds} elapsed=${elapsed}s vill=${stats.outcomes.villagerWon} wolf=${stats.outcomes.werewolfWon} ham=${stats.outcomes.werehamsterWon} draw=${stats.outcomes.draw}`)
+      log(`round ${r}/${options.rounds} retar=${retarTag} elapsed=${elapsed}s vill=${stats.outcomes.villagerWon} wolf=${stats.outcomes.werewolfWon} ham=${stats.outcomes.werehamsterWon} draw=${stats.outcomes.draw}`)
       for (const key of SLOT_KEYS) {
         const s = stats.perSlot[key]
         if (!s) continue

@@ -60,6 +60,12 @@ export type SelfPlayChunkRequest = {
   forwardSABs?: ForwardSABBundle
   /** forwardSABs と必ず同時指定。forward server が SAB を区別するための worker 識別 */
   workerId?: number
+  /**
+   * カリキュラム制御: この chunk で retar rollout (MCTS 中の retar 再実行) を有効化するか。
+   * worker 内で process.env.SKOLLZ_ROLLOUT_RETAR を上書きする。
+   * 未指定なら worker 起動時の env を維持 (= phase 起動時の env)。
+   */
+  rolloutRetar?: boolean
 }
 
 /** worker での self-play 結果サマリ (chunk 単位の outcomes 集計) */
