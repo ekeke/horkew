@@ -203,11 +203,14 @@ export function buildInvariants(ctx: DecisionContext): RolloutInvariants {
   // SimState 由来の VillageStatus に対して Retar を呼ぶ (from-sim-state.ts 経路)。
   const recomputeRetarInRollout = process.env.SKOLLZ_ROLLOUT_RETAR === '1'
   let setup: Map<SystemRole, number> | undefined
+  let retarPriorCache: { global: Map<number, Set<SystemRole>> | null } | undefined
   if (recomputeRetarInRollout) {
     setup = new Map<SystemRole, number>()
     for (const player of ctx.gameState.players) {
       setup.set(player.role, (setup.get(player.role) ?? 0) + 1)
     }
+    // 差分計算用 prior cache: root snapshot の global retar 結果を初期 prior に。
+    retarPriorCache = { global: ctx.globalRetarPossibilities ?? null }
   }
 
   return {
@@ -222,6 +225,7 @@ export function buildInvariants(ctx: DecisionContext): RolloutInvariants {
     villageNNOutput: undefined,
     setup,
     recomputeRetarInRollout,
+    retarPriorCache,
   }
 }
 

@@ -71,6 +71,18 @@ export type RolloutInvariants = {
    * false (default) なら invariants.retarPossibilities / globalRetarPossibilities を root snapshot として使う。
    */
   recomputeRetarInRollout?: boolean
+  /**
+   * Retar 差分計算用の prior cache (mutable)。recomputeRetarInRollout=true のとき、
+   * 各 expand の global retar 計算で前回結果を prior として渡し、計算後に最新結果で update。
+   *
+   * 並列 leaf 間で衝突 (= 直前 leaf の結果が次 leaf の prior になる) する可能性があるが、
+   * retar の initFromPrior が cross-day 対応 (eced9fb) で、prior が腐っていれば silent
+   * fallback (scratch から計算) するため結果は正しい。prior 効果が落ちる場合があるだけ。
+   *
+   * Stage 1 簡略化: global retar のみキャッシュ。self retar (viewer-specific assumption)
+   * は prior なし (既存挙動維持)。
+   */
+  retarPriorCache?: { global: Map<number, Set<SystemRole>> | null }
 }
 
 /** signal の per-seat 累積カウンター (`collectObservation` 由来) */
@@ -420,8 +432,14 @@ function resolveRetarBoth(
   const setup = invariants.setup ?? setupFromWorld(state.world)
   try {
     const vs = simStateToVillageStatus(state)
-    const global = runRetarOnVillageStatus(vs, setup)
+    // 差分計算: 前回 global retar 結果を prior として渡す。retar 内部で initFromPrior
+    // 経路で枝刈り。prior が腐っていれば silent fallback (scratch から計算) する。
+    const priorGlobal = invariants.retarPriorCache?.global ?? undefined
+    const global = runRetarOnVillageStatus(vs, setup, undefined, undefined, priorGlobal)
+    // self retar は viewer-specific assumption が異なるため Stage 1 では prior なし
     const self = runRetarOnVillageStatus(vs, setup, viewerSeat, viewerRole)
+    // 次回 prior 用に cache を update (並列 leaf で衝突しても retar 側 fallback で正しく動く)
+    if (invariants.retarPriorCache) invariants.retarPriorCache.global = global
     return { self, global }
   } catch (e) {
     debugDumpOnPanic(state, viewerSeat, viewerRole, setup, e)

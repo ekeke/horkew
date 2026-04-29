@@ -162,12 +162,16 @@ export function simStateToVillageStatus(state: SimState): VillageStatus {
 /**
  * 既構築の VillageStatus + setup から Retar を実行する低レベル API。
  * 同じ SimState から global / viewer 両方の Retar を呼ぶときに VS 構築を 1 回化するために使う。
+ *
+ * @param prior 前回 Retar 結果。指定すると `initFromPrior` 経路で差分計算 (eced9fb)、
+ *   prior が腐っていれば retar 内部で silent fallback (scratch から計算) する。
  */
 export function runRetarOnVillageStatus(
   vs: VillageStatus,
   setup: Map<SystemRole, number>,
   viewerSeat?: number,
   viewerRole?: SystemRole,
+  prior?: Map<number, Set<SystemRole>>,
 ): Map<number, Set<SystemRole>> {
   const assumptions = new Map<number, SystemRole>()
   if (viewerSeat !== undefined && viewerRole !== undefined) {
@@ -176,6 +180,7 @@ export function runRetarOnVillageStatus(
   const options: AnalyzeOptions = {
     ...DEFAULT_RETAR_OPTIONS,
     assumptions,
+    prior,
   }
   const t0 = BENCH_ENABLED ? performance.now() : 0
   const possibilities: Possibilities = lupaRunRetar(vs, setup, options)
@@ -202,10 +207,11 @@ export function runRetarOnSimState(
   setup?: Map<SystemRole, number>,
   viewerSeat?: number,
   viewerRole?: SystemRole,
+  prior?: Map<number, Set<SystemRole>>,
 ): Map<number, Set<SystemRole>> {
   const resolvedSetup = setup ?? setupFromWorld(state.world)
   const vs = simStateToVillageStatus(state)
-  return runRetarOnVillageStatus(vs, resolvedSetup, viewerSeat, viewerRole)
+  return runRetarOnVillageStatus(vs, resolvedSetup, viewerSeat, viewerRole, prior)
 }
 
 /** Possibilities インスタンス → Map<seat, Set<role>> 変換 */
