@@ -180,10 +180,14 @@ export class MultiSkollZeroTrainer {
       const recordsAdded = slot.buffer.size() - (preSize.get(key) ?? 0)
       const bufferExpired = slot.buffer.expireOldest(this.config.bufferCapacity)
 
+      // SKOLLZ_SAMPLE_WEIGHT=alive で alive-weighted sampling を有効化
+      // (終盤 record を線形重みで優先 sampling、序盤の noisy target の影響を減らす)
+      const sampleWeighted = process.env.SKOLLZ_SAMPLE_WEIGHT === 'alive' ? 'alive' as const : undefined
+
       let lossSum = 0, policyLossSum = 0, valueLossSum = 0, stepsWithData = 0
       if (!slot.frozen) {
         for (let s = 0; s < this.config.stepsPerRound; s++) {
-          const records = slot.buffer.sample(this.config.batchSize, this.rng)
+          const records = slot.buffer.sample(this.config.batchSize, this.rng, { weighted: sampleWeighted })
           if (records.length === 0) break
           // head 別にバケット分割し、MCTS-π head (vote/attack/divine/guard) を trainMasonZero で学習
           const groups = groupRecordsByHead(records)

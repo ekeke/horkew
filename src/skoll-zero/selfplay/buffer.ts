@@ -96,15 +96,55 @@ export class TrainingBuffer {
   }
 
   /**
-   * finalized から size 件を uniform random sampling (with replacement)。
-   * 決定的にしたい場合は rng を渡す。
+   * finalized から size 件を sampling (with replacement)。
+   *
+   * @param opts.weighted 'alive' なら alive 数 (= record.alive bitmask の popcount) で
+   *   線形重み付け sampling。終盤 record (alive 少) を優先する: weight = 14 - aliveCount + 1
+   *   (alive=14 → 1, alive=4 → 11)。終盤の outcome 直結 record で学習信号を強化する目的。
+   *   省略時は uniform random sampling。
    */
-  sample(size: number, rng: () => number = Math.random): TrainingRecord[] {
+  sample(
+    size: number,
+    rng: () => number = Math.random,
+    opts?: { weighted?: 'alive' },
+  ): TrainingRecord[] {
     const n = this.finalized.length
     if (n === 0 || size <= 0) return []
     const out: TrainingRecord[] = new Array(size)
+
+    if (opts?.weighted !== 'alive') {
+      // uniform sampling
+      for (let i = 0; i < size; i++) {
+        const idx = Math.floor(rng() * n)
+        out[i] = this.finalized[idx]
+      }
+      return out
+    }
+
+    // alive-weighted sampling: weight = 14 - aliveCount + 1
+    const weights = new Float64Array(n)
+    let totalWeight = 0
+    for (let i = 0; i < n; i++) {
+      const w = 15 - popcount(this.finalized[i].alive)
+      weights[i] = w
+      totalWeight += w
+    }
+    if (totalWeight <= 0) {
+      // fallback: uniform if 全部 alive=14 (理論上は無い)
+      for (let i = 0; i < size; i++) {
+        const idx = Math.floor(rng() * n)
+        out[i] = this.finalized[idx]
+      }
+      return out
+    }
     for (let i = 0; i < size; i++) {
-      const idx = Math.floor(rng() * n)
+      let r = rng() * totalWeight
+      let idx = 0
+      for (; idx < n; idx++) {
+        r -= weights[idx]
+        if (r < 0) break
+      }
+      if (idx >= n) idx = n - 1
       out[i] = this.finalized[idx]
     }
     return out
@@ -124,4 +164,15 @@ export function outcomeOneHot(outcome: FinalOutcome): Float32Array {
   if (idx !== undefined) out[idx] = 1
   // OUTCOME_ORDER に無い outcome (例: 'ongoing') はゼロのまま (理論上 finalize 時に来ない前提)
   return out
+}
+
+/** 32-bit popcount (alive bitmask のビット数 = 生存席数) */
+function popcount(x: number): number {
+  let n = x | 0
+  let c = 0
+  while (n !== 0) {
+    n &= n - 1
+    c++
+  }
+  return c
 }
