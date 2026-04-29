@@ -29,6 +29,8 @@ import {
   type AgentSlot,
 } from '../selfplay/multi-runner.ts'
 import type { MCTSConfig } from '../mcts/ISMCTS.ts'
+import type { MasonZeroNN } from '../mcts/nn.ts'
+import { ProxiedMasonZeroNN } from './proxy-nn.ts'
 import type {
   SelfPlayChunkRequest,
   SelfPlayChunkResult,
@@ -83,6 +85,7 @@ parentPort.on('message', async (req: SelfPlayChunkRequest) => {
 })
 
 async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkResult> {
+  const useProxy = req.forwardSABs !== undefined && req.workerId !== undefined
   const slots: SlotMap = {}
   for (const slotName of Object.keys(req.weights) as SlotName[]) {
     const sw = req.weights[slotName]
@@ -90,7 +93,17 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
     const pureNet = buildPureNetForSlot(slotName)
     unpackWeights(pureNet, sw)
     const masonZero = new MasonZeroNetwork(pureNet, { zeroValueHead: false })
-    const slot: AgentSlot = { nn: masonZero, buffer: new TrainingBuffer() }
+    const nn: MasonZeroNN = useProxy
+      ? new ProxiedMasonZeroNN(
+          slotName,
+          masonZero,
+          req.forwardSABs!.signalSAB,
+          req.forwardSABs!.requestSAB,
+          req.forwardSABs!.responseSAB,
+          req.workerId!,
+        )
+      : masonZero
+    const slot: AgentSlot = { nn, buffer: new TrainingBuffer() }
     slots[slotName] = slot
   }
 

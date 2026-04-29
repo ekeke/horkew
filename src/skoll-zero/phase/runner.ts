@@ -41,7 +41,12 @@ import {
   type MultiTrainerSlots,
 } from '../training/multi-trainer.ts'
 import { DEFAULT_SKOLL_ZERO_TRAIN_CONFIG } from '../training/schedule.ts'
-import { initSkollZeroWorkerPool, terminateSkollZeroWorkerPool } from '../parallel/index.ts'
+import {
+  initSkollZeroWorkerPool,
+  terminateSkollZeroWorkerPool,
+  initSkollZeroForwardServer,
+} from '../parallel/index.ts'
+import type { ForwardServerSlots } from '../parallel/forward-server.ts'
 
 export type SkollZeroPhaseOptions = {
   checkpointBase: string
@@ -172,6 +177,18 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
   const numWorkersEnv = process.env.SKOLLZ_WORKERS
   const numWorkers = numWorkersEnv ? parseInt(numWorkersEnv, 10) : undefined
   initSkollZeroWorkerPool(numWorkers)
+
+  // Stage 2: SKOLLZ_PARALLEL_GPU=1 で proxy NN 経路を有効化。
+  // worker 内 forwardBatch を main GPU (Atomics+SAB) に投げる。
+  if (process.env.SKOLLZ_PARALLEL_GPU === '1') {
+    const tfSlots: ForwardServerSlots = {}
+    for (const key of SLOT_KEYS) {
+      const s = slots[key]
+      if (s) tfSlots[key] = new TfMasonZeroNetwork(s.tfNet)
+    }
+    initSkollZeroForwardServer(tfSlots)
+    log('SKOLLZ_PARALLEL_GPU=1 -> forward server 起動 (Stage 2: GPU forward via Atomics+SAB)')
+  }
 
   const config = {
     ...DEFAULT_SKOLL_ZERO_TRAIN_CONFIG,

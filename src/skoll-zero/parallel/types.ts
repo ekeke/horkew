@@ -29,6 +29,13 @@ export type SerializableMCTSConfig = {
   rootDirichletEps?: number
 }
 
+/** Stage 2: ProxiedMasonZeroNN が forward IPC で使う SAB のセット (1 worker あたり 1 セット) */
+export type ForwardSABBundle = {
+  signalSAB: SharedArrayBuffer
+  requestSAB: SharedArrayBuffer
+  responseSAB: SharedArrayBuffer
+}
+
 /** main → worker: 1 chunk 分の self-play job */
 export type SelfPlayChunkRequest = {
   type: 'self_play_chunk'
@@ -45,6 +52,14 @@ export type SelfPlayChunkRequest = {
   batchInferSize: number
   /** この chunk が担当する seed リスト */
   seeds: number[]
+  /**
+   * Stage 2: 指定されれば worker は MasonZeroNetwork (Pure JS) を ProxiedMasonZeroNN で wrap し、
+   * forwardBatch を SAB+Atomics 経由で main GPU に投げる。
+   * 未指定なら Stage 1 経路 (worker 内 Pure JS forward)。
+   */
+  forwardSABs?: ForwardSABBundle
+  /** forwardSABs と必ず同時指定。forward server が SAB を区別するための worker 識別 */
+  workerId?: number
 }
 
 /** worker での self-play 結果サマリ (chunk 単位の outcomes 集計) */

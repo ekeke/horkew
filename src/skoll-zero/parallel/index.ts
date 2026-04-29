@@ -29,13 +29,27 @@ import type {
   SerializedOutcomes,
   SerializableMCTSConfig,
   SlotName,
+  ForwardSABBundle,
 } from './types.ts'
+import {
+  ForwardServer,
+  type ForwardServerSlots,
+  type WorkerSABBundle,
+} from './forward-server.ts'
+import {
+  SIGNAL_SAB_BYTES,
+  REQUEST_SAB_BYTES,
+  RESPONSE_SAB_BYTES,
+} from './forward-types.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const WORKER_PATH = join(__dirname, 'skoll-zero-worker.ts')
 
 let workerPool: Worker[] = []
+let workerSABs: WorkerSABBundle[] = []
+let forwardServer: ForwardServer | null = null
+let forwardServerHandlers: Array<(msg: { type: string }) => void> = []
 
 export function initSkollZeroWorkerPool(numWorkers?: number): void {
   if (workerPool.length > 0) return
@@ -50,12 +64,55 @@ export function initSkollZeroWorkerPool(numWorkers?: number): void {
 }
 
 export function terminateSkollZeroWorkerPool(): void {
+  // forward server を起動していたら先に terminate (listener 解放)
+  terminateSkollZeroForwardServer()
   for (const w of workerPool) w.terminate()
   workerPool = []
 }
 
 export function skollZeroWorkerPoolSize(): number {
   return workerPool.length
+}
+
+/**
+ * Stage 2: 各 worker に SAB セットを allocate し、forward server を起動して
+ * worker からの forward_request listener を attach する。
+ *
+ * 呼び出し前に initSkollZeroWorkerPool が必要。tfSlots は slot 名 → TfMasonZeroNetwork。
+ * GPU forward を担当する slot のみ含めれば良い (含まれない slot は worker からの
+ * forward_request で error を返す)。
+ */
+export function initSkollZeroForwardServer(tfSlots: ForwardServerSlots): void {
+  if (forwardServer) return
+  if (workerPool.length === 0) {
+    throw new Error('initSkollZeroForwardServer: worker pool not initialized')
+  }
+  workerSABs = workerPool.map(() => ({
+    signalSAB: new SharedArrayBuffer(SIGNAL_SAB_BYTES),
+    requestSAB: new SharedArrayBuffer(REQUEST_SAB_BYTES),
+    responseSAB: new SharedArrayBuffer(RESPONSE_SAB_BYTES),
+  }))
+  forwardServer = new ForwardServer(tfSlots, workerSABs)
+  forwardServerHandlers = workerPool.map((worker, i) => {
+    const handler = forwardServer!.makeMessageHandler(i)
+    worker.on('message', handler)
+    return handler
+  })
+  process.stderr.write(`[skoll-zero parallel] forward server started (${workerPool.length} workers, GPU forward via Atomics+SAB)\n`)
+}
+
+export function terminateSkollZeroForwardServer(): void {
+  if (!forwardServer) return
+  for (let i = 0; i < workerPool.length && i < forwardServerHandlers.length; i++) {
+    workerPool[i].off('message', forwardServerHandlers[i])
+  }
+  forwardServerHandlers = []
+  workerSABs = []
+  forwardServer = null
+}
+
+export function isSkollZeroForwardServerActive(): boolean {
+  return forwardServer !== null
 }
 
 export type ParallelSelfPlayConfig = Omit<MultiAgentSelfPlayConfig, 'mctsConfig' | 'collectGameRecord'> & {
@@ -124,23 +181,27 @@ export function runSelfPlayParallel(
         continue
       }
 
-      const onMessage = (msg: WorkerToMainMessage): void => {
+      const onMessage = (msg: WorkerToMainMessage | { type: string }): void => {
+        // self_play_result / self_play_error 以外 (例: forward_request) は無視。
+        // forward server の listener が同 worker.message を共有するため、type で分岐必須。
+        if (msg.type !== 'self_play_result' && msg.type !== 'self_play_error') return
         worker.off('message', onMessage)
         worker.off('error', onError)
         if (rejected) return
-        if (msg.type === 'self_play_error') {
+        const result = msg as WorkerToMainMessage
+        if (result.type === 'self_play_error') {
           rejected = true
-          reject(new Error(`skoll-zero worker chunk failed: ${msg.message}\n${msg.stack ?? ''}`))
+          reject(new Error(`skoll-zero worker chunk failed: ${result.message}\n${result.stack ?? ''}`))
           return
         }
         // outcomes 集計
-        aggregated.villagerWon += msg.outcomes.villagerWon
-        aggregated.werewolfWon += msg.outcomes.werewolfWon
-        aggregated.werehamsterWon += msg.outcomes.werehamsterWon
-        aggregated.draw += msg.outcomes.draw
+        aggregated.villagerWon += result.outcomes.villagerWon
+        aggregated.werewolfWon += result.outcomes.werewolfWon
+        aggregated.werehamsterWon += result.outcomes.werehamsterWon
+        aggregated.draw += result.outcomes.draw
         // records を main slot buffer へ merge
-        for (const slotName of Object.keys(msg.records) as SlotName[]) {
-          const recs = msg.records[slotName]
+        for (const slotName of Object.keys(result.records) as SlotName[]) {
+          const recs = result.records[slotName]
           const slot = cfg.slots[slotName]
           if (!recs || !slot) continue
           slot.buffer.appendFinalized(recs)
@@ -159,6 +220,11 @@ export function runSelfPlayParallel(
 
       worker.on('message', onMessage)
       worker.on('error', onError)
+      // forward server が active なら proxy NN 経路 (Stage 2) で動く
+      const forwardSABs: ForwardSABBundle | undefined = forwardServer
+        ? workerSABs[i]
+        : undefined
+      const workerId = forwardServer ? i : undefined
       const request: SelfPlayChunkRequest = {
         type: 'self_play_chunk',
         weights,
@@ -167,6 +233,8 @@ export function runSelfPlayParallel(
         selectionMode,
         batchInferSize: cfg.batchInferSize ?? 1,
         seeds,
+        forwardSABs,
+        workerId,
       }
       worker.postMessage(request)
     }
