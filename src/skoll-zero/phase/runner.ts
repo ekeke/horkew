@@ -16,7 +16,7 @@
  *   SKOLLZ_LR, SKOLLZ_SEED, SKOLLZ_OUTCOME_SL (1 で有効), SKOLLZ_KL_COEFF
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
@@ -45,8 +45,11 @@ import {
   initSkollZeroWorkerPool,
   terminateSkollZeroWorkerPool,
   initSkollZeroForwardServer,
+  runSelfPlayParallel,
 } from '../parallel/index.ts'
 import type { ForwardServerSlots } from '../parallel/forward-server.ts'
+import type { SlotMap, AgentSlot } from '../selfplay/multi-runner.ts'
+import type { SkollZeroTrainConfig } from '../training/schedule.ts'
 
 export type SkollZeroPhaseOptions = {
   checkpointBase: string
@@ -96,6 +99,47 @@ const WARM_START_PATHS: Record<Exclude<keyof MultiTrainerSlots, 'village'>, stri
 
 function log(msg: string): void {
   process.stderr.write(`[skoll-zero] ${msg}\n`)
+}
+
+/**
+ * Eval セッション: numGames 件の self-play を `selectionMode='argmax'` で実行し、
+ * outcomes を集計する。学習 buffer は temp で捨てるので、main slot.buffer に
+ * record は merge されない (= 学習に影響なし)。SKOLLZ_EVAL_EVERY env で間隔指定。
+ */
+async function runEvalSession(
+  slots: MultiTrainerSlots,
+  config: SkollZeroTrainConfig,
+  numGames: number,
+  evalSeed: number,
+): Promise<{
+  outcomes: { villagerWon: number, werewolfWon: number, werehamsterWon: number, draw: number }
+  elapsedSec: number
+}> {
+  const evalSlots: SlotMap = {}
+  for (const k of SLOT_KEYS) {
+    const s = slots[k]
+    if (!s) continue
+    const slot: AgentSlot = { nn: s.inferNet ?? s.masonZeroNet, buffer: new TrainingBuffer() }
+    evalSlots[k] = slot
+  }
+  const t0 = Date.now()
+  const { outcomes } = await runSelfPlayParallel(
+    {
+      slots: evalSlots,
+      seed: evalSeed,
+      mctsConfig: {
+        cPuct: config.cPuct,
+        nRollouts: config.mctsRollouts,
+        rootDirichletAlpha: config.rootDirichletAlpha,
+        rootDirichletEps: config.rootDirichletEps,
+      },
+      selectionMode: 'argmax',
+      // rolloutRetar: 学習時の env を維持 (worker 起動時の SKOLLZ_ROLLOUT_RETAR を使う)
+    },
+    numGames,
+  )
+  const elapsedSec = (Date.now() - t0) / 1000
+  return { outcomes, elapsedSec }
 }
 
 function buildSlot(
@@ -234,6 +278,14 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
 
   const trainer = new MultiSkollZeroTrainer({ slots, config, initialGameSeedCounter })
 
+  // Eval セッション設定: SKOLLZ_EVAL_EVERY=N で N round ごとに argmax self-play で勝率推移を記録
+  const evalEvery = parseInt(process.env.SKOLLZ_EVAL_EVERY ?? '0', 10)
+  const evalGames = parseInt(process.env.SKOLLZ_EVAL_GAMES ?? '100', 10)
+  const evalLogPath = join(phaseDir, 'eval_log.jsonl')
+  if (evalEvery > 0) {
+    log(`eval: ${evalEvery} round ごとに ${evalGames} game eval (argmax)、出力 ${evalLogPath}`)
+  }
+
   const roundSummaries: Array<{ round: number, outcomes: { villagerWon: number, werewolfWon: number, werehamsterWon: number, draw: number } }> = []
 
   try {
@@ -258,6 +310,25 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
         gameSeedCounter: trainer.getGameSeedCounter(),
         timestamp: new Date().toISOString(),
       }, null, 2))
+
+      // Eval セッション (SKOLLZ_EVAL_EVERY > 0 のとき N round ごとに実行)
+      if (evalEvery > 0 && r % evalEvery === 0) {
+        log(`eval@R${r} starting (n=${evalGames}, argmax)...`)
+        const { outcomes: evalOut, elapsedSec: evalElapsed } = await runEvalSession(
+          slots,
+          config,
+          evalGames,
+          options.seed + 1_000_000 + r,  // run-static seed offset (round 番号で variation)
+        )
+        log(`eval@R${r} elapsed=${evalElapsed.toFixed(1)}s vill=${evalOut.villagerWon} wolf=${evalOut.werewolfWon} ham=${evalOut.werehamsterWon} draw=${evalOut.draw}`)
+        appendFileSync(evalLogPath, JSON.stringify({
+          round: r,
+          games: evalGames,
+          elapsedSec: evalElapsed,
+          outcomes: evalOut,
+          timestamp: new Date().toISOString(),
+        }) + '\n')
+      }
     }
   } finally {
     terminateSkollZeroWorkerPool()
