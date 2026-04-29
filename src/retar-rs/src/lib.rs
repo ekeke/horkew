@@ -201,4 +201,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn init_from_prior_with_short_possibilities_does_not_panic() {
+        // Regression: skoll-zero rollout で空 prior (Map size 0) を渡されると、
+        // serializer は Array(maxSeat+1) = Array(1) で送ってくる。
+        // Vec<u16> 長さ 1 を init_from_prior が clone してそのまま使うと、
+        // apply_fixed_positions で seat 3 等にアクセスして OOB panic していた。
+        let vs_json = include_str!("../std10p_s0_vs.json");
+        let setup_json = include_str!("../std10p_s0_setup.json");
+        let options_json = include_str!("../std10p_s0_options.json");
+
+        let vs: VillageStatus = serde_json::from_str(vs_json).unwrap();
+        let setup: BTreeMap<SystemRole, u32> = serde_json::from_str(setup_json).unwrap();
+        let mut options: AnalyzeOptions = serde_json::from_str(options_json).unwrap();
+
+        // 空 prior をシミュレート: possibilities の Vec 長 1 (seat 0 のみ)
+        let empty_prior = crate::possibilities::Possibilities {
+            possibilities: vec![0u16; 1],
+            setup: [0u8; crate::possibilities::ROLE_COUNT],
+            setup_original: [0u8; crate::possibilities::ROLE_COUNT],
+            max_surviving_nv: 0,
+        };
+        options.prior = Some(empty_prior);
+
+        // panic せず最後まで走ること
+        let mut retar = VillageRetar::new(vs, setup, options);
+        let _result = retar.analyze();
+    }
+
 }

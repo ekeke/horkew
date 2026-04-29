@@ -690,7 +690,13 @@ fn init_from_prior(
 
     apply_hocus_pocus(vs, options);
 
-    let mut initial_possibilities = prior.clone();
+    // TS と同じパターン: setup ベースでフルサイズ確保 → prior の bits を上書き。
+    // prior の Vec 長は serializer 側で maxSeat+1 にトリミングされるため、
+    // 空 prior (length=1) や短い prior でも OOB しないよう dest 側のサイズに揃える。
+    let mut initial_possibilities = Possibilities::from_setup(setup);
+    let copy_len = prior.possibilities.len().min(initial_possibilities.possibilities.len());
+    initial_possibilities.possibilities[..copy_len]
+        .copy_from_slice(&prior.possibilities[..copy_len]);
 
     // prior ビットマスクに合わせて setup カウントを同期し、確定席の伝播を実行
     initial_possibilities.refix();
