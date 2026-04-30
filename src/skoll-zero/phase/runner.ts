@@ -252,6 +252,22 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     rngSeed: options.seed,
   }
 
+  // Dirichlet noise の env override (policy collapse 対策で root exploration 強化)
+  if (process.env.SKOLLZ_DIRICHLET_EPS) {
+    const eps = parseFloat(process.env.SKOLLZ_DIRICHLET_EPS)
+    if (Number.isFinite(eps) && eps >= 0 && eps <= 1) {
+      config.rootDirichletEps = eps
+      log(`SKOLLZ_DIRICHLET_EPS=${eps} (default ${DEFAULT_SKOLL_ZERO_TRAIN_CONFIG.rootDirichletEps})`)
+    }
+  }
+  if (process.env.SKOLLZ_DIRICHLET_ALPHA) {
+    const alpha = parseFloat(process.env.SKOLLZ_DIRICHLET_ALPHA)
+    if (Number.isFinite(alpha) && alpha > 0) {
+      config.rootDirichletAlpha = alpha
+      log(`SKOLLZ_DIRICHLET_ALPHA=${alpha} (default ${DEFAULT_SKOLL_ZERO_TRAIN_CONFIG.rootDirichletAlpha})`)
+    }
+  }
+
   // Resume: phaseDir/resume.json があれば lastCompletedRound + 1 から再開、
   // gameSeedCounter も復元する。weights は buildSlot 内で {slot}/final.json から resume 済み。
   // TrainingBuffer は persist しないので空で再開 (1-2 round で再蓄積される)。
