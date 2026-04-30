@@ -21,7 +21,7 @@ import { buildPossibilitiesFromRetar } from '../../skoll/unified.ts'
 import type { SimState } from '../simulator/world-state.ts'
 import { Determinizer } from '../mcts/determinize.ts'
 import {
-  runMCTS, DEFAULT_MCTS_CONFIG,
+  runMCTS, DEFAULT_MCTS_CONFIG, visitEntropyRatio,
   type Faction, type MCTSConfig, type MCTSResult,
 } from '../mcts/ISMCTS.ts'
 import type { MasonZeroNN, HeadName, NNOutput } from '../mcts/nn.ts'
@@ -58,6 +58,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
   readonly buffer: TrainingBuffer
   mctsCalls = 0
   fallbackCalls = 0
+  readonly entropyStats: { sum: number, count: number } = { sum: 0, count: 0 }
 
   /** 直近の MCTS 結果 (fallback 時は null)。Adapter から読まれる */
   private _lastMCTSResult: MCTSResult | null = null
@@ -271,6 +272,8 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
 
     this.mctsCalls++
     this._lastMCTSResult = result
+    this.entropyStats.sum += visitEntropyRatio(result.visits)
+    this.entropyStats.count++
 
     const pi = normalizeVisits(result.visits)
     const headName: HeadName = actionMode

@@ -51,6 +51,7 @@ class DummyModule implements SkollZeroModule {
   lastMCTSResult = null
   mctsCalls = 0
   fallbackCalls = 0
+  entropyStats = { sum: 0, count: 0 }
   faction(): Faction { return 'village' }
   encodeStateObs(): RootObservation { return new Float32Array(0) }
   forwardAt(state: SimState, actorSeat: number, _actorRole: SystemRole, _headName: HeadName, _invariants: RolloutInvariants): NNOutput {

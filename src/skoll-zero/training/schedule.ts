@@ -10,6 +10,65 @@
  * smoke / 本訓練で振る値は trainer.ts 側で override する想定。
  */
 
+/**
+ * Dirichlet ε auto-decay 設定。
+ *
+ * 各 slot 独立に root visit エントロピー比 (visitEntropyRatio) を round 単位で集計し、
+ * 平均が targetRatio を streak round 連続で下回ったら ε を decay 倍に減衰する。
+ * 一方向 (減衰のみ)、復活なし。floor で下限を保証する。
+ */
+export type DirichletAutoConfig = {
+  /** 自動減衰の有効化フラグ */
+  enabled: boolean
+  /** 平均 visit エントロピー比の閾値。これ以下で「decisive」と判定 (default 0.5) */
+  targetRatio: number
+  /** ε に乗ずる減衰係数 (default 0.9) */
+  decay: number
+  /** ε の下限。これ以下には下げない (default 0.1) */
+  floor: number
+  /** 閾値割れの連続 round 数。これに達すると 1 段減衰 (default 3) */
+  streak: number
+}
+
+export const DEFAULT_DIRICHLET_AUTO_CONFIG: DirichletAutoConfig = {
+  enabled: false,
+  targetRatio: 0.5,
+  decay: 0.9,
+  floor: 0.1,
+  streak: 3,
+}
+
+/**
+ * Dirichlet ε auto-decay の純関数版規則。MultiSkollZeroTrainer から呼ばれる。
+ *
+ * 入力: 現在の ε / streak、観測 meanEntropyRatio、auto-decay config。
+ * 出力: 次 round 用の ε / streak。
+ *
+ * 規則:
+ * - 無効化されている / sample 0 件 → ε / streak は据え置き
+ * - meanEntropyRatio < targetRatio が streak round 連続 → ε *= decay (floor で clamp、streak リセット)
+ * - meanEntropyRatio >= targetRatio → streak リセット (ε は据え置き)
+ */
+export function applyDirichletDecay(
+  state: { eps: number, streak: number },
+  meanEntropyRatio: number,
+  sampleCount: number,
+  cfg: DirichletAutoConfig,
+): { eps: number, streak: number } {
+  if (!cfg.enabled || sampleCount === 0) {
+    return { eps: state.eps, streak: state.streak }
+  }
+  if (meanEntropyRatio < cfg.targetRatio) {
+    const newStreak = state.streak + 1
+    if (newStreak >= cfg.streak) {
+      const eps = Math.max(state.eps * cfg.decay, cfg.floor)
+      return { eps, streak: 0 }
+    }
+    return { eps: state.eps, streak: newStreak }
+  }
+  return { eps: state.eps, streak: 0 }
+}
+
 export type SkollZeroTrainConfig = {
   /** Adam 学習率 */
   learningRate: number
@@ -33,6 +92,8 @@ export type SkollZeroTrainConfig = {
   rootDirichletEps: number
   /** Trainer の RNG seed (batch sampling, self-play 初期 seed) */
   rngSeed: number
+  /** Dirichlet ε auto-decay 設定 (省略時 DEFAULT_DIRICHLET_AUTO_CONFIG) */
+  dirichletAuto?: DirichletAutoConfig
 }
 
 export const DEFAULT_SKOLL_ZERO_TRAIN_CONFIG: SkollZeroTrainConfig = {

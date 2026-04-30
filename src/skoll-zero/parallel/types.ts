@@ -66,6 +66,11 @@ export type SelfPlayChunkRequest = {
    * 未指定なら worker 起動時の env を維持 (= phase 起動時の env)。
    */
   rolloutRetar?: boolean
+  /**
+   * Per-slot Dirichlet ε override (auto-decay 用)。指定された slot は mctsConfig.rootDirichletEps
+   * の代わりにこちらを使う。指定外は mctsConfig.rootDirichletEps を維持。
+   */
+  dirichletEpsBySlot?: Partial<Record<SlotName, number>>
 }
 
 /** worker での self-play 結果サマリ (chunk 単位の outcomes 集計) */
@@ -82,6 +87,11 @@ export type SelfPlayChunkResult = {
   /** slot 名 → finalize 済み TrainingRecord 配列 (main で buffer に push) */
   records: Partial<Record<SlotName, TrainingRecord[]>>
   outcomes: SerializedOutcomes
+  /**
+   * slot 名 → root visit エントロピー比の集計 (chunk 内全 game 累計)。
+   * Dirichlet ε auto-decay の判定に使う。
+   */
+  entropyStats: Partial<Record<SlotName, { sum: number, count: number }>>
 }
 
 /** worker → main: エラー報告 (例外時) */

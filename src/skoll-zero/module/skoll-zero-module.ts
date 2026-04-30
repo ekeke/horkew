@@ -105,6 +105,14 @@ export interface SkollZeroModule {
   /** debug: MCTS fallback 回数 (retar 無効 / overflow 等) */
   readonly fallbackCalls: number
 
+  /**
+   * 直近 reset 以降に成功した MCTS 呼び出しでの root visit エントロピー比の累積。
+   * Dirichlet ε 自動減衰の判定に使う。
+   * - sum: visitEntropyRatio の総和
+   * - count: 集計対象の MCTS 呼び出し数 (= 成功 mctsCalls の subset)
+   */
+  readonly entropyStats: { sum: number, count: number }
+
   // ============================================================
   // Stage 2: ModuleBundle dispatch 用 interface
   // ============================================================

@@ -129,6 +129,7 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
   const outcomes: SerializedOutcomes = {
     villagerWon: 0, werewolfWon: 0, werehamsterWon: 0, draw: 0,
   }
+  const entropyStats: Partial<Record<SlotName, { sum: number, count: number }>> = {}
 
   for (const seed of req.seeds) {
     const r = await runMultiAgentSelfPlayGame({
@@ -137,12 +138,21 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
       mctsConfig,
       selectionMode: req.selectionMode,
       seed,
+      dirichletEpsBySlot: req.dirichletEpsBySlot,
     })
     switch (r.result) {
       case 'villager_won': outcomes.villagerWon++; break
       case 'werewolf_won': outcomes.werewolfWon++; break
       case 'werehamster_won': outcomes.werehamsterWon++; break
       case 'draw': outcomes.draw++; break
+    }
+    for (const slotName of Object.keys(r.stats) as SlotName[]) {
+      const s = r.stats[slotName]
+      if (!s) continue
+      const acc = entropyStats[slotName] ?? { sum: 0, count: 0 }
+      acc.sum += s.entropyRatioSum
+      acc.count += s.entropyRatioCount
+      entropyStats[slotName] = acc
     }
   }
 
@@ -153,5 +163,5 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
     records[slotName] = [...slot.buffer.records()]
   }
 
-  return { type: 'self_play_result', records, outcomes }
+  return { type: 'self_play_result', records, outcomes, entropyStats }
 }

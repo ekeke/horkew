@@ -54,6 +54,30 @@ export type MCTSResult = {
 }
 
 /**
+ * Root visit 分布のエントロピーを最大エントロピー (= log(N_legal)) で正規化した比率。
+ * Dirichlet ε 自動減衰の判定信号として使う。
+ *
+ * 戻り値の解釈:
+ *   - 0 → 1 つの action に visits が完全集中 (decisive)
+ *   - 1 → 全 action に均等 (uniform / undecided)
+ *   - 候補手が 1 つしかない / visits が空の場合は 0 を返す
+ */
+export function visitEntropyRatio(visits: Map<number, number>): number {
+  const k = visits.size
+  if (k <= 1) return 0
+  let sum = 0
+  for (const v of visits.values()) sum += v
+  if (sum <= 0) return 0
+  let h = 0
+  for (const v of visits.values()) {
+    if (v <= 0) continue
+    const p = v / sum
+    h -= p * Math.log(p)
+  }
+  return h / Math.log(k)
+}
+
+/**
  * MCTS root の意思決定種別。Stage 1 と同じ 4 種を維持。Stage 2 で
  * dispatch ベースの descent を導入したので、これは「root を置く初期 phase」を
  * 決めるためだけに使う。

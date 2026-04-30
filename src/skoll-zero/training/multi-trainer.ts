@@ -26,7 +26,12 @@ import {
 import type { MCTSConfig } from '../mcts/ISMCTS.ts'
 import { runSelfPlayParallel, skollZeroWorkerPoolSize } from '../parallel/index.ts'
 import { groupRecordsByHead, recordsToBatchInputs } from './trainer.ts'
-import type { SkollZeroTrainConfig } from './schedule.ts'
+import type { SkollZeroTrainConfig, DirichletAutoConfig } from './schedule.ts'
+import { DEFAULT_DIRICHLET_AUTO_CONFIG, applyDirichletDecay } from './schedule.ts'
+
+/** SlotMap のキー集合 — 順序を固定しておくと resume / log で安定 */
+const SLOT_KEYS = ['mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist'] as const
+type SlotKey = typeof SLOT_KEYS[number]
 
 export type TrainerSlot = {
   /** Pure JS 推論用 (self-play で使用、default) */
@@ -68,6 +73,16 @@ export type MultiRoundStats = {
     avgPolicyLoss: number
     avgValueLoss: number
     checkpointPath: string
+    /** この round の self-play で観測した root visit エントロピー比の平均 (0 件なら 0) */
+    meanEntropyRatio: number
+    /** entropy 集計対象の MCTS 呼び出し回数 (= sample 数) */
+    entropyRatioCount: number
+    /** この round で使用した Dirichlet ε */
+    dirichletEps: number
+    /** auto-decay 適用後の次 round 用 ε (この round と等しい場合は変化なし) */
+    dirichletEpsAfter: number
+    /** 連続「decisive」検出 round 数 (decay 適用直後は 0 にリセット) */
+    lowEntropyStreak: number
   }>>
 }
 
@@ -79,24 +94,55 @@ export type MultiSkollZeroTrainerOptions = {
    * 未指定なら config.rngSeed で初期化 (新規ラン)。
    */
   initialGameSeedCounter?: number
+  /**
+   * Resume 時の per-slot Dirichlet ε。指定外 slot は config.rootDirichletEps で初期化。
+   */
+  initialDirichletEpsBySlot?: Partial<Record<SlotKey, number>>
+  /**
+   * Resume 時の per-slot 連続 decisive 検出カウンタ。指定外 slot は 0 で初期化。
+   */
+  initialLowEntropyStreakBySlot?: Partial<Record<SlotKey, number>>
 }
 
 export class MultiSkollZeroTrainer {
   private readonly slots: MultiTrainerSlots
   private readonly config: SkollZeroTrainConfig
+  private readonly autoDirichlet: DirichletAutoConfig
   private rng: () => number
   private gameSeedCounter: number
+  /** Per-slot Dirichlet ε。auto-decay 有効時は round 末に更新される */
+  private dirichletEpsBySlot: Partial<Record<SlotKey, number>> = {}
+  /** Per-slot 連続「decisive」検出 round 数 */
+  private lowEntropyStreakBySlot: Partial<Record<SlotKey, number>> = {}
 
   constructor(opts: MultiSkollZeroTrainerOptions) {
     this.slots = opts.slots
     this.config = opts.config
+    this.autoDirichlet = opts.config.dirichletAuto ?? DEFAULT_DIRICHLET_AUTO_CONFIG
     this.rng = makeRng(opts.config.rngSeed)
     this.gameSeedCounter = opts.initialGameSeedCounter ?? opts.config.rngSeed
+    // 各 slot の ε / streak を resume opts → config default の順で初期化
+    for (const key of SLOT_KEYS) {
+      if (!this.slots[key]) continue
+      this.dirichletEpsBySlot[key] = opts.initialDirichletEpsBySlot?.[key]
+        ?? this.config.rootDirichletEps
+      this.lowEntropyStreakBySlot[key] = opts.initialLowEntropyStreakBySlot?.[key] ?? 0
+    }
   }
 
   /** Resume 用: 現在の gameSeedCounter を取得 (round 完了時に persist して再起動時に復元) */
   getGameSeedCounter(): number {
     return this.gameSeedCounter
+  }
+
+  /** Resume 用: 現在の per-slot Dirichlet ε を取得 */
+  getDirichletEpsBySlot(): Partial<Record<SlotKey, number>> {
+    return { ...this.dirichletEpsBySlot }
+  }
+
+  /** Resume 用: 現在の per-slot 連続 decisive カウンタを取得 */
+  getLowEntropyStreakBySlot(): Partial<Record<SlotKey, number>> {
+    return { ...this.lowEntropyStreakBySlot }
   }
 
   private asSlotMap(): SlotMap {
@@ -121,16 +167,25 @@ export class MultiSkollZeroTrainer {
       rootDirichletEps: this.config.rootDirichletEps,
     }
 
+    // この round で各 slot に適用する ε のスナップショット (auto-decay により round ごとに変動)
+    const epsThisRound: Partial<Record<SlotKey, number>> = {}
+    for (const key of SLOT_KEYS) {
+      if (this.slots[key]) {
+        epsThisRound[key] = this.dirichletEpsBySlot[key] ?? this.config.rootDirichletEps
+      }
+    }
+
     // preSize 記録 (slot ごとに後で recordsAdded を計算)
     const preSize = new Map<keyof MultiTrainerSlots, number>()
-    for (const key of ['mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist'] as const) {
+    for (const key of SLOT_KEYS) {
       if (this.slots[key]) preSize.set(key, this.slots[key]!.buffer.size())
     }
 
     // self-play batch — worker pool が init されていれば parallel、それ以外は既存の逐次経路
     const outcomes = { villagerWon: 0, werewolfWon: 0, werehamsterWon: 0, draw: 0 }
+    const entropyAgg: Partial<Record<SlotKey, { sum: number, count: number }>> = {}
     if (skollZeroWorkerPoolSize() > 0) {
-      const { outcomes: chunkOutcomes } = await runSelfPlayParallel(
+      const { outcomes: chunkOutcomes, entropyStats } = await runSelfPlayParallel(
         {
           slots: this.asSlotMap(),
           seed: this.gameSeedCounter,
@@ -142,6 +197,7 @@ export class MultiSkollZeroTrainer {
           },
           selectionMode: 'sample',
           rolloutRetar: opts.rolloutRetar,
+          dirichletEpsBySlot: epsThisRound,
         },
         this.config.gamesPerRound,
       )
@@ -149,6 +205,10 @@ export class MultiSkollZeroTrainer {
       outcomes.werewolfWon = chunkOutcomes.werewolfWon
       outcomes.werehamsterWon = chunkOutcomes.werehamsterWon
       outcomes.draw = chunkOutcomes.draw
+      for (const key of SLOT_KEYS) {
+        const e = entropyStats[key]
+        if (e) entropyAgg[key] = { sum: e.sum, count: e.count }
+      }
     } else {
       const onGameComplete = (_i: number, r: MultiAgentSelfPlayResult): void => {
         switch (r.result) {
@@ -157,6 +217,14 @@ export class MultiSkollZeroTrainer {
           case 'werehamster_won': outcomes.werehamsterWon++; break
           case 'draw': outcomes.draw++; break
         }
+        for (const key of SLOT_KEYS) {
+          const s = r.stats[key]
+          if (!s) continue
+          const acc = entropyAgg[key] ?? { sum: 0, count: 0 }
+          acc.sum += s.entropyRatioSum
+          acc.count += s.entropyRatioCount
+          entropyAgg[key] = acc
+        }
       }
       await runMultiAgentSelfPlayBatch(
         {
@@ -164,6 +232,7 @@ export class MultiSkollZeroTrainer {
           seed: this.gameSeedCounter,
           mctsConfig,
           selectionMode: 'sample',
+          dirichletEpsBySlot: epsThisRound,
         },
         this.config.gamesPerRound,
         onGameComplete,
@@ -173,7 +242,7 @@ export class MultiSkollZeroTrainer {
 
     // 各 slot で train + sync + checkpoint
     const perSlot: MultiRoundStats['perSlot'] = {}
-    for (const key of ['mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist'] as const) {
+    for (const key of SLOT_KEYS) {
       const slot = this.slots[key]
       if (!slot) continue
 
@@ -224,6 +293,19 @@ export class MultiSkollZeroTrainer {
       const avgValueLoss = stepsWithData > 0 ? valueLossSum / stepsWithData : 0
 
       const checkpointPath = this.saveSlotCheckpoint(outputDir, roundId, key, slot.masonZeroNet)
+
+      // entropy 集計と Dirichlet ε auto-decay 適用 (有効時のみ ε / streak が更新される)
+      const entropy = entropyAgg[key] ?? { sum: 0, count: 0 }
+      const meanEntropyRatio = entropy.count > 0 ? entropy.sum / entropy.count : 0
+      const epsBefore = epsThisRound[key] ?? this.config.rootDirichletEps
+      const streakBefore = this.lowEntropyStreakBySlot[key] ?? 0
+      const next = applyDirichletDecay(
+        { eps: epsBefore, streak: streakBefore },
+        meanEntropyRatio, entropy.count, this.autoDirichlet,
+      )
+      this.dirichletEpsBySlot[key] = next.eps
+      this.lowEntropyStreakBySlot[key] = next.streak
+
       perSlot[key] = {
         recordsAdded,
         bufferSize: slot.buffer.size(),
@@ -233,6 +315,11 @@ export class MultiSkollZeroTrainer {
         avgPolicyLoss,
         avgValueLoss,
         checkpointPath,
+        meanEntropyRatio,
+        entropyRatioCount: entropy.count,
+        dirichletEps: epsBefore,
+        dirichletEpsAfter: next.eps,
+        lowEntropyStreak: next.streak,
       }
     }
 

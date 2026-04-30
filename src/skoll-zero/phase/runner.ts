@@ -40,7 +40,7 @@ import {
   writeRoundMeta,
   type MultiTrainerSlots,
 } from '../training/multi-trainer.ts'
-import { DEFAULT_SKOLL_ZERO_TRAIN_CONFIG } from '../training/schedule.ts'
+import { DEFAULT_SKOLL_ZERO_TRAIN_CONFIG, DEFAULT_DIRICHLET_AUTO_CONFIG } from '../training/schedule.ts'
 import {
   initSkollZeroWorkerPool,
   terminateSkollZeroWorkerPool,
@@ -89,8 +89,9 @@ const SLOT_KEYS: (keyof MultiTrainerSlots)[] = [
   'mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist',
 ]
 
-const WARM_START_PATHS: Record<Exclude<keyof MultiTrainerSlots, 'village'>, string> = {
+const WARM_START_PATHS: Record<keyof MultiTrainerSlots, string> = {
   mason: 'src/skoll/models/mason.json',
+  village: 'src/skoll/models/village.json',
   wolf: 'src/skoll/models/wolf.json',
   fanatic: 'src/skoll/models/fanatic.json',
   hamster: 'src/skoll/models/hamster.json',
@@ -172,7 +173,7 @@ function buildSlot(
   if (existsSync(resumePath)) {
     loadCheckpoint(pureNet, resumePath)
     log(`${slotKey}: resume from ${resumePath}`)
-  } else if (slotKey !== 'village') {
+  } else {
     const warmPath = WARM_START_PATHS[slotKey]
     if (existsSync(warmPath)) {
       loadCheckpoint(pureNet, warmPath)
@@ -180,8 +181,6 @@ function buildSlot(
     } else {
       log(`${slotKey}: WARN ${warmPath} missing, random init`)
     }
-  } else {
-    log(`${slotKey}: random init (SL 非存在)`)
   }
 
   tfNet.loadWeights(pureNet.cloneWeights())
@@ -268,31 +267,71 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     }
   }
 
+  // Dirichlet ε auto-decay (visit エントロピー比に基づく per-slot 自動減衰)。
+  // SKOLLZ_DIRICHLET_AUTO=1 で有効化、各パラメータは個別 env で上書き可能。
+  if (process.env.SKOLLZ_DIRICHLET_AUTO === '1') {
+    const auto = { ...DEFAULT_DIRICHLET_AUTO_CONFIG, enabled: true }
+    if (process.env.SKOLLZ_DIRICHLET_TARGET_RATIO) {
+      const v = parseFloat(process.env.SKOLLZ_DIRICHLET_TARGET_RATIO)
+      if (Number.isFinite(v) && v > 0 && v < 1) auto.targetRatio = v
+    }
+    if (process.env.SKOLLZ_DIRICHLET_DECAY) {
+      const v = parseFloat(process.env.SKOLLZ_DIRICHLET_DECAY)
+      if (Number.isFinite(v) && v > 0 && v < 1) auto.decay = v
+    }
+    if (process.env.SKOLLZ_DIRICHLET_FLOOR) {
+      const v = parseFloat(process.env.SKOLLZ_DIRICHLET_FLOOR)
+      if (Number.isFinite(v) && v >= 0 && v <= 1) auto.floor = v
+    }
+    if (process.env.SKOLLZ_DIRICHLET_STREAK) {
+      const v = parseInt(process.env.SKOLLZ_DIRICHLET_STREAK, 10)
+      if (Number.isFinite(v) && v >= 1) auto.streak = v
+    }
+    config.dirichletAuto = auto
+    log(`SKOLLZ_DIRICHLET_AUTO=1 (per-slot decay, target=${auto.targetRatio} decay=${auto.decay} floor=${auto.floor} streak=${auto.streak})`)
+  }
+
   // Resume: phaseDir/resume.json があれば lastCompletedRound + 1 から再開、
   // gameSeedCounter も復元する。weights は buildSlot 内で {slot}/final.json から resume 済み。
   // TrainingBuffer は persist しないので空で再開 (1-2 round で再蓄積される)。
   const resumeStatePath = join(phaseDir, 'resume.json')
   let startRound = 1
   let initialGameSeedCounter: number | undefined
+  let initialDirichletEpsBySlot: Partial<Record<keyof MultiTrainerSlots, number>> | undefined
+  let initialLowEntropyStreakBySlot: Partial<Record<keyof MultiTrainerSlots, number>> | undefined
   if (existsSync(resumeStatePath)) {
     try {
       const raw = JSON.parse(readFileSync(resumeStatePath, 'utf-8')) as {
         lastCompletedRound: number
         gameSeedCounter: number
+        dirichletEpsBySlot?: Partial<Record<keyof MultiTrainerSlots, number>>
+        lowEntropyStreakBySlot?: Partial<Record<keyof MultiTrainerSlots, number>>
       }
       if (raw.lastCompletedRound >= options.rounds) {
         log(`resume.json: 既に ${raw.lastCompletedRound} round 完了済み (target ${options.rounds})、追加 round なし`)
       } else {
         startRound = raw.lastCompletedRound + 1
         initialGameSeedCounter = raw.gameSeedCounter
+        initialDirichletEpsBySlot = raw.dirichletEpsBySlot
+        initialLowEntropyStreakBySlot = raw.lowEntropyStreakBySlot
         log(`resume: round ${startRound} から再開 (前回 ${raw.lastCompletedRound} 完了、gameSeedCounter=${raw.gameSeedCounter})`)
+        if (raw.dirichletEpsBySlot) {
+          const epsStr = SLOT_KEYS
+            .map(k => raw.dirichletEpsBySlot?.[k] !== undefined ? `${k}=${raw.dirichletEpsBySlot[k]!.toFixed(3)}` : null)
+            .filter(s => s !== null)
+            .join(' ')
+          if (epsStr.length > 0) log(`resume: dirichlet ε ${epsStr}`)
+        }
       }
     } catch (e) {
       log(`WARN: resume.json 読み込み失敗、最初から開始: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
-  const trainer = new MultiSkollZeroTrainer({ slots, config, initialGameSeedCounter })
+  const trainer = new MultiSkollZeroTrainer({
+    slots, config, initialGameSeedCounter,
+    initialDirichletEpsBySlot, initialLowEntropyStreakBySlot,
+  })
 
   // Eval セッション設定: SKOLLZ_EVAL_EVERY=N で N round ごとに argmax self-play で勝率推移を記録
   const evalEvery = parseInt(process.env.SKOLLZ_EVAL_EVERY ?? '0', 10)
@@ -315,7 +354,13 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
       for (const key of SLOT_KEYS) {
         const s = stats.perSlot[key]
         if (!s) continue
-        log(`  ${key.padEnd(11)} +${s.recordsAdded} buf=${s.bufferSize} steps=${s.stepsRun} loss=${s.avgLoss.toFixed(4)} (p=${s.avgPolicyLoss.toFixed(4)} v=${s.avgValueLoss.toFixed(4)})`)
+        // ε / H/streak は auto-decay 有効時のみ末尾に表示 (無効時は ε が動かないので冗長)
+        const epsTag = (s.dirichletEpsAfter !== s.dirichletEps)
+          ? ` ε=${s.dirichletEps.toFixed(3)}→${s.dirichletEpsAfter.toFixed(3)} streak=0`
+          : (config.dirichletAuto?.enabled
+            ? ` ε=${s.dirichletEps.toFixed(3)} H=${s.meanEntropyRatio.toFixed(3)} streak=${s.lowEntropyStreak}`
+            : '')
+        log(`  ${key.padEnd(11)} +${s.recordsAdded} buf=${s.bufferSize} steps=${s.stepsRun} loss=${s.avgLoss.toFixed(4)} (p=${s.avgPolicyLoss.toFixed(4)} v=${s.avgValueLoss.toFixed(4)})${epsTag}`)
       }
       writeRoundMeta(phaseDir, stats)
       roundSummaries.push({ round: r, outcomes: stats.outcomes })
@@ -325,6 +370,8 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
         lastCompletedRound: r,
         gameSeedCounter: trainer.getGameSeedCounter(),
         timestamp: new Date().toISOString(),
+        dirichletEpsBySlot: trainer.getDirichletEpsBySlot(),
+        lowEntropyStreakBySlot: trainer.getLowEntropyStreakBySlot(),
       }, null, 2))
 
       // Eval セッション (SKOLLZ_EVAL_EVERY > 0 のとき N round ごとに実行)

@@ -61,6 +61,11 @@ export type MultiAgentSelfPlayConfig = {
   seed: number
   /** true なら結果に events / state / config を乗せる (howl 出力等の診断用、学習中は false) */
   collectGameRecord?: boolean
+  /**
+   * Per-slot Dirichlet ε override (auto-decay 用)。指定された slot は mctsConfig.rootDirichletEps
+   * の代わりにこちらを使う。指定外の slot は mctsConfig.rootDirichletEps にフォールバック。
+   */
+  dirichletEpsBySlot?: Partial<Record<keyof SlotMap, number>>
 }
 
 export type SlotStats = {
@@ -68,6 +73,10 @@ export type SlotStats = {
   fallbackCalls: number
   recordsAdded: number
   z: number
+  /** 1 game 中の root visit エントロピー比 (visitEntropyRatio) の総和 */
+  entropyRatioSum: number
+  /** 集計対象 MCTS 呼び出し数 (= module.entropyStats.count、成功 mctsCalls の subset) */
+  entropyRatioCount: number
 }
 
 export type MultiAgentSelfPlayResult = {
@@ -121,11 +130,16 @@ function buildAgent(
   setup: Map<SystemRole, number>,
   cfg: MultiAgentSelfPlayConfig,
 ): SkollZeroRoleAgent {
+  // Per-slot ε override がある場合は、その slot 専用の MCTSConfig を作る
+  const slotEps = cfg.dirichletEpsBySlot?.[slotKey]
+  const mctsConfig: MCTSConfig | undefined = (slotEps !== undefined && cfg.mctsConfig)
+    ? { ...cfg.mctsConfig, rootDirichletEps: slotEps }
+    : cfg.mctsConfig
   const opts = {
     nn: slot.nn,
     setup,
     buffer: slot.buffer,
-    mctsConfig: cfg.mctsConfig,
+    mctsConfig,
     selectionMode: cfg.selectionMode ?? 'sample',
   }
   switch (slotKey) {
@@ -223,11 +237,14 @@ export async function runMultiAgentSelfPlayGame(
     if (!slot || !agent) continue
     const faction = factionForSlot(key)
     slot.buffer.finalize(outcome)
+    const moduleEntropy = agent.getModule().entropyStats
     stats[key] = {
       mctsCalls: agent.mctsCalls,
       fallbackCalls: agent.fallbackCalls,
       recordsAdded: slot.buffer.size() - (preSize.get(key) ?? 0),
       z: factionValueFromResult(result, faction),
+      entropyRatioSum: moduleEntropy.sum,
+      entropyRatioCount: moduleEntropy.count,
     }
   }
 

@@ -124,6 +124,12 @@ export type ParallelSelfPlayConfig = Omit<MultiAgentSelfPlayConfig, 'mctsConfig'
   rolloutRetar?: boolean
 }
 
+/** runSelfPlayParallel の戻り値: 全 chunk の outcomes 集計 + per-slot entropy 集計 */
+export type ParallelSelfPlayOutput = {
+  outcomes: SerializedOutcomes
+  entropyStats: Partial<Record<SlotName, { sum: number, count: number }>>
+}
+
 /**
  * 並列 self-play。numGames を pool size で interleaved 分割し、各 worker に dispatch。
  *
@@ -135,7 +141,7 @@ export type ParallelSelfPlayConfig = Omit<MultiAgentSelfPlayConfig, 'mctsConfig'
 export function runSelfPlayParallel(
   cfg: ParallelSelfPlayConfig,
   numGames: number,
-): Promise<{ outcomes: SerializedOutcomes }> {
+): Promise<ParallelSelfPlayOutput> {
   const n = workerPool.length
   if (n === 0) throw new Error('skoll-zero worker pool not initialized')
 
@@ -166,12 +172,13 @@ export function runSelfPlayParallel(
     const aggregated: SerializedOutcomes = {
       villagerWon: 0, werewolfWon: 0, werehamsterWon: 0, draw: 0,
     }
+    const aggregatedEntropy: Partial<Record<SlotName, { sum: number, count: number }>> = {}
     let completed = 0
     let rejected = false
 
     const finalize = (): void => {
       if (rejected) return
-      if (completed === n) resolve({ outcomes: aggregated })
+      if (completed === n) resolve({ outcomes: aggregated, entropyStats: aggregatedEntropy })
     }
 
     for (let i = 0; i < n; i++) {
@@ -208,6 +215,15 @@ export function runSelfPlayParallel(
           if (!recs || !slot) continue
           slot.buffer.appendFinalized(recs)
         }
+        // entropy stats を集計
+        for (const slotName of Object.keys(result.entropyStats) as SlotName[]) {
+          const e = result.entropyStats[slotName]
+          if (!e) continue
+          const acc = aggregatedEntropy[slotName] ?? { sum: 0, count: 0 }
+          acc.sum += e.sum
+          acc.count += e.count
+          aggregatedEntropy[slotName] = acc
+        }
         completed++
         finalize()
       }
@@ -238,6 +254,7 @@ export function runSelfPlayParallel(
         forwardSABs,
         workerId,
         rolloutRetar: cfg.rolloutRetar,
+        dirichletEpsBySlot: cfg.dirichletEpsBySlot,
       }
       worker.postMessage(request)
     }
