@@ -315,7 +315,7 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
       for (const key of SLOT_KEYS) {
         const s = stats.perSlot[key]
         if (!s) continue
-        log(`  ${key.padEnd(11)} +${s.recordsAdded} buf=${s.bufferSize} steps=${s.stepsRun} loss=${s.avgLoss.toFixed(4)}`)
+        log(`  ${key.padEnd(11)} +${s.recordsAdded} buf=${s.bufferSize} steps=${s.stepsRun} loss=${s.avgLoss.toFixed(4)} (p=${s.avgPolicyLoss.toFixed(4)} v=${s.avgValueLoss.toFixed(4)})`)
       }
       writeRoundMeta(phaseDir, stats)
       roundSummaries.push({ round: r, outcomes: stats.outcomes })
