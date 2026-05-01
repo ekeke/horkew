@@ -132,7 +132,9 @@ async function runEvalSession(
         cPuct: config.cPuct,
         nRollouts: config.mctsRollouts,
         rootDirichletAlpha: config.rootDirichletAlpha,
-        rootDirichletEps: config.rootDirichletEps,
+        // eval は exploration noise を切る (ε=0)。学習中の auto-decay や ε override の
+        // 影響を受けない true greedy 評価で勝率推移を測る。
+        rootDirichletEps: 0,
       },
       selectionMode: 'argmax',
       // rolloutRetar: 学習時の env を維持 (worker 起動時の SKOLLZ_ROLLOUT_RETAR を使う)
