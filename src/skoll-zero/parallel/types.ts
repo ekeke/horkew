@@ -47,7 +47,7 @@ export type SelfPlayChunkRequest = {
    */
   rolesEntries?: Array<[SystemRole, number]>
   mctsConfig: SerializableMCTSConfig
-  selectionMode: 'sample' | 'argmax'
+  selectionMode: 'sample' | 'argmax' | 'policy_argmax'
   /** Stage 1 では未使用、Stage 2+ で main 集約用に使う */
   batchInferSize: number
   /** この chunk が担当する seed リスト */

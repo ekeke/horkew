@@ -108,25 +108,15 @@ function log(msg: string): void {
  * record は merge されない (= 学習に影響なし)。SKOLLZ_EVAL_EVERY env で間隔指定。
  */
 /**
- * Eval session の MCTS rollouts。学習時の SKOLLZ_ROLLOUTS とは独立に固定する。
+ * Eval session: NN-only 一発勝負 (selectionMode='policy_argmax')。
  *
  * 設計意図: eval は「学習設定に依らない単純な性能評価」のためのベンチ。
- * 学習側で rollouts を変えても eval は固定値で勝率を測ることで、
- * - 過去ラン (rollouts=50 で eval) との直接比較が可能
- * - 学習側のハイパラ振りで eval 結果が連動して動かない (純粋な policy quality を測れる)
+ *   - MCTS を介さず NN forward 1 回 + argmax で意思決定
+ *   - 学習側 SKOLLZ_ROLLOUTS や Dirichlet ε を変えても eval 結果に影響しない
+ *   - 純粋な NN policy quality を勝率で測る
  *
- * Default 50 は historical baseline (R30 backup 等の eval が rollouts=50 で取られたため)。
- * SKOLLZ_EVAL_ROLLOUTS env で override 可能。
+ * mctsConfig は policy_argmax モードでは不使用だが、型上 required なのでダミー値を渡す。
  */
-const DEFAULT_EVAL_ROLLOUTS = 50
-
-function evalRollouts(): number {
-  const raw = process.env.SKOLLZ_EVAL_ROLLOUTS
-  if (!raw) return DEFAULT_EVAL_ROLLOUTS
-  const v = parseInt(raw, 10)
-  return Number.isFinite(v) && v > 0 ? v : DEFAULT_EVAL_ROLLOUTS
-}
-
 async function runEvalSession(
   slots: MultiTrainerSlots,
   config: SkollZeroTrainConfig,
@@ -148,16 +138,14 @@ async function runEvalSession(
     {
       slots: evalSlots,
       seed: evalSeed,
+      // policy_argmax モードでは MCTS 不使用、mctsConfig はダミー値で OK
       mctsConfig: {
         cPuct: config.cPuct,
-        // eval は固定 rollouts (学習側の SKOLLZ_ROLLOUTS とは独立、SKOLLZ_EVAL_ROLLOUTS で override 可)
-        nRollouts: evalRollouts(),
-        rootDirichletAlpha: config.rootDirichletAlpha,
-        // eval は exploration noise を切る (ε=0)。学習中の auto-decay や ε override の
-        // 影響を受けない true greedy 評価で勝率推移を測る。
+        nRollouts: 1,
+        rootDirichletAlpha: 0,
         rootDirichletEps: 0,
       },
-      selectionMode: 'argmax',
+      selectionMode: 'policy_argmax',
       // rolloutRetar: 学習時の env を維持 (worker 起動時の SKOLLZ_ROLLOUT_RETAR を使う)
     },
     numGames,

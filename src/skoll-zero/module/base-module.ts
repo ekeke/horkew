@@ -33,7 +33,19 @@ import { encodeFromSimState, type RolloutInvariants } from '../observation/from-
 import { buildInitialSimState, buildInvariants } from '../observation/from-ctx.ts'
 import type { ModuleBundle } from '../mcts/dispatch.ts'
 import { BENCH_ENABLED, benchEnd } from '../bench/profiler.ts'
+import { advancePhase } from '../simulator/rollout-sim.ts'
+import type { Phase } from '../simulator/world-state.ts'
 import type { SkollZeroModule, McctsProposal } from './skoll-zero-module.ts'
+
+/** action mode → 対応する SimState phase (proposePolicyOnly 用、ISMCTS の同名関数と同じ規則) */
+function phaseForActionMode(mode: 'execute' | 'divine' | 'guard' | 'attack'): Phase {
+  switch (mode) {
+    case 'execute': return 'day'
+    case 'divine': return 'night_divine'
+    case 'guard': return 'night_guard'
+    case 'attack': return 'night_attack'
+  }
+}
 
 export type BaseSkollZeroModuleOptions = {
   /** 形勢判断 NN (MCTS node expand 用 policy/value)。MasonZeroNetwork 等 */
@@ -177,6 +189,55 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     }
     const bundle = opts?.bundle ?? this.singletonBundle()
     return this.runMctsProposal(ctx, bundle, mode, excludedMask, opts?.record ?? true)
+  }
+
+  /**
+   * MCTS を介さず NN forward 1 回で policy 分布を返す。
+   * runMctsProposal の setup (determinizer + SimState 構築) は再利用するが、runMCTS は呼ばず
+   * NN.forward を 1 回呼んで返す。eval (single-shot evaluation) 用。
+   */
+  proposePolicyOnly(
+    ctx: DecisionContext,
+    mode: 'execute' | 'divine' | 'guard' | 'attack',
+  ): Map<number, number> | null {
+    if (!ctx.globalRetarPossibilities) return null
+    const possibilities = buildPossibilitiesFromRetar(ctx.globalRetarPossibilities, this.setup)
+    if (!possibilities.fixRole(ctx.mySeat, ctx.myRole)) return null
+    const determinizer = new Determinizer(possibilities, this.setup, this.determinizerMaxWorlds)
+    if (determinizer.isOverflow() || determinizer.size() === 0) return null
+    const sampleWorld = determinizer.sample(() => ctx.rng.next())
+    if (!sampleWorld) return null
+
+    // SimState を action mode に応じた phase で構築 (mirror MCTS makeRolloutState)
+    const rootSimState = buildInitialSimState(ctx, sampleWorld)
+    rootSimState.phase = phaseForActionMode(mode)
+    rootSimState.pendingAttack = null
+    rootSimState.pendingGuard = null
+    rootSimState.pendingDivineTargets = []
+    rootSimState.outcome = null
+    advancePhase(rootSimState)
+
+    const obs = this.captureObs(ctx)
+    const result = this.nn.forward(obs, rootSimState, ctx.mySeat, mode)
+
+    // 除外マスク適用 (自席 + attack なら狼 teammates)
+    let excludedMask = 1 << ctx.mySeat
+    if (mode === 'attack') {
+      for (const s of ctx.wolfTeammates ?? []) excludedMask |= 1 << s
+    }
+    const filtered = new Map<number, number>()
+    let total = 0
+    for (const [seat, p] of result.policy) {
+      if ((excludedMask >> seat) & 1) continue
+      filtered.set(seat, p)
+      total += p
+    }
+    if (filtered.size === 0) return null
+    if (total > 0) {
+      // 再正規化
+      for (const [seat, p] of filtered) filtered.set(seat, p / total)
+    }
+    return filtered
   }
 
   /**

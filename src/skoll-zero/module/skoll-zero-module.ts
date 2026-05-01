@@ -85,6 +85,20 @@ export interface SkollZeroModule {
   ): McctsProposal | null
 
   /**
+   * MCTS を介さず NN forward 1 回で policy 分布を返す (eval / pure-policy 評価用)。
+   *
+   * - mode は 'execute' / 'divine' / 'guard' / 'attack' のいずれか
+   * - 戻り値 Map<actionId, prob>: NN の policy head から取った per-seat 確率分布
+   *   (mode に応じた除外マスク = 自席 + (attack なら) 狼 teammates 適用済)
+   * - retar 無効 / determinizer overflow / fixRole 失敗時は null (caller は heuristic fallback)
+   * - buffer に書き込まない (eval は学習に影響しない)
+   */
+  proposePolicyOnly(
+    ctx: DecisionContext,
+    mode: 'execute' | 'divine' | 'guard' | 'attack',
+  ): Map<number, number> | null
+
+  /**
    * ゲーム終了時に pending records に outcome one-hot を貼って finalized へ移送。
    * Adapter / self-play runner が呼ぶ (Stage 4: outcome distribution 学習用)。
    */

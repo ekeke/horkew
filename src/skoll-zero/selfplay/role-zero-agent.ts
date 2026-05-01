@@ -34,6 +34,14 @@ import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
  * 原材料を渡す形の両方をサポートする。サブクラスは内部で Module を構築する
  * 方針を取るため `module` フィールドは通常使わない。
  */
+/**
+ * 行動選択モード:
+ *   - 'sample': MCTS visit 分布から温度付き sampling (training)
+ *   - 'argmax': MCTS visit 分布から argmax (eval、search 込みの greedy 評価)
+ *   - 'policy_argmax': MCTS スキップ、NN policy 分布の argmax (eval、純粋な NN-only 性能評価)
+ */
+export type SelectionMode = 'sample' | 'argmax' | 'policy_argmax'
+
 export type SkollZeroRoleAgentOptions = {
   /** 形勢判断 NN (MCTS node expand 用)。Module が受け取る */
   nn: MasonZeroNN
@@ -43,8 +51,8 @@ export type SkollZeroRoleAgentOptions = {
   buffer: TrainingBuffer
   /** MCTS hyperparams */
   mctsConfig?: MCTSConfig
-  /** 行動選択モード: 'sample' (training) or 'argmax' (eval) */
-  selectionMode?: 'sample' | 'argmax'
+  /** 行動選択モード */
+  selectionMode?: SelectionMode
   /** Determinizer の世界数上限 */
   determinizerMaxWorlds?: number
 }
@@ -57,14 +65,14 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
   /** skoll-zero Module (NN + MCTS + buffer の塊) */
   protected readonly module: SkollZeroModule
   /** 行動選択モード */
-  protected readonly selectionMode: 'sample' | 'argmax'
+  protected readonly selectionMode: SelectionMode
   /**
    * cross-module dispatch 用 ModuleBundle (multi-runner が注入)。
    * 未注入時は base-module が singletonBundle にフォールバック (Stage 1 互換)。
    */
   protected bundle: ModuleBundle | undefined
 
-  constructor(module: SkollZeroModule, selectionMode: 'sample' | 'argmax' = 'sample') {
+  constructor(module: SkollZeroModule, selectionMode: SelectionMode = 'sample') {
     super({})
     this.module = module
     this.selectionMode = selectionMode
@@ -98,6 +106,11 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
   // ========== lupa decide\* interface ==========
 
   override decideVote(ctx: DecisionContext): number {
+    if (this.selectionMode === 'policy_argmax') {
+      const policy = this.module.proposePolicyOnly(ctx, 'execute')
+      if (!policy) return super.decideVote(ctx)
+      return argmaxFromVisits(policy)
+    }
     const result = this.module.proposeVote(ctx, this.proposeOpts())
     if (!result) return super.decideVote(ctx)
     return this.selectionMode === 'argmax'

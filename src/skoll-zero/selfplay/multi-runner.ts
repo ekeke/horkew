@@ -57,7 +57,8 @@ export type MultiAgentSelfPlayConfig = {
   slots: SlotMap
   roles?: Map<SystemRole, number>
   mctsConfig?: MCTSConfig
-  selectionMode?: 'sample' | 'argmax'
+  /** 'sample'=訓練、'argmax'=MCTS argmax 評価、'policy_argmax'=NN-only argmax 評価 (1 forward) */
+  selectionMode?: 'sample' | 'argmax' | 'policy_argmax'
   seed: number
   /** true なら結果に events / state / config を乗せる (howl 出力等の診断用、学習中は false) */
   collectGameRecord?: boolean

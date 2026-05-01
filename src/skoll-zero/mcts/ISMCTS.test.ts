@@ -71,6 +71,7 @@ class DummyModule implements SkollZeroModule {
   }
   proposeVote(): null { return null }
   proposeNightAction(): null { return null }
+  proposePolicyOnly(): null { return null }
   finalize(): void {}
   reset(): void {}
 }
