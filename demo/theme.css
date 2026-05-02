@@ -56,6 +56,7 @@
   --color-bg-sunken:      var(--ctp-crust);      /* 入力フィールド内部 */
   --color-surface:        var(--ctp-surface0);   /* カード、ボタン背景 */
   --color-surface-hover:  var(--ctp-surface1);   /* ホバー状態 */
+  --color-selection:      color-mix(in srgb, var(--ctp-surface2) 55%, transparent); /* テキスト選択範囲（Catppuccin 準拠：surface2 + alpha） */
   --color-border:         var(--ctp-surface0);   /* 通常の境界線 */
   --color-border-strong:  var(--ctp-surface1);   /* 強調された境界線 */
 

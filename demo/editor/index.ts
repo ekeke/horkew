@@ -1,5 +1,5 @@
 import { Compartment, EditorState } from '@codemirror/state'
-import { EditorView, drawSelection, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
+import { EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { completionKeymap } from '@codemirror/autocomplete'
 import { howlLanguageExtension } from './howlLanguage.ts'
@@ -33,6 +33,7 @@ export function createHowlEditor(parent: HTMLElement, opts: {
       history(),
       drawSelection(),
       highlightActiveLine(),
+      highlightActiveLineGutter(),
       howlCompletionExtension,
       EditorView.lineWrapping,
       editableCompartment.of(EditorView.editable.of(true)),

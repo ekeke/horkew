@@ -17,11 +17,17 @@ export const howlThemeExtension: Extension = EditorView.theme({
   '.cm-cursor, .cm-dropCursor': {
     borderLeftColor: 'var(--color-text)',
   },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
-    backgroundColor: 'var(--color-surface)',
+  '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground': {
+    backgroundColor: 'var(--color-selection)',
   },
   '.cm-activeLine': {
-    backgroundColor: 'color-mix(in srgb, var(--ctp-surface0) 50%, transparent)',
+    backgroundColor: 'transparent',
+    boxShadow: 'inset 0 -1px 0 color-mix(in srgb, var(--color-text) 15%, transparent)',
+  },
+  '.cm-activeLineGutter': {
+    backgroundColor: 'transparent',
+    color: 'var(--color-text)',
+    fontWeight: 'bold',
   },
   '.cm-gutters': {
     backgroundColor: 'var(--color-bg)',
@@ -47,18 +53,11 @@ export const howlThemeExtension: Extension = EditorView.theme({
   '.hw-co':       { color: 'var(--color-co)' },
   '.hw-over':     { color: 'var(--color-execution)' },
 
-  // Line-level backgrounds
-  '.hwl-join':     { backgroundColor: 'color-mix(in srgb, var(--ctp-blue) 6%, transparent)' },
-  '.hwl-lynch':    { backgroundColor: 'color-mix(in srgb, var(--ctp-peach) 6%, transparent)' },
-  '.hwl-attack':   { backgroundColor: 'color-mix(in srgb, var(--ctp-red) 6%, transparent)' },
-  '.hwl-curse':    { backgroundColor: 'color-mix(in srgb, var(--ctp-mauve) 6%, transparent)' },
-  '.hwl-follow':   { backgroundColor: 'color-mix(in srgb, var(--ctp-overlay0) 6%, transparent)' },
-  '.hwl-peace':    { backgroundColor: 'color-mix(in srgb, var(--ctp-green) 6%, transparent)' },
-  '.hwl-unknown':  { textDecoration: 'wavy underline var(--color-editor-unresolved)', textUnderlineOffset: '3px', backgroundColor: 'color-mix(in srgb, var(--color-editor-unresolved) 13%, transparent)' },
+  '.hwl-unknown':  { textDecoration: 'wavy underline var(--color-editor-unresolved)', textUnderlineOffset: '3px' },
   '.hw-beyond-cursor': { opacity: '0.35' },
   '.hw-join-name':         { color: 'var(--color-vote-arrow)', fontWeight: 'bold' },
-  '.hw-player-resolved':   { backgroundColor: 'color-mix(in srgb, var(--color-editor-resolved) 13%, transparent)', color: 'var(--color-editor-resolved)' },
-  '.hw-player-unresolved': { textDecoration: 'wavy underline var(--color-editor-unresolved)', textUnderlineOffset: '3px', backgroundColor: 'color-mix(in srgb, var(--color-editor-unresolved) 9%, transparent)' },
+  '.hw-player-resolved':   { color: 'var(--color-editor-resolved)' },
+  '.hw-player-unresolved': { textDecoration: 'wavy underline var(--color-editor-unresolved)', textUnderlineOffset: '3px' },
 
   // Timestamp seek gutter
   '.hwl-gutter': {
