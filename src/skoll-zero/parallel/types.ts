@@ -27,6 +27,8 @@ export type SerializableMCTSConfig = {
   rngSeed: number
   rootDirichletAlpha?: number
   rootDirichletEps?: number
+  /** Day bonus 係数 (0 で無効、SKOLLZ_DAY_BONUS_COEF) */
+  dayBonusCoef?: number
 }
 
 /** Stage 2: ProxiedMasonZeroNN が forward IPC で使う SAB のセット (1 worker あたり 1 セット) */

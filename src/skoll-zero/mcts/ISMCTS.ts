@@ -19,6 +19,7 @@ import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
 import type { HeadName, NNOutput } from './nn.ts'
 import { OUTCOME_ORDER } from '../network/config.ts'
 import { BENCH_ENABLED, benchEnd } from '../bench/profiler.ts'
+import { applyDayBonus } from '../training/day-bonus.ts'
 
 const RoleBitIndexFanatic = RoleBitIndex.fanatic
 
@@ -38,6 +39,12 @@ export type MCTSConfig = {
   rng: () => number
   rootDirichletAlpha?: number
   rootDirichletEps?: number
+  /**
+   * Day bonus 係数 (0 で無効、SKOLLZ_DAY_BONUS_COEF)。
+   * value 評価で `+sign(faction) * coef * state.day` を加算。
+   * faction sign は village/wolf=+1, hamster=-1。
+   */
+  dayBonusCoef?: number
 }
 
 export const DEFAULT_MCTS_CONFIG: MCTSConfig = {
@@ -177,7 +184,7 @@ export function runMCTS(
     // 初回 expand + Dirichlet noise は targetPhase の root にだけ適用 (1 回限り)
     if (!dirichletApplied && rolloutState.phase === targetPhase
       && rolloutState.phase !== 'terminal' && hasSeat(rolloutState.alive, decisionSeat)) {
-      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, /*isRoot*/ true, decisionFaction)
+      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, /*isRoot*/ true, decisionFaction, config.dayBonusCoef ?? 0)
       if (value !== null) {
         applyRootDirichletNoise(root, config)
       }
@@ -314,10 +321,12 @@ function runOneRollout(
   let state = initialState
   let isRoot = true
 
+  const dayBonusCoef = config.dayBonusCoef ?? 0
+
   while (true) {
     if (state.phase === 'terminal') {
       const tBackup = BENCH_ENABLED ? performance.now() : 0
-      backup(path, outcomeToValue(state.outcome, decisionFaction))
+      backup(path, outcomeToValue(state.outcome, decisionFaction, state.day, dayBonusCoef))
       if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
       return
     }
@@ -334,7 +343,7 @@ function runOneRollout(
       }
       const out = dispatch.module.forwardAt(state, dispatch.actorSeat, dispatch.actorRole, dispatch.headName, invariants)
       // Stage 4: NN は outcome 分布を返す。decision faction 視点の scalar に変換して backup。
-      const v = outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
+      const v = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef)
       const tBackup = BENCH_ENABLED ? performance.now() : 0
       backup(path, v)
       if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
@@ -363,7 +372,7 @@ function runOneRollout(
 
     if (!node.expanded) {
       const tExpand = BENCH_ENABLED ? performance.now() : 0
-      const value = expandWithDispatch(node, state, decisionSeat, bundle, invariants, isRoot ? excludedMask : 0, isRoot, decisionFaction)
+      const value = expandWithDispatch(node, state, decisionSeat, bundle, invariants, isRoot ? excludedMask : 0, isRoot, decisionFaction, dayBonusCoef)
       if (BENCH_ENABLED) benchEnd('mcts_expand', tExpand)
       const tBackup = BENCH_ENABLED ? performance.now() : 0
       backup(path, value ?? 0)
@@ -566,6 +575,7 @@ function expandWithDispatch(
   excludedMask: number,
   isRoot: boolean,
   decisionFaction: Faction,
+  dayBonusCoef: number,
 ): number | null {
   const dispatch = dispatchForPhase(state, decisionSeat, bundle)
   if (!dispatch) return null
@@ -587,7 +597,7 @@ function expandWithDispatch(
   if (legal.size === 0) {
     node.expanded = true
     node.phase = state.phase
-    return outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
+    return outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef)
   }
   // NN policy が legal action に与える prior を集計
   let providedSum = 0
@@ -608,7 +618,7 @@ function expandWithDispatch(
   }
   node.expanded = true
   node.phase = state.phase
-  return outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
+  return outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef)
 }
 
 /** Debug: phase mismatch (expandedPhase, currentPhase) のペアごとに最初の 1 回だけ警告 */
@@ -707,16 +717,23 @@ export type Faction = 'village' | 'wolf' | 'hamster'
 export function outcomeToValue(
   outcome: GameOutcome | 'draw' | null,
   faction: Faction,
+  day: number = 0,
+  dayBonusCoef: number = 0,
 ): number {
   if (outcome == null) return 0
+  let base: number
   switch (faction) {
     case 'village':
-      return outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.0 : outcome === 'hamster_win' ? -2.0 : 0
+      base = outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.0 : outcome === 'hamster_win' ? -2.0 : 0
+      break
     case 'wolf':
-      return outcome === 'wolf_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'hamster_win' ? -1.5 : 0
+      base = outcome === 'wolf_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'hamster_win' ? -1.5 : 0
+      break
     case 'hamster':
-      return outcome === 'hamster_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'wolf_win' ? -1.0 : 0
+      base = outcome === 'hamster_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'wolf_win' ? -1.0 : 0
+      break
   }
+  return applyDayBonus(base, faction, day, dayBonusCoef)
 }
 
 /** 互換: mason は village faction */
@@ -737,13 +754,16 @@ export function outcomeToMasonValue(outcome: GameOutcome | 'draw' | null): numbe
 export function outcomeDistToFactionValue(
   dist: Float32Array | undefined,
   faction: Faction,
+  day: number = 0,
+  dayBonusCoef: number = 0,
 ): number {
   if (!dist) return 0
   let v = 0
   for (let i = 0; i < OUTCOME_ORDER.length && i < dist.length; i++) {
+    // base のみ加算 (default day=0, coef=0)。bonus は最後に 1 回だけ applyDayBonus する。
     v += dist[i] * outcomeToValue(OUTCOME_ORDER[i], faction)
   }
-  return v
+  return applyDayBonus(v, faction, day, dayBonusCoef)
 }
 
 // ============================================================
@@ -813,12 +833,14 @@ function descentToLeaf(
   let node = root
   let state = initialState
 
+  const dayBonusCoef = config.dayBonusCoef ?? 0
+
   while (true) {
     if (state.phase === 'terminal') {
       return {
         kind: 'terminal', path, state, node,
         isRoot: path.length === 0,
-        immediateValue: outcomeToValue(state.outcome, decisionFaction),
+        immediateValue: outcomeToValue(state.outcome, decisionFaction, state.day, dayBonusCoef),
       }
     }
     if (!hasSeat(state.alive, decisionSeat)) {
@@ -967,6 +989,8 @@ function runBatchedMCTSImpl(
   const targetPhase = phaseFromActionMode(actionMode)
   const roots = new Map<string, TreeNode>()
 
+  const dayBonusCoef = config.dayBonusCoef ?? 0
+
   // 初回 root expand + Dirichlet (sequential と同じ条件で 1 回)
   {
     const rolloutState = makeRolloutState(rootSimState, firstWorld, actionMode)
@@ -975,7 +999,7 @@ function runBatchedMCTSImpl(
     if (rolloutState.phase === targetPhase
       && rolloutState.phase !== 'terminal' && hasSeat(rolloutState.alive, decisionSeat)) {
       const tExpand = BENCH_ENABLED ? performance.now() : 0
-      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, true, decisionFaction)
+      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, true, decisionFaction, dayBonusCoef)
       if (BENCH_ENABLED) benchEnd('mcts_expand', tExpand)
       if (value !== null) applyRootDirichletNoise(root, config)
     }
@@ -1042,7 +1066,7 @@ function runBatchedMCTSImpl(
         for (let i = 0; i < leaves.length; i++) {
           const leaf = leaves[i]
           const out = outputs[i]
-          const value = outcomeDistToFactionValue(out.outcomeDist, decisionFaction)
+          const value = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, leaf.state.day, dayBonusCoef)
           if (leaf.kind === 'pending_expand') {
             const tExpand = BENCH_ENABLED ? performance.now() : 0
             expandEdgesFromPolicy(leaf.node, leaf.state, leaf.dispatch!, out.policy, leaf.isRoot ? excludedMask : 0, leaf.isRoot)

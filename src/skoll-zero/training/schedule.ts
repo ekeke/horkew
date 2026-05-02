@@ -94,6 +94,12 @@ export type SkollZeroTrainConfig = {
   rngSeed: number
   /** Dirichlet ε auto-decay 設定 (省略時 DEFAULT_DIRICHLET_AUTO_CONFIG) */
   dirichletAuto?: DirichletAutoConfig
+  /**
+   * Day bonus 係数 (0 で無効、SKOLLZ_DAY_BONUS_COEF)。
+   * MCTS の value 評価で `+sign(faction) * coef * state.day` を加算し、
+   * 14D-12-猫構造の長期化インセンティブを village/wolf に与える (hamster は逆方向)。
+   */
+  dayBonusCoef?: number
 }
 
 export const DEFAULT_SKOLL_ZERO_TRAIN_CONFIG: SkollZeroTrainConfig = {

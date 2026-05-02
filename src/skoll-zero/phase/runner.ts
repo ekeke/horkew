@@ -302,6 +302,17 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     log(`SKOLLZ_DIRICHLET_AUTO=1 (per-slot decay, target=${auto.targetRatio} decay=${auto.decay} floor=${auto.floor} streak=${auto.streak})`)
   }
 
+  // Day bonus reward shaping (14D-12-猫: 12/14 が長期化を望む)。
+  // village/wolf=+coef×day、hamster=-coef×day を MCTS の value 評価に加算。
+  // value head 自体 (outcome 分布) は変更しない。
+  if (process.env.SKOLLZ_DAY_BONUS_COEF) {
+    const coef = parseFloat(process.env.SKOLLZ_DAY_BONUS_COEF)
+    if (Number.isFinite(coef)) {
+      config.dayBonusCoef = coef
+      log(`SKOLLZ_DAY_BONUS_COEF=${coef} (village/wolf=+coef×day, hamster=-coef×day)`)
+    }
+  }
+
   // Resume: phaseDir/resume.json があれば lastCompletedRound + 1 から再開、
   // gameSeedCounter も復元する。weights は buildSlot 内で {slot}/final.json から resume 済み。
   // TrainingBuffer は persist しないので空で再開 (1-2 round で再蓄積される)。
