@@ -781,6 +781,7 @@
 
   let copyCompressedStatus: 'idle' | 'done' | 'error' = $state('idle')
   let copyCompressedTimer: ReturnType<typeof setTimeout> | undefined
+  let docMenuOpen = $state(false)
 
   async function copyCompressed() {
     if (!editorView) return
@@ -1770,7 +1771,36 @@
     {:else if activeKey && fileIndex[activeKey]}
       <span class="header-active-file" title={displayName(fileIndex[activeKey])}>{displayName(fileIndex[activeKey])}</span>
     {/if}
-    <button class="header-btn" onclick={openNewModal}>新規作成</button>
+    {#if activeKey || trialMode}
+      <div class="doc-actions-cluster">
+        <button
+          class="doc-actions-trigger"
+          onclick={() => docMenuOpen = !docMenuOpen}
+          title="ドキュメント操作"
+          aria-label="ドキュメント操作"
+          aria-expanded={docMenuOpen}
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 9 L12 15 L18 9" />
+          </svg>
+        </button>
+        {#if docMenuOpen}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="doc-actions-backdrop" onclick={() => docMenuOpen = false}></div>
+          <div class="doc-actions-menu" role="menu">
+            <button
+              class="doc-actions-item"
+              onclick={() => { copyCompressed(); docMenuOpen = false }}
+              title="エディタ内容を gzip+Base64 でクリップボードにコピー"
+            >{#if copyCompressedStatus === 'done'}コピー済み{:else if copyCompressedStatus === 'error'}失敗{:else}圧縮コピー{/if}</button>
+            <button
+              class="doc-actions-item"
+              onclick={() => { obsSettingsOpen = true; docMenuOpen = false }}
+            >OBS 設定…{obsRoom ? (obsConnected ? ' ●' : ' …') : ''}</button>
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <div class="header-spacer"></div>
 
@@ -1815,14 +1845,7 @@
       aria-label="テーマ切替"
     >{appTheme === 'dark' ? 'Dark' : 'Light'}</button>
 
-    <div class="obs-cluster">
-      <button
-        class="header-btn obs-btn"
-        class:obs-connected={obsRoom}
-        onclick={() => obsSettingsOpen = !obsSettingsOpen}
-        title="OBS連携・表示設定"
-      >OBS{obsRoom ? (obsConnected ? '●' : '…') : ''}</button>
-      {#if obsSettingsOpen}
+    {#if obsSettingsOpen}
         <div
           class="obs-settings-backdrop"
           onclick={() => obsSettingsOpen = false}
@@ -1926,7 +1949,6 @@
           </div>
         </div>
       {/if}
-    </div>
     <button class="header-btn help-btn" onclick={() => showHelp = true} title="Howl記法ヘルプ">?</button>
   </header>
 
@@ -1935,12 +1957,6 @@
       <div class="pane-header">Input</div>
       <div class="pane-body pane-body-input">
         {#if activeKey || trialMode}
-          <div class="editor-toolbar">
-            <button class="editor-toolbar-btn" onclick={copyCompressed} title="エディタ内容を gzip+Base64 でクリップボードにコピー">
-              {#if copyCompressedStatus === 'done'}コピー済み{:else if copyCompressedStatus === 'error'}失敗{:else}圧縮コピー{/if}
-            </button>
-            <span class="editor-toolbar-hint">全選択して圧縮テキストを貼り付けると自動展開</span>
-          </div>
           <div class="input-editor" bind:this={editorParent}></div>
           {#if isActivePendingDelete}
             <div class="pending-delete-overlay">
@@ -2555,18 +2571,64 @@
     min-width: 48px;
   }
 
-  .obs-btn {
-    font-size: 11px;
-    font-weight: 700;
-  }
-  .obs-connected {
-    color: var(--ctp-green, #a6e3a1);
+  .doc-actions-cluster {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
   }
 
-  .obs-cluster {
-    position: relative;
-    display: flex;
-    gap: 2px;
+  .doc-actions-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 3px;
+    line-height: 1;
+  }
+
+  .doc-actions-trigger:hover {
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  .doc-actions-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+  }
+
+  .doc-actions-menu {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 4px);
+    z-index: 11;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 6px;
+    padding: 6px 0;
+    min-width: 180px;
+    box-shadow: 0 4px 12px color-mix(in srgb, black 40%, transparent);
+  }
+
+  .doc-actions-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--color-text);
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .doc-actions-item:hover {
+    background: var(--color-surface);
   }
 
   .obs-connection-info {
@@ -3335,37 +3397,6 @@
 
   .pending-delete-undo:hover {
     background: var(--color-surface);
-  }
-
-  .editor-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-bg-elevated);
-    flex-shrink: 0;
-  }
-
-  .editor-toolbar-btn {
-    background: var(--color-surface);
-    color: var(--color-text);
-    border: 1px solid var(--color-border-strong);
-    border-radius: 3px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-family: system-ui, -apple-system, sans-serif;
-    cursor: pointer;
-  }
-
-  .editor-toolbar-btn:hover {
-    background: var(--color-surface-hover);
-  }
-
-  .editor-toolbar-hint {
-    color: var(--color-text-faint);
-    font-size: 10px;
-    font-family: system-ui, -apple-system, sans-serif;
   }
 
   .input-editor {

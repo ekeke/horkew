@@ -40,6 +40,7 @@
   let renamingKey = $state<string | null>(null)
   let renameDraft = $state('')
   let renameInputEl: HTMLInputElement | undefined = $state()
+  let menuOpen = $state(false)
 
   async function startRename(key: string, entry: FileEntry) {
     renamingKey = key
@@ -77,6 +78,40 @@
       <span class="file-sidebar-trial-badge">お試し中</span>
     {/if}
     <div class="file-sidebar-spacer"></div>
+    <div class="file-sidebar-new-cluster">
+      <button
+        class="file-sidebar-new-btn"
+        onclick={onCreateNew}
+        title="新規作成"
+        aria-label="新規作成"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 5 V19 M5 12 H19" />
+        </svg>
+      </button>
+      <button
+        class="file-sidebar-new-menu-btn"
+        onclick={() => menuOpen = !menuOpen}
+        title="その他"
+        aria-label="その他"
+        aria-expanded={menuOpen}
+      >
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M6 9 L12 15 L18 9" />
+        </svg>
+      </button>
+      {#if menuOpen}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="file-sidebar-new-menu-backdrop" onclick={() => menuOpen = false}></div>
+        <div class="file-sidebar-new-menu" role="menu">
+          <button
+            class="file-sidebar-new-menu-item"
+            onclick={() => { onStartTrial(); menuOpen = false }}
+            disabled={trialMode}
+          >お試しモードに移行</button>
+        </div>
+      {/if}
+    </div>
   </header>
 
   <div class="file-sidebar-body">
@@ -139,9 +174,6 @@
     {/if}
   </div>
 
-  <footer class="file-sidebar-footer">
-    <button class="file-sidebar-trial" onclick={onStartTrial}>お試しモード（保存なし）</button>
-  </footer>
 </aside>
 
 <style>
@@ -362,24 +394,75 @@
     background: var(--color-surface-hover);
   }
 
-  .file-sidebar-footer {
-    border-top: 1px solid var(--color-border);
-    padding: 6px 8px;
+  .file-sidebar-new-cluster {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 1px;
   }
 
-  .file-sidebar-trial {
-    width: 100%;
+  .file-sidebar-new-btn,
+  .file-sidebar-new-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
-    border: 1px dashed var(--color-border-strong);
+    border: none;
     color: var(--color-text-muted);
-    padding: 6px 10px;
-    font-size: 11px;
-    border-radius: 4px;
     cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 3px;
+    line-height: 1;
   }
 
-  .file-sidebar-trial:hover {
+  .file-sidebar-new-btn:hover,
+  .file-sidebar-new-menu-btn:hover {
     background: var(--color-surface);
     color: var(--color-text);
+  }
+
+  .file-sidebar-new-menu-btn {
+    padding: 6px 4px;
+  }
+
+  .file-sidebar-new-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+  }
+
+  .file-sidebar-new-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 11;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 6px;
+    padding: 6px 0;
+    min-width: 180px;
+    box-shadow: 0 4px 12px color-mix(in srgb, black 40%, transparent);
+  }
+
+  .file-sidebar-new-menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--color-text);
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .file-sidebar-new-menu-item:hover:not(:disabled) {
+    background: var(--color-surface);
+  }
+
+  .file-sidebar-new-menu-item:disabled {
+    color: var(--color-text-faint);
+    cursor: not-allowed;
   }
 </style>
