@@ -1755,7 +1755,11 @@
       onclick={toggleSidebar}
       title={sidebarOpen ? 'サイドバーを閉じる' : 'サイドバーを開く'}
       aria-label="サイドバー切替"
-    >&#x2630;</button>
+    >
+      <svg class="sidebar-toggle-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 6 L15 12 L9 18" />
+      </svg>
+    </button>
 
     <span class="header-subtitle">人狼メモ・解析ツール</span>
     <span class="header-title" class:title-flash={titleFlash} onclick={onTitleTap}>Horkew</span>
@@ -2436,10 +2440,27 @@
     min-width: 0;
   }
 
-  .sidebar-toggle {
-    padding: 4px 10px;
+  button.sidebar-toggle {
+    margin: 0 0 0 -1rem;
+    padding: 0 14px;
+    height: 40px;
     font-size: 14px;
     line-height: 1;
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--color-border);
+    border-radius: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sidebar-toggle-icon {
+    transition: transform 200ms ease;
+  }
+
+  .sidebar-toggle-open .sidebar-toggle-icon {
+    transform: rotate(180deg);
   }
 
   .sidebar-toggle-open {
