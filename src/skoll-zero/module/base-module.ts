@@ -47,6 +47,18 @@ function phaseForActionMode(mode: 'execute' | 'divine' | 'guard' | 'attack'): Ph
   }
 }
 
+/**
+ * 過去に占った対象の bitmask。同一対象の連続占いを禁止するため合法手から除外する。
+ * Why: 占い結果は決定的なので二度占う情報利得はゼロ、policy が偏ると未占い席の探索が滞る。
+ */
+function pastDivineTargetsMask(ctx: DecisionContext): number {
+  const history = ctx.myPlayer?.divineHistory
+  if (!history) return 0
+  let mask = 0
+  for (const d of history.values()) mask |= (1 << d.target)
+  return mask
+}
+
 export type BaseSkollZeroModuleOptions = {
   /** 形勢判断 NN (MCTS node expand 用 policy/value)。MasonZeroNetwork 等 */
   nn: MasonZeroNN
@@ -174,7 +186,8 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     opts?: { record?: boolean, bundle?: ModuleBundle },
   ): McctsProposal | null {
     const bundle = opts?.bundle ?? this.singletonBundle()
-    return this.runMctsProposal(ctx, bundle, 'execute', 0, opts?.record ?? true)
+    // 投票の自席除外。これを忘れると vote head の argmax で自票が出る (再投票時に観測済)。
+    return this.runMctsProposal(ctx, bundle, 'execute', 1 << ctx.mySeat, opts?.record ?? true)
   }
 
   proposeNightAction(
@@ -182,11 +195,13 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     mode: 'divine' | 'guard' | 'attack',
     opts?: { record?: boolean, bundle?: ModuleBundle },
   ): McctsProposal | null {
-    // 夜行動の除外席: 自席は常に除外、wolf の attack は teammates も除外
+    // 夜行動の除外席: 自席は常に除外、wolf の attack は teammates も除外、
+    // divine は過去占い対象も除外 (同一対象連続占い禁止)
     let excludedMask = 1 << ctx.mySeat
     if (mode === 'attack') {
       for (const s of ctx.wolfTeammates ?? []) excludedMask |= 1 << s
     }
+    if (mode === 'divine') excludedMask |= pastDivineTargetsMask(ctx)
     const bundle = opts?.bundle ?? this.singletonBundle()
     return this.runMctsProposal(ctx, bundle, mode, excludedMask, opts?.record ?? true)
   }
@@ -220,11 +235,12 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     const obs = this.captureObs(ctx)
     const result = this.nn.forward(obs, rootSimState, ctx.mySeat, mode)
 
-    // 除外マスク適用 (自席 + attack なら狼 teammates)
+    // 除外マスク適用 (自席 + attack なら狼 teammates、divine なら過去占い対象)
     let excludedMask = 1 << ctx.mySeat
     if (mode === 'attack') {
       for (const s of ctx.wolfTeammates ?? []) excludedMask |= 1 << s
     }
+    if (mode === 'divine') excludedMask |= pastDivineTargetsMask(ctx)
     const filtered = new Map<number, number>()
     let total = 0
     for (const [seat, p] of result.policy) {
@@ -323,7 +339,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
 
     const result = runMCTS(
       rootSimState, ctx.mySeat, determinizer, bundle, invariants, mctsConfig,
-      { actionMode, excludedMask: actionMode === 'execute' ? 0 : excludedMask },
+      { actionMode, excludedMask },
     )
 
     if (result.visits.size === 0) {

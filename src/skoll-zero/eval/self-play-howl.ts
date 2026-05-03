@@ -43,7 +43,7 @@ type CliOptions = {
   games: number
   seed: number
   rollouts: number
-  selectionMode: 'sample' | 'argmax'
+  selectionMode: 'sample' | 'argmax' | 'policy_argmax'
   round: number | null
   out: string | null
 }
@@ -230,7 +230,7 @@ function parseArgs(argv: string[]): CliOptions {
       case '--games': opts.games = parseInt(argv[++i], 10); break
       case '--seed': opts.seed = parseInt(argv[++i], 10); break
       case '--rollouts': opts.rollouts = parseInt(argv[++i], 10); break
-      case '--selection-mode': opts.selectionMode = argv[++i] as 'sample' | 'argmax'; break
+      case '--selection-mode': opts.selectionMode = argv[++i] as 'sample' | 'argmax' | 'policy_argmax'; break
       case '--round': opts.round = parseInt(argv[++i], 10); break
       case '--out': opts.out = argv[++i]; break
       case '-h': case '--help':
@@ -240,7 +240,7 @@ function parseArgs(argv: string[]): CliOptions {
           '  --games N           number of games (default: 10)',
           '  --seed N            base seed (default: 1)',
           '  --rollouts N        MCTS rollouts (default: 50)',
-          '  --selection-mode M  sample | argmax (default: argmax)',
+          '  --selection-mode M  sample | argmax | policy_argmax (default: argmax; use policy_argmax for NN-only eval-equivalent)',
           '  --round NNNN        load round_NNNN/weights.json instead of final.json',
           '  --out PATH          output dir (default: <ckpt-base>/self-play-howl[/round_NNNN])',
         ].join('\n') + '\n')

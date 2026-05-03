@@ -259,7 +259,11 @@ async function runGameLoop<E = never, Ext = unknown>(
       if (revoteCandidates && revoteStyle === 'random_tied') {
         const votes = new Map<number, number>()
         for (const voter of alivePlayers(state)) {
-          const target = revoteCandidates[Math.floor(rng.next() * revoteCandidates.length)]
+          // voter 自身が候補者の場合は自票を禁止して残り候補から選ぶ。
+          // 候補が voter のみのケース (理論上ありえない) は元の候補配列にフォールバック。
+          const pool = revoteCandidates.filter(c => c !== voter.seat)
+          const choices = pool.length > 0 ? pool : revoteCandidates
+          const target = choices[Math.floor(rng.next() * choices.length)]
           votes.set(voter.seat, target)
           emit({ type: 'vote', voter: voter.seat, target })
         }

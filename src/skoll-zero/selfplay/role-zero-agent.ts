@@ -106,6 +106,17 @@ export abstract class SkollZeroRoleAgent extends SkollMasterAgent {
   // ========== lupa decide\* interface ==========
 
   override decideVote(ctx: DecisionContext): number {
+    const vote = this.pickVote(ctx)
+    // self-vote safety net: Module / heuristic fallback いずれの経路でも自票になり得るため、
+    // 最終段で必ず弾いて他の生存席へ振り替える (再投票で本物が候補に乗ったケースで観測済)。
+    if (vote === ctx.mySeat) {
+      const fallback = ctx.alivePlayers.find(s => s !== ctx.mySeat)
+      if (fallback != null) return fallback
+    }
+    return vote
+  }
+
+  private pickVote(ctx: DecisionContext): number {
     if (this.selectionMode === 'policy_argmax') {
       const policy = this.module.proposePolicyOnly(ctx, 'execute')
       if (!policy) return super.decideVote(ctx)
