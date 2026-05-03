@@ -405,6 +405,23 @@ function debugDumpOnPanic(
 }
 
 /**
+ * viewer 視点 retar から「観測上 fox (werehamster) 候補が生存席に残っているか」を判定。
+ * 全生存席で fox を持ち得る席が消えれば観測上 fox 死亡確認、それ以外は生存可能性ありで true。
+ * day bonus / endgame bonus の faction 切替信号として `state.foxAliveByViewer` に書き戻す。
+ */
+export function viewerFoxAlive(
+  possibilities: Map<number, Set<SystemRole>> | null,
+  alive: number,
+): boolean {
+  if (!possibilities) return true  // 不明時は生存扱い (互換、保守側)
+  for (const [seat, roles] of possibilities) {
+    if (!hasSeat(alive, seat)) continue
+    if (roles.has('werehamster')) return true
+  }
+  return false
+}
+
+/**
  * viewer 視点 + global 視点の retarPossibilities を 1 度の VS 構築でまとめて解決する。
  * `invariants.recomputeRetarInRollout` が true なら SimState から Retar 再実行、
  * false なら invariants の root snapshot を使う。
@@ -413,6 +430,9 @@ function debugDumpOnPanic(
  * setup は共有できる。`simStateToVillageStatus` を 1 回だけ呼んで使い回す。
  *
  * Retar 呼び出しが失敗した場合 (WASM panic 等) は root snapshot にフォールバック。
+ *
+ * 副作用: self retar 結果から `state.foxAliveByViewer` を更新する (rollout 内の day 進行で
+ * 占い呪殺等が観測上確認できた瞬間に false に切り替わる)。
  */
 function resolveRetarBoth(
   state: SimState,
@@ -424,6 +444,7 @@ function resolveRetarBoth(
   global: Map<number, Set<SystemRole>> | null,
 } {
   if (!invariants.recomputeRetarInRollout) {
+    state.foxAliveByViewer = viewerFoxAlive(invariants.retarPossibilities, state.alive)
     return {
       self: invariants.retarPossibilities,
       global: invariants.globalRetarPossibilities,
@@ -440,6 +461,7 @@ function resolveRetarBoth(
     const self = runRetarOnVillageStatus(vs, setup, viewerSeat, viewerRole)
     // 次回 prior 用に cache を update (並列 leaf で衝突しても retar 側 fallback で正しく動く)
     if (invariants.retarPriorCache) invariants.retarPriorCache.global = global
+    state.foxAliveByViewer = viewerFoxAlive(self, state.alive)
     return { self, global }
   } catch (e) {
     debugDumpOnPanic(state, viewerSeat, viewerRole, setup, e)
@@ -447,6 +469,7 @@ function resolveRetarBoth(
       console.error(`[from-sim-state] Retar rollout failed, falling back to root snapshot: ${e instanceof Error ? e.message : String(e)}`)
       warnedRetarFallback = true
     }
+    state.foxAliveByViewer = viewerFoxAlive(invariants.retarPossibilities, state.alive)
     return {
       self: invariants.retarPossibilities,
       global: invariants.globalRetarPossibilities,

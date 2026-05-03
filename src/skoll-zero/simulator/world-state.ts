@@ -126,6 +126,16 @@ export type SimState = {
    * 処理し、queue が空になったら次 phase へ。night_guard 後の翌日遷移時に再 populate される。
    */
   morningPending: number[]
+
+  /**
+   * viewer (= 観測者) 視点で観測上 fox (werehamster) が生存可能性ありか。
+   * retar 再計算時に更新される (`from-sim-state.ts:resolveRetarBoth`)。
+   * day bonus / endgame bonus の faction-aware 切替に使う:
+   * 観測上 fox 死亡確認後 (= retar の生存席に werehamster 候補ゼロ) は固定 endgame bonus に切り替わる。
+   * 完全情報 (`world.hamsterMask & alive`) ではなく viewer 視点の retar 結果を使うこと
+   * (エージェントから見えない情報を value 計算に混ぜない)。default true (生存扱い、互換)。
+   */
+  foxAliveByViewer: boolean
 }
 
 /**
@@ -156,6 +166,7 @@ export function createSimState(
     voteLog: [],
     guardLog: [],
     morningPending: [],
+    foxAliveByViewer: true,
   }
 }
 
@@ -192,6 +203,7 @@ export function cloneSimState(state: SimState): SimState {
     voteLog: state.voteLog.map(e => ({ day: e.day, voter: e.voter, target: e.target })),
     guardLog: state.guardLog.map(e => ({ day: e.day, target: e.target })),
     morningPending: state.morningPending.slice(),
+    foxAliveByViewer: state.foxAliveByViewer,
   }
 }
 

@@ -100,6 +100,12 @@ export type SkollZeroTrainConfig = {
    * 14D-12-猫構造の長期化インセンティブを village/wolf に与える (hamster は逆方向)。
    */
   dayBonusCoef?: number
+  /**
+   * Endgame bonus 係数 (0 で無効、SKOLLZ_ENDGAME_BONUS_COEF)。
+   * 観測上 fox 死亡確認後 (viewer の retar で werehamster 候補ゼロ) に村/狼へ
+   * `+endgameBonusCoef` を一発加算 (累積させない)。狐排除をマイルストーン化。
+   */
+  endgameBonusCoef?: number
 }
 
 export const DEFAULT_SKOLL_ZERO_TRAIN_CONFIG: SkollZeroTrainConfig = {

@@ -41,10 +41,17 @@ export type MCTSConfig = {
   rootDirichletEps?: number
   /**
    * Day bonus 係数 (0 で無効、SKOLLZ_DAY_BONUS_COEF)。
-   * value 評価で `+sign(faction) * coef * state.day` を加算。
+   * 観測上 fox 生存中は value 評価で `+sign(faction) * coef * state.day` を加算。
    * faction sign は village/wolf=+1, hamster=-1。
    */
   dayBonusCoef?: number
+  /**
+   * Endgame bonus 係数 (0 で無効、SKOLLZ_ENDGAME_BONUS_COEF)。
+   * viewer の retar で fox 候補が消えた時点で village/wolf に固定値 +endgameCoef を加算
+   * (累積させない、最終日到達と同等の単発報酬)。hamster には適用しない。
+   * 狐排除をマイルストーン化して短期決戦への遷移を促す。
+   */
+  endgameBonusCoef?: number
 }
 
 export const DEFAULT_MCTS_CONFIG: MCTSConfig = {
@@ -184,7 +191,7 @@ export function runMCTS(
     // 初回 expand + Dirichlet noise は targetPhase の root にだけ適用 (1 回限り)
     if (!dirichletApplied && rolloutState.phase === targetPhase
       && rolloutState.phase !== 'terminal' && hasSeat(rolloutState.alive, decisionSeat)) {
-      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, /*isRoot*/ true, decisionFaction, config.dayBonusCoef ?? 0)
+      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, /*isRoot*/ true, decisionFaction, config.dayBonusCoef ?? 0, config.endgameBonusCoef ?? 0)
       if (value !== null) {
         applyRootDirichletNoise(root, config)
       }
@@ -322,11 +329,12 @@ function runOneRollout(
   let isRoot = true
 
   const dayBonusCoef = config.dayBonusCoef ?? 0
+  const endgameBonusCoef = config.endgameBonusCoef ?? 0
 
   while (true) {
     if (state.phase === 'terminal') {
       const tBackup = BENCH_ENABLED ? performance.now() : 0
-      backup(path, outcomeToValue(state.outcome, decisionFaction, state.day, dayBonusCoef))
+      backup(path, outcomeToValue(state.outcome, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef }))
       if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
       return
     }
@@ -343,7 +351,7 @@ function runOneRollout(
       }
       const out = dispatch.module.forwardAt(state, dispatch.actorSeat, dispatch.actorRole, dispatch.headName, invariants)
       // Stage 4: NN は outcome 分布を返す。decision faction 視点の scalar に変換して backup。
-      const v = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef)
+      const v = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
       const tBackup = BENCH_ENABLED ? performance.now() : 0
       backup(path, v)
       if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
@@ -372,7 +380,7 @@ function runOneRollout(
 
     if (!node.expanded) {
       const tExpand = BENCH_ENABLED ? performance.now() : 0
-      const value = expandWithDispatch(node, state, decisionSeat, bundle, invariants, isRoot ? excludedMask : 0, isRoot, decisionFaction, dayBonusCoef)
+      const value = expandWithDispatch(node, state, decisionSeat, bundle, invariants, isRoot ? excludedMask : 0, isRoot, decisionFaction, dayBonusCoef, endgameBonusCoef)
       if (BENCH_ENABLED) benchEnd('mcts_expand', tExpand)
       const tBackup = BENCH_ENABLED ? performance.now() : 0
       backup(path, value ?? 0)
@@ -576,6 +584,7 @@ function expandWithDispatch(
   isRoot: boolean,
   decisionFaction: Faction,
   dayBonusCoef: number,
+  endgameBonusCoef: number,
 ): number | null {
   const dispatch = dispatchForPhase(state, decisionSeat, bundle)
   if (!dispatch) return null
@@ -597,7 +606,7 @@ function expandWithDispatch(
   if (legal.size === 0) {
     node.expanded = true
     node.phase = state.phase
-    return outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef)
+    return outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
   }
   // NN policy が legal action に与える prior を集計
   let providedSum = 0
@@ -618,7 +627,7 @@ function expandWithDispatch(
   }
   node.expanded = true
   node.phase = state.phase
-  return outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef)
+  return outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
 }
 
 /** Debug: phase mismatch (expandedPhase, currentPhase) のペアごとに最初の 1 回だけ警告 */
@@ -719,21 +728,25 @@ export function outcomeToValue(
   faction: Faction,
   day: number = 0,
   dayBonusCoef: number = 0,
+  opts?: { foxAliveByViewer?: boolean, endgameBonusCoef?: number },
 ): number {
   if (outcome == null) return 0
   let base: number
+  // 案 A: 敗北ペナルティを bonus 分強化 (-1.0 → -1.3)。
+  // endgame bonus +endgameCoef が乗ったときに「狐排除した上での敗北」が
+  // 元の -1.0 相当に戻るよう、outcome 側で先取りで強める。
   switch (faction) {
     case 'village':
-      base = outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.0 : outcome === 'hamster_win' ? -2.0 : 0
+      base = outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.3 : outcome === 'hamster_win' ? -2.0 : 0
       break
     case 'wolf':
-      base = outcome === 'wolf_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'hamster_win' ? -1.5 : 0
+      base = outcome === 'wolf_win' ? 1.0 : outcome === 'village_win' ? -1.3 : outcome === 'hamster_win' ? -1.5 : 0
       break
     case 'hamster':
       base = outcome === 'hamster_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'wolf_win' ? -1.0 : 0
       break
   }
-  return applyDayBonus(base, faction, day, dayBonusCoef)
+  return applyDayBonus(base, faction, day, dayBonusCoef, opts)
 }
 
 /** 互換: mason は village faction */
@@ -756,6 +769,7 @@ export function outcomeDistToFactionValue(
   faction: Faction,
   day: number = 0,
   dayBonusCoef: number = 0,
+  opts?: { foxAliveByViewer?: boolean, endgameBonusCoef?: number },
 ): number {
   if (!dist) return 0
   let v = 0
@@ -763,7 +777,7 @@ export function outcomeDistToFactionValue(
     // base のみ加算 (default day=0, coef=0)。bonus は最後に 1 回だけ applyDayBonus する。
     v += dist[i] * outcomeToValue(OUTCOME_ORDER[i], faction)
   }
-  return applyDayBonus(v, faction, day, dayBonusCoef)
+  return applyDayBonus(v, faction, day, dayBonusCoef, opts)
 }
 
 // ============================================================
@@ -834,13 +848,14 @@ function descentToLeaf(
   let state = initialState
 
   const dayBonusCoef = config.dayBonusCoef ?? 0
+  const endgameBonusCoef = config.endgameBonusCoef ?? 0
 
   while (true) {
     if (state.phase === 'terminal') {
       return {
         kind: 'terminal', path, state, node,
         isRoot: path.length === 0,
-        immediateValue: outcomeToValue(state.outcome, decisionFaction, state.day, dayBonusCoef),
+        immediateValue: outcomeToValue(state.outcome, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef }),
       }
     }
     if (!hasSeat(state.alive, decisionSeat)) {
@@ -990,6 +1005,7 @@ function runBatchedMCTSImpl(
   const roots = new Map<string, TreeNode>()
 
   const dayBonusCoef = config.dayBonusCoef ?? 0
+  const endgameBonusCoef = config.endgameBonusCoef ?? 0
 
   // 初回 root expand + Dirichlet (sequential と同じ条件で 1 回)
   {
@@ -999,7 +1015,7 @@ function runBatchedMCTSImpl(
     if (rolloutState.phase === targetPhase
       && rolloutState.phase !== 'terminal' && hasSeat(rolloutState.alive, decisionSeat)) {
       const tExpand = BENCH_ENABLED ? performance.now() : 0
-      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, true, decisionFaction, dayBonusCoef)
+      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, true, decisionFaction, dayBonusCoef, endgameBonusCoef)
       if (BENCH_ENABLED) benchEnd('mcts_expand', tExpand)
       if (value !== null) applyRootDirichletNoise(root, config)
     }
@@ -1066,7 +1082,7 @@ function runBatchedMCTSImpl(
         for (let i = 0; i < leaves.length; i++) {
           const leaf = leaves[i]
           const out = outputs[i]
-          const value = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, leaf.state.day, dayBonusCoef)
+          const value = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, leaf.state.day, dayBonusCoef, { foxAliveByViewer: leaf.state.foxAliveByViewer, endgameBonusCoef })
           if (leaf.kind === 'pending_expand') {
             const tExpand = BENCH_ENABLED ? performance.now() : 0
             expandEdgesFromPolicy(leaf.node, leaf.state, leaf.dispatch!, out.policy, leaf.isRoot ? excludedMask : 0, leaf.isRoot)

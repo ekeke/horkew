@@ -309,7 +309,18 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     const coef = parseFloat(process.env.SKOLLZ_DAY_BONUS_COEF)
     if (Number.isFinite(coef)) {
       config.dayBonusCoef = coef
-      log(`SKOLLZ_DAY_BONUS_COEF=${coef} (village/wolf=+coef×day, hamster=-coef×day)`)
+      log(`SKOLLZ_DAY_BONUS_COEF=${coef} (village/wolf=+coef×day [foxAlive], hamster=-coef×day)`)
+    }
+  }
+
+  // Endgame bonus reward shaping (狐排除マイルストーン)。
+  // viewer の retar で fox 候補ゼロになった時点で village/wolf に固定 +endgameCoef を加算。
+  // 累積させない (最終日到達と同等の単発報酬)。狐排除を「次フェーズへの遷移点」として policy に学習させる。
+  if (process.env.SKOLLZ_ENDGAME_BONUS_COEF) {
+    const coef = parseFloat(process.env.SKOLLZ_ENDGAME_BONUS_COEF)
+    if (Number.isFinite(coef)) {
+      config.endgameBonusCoef = coef
+      log(`SKOLLZ_ENDGAME_BONUS_COEF=${coef} (village/wolf に foxAlive=false 時に +coef 一発)`)
     }
   }
 

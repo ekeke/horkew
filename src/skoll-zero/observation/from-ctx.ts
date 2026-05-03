@@ -28,7 +28,7 @@ import type { FenrirEvent } from '../../fenrir/src/events.ts'
 import { createSimState } from '../simulator/world-state.ts'
 import type { SimState, Phase } from '../simulator/world-state.ts'
 import {
-  zeroSignalCounts, type RolloutInvariants, type SignalCountsPerSeat,
+  zeroSignalCounts, viewerFoxAlive, type RolloutInvariants, type SignalCountsPerSeat,
 } from './from-sim-state.ts'
 
 /**
@@ -143,6 +143,9 @@ export function buildInitialSimState(ctx: DecisionContext, world: World): SimSta
       state.guardLog.push({ day, target })
     }
   }
+
+  // root 時点の viewer 視点 fox 生存判定 (rollout 中は resolveRetarBoth で更新)。
+  state.foxAliveByViewer = viewerFoxAlive(ctx.retarPossibilities, alive)
 
   return state
 }
