@@ -147,6 +147,16 @@ const BATCH_INFER_SIZE: number = (() => {
   return Number.isFinite(n) && n > 1 ? n : 1
 })()
 
+/**
+ * Night phase の sample forward を cross-rollout で batch 化するか (SKOLLZ_NIGHT_BATCH_SAMPLES、Open Issue O2 case A)。
+ *
+ * - false (default): 各 rollout の descent 内で逐次 sample (memoization は適用、O2 case B)。
+ *   Pure JS NN 環境では path concat / re-descent overhead を避けられる。
+ * - true: descentToLeaf が pending_night_self/enemy で pause、processNightBatch で
+ *   cross-rollout batched forwardBatchAt する。SAB+GPU production 環境で真の batching が効く想定。
+ */
+const NIGHT_BATCH_SAMPLES: boolean = process.env.SKOLLZ_NIGHT_BATCH_SAMPLES === '1'
+
 export function runMCTS(
   rootSimState: SimState,
   decisionSeat: number,
@@ -191,6 +201,8 @@ export function runMCTS(
   const roots = new Map<string, TreeNode>()
   const targetPhase = phaseFromActionMode(actionMode)
   let dirichletApplied = false
+  // nightParallel の sample forward キャッシュ (per-MCTS-call、Determinizer の同 world 再 sample 時に hit)
+  const nightSampleCache = config.nightParallel ? new NightSampleCache() : undefined
   for (let i = 0; i < config.nRollouts; i++) {
     const world = i === 0 ? firstWorld : determinizer.sample(config.rng)
     if (!world) break
@@ -209,7 +221,7 @@ export function runMCTS(
       }
       dirichletApplied = true
     }
-    runOneRollout(root, rolloutState, decisionSeat, bundle, invariants, config, decisionFaction, excludedMask)
+    runOneRollout(root, rolloutState, decisionSeat, bundle, invariants, config, decisionFaction, excludedMask, nightSampleCache)
   }
   // 戻り値は targetPhase の root に固定 (呼び出し元は actionMode 対応 phase の visit を期待)
   const finalRoot = roots.get(targetPhase) ?? createTreeNode()
@@ -288,6 +300,69 @@ function lowestSetSeat(mask: number): number {
 const MAX_SEAT_NIGHT = 14
 
 /**
+ * 並列 night sample の per-MCTS-call キャッシュ (Open Issue O2: case (B) memoization)。
+ *
+ * 同じ (world, role + alive + day) で複数 rollout が NN sample する場合、
+ * forward 結果 (policy) を再利用する。NN forward は perf の 61.5% を占めるため、
+ * cache hit で大幅な高速化が期待できる。
+ *
+ * - World 同一性: Determinizer 内で worlds 配列を cache、sample() は同 idx 同オブジェクトを返す。
+ *   Map<World, ...> の object identity で hit 判定可能。
+ * - alive/day 区別: rollout が深く進むと state が変わるので別エントリ。
+ * - 寿命: 1 MCTS call (= 1 root decision) のみ。次の MCTS call では新規 cache。
+ *
+ * forward 結果 (NNOutput) には outcomeDist も含むが、sample 用途では policy のみ参照。
+ */
+class NightSampleCache {
+  private readonly cache: Map<World, Map<string, NNOutput>> = new Map()
+  hits = 0
+  misses = 0
+
+  /** (world, key) で取得。miss なら compute() を呼んで保存 */
+  get(world: World, key: string, compute: () => NNOutput): NNOutput {
+    let inner = this.cache.get(world)
+    if (!inner) {
+      inner = new Map()
+      this.cache.set(world, inner)
+    }
+    const cached = inner.get(key)
+    if (cached !== undefined) {
+      this.hits++
+      return cached
+    }
+    this.misses++
+    const out = compute()
+    inner.set(key, out)
+    return out
+  }
+
+  /** (world, key) で lookup のみ。hit なら value、miss なら undefined。compute は呼ばない */
+  tryGet(world: World, key: string): NNOutput | undefined {
+    const inner = this.cache.get(world)
+    if (!inner) return undefined
+    const cached = inner.get(key)
+    if (cached !== undefined) {
+      this.hits++
+      return cached
+    }
+    return undefined
+  }
+
+  /** 外部 compute 結果を cache に書き込む (batch forward 結果を後から put する用) */
+  put(world: World, key: string, value: NNOutput): void {
+    let inner = this.cache.get(world)
+    if (!inner) {
+      inner = new Map()
+      this.cache.set(world, inner)
+    }
+    if (!inner.has(key)) {
+      this.misses++  // 初回 put は miss としてカウント (compute 経由でも put 経由でも同じ扱い)
+      inner.set(key, value)
+    }
+  }
+}
+
+/**
  * NN policy 分布から legal action 集合に制限して 1 つ categorical sample (T=1)。
  *
  * - legal ∩ policy.keys() に正規化後 categorical sample
@@ -332,17 +407,23 @@ function sampleWolfAttack(
   bundle: ModuleBundle,
   invariants: RolloutInvariants,
   rng: () => number,
+  cache?: NightSampleCache,
 ): number | undefined {
   const wolfSeat = lowestSetSeat(state.world.wolfMask & state.alive)
   if (wolfSeat < 0) return undefined
   const module = bundle.wolf
   if (!module) return undefined
 
-  // forwardAt 用に一時的に night_attack 相当に
-  const savedPhase = state.phase
-  state.phase = 'night_attack'
-  const out = module.forwardAt(state, wolfSeat, 'werewolf', 'attack', invariants)
-  state.phase = savedPhase
+  // forward (cache hit なら NN forward 省略)
+  const cacheKey = `wolf:${wolfSeat}:${state.alive}:${state.day}`
+  const compute = (): NNOutput => {
+    const savedPhase = state.phase
+    state.phase = 'night_attack'
+    const r = module.forwardAt(state, wolfSeat, 'werewolf', 'attack', invariants)
+    state.phase = savedPhase
+    return r
+  }
+  const out = cache ? cache.get(state.world, cacheKey, compute) : compute()
 
   const legal = new Set<number>()
   for (const a of legalAttackActions(state)) {
@@ -362,16 +443,22 @@ function sampleSeerDivine(
   bundle: ModuleBundle,
   invariants: RolloutInvariants,
   rng: () => number,
+  cache?: NightSampleCache,
 ): number | undefined {
   const seerSeat = lowestSetSeat(state.world.seerMask & state.alive)
   if (seerSeat < 0) return undefined
   const module = bundle.standard
   if (!module) return undefined
 
-  const savedPhase = state.phase
-  state.phase = 'night_divine'
-  const out = module.forwardAt(state, seerSeat, 'seer', 'divine', invariants)
-  state.phase = savedPhase
+  const cacheKey = `seer:${seerSeat}:${state.alive}:${state.day}`
+  const compute = (): NNOutput => {
+    const savedPhase = state.phase
+    state.phase = 'night_divine'
+    const r = module.forwardAt(state, seerSeat, 'seer', 'divine', invariants)
+    state.phase = savedPhase
+    return r
+  }
+  const out = cache ? cache.get(state.world, cacheKey, compute) : compute()
 
   // alive 全席 (自己 seer 除く)
   const legal = new Set<number>()
@@ -397,16 +484,22 @@ function sampleBgGuard(
   bundle: ModuleBundle,
   invariants: RolloutInvariants,
   rng: () => number,
+  cache?: NightSampleCache,
 ): number | undefined {
   const bgSeat = state.world.bodyguardSeat
   if (bgSeat < 0 || (state.alive & (1 << bgSeat)) === 0) return undefined
   const module = bundle.standard
   if (!module) return undefined
 
-  const savedPhase = state.phase
-  state.phase = 'night_guard'
-  const out = module.forwardAt(state, bgSeat, 'bodyguard', 'guard', invariants)
-  state.phase = savedPhase
+  const cacheKey = `bg:${bgSeat}:${state.alive}:${state.day}`
+  const compute = (): NNOutput => {
+    const savedPhase = state.phase
+    state.phase = 'night_guard'
+    const r = module.forwardAt(state, bgSeat, 'bodyguard', 'guard', invariants)
+    state.phase = savedPhase
+    return r
+  }
+  const out = cache ? cache.get(state.world, cacheKey, compute) : compute()
 
   const legal = new Set<number>()
   let mask = state.alive & ~(1 << bgSeat)
@@ -438,6 +531,7 @@ function resolveNightInParallel(
   bundle: ModuleBundle,
   invariants: RolloutInvariants,
   rng: () => number,
+  cache?: NightSampleCache,
 ): void {
   // 既に set 済の pendingX は再 sample しない (Day 2+ で先行 sample 済の場合あり)。
   // Phase A: 未 set かつ自己以外の night actor に対して forward を先行実行
@@ -446,13 +540,13 @@ function resolveNightInParallel(
   let guardSample: number | undefined
 
   if (selfRole !== 'werewolf' && state.pendingAttack === null) {
-    attackSample = sampleWolfAttack(state, bundle, invariants, rng)
+    attackSample = sampleWolfAttack(state, bundle, invariants, rng, cache)
   }
   if (selfRole !== 'seer' && state.pendingDivineTargets.length === 0) {
-    divineSample = sampleSeerDivine(state, bundle, invariants, rng)
+    divineSample = sampleSeerDivine(state, bundle, invariants, rng, cache)
   }
   if (selfRole !== 'bodyguard' && state.pendingGuard === null) {
-    guardSample = sampleBgGuard(state, bundle, invariants, rng)
+    guardSample = sampleBgGuard(state, bundle, invariants, rng, cache)
   }
 
   // Phase B: 一括書き込み (parallel commit)
@@ -479,11 +573,12 @@ function sampleAndAdvanceEnemyNightPhase(
   bundle: ModuleBundle,
   invariants: RolloutInvariants,
   rng: () => number,
+  cache?: NightSampleCache,
 ): void {
   switch (state.phase) {
     case 'night_attack': {
       if (state.pendingAttack === null) {
-        const sample = sampleWolfAttack(state, bundle, invariants, rng)
+        const sample = sampleWolfAttack(state, bundle, invariants, rng, cache)
         if (sample !== undefined) state.pendingAttack = sample
       }
       state.phase = 'night_divine'
@@ -492,7 +587,7 @@ function sampleAndAdvanceEnemyNightPhase(
     }
     case 'night_divine': {
       if (state.pendingDivineTargets.length === 0) {
-        const sample = sampleSeerDivine(state, bundle, invariants, rng)
+        const sample = sampleSeerDivine(state, bundle, invariants, rng, cache)
         if (sample !== undefined) state.pendingDivineTargets.push(sample)
       }
       state.phase = 'night_guard'
@@ -501,7 +596,7 @@ function sampleAndAdvanceEnemyNightPhase(
     }
     case 'night_guard': {
       if (state.pendingGuard === null) {
-        const sample = sampleBgGuard(state, bundle, invariants, rng)
+        const sample = sampleBgGuard(state, bundle, invariants, rng, cache)
         if (sample !== undefined) state.pendingGuard = sample
       }
       // simulateNight + outcome + 翌 morning 遷移
@@ -530,6 +625,7 @@ function executeNightStep(
   bundle: ModuleBundle,
   invariants: RolloutInvariants,
   rng: () => number,
+  cache?: NightSampleCache,
 ): void {
   // 1. 自己の pending を直接書き込み
   switch (selfAction.type) {
@@ -555,7 +651,7 @@ function executeNightStep(
 
   // 2. 自己以外を並列 sample で決定
   const selfRole = state.world.roles[decisionSeat]
-  resolveNightInParallel(state, selfRole, bundle, invariants, rng)
+  resolveNightInParallel(state, selfRole, bundle, invariants, rng, cache)
 
   // 3. simulateNight + outcome + morning 遷移
   resolveNightSimulationAndAdvance(state)
@@ -633,6 +729,7 @@ function runOneRollout(
   config: MCTSConfig,
   decisionFaction: Faction,
   excludedMask: number,
+  nightSampleCache?: NightSampleCache,
 ): void {
   const path: { node: TreeNode, action: number }[] = []
   let node = root
@@ -693,7 +790,7 @@ function runOneRollout(
     if (config.nightParallel && isNightPhase(state.phase) && !isOwnPhase(dispatch, decisionFaction)) {
       const tStep = BENCH_ENABLED ? performance.now() : 0
       const nextState = cloneSimState(state)
-      sampleAndAdvanceEnemyNightPhase(nextState, bundle, invariants, config.rng)
+      sampleAndAdvanceEnemyNightPhase(nextState, bundle, invariants, config.rng, nightSampleCache)
       if (BENCH_ENABLED) benchEnd('step_phase', tStep)
       const ck = childKey(SKIP_ACTION, nextState.phase)
       let child = node.children.get(ck)
@@ -734,7 +831,7 @@ function runOneRollout(
     const nextState = cloneSimState(state)
     // ★ nightParallel mode + 自己 night phase: executeNightStep で並列 sample + simulateNight + morning 遷移を atomic に処理
     if (config.nightParallel && isNightPhase(state.phase) && isOwnPhase(dispatch, decisionFaction)) {
-      executeNightStep(nextState, buildPhaseActionFor(state, action), decisionSeat, bundle, invariants, config.rng)
+      executeNightStep(nextState, buildPhaseActionFor(state, action), decisionSeat, bundle, invariants, config.rng, nightSampleCache)
     } else {
       stepPhase(nextState, buildPhaseActionFor(state, action))
     }
@@ -1156,6 +1253,7 @@ function revertVirtualLoss(path: Array<{ node: TreeNode, action: number }>): voi
 
 /** descentToLeaf の返り値 type */
 type LeafKind = 'terminal' | 'leaf_eval' | 'pending_expand' | 'invalid'
+  | 'pending_night_self' | 'pending_night_enemy'
 
 type LeafInfo = {
   kind: LeafKind
@@ -1166,6 +1264,11 @@ type LeafInfo = {
   isRoot: boolean
   /** terminal / invalid の即 backup 用 value (decision faction 視点) */
   immediateValue?: number
+  /**
+   * pending_night_self 専用: selectActionUCB で選択した自己の action ID。
+   * 並列 night sample 後、この action を path に push して child node に降りる。
+   */
+  selfNightActionId?: number
 }
 
 /**
@@ -1177,6 +1280,11 @@ type LeafInfo = {
  * - 'invalid': dispatch=null かつ skip 連鎖でも進めない、または selectAction で action<0
  * - 'leaf_eval': 決定者死亡で leaf 評価が必要 (NN forward → backup、edges 触らない)
  * - 'pending_expand': 未 expand の node に到達 (NN forward → expandEdges + backup)
+ * - 'pending_night_self': nightParallel mode で自己 night phase の selectAction 後、
+ *   sample forward を batch 化するため caller に処理を委譲。state は self pending 未書き込み。
+ *   caller が並列 sample → self pending 書き込み → resolveNightSimulation → 再 descent。
+ * - 'pending_night_enemy': nightParallel mode で敵 night phase。state は pendingX 未書き込み。
+ *   caller が単一 sample → pending 書き込み → state.phase 進行 → 再 descent。
  */
 function descentToLeaf(
   root: TreeNode,
@@ -1186,6 +1294,7 @@ function descentToLeaf(
   invariants: RolloutInvariants,
   config: MCTSConfig,
   decisionFaction: Faction,
+  nightSampleCache?: NightSampleCache,
 ): LeafInfo {
   const path: Array<{ node: TreeNode, action: number }> = []
   let node = root
@@ -1227,11 +1336,15 @@ function descentToLeaf(
       continue
     }
 
-    // ★ nightParallel mode: 敵 night phase は NN sample で advance、MCTS branching せず (path 不参加)
+    // ★ nightParallel + NIGHT_BATCH_SAMPLES: 敵 night phase を caller に委譲 (case A: cross-rollout batch)
+    if (config.nightParallel && NIGHT_BATCH_SAMPLES && isNightPhase(state.phase) && !isOwnPhase(dispatch, decisionFaction)) {
+      return { kind: 'pending_night_enemy', path, state, node, dispatch, isRoot: path.length === 0 }
+    }
+    // ★ nightParallel mode (NIGHT_BATCH_SAMPLES=false): 敵 night phase を inline で sample + advance (case B: 逐次 + memoization)
     if (config.nightParallel && isNightPhase(state.phase) && !isOwnPhase(dispatch, decisionFaction)) {
       const tStep = BENCH_ENABLED ? performance.now() : 0
       const nextState = cloneSimState(state)
-      sampleAndAdvanceEnemyNightPhase(nextState, bundle, invariants, config.rng)
+      sampleAndAdvanceEnemyNightPhase(nextState, bundle, invariants, config.rng, nightSampleCache)
       if (BENCH_ENABLED) benchEnd('step_phase', tStep)
       const ck = childKey(SKIP_ACTION, nextState.phase)
       let child = node.children.get(ck)
@@ -1256,11 +1369,19 @@ function descentToLeaf(
     if (action < 0) {
       return { kind: 'invalid', path, state, node, isRoot: path.length === 0, immediateValue: 0 }
     }
+    // ★ nightParallel + NIGHT_BATCH_SAMPLES: 自己 night phase を caller に委譲 (case A)
+    if (config.nightParallel && NIGHT_BATCH_SAMPLES && isNightPhase(state.phase) && isOwnPhase(dispatch, decisionFaction)) {
+      return {
+        kind: 'pending_night_self',
+        path, state, node, dispatch, isRoot: path.length === 0,
+        selfNightActionId: action,
+      }
+    }
     const tStep = BENCH_ENABLED ? performance.now() : 0
     const nextState = cloneSimState(state)
-    // ★ nightParallel mode + 自己 night phase: executeNightStep で並列 sample + simulateNight + morning 遷移を atomic に
+    // ★ nightParallel + 自己 night phase (NIGHT_BATCH_SAMPLES=false): inline executeNightStep (case B)
     if (config.nightParallel && isNightPhase(state.phase) && isOwnPhase(dispatch, decisionFaction)) {
-      executeNightStep(nextState, buildPhaseActionFor(state, action), decisionSeat, bundle, invariants, config.rng)
+      executeNightStep(nextState, buildPhaseActionFor(state, action), decisionSeat, bundle, invariants, config.rng, nightSampleCache)
     } else {
       stepPhase(nextState, buildPhaseActionFor(state, action))
     }
@@ -1326,6 +1447,353 @@ function expandEdgesFromPolicy(
 /** PendingLeaf: collected leaves で保持する LeafInfo + 元 rolloutState */
 type PendingLeaf = LeafInfo & { rolloutState: SimState }
 
+// ============================================================
+// Night sample batching (Open Issue O2: case (A))
+// 複数 rollout の night sample forward をまとめて batch forward に集約する。
+// ============================================================
+
+/** sample 1 件分の request: target leaf index, sample type, actor seat, state, cache key */
+type NightSampleSlot = {
+  leafIdx: number
+  sampleType: 'wolf' | 'seer' | 'bg'
+  actorSeat: number
+  state: SimState
+  cacheKey: string
+  cachedOut?: NNOutput
+}
+
+/** state.world から wolf/seer/bg seat を抽出する小ヘルパー (生存者なし は -1) */
+function nightActorSeats(state: SimState): { wolf: number, seer: number, bg: number } {
+  return {
+    wolf: lowestSetSeat(state.world.wolfMask & state.alive),
+    seer: lowestSetSeat(state.world.seerMask & state.alive),
+    bg: state.world.bodyguardSeat >= 0 && (state.alive & (1 << state.world.bodyguardSeat)) !== 0
+      ? state.world.bodyguardSeat : -1,
+  }
+}
+
+/**
+ * pending_night_self leaf から必要な sample slot を構築。selfRole に応じて自己分は skip。
+ * 既に pending* が set されていれば skip (Day 2+ で先行 sample 済の場合)。
+ */
+function collectSelfNightSampleSlots(
+  leaves: PendingLeaf[],
+  decisionSeat: number,
+): NightSampleSlot[] {
+  const slots: NightSampleSlot[] = []
+  for (let i = 0; i < leaves.length; i++) {
+    const leaf = leaves[i]
+    if (leaf.kind !== 'pending_night_self') continue
+    const state = leaf.state
+    const selfRole = state.world.roles[decisionSeat]
+    const seats = nightActorSeats(state)
+    if (selfRole !== 'werewolf' && state.pendingAttack === null && seats.wolf >= 0) {
+      slots.push({ leafIdx: i, sampleType: 'wolf', actorSeat: seats.wolf, state, cacheKey: `wolf:${seats.wolf}:${state.alive}:${state.day}` })
+    }
+    if (selfRole !== 'seer' && state.pendingDivineTargets.length === 0 && seats.seer >= 0) {
+      slots.push({ leafIdx: i, sampleType: 'seer', actorSeat: seats.seer, state, cacheKey: `seer:${seats.seer}:${state.alive}:${state.day}` })
+    }
+    if (selfRole !== 'bodyguard' && state.pendingGuard === null && seats.bg >= 0) {
+      slots.push({ leafIdx: i, sampleType: 'bg', actorSeat: seats.bg, state, cacheKey: `bg:${seats.bg}:${state.alive}:${state.day}` })
+    }
+  }
+  return slots
+}
+
+/**
+ * pending_night_enemy leaf から sample slot を構築。state.phase に応じて 1 件ずつ。
+ */
+function collectEnemyNightSampleSlots(leaves: PendingLeaf[]): NightSampleSlot[] {
+  const slots: NightSampleSlot[] = []
+  for (let i = 0; i < leaves.length; i++) {
+    const leaf = leaves[i]
+    if (leaf.kind !== 'pending_night_enemy') continue
+    const state = leaf.state
+    const seats = nightActorSeats(state)
+    if (state.phase === 'night_attack' && state.pendingAttack === null && seats.wolf >= 0) {
+      slots.push({ leafIdx: i, sampleType: 'wolf', actorSeat: seats.wolf, state, cacheKey: `wolf:${seats.wolf}:${state.alive}:${state.day}` })
+    } else if (state.phase === 'night_divine' && state.pendingDivineTargets.length === 0 && seats.seer >= 0) {
+      slots.push({ leafIdx: i, sampleType: 'seer', actorSeat: seats.seer, state, cacheKey: `seer:${seats.seer}:${state.alive}:${state.day}` })
+    } else if (state.phase === 'night_guard' && state.pendingGuard === null && seats.bg >= 0) {
+      slots.push({ leafIdx: i, sampleType: 'bg', actorSeat: seats.bg, state, cacheKey: `bg:${seats.bg}:${state.alive}:${state.day}` })
+    }
+  }
+  return slots
+}
+
+/**
+ * sample slot の cache lookup を試みる。hit したものは cachedOut を埋め、
+ * miss の slot だけを返す (batch forward 対象)。
+ */
+function tryFillFromCache(slots: NightSampleSlot[], cache: NightSampleCache | undefined): NightSampleSlot[] {
+  if (!cache) return slots
+  const misses: NightSampleSlot[] = []
+  for (const slot of slots) {
+    const hit = cache.tryGet(slot.state.world, slot.cacheKey)
+    if (hit !== undefined) {
+      slot.cachedOut = hit
+    } else {
+      misses.push(slot)
+    }
+  }
+  return misses
+}
+
+/**
+ * batch forward: 同じ sampleType の slots を 1 batch にまとめて forwardBatchAt 呼び出し。
+ * 結果を slot.cachedOut に書き込む (cache にも put)。
+ */
+function batchForwardSamples(
+  slots: NightSampleSlot[],
+  bundle: ModuleBundle,
+  invariants: RolloutInvariants,
+  cache: NightSampleCache | undefined,
+): void {
+  // sampleType ごとにグループ化 (cachedOut が既に埋まっている slot は skip)
+  const groups: Record<'wolf' | 'seer' | 'bg', NightSampleSlot[]> = { wolf: [], seer: [], bg: [] }
+  for (const slot of slots) {
+    if (!slot.cachedOut) groups[slot.sampleType].push(slot)
+  }
+
+  const runGroup = (
+    group: NightSampleSlot[],
+    module: SkollZeroModule | undefined,
+    role: SystemRole,
+    headName: HeadName,
+    phaseForObs: Phase,
+  ): void => {
+    if (group.length === 0 || !module) return
+    const states = group.map(s => s.state)
+    const seats = group.map(s => s.actorSeat)
+    const roles = group.map(() => role)
+    // forward 用に一時的に state.phase を変える (obs encoder が phase を見る場合に対応)
+    const savedPhases = states.map(s => s.phase)
+    states.forEach(s => s.phase = phaseForObs)
+    const tBatch = BENCH_ENABLED ? performance.now() : 0
+    const outputs: NNOutput[] = module.forwardBatchAt
+      ? module.forwardBatchAt(states, seats, roles, headName, invariants)
+      : states.map((s, j) => module.forwardAt(s, seats[j], roles[j], headName, invariants))
+    if (BENCH_ENABLED) benchEnd('batch_forward', tBatch)
+    states.forEach((s, j) => s.phase = savedPhases[j])
+    for (let j = 0; j < group.length; j++) {
+      group[j].cachedOut = outputs[j]
+      if (cache) {
+        // 同 MCTS call 内の後続 rollout で hit 可能になるよう cache に put
+        cache.put(group[j].state.world, group[j].cacheKey, outputs[j])
+      }
+    }
+  }
+
+  runGroup(groups.wolf, bundle.wolf, 'werewolf', 'attack', 'night_attack')
+  runGroup(groups.seer, bundle.standard, 'seer', 'divine', 'night_divine')
+  runGroup(groups.bg, bundle.standard, 'bodyguard', 'guard', 'night_guard')
+}
+
+/**
+ * runBatchedMCTSImpl の Phase 1.5: pending_night_self / pending_night_enemy leaves を 1 ラウンド分処理する。
+ *
+ * 1. 全 night leaves から sample slot を構築 (self は 2-3 件、enemy は 1 件 / leaf)
+ * 2. cache lookup → miss を batch forward → 結果を slot に書き込む
+ * 3. 各 leaf の state に sample 結果を反映:
+ *    - self: 自己 action を pending* に書き、resolveNightSimulationAndAdvance で morning/terminal へ
+ *    - enemy: 単一 sample を pending* に書き、advancePhase で次 night phase へ
+ * 4. 各 leaf を child node から再 descent → 新 leaf で置き換え
+ * 5. terminal/invalid に到達した leaf は完了処理 (backup + revertVloss + completed++ → caller で count)
+ *
+ * @returns 更新後の leaves 配列 (terminal/invalid kind を含み、caller が filter する)
+ */
+function processNightBatch(
+  collected: PendingLeaf[],
+  decisionSeat: number,
+  decisionFaction: Faction,
+  bundle: ModuleBundle,
+  invariants: RolloutInvariants,
+  config: MCTSConfig,
+  excludedMask: number,
+  dayBonusCoef: number,
+  endgameBonusCoef: number,
+  nightSampleCache: NightSampleCache | undefined,
+): PendingLeaf[] {
+  // Phase A: sample slot 収集
+  const selfSlots = collectSelfNightSampleSlots(collected, decisionSeat)
+  const enemySlots = collectEnemyNightSampleSlots(collected)
+  const allSlots = [...selfSlots, ...enemySlots]
+
+  // Phase B: cache lookup → miss を batch forward
+  const misses = tryFillFromCache(allSlots, nightSampleCache)
+  batchForwardSamples(misses, bundle, invariants, nightSampleCache)
+
+  // Phase C: sample 結果を state に反映
+  for (const slot of allSlots) {
+    applyNightSampleToState(slot, config.rng)
+  }
+
+  // Phase D: 各 night leaf について resolveNightSimulation + 再 descent
+  const result: PendingLeaf[] = []
+  for (let i = 0; i < collected.length; i++) {
+    const leaf = collected[i]
+    if (leaf.kind !== 'pending_night_self' && leaf.kind !== 'pending_night_enemy') {
+      result.push(leaf)
+      continue
+    }
+
+    if (leaf.kind === 'pending_night_self') {
+      // 自己 action を pending に書き込み
+      const selfActionId = leaf.selfNightActionId!
+      const selfAction = buildPhaseActionFor(leaf.state, selfActionId)
+      switch (selfAction.type) {
+        case 'attack':
+          if (selfAction.target >= 1 && selfAction.target <= MAX_SEAT_NIGHT) leaf.state.pendingAttack = selfAction.target
+          break
+        case 'divine':
+          if (selfAction.target >= 1 && selfAction.target <= MAX_SEAT_NIGHT) leaf.state.pendingDivineTargets.push(selfAction.target)
+          break
+        case 'guard':
+          if (selfAction.target >= 1 && selfAction.target <= MAX_SEAT_NIGHT) leaf.state.pendingGuard = selfAction.target
+          break
+      }
+      // simulateNight 解決 + outcome + 翌 morning 遷移
+      resolveNightSimulationAndAdvance(leaf.state)
+
+      // child node 作成 + path に self action edge を push
+      const ck = childKey(selfActionId, leaf.state.phase)
+      let child = leaf.node.children.get(ck)
+      if (!child) {
+        child = createTreeNode()
+        leaf.node.children.set(ck, child)
+      }
+      const newEdge = { node: leaf.node, action: selfActionId }
+      leaf.path.push(newEdge)
+      // 増分 vloss を新 edge に適用
+      applyVirtualLoss([newEdge])
+
+      // child から再 descent
+      const reLeaf = descentToLeaf(child, leaf.state, decisionSeat, bundle, invariants, config, decisionFaction, nightSampleCache)
+      const mergedPath = [...leaf.path, ...reLeaf.path]
+      // reLeaf.path の新 entries に vloss 適用
+      applyVirtualLoss(reLeaf.path)
+
+      const newLeaf: PendingLeaf = {
+        kind: reLeaf.kind,
+        path: mergedPath,
+        state: reLeaf.state,
+        node: reLeaf.node,
+        dispatch: reLeaf.dispatch,
+        isRoot: false,  // re-descent 後は root ではない
+        immediateValue: reLeaf.immediateValue,
+        selfNightActionId: reLeaf.selfNightActionId,
+        rolloutState: leaf.rolloutState,
+      }
+
+      // terminal/invalid なら即 backup + revertVloss
+      if (newLeaf.kind === 'terminal' || newLeaf.kind === 'invalid') {
+        const v = newLeaf.kind === 'terminal'
+          ? outcomeToValue(newLeaf.state.outcome, decisionFaction, newLeaf.state.day, dayBonusCoef, { foxAliveByViewer: newLeaf.state.foxAliveByViewer, endgameBonusCoef })
+          : 0
+        backup(newLeaf.path, v)
+        revertVirtualLoss(newLeaf.path)
+        // immediateValue 上書き (caller が count する都合)
+        newLeaf.immediateValue = v
+      }
+      result.push(newLeaf)
+    } else {
+      // pending_night_enemy: 単一 sample 結果を反映 → advancePhase or resolve
+      const phase = leaf.state.phase
+      if (phase === 'night_attack') {
+        leaf.state.phase = 'night_divine'
+        advancePhase(leaf.state)
+      } else if (phase === 'night_divine') {
+        leaf.state.phase = 'night_guard'
+        advancePhase(leaf.state)
+      } else if (phase === 'night_guard') {
+        resolveNightSimulationAndAdvance(leaf.state)
+      }
+
+      // SKIP_ACTION で child 作成 (既存 enemy night の挙動踏襲、path 不参加)
+      const ck = childKey(SKIP_ACTION, leaf.state.phase)
+      let child = leaf.node.children.get(ck)
+      if (!child) {
+        child = createTreeNode()
+        leaf.node.children.set(ck, child)
+      }
+      // path には乗せないので vloss 増分なし (SKIP semantics)
+
+      // child から再 descent
+      const reLeaf = descentToLeaf(child, leaf.state, decisionSeat, bundle, invariants, config, decisionFaction, nightSampleCache)
+      const mergedPath = [...leaf.path, ...reLeaf.path]
+      applyVirtualLoss(reLeaf.path)
+
+      const newLeaf: PendingLeaf = {
+        kind: reLeaf.kind,
+        path: mergedPath,
+        state: reLeaf.state,
+        node: reLeaf.node,
+        dispatch: reLeaf.dispatch,
+        isRoot: false,
+        immediateValue: reLeaf.immediateValue,
+        selfNightActionId: reLeaf.selfNightActionId,
+        rolloutState: leaf.rolloutState,
+      }
+
+      if (newLeaf.kind === 'terminal' || newLeaf.kind === 'invalid') {
+        const v = newLeaf.kind === 'terminal'
+          ? outcomeToValue(newLeaf.state.outcome, decisionFaction, newLeaf.state.day, dayBonusCoef, { foxAliveByViewer: newLeaf.state.foxAliveByViewer, endgameBonusCoef })
+          : 0
+        backup(newLeaf.path, v)
+        revertVirtualLoss(newLeaf.path)
+        newLeaf.immediateValue = v
+      }
+      result.push(newLeaf)
+    }
+  }
+
+  // 引数で参照しないが、unused 警告を抑制するため
+  void excludedMask
+
+  return result
+}
+
+/**
+ * sample 結果から legal 内 categorical sample で action を選び、state.pendingX に書き込む。
+ */
+function applyNightSampleToState(slot: NightSampleSlot, rng: () => number): void {
+  const out = slot.cachedOut
+  if (!out) return
+  const state = slot.state
+  if (slot.sampleType === 'wolf') {
+    const legal = new Set<number>()
+    for (const a of legalAttackActions(state)) {
+      if (a.type === 'attack' && a.target >= 1 && a.target <= MAX_SEAT_NIGHT) legal.add(a.target)
+    }
+    if (legal.size > 0) {
+      state.pendingAttack = samplePolicyAction(out.policy, legal, rng)
+    }
+  } else if (slot.sampleType === 'seer') {
+    const legal = new Set<number>()
+    let mask = state.alive & ~(1 << slot.actorSeat)
+    while (mask !== 0) {
+      const bit = mask & (-mask)
+      const seat = 31 - Math.clz32(bit)
+      if (seat >= 1 && seat <= MAX_SEAT_NIGHT) legal.add(seat)
+      mask ^= bit
+    }
+    if (legal.size > 0) {
+      state.pendingDivineTargets.push(samplePolicyAction(out.policy, legal, rng))
+    }
+  } else if (slot.sampleType === 'bg') {
+    const legal = new Set<number>()
+    let mask = state.alive & ~(1 << slot.actorSeat)
+    while (mask !== 0) {
+      const bit = mask & (-mask)
+      const seat = 31 - Math.clz32(bit)
+      if (seat >= 1 && seat <= MAX_SEAT_NIGHT) legal.add(seat)
+      mask ^= bit
+    }
+    legal.add(-1)
+    state.pendingGuard = samplePolicyAction(out.policy, legal, rng)
+  }
+}
+
 /**
  * batched MCTS の本体。BATCH_INFER_SIZE > 1 のとき runMCTS から呼ばれる。
  *
@@ -1388,12 +1856,15 @@ function runBatchedMCTSImpl(
     }
   }
 
+  // nightParallel の sample forward キャッシュ (per-MCTS-call)
+  const nightSampleCache = config.nightParallel ? new NightSampleCache() : undefined
+
   // Batched loop
   let completed = 0
   while (completed < config.nRollouts) {
     const remaining = config.nRollouts - completed
     const thisBatch = Math.min(batchSize, remaining)
-    const collected: PendingLeaf[] = []
+    let collected: PendingLeaf[] = []
 
     // Phase 1: descent (collect leaves)
     for (let b = 0; b < thisBatch; b++) {
@@ -1403,7 +1874,7 @@ function runBatchedMCTSImpl(
       let root = roots.get(rolloutState.phase)
       if (!root) { root = createTreeNode(); roots.set(rolloutState.phase, root) }
 
-      const leaf = descentToLeaf(root, rolloutState, decisionSeat, bundle, invariants, config, decisionFaction)
+      const leaf = descentToLeaf(root, rolloutState, decisionSeat, bundle, invariants, config, decisionFaction, nightSampleCache)
       applyVirtualLoss(leaf.path)
 
       if (leaf.kind === 'terminal' || leaf.kind === 'invalid') {
@@ -1415,6 +1886,32 @@ function runBatchedMCTSImpl(
       } else {
         collected.push({ ...leaf, rolloutState })
       }
+    }
+
+    if (collected.length === 0) {
+      if (completed >= config.nRollouts) break
+      continue
+    }
+
+    // Phase 1.5: night sample loop (cross-rollout batched samples for nightParallel mode)
+    // pending_night_self / pending_night_enemy leaves を batch sample で解決し、再 descent。
+    // 1 rollout で複数 night barrier がありうるので、night 系がなくなるまで繰り返す。
+    let nightLoopCount = 0
+    const NIGHT_LOOP_MAX = 32  // 安全装置 (game の最大日数 × actor 数 程度を想定)
+    while (collected.some(l => l.kind === 'pending_night_self' || l.kind === 'pending_night_enemy')) {
+      if (++nightLoopCount > NIGHT_LOOP_MAX) {
+        console.error(`[MCTS] night sample loop exceeded ${NIGHT_LOOP_MAX} iterations, breaking`)
+        break
+      }
+      collected = processNightBatch(
+        collected, decisionSeat, decisionFaction, bundle, invariants, config,
+        excludedMask, dayBonusCoef, endgameBonusCoef, nightSampleCache,
+      )
+      // 終局/不正に遷移した leaf は processNightBatch 内で backup + completed++ 済み
+      // ここでは completed カウンタを再計算
+      const beforeCount = collected.length
+      collected = collected.filter(l => l.kind !== 'terminal' && l.kind !== 'invalid')
+      completed += beforeCount - collected.length
     }
 
     if (collected.length === 0) {
