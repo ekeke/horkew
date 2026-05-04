@@ -5,7 +5,9 @@ import { Possibilities, RoleSignatureBits } from '../../retar/possibilities.ts'
 import { createSimState } from '../simulator/world-state.ts'
 import type { SimState } from '../simulator/world-state.ts'
 import { Determinizer } from './determinize.ts'
-import { runMCTS, outcomeToMasonValue } from './ISMCTS.ts'
+import { runMCTS, outcomeToMasonValue, legalActionIdsForPhase } from './ISMCTS.ts'
+import { RoleBitIndex as RBI } from '../../retar/possibilities.ts'
+import type { World } from '../../hati/types.ts'
 import type { ModuleBundle } from './dispatch.ts'
 import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
 import type { Faction } from './ISMCTS.ts'
@@ -91,6 +93,59 @@ describe('outcomeToMasonValue', () => {
     assert.equal(outcomeToMasonValue('hamster_win'), -2.0)
     assert.equal(outcomeToMasonValue('ongoing'), 0)
     assert.equal(outcomeToMasonValue(null), 0)
+  })
+})
+
+/** LW 猫又除外テスト用の最小 World 構築 */
+function makeWorldFor(roles: Record<number, SystemRole>): World {
+  const maxSeat = Math.max(...Object.keys(roles).map(Number))
+  const roleArr: SystemRole[] = new Array(maxSeat + 1)
+  const roleIds = new Uint8Array(maxSeat + 1)
+  let wolfMask = 0, hamsterMask = 0, immoralistMask = 0
+  let seerMask = 0, mediumMask = 0, nekomataMask = 0
+  let bodyguardSeat = -1
+  for (const [s, r] of Object.entries(roles)) {
+    const seat = Number(s)
+    roleArr[seat] = r
+    roleIds[seat] = RBI[r]
+    if (r === 'werewolf') wolfMask |= (1 << seat)
+    if (r === 'werehamster') hamsterMask |= (1 << seat)
+    if (r === 'immoralist') immoralistMask |= (1 << seat)
+    if (r === 'seer') seerMask |= (1 << seat)
+    if (r === 'medium') mediumMask |= (1 << seat)
+    if (r === 'nekomata') nekomataMask |= (1 << seat)
+    if (r === 'bodyguard') bodyguardSeat = seat
+  }
+  return { roles: roleArr, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, mediumMask, nekomataMask, bodyguardSeat }
+}
+
+describe('legalActionIdsForPhase: night_attack', () => {
+  it('LW (狼 1 体生存) で nekomata seat が legal action から除外される', () => {
+    // 1=狼, 2=猫又, 3=村人 (全員生存、狼 1 体のみ = LW)
+    const world = makeWorldFor({ 1: 'werewolf', 2: 'nekomata', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'night_attack')
+    const legal = legalActionIdsForPhase(state, 1)
+    assert.ok(!legal.has(2), 'LW なら nekomata 除外 (襲撃で道連れ自滅を防止)')
+    assert.ok(legal.has(3), '村人は legal target')
+    assert.ok(!legal.has(1), 'wolf 自身は除外')
+  })
+  it('狼 2 体生存なら nekomata も legal target に含まれる', () => {
+    // 1=狼, 2=猫又, 3=村人, 4=狼 (狼 2 体生存 = LW でない)
+    const world = makeWorldFor({ 1: 'werewolf', 2: 'nekomata', 3: 'villager', 4: 'werewolf' })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'night_attack')
+    const legal = legalActionIdsForPhase(state, 1)
+    assert.ok(legal.has(2), '狼 2 体なら nekomata も target (片方が呪殺されても残る)')
+    assert.ok(legal.has(3), '村人は legal target')
+    assert.ok(!legal.has(4), '狼 teammate も除外')
+    assert.ok(!legal.has(1), 'wolf 自身も除外')
+  })
+  it('LW で猫又が死亡している場合は target に nekomata 残らない (alive で判定)', () => {
+    // 1=狼, 2=猫又 (死亡), 3=村人
+    const world = makeWorldFor({ 1: 'werewolf', 2: 'nekomata', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 3]), 1, 'night_attack')
+    const legal = legalActionIdsForPhase(state, 1)
+    assert.ok(!legal.has(2), '死亡 seat は legal でない')
+    assert.ok(legal.has(3), '村人は legal target')
   })
 })
 

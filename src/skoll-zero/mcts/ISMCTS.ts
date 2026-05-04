@@ -2,7 +2,7 @@ import type { GameOutcome } from '../../hati/simulate.ts'
 import { hasSeat } from '../../hati/types.ts'
 import { cloneSimState } from '../simulator/world-state.ts'
 import type { SimState, Phase } from '../simulator/world-state.ts'
-import { stepPhase, advancePhase } from '../simulator/rollout-sim.ts'
+import { stepPhase, advancePhase, legalAttackActions } from '../simulator/rollout-sim.ts'
 import type { PhaseAction } from '../simulator/rollout-sim.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
 import { createTreeNode, totalChildVisits, childKey } from './node.ts'
@@ -499,11 +499,20 @@ function buildPhaseActionFor(state: SimState, action: number): PhaseAction {
  * @param state 現 state (morningPending 等を参照)
  * @param actorSeat dispatch.actorSeat (一部 phase で除外対象)
  */
-function legalActionIdsForPhase(state: SimState, actorSeat: number): Set<number> {
+export function legalActionIdsForPhase(state: SimState, actorSeat: number): Set<number> {
   const out = new Set<number>()
   switch (state.phase) {
+    case 'night_attack': {
+      // 噛み専用: rollout-sim の legalAttackActions (wolf teammates 除外、
+      // LW 時の猫又除外) を使う。これを使わずに alive 全席を返すと、retar が
+      // 観測上 nekomata を確定している盤面でも MCTS が「猫又を噛む」を
+      // 合法手として残し、LW が猫又自滅で負ける rollout が visit に乗る。
+      for (const action of legalAttackActions(state)) {
+        if (action.type === 'attack' && action.target >= 0) out.add(action.target)
+      }
+      return out
+    }
     case 'day':
-    case 'night_attack':
     case 'night_divine': {
       // alive 全席 (actor 除く)
       let mask = state.alive & ~(1 << actorSeat)
