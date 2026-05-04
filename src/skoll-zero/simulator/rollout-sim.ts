@@ -290,81 +290,10 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
         if (action.target >= 0) warnInvalidTarget('night_guard', action.target)
         state.pendingGuard = null
       }
-      // 護衛履歴を log (真 bg 視点の私的情報)
-      if (state.pendingGuard !== null) {
-        state.guardLog.push({ day: state.day, target: state.pendingGuard })
-      }
-      // 夜 3 行動を一括解決
-      const wolfBiteTarget = state.pendingAttack ?? -1
-      const beforeAlive = state.alive
-      const aliveSeers = state.world.seerMask & beforeAlive
-      const result = simulateNight(
-        state.world,
-        state.alive,
-        wolfBiteTarget,
-        state.pendingGuard,
-        state.pendingDivineTargets,
-      )
-      state.alive = result.nextAlive
-      state.alive = applyFollowDeaths(state.alive, state.world)
-
-      // 死亡 log: 死因を判定
-      // - 呪殺: 占い対象の狐 (pendingDivineTargets に含まれる werehamster)
-      // - 噛み: wolfBiteTarget (護衛成功なら除外)
-      // - 道連れ: 噛まれた猫又に対する随伴狼 (現実装は 1 wolf のみ反撃モデル)
-      // - 後追い: その他 (immoralist の hamster 死亡後追い等)
-      const deadMask = beforeAlive & ~state.alive
-      const cursedTargets = new Set<number>()
-      for (const t of state.pendingDivineTargets) {
-        if (t >= 0 && state.world.roleIds[t] === RoleBitIndex.werehamster && (deadMask & (1 << t))) {
-          cursedTargets.add(t)
-        }
-      }
-      const guardSucceeded = state.pendingGuard !== null
-        && state.pendingGuard === wolfBiteTarget
-        && state.world.bodyguardSeat >= 0
-        && (beforeAlive & (1 << state.world.bodyguardSeat)) !== 0
-      for (const seat of seatsFromMask(deadMask)) {
-        let cause: 'execute' | 'night_kill' | 'follow' | 'curse' | 'nekomata_revenge'
-        if (cursedTargets.has(seat)) cause = 'curse'
-        else if (seat === wolfBiteTarget && !guardSucceeded) cause = 'night_kill'
-        else if (state.world.roleIds[seat] === RoleBitIndex.werewolf
-          && wolfBiteTarget >= 0
-          && state.world.roleIds[wolfBiteTarget] === RoleBitIndex.nekomata) cause = 'nekomata_revenge'
-        else cause = 'follow'
-        state.deathLog.push({ day: state.day, seat, cause })
-      }
-
-      // 真占い結果の log: 生存中の seer のみが結果を観測
-      // simulateNight と同じ順序 (seerMask の low-bit 順) で pendingDivineTargets を割り当て
-      let seerIdx = 0
-      let scan = aliveSeers
-      while (scan !== 0) {
-        const bit = scan & (-scan)
-        const seerSeat = 31 - Math.clz32(bit)
-        scan ^= bit
-        const target = state.pendingDivineTargets[seerIdx++]
-        if (target !== undefined && target >= 0 && (state.alive & (1 << seerSeat))) {
-          const color: DivineColor = state.world.roleIds[target] === RoleBitIndex.werewolf ? 'wolf' : 'human'
-          const log = state.divineLog.get(seerSeat) ?? []
-          log.push({ day: state.day, target, color })
-          state.divineLog.set(seerSeat, log)
-        }
-      }
-
-      const outcome = checkOutcome(state.world, state.alive)
-      if (outcome !== 'ongoing') {
-        state.outcome = outcome
-        state.phase = 'terminal'
-        return state
-      }
-      // 翌日へ。pending をクリア + 翌 morning の queue を populate
-      state.day += 1
-      state.pendingAttack = null
-      state.pendingGuard = null
-      state.pendingDivineTargets = []
-      enterMorningPhase(state)
-      break
+      // 夜 3 行動を一括解決 + outcome 判定 + 翌 morning 遷移
+      // (resolveNightSimulationAndAdvance が phase を 'morning' or 'terminal' に確定する)
+      resolveNightSimulationAndAdvance(state)
+      return state
     }
   }
 
@@ -488,6 +417,102 @@ export function legalMorningActions(state: SimState): PhaseAction[] {
     }
   }
   return out
+}
+
+/**
+ * pending* (pendingAttack / pendingGuard / pendingDivineTargets) が全て set 済の状態から、
+ * simulateNight 解決 + 死亡/真占い log 記録 + outcome 判定 + 翌 morning 遷移までを atomic に処理する。
+ *
+ * 呼び出し元:
+ * - `stepPhase` の night_guard handler (既存挙動を維持するための薄いラッパー)
+ * - MCTS rollout の `executeNightStep` (並列 night step の最終ステップ)
+ *
+ * 完了時:
+ * - state.phase = 'terminal' (outcome 確定時) または 'morning' (advancePhase 後に skip 連鎖した phase)
+ * - state.day, state.alive, state.deathLog, state.divineLog, state.guardLog が更新
+ * - pendingAttack / pendingGuard / pendingDivineTargets はクリア
+ *
+ * Note: pendingGuard が set されていれば guardLog にも push する。caller は
+ * pendingGuard を「並列 sample 経由」「stepPhase 経由」どちらで set しても OK
+ * (どちらも resolveNight 内で一度だけ guardLog に積まれる)。
+ */
+export function resolveNightSimulationAndAdvance(state: SimState): void {
+  // 護衛履歴を log (真 bg 視点の私的情報)
+  if (state.pendingGuard !== null) {
+    state.guardLog.push({ day: state.day, target: state.pendingGuard })
+  }
+  const wolfBiteTarget = state.pendingAttack ?? -1
+  const beforeAlive = state.alive
+  const aliveSeers = state.world.seerMask & beforeAlive
+  const result = simulateNight(
+    state.world,
+    state.alive,
+    wolfBiteTarget,
+    state.pendingGuard,
+    state.pendingDivineTargets,
+  )
+  state.alive = result.nextAlive
+  state.alive = applyFollowDeaths(state.alive, state.world)
+
+  // 死亡 log: 死因を判定
+  // - 呪殺: 占い対象の狐 (pendingDivineTargets に含まれる werehamster)
+  // - 噛み: wolfBiteTarget (護衛成功なら除外)
+  // - 道連れ: 噛まれた猫又に対する随伴狼 (現実装は 1 wolf のみ反撃モデル)
+  // - 後追い: その他 (immoralist の hamster 死亡後追い等)
+  const deadMask = beforeAlive & ~state.alive
+  const cursedTargets = new Set<number>()
+  for (const t of state.pendingDivineTargets) {
+    if (t >= 0 && state.world.roleIds[t] === RoleBitIndex.werehamster && (deadMask & (1 << t))) {
+      cursedTargets.add(t)
+    }
+  }
+  const guardSucceeded = state.pendingGuard !== null
+    && state.pendingGuard === wolfBiteTarget
+    && state.world.bodyguardSeat >= 0
+    && (beforeAlive & (1 << state.world.bodyguardSeat)) !== 0
+  for (const seat of seatsFromMask(deadMask)) {
+    let cause: 'execute' | 'night_kill' | 'follow' | 'curse' | 'nekomata_revenge'
+    if (cursedTargets.has(seat)) cause = 'curse'
+    else if (seat === wolfBiteTarget && !guardSucceeded) cause = 'night_kill'
+    else if (state.world.roleIds[seat] === RoleBitIndex.werewolf
+      && wolfBiteTarget >= 0
+      && state.world.roleIds[wolfBiteTarget] === RoleBitIndex.nekomata) cause = 'nekomata_revenge'
+    else cause = 'follow'
+    state.deathLog.push({ day: state.day, seat, cause })
+  }
+
+  // 真占い結果の log: 生存中の seer のみが結果を観測
+  // simulateNight と同じ順序 (seerMask の low-bit 順) で pendingDivineTargets を割り当て
+  let seerIdx = 0
+  let scan = aliveSeers
+  while (scan !== 0) {
+    const bit = scan & (-scan)
+    const seerSeat = 31 - Math.clz32(bit)
+    scan ^= bit
+    const target = state.pendingDivineTargets[seerIdx++]
+    if (target !== undefined && target >= 0 && (state.alive & (1 << seerSeat))) {
+      const color: DivineColor = state.world.roleIds[target] === RoleBitIndex.werewolf ? 'wolf' : 'human'
+      const log = state.divineLog.get(seerSeat) ?? []
+      log.push({ day: state.day, target, color })
+      state.divineLog.set(seerSeat, log)
+    }
+  }
+
+  const outcome = checkOutcome(state.world, state.alive)
+  if (outcome !== 'ongoing') {
+    state.outcome = outcome
+    state.phase = 'terminal'
+    return
+  }
+
+  // 翌日へ。pending をクリア + 翌 morning の queue を populate
+  state.day += 1
+  state.pendingAttack = null
+  state.pendingGuard = null
+  state.pendingDivineTargets = []
+  enterMorningPhase(state)
+  state.phase = 'morning'
+  advancePhase(state)
 }
 
 /**

@@ -167,6 +167,7 @@ export class MultiSkollZeroTrainer {
       rootDirichletEps: this.config.rootDirichletEps,
       dayBonusCoef: this.config.dayBonusCoef ?? 0,
       endgameBonusCoef: this.config.endgameBonusCoef ?? 0,
+      nightParallel: this.config.nightParallel ?? false,
     }
 
     // この round で各 slot に適用する ε のスナップショット (auto-decay により round ごとに変動)
@@ -198,6 +199,7 @@ export class MultiSkollZeroTrainer {
             rootDirichletEps: this.config.rootDirichletEps,
             dayBonusCoef: this.config.dayBonusCoef ?? 0,
             endgameBonusCoef: this.config.endgameBonusCoef ?? 0,
+            nightParallel: this.config.nightParallel ?? false,
           },
           selectionMode: 'sample',
           rolloutRetar: opts.rolloutRetar,

@@ -2,8 +2,11 @@ import type { GameOutcome } from '../../hati/simulate.ts'
 import { hasSeat } from '../../hati/types.ts'
 import { cloneSimState } from '../simulator/world-state.ts'
 import type { SimState, Phase } from '../simulator/world-state.ts'
-import { stepPhase, advancePhase, legalAttackActions } from '../simulator/rollout-sim.ts'
+import {
+  stepPhase, advancePhase, legalAttackActions, resolveNightSimulationAndAdvance,
+} from '../simulator/rollout-sim.ts'
 import type { PhaseAction } from '../simulator/rollout-sim.ts'
+import type { SystemRole } from '../../types/index.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
 import { createTreeNode, totalChildVisits, childKey } from './node.ts'
 import type { TreeNode } from './node.ts'
@@ -52,6 +55,15 @@ export type MCTSConfig = {
    * 狐排除をマイルストーン化して短期決戦への遷移を促す。
    */
   endgameBonusCoef?: number
+  /**
+   * Night phase 並列化フラグ (SKOLLZ_NIGHT_PARALLEL)。
+   * true: night_attack/divine/guard を atomic な 1 step として扱う。
+   *   - 自己 phase: MCTS で expand/select、その後 executeNightStep で並列 sample + simulateNight
+   *   - 敵 phase:   sampleAndAdvanceEnemyNightPhase で NN sample + advance (path 不参加 = MCTS branching せず)
+   * これにより自己の night action から翌朝 state (or terminal) まで 1 step で leaf 評価される。
+   * false (default): 既存挙動 (各 night phase で MCTS expand)。
+   */
+  nightParallel?: boolean
 }
 
 export const DEFAULT_MCTS_CONFIG: MCTSConfig = {
@@ -230,7 +242,7 @@ function makeRolloutState(
 /**
  * SystemRole → Faction (decision faction の判定用)
  */
-function factionForRole(role: import('../../types/index.ts').SystemRole): Faction | null {
+function factionForRole(role: SystemRole): Faction | null {
   switch (role) {
     case 'mason':
     case 'villager':
@@ -248,6 +260,305 @@ function factionForRole(role: import('../../types/index.ts').SystemRole): Factio
     default:
       return null
   }
+}
+
+// ============================================================
+// Night phase 並列化 (MCTSConfig.nightParallel=true 時の rollout 動作)
+// ============================================================
+
+/** night phase かどうか (executeNightStep 適用判定) */
+function isNightPhase(phase: Phase): boolean {
+  return phase === 'night_attack' || phase === 'night_divine' || phase === 'night_guard'
+}
+
+/** dispatch.actorRole の faction が decisionFaction と一致するか */
+function isOwnPhase(dispatch: DispatchResult, decisionFaction: Faction): boolean {
+  const phaseFaction = factionForRole(dispatch.actorRole)
+  return phaseFaction === decisionFaction
+}
+
+/** mask の最下位 set bit に対応する seat (なければ -1) */
+function lowestSetSeat(mask: number): number {
+  if (mask === 0) return -1
+  const bit = mask & (-mask)
+  return 31 - Math.clz32(bit)
+}
+
+/** 14 人村の最大 seat 番号 (rollout-sim.ts と同じ MAX_SEAT) */
+const MAX_SEAT_NIGHT = 14
+
+/**
+ * NN policy 分布から legal action 集合に制限して 1 つ categorical sample (T=1)。
+ *
+ * - legal ∩ policy.keys() に正規化後 categorical sample
+ * - NN policy が legal に重みを置いていない場合は legal 内で uniform sample
+ */
+function samplePolicyAction(
+  policy: Map<number, number>,
+  legal: Set<number>,
+  rng: () => number,
+): number {
+  const candidates: Array<[number, number]> = []
+  let sum = 0
+  for (const a of legal) {
+    const p = policy.get(a) ?? 0
+    if (p > 0) {
+      candidates.push([a, p])
+      sum += p
+    }
+  }
+  if (sum <= 0 || candidates.length === 0) {
+    // policy が legal に重み無 → uniform fallback
+    const arr = Array.from(legal)
+    return arr[Math.floor(rng() * arr.length)]
+  }
+  const r = rng() * sum
+  let acc = 0
+  for (const [a, p] of candidates) {
+    acc += p
+    if (r <= acc) return a
+  }
+  return candidates[candidates.length - 1][0]  // 浮動小数誤差 fallback
+}
+
+/**
+ * 狼の噛み先を NN policy から sample。
+ * - 生存狼 0 → undefined (noBite が valid)
+ * - bundle.wolf 不在 → undefined
+ * - legalAttackActions は LW 猫又除外 + wolf teammates 除外を含む
+ */
+function sampleWolfAttack(
+  state: SimState,
+  bundle: ModuleBundle,
+  invariants: RolloutInvariants,
+  rng: () => number,
+): number | undefined {
+  const wolfSeat = lowestSetSeat(state.world.wolfMask & state.alive)
+  if (wolfSeat < 0) return undefined
+  const module = bundle.wolf
+  if (!module) return undefined
+
+  // forwardAt 用に一時的に night_attack 相当に
+  const savedPhase = state.phase
+  state.phase = 'night_attack'
+  const out = module.forwardAt(state, wolfSeat, 'werewolf', 'attack', invariants)
+  state.phase = savedPhase
+
+  const legal = new Set<number>()
+  for (const a of legalAttackActions(state)) {
+    if (a.type === 'attack' && a.target >= 1 && a.target <= MAX_SEAT_NIGHT) legal.add(a.target)
+  }
+  if (legal.size === 0) return undefined
+  return samplePolicyAction(out.policy, legal, rng)
+}
+
+/**
+ * 真 seer の占い先を NN policy から sample。
+ * - 生存真 seer 0 → undefined
+ * - bundle.standard 不在 → undefined
+ */
+function sampleSeerDivine(
+  state: SimState,
+  bundle: ModuleBundle,
+  invariants: RolloutInvariants,
+  rng: () => number,
+): number | undefined {
+  const seerSeat = lowestSetSeat(state.world.seerMask & state.alive)
+  if (seerSeat < 0) return undefined
+  const module = bundle.standard
+  if (!module) return undefined
+
+  const savedPhase = state.phase
+  state.phase = 'night_divine'
+  const out = module.forwardAt(state, seerSeat, 'seer', 'divine', invariants)
+  state.phase = savedPhase
+
+  // alive 全席 (自己 seer 除く)
+  const legal = new Set<number>()
+  let mask = state.alive & ~(1 << seerSeat)
+  while (mask !== 0) {
+    const bit = mask & (-mask)
+    const seat = 31 - Math.clz32(bit)
+    if (seat >= 1 && seat <= MAX_SEAT_NIGHT) legal.add(seat)
+    mask ^= bit
+  }
+  if (legal.size === 0) return undefined
+  return samplePolicyAction(out.policy, legal, rng)
+}
+
+/**
+ * 真 bodyguard の護衛先を NN policy から sample。
+ * - bg 不在/退場 → undefined (護衛無し、null OK)
+ * - bundle.standard 不在 → undefined
+ * - 合法手は alive 自己除く + -1 (無護衛)
+ */
+function sampleBgGuard(
+  state: SimState,
+  bundle: ModuleBundle,
+  invariants: RolloutInvariants,
+  rng: () => number,
+): number | undefined {
+  const bgSeat = state.world.bodyguardSeat
+  if (bgSeat < 0 || (state.alive & (1 << bgSeat)) === 0) return undefined
+  const module = bundle.standard
+  if (!module) return undefined
+
+  const savedPhase = state.phase
+  state.phase = 'night_guard'
+  const out = module.forwardAt(state, bgSeat, 'bodyguard', 'guard', invariants)
+  state.phase = savedPhase
+
+  const legal = new Set<number>()
+  let mask = state.alive & ~(1 << bgSeat)
+  while (mask !== 0) {
+    const bit = mask & (-mask)
+    const seat = 31 - Math.clz32(bit)
+    if (seat >= 1 && seat <= MAX_SEAT_NIGHT) legal.add(seat)
+    mask ^= bit
+  }
+  legal.add(-1) // 無護衛
+  return samplePolicyAction(out.policy, legal, rng)
+}
+
+/**
+ * 並列 night step の中核: 自己以外の night actor (wolf/seer/bg) を NN policy sample で並列決定する。
+ *
+ * 並列セマンティクス: 各 NN forward は他者の choice を観測しない。
+ *   - Phase A: 全 forward を先に実行 (state の pending* は self の値のみ書き込まれた状態)
+ *   - Phase B: sample 結果を一括書き込み (parallel commit)
+ *
+ * selfRole に応じて自己分の sample はスキップ:
+ *   - werewolf 自己: attack sample スキップ
+ *   - seer 自己: divine sample スキップ
+ *   - bodyguard 自己: guard sample スキップ
+ */
+function resolveNightInParallel(
+  state: SimState,
+  selfRole: SystemRole,
+  bundle: ModuleBundle,
+  invariants: RolloutInvariants,
+  rng: () => number,
+): void {
+  // 既に set 済の pendingX は再 sample しない (Day 2+ で先行 sample 済の場合あり)。
+  // Phase A: 未 set かつ自己以外の night actor に対して forward を先行実行
+  let attackSample: number | undefined
+  let divineSample: number | undefined
+  let guardSample: number | undefined
+
+  if (selfRole !== 'werewolf' && state.pendingAttack === null) {
+    attackSample = sampleWolfAttack(state, bundle, invariants, rng)
+  }
+  if (selfRole !== 'seer' && state.pendingDivineTargets.length === 0) {
+    divineSample = sampleSeerDivine(state, bundle, invariants, rng)
+  }
+  if (selfRole !== 'bodyguard' && state.pendingGuard === null) {
+    guardSample = sampleBgGuard(state, bundle, invariants, rng)
+  }
+
+  // Phase B: 一括書き込み (parallel commit)
+  if (attackSample !== undefined) state.pendingAttack = attackSample
+  if (divineSample !== undefined) state.pendingDivineTargets.push(divineSample)
+  if (guardSample !== undefined) state.pendingGuard = guardSample
+}
+
+/**
+ * Enemy night phase で 1 step 進める (nightParallel mode 専用)。
+ *
+ * 呼び出し条件: nightParallel=true、state.phase ∈ night、非自己 phase。
+ *
+ * - night_attack: sampleWolfAttack で pendingAttack を埋め、state.phase=night_divine へ (skip 連鎖込み)
+ * - night_divine: sampleSeerDivine で pendingDivineTargets に push、state.phase=night_guard へ
+ * - night_guard:  sampleBgGuard で pendingGuard を埋め、resolveNightSimulationAndAdvance で morning/terminal へ
+ *
+ * 既に set されている pendingX は再 sample しない。NN sample 失敗 (生存 actor 0 等) は no-op (pendingX は null/empty のまま)。
+ *
+ * Note: stepPhase は使わない (skip semantics: child node 作るが path 不参加、後で MCTS branch しない)。
+ */
+function sampleAndAdvanceEnemyNightPhase(
+  state: SimState,
+  bundle: ModuleBundle,
+  invariants: RolloutInvariants,
+  rng: () => number,
+): void {
+  switch (state.phase) {
+    case 'night_attack': {
+      if (state.pendingAttack === null) {
+        const sample = sampleWolfAttack(state, bundle, invariants, rng)
+        if (sample !== undefined) state.pendingAttack = sample
+      }
+      state.phase = 'night_divine'
+      advancePhase(state)
+      break
+    }
+    case 'night_divine': {
+      if (state.pendingDivineTargets.length === 0) {
+        const sample = sampleSeerDivine(state, bundle, invariants, rng)
+        if (sample !== undefined) state.pendingDivineTargets.push(sample)
+      }
+      state.phase = 'night_guard'
+      advancePhase(state)
+      break
+    }
+    case 'night_guard': {
+      if (state.pendingGuard === null) {
+        const sample = sampleBgGuard(state, bundle, invariants, rng)
+        if (sample !== undefined) state.pendingGuard = sample
+      }
+      // simulateNight + outcome + 翌 morning 遷移
+      resolveNightSimulationAndAdvance(state)
+      break
+    }
+    // 他 phase は呼ばれない (caller が isNightPhase で gating)
+  }
+}
+
+/**
+ * Night step を atomic に処理する。MCTS rollout の自己 night phase 到達時に呼ぶ。
+ *
+ * 処理:
+ *   1. selfAction を pending* に直接書き込み (stepPhase 不経由 = phase 遷移しない)
+ *   2. resolveNightInParallel で自己以外の night actor を並列 NN sample で決定
+ *   3. resolveNightSimulationAndAdvance で simulateNight + outcome + 翌 morning 遷移
+ *
+ * 完了時: state.phase は 'morning' か 'terminal' に確定。
+ * 中間状態 (例: night_divine だが pendingDivine set 済) は発生しない。
+ */
+function executeNightStep(
+  state: SimState,
+  selfAction: PhaseAction,
+  decisionSeat: number,
+  bundle: ModuleBundle,
+  invariants: RolloutInvariants,
+  rng: () => number,
+): void {
+  // 1. 自己の pending を直接書き込み
+  switch (selfAction.type) {
+    case 'attack':
+      if (selfAction.target >= 1 && selfAction.target <= MAX_SEAT_NIGHT) {
+        state.pendingAttack = selfAction.target
+      }
+      break
+    case 'divine':
+      if (selfAction.target >= 1 && selfAction.target <= MAX_SEAT_NIGHT) {
+        state.pendingDivineTargets.push(selfAction.target)
+      }
+      break
+    case 'guard':
+      if (selfAction.target >= 1 && selfAction.target <= MAX_SEAT_NIGHT) {
+        state.pendingGuard = selfAction.target
+      }
+      break
+    default:
+      // 自己 night phase で attack/divine/guard 以外は来ない (caller が phase で振り分け)
+      break
+  }
+
+  // 2. 自己以外を並列 sample で決定
+  const selfRole = state.world.roles[decisionSeat]
+  resolveNightInParallel(state, selfRole, bundle, invariants, rng)
+
+  // 3. simulateNight + outcome + morning 遷移
+  resolveNightSimulationAndAdvance(state)
 }
 
 /**
@@ -378,6 +689,24 @@ function runOneRollout(
       continue
     }
 
+    // ★ nightParallel mode: 敵 night phase は NN sample で advance、MCTS branching せず (path 不参加)
+    if (config.nightParallel && isNightPhase(state.phase) && !isOwnPhase(dispatch, decisionFaction)) {
+      const tStep = BENCH_ENABLED ? performance.now() : 0
+      const nextState = cloneSimState(state)
+      sampleAndAdvanceEnemyNightPhase(nextState, bundle, invariants, config.rng)
+      if (BENCH_ENABLED) benchEnd('step_phase', tStep)
+      const ck = childKey(SKIP_ACTION, nextState.phase)
+      let child = node.children.get(ck)
+      if (!child) {
+        child = createTreeNode()
+        node.children.set(ck, child)
+      }
+      node = child
+      state = nextState
+      isRoot = false
+      continue
+    }
+
     if (!node.expanded) {
       const tExpand = BENCH_ENABLED ? performance.now() : 0
       const value = expandWithDispatch(node, state, decisionSeat, bundle, invariants, isRoot ? excludedMask : 0, isRoot, decisionFaction, dayBonusCoef, endgameBonusCoef)
@@ -403,7 +732,12 @@ function runOneRollout(
     }
     const tStep = BENCH_ENABLED ? performance.now() : 0
     const nextState = cloneSimState(state)
-    stepPhase(nextState, buildPhaseActionFor(state, action))
+    // ★ nightParallel mode + 自己 night phase: executeNightStep で並列 sample + simulateNight + morning 遷移を atomic に処理
+    if (config.nightParallel && isNightPhase(state.phase) && isOwnPhase(dispatch, decisionFaction)) {
+      executeNightStep(nextState, buildPhaseActionFor(state, action), decisionSeat, bundle, invariants, config.rng)
+    } else {
+      stepPhase(nextState, buildPhaseActionFor(state, action))
+    }
     if (BENCH_ENABLED) benchEnd('step_phase', tStep)
     isRoot = false
     // child key = `${action}:${nextState.phase}` で world 依存の next phase を分岐
@@ -849,6 +1183,7 @@ function descentToLeaf(
   initialState: SimState,
   decisionSeat: number,
   bundle: ModuleBundle,
+  invariants: RolloutInvariants,
   config: MCTSConfig,
   decisionFaction: Faction,
 ): LeafInfo {
@@ -891,6 +1226,24 @@ function descentToLeaf(
       state = nextState
       continue
     }
+
+    // ★ nightParallel mode: 敵 night phase は NN sample で advance、MCTS branching せず (path 不参加)
+    if (config.nightParallel && isNightPhase(state.phase) && !isOwnPhase(dispatch, decisionFaction)) {
+      const tStep = BENCH_ENABLED ? performance.now() : 0
+      const nextState = cloneSimState(state)
+      sampleAndAdvanceEnemyNightPhase(nextState, bundle, invariants, config.rng)
+      if (BENCH_ENABLED) benchEnd('step_phase', tStep)
+      const ck = childKey(SKIP_ACTION, nextState.phase)
+      let child = node.children.get(ck)
+      if (!child) {
+        child = createTreeNode()
+        node.children.set(ck, child)
+      }
+      node = child
+      state = nextState
+      continue
+    }
+
     if (!node.expanded) {
       return { kind: 'pending_expand', path, state, node, dispatch, isRoot: path.length === 0 }
     }
@@ -905,7 +1258,12 @@ function descentToLeaf(
     }
     const tStep = BENCH_ENABLED ? performance.now() : 0
     const nextState = cloneSimState(state)
-    stepPhase(nextState, buildPhaseActionFor(state, action))
+    // ★ nightParallel mode + 自己 night phase: executeNightStep で並列 sample + simulateNight + morning 遷移を atomic に
+    if (config.nightParallel && isNightPhase(state.phase) && isOwnPhase(dispatch, decisionFaction)) {
+      executeNightStep(nextState, buildPhaseActionFor(state, action), decisionSeat, bundle, invariants, config.rng)
+    } else {
+      stepPhase(nextState, buildPhaseActionFor(state, action))
+    }
     if (BENCH_ENABLED) benchEnd('step_phase', tStep)
     const ck = childKey(action, nextState.phase)
     let child = node.children.get(ck)
@@ -1045,7 +1403,7 @@ function runBatchedMCTSImpl(
       let root = roots.get(rolloutState.phase)
       if (!root) { root = createTreeNode(); roots.set(rolloutState.phase, root) }
 
-      const leaf = descentToLeaf(root, rolloutState, decisionSeat, bundle, config, decisionFaction)
+      const leaf = descentToLeaf(root, rolloutState, decisionSeat, bundle, invariants, config, decisionFaction)
       applyVirtualLoss(leaf.path)
 
       if (leaf.kind === 'terminal' || leaf.kind === 'invalid') {

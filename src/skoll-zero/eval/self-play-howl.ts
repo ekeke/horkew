@@ -145,7 +145,11 @@ async function runPlayback(opts: CliOptions): Promise<void> {
   const nets = loadAllNets(opts.ckptBase, opts.round)
   const slots = buildSlotMap(nets)
 
-  const mctsConfig: MCTSConfig = { ...DEFAULT_MCTS_CONFIG, nRollouts: opts.rollouts }
+  const mctsConfig: MCTSConfig = {
+    ...DEFAULT_MCTS_CONFIG,
+    nRollouts: opts.rollouts,
+    nightParallel: process.env.SKOLLZ_NIGHT_PARALLEL === '1',
+  }
 
   const outDir = opts.out
     ?? (opts.round == null

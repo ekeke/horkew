@@ -31,6 +31,8 @@ export type SerializableMCTSConfig = {
   dayBonusCoef?: number
   /** Endgame bonus 係数 (0 で無効、SKOLLZ_ENDGAME_BONUS_COEF) */
   endgameBonusCoef?: number
+  /** Night phase 並列化フラグ (SKOLLZ_NIGHT_PARALLEL) */
+  nightParallel?: boolean
 }
 
 /** Stage 2: ProxiedMasonZeroNN が forward IPC で使う SAB のセット (1 worker あたり 1 セット) */

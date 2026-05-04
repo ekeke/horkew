@@ -324,6 +324,14 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     }
   }
 
+  // Night phase 並列化 (SKOLLZ_NIGHT_PARALLEL=1)。
+  // night_attack/divine/guard を atomic な 1 step として扱い、敵 night phase を NN sample で通り抜けて
+  // simulateNight を 1 step で leaf 評価に到達させる。LW 猫又自滅等の即時帰結が学習信号として直接 backup される。
+  if (process.env.SKOLLZ_NIGHT_PARALLEL === '1') {
+    config.nightParallel = true
+    log('SKOLLZ_NIGHT_PARALLEL=1 (night phase を atomic 1 step として並列化)')
+  }
+
   // Resume: phaseDir/resume.json があれば lastCompletedRound + 1 から再開、
   // gameSeedCounter も復元する。weights は buildSlot 内で {slot}/final.json から resume 済み。
   // TrainingBuffer は persist しないので空で再開 (1-2 round で再蓄積される)。

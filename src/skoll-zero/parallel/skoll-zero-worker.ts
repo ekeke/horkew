@@ -120,6 +120,7 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
     rootDirichletEps: req.mctsConfig.rootDirichletEps,
     dayBonusCoef: req.mctsConfig.dayBonusCoef,
     endgameBonusCoef: req.mctsConfig.endgameBonusCoef,
+    nightParallel: req.mctsConfig.nightParallel,
   }
 
   // rolesEntries が undefined なら roles を渡さず、runMultiAgentSelfPlayGame 内の

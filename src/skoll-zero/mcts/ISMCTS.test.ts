@@ -390,3 +390,203 @@ describe('runMCTS: cross-module dispatch (Stage 2 の本体)', () => {
     assert.ok(callCounts.wolf > 0, 'wolf Module も呼ばれた (cross-module dispatch)')
   })
 })
+
+// ============================================================
+// nightParallel mode (SKOLLZ_NIGHT_PARALLEL=1) の挙動テスト
+// ============================================================
+
+describe('nightParallel: 自己 night phase で root child phase は morning/terminal (atomic 1 step)', () => {
+  function makeBaseSetup() {
+    const setup = new Map<SystemRole, number>([
+      ['villager', 2], ['seer', 1], ['werewolf', 1], ['mason', 1],
+    ])
+    const roleMask = RoleSignatureBits.villager | RoleSignatureBits.seer
+      | RoleSignatureBits.werewolf | RoleSignatureBits.mason
+    return { setup, roleMask }
+  }
+
+  it('actionMode=attack: child phase ∈ {morning, terminal} (中間 night_divine/night_guard を経由しない)', () => {
+    const { setup, roleMask } = makeBaseSetup()
+    const poss = makePossibilitiesAllOpen(setup, 5, roleMask)
+    poss.possibilities[1] = RoleSignatureBits.werewolf
+    const det = new Determinizer(poss, setup)
+    const w = det.sample(seededRng(1))!
+    const state = createSimState(w, aliveOf([1, 2, 3, 4, 5]), 1, 'night_attack')
+
+    const result = runMCTS(state, 1, det, makeBundle(), emptyInvariants(), {
+      cPuct: 1.5, nRollouts: 20, rng: seededRng(123), nightParallel: true,
+    }, { actionMode: 'attack' })
+
+    assert.equal(result.abortReason, null)
+    assert.ok(result.root.children.size > 0, 'children が作られている')
+
+    for (const ck of result.root.children.keys()) {
+      const phase = ck.split(':')[1]
+      // child phase は night_* ではない (= 1 atomic step で night を抜けた)。
+      // advancePhase 連鎖の結果として morning / claim_* / day / terminal のいずれかに到達する。
+      assert.ok(
+        phase !== 'night_attack' && phase !== 'night_divine' && phase !== 'night_guard',
+        `nightParallel attack rollout は night phase を 1 step で抜ける、実際: ${phase}`,
+      )
+    }
+  })
+
+  it('actionMode=divine: child phase ∈ {morning, terminal} (前段 night_attack も同 step で並列解決)', () => {
+    const { setup, roleMask } = makeBaseSetup()
+    const poss = makePossibilitiesAllOpen(setup, 5, roleMask)
+    poss.possibilities[1] = RoleSignatureBits.seer
+    const det = new Determinizer(poss, setup)
+    const w = det.sample(seededRng(1))!
+    const state = createSimState(w, aliveOf([1, 2, 3, 4, 5]), 1, 'night_divine')
+
+    const result = runMCTS(state, 1, det, makeBundle(), emptyInvariants(), {
+      cPuct: 1.5, nRollouts: 20, rng: seededRng(123), nightParallel: true,
+    }, { actionMode: 'divine' })
+
+    assert.equal(result.abortReason, null)
+    assert.ok(result.root.children.size > 0, 'children が作られている')
+
+    for (const ck of result.root.children.keys()) {
+      const phase = ck.split(':')[1]
+      assert.ok(
+        phase !== 'night_attack' && phase !== 'night_divine' && phase !== 'night_guard',
+        `nightParallel divine rollout は night phase を 1 step で抜ける、実際: ${phase}`,
+      )
+    }
+  })
+
+  it('nightParallel=false (default): child phase に night_divine/night_guard 等の中間 phase が含まれる (回帰確認)', () => {
+    const { setup, roleMask } = makeBaseSetup()
+    const poss = makePossibilitiesAllOpen(setup, 5, roleMask)
+    poss.possibilities[1] = RoleSignatureBits.werewolf
+    const det = new Determinizer(poss, setup)
+    const w = det.sample(seededRng(1))!
+    const state = createSimState(w, aliveOf([1, 2, 3, 4, 5]), 1, 'night_attack')
+
+    const result = runMCTS(state, 1, det, makeBundle(), emptyInvariants(), {
+      cPuct: 1.5, nRollouts: 20, rng: seededRng(123),  // nightParallel: false (default)
+    }, { actionMode: 'attack' })
+
+    assert.equal(result.abortReason, null)
+    let foundMidnight = false
+    for (const ck of result.root.children.keys()) {
+      const phase = ck.split(':')[1]
+      if (phase === 'night_divine' || phase === 'night_guard') foundMidnight = true
+    }
+    assert.ok(foundMidnight,
+      'nightParallel=false なら既存通り night_divine/night_guard が child phase に含まれる')
+  })
+})
+
+describe('nightParallel: 並列セマンティクス (各 NN forward は他 actor の choice を観測しない)', () => {
+  it('actionMode=attack: seer/bg sample 時に pendingDivine 空かつ pendingGuard null', () => {
+    const setup = new Map<SystemRole, number>([
+      ['villager', 1], ['seer', 1], ['werewolf', 1], ['bodyguard', 1], ['mason', 1],
+    ])
+    const roleMask = RoleSignatureBits.villager | RoleSignatureBits.seer
+      | RoleSignatureBits.werewolf | RoleSignatureBits.bodyguard | RoleSignatureBits.mason
+    const poss = makePossibilitiesAllOpen(setup, 5, roleMask)
+    poss.possibilities[1] = RoleSignatureBits.werewolf
+    poss.possibilities[2] = RoleSignatureBits.seer
+    poss.possibilities[3] = RoleSignatureBits.bodyguard
+    const det = new Determinizer(poss, setup)
+    const w = det.sample(seededRng(1))!
+    const state = createSimState(w, aliveOf([1, 2, 3, 4, 5]), 1, 'night_attack')
+
+    // forwardAt 入力 state を記録するモジュール
+    type ForwardRecord = {
+      headName: HeadName, actorSeat: number,
+      pendingAttack: number | null, pendingDivineLength: number, pendingGuard: number | null,
+    }
+    const records: ForwardRecord[] = []
+
+    class TrackingModule extends DummyModule {
+      forwardAt(state: SimState, actorSeat: number, role: SystemRole, headName: HeadName, inv: RolloutInvariants): NNOutput {
+        records.push({
+          headName, actorSeat,
+          pendingAttack: state.pendingAttack,
+          pendingDivineLength: state.pendingDivineTargets.length,
+          pendingGuard: state.pendingGuard,
+        })
+        return super.forwardAt(state, actorSeat, role, headName, inv)
+      }
+    }
+    const tracking = new TrackingModule()
+    const bundle: ModuleBundle = {
+      mason: tracking, wolf: tracking, standard: tracking,
+      fanatic: tracking, hamster: tracking, immoralist: tracking,
+    }
+
+    runMCTS(state, 1, det, bundle, emptyInvariants(), {
+      cPuct: 1.5, nRollouts: 5, rng: seededRng(456), nightParallel: true,
+    }, { actionMode: 'attack' })
+
+    // self=wolf。executeNightStep 内で divine + guard の sample forward が呼ばれる。
+    // resolveNightInParallel の Phase A: pendingAttack は self が write 済 (>=1)、
+    // pendingDivine/pendingGuard はまだ Phase B 前なので空/null。
+    const sampleForwards = records.filter(r =>
+      (r.headName === 'divine' || r.headName === 'guard') && r.pendingAttack !== null,
+    )
+    // sample が呼ばれていることを確認 (self=wolf の rollout で divine/guard sample forward が発生する)
+    assert.ok(sampleForwards.length > 0, 'divine/guard sample forward が発生')
+    for (const r of sampleForwards) {
+      assert.equal(r.pendingDivineLength, 0,
+        `${r.headName} forward 時 pendingDivine 空 (Phase A 並列セマンティクス)`)
+      assert.equal(r.pendingGuard, null,
+        `${r.headName} forward 時 pendingGuard null (Phase A 並列セマンティクス)`)
+    }
+  })
+})
+
+describe('nightParallel: simulateNight が valid な pendingAttack で呼ばれる (no-bite 世界が消える)', () => {
+  it('actionMode=divine rollout で simulateNight 後 alive 数が変化 (= wolf bite が発生)', () => {
+    const setup = new Map<SystemRole, number>([
+      ['villager', 1], ['seer', 1], ['werewolf', 1], ['mason', 1], ['bodyguard', 1],
+    ])
+    const roleMask = RoleSignatureBits.villager | RoleSignatureBits.seer
+      | RoleSignatureBits.werewolf | RoleSignatureBits.mason | RoleSignatureBits.bodyguard
+    const poss = makePossibilitiesAllOpen(setup, 5, roleMask)
+    poss.possibilities[1] = RoleSignatureBits.seer
+    poss.possibilities[2] = RoleSignatureBits.werewolf
+    poss.possibilities[3] = RoleSignatureBits.bodyguard
+    const det = new Determinizer(poss, setup)
+    const w = det.sample(seededRng(1))!
+    const state = createSimState(w, aliveOf([1, 2, 3, 4, 5]), 1, 'night_divine')
+
+    // simulateNight 後 (= state.day >= 2) の alive 数を観察。
+    // 既存挙動 (nightParallel=false) では actionMode='divine' rollout で simulateNight 時に
+    // pendingAttack=null → wolfBiteTarget=-1 → 噛みなし → alive 不変。
+    // nightParallel=true では pendingAttack が NN sample で埋まる → 噛み発火 → alive 減少。
+    const observedPostNightAlive: number[] = []
+
+    class ObservingModule extends DummyModule {
+      forwardAt(state: SimState, actorSeat: number, role: SystemRole, headName: HeadName, inv: RolloutInvariants): NNOutput {
+        // night phase 以外 (= simulateNight 通過後) で alive を記録
+        if (state.day >= 2) {
+          let c = 0
+          let m = state.alive
+          while (m !== 0) { c++; m &= m - 1 }
+          observedPostNightAlive.push(c)
+        }
+        return super.forwardAt(state, actorSeat, role, headName, inv)
+      }
+    }
+    const obs = new ObservingModule()
+    const bundle: ModuleBundle = {
+      mason: obs, wolf: obs, standard: obs,
+      fanatic: obs, hamster: obs, immoralist: obs,
+    }
+
+    runMCTS(state, 1, det, bundle, emptyInvariants(), {
+      cPuct: 1.5, nRollouts: 30, rng: seededRng(789), nightParallel: true,
+    }, { actionMode: 'divine' })
+
+    // wolf bite が発生していれば alive 数 = 5 ではなく 4 以下 (護衛失敗の場合)。
+    // 護衛成功なら 5 のまま。少なくとも 1 path で alive=4 が観測されることを期待。
+    assert.ok(observedPostNightAlive.length > 0,
+      'day >= 2 (= simulateNight 後) に到達した rollout が存在する')
+    const sawBiteResult = observedPostNightAlive.some(c => c <= 4)
+    assert.ok(sawBiteResult,
+      `wolf bite による死亡が少なくとも 1 path で発生 (= simulateNight が valid な pendingAttack で呼ばれた)、observed: ${observedPostNightAlive.slice(0, 10).join(',')}`)
+  })
+})

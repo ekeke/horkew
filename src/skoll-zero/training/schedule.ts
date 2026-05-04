@@ -106,6 +106,13 @@ export type SkollZeroTrainConfig = {
    * `+endgameBonusCoef` を一発加算 (累積させない)。狐排除をマイルストーン化。
    */
   endgameBonusCoef?: number
+  /**
+   * Night phase 並列化フラグ (SKOLLZ_NIGHT_PARALLEL)。
+   * true: night_attack/divine/guard を atomic な 1 step として処理し、
+   *   敵 night phase を NN policy sample で通り抜けて simulateNight で 1 step leaf 評価する。
+   * false (default): 既存挙動 (各 night phase で MCTS expand)。
+   */
+  nightParallel?: boolean
 }
 
 export const DEFAULT_SKOLL_ZERO_TRAIN_CONFIG: SkollZeroTrainConfig = {
