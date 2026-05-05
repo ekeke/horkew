@@ -113,6 +113,15 @@ export type SkollZeroTrainConfig = {
    * false (default): 既存挙動 (各 night phase で MCTS expand)。
    */
   nightParallel?: boolean
+  /**
+   * Retar narrowing reward 係数 (0 で無効、SKOLLZ_NARROW_COEF)。
+   * 村陣営の MCTS leaf value に `+coef × narrowProgress` を加算する shaping。
+   * narrowProgress は global retar 可能性総和の root → leaf 縮小率 (alive×11 で正規化、[0,1])。
+   * 「真占/真霊の自滅吊」を減らすため真贋判別を learning で獲得させる狙い。
+   * 狼/狐側は対称シェイプを行わない (handoff 2026-05-05 設計議論)。
+   * `recomputeRetarInRollout=true` (= SKOLLZ_ROLLOUT_RETAR=1) と組合せて初めて意味がある。
+   */
+  narrowBonusCoef?: number
 }
 
 export const DEFAULT_SKOLL_ZERO_TRAIN_CONFIG: SkollZeroTrainConfig = {

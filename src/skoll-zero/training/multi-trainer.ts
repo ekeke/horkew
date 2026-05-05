@@ -168,6 +168,7 @@ export class MultiSkollZeroTrainer {
       dayBonusCoef: this.config.dayBonusCoef ?? 0,
       endgameBonusCoef: this.config.endgameBonusCoef ?? 0,
       nightParallel: this.config.nightParallel ?? false,
+      narrowBonusCoef: this.config.narrowBonusCoef ?? 0,
     }
 
     // この round で各 slot に適用する ε のスナップショット (auto-decay により round ごとに変動)
@@ -200,6 +201,7 @@ export class MultiSkollZeroTrainer {
             dayBonusCoef: this.config.dayBonusCoef ?? 0,
             endgameBonusCoef: this.config.endgameBonusCoef ?? 0,
             nightParallel: this.config.nightParallel ?? false,
+            narrowBonusCoef: this.config.narrowBonusCoef ?? 0,
           },
           selectionMode: 'sample',
           rolloutRetar: opts.rolloutRetar,

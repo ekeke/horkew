@@ -136,6 +136,19 @@ export type SimState = {
    * (エージェントから見えない情報を value 計算に混ぜない)。default true (生存扱い、互換)。
    */
   foxAliveByViewer: boolean
+
+  /**
+   * Global retar (公開情報のみ) の生存席可能性総和 = Σ_{seat ∈ alive} |possibilities[seat]|。
+   * `from-sim-state.ts:resolveRetarBoth` で retar 解決時に毎回更新される。
+   *
+   * narrow bonus の leaf 評価で `(rootSum - leafSum)` を計算するために leaf state に保持する。
+   * global retar を採用する理由: viewer 非依存で、村陣営全体で共有される「公開情報の縮小量」を
+   * 表す自然な指標。viewer 自己 retar (assumption 入り) は dispatch actor によって viewer が
+   * 切り替わると指標が不連続になるため使わない。
+   *
+   * default null (= 未計算)。SKOLLZ_ROLLOUT_RETAR=0 では root snapshot で固定 (narrow bonus は no-op)。
+   */
+  globalRetarSum: number | null
 }
 
 /**
@@ -167,6 +180,7 @@ export function createSimState(
     guardLog: [],
     morningPending: [],
     foxAliveByViewer: true,
+    globalRetarSum: null,
   }
 }
 
@@ -204,6 +218,7 @@ export function cloneSimState(state: SimState): SimState {
     guardLog: state.guardLog.map(e => ({ day: e.day, target: e.target })),
     morningPending: state.morningPending.slice(),
     foxAliveByViewer: state.foxAliveByViewer,
+    globalRetarSum: state.globalRetarSum,
   }
 }
 

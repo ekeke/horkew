@@ -83,6 +83,14 @@ export type RolloutInvariants = {
    * は prior なし (既存挙動維持)。
    */
   retarPriorCache?: { global: Map<number, Set<SystemRole>> | null }
+  /**
+   * Narrow bonus 用: MCTS root 時点の global retar 可能性総和 (alive 席のみ)。
+   *
+   * `runMCTS` の冒頭で `globalRetarPossibilities` から 1 度だけ計算してキャッシュする。
+   * leaf 評価時に `state.globalRetarSum` と差分を取って narrow bonus を計算する。
+   * null なら narrow bonus は no-op (rollout retar OFF または narrow coef=0 時の最適化)。
+   */
+  globalRetarSumAtRoot?: number | null
 }
 
 /** signal の per-seat 累積カウンター (`collectObservation` 由来) */
@@ -422,6 +430,27 @@ export function viewerFoxAlive(
 }
 
 /**
+ * Retar の生存席可能性総和 = Σ_{seat ∈ alive} |possibilities[seat]|。
+ *
+ * narrow bonus の root/leaf 比較に使う。possibilities が null なら null を返す
+ * (= 計算できない、bonus 側で no-op になる)。
+ *
+ * possibilities に死亡席のエントリが入っていても無視する (alive bitmask で filter)。
+ */
+export function sumAlivePossibilities(
+  possibilities: Map<number, Set<SystemRole>> | null,
+  alive: number,
+): number | null {
+  if (!possibilities) return null
+  let sum = 0
+  for (const [seat, roles] of possibilities) {
+    if (!hasSeat(alive, seat)) continue
+    sum += roles.size
+  }
+  return sum
+}
+
+/**
  * viewer 視点 + global 視点の retarPossibilities を 1 度の VS 構築でまとめて解決する。
  * `invariants.recomputeRetarInRollout` が true なら SimState から Retar 再実行、
  * false なら invariants の root snapshot を使う。
@@ -445,6 +474,7 @@ function resolveRetarBoth(
 } {
   if (!invariants.recomputeRetarInRollout) {
     state.foxAliveByViewer = viewerFoxAlive(invariants.retarPossibilities, state.alive)
+    state.globalRetarSum = sumAlivePossibilities(invariants.globalRetarPossibilities, state.alive)
     return {
       self: invariants.retarPossibilities,
       global: invariants.globalRetarPossibilities,
@@ -462,6 +492,7 @@ function resolveRetarBoth(
     // 次回 prior 用に cache を update (並列 leaf で衝突しても retar 側 fallback で正しく動く)
     if (invariants.retarPriorCache) invariants.retarPriorCache.global = global
     state.foxAliveByViewer = viewerFoxAlive(self, state.alive)
+    state.globalRetarSum = sumAlivePossibilities(global, state.alive)
     return { self, global }
   } catch (e) {
     debugDumpOnPanic(state, viewerSeat, viewerRole, setup, e)
@@ -470,6 +501,7 @@ function resolveRetarBoth(
       warnedRetarFallback = true
     }
     state.foxAliveByViewer = viewerFoxAlive(invariants.retarPossibilities, state.alive)
+    state.globalRetarSum = sumAlivePossibilities(invariants.globalRetarPossibilities, state.alive)
     return {
       self: invariants.retarPossibilities,
       global: invariants.globalRetarPossibilities,

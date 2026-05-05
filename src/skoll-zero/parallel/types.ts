@@ -33,6 +33,8 @@ export type SerializableMCTSConfig = {
   endgameBonusCoef?: number
   /** Night phase 並列化フラグ (SKOLLZ_NIGHT_PARALLEL) */
   nightParallel?: boolean
+  /** Retar narrowing reward 係数 (0 で無効、SKOLLZ_NARROW_COEF)。村陣営 leaf value のみに加算 */
+  narrowBonusCoef?: number
 }
 
 /** Stage 2: ProxiedMasonZeroNN が forward IPC で使う SAB のセット (1 worker あたり 1 セット) */

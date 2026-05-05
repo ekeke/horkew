@@ -332,6 +332,19 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     log('SKOLLZ_NIGHT_PARALLEL=1 (night phase を atomic 1 step として並列化)')
   }
 
+  // Retar narrowing reward (SKOLLZ_NARROW_COEF)。
+  // 村陣営の MCTS leaf value に `+coef × narrowProgress` を加算 (狼/狐は据え置き、非対称)。
+  // 真贋判別を learning で獲得させて「真占/真霊の自滅吊」を減らす狙い (handoff 2026-05-05)。
+  // SKOLLZ_ROLLOUT_RETAR=1 と組合せて初めて意味がある (rollout retar OFF だと no-op)。
+  if (process.env.SKOLLZ_NARROW_COEF) {
+    const coef = parseFloat(process.env.SKOLLZ_NARROW_COEF)
+    if (Number.isFinite(coef)) {
+      config.narrowBonusCoef = coef
+      const requiresRetar = process.env.SKOLLZ_ROLLOUT_RETAR === '1' ? '' : ' (注意: SKOLLZ_ROLLOUT_RETAR=1 未設定のため no-op)'
+      log(`SKOLLZ_NARROW_COEF=${coef} (village leaf value に +coef×narrowProgress)${requiresRetar}`)
+    }
+  }
+
   // Resume: phaseDir/resume.json があれば lastCompletedRound + 1 から再開、
   // gameSeedCounter も復元する。weights は buildSlot 内で {slot}/final.json から resume 済み。
   // TrainingBuffer は persist しないので空で再開 (1-2 round で再蓄積される)。

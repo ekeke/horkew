@@ -1,5 +1,5 @@
 import type { GameOutcome } from '../../hati/simulate.ts'
-import { hasSeat } from '../../hati/types.ts'
+import { hasSeat, popCount32 } from '../../hati/types.ts'
 import { cloneSimState } from '../simulator/world-state.ts'
 import type { SimState, Phase } from '../simulator/world-state.ts'
 import {
@@ -18,11 +18,12 @@ import {
   type ModuleBundle,
 } from './dispatch.ts'
 import type { RolloutInvariants } from '../observation/from-sim-state.ts'
+import { sumAlivePossibilities } from '../observation/from-sim-state.ts'
 import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
 import type { HeadName, NNOutput } from './nn.ts'
 import { OUTCOME_ORDER } from '../network/config.ts'
 import { BENCH_ENABLED, benchEnd } from '../bench/profiler.ts'
-import { applyDayBonus } from '../training/day-bonus.ts'
+import { applyDayBonus, applyNarrowBonus, narrowProgress } from '../training/day-bonus.ts'
 
 const RoleBitIndexFanatic = RoleBitIndex.fanatic
 
@@ -64,6 +65,15 @@ export type MCTSConfig = {
    * false (default): 既存挙動 (各 night phase で MCTS expand)。
    */
   nightParallel?: boolean
+  /**
+   * Retar narrowing reward 係数 (0 で無効、SKOLLZ_NARROW_COEF)。
+   * 村陣営の leaf value に `+coef * narrowProgress` を加算する shaping。
+   * narrowProgress = clamp01((rootGlobalSum - leafGlobalSum) / (alive × 11))
+   * 真贋判別を学習させて「真占/真霊の自滅吊」を減らす狙い。狼/狐側は据え置き
+   * (二項対称 shaping は陣営行動が分離してバレるため、handoff 2026-05-05 で不採用)。
+   * `recomputeRetarInRollout=true` (= SKOLLZ_ROLLOUT_RETAR=1) と組合せて初めて意味がある。
+   */
+  narrowBonusCoef?: number
 }
 
 export const DEFAULT_MCTS_CONFIG: MCTSConfig = {
@@ -157,6 +167,14 @@ export function runMCTS(
   config: MCTSConfig = DEFAULT_MCTS_CONFIG,
   opts: { actionMode?: RootActionMode, excludedMask?: number } = {},
 ): MCTSResult {
+  // narrow bonus が有効な場合のみ root の global retar sum を計算してキャッシュ。
+  // invariants は buildInvariants(ctx) で per-MCTS-call に作られるため、ここで mutate して安全。
+  if ((config.narrowBonusCoef ?? 0) !== 0
+    && invariants.globalRetarSumAtRoot === undefined) {
+    invariants.globalRetarSumAtRoot = sumAlivePossibilities(
+      invariants.globalRetarPossibilities, rootSimState.alive,
+    )
+  }
   if (BATCH_INFER_SIZE > 1) {
     return runBatchedMCTSImpl(rootSimState, decisionSeat, determinizer, bundle, invariants, config, opts, BATCH_INFER_SIZE)
   }
@@ -206,7 +224,7 @@ export function runMCTS(
     // 初回 expand + Dirichlet noise は targetPhase の root にだけ適用 (1 回限り)
     if (!dirichletApplied && rolloutState.phase === targetPhase
       && rolloutState.phase !== 'terminal' && hasSeat(rolloutState.alive, decisionSeat)) {
-      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, /*isRoot*/ true, decisionFaction, config.dayBonusCoef ?? 0, config.endgameBonusCoef ?? 0)
+      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, /*isRoot*/ true, decisionFaction, config.dayBonusCoef ?? 0, config.endgameBonusCoef ?? 0, config.narrowBonusCoef ?? 0)
       if (value !== null) {
         applyRootDirichletNoise(root, config)
       }
@@ -709,11 +727,13 @@ function runOneRollout(
 
   const dayBonusCoef = config.dayBonusCoef ?? 0
   const endgameBonusCoef = config.endgameBonusCoef ?? 0
+  const narrowBonusCoef = config.narrowBonusCoef ?? 0
 
   while (true) {
     if (state.phase === 'terminal') {
       const tBackup = BENCH_ENABLED ? performance.now() : 0
-      backup(path, outcomeToValue(state.outcome, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef }))
+      const baseV = outcomeToValue(state.outcome, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
+      backup(path, applyNarrowBonusForLeaf(baseV, decisionFaction, state, invariants, narrowBonusCoef))
       if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
       return
     }
@@ -730,7 +750,8 @@ function runOneRollout(
       }
       const out = dispatch.module.forwardAt(state, dispatch.actorSeat, dispatch.actorRole, dispatch.headName, invariants)
       // Stage 4: NN は outcome 分布を返す。decision faction 視点の scalar に変換して backup。
-      const v = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
+      const baseV = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
+      const v = applyNarrowBonusForLeaf(baseV, decisionFaction, state, invariants, narrowBonusCoef)
       const tBackup = BENCH_ENABLED ? performance.now() : 0
       backup(path, v)
       if (BENCH_ENABLED) benchEnd('mcts_backup', tBackup)
@@ -777,7 +798,7 @@ function runOneRollout(
 
     if (!node.expanded) {
       const tExpand = BENCH_ENABLED ? performance.now() : 0
-      const value = expandWithDispatch(node, state, decisionSeat, bundle, invariants, isRoot ? excludedMask : 0, isRoot, decisionFaction, dayBonusCoef, endgameBonusCoef)
+      const value = expandWithDispatch(node, state, decisionSeat, bundle, invariants, isRoot ? excludedMask : 0, isRoot, decisionFaction, dayBonusCoef, endgameBonusCoef, narrowBonusCoef)
       if (BENCH_ENABLED) benchEnd('mcts_expand', tExpand)
       const tBackup = BENCH_ENABLED ? performance.now() : 0
       backup(path, value ?? 0)
@@ -996,6 +1017,7 @@ function expandWithDispatch(
   decisionFaction: Faction,
   dayBonusCoef: number,
   endgameBonusCoef: number,
+  narrowBonusCoef: number,
 ): number | null {
   const dispatch = dispatchForPhase(state, decisionSeat, bundle)
   if (!dispatch) return null
@@ -1017,7 +1039,8 @@ function expandWithDispatch(
   if (legal.size === 0) {
     node.expanded = true
     node.phase = state.phase
-    return outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
+    const baseV = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
+    return applyNarrowBonusForLeaf(baseV, decisionFaction, state, invariants, narrowBonusCoef)
   }
   // NN policy が legal action に与える prior を集計
   let providedSum = 0
@@ -1038,7 +1061,8 @@ function expandWithDispatch(
   }
   node.expanded = true
   node.phase = state.phase
-  return outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
+  const baseV = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
+  return applyNarrowBonusForLeaf(baseV, decisionFaction, state, invariants, narrowBonusCoef)
 }
 
 /** Debug: phase mismatch (expandedPhase, currentPhase) のペアごとに最初の 1 回だけ警告 */
@@ -1191,6 +1215,31 @@ export function outcomeDistToFactionValue(
   return applyDayBonus(v, faction, day, dayBonusCoef, opts)
 }
 
+/**
+ * leaf 評価値に Retar narrowing bonus を適用する内部 helper。
+ *
+ * 村陣営の value に `+coef × narrowProgress` を加算 (非村は据え置き、二項対称 shaping 不採用)。
+ * progress は `(rootGlobalSum - leafGlobalSum) / (alive × 11)` を [0, 1] に clamp。
+ *
+ * 早期 short-circuit: coef=0 / globalRetarSumAtRoot 未設定 / leaf state.globalRetarSum=null で no-op。
+ * (= rollout retar OFF または narrow coef OFF のとき完全に bypass)
+ */
+function applyNarrowBonusForLeaf(
+  baseValue: number,
+  faction: Faction,
+  state: SimState,
+  invariants: RolloutInvariants,
+  coef: number,
+): number {
+  if (coef === 0) return baseValue
+  const progress = narrowProgress(
+    invariants.globalRetarSumAtRoot ?? null,
+    state.globalRetarSum,
+    popCount32(state.alive),
+  )
+  return applyNarrowBonus(baseValue, faction, progress, coef)
+}
+
 // ============================================================
 // Batched MCTS (SKOLLZ_BATCH_INFER > 1 で有効化)
 // ============================================================
@@ -1265,13 +1314,15 @@ function descentToLeaf(
 
   const dayBonusCoef = config.dayBonusCoef ?? 0
   const endgameBonusCoef = config.endgameBonusCoef ?? 0
+  const narrowBonusCoef = config.narrowBonusCoef ?? 0
 
   while (true) {
     if (state.phase === 'terminal') {
+      const baseV = outcomeToValue(state.outcome, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef })
       return {
         kind: 'terminal', path, state, node,
         isRoot: path.length === 0,
-        immediateValue: outcomeToValue(state.outcome, decisionFaction, state.day, dayBonusCoef, { foxAliveByViewer: state.foxAliveByViewer, endgameBonusCoef }),
+        immediateValue: applyNarrowBonusForLeaf(baseV, decisionFaction, state, invariants, narrowBonusCoef),
       }
     }
     if (!hasSeat(state.alive, decisionSeat)) {
@@ -1446,6 +1497,7 @@ function runBatchedMCTSImpl(
 
   const dayBonusCoef = config.dayBonusCoef ?? 0
   const endgameBonusCoef = config.endgameBonusCoef ?? 0
+  const narrowBonusCoef = config.narrowBonusCoef ?? 0
 
   // 初回 root expand + Dirichlet (sequential と同じ条件で 1 回)
   {
@@ -1455,7 +1507,7 @@ function runBatchedMCTSImpl(
     if (rolloutState.phase === targetPhase
       && rolloutState.phase !== 'terminal' && hasSeat(rolloutState.alive, decisionSeat)) {
       const tExpand = BENCH_ENABLED ? performance.now() : 0
-      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, true, decisionFaction, dayBonusCoef, endgameBonusCoef)
+      const value = expandWithDispatch(root, rolloutState, decisionSeat, bundle, invariants, excludedMask, true, decisionFaction, dayBonusCoef, endgameBonusCoef, narrowBonusCoef)
       if (BENCH_ENABLED) benchEnd('mcts_expand', tExpand)
       if (value !== null) applyRootDirichletNoise(root, config)
     }
@@ -1525,7 +1577,8 @@ function runBatchedMCTSImpl(
         for (let i = 0; i < leaves.length; i++) {
           const leaf = leaves[i]
           const out = outputs[i]
-          const value = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, leaf.state.day, dayBonusCoef, { foxAliveByViewer: leaf.state.foxAliveByViewer, endgameBonusCoef })
+          const baseV = outcomeDistToFactionValue(out.outcomeDist, decisionFaction, leaf.state.day, dayBonusCoef, { foxAliveByViewer: leaf.state.foxAliveByViewer, endgameBonusCoef })
+          const value = applyNarrowBonusForLeaf(baseV, decisionFaction, leaf.state, invariants, narrowBonusCoef)
           if (leaf.kind === 'pending_expand') {
             const tExpand = BENCH_ENABLED ? performance.now() : 0
             expandEdgesFromPolicy(leaf.node, leaf.state, leaf.dispatch!, out.policy, leaf.isRoot ? excludedMask : 0, leaf.isRoot)

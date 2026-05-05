@@ -3,12 +3,16 @@ import assert from 'node:assert/strict'
 
 import {
   applyDayBonus,
+  applyNarrowBonus,
   factionDayBonusSign,
+  narrowProgress,
   readDayBonusCoefFromEnv,
   readEndgameBonusCoefFromEnv,
+  readNarrowBonusCoefFromEnv,
 } from './day-bonus.ts'
 import { outcomeToValue, outcomeDistToFactionValue } from '../mcts/ISMCTS.ts'
-import { viewerFoxAlive } from '../observation/from-sim-state.ts'
+import { sumAlivePossibilities, viewerFoxAlive } from '../observation/from-sim-state.ts'
+import type { SystemRole } from '../../types/index.ts'
 
 describe('factionDayBonusSign', () => {
   it('village は +1 (長期化希望)', () => {
@@ -193,5 +197,103 @@ describe('readDayBonusCoefFromEnv', () => {
     assert.equal(readDayBonusCoefFromEnv(), 0)
     if (prev !== undefined) process.env.SKOLLZ_DAY_BONUS_COEF = prev
     else delete process.env.SKOLLZ_DAY_BONUS_COEF
+  })
+})
+
+describe('narrowProgress', () => {
+  it('rootSum=null は 0 (no-op)', () => {
+    assert.equal(narrowProgress(null, 50, 14), 0)
+    assert.equal(narrowProgress(undefined, 50, 14), 0)
+  })
+  it('leafSum=null は 0 (no-op)', () => {
+    assert.equal(narrowProgress(100, null, 14), 0)
+    assert.equal(narrowProgress(100, undefined, 14), 0)
+  })
+  it('aliveCount=0 は 0', () => {
+    assert.equal(narrowProgress(100, 50, 0), 0)
+  })
+  it('縮小なし (delta<=0) は 0 (拡大は報酬しない)', () => {
+    assert.equal(narrowProgress(50, 50, 14), 0)
+    assert.equal(narrowProgress(50, 80, 14), 0)
+  })
+  it('正規化: delta / (alive×11) を返す', () => {
+    // alive=14, delta=154 → 154 / (14×11) = 1.0
+    assert.equal(narrowProgress(154, 0, 14), 1)
+    // alive=14, delta=77 → 77 / 154 = 0.5
+    assert.equal(narrowProgress(77 + 50, 50, 14), 0.5)
+  })
+  it('progress > 1 は 1 に clamp', () => {
+    // alive=2, delta=100, denom=22 → 100/22 ≈ 4.5 → 1.0
+    assert.equal(narrowProgress(100, 0, 2), 1)
+  })
+})
+
+describe('applyNarrowBonus', () => {
+  it('coef=0 で no-op', () => {
+    assert.equal(applyNarrowBonus(1.0, 'village', 0.5, 0), 1.0)
+    assert.equal(applyNarrowBonus(-2.0, 'wolf', 0.5, 0), -2.0)
+  })
+  it('progress=0 で no-op', () => {
+    assert.equal(applyNarrowBonus(1.0, 'village', 0, 0.05), 1.0)
+  })
+  it('village は coef×progress を加算', () => {
+    assert.ok(Math.abs(applyNarrowBonus(0.5, 'village', 0.4, 0.05) - (0.5 + 0.02)) < 1e-9)
+    assert.ok(Math.abs(applyNarrowBonus(-1.0, 'village', 1.0, 0.10) - (-1.0 + 0.10)) < 1e-9)
+  })
+  it('wolf は据え置き (非対称設計、handoff 2026-05-05)', () => {
+    assert.equal(applyNarrowBonus(0.5, 'wolf', 0.5, 0.05), 0.5)
+    assert.equal(applyNarrowBonus(-1.0, 'wolf', 1.0, 0.10), -1.0)
+  })
+  it('hamster も据え置き', () => {
+    assert.equal(applyNarrowBonus(0.5, 'hamster', 0.5, 0.05), 0.5)
+  })
+})
+
+describe('sumAlivePossibilities', () => {
+  it('possibilities=null は null', () => {
+    assert.equal(sumAlivePossibilities(null, 0xFFFF), null)
+  })
+  it('生存席のみ集計 (死亡席は無視)', () => {
+    const map = new Map<number, Set<SystemRole>>([
+      [1, new Set(['villager', 'seer']) as Set<SystemRole>],            // alive: +2
+      [2, new Set(['villager', 'seer', 'medium']) as Set<SystemRole>],  // dead:  +0
+      [3, new Set(['villager']) as Set<SystemRole>],                    // alive: +1
+    ])
+    const alive = (1 << 1) | (1 << 3)  // seat 1, 3 のみ生存
+    assert.equal(sumAlivePossibilities(map, alive), 3)
+  })
+  it('全席生存なら全集計', () => {
+    const map = new Map<number, Set<SystemRole>>([
+      [1, new Set(['villager']) as Set<SystemRole>],
+      [2, new Set(['villager', 'seer']) as Set<SystemRole>],
+    ])
+    const alive = (1 << 1) | (1 << 2)
+    assert.equal(sumAlivePossibilities(map, alive), 3)
+  })
+  it('空 map は 0', () => {
+    assert.equal(sumAlivePossibilities(new Map(), 0xFFFF), 0)
+  })
+})
+
+describe('readNarrowBonusCoefFromEnv', () => {
+  it('未設定なら 0', () => {
+    const prev = process.env.SKOLLZ_NARROW_COEF
+    delete process.env.SKOLLZ_NARROW_COEF
+    assert.equal(readNarrowBonusCoefFromEnv(), 0)
+    if (prev !== undefined) process.env.SKOLLZ_NARROW_COEF = prev
+  })
+  it('正常な数値はそのまま返す', () => {
+    const prev = process.env.SKOLLZ_NARROW_COEF
+    process.env.SKOLLZ_NARROW_COEF = '0.05'
+    assert.equal(readNarrowBonusCoefFromEnv(), 0.05)
+    if (prev !== undefined) process.env.SKOLLZ_NARROW_COEF = prev
+    else delete process.env.SKOLLZ_NARROW_COEF
+  })
+  it('不正値は 0 にフォールバック', () => {
+    const prev = process.env.SKOLLZ_NARROW_COEF
+    process.env.SKOLLZ_NARROW_COEF = 'abc'
+    assert.equal(readNarrowBonusCoefFromEnv(), 0)
+    if (prev !== undefined) process.env.SKOLLZ_NARROW_COEF = prev
+    else delete process.env.SKOLLZ_NARROW_COEF
   })
 })
