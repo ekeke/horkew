@@ -99,7 +99,8 @@ const WARM_START_PATHS: Record<keyof MultiTrainerSlots, string> = {
 }
 
 function log(msg: string): void {
-  process.stderr.write(`[skoll-zero] ${msg}\n`)
+  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19)
+  process.stderr.write(`[${ts}] [skoll-zero] ${msg}\n`)
 }
 
 /**
@@ -401,6 +402,7 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
     for (let r = startRound; r <= options.rounds; r++) {
       const rolloutRetar: boolean | undefined = offRounds > 0 ? r > offRounds : undefined
       const retarTag = rolloutRetar === undefined ? 'env' : (rolloutRetar ? 'on' : 'off')
+      log(`round ${r}/${options.rounds} starting...`)
       const t0 = Date.now()
       const stats = await trainer.trainRound(r, phaseDir, { rolloutRetar })
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
