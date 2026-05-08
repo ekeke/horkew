@@ -378,6 +378,13 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     // rollout 不変情報 (signal counts / retar / tsumi 等) を構築。
     const rootSimState = buildInitialSimState(ctx, sampleWorld)
     const invariants = buildInvariants(ctx)
+    // proposeMorning (root='morning'): dispatch.ts の morning case は morningPending[0] を
+    // actor とするが、buildInitialSimState は朝フェーズに到達していない時点 (= 昼の判断中)
+    // では morningPending を空で構築する。よって ctx.mySeat (= 偽 seer 騙り中の wolf 自身)
+    // を pending 先頭に置いて root expand を成立させる。
+    if (actionMode === 'morning' && !rootSimState.morningPending.includes(ctx.mySeat)) {
+      rootSimState.morningPending = [ctx.mySeat, ...rootSimState.morningPending]
+    }
     // root snapshot 用の obs (buffer 記録に使う、現状は決定者の Module の captureObs)
     const rootObs = this.captureObs(ctx)
     const alive = aliveBitmask(ctx.alivePlayers)

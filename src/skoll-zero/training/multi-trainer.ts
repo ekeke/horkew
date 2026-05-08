@@ -307,6 +307,18 @@ export class MultiSkollZeroTrainer {
       const recordsAdded = slot.buffer.size() - (preSize.get(key) ?? 0)
       const bufferExpired = slot.buffer.expireOldest(this.config.bufferCapacity)
 
+      // Wolf imitation debug: 直前 round で追加された wolf records の head 別内訳を log。
+      // 'morning' 件数が 0 なら proposeMorning 経路が呼ばれていない (= 偽 seer 騙りが
+      // 1 度も発生していない or wolf imitation 無効) を示す。
+      if (key === 'wolf' && slot.wolfImitationFrozen && recordsAdded > 0) {
+        const tail = slot.buffer.records().slice(-recordsAdded)
+        const headBreakdown: Record<string, number> = {}
+        for (const r of tail) {
+          headBreakdown[r.headName] = (headBreakdown[r.headName] ?? 0) + 1
+        }
+        process.stderr.write(`[skoll-zero] wolf head breakdown (round ${roundId}): ${JSON.stringify(headBreakdown)}\n`)
+      }
+
       // SKOLLZ_SAMPLE_WEIGHT=alive で alive-weighted sampling を有効化
       // (終盤 record を線形重みで優先 sampling、序盤の noisy target の影響を減らす)
       const sampleWeighted = process.env.SKOLLZ_SAMPLE_WEIGHT === 'alive' ? 'alive' as const : undefined

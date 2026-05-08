@@ -81,11 +81,18 @@ export class WolfImitationRoleAgent extends SkollZeroRoleAgent {
    */
   override decideDayClaim(ctx: DecisionContext): DayClaim {
     const myPlayer = ctx.myPlayer
+    const debug = process.env.SKOLLZ_WOLF_IMITATION_DEBUG === '1'
     const isFakeSeerActive = myPlayer?.claimedRole === 'seer'
       && (ctx.myRole === 'werewolf' || ctx.myRole === 'fanatic')
+    if (debug) {
+      process.stderr.write(`[wolf-imitation] decideDayClaim day=${ctx.day} seat=${ctx.mySeat} role=${ctx.myRole} claimed=${myPlayer?.claimedRole ?? 'null'} fakeSeerActive=${isFakeSeerActive}\n`)
+    }
     if (!isFakeSeerActive) return super.decideDayClaim(ctx)
 
     const r = this.module.proposeMorning(ctx, this.proposeOpts())
+    if (debug) {
+      process.stderr.write(`[wolf-imitation] proposeMorning result=${r ? `visits=${r.visits.size}` : 'null (fallback to heuristic)'}\n`)
+    }
     if (!r) return super.decideDayClaim(ctx)
 
     const action = this.selectionMode === 'argmax' || this.selectionMode === 'policy_argmax'

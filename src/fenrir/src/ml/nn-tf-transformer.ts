@@ -1664,9 +1664,12 @@ export class TfTransformerNetwork {
       const { clsOut, seatOutputs } = this.forwardTrunk(wolfObsTensor)
 
       // === frozen village (勾配なし) ===
+      // 勾配は optimizer.minimize の `this.allVariables` 指定で wolf NN のみに流れる前提。
+      // village の variables は frozenVillageNet 側にあり、wolf NN の allVariables には
+      // 含まれないため、softmax 越しに loss と接続されても更新対象外。
       const villageLogits = batch.frozenVillageNet.forwardForImitation(villageObsTensor)
-      const piVTarget = tf.softmax(tf.stopGradient(villageLogits.divineLogits))    // [n, 14]
-      const piVCo = tf.softmax(tf.stopGradient(villageLogits.claimTrueLogits))     // [n, 2]
+      const piVTarget = tf.softmax(villageLogits.divineLogits)    // [n, 14]
+      const piVCo = tf.softmax(villageLogits.claimTrueLogits)     // [n, 2]
 
       // === outcome dist (wolf own value head) ===
       const outcomeLogits = tf.add(tf.matMul(clsOut, odW), odB)
