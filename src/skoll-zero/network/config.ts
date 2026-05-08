@@ -220,3 +220,60 @@ export function createWolfZeroNetwork(): TransformerNetwork {
 export function createFanaticZeroNetwork(): TransformerNetwork {
   return new TransformerNetwork(FANATIC_ZERO_NETWORK_CONFIG, 'fanatic')
 }
+
+// ============================================================
+// Wolf Imitation: 真占い base からの deviation を学習する狼 NN
+// ============================================================
+
+/**
+ * Wolf Imitation 用 config。観測は既存 Wolf Collective (1212 dims) と同形。
+ *
+ * Heads:
+ * - `execute`         (per-seat 14): 昼投票 — 純 wolf
+ * - `attack`          (per-seat 14): 夜の噛み先 — 純 wolf
+ * - `claim_fake_dev`  (global 15):   偽 CO 判断の deviation (mix で claim_true と合成)
+ * - `alpha_claim`     (global 2):    binary softmax、σ_claim = policies['alpha_claim'][1]
+ * - `morning_tgt_dev` (per-seat 14): 偽占い対象の deviation (mix で divine と合成)
+ * - `alpha_morning`   (global 2):    binary softmax、σ_morning = policies['alpha_morning'][1]
+ * - `morning_res`     (per-seat 14): 偽占い結果 (white/black 配分) — 純 wolf
+ *
+ * 推論時に WolfImitationNetwork.mixForward が:
+ *   - `claim_fake[skip]` ← σ_claim と claim_true を凸結合
+ *   - `morning[target]` ← σ_morning と divine を凸結合
+ * の 2 箇所 mix を行い、最終 policy として既存 wolf NN 互換 (claim_fake 15 + morning 28) を出力。
+ *
+ * 学習時は raw logits + α を生で出力し、PPO 損失は最終 mix policy で計算する。
+ */
+export const WOLF_IMITATION_ZERO_NETWORK_CONFIG: NetworkConfig = {
+  inputSize: WOLF_COLLECTIVE_OBSERVATION_SIZE,
+  heads: {
+    execute: HEAD_SIZES.vote,
+    attack: HEAD_SIZES.vote,
+    claim_fake_dev: CLAIM_FAKE_HEAD_SIZE,
+    alpha_claim: 2,
+    morning_tgt_dev: HEAD_SIZES.vote,
+    alpha_morning: 2,
+    morning_res: HEAD_SIZES.vote,
+  },
+  transformer: {
+    dModel: 64,
+    numHeads: 4,
+    dFf: 128,
+    planFeatures: 0,
+    maxPlanTokens: 0,
+    roleFeatures: ROLE_TOKEN_FEATURES,
+    numRoleTokens: NUM_ROLE_TOKENS,
+    seatLayers: 3,
+    strategyLayers: 2,
+    numPlanTokens: 0,
+    planVocabSize: 0,
+    seatFeatures: WOLF_COLLECTIVE_SEAT_FEATURES,
+    clsFeatures: WOLF_COLLECTIVE_CLS_FEATURES,
+    perSeatHeads: ['execute', 'attack', 'morning_tgt_dev', 'morning_res'],
+  },
+  outcomeDistOutputs: OUTCOME_DIST_SIZE,
+}
+
+export function createWolfImitationZeroNetwork(): TransformerNetwork {
+  return new TransformerNetwork(WOLF_IMITATION_ZERO_NETWORK_CONFIG, 'wolf_collective')
+}
