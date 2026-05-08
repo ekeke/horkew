@@ -20,8 +20,10 @@ import {
   createStandardZeroNetwork,
   createWolfZeroNetwork,
   createFanaticZeroNetwork,
+  createWolfImitationZeroNetwork,
 } from '../network/config.ts'
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
+import { WolfImitationNetwork } from '../network/wolf-imitation-network.ts'
 import { TrainingBuffer, type TrainingRecord } from '../selfplay/buffer.ts'
 import {
   runMultiAgentSelfPlayGame,
@@ -41,11 +43,16 @@ import type {
 
 if (!parentPort) throw new Error('skoll-zero-worker must run in a worker thread')
 
-/** slot 名 → 対応する Pure JS network factory */
-function buildPureNetForSlot(slotKey: SlotName): TransformerNetwork {
+/**
+ * slot 名 → 対応する Pure JS network factory。
+ *
+ * wolf slot は wolfImitation=true で WolfImitationNetwork 用 wolf NN を作る (head 構造が
+ * 異なるため、weights の serialize/unpack も新 head 名で対応)。
+ */
+function buildPureNetForSlot(slotKey: SlotName, wolfImitation: boolean): TransformerNetwork {
   switch (slotKey) {
     case 'mason': return createSkollZeroNetwork()
-    case 'wolf': return createWolfZeroNetwork()
+    case 'wolf': return wolfImitation ? createWolfImitationZeroNetwork() : createWolfZeroNetwork()
     case 'fanatic': return createFanaticZeroNetwork()
     case 'village':
     case 'hamster':
@@ -90,23 +97,42 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
     process.env.SKOLLZ_ROLLOUT_RETAR = req.rolloutRetar ? '1' : '0'
   }
   const useProxy = req.forwardSABs !== undefined && req.workerId !== undefined
+  // Wolf imitation 有効化判定: req.wolfImitationFrozenVillageWeights が指定されたら、
+  // wolf slot は WolfImitationNetwork (frozen village + deviation/α) で構築。
+  // この場合 wolf slot のみ ProxiedMasonZeroNN を bypass (mix forward は Pure JS で実行、
+  // forward server 経路は未対応)。
+  const wolfImitation = req.wolfImitationFrozenVillageWeights !== undefined
+  // Wolf imitation 用の frozen village (Pure JS) を一度だけ構築・unpack
+  let frozenVillagePure: TransformerNetwork | undefined
+  if (wolfImitation && req.wolfImitationFrozenVillageWeights) {
+    frozenVillagePure = createStandardZeroNetwork()
+    unpackWeights(frozenVillagePure, req.wolfImitationFrozenVillageWeights)
+  }
+
   const slots: SlotMap = {}
   for (const slotName of Object.keys(req.weights) as SlotName[]) {
     const sw = req.weights[slotName]
     if (!sw) continue
-    const pureNet = buildPureNetForSlot(slotName)
+    const pureNet = buildPureNetForSlot(slotName, wolfImitation && slotName === 'wolf')
     unpackWeights(pureNet, sw)
-    const masonZero = new MasonZeroNetwork(pureNet, { zeroValueHead: false })
-    const nn: MasonZeroNN = useProxy
-      ? new ProxiedMasonZeroNN(
-          slotName,
-          masonZero,
-          req.forwardSABs!.signalSAB,
-          req.forwardSABs!.requestSAB,
-          req.forwardSABs!.responseSAB,
-          req.workerId!,
-        )
-      : masonZero
+
+    let nn: MasonZeroNN
+    if (slotName === 'wolf' && wolfImitation && frozenVillagePure) {
+      // WolfImitationNetwork で wrap (frozen village + deviation/α)
+      nn = new WolfImitationNetwork(frozenVillagePure, pureNet, { zeroValueHead: false })
+    } else {
+      const masonZero = new MasonZeroNetwork(pureNet, { zeroValueHead: false })
+      nn = useProxy
+        ? new ProxiedMasonZeroNN(
+            slotName,
+            masonZero,
+            req.forwardSABs!.signalSAB,
+            req.forwardSABs!.requestSAB,
+            req.forwardSABs!.responseSAB,
+            req.workerId!,
+          )
+        : masonZero
+    }
     const slot: AgentSlot = { nn, buffer: new TrainingBuffer() }
     slots[slotName] = slot
   }

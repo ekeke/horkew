@@ -79,6 +79,13 @@ export type SelfPlayChunkRequest = {
    * の代わりにこちらを使う。指定外は mctsConfig.rootDirichletEps を維持。
    */
   dirichletEpsBySlot?: Partial<Record<SlotName, number>>
+  /**
+   * Wolf imitation 用 frozen village NN の重み。
+   * 指定時は worker が wolf slot を WolfImitationNetwork (frozen village + deviation/α) で
+   * 構築し、claim_fake / morning record に virtualSeerObs を inject する。
+   * 未指定なら従来通り (= 旧 wolf NN 構造)。
+   */
+  wolfImitationFrozenVillageWeights?: SharedWeights
 }
 
 /** worker での self-play 結果サマリ (chunk 単位の outcomes 集計) */

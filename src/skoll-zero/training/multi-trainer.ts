@@ -256,6 +256,10 @@ export class MultiSkollZeroTrainer {
           selectionMode: 'sample',
           rolloutRetar: opts.rolloutRetar,
           dirichletEpsBySlot: epsThisRound,
+          // Wolf imitation: wolf slot に wolfImitationFrozen 設定済なら、その Pure JS net の
+          // 重みを worker に送って WolfImitationNetwork を構築させる (syncWolfImitationFrozen
+          // で round 開始時に村 NN から最新の重みがコピー済)。
+          wolfImitationFrozenVillageNet: this.slots.wolf?.wolfImitationFrozen?.pureJsNet,
         },
         this.config.gamesPerRound,
       )

@@ -271,11 +271,7 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
   }
 
   const numWorkersEnv = process.env.SKOLLZ_WORKERS
-  let numWorkers = numWorkersEnv ? parseInt(numWorkersEnv, 10) : undefined
-  if (process.env.SKOLLZ_WOLF_IMITATION === '1' && (numWorkers === undefined || numWorkers > 0)) {
-    log(`WARN: SKOLLZ_WOLF_IMITATION=1 は worker pool 未対応のため SKOLLZ_WORKERS=0 (sequential) を強制します`)
-    numWorkers = 0
-  }
+  const numWorkers = numWorkersEnv ? parseInt(numWorkersEnv, 10) : undefined
   initSkollZeroWorkerPool(numWorkers)
 
   // Stage 2: SKOLLZ_PARALLEL_GPU=1 で proxy NN 経路を有効化。

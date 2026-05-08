@@ -122,6 +122,12 @@ export type ParallelSelfPlayConfig = Omit<MultiAgentSelfPlayConfig, 'mctsConfig'
   batchInferSize?: number
   /** カリキュラム制御: この round で retar rollout を有効化するか (未指定なら worker 起動時 env 維持) */
   rolloutRetar?: boolean
+  /**
+   * Wolf imitation 有効時、frozen village の Pure JS network。worker に重みを送って
+   * wolf slot を WolfImitationNetwork で構築させる。未指定なら worker は従来通り
+   * (= 旧 wolf NN) で動作。
+   */
+  wolfImitationFrozenVillageNet?: AnyNetwork
 }
 
 /** runSelfPlayParallel の戻り値: 全 chunk の outcomes 集計 + per-slot entropy 集計 */
@@ -156,10 +162,16 @@ export function runSelfPlayParallel(
   for (const slotName of Object.keys(cfg.slots) as SlotName[]) {
     const slot = cfg.slots[slotName]
     if (!slot) continue
-    // slot.nn は MasonZeroNN interface、実装は MasonZeroNetwork で .net: TransformerNetwork を持つ
+    // slot.nn は MasonZeroNN interface、実装は MasonZeroNetwork or WolfImitationNetwork で
+    // .net: TransformerNetwork を持つ。WolfImitationNetwork の場合 .net は wolf NN 本体
+    // (frozen village は別途 cfg.wolfImitationFrozenVillageNet として送る)。
     const net = (slot.nn as unknown as { net: AnyNetwork }).net
     weights[slotName] = packWeights(net)
   }
+  // Wolf imitation 有効時: frozen village の重みも別フィールドで送る
+  const wolfImitationFrozenVillageWeights = cfg.wolfImitationFrozenVillageNet
+    ? packWeights(cfg.wolfImitationFrozenVillageNet)
+    : undefined
 
   // cfg.roles が undefined の場合は worker に渡さず、worker 側で DEFAULT_ROLES に
   // fallback させる (逐次経路 runMultiAgentSelfPlayGame の `cfg.roles ?? DEFAULT_ROLES` と一致)。
@@ -255,6 +267,7 @@ export function runSelfPlayParallel(
         workerId,
         rolloutRetar: cfg.rolloutRetar,
         dirichletEpsBySlot: cfg.dirichletEpsBySlot,
+        wolfImitationFrozenVillageWeights,
       }
       worker.postMessage(request)
     }
