@@ -114,11 +114,20 @@ export function visitEntropyRatio(visits: Map<number, number>): number {
 }
 
 /**
- * MCTS root の意思決定種別。Stage 1 と同じ 4 種を維持。Stage 2 で
- * dispatch ベースの descent を導入したので、これは「root を置く初期 phase」を
+ * MCTS root の意思決定種別。
+ *
+ * - `execute` / `attack` / `divine` / `guard`: per-seat 14 action 空間
+ * - `claim_*_fake`: wolf/fanatic の偽 CO 判断 (15 action: skip + claimer seat)、
+ *   全 sub-phase で record headName は 'claim_fake' に集約
+ * - `morning`: 偽占い報告 (28 action: target × {white, black})
+ *
+ * Stage 2 で dispatch ベースの descent を導入したので、これは「root を置く初期 phase」を
  * 決めるためだけに使う。
  */
-export type RootActionMode = 'execute' | 'attack' | 'divine' | 'guard'
+export type RootActionMode =
+  | 'execute' | 'attack' | 'divine' | 'guard'
+  | 'claim_seer_fake' | 'claim_medium_fake' | 'claim_bg_fake' | 'claim_nekomata_fake'
+  | 'morning'
 
 /** action mode → MCTS root を置く initial phase */
 function phaseFromActionMode(mode: RootActionMode): Phase {
@@ -127,6 +136,30 @@ function phaseFromActionMode(mode: RootActionMode): Phase {
     case 'attack': return 'night_attack'
     case 'divine': return 'night_divine'
     case 'guard': return 'night_guard'
+    case 'claim_seer_fake': return 'claim_seer_fake'
+    case 'claim_medium_fake': return 'claim_medium_fake'
+    case 'claim_bg_fake': return 'claim_bg_fake'
+    case 'claim_nekomata_fake': return 'claim_nekomata_fake'
+    case 'morning': return 'morning'
+  }
+}
+
+/**
+ * action mode → record の headName。
+ * claim_*_fake (4 種) は全て 'claim_fake' に集約 (TF head 名)。
+ */
+export function headNameFromActionMode(mode: RootActionMode): HeadName {
+  switch (mode) {
+    case 'execute': return 'execute'
+    case 'attack': return 'attack'
+    case 'divine': return 'divine'
+    case 'guard': return 'guard'
+    case 'claim_seer_fake':
+    case 'claim_medium_fake':
+    case 'claim_bg_fake':
+    case 'claim_nekomata_fake':
+      return 'claim_fake'
+    case 'morning': return 'morning'
   }
 }
 

@@ -256,6 +256,48 @@ export function recordsToBatchInputs(records: readonly TrainingRecord[]): {
 }
 
 /**
+ * Wolf imitation 学習用の batch 変換。
+ *
+ * - `observations`: r.obs (wolf 観測 1212 dim)
+ * - `virtualSeerObs`: r.auxObs?.virtualSeerObs (1029 dim、wolfSeat を真 seer 仮定した obs)
+ * - `policyTargets[i]`: 15 (claim_fake) or 28 (morning) dim、r.pi の action ID 空間に対応
+ * - `outcomeTargets[i]`: r.outcomeTarget (4-dim one-hot)
+ *
+ * `auxObs.virtualSeerObs` を持たない record は skip される (後方互換、wolf imitation 無効時)。
+ * caller は records が headName='claim_fake' or 'morning' に絞られている前提で呼ぶこと。
+ */
+export function recordsToWolfImitationInputs(records: readonly TrainingRecord[]): {
+  observations: Float32Array[]
+  virtualSeerObs: Float32Array[]
+  policyTargets: Float32Array[]
+  outcomeTargets: Float32Array[]
+} {
+  const observations: Float32Array[] = []
+  const virtualSeerObs: Float32Array[] = []
+  const policyTargets: Float32Array[] = []
+  const outcomeTargets: Float32Array[] = []
+
+  for (const r of records) {
+    if (r.headName !== 'claim_fake' && r.headName !== 'morning') continue
+    const vs = r.auxObs?.virtualSeerObs
+    if (!vs) continue
+
+    const policySize = r.headName === 'claim_fake' ? 15 : 28
+    const pi = new Float32Array(policySize)
+    for (const [actionId, prob] of r.pi) {
+      if (actionId >= 0 && actionId < policySize) pi[actionId] = prob
+    }
+
+    observations.push(r.obs)
+    virtualSeerObs.push(vs)
+    policyTargets.push(pi)
+    outcomeTargets.push(r.outcomeTarget)
+  }
+
+  return { observations, virtualSeerObs, policyTargets, outcomeTargets }
+}
+
+/**
  * records を headName ごとにバケットに分ける。head ごとに独立 trainMasonZero を呼ぶための前処理。
  * 他の head を持たない records に対しては空配列を返す。
  */

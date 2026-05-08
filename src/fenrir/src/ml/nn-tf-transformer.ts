@@ -1559,6 +1559,196 @@ export class TfTransformerNetwork {
     this.optimizer.minimize(lossFunc, false, this.allVariables)
     return result
   }
+
+  /**
+   * Wolf Imitation 用の forward。frozen village NN として呼ばれ、
+   * `divine` (per-seat 14) と `claim_true` (global 2) の logits を返す。
+   *
+   * 内部 weights を直接外部に晒さず、必要な logits だけ提供することで encapsulation を保つ。
+   * trainWolfImitation の lossFunc 内で呼ばれる前提 (caller 側で stopGradient を適用)。
+   */
+  forwardForImitation(obsTensor: tf.Tensor2D): {
+    divineLogits: tf.Tensor2D     // [n, 14]
+    claimTrueLogits: tf.Tensor2D  // [n, 2]
+  } {
+    const { clsOut, seatOutputs } = this.forwardTrunk(obsTensor)
+    const divineEntry = this.perSeatHeadWeights.get('divine')
+    const claimTrueEntry = this.globalHeadWeights.get('claim_true')
+    if (!divineEntry) throw new Error("forwardForImitation: 'divine' head not found")
+    if (!claimTrueEntry) throw new Error("forwardForImitation: 'claim_true' head not found")
+    const divineLogits = this.perSeatLogits(seatOutputs, divineEntry[0], divineEntry[1])
+    const claimTrueLogits = tf.add(
+      tf.matMul(clsOut, claimTrueEntry[0]),
+      claimTrueEntry[1],
+    ) as tf.Tensor2D
+    return { divineLogits, claimTrueLogits }
+  }
+
+  /**
+   * Wolf imitation network 用の学習。mix 式 (sigmoid + 凸結合) を TF graph で
+   * 組み、cross entropy + outcome dist categorical CE で勾配を deviation/alpha head
+   * に流す。
+   *
+   * Forward の流れ:
+   *   1. wolf NN.forwardTrunk(rootObs) → wolf clsOut + seatOutputs
+   *   2. frozen village NN.forwardForImitation(virtualSeerObs) → divineLogits + claimTrueLogits
+   *      (stopGradient で勾配を切る、village の weights は更新されない)
+   *   3. wolf の deviation/alpha head logits を取り出し
+   *   4. mix:
+   *      - claim_fake: skip 部分を α_claim と claim_true で凸結合、claimer は wolf 再正規化
+   *      - morning:    target は α_morning と divine で凸結合、white/black は sigmoid(morning_res)
+   *   5. cross entropy(final policy, target) + outcome dist CE → 勾配は wolf NN 側のみ
+   *
+   * `policyTargets` は最終 mix 後の確率分布空間で記述される (claim_fake 15 / morning 28)。
+   *
+   * 注意: frozen village NN は `this.optimizer.minimize` の `this.allVariables` に
+   * 含まれないため、勾配は流れない (= 更新されない)。stopGradient はメモリリーク防止。
+   */
+  trainWolfImitation(batch: {
+    observations: Float32Array[]    // wolf 観測 [n, wolfInputSize]
+    virtualSeerObs: Float32Array[]  // virtual seer obs [n, villageInputSize]
+    policyTargets: Float32Array[]   // [n, 15] (claim_fake) or [n, 28] (morning)
+    outcomeTargets: Float32Array[]  // [n, outcomeDistOutputs]
+    valueCoeff?: number
+    headName: 'claim_fake' | 'morning'
+    frozenVillageNet: TfTransformerNetwork
+  }): { loss: number, policyLoss: number, valueLoss: number } {
+    const n = batch.observations.length
+    if (n === 0) return { loss: 0, policyLoss: 0, valueLoss: 0 }
+    if (!this.outcomeDistW || !this.outcomeDistB) {
+      throw new Error('trainWolfImitation: outcomeDistOutputs が config に設定されていません')
+    }
+
+    const valueCoeff = batch.valueCoeff ?? 1.0
+    const wolfInputSize = this.config.inputSize
+    const villageInputSize = batch.frozenVillageNet.config.inputSize
+    const outcomeSize = this.config.outcomeDistOutputs!
+    const policySize = batch.headName === 'claim_fake' ? 15 : 28
+
+    // wolf 側 head の存在確認
+    const claimFakeDevEntry = this.globalHeadWeights.get('claim_fake_dev')
+    const alphaClaimEntry = this.globalHeadWeights.get('alpha_claim')
+    const morningTgtDevEntry = this.perSeatHeadWeights.get('morning_tgt_dev')
+    const morningResEntry = this.perSeatHeadWeights.get('morning_res')
+    const alphaMorningEntry = this.globalHeadWeights.get('alpha_morning')
+    if (batch.headName === 'claim_fake'
+      && (!claimFakeDevEntry || !alphaClaimEntry)) {
+      throw new Error("trainWolfImitation: claim_fake_dev / alpha_claim head not found")
+    }
+    if (batch.headName === 'morning'
+      && (!morningTgtDevEntry || !morningResEntry || !alphaMorningEntry)) {
+      throw new Error("trainWolfImitation: morning_tgt_dev / morning_res / alpha_morning head not found")
+    }
+
+    // batch flatten
+    const wolfObsData = new Float32Array(n * wolfInputSize)
+    const villageObsData = new Float32Array(n * villageInputSize)
+    const policyData = new Float32Array(n * policySize)
+    const outcomeData = new Float32Array(n * outcomeSize)
+    for (let i = 0; i < n; i++) {
+      wolfObsData.set(batch.observations[i], i * wolfInputSize)
+      villageObsData.set(batch.virtualSeerObs[i], i * villageInputSize)
+      policyData.set(batch.policyTargets[i], i * policySize)
+      outcomeData.set(batch.outcomeTargets[i], i * outcomeSize)
+    }
+
+    const result = { loss: 0, policyLoss: 0, valueLoss: 0 }
+    const odW = this.outcomeDistW
+    const odB = this.outcomeDistB
+
+    const lossFunc = () => {
+      const wolfObsTensor = tf.tensor2d(wolfObsData, [n, wolfInputSize])
+      const villageObsTensor = tf.tensor2d(villageObsData, [n, villageInputSize])
+
+      // === wolf trunk (勾配あり) ===
+      const { clsOut, seatOutputs } = this.forwardTrunk(wolfObsTensor)
+
+      // === frozen village (勾配なし) ===
+      const villageLogits = batch.frozenVillageNet.forwardForImitation(villageObsTensor)
+      const piVTarget = tf.softmax(tf.stopGradient(villageLogits.divineLogits))    // [n, 14]
+      const piVCo = tf.softmax(tf.stopGradient(villageLogits.claimTrueLogits))     // [n, 2]
+
+      // === outcome dist (wolf own value head) ===
+      const outcomeLogits = tf.add(tf.matMul(clsOut, odW), odB)
+      const outcomeProbs = tf.softmax(outcomeLogits)
+      const outcomeTensor = tf.tensor2d(outcomeData, [n, outcomeSize])
+      const outcomeLogProbs = tf.log(tf.add(outcomeProbs, tf.scalar(1e-8)))
+      const valueLoss = tf.neg(tf.mean(tf.sum(tf.mul(outcomeTensor, outcomeLogProbs), 1))) as tf.Scalar
+
+      // === policy mix ===
+      let policyLoss: tf.Scalar
+      if (batch.headName === 'claim_fake') {
+        const claimFakeDevLogits = tf.add(
+          tf.matMul(clsOut, claimFakeDevEntry![0]), claimFakeDevEntry![1],
+        )  // [n, 15]
+        const alphaClaimLogits = tf.add(
+          tf.matMul(clsOut, alphaClaimEntry![0]), alphaClaimEntry![1],
+        )  // [n, 2]
+        const piWFull = tf.softmax(claimFakeDevLogits)  // [n, 15]
+        const alphaClaim = tf.softmax(alphaClaimLogits).slice([0, 1], [n, 1])  // [n, 1]
+        const oneMinusAlpha = tf.sub(tf.scalar(1), alphaClaim)
+
+        // skip 部分 mix
+        const piVCoSkip = piVCo.slice([0, 0], [n, 1])  // [n, 1]
+        const piWSkip = piWFull.slice([0, 0], [n, 1])  // [n, 1]
+        const finalSkip = tf.add(tf.mul(oneMinusAlpha, piVCoSkip), tf.mul(alphaClaim, piWSkip))
+
+        // claimer 部分 (i=1..14): wolf を再正規化
+        const piWClaimer = piWFull.slice([0, 1], [n, 14])  // [n, 14]
+        const wolfNonSkipSum = tf.sum(piWClaimer, 1, true)  // [n, 1]
+        const targetNonSkip = tf.sub(tf.scalar(1), finalSkip)  // [n, 1]
+        const scale = tf.div(targetNonSkip, tf.add(wolfNonSkipSum, tf.scalar(1e-8)))  // [n, 1]
+        const finalClaimer = tf.mul(piWClaimer, scale)  // [n, 14]
+
+        const finalProb = tf.concat([finalSkip, finalClaimer], 1)  // [n, 15]
+        const policyTensor = tf.tensor2d(policyData, [n, 15])
+        const logProbs = tf.log(tf.add(finalProb, tf.scalar(1e-8)))
+        policyLoss = tf.neg(tf.mean(tf.sum(tf.mul(policyTensor, logProbs), 1))) as tf.Scalar
+      } else {
+        // morning mix
+        const morningTgtDev = this.perSeatLogits(
+          seatOutputs, morningTgtDevEntry![0], morningTgtDevEntry![1],
+        )  // [n, 14]
+        const morningRes = this.perSeatLogits(
+          seatOutputs, morningResEntry![0], morningResEntry![1],
+        )  // [n, 14]
+        const alphaMorningLogits = tf.add(
+          tf.matMul(clsOut, alphaMorningEntry![0]), alphaMorningEntry![1],
+        )  // [n, 2]
+        const piWTarget = tf.softmax(morningTgtDev)
+        const alphaMorning = tf.softmax(alphaMorningLogits).slice([0, 1], [n, 1])  // [n, 1]
+        const oneMinusAlpha = tf.sub(tf.scalar(1), alphaMorning)
+        const target = tf.add(
+          tf.mul(oneMinusAlpha, piVTarget), tf.mul(alphaMorning, piWTarget),
+        )  // [n, 14]
+        const whiteProb = tf.sigmoid(morningRes)
+        const blackProb = tf.sub(tf.scalar(1), whiteProb)
+
+        // 28-dim: [n, 14, 2] = stack([target*white, target*black]) → reshape [n, 28]
+        const whiteTerm = tf.mul(target, whiteProb).expandDims(2)  // [n, 14, 1]
+        const blackTerm = tf.mul(target, blackProb).expandDims(2)  // [n, 14, 1]
+        const stacked = tf.concat([whiteTerm, blackTerm], 2)        // [n, 14, 2]
+        const finalProb = stacked.reshape([n, 28])
+
+        const policyTensor = tf.tensor2d(policyData, [n, 28])
+        const logProbs = tf.log(tf.add(finalProb, tf.scalar(1e-8)))
+        policyLoss = tf.neg(tf.mean(tf.sum(tf.mul(policyTensor, logProbs), 1))) as tf.Scalar
+      }
+
+      const totalLoss = tf.add(policyLoss, tf.mul(tf.scalar(valueCoeff), valueLoss)) as tf.Scalar
+
+      result.policyLoss = policyLoss.dataSync()[0]
+      result.valueLoss = valueLoss.dataSync()[0]
+      result.loss = totalLoss.dataSync()[0]
+
+      return totalLoss
+    }
+
+    // this.allVariables は wolf NN の変数のみ → frozen village の重みは更新されない
+    this.optimizer.minimize(lossFunc, false, this.allVariables)
+    return result
+  }
+
   /**
    * Plan token Pointer 教師あり学習
    * Forward plan tokensのPointer出力にcross-entropy損失を適用

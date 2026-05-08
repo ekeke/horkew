@@ -28,6 +28,8 @@ import { MasonRoleAgent } from './mason-zero-agent.ts'
 import {
   VillageRoleAgent, WolfRoleAgent, FanaticRoleAgent, HamsterRoleAgent, ImmoralistRoleAgent,
 } from './role-zero-agents.ts'
+import { WolfImitationRoleAgent } from './wolf-imitation-agent.ts'
+import { WolfImitationNetwork } from '../network/wolf-imitation-network.ts'
 import { SkollZeroRoleAgent } from './role-zero-agent.ts'
 
 export type GameResult = 'villager_won' | 'werewolf_won' | 'werehamster_won' | 'draw' | null
@@ -146,7 +148,12 @@ function buildAgent(
   switch (slotKey) {
     case 'mason': return new MasonRoleAgent(opts)
     case 'village': return new VillageRoleAgent(opts)
-    case 'wolf': return new WolfRoleAgent(opts)
+    case 'wolf':
+      // Wolf imitation 有効時 (slot.nn が WolfImitationNetwork) は WolfImitationRoleAgent を使う。
+      // decideDayClaim で偽 seer 騙り中の翌朝結果を NN-MCTS (proposeMorning) で生成する。
+      return slot.nn instanceof WolfImitationNetwork
+        ? new WolfImitationRoleAgent({ ...opts, nn: slot.nn })
+        : new WolfRoleAgent(opts)
     case 'fanatic': return new FanaticRoleAgent(opts)
     case 'hamster': return new HamsterRoleAgent(opts)
     case 'immoralist': return new ImmoralistRoleAgent(opts)

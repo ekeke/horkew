@@ -26,13 +26,16 @@ import {
   createStandardZeroNetwork,
   createWolfZeroNetwork,
   createFanaticZeroNetwork,
+  createWolfImitationZeroNetwork,
 } from '../network/config.ts'
 import {
   createSkollZeroTfNetwork,
   createStandardZeroTfNetwork,
   createWolfZeroTfNetwork,
   createFanaticZeroTfNetwork,
+  createWolfImitationZeroTfNetwork,
 } from '../network/tf-config.ts'
+import { WolfImitationNetwork } from '../network/wolf-imitation-network.ts'
 import { loadCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import {
@@ -160,6 +163,9 @@ function buildSlot(
   slotKey: keyof MultiTrainerSlots,
   lr: number,
 ): MultiTrainerSlots[keyof MultiTrainerSlots] {
+  // SKOLLZ_WOLF_IMITATION=1 で wolf slot のみ Imitation 構造 (frozen 村 NN + deviation/α)。
+  const wolfImitationEnabled = process.env.SKOLLZ_WOLF_IMITATION === '1' && slotKey === 'wolf'
+
   // Pure JS 推論用 + TF.js 学習用
   let pureNet
   let tfNet
@@ -167,8 +173,13 @@ function buildSlot(
     pureNet = createSkollZeroNetwork()
     tfNet = createSkollZeroTfNetwork(lr)
   } else if (slotKey === 'wolf') {
-    pureNet = createWolfZeroNetwork()
-    tfNet = createWolfZeroTfNetwork(lr)
+    if (wolfImitationEnabled) {
+      pureNet = createWolfImitationZeroNetwork()
+      tfNet = createWolfImitationZeroTfNetwork(lr)
+    } else {
+      pureNet = createWolfZeroNetwork()
+      tfNet = createWolfZeroTfNetwork(lr)
+    }
   } else if (slotKey === 'fanatic') {
     // FanaticIndividualModule.captureObs は encodeFanaticObservation (1197 dims、
     // village_predict + village_trust 注入) を返すため、専用 NN config が必要。
@@ -181,31 +192,53 @@ function buildSlot(
   }
 
   // resume > warm-start > random
+  // 注: wolf imitation 有効時は head 構造が異なるため、既存の wolf checkpoint からは
+  //     resume できない (loadCheckpoint が head 名 mismatch で失敗 or 部分 load)。Phase 1 では
+  //     wolf imitation 専用 ckpt が無ければ random init で開始する想定。
   const resumePath = join(phaseDir, slotKey, 'final.json')
   if (existsSync(resumePath)) {
-    loadCheckpoint(pureNet, resumePath)
-    log(`${slotKey}: resume from ${resumePath}`)
+    try {
+      loadCheckpoint(pureNet, resumePath)
+      log(`${slotKey}: resume from ${resumePath}`)
+    } catch (e) {
+      log(`${slotKey}: resume FAILED (${e instanceof Error ? e.message : String(e)}), random init`)
+    }
   } else {
     const warmPath = WARM_START_PATHS[slotKey]
-    if (existsSync(warmPath)) {
+    if (!wolfImitationEnabled && existsSync(warmPath)) {
       loadCheckpoint(pureNet, warmPath)
       log(`${slotKey}: warm-start from ${warmPath}`)
     } else {
-      log(`${slotKey}: WARN ${warmPath} missing, random init`)
+      log(`${slotKey}: WARN ${warmPath} missing, random init${wolfImitationEnabled ? ' (wolf imitation, no compatible warm-start)' : ''}`)
     }
   }
 
   tfNet.loadWeights(pureNet.cloneWeights())
-  const masonZeroNet = new MasonZeroNetwork(pureNet, { zeroValueHead: false })
+
+  // wolf imitation の場合は WolfImitationNetwork で wrap (frozen village を内蔵)。
+  // frozen village 用に Pure JS の standard NN を別途構築 (random init、
+  // multi-trainer.syncWolfImitationFrozen が round 0 冒頭で village slot から weights をコピー)。
+  let masonZeroNet
+  let wolfImitationFrozen
+  if (wolfImitationEnabled) {
+    const frozenVillagePure = createStandardZeroNetwork()
+    const frozenVillageTf = createStandardZeroTfNetwork(lr)
+    masonZeroNet = new WolfImitationNetwork(frozenVillagePure, pureNet, { zeroValueHead: false })
+    wolfImitationFrozen = { tfNet: frozenVillageTf, pureJsNet: frozenVillagePure }
+    log(`${slotKey}: SKOLLZ_WOLF_IMITATION=1 -> WolfImitationNetwork (frozen village + deviation/α)`)
+  } else {
+    masonZeroNet = new MasonZeroNetwork(pureNet, { zeroValueHead: false })
+  }
 
   // SKOLLZ_INFER_GPU=1 で self-play 推論を tfNet (TF.js GPU) に切替。
   // tfNet 自体を wrap するため、学習で更新された重みは推論にも即反映される。
   // 未指定なら inferNet=undefined で multi-trainer が masonZeroNet (Pure JS) を使う。
-  const useGpuInfer = process.env.SKOLLZ_INFER_GPU === '1'
+  // 注: wolf imitation 時は GPU 推論 + mix forward の整合が未対応なので Pure JS 経路を使う。
+  const useGpuInfer = process.env.SKOLLZ_INFER_GPU === '1' && !wolfImitationEnabled
   const inferNet = useGpuInfer ? new TfMasonZeroNetwork(tfNet) : undefined
   if (useGpuInfer) log(`${slotKey}: SKOLLZ_INFER_GPU=1 -> TfMasonZeroNetwork (TF.js GPU 推論)`)
 
-  return { masonZeroNet, tfNet, buffer: new TrainingBuffer(), inferNet }
+  return { masonZeroNet, tfNet, buffer: new TrainingBuffer(), inferNet, wolfImitationFrozen }
 }
 
 export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): Promise<void> {

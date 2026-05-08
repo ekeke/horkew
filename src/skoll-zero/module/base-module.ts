@@ -21,10 +21,11 @@ import { buildPossibilitiesFromRetar } from '../../skoll/unified.ts'
 import type { SimState } from '../simulator/world-state.ts'
 import { Determinizer } from '../mcts/determinize.ts'
 import {
-  runMCTS, DEFAULT_MCTS_CONFIG, visitEntropyRatio,
-  type Faction, type MCTSConfig, type MCTSResult,
+  runMCTS, DEFAULT_MCTS_CONFIG, visitEntropyRatio, headNameFromActionMode,
+  type Faction, type MCTSConfig, type MCTSResult, type RootActionMode,
 } from '../mcts/ISMCTS.ts'
 import type { MasonZeroNN, HeadName, NNOutput } from '../mcts/nn.ts'
+import type { PendingRecord } from '../selfplay/buffer.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import type { RootObs } from '../selfplay/observation.ts'
 import { normalizeVisits } from '../selfplay/policy-utils.ts'
@@ -207,6 +208,35 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
   }
 
   /**
+   * 偽 CO 判断 (claim_*_fake) を MCTS root として提案。
+   *
+   * action 空間: 15 (skip + claimer seat 1..14)。record headName は 'claim_fake' に集約。
+   * Wolf imitation 学習対象。excludedMask=0 (legal action は MCTS 内部の dispatch で制約)。
+   */
+  proposeFakeCO(
+    ctx: DecisionContext,
+    phase: 'claim_seer_fake' | 'claim_medium_fake' | 'claim_bg_fake' | 'claim_nekomata_fake',
+    opts?: { record?: boolean, bundle?: ModuleBundle },
+  ): McctsProposal | null {
+    const bundle = opts?.bundle ?? this.singletonBundle()
+    return this.runMctsProposal(ctx, bundle, phase, 0, opts?.record ?? true)
+  }
+
+  /**
+   * 偽占い報告 (morning) を MCTS root として提案。
+   *
+   * action 空間: 28 (target_idx × {white, black})。record headName は 'morning'。
+   * Wolf imitation 学習対象。
+   */
+  proposeMorning(
+    ctx: DecisionContext,
+    opts?: { record?: boolean, bundle?: ModuleBundle },
+  ): McctsProposal | null {
+    const bundle = opts?.bundle ?? this.singletonBundle()
+    return this.runMctsProposal(ctx, bundle, 'morning', 0, opts?.record ?? true)
+  }
+
+  /**
    * MCTS を介さず NN forward 1 回で policy 分布を返す。
    * runMctsProposal の setup (determinizer + SimState 構築) は再利用するが、runMCTS は呼ばず
    * NN.forward を 1 回呼んで返す。eval (single-shot evaluation) 用。
@@ -283,16 +313,35 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
   // ============================================================
 
   /**
-   * proposeVote / proposeNightAction の共通実装。
+   * record 蓄積前の hook。サブクラスで `auxObs` 等を追加できる (例: WolfImitationModule
+   * が virtualSeerObs を inject)。base 実装は no-op。
    *
-   * @param actionMode vote / divine / guard / attack のどれか
-   * @param excludedMask NN policy から除外する席 bitmask (自席 + wolf teammates 等)
+   * @param record   蓄積予定の PendingRecord
+   * @param state    root SimState (rollout 開始 phase 適用済)
+   * @param invariants  rollout 不変情報
+   * @param actionMode  root の意思決定種別
+   */
+  protected augmentRecord(
+    record: PendingRecord,
+    _state: SimState,
+    _invariants: RolloutInvariants,
+    _actionMode: RootActionMode,
+  ): PendingRecord {
+    return record
+  }
+
+  /**
+   * proposeVote / proposeNightAction / proposeFakeCO / proposeMorning の共通実装。
+   *
+   * @param actionMode RootActionMode (execute / attack / divine / guard / claim_*_fake / morning)
+   * @param excludedMask NN policy から除外する席 bitmask (自席 + wolf teammates 等、
+   *   per-seat 14 action 空間でのみ意味あり、claim_fake/morning では 0 で OK)
    * @param record buffer に蓄積するか
    */
   private runMctsProposal(
     ctx: DecisionContext,
     bundle: ModuleBundle,
-    actionMode: 'execute' | 'divine' | 'guard' | 'attack',
+    actionMode: RootActionMode,
     excludedMask: number,
     record: boolean,
   ): McctsProposal | null {
@@ -353,10 +402,10 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     this.entropyStats.count++
 
     const pi = normalizeVisits(result.visits)
-    const headName: HeadName = actionMode
+    const headName: HeadName = headNameFromActionMode(actionMode)
 
     if (record) {
-      this.buffer.appendPending({
+      const baseRecord: PendingRecord = {
         obs: rootObs,
         visits: result.visits,
         pi,
@@ -364,7 +413,9 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
         masonSeat: ctx.mySeat,
         alive,
         headName,
-      })
+      }
+      const augmented = this.augmentRecord(baseRecord, rootSimState, invariants, actionMode)
+      this.buffer.appendPending(augmented)
     }
 
     return {

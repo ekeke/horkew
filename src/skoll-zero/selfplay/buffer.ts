@@ -19,6 +19,13 @@ export type PendingRecord = {
   visits: Map<number, number>
   /** 正規化済み policy target π = N(a) / Σ N(b) */
   pi: Map<number, number>
+  /**
+   * 補助観測 (head 名や用途別に key を分けられる柔軟構造)。
+   * 例: wolf imitation 用の `virtualSeerObs` (1029 dim、wolfSeat を真 seer 仮定した obs)。
+   * trainer が head 名や key で取り出して TF.js graph の入力に渡す。
+   * 既存 record と互換のため optional。
+   */
+  auxObs?: Record<string, Float32Array>
 }
 
 export type TrainingRecord = PendingRecord & {

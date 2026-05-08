@@ -10,6 +10,7 @@ import {
   STANDARD_ZERO_NETWORK_CONFIG,
   WOLF_ZERO_NETWORK_CONFIG,
   FANATIC_ZERO_NETWORK_CONFIG,
+  WOLF_IMITATION_ZERO_NETWORK_CONFIG,
 } from './config.ts'
 
 /** TF.js (学習用)。Node 専用。 */
@@ -27,4 +28,8 @@ export function createWolfZeroTfNetwork(lr: number = 3e-4): TfTransformerNetwork
 
 export function createFanaticZeroTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
   return new TfTransformerNetwork(FANATIC_ZERO_NETWORK_CONFIG, lr, 'fanatic')
+}
+
+export function createWolfImitationZeroTfNetwork(lr: number = 3e-4): TfTransformerNetwork {
+  return new TfTransformerNetwork(WOLF_IMITATION_ZERO_NETWORK_CONFIG, lr, 'wolf_collective')
 }

@@ -14,7 +14,9 @@ import { join } from 'node:path'
 
 import type { MasonZeroNetwork } from '../network/mason-zero.ts'
 import type { TfTransformerNetwork } from '../../fenrir/src/ml/nn-tf-transformer.ts'
+import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 import type { MasonZeroNN } from '../mcts/nn.ts'
+import type { WolfImitationNetwork } from '../network/wolf-imitation-network.ts'
 import { saveCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { TrainingBuffer } from '../selfplay/buffer.ts'
 import {
@@ -25,7 +27,7 @@ import {
 } from '../selfplay/multi-runner.ts'
 import type { MCTSConfig } from '../mcts/ISMCTS.ts'
 import { runSelfPlayParallel, skollZeroWorkerPoolSize } from '../parallel/index.ts'
-import { groupRecordsByHead, recordsToBatchInputs } from './trainer.ts'
+import { groupRecordsByHead, recordsToBatchInputs, recordsToWolfImitationInputs } from './trainer.ts'
 import type { SkollZeroTrainConfig, DirichletAutoConfig } from './schedule.ts'
 import { DEFAULT_DIRICHLET_AUTO_CONFIG, applyDirichletDecay } from './schedule.ts'
 
@@ -33,9 +35,32 @@ import { DEFAULT_DIRICHLET_AUTO_CONFIG, applyDirichletDecay } from './schedule.t
 const SLOT_KEYS = ['mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist'] as const
 type SlotKey = typeof SLOT_KEYS[number]
 
+/**
+ * Wolf Imitation 用の frozen village ペア。
+ *
+ * - `tfNet`: trainWolfImitation で frozen reference として渡す TF.js network
+ * - `pureJsNet`: WolfImitationNetwork.frozenVillage に渡す Pure JS 推論用 network
+ *
+ * round 開始時に village slot の現在の weights を両方にコピーする (snapshot)。
+ * その後 round 内では frozen として動作 (勾配は流れない、推論のみ)。
+ */
+export type WolfImitationFrozenSet = {
+  tfNet: TfTransformerNetwork
+  pureJsNet: TransformerNetwork
+}
+
+/**
+ * slot の Pure JS 推論ネット。
+ *
+ * 通常は MasonZeroNetwork (forward signature: rootObs/state/seat/headName)、
+ * Wolf Imitation 有効時は WolfImitationNetwork (= MasonZeroNN 互換 + 内部に frozenVillage)。
+ * 両者ともに `.net: TransformerNetwork` を持つ前提で、checkpoint 保存と weight sync が成立する。
+ */
+export type SlotPureJsNet = MasonZeroNetwork | WolfImitationNetwork
+
 export type TrainerSlot = {
   /** Pure JS 推論用 (self-play で使用、default) */
-  masonZeroNet: MasonZeroNetwork
+  masonZeroNet: SlotPureJsNet
   /** TF.js 学習用 */
   tfNet: TfTransformerNetwork
   /**
@@ -48,6 +73,11 @@ export type TrainerSlot = {
   buffer: TrainingBuffer
   /** true なら train step / sync / checkpoint 上書きを skip (self-play では使う) */
   frozen?: boolean
+  /**
+   * Wolf imitation 用 frozen village (wolf slot 専用、設定時のみ有効)。
+   * round 開始時に village slot から weights をコピーされる前提。
+   */
+  wolfImitationFrozen?: WolfImitationFrozenSet
 }
 
 export type MultiTrainerSlots = {
@@ -154,11 +184,31 @@ export class MultiSkollZeroTrainer {
     return out
   }
 
+  /**
+   * Wolf imitation の frozen village を round 開始時に同期。
+   *
+   * - village slot の TF.js weights を wolf slot の wolfImitationFrozen.tfNet にコピー
+   * - village slot の Pure JS weights を wolf slot の wolfImitationFrozen.pureJsNet にコピー
+   *
+   * これで round 内は wolf NN の deviation 学習が「現時点の村 NN」を base として進む。
+   * wolf imitation 無効 (= wolf slot に wolfImitationFrozen 未設定) なら no-op。
+   */
+  private syncWolfImitationFrozen(): void {
+    const wolfSlot = this.slots.wolf
+    const villageSlot = this.slots.village
+    if (!wolfSlot?.wolfImitationFrozen || !villageSlot) return
+    wolfSlot.wolfImitationFrozen.tfNet.loadWeights(villageSlot.tfNet.cloneWeights())
+    wolfSlot.wolfImitationFrozen.pureJsNet.loadWeights(villageSlot.masonZeroNet.net.cloneWeights())
+  }
+
   async trainRound(
     roundId: number,
     outputDir: string,
     opts: { rolloutRetar?: boolean } = {},
   ): Promise<MultiRoundStats> {
+    // Wolf imitation: round 開始時に村 NN を frozen として snapshot
+    this.syncWolfImitationFrozen()
+
     const mctsConfig: MCTSConfig = {
       cPuct: this.config.cPuct,
       nRollouts: this.config.mctsRollouts,
@@ -266,11 +316,34 @@ export class MultiSkollZeroTrainer {
         for (let s = 0; s < this.config.stepsPerRound; s++) {
           const records = slot.buffer.sample(this.config.batchSize, this.rng, { weighted: sampleWeighted })
           if (records.length === 0) break
-          // head 別にバケット分割し、MCTS-π head (vote/attack/divine/guard) を trainMasonZero で学習
+          // head 別にバケット分割。MCTS-π head (vote/attack/divine/guard) は trainMasonZero、
+          // wolf imitation 用 head (claim_fake/morning) は trainWolfImitation を呼ぶ。
           const groups = groupRecordsByHead(records)
           let stepLoss = 0, stepPolicyLoss = 0, stepValueLoss = 0, headsTrained = 0
           for (const [headName, bucket] of groups) {
             if (bucket.length === 0) continue
+
+            if (headName === 'claim_fake' || headName === 'morning') {
+              // wolf imitation 経路。frozen village が無い (= wolf imitation 無効) なら skip。
+              if (!slot.wolfImitationFrozen) continue
+              const inputs = recordsToWolfImitationInputs(bucket)
+              if (inputs.observations.length === 0) continue  // virtualSeerObs 欠落
+              const res = slot.tfNet.trainWolfImitation({
+                observations: inputs.observations,
+                virtualSeerObs: inputs.virtualSeerObs,
+                policyTargets: inputs.policyTargets,
+                outcomeTargets: inputs.outcomeTargets,
+                valueCoeff: this.config.valueCoeff,
+                headName,
+                frozenVillageNet: slot.wolfImitationFrozen.tfNet,
+              })
+              stepLoss += res.loss
+              stepPolicyLoss += res.policyLoss
+              stepValueLoss += res.valueLoss
+              headsTrained++
+              continue
+            }
+
             const { observations, policyTargets, masks, outcomeTargets } = recordsToBatchInputs(bucket)
             const res = slot.tfNet.trainMasonZero({
               observations,
@@ -343,7 +416,7 @@ export class MultiSkollZeroTrainer {
     outputDir: string,
     roundId: number,
     slotKey: keyof MultiTrainerSlots,
-    net: MasonZeroNetwork,
+    net: SlotPureJsNet,
   ): string {
     const slotDir = join(outputDir, slotKey, `round_${String(roundId).padStart(4, '0')}`)
     if (!existsSync(slotDir)) mkdirSync(slotDir, { recursive: true })

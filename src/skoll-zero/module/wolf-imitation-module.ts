@@ -13,8 +13,10 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { HeadName, NNOutput } from '../mcts/nn.ts'
+import type { RootActionMode } from '../mcts/ISMCTS.ts'
 import type { SimState } from '../simulator/world-state.ts'
 import type { RolloutInvariants } from '../observation/from-sim-state.ts'
+import type { PendingRecord } from '../selfplay/buffer.ts'
 import { BENCH_ENABLED, benchEnd } from '../bench/profiler.ts'
 import { buildVirtualSeerObs } from '../observation/wolf-imitation.ts'
 import { WolfImitationNetwork } from '../network/wolf-imitation-network.ts'
@@ -74,4 +76,35 @@ export class WolfImitationModule extends WolfSkollZeroModule {
     }
     return outputs
   }
+
+  /**
+   * record 蓄積前に virtualSeerObs を auxObs に inject。
+   *
+   * claim_fake / morning record (= claim_*_fake / morning actionMode) でのみ実施。
+   * その他 (execute / attack / divine / guard) はそのまま。
+   *
+   * 注意: record.masonSeat は actor seat (Wolf の自席)。virtualSeerObs はこの seat を
+   * 真 seer と仮定した観測。学習時に TF.js graph で frozen village NN に入力する。
+   */
+  protected override augmentRecord(
+    record: PendingRecord,
+    state: SimState,
+    invariants: RolloutInvariants,
+    actionMode: RootActionMode,
+  ): PendingRecord {
+    if (!isFakeOrMorning(actionMode)) return record
+    const virtualSeerObs = buildVirtualSeerObs(state, record.masonSeat, invariants)
+    return {
+      ...record,
+      auxObs: { ...(record.auxObs ?? {}), virtualSeerObs },
+    }
+  }
+}
+
+function isFakeOrMorning(mode: RootActionMode): boolean {
+  return mode === 'claim_seer_fake'
+    || mode === 'claim_medium_fake'
+    || mode === 'claim_bg_fake'
+    || mode === 'claim_nekomata_fake'
+    || mode === 'morning'
 }
