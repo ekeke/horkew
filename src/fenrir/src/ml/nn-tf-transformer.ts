@@ -1609,34 +1609,46 @@ export class TfTransformerNetwork {
    */
   trainWolfImitation(batch: {
     observations: Float32Array[]      // wolf 観測 [n, wolfInputSize]
-    virtualViewerObs: Float32Array[]  // virtual viewer obs [n, villageInputSize]
-    policyTargets: Float32Array[]     // [n, 15] (claim_fake) or [n, 28] (morning)
+    /** morning record 用の seer 単体 viewer obs ([n, villageInputSize])。claim_decision では未使用 */
+    virtualViewerObs?: Float32Array[]
+    /** claim_decision 用の 4 種 viewer obs (各 [n, villageInputSize])。morning では未使用 */
+    virtualViewerObsBundle?: {
+      seer: Float32Array[]
+      medium: Float32Array[]
+      bodyguard: Float32Array[]
+      nekomata: Float32Array[]
+    }
+    policyTargets: Float32Array[]     // [n, 57] (claim_decision) or [n, 28] (morning)
     outcomeTargets: Float32Array[]    // [n, outcomeDistOutputs]
     valueCoeff?: number
-    headName: 'claim_fake' | 'morning'
+    /** KL(α‖0.5) bonus 係数 (default 0)。0.01 推奨 (Plan)。 */
+    alphaKlCoef?: number
+    headName: 'claim_decision' | 'morning'
     frozenVillageNet: TfTransformerNetwork
-  }): { loss: number, policyLoss: number, valueLoss: number } {
+  }): { loss: number, policyLoss: number, valueLoss: number, alphaKlLoss: number } {
     const n = batch.observations.length
-    if (n === 0) return { loss: 0, policyLoss: 0, valueLoss: 0 }
+    if (n === 0) return { loss: 0, policyLoss: 0, valueLoss: 0, alphaKlLoss: 0 }
     if (!this.outcomeDistW || !this.outcomeDistB) {
       throw new Error('trainWolfImitation: outcomeDistOutputs が config に設定されていません')
     }
 
     const valueCoeff = batch.valueCoeff ?? 1.0
+    const alphaKlCoef = batch.alphaKlCoef ?? 0
     const wolfInputSize = this.config.inputSize
     const villageInputSize = batch.frozenVillageNet.config.inputSize
     const outcomeSize = this.config.outcomeDistOutputs!
-    const policySize = batch.headName === 'claim_fake' ? 15 : 28
+    const policySize = batch.headName === 'claim_decision' ? 57 : 28
+    const SEATS_LOCAL = 14
 
     // wolf 側 head の存在確認
-    const claimFakeDevEntry = this.globalHeadWeights.get('claim_fake_dev')
+    const claimDecisionDevEntry = this.globalHeadWeights.get('claim_decision_dev')
     const alphaClaimEntry = this.globalHeadWeights.get('alpha_claim')
     const morningTgtDevEntry = this.perSeatHeadWeights.get('morning_tgt_dev')
     const morningResEntry = this.perSeatHeadWeights.get('morning_res')
     const alphaMorningEntry = this.globalHeadWeights.get('alpha_morning')
-    if (batch.headName === 'claim_fake'
-      && (!claimFakeDevEntry || !alphaClaimEntry)) {
-      throw new Error("trainWolfImitation: claim_fake_dev / alpha_claim head not found")
+    if (batch.headName === 'claim_decision'
+      && (!claimDecisionDevEntry || !alphaClaimEntry)) {
+      throw new Error("trainWolfImitation: claim_decision_dev / alpha_claim head not found")
     }
     if (batch.headName === 'morning'
       && (!morningTgtDevEntry || !morningResEntry || !alphaMorningEntry)) {
@@ -1645,34 +1657,57 @@ export class TfTransformerNetwork {
 
     // batch flatten
     const wolfObsData = new Float32Array(n * wolfInputSize)
-    const villageObsData = new Float32Array(n * villageInputSize)
     const policyData = new Float32Array(n * policySize)
     const outcomeData = new Float32Array(n * outcomeSize)
     for (let i = 0; i < n; i++) {
       wolfObsData.set(batch.observations[i], i * wolfInputSize)
-      villageObsData.set(batch.virtualViewerObs[i], i * villageInputSize)
       policyData.set(batch.policyTargets[i], i * policySize)
       outcomeData.set(batch.outcomeTargets[i], i * outcomeSize)
     }
 
-    const result = { loss: 0, policyLoss: 0, valueLoss: 0 }
+    // village obs:
+    // - claim_decision: 4 種 viewer obs を [4n, villageInputSize] に concat
+    //   (順序: seer/medium/bodyguard/nekomata、CLAIM_DECISION_ROLES と整合)
+    // - morning: seer 単体 [n, villageInputSize]
+    let villageObsData: Float32Array
+    let villageBatchN: number  // forward に渡す batch サイズ
+    if (batch.headName === 'claim_decision') {
+      const bundle = batch.virtualViewerObsBundle
+      if (!bundle) throw new Error('trainWolfImitation: claim_decision requires virtualViewerObsBundle')
+      villageBatchN = 4 * n
+      villageObsData = new Float32Array(villageBatchN * villageInputSize)
+      // [seer*n, medium*n, bg*n, nekomata*n] の順で配置 → reshape [4, n, ...] で取り出せる
+      const order: ReadonlyArray<keyof typeof bundle> = ['seer', 'medium', 'bodyguard', 'nekomata']
+      for (let r = 0; r < order.length; r++) {
+        for (let i = 0; i < n; i++) {
+          villageObsData.set(bundle[order[r]][i], (r * n + i) * villageInputSize)
+        }
+      }
+    } else {
+      const single = batch.virtualViewerObs
+      if (!single) throw new Error('trainWolfImitation: morning requires virtualViewerObs')
+      villageBatchN = n
+      villageObsData = new Float32Array(n * villageInputSize)
+      for (let i = 0; i < n; i++) {
+        villageObsData.set(single[i], i * villageInputSize)
+      }
+    }
+
+    const result = { loss: 0, policyLoss: 0, valueLoss: 0, alphaKlLoss: 0 }
     const odW = this.outcomeDistW
     const odB = this.outcomeDistB
 
     const lossFunc = () => {
       const wolfObsTensor = tf.tensor2d(wolfObsData, [n, wolfInputSize])
-      const villageObsTensor = tf.tensor2d(villageObsData, [n, villageInputSize])
+      const villageObsTensor = tf.tensor2d(villageObsData, [villageBatchN, villageInputSize])
 
       // === wolf trunk (勾配あり) ===
       const { clsOut, seatOutputs } = this.forwardTrunk(wolfObsTensor)
 
-      // === frozen village (勾配なし) ===
-      // 勾配は optimizer.minimize の `this.allVariables` 指定で wolf NN のみに流れる前提。
-      // village の variables は frozenVillageNet 側にあり、wolf NN の allVariables には
-      // 含まれないため、softmax 越しに loss と接続されても更新対象外。
+      // === frozen village (勾配なし、wolf NN allVariables に含まれないため自動) ===
       const villageLogits = batch.frozenVillageNet.forwardForImitation(villageObsTensor)
-      const piVTarget = tf.softmax(villageLogits.divineLogits)    // [n, 14]
-      const piVCo = tf.softmax(villageLogits.claimTrueLogits)     // [n, 2]
+      // claim_decision: [4n, 14] / [4n, 2] → reshape [4, n, ...]
+      // morning: [n, 14] / [n, 2]
 
       // === outcome dist (wolf own value head) ===
       const outcomeLogits = tf.add(tf.matMul(clsOut, odW), odB)
@@ -1683,35 +1718,57 @@ export class TfTransformerNetwork {
 
       // === policy mix ===
       let policyLoss: tf.Scalar
-      if (batch.headName === 'claim_fake') {
-        const claimFakeDevLogits = tf.add(
-          tf.matMul(clsOut, claimFakeDevEntry![0]), claimFakeDevEntry![1],
-        )  // [n, 15]
+      let alphaForKl: tf.Tensor | null = null  // [n, 1]、KL bonus 計算用 (claim_decision 系のみ)
+
+      if (batch.headName === 'claim_decision') {
+        // wolf claim_decision_dev (57) + alpha_claim (2)
+        const claimDevLogits = tf.add(
+          tf.matMul(clsOut, claimDecisionDevEntry![0]), claimDecisionDevEntry![1],
+        )  // [n, 57]
         const alphaClaimLogits = tf.add(
           tf.matMul(clsOut, alphaClaimEntry![0]), alphaClaimEntry![1],
         )  // [n, 2]
-        const piWFull = tf.softmax(claimFakeDevLogits)  // [n, 15]
-        const alphaClaim = tf.softmax(alphaClaimLogits).slice([0, 1], [n, 1])  // [n, 1]
+        const piWFull = tf.softmax(claimDevLogits)                                   // [n, 57]
+        const alphaClaim = tf.softmax(alphaClaimLogits).slice([0, 1], [n, 1])         // [n, 1]
+        alphaForKl = alphaClaim
         const oneMinusAlpha = tf.sub(tf.scalar(1), alphaClaim)
 
-        // skip 部分 mix
-        const piVCoSkip = piVCo.slice([0, 0], [n, 1])  // [n, 1]
-        const piWSkip = piWFull.slice([0, 0], [n, 1])  // [n, 1]
-        const finalSkip = tf.add(tf.mul(oneMinusAlpha, piVCoSkip), tf.mul(alphaClaim, piWSkip))
+        // village base 57-dim 構築:
+        //   piVCo4 = softmax(claim_true) で [4n, 2]、reshape [4, n, 2]
+        //   role i (i=0..3) の skip prob = piVCo4[i, :, 0]、co prob = piVCo4[i, :, 1]
+        //   base[skip] = (1/4) Σ skip_role
+        //   base[role*14 + claimer] = co_role / (4 * 14)
+        const piVCo4 = tf.softmax(villageLogits.claimTrueLogits)                      // [4n, 2]
+        const piVCo4Reshape = piVCo4.reshape([4, n, 2])                                // [4, n, 2]
+        // skip 部分: avg over 4 roles の skip prob → [n, 1]
+        const skipPerRole = piVCo4Reshape.slice([0, 0, 0], [4, n, 1]).reshape([4, n])  // [4, n]
+        const baseSkip = tf.div(
+          tf.sum(skipPerRole, 0, true).reshape([n, 1]),
+          tf.scalar(4),
+        )  // [n, 1]
+        // role × 14 部分: co_role / (4 * 14)、各 role 毎に [n, 14] expand
+        const coPerRole = piVCo4Reshape.slice([0, 0, 1], [4, n, 1]).reshape([4, n])    // [4, n]
+        // for each role, build [n, 14] = co_role / 56 broadcast
+        const baseRoleParts: tf.Tensor2D[] = []
+        for (let r = 0; r < 4; r++) {
+          const co_r = coPerRole.slice([r, 0], [1, n]).reshape([n, 1])  // [n, 1]
+          const co_per_claimer = tf.div(co_r, tf.scalar(4 * SEATS_LOCAL))  // [n, 1]
+          const expanded = tf.tile(co_per_claimer, [1, SEATS_LOCAL])        // [n, 14]
+          baseRoleParts.push(expanded as tf.Tensor2D)
+        }
+        const baseRoles = tf.concat(baseRoleParts, 1)  // [n, 56]
+        const base57 = tf.concat([baseSkip, baseRoles], 1)  // [n, 57]
 
-        // claimer 部分 (i=1..14): wolf を再正規化
-        const piWClaimer = piWFull.slice([0, 1], [n, 14])  // [n, 14]
-        const wolfNonSkipSum = tf.sum(piWClaimer, 1, true)  // [n, 1]
-        const targetNonSkip = tf.sub(tf.scalar(1), finalSkip)  // [n, 1]
-        const scale = tf.div(targetNonSkip, tf.add(wolfNonSkipSum, tf.scalar(1e-8)))  // [n, 1]
-        const finalClaimer = tf.mul(piWClaimer, scale)  // [n, 14]
-
-        const finalProb = tf.concat([finalSkip, finalClaimer], 1)  // [n, 15]
-        const policyTensor = tf.tensor2d(policyData, [n, 15])
+        // mix
+        const finalProb = tf.add(
+          tf.mul(oneMinusAlpha, base57), tf.mul(alphaClaim, piWFull),
+        )  // [n, 57]
+        const policyTensor = tf.tensor2d(policyData, [n, 57])
         const logProbs = tf.log(tf.add(finalProb, tf.scalar(1e-8)))
         policyLoss = tf.neg(tf.mean(tf.sum(tf.mul(policyTensor, logProbs), 1))) as tf.Scalar
       } else {
         // morning mix
+        const piVTarget = tf.softmax(villageLogits.divineLogits)    // [n, 14]
         const morningTgtDev = this.perSeatLogits(
           seatOutputs, morningTgtDevEntry![0], morningTgtDevEntry![1],
         )  // [n, 14]
@@ -1723,6 +1780,7 @@ export class TfTransformerNetwork {
         )  // [n, 2]
         const piWTarget = tf.softmax(morningTgtDev)
         const alphaMorning = tf.softmax(alphaMorningLogits).slice([0, 1], [n, 1])  // [n, 1]
+        alphaForKl = alphaMorning
         const oneMinusAlpha = tf.sub(tf.scalar(1), alphaMorning)
         const target = tf.add(
           tf.mul(oneMinusAlpha, piVTarget), tf.mul(alphaMorning, piWTarget),
@@ -1741,10 +1799,32 @@ export class TfTransformerNetwork {
         policyLoss = tf.neg(tf.mean(tf.sum(tf.mul(policyTensor, logProbs), 1))) as tf.Scalar
       }
 
-      const totalLoss = tf.add(policyLoss, tf.mul(tf.scalar(valueCoeff), valueLoss)) as tf.Scalar
+      // === KL(α‖0.5) bonus ===
+      // KL(α‖0.5) = α log(2α) + (1-α) log(2(1-α))
+      // = log 2 + α log α + (1-α) log(1-α)
+      // 数値安定化: α を [eps, 1-eps] にクリップ
+      let alphaKlLoss: tf.Scalar
+      if (alphaForKl !== null && alphaKlCoef > 0) {
+        const eps = tf.scalar(1e-6)
+        const alphaClipped = tf.clipByValue(alphaForKl, 1e-6, 1 - 1e-6)
+        const oneMinusAlpha = tf.sub(tf.scalar(1), alphaClipped)
+        const term1 = tf.mul(alphaClipped, tf.log(tf.mul(alphaClipped, tf.scalar(2))))
+        const term2 = tf.mul(oneMinusAlpha, tf.log(tf.mul(oneMinusAlpha, tf.scalar(2))))
+        const kl = tf.add(term1, term2)  // [n, 1]
+        alphaKlLoss = tf.mean(kl) as tf.Scalar
+        eps.dispose()
+      } else {
+        alphaKlLoss = tf.scalar(0)
+      }
+
+      const totalLoss = tf.add(
+        tf.add(policyLoss, tf.mul(tf.scalar(valueCoeff), valueLoss)),
+        tf.mul(tf.scalar(alphaKlCoef), alphaKlLoss),
+      ) as tf.Scalar
 
       result.policyLoss = policyLoss.dataSync()[0]
       result.valueLoss = valueLoss.dataSync()[0]
+      result.alphaKlLoss = alphaKlLoss.dataSync()[0]
       result.loss = totalLoss.dataSync()[0]
 
       return totalLoss

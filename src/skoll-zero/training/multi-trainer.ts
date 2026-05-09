@@ -333,23 +333,27 @@ export class MultiSkollZeroTrainer {
           const records = slot.buffer.sample(this.config.batchSize, this.rng, { weighted: sampleWeighted })
           if (records.length === 0) break
           // head 別にバケット分割。MCTS-π head (vote/attack/divine/guard) は trainMasonZero、
-          // wolf imitation 用 head (claim_fake/morning) は trainWolfImitation を呼ぶ。
+          // wolf imitation 用 head (claim_decision/morning) は trainWolfImitation を呼ぶ。
           const groups = groupRecordsByHead(records)
           let stepLoss = 0, stepPolicyLoss = 0, stepValueLoss = 0, headsTrained = 0
+          // KL(α‖0.5) bonus 係数 (env: SKOLLZ_ALPHA_KL_COEF、default 0.01)
+          const alphaKlCoef = parseFloat(process.env.SKOLLZ_ALPHA_KL_COEF ?? '0.01')
           for (const [headName, bucket] of groups) {
             if (bucket.length === 0) continue
 
-            if (headName === 'claim_fake' || headName === 'morning') {
+            if (headName === 'claim_decision' || headName === 'morning') {
               // wolf imitation 経路。frozen village が無い (= wolf imitation 無効) なら skip。
               if (!slot.wolfImitationFrozen) continue
               const inputs = recordsToWolfImitationInputs(bucket)
-              if (inputs.observations.length === 0) continue  // virtualViewerObs 欠落
+              if (inputs.observations.length === 0) continue  // viewer obs 欠落
               const res = slot.tfNet.trainWolfImitation({
                 observations: inputs.observations,
-                virtualViewerObs: inputs.virtualViewerObs,
+                virtualViewerObs: headName === 'morning' ? inputs.virtualViewerObs : undefined,
+                virtualViewerObsBundle: headName === 'claim_decision' ? inputs.virtualViewerObsBundle : undefined,
                 policyTargets: inputs.policyTargets,
                 outcomeTargets: inputs.outcomeTargets,
                 valueCoeff: this.config.valueCoeff,
+                alphaKlCoef,
                 headName,
                 frozenVillageNet: slot.wolfImitationFrozen.tfNet,
               })
