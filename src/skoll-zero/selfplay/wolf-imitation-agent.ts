@@ -1,26 +1,23 @@
 /**
- * WolfImitationRoleAgent — Wolf Imitation 用の Role Agent (B 案)。
+ * WolfImitationRoleAgent — Wolf Imitation 用の Role Agent (A 案)。
  *
  * SkollZeroRoleAgent を継承し、内部に WolfImitationModule を持つ。WolfRoleAgent と同様に
- * decideNightAction (襲撃) は execute MCTS を使うが、加えて decideDayClaim を override して
- * **偽 seer 騙り中の翌朝結果報告** を proposeMorning (NN-MCTS) 経由で生成する。
+ * decideNightAction (襲撃) は execute MCTS を使い、加えて decideDayClaim を override して
+ * 以下の 2 経路を NN-MCTS 化する:
  *
- * ## B 案 (現状) vs A 案 (将来)
+ * 1. **未 CO 状態の偽 CO 種別 + claimer 選択** (A案、proposeClaimDecision)
+ *    - 57-action 空間 (skip + 4 役職 × 14 claimer) で MCTS、joint distribution として学習
+ *    - 自席が claimer に選ばれた場合のみ自身が CO、別 seat なら super (heuristic) に委譲
+ *    - 偽 seer 選択時は results=[] の seer_co を返し、翌朝の morning で結果生成へ続く
  *
- * - **B 案**: claim 種別 (どの役職を騙るか、未 CO 1 日目の判断) は heuristic 維持
- *   (`RuleBasedAgent.decideWerewolfClaim` 経由)、偽 seer 中の朝結果のみ NN-MCTS 化。
- *   morning record だけが学習対象、wolf NN の `claim_fake_dev` / `alpha_claim` head は
- *   random init のまま使われない。
- * - **A 案** (Future Work): claim 種別も 4 phase MCTS (`proposeFakeCO`) で決める。
- *   `claim_fake_dev` / `alpha_claim` head も学習対象になる。memory `project_skoll_zero_wolf_imitation`
- *   参照。
+ * 2. **偽 seer 騙り中の翌朝結果報告** (B案維持、proposeMorning)
+ *    - 既 CO 状態かつ claimedRole='seer' で werewolf/fanatic のとき
+ *    - 28-action 空間 (target × {white, black}) で MCTS、wolf NN の morning_* head を学習
  *
  * ## fakeDivineHistory の整合性
  *
- * 既存 `reportFakeSeerResult` は `generateStrategicFakeResult` で fakeDivineHistory に
- * 登録してから DayClaim を返す。本 override も同等に MCTS の結果 (target × color) を
- * fakeDivineHistory に登録する。これを忘れると後続日の retar 整合性チェックや観測 encoding
- * (state.fakeDivineHistory 参照) で乖離が生じる。
+ * morning result (seer 結果報告) は `myPlayer.fakeDivineHistory` に登録してから DayClaim を
+ * 返す。これを忘れると後続日の retar 整合性チェックや観測 encoding で乖離が生じる。
  */
 
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
@@ -30,6 +27,7 @@ import { SkollZeroRoleAgent, type SkollZeroRoleAgentOptions } from './role-zero-
 import { argmaxFromVisits, sampleFromVisits, temperatureForAlive } from './policy-utils.ts'
 import { WolfImitationModule } from '../module/wolf-imitation-module.ts'
 import { WolfImitationNetwork } from '../network/wolf-imitation-network.ts'
+import { decodeClaimDecisionAction } from '../simulator/rollout-sim.ts'
 
 const SEATS = 14
 
@@ -38,6 +36,9 @@ export type WolfImitationRoleAgentOptions =
   Omit<SkollZeroRoleAgentOptions, 'nn'> & { nn: WolfImitationNetwork }
 
 export class WolfImitationRoleAgent extends SkollZeroRoleAgent {
+  /** type-narrowed module (constructor で同じインスタンスを再格納) */
+  private readonly imitationModule: WolfImitationModule
+
   constructor(opts: WolfImitationRoleAgentOptions) {
     const module = new WolfImitationModule({
       nn: opts.nn,
@@ -47,6 +48,7 @@ export class WolfImitationRoleAgent extends SkollZeroRoleAgent {
       determinizerMaxWorlds: opts.determinizerMaxWorlds,
     })
     super(module, opts.selectionMode ?? 'sample')
+    this.imitationModule = module
   }
 
   /**
@@ -71,25 +73,84 @@ export class WolfImitationRoleAgent extends SkollZeroRoleAgent {
   }
 
   /**
-   * 偽 seer 騙り中の翌朝結果報告のみ NN-MCTS で生成 (B 案)。
-   *
-   * - 偽 seer CO 中 (myPlayer.claimedRole === 'seer' && myRole が wolf 系):
-   *   proposeMorning で 28-action 空間を MCTS、(target × color) を action として返す。
-   *   fakeDivineHistory に登録した上で `{ type: 'seer_result' }` を返す。
-   * - それ以外 (未 CO / 偽 medium 中 / 偽 mason 中 / 偽 bg 中 等):
-   *   super (RuleBasedAgent.decideWerewolfClaim) に委譲。
+   * 偽 CO 判断 (未 CO 状態、A案) と偽 seer 騙り中の翌朝結果 (既 CO 状態、B案維持) を
+   * NN-MCTS で生成。それ以外は super (heuristic) に委譲。
    */
   override decideDayClaim(ctx: DecisionContext): DayClaim {
     const myPlayer = ctx.myPlayer
+    if (!myPlayer) return super.decideDayClaim(ctx)
     const debug = process.env.SKOLLZ_WOLF_IMITATION_DEBUG === '1'
-    const isFakeSeerActive = myPlayer?.claimedRole === 'seer'
-      && (ctx.myRole === 'werewolf' || ctx.myRole === 'fanatic')
-    if (debug) {
-      process.stderr.write(`[wolf-imitation] decideDayClaim day=${ctx.day} seat=${ctx.mySeat} role=${ctx.myRole} claimed=${myPlayer?.claimedRole ?? 'null'} fakeSeerActive=${isFakeSeerActive}\n`)
-    }
-    if (!isFakeSeerActive) return super.decideDayClaim(ctx)
 
-    const r = this.module.proposeMorning(ctx, this.proposeOpts())
+    // 既 CO 状態: 偽 seer 騙り中なら proposeMorning、それ以外は super
+    if (myPlayer.claimedRole !== null) {
+      const isFakeSeerActive = myPlayer.claimedRole === 'seer'
+        && (ctx.myRole === 'werewolf' || ctx.myRole === 'fanatic')
+      if (debug) {
+        process.stderr.write(`[wolf-imitation] decideDayClaim (post-CO) day=${ctx.day} seat=${ctx.mySeat} role=${ctx.myRole} claimed=${myPlayer.claimedRole} fakeSeerActive=${isFakeSeerActive}\n`)
+      }
+      if (!isFakeSeerActive) return super.decideDayClaim(ctx)
+      return this.decideMorningResult(ctx, myPlayer)
+    }
+
+    // 未 CO 状態 (A案): proposeClaimDecision で 57-action 空間を MCTS
+    const isWolfFaction = ctx.myRole === 'werewolf' || ctx.myRole === 'fanatic'
+    if (!isWolfFaction) return super.decideDayClaim(ctx)
+
+    const r = this.imitationModule.proposeClaimDecision(ctx, this.proposeOpts())
+    if (debug) {
+      process.stderr.write(`[wolf-imitation] proposeClaimDecision day=${ctx.day} seat=${ctx.mySeat} result=${r ? `visits=${r.visits.size}` : 'null (fallback to heuristic)'}\n`)
+    }
+    if (!r) return super.decideDayClaim(ctx)
+
+    const action = this.selectionMode === 'argmax' || this.selectionMode === 'policy_argmax'
+      ? argmaxFromVisits(r.visits)
+      : sampleFromVisits(
+          r.visits,
+          () => ctx.rng.next(),
+          temperatureForAlive(ctx.alivePlayers.length),
+        )
+
+    if (debug) {
+      process.stderr.write(`[wolf-imitation] proposeClaimDecision selected action=${action}\n`)
+    }
+
+    // action 0 = skip → super (潜伏 or 別判断は heuristic)
+    if (action === 0) return super.decideDayClaim(ctx)
+
+    const decoded = decodeClaimDecisionAction(action)
+    if (!decoded) return super.decideDayClaim(ctx)
+
+    // claimer != mySeat → 別 wolf に任せる (super 経由で heuristic で潜伏 or その wolf が自分で CO)
+    if (decoded.claimerSeat !== ctx.mySeat) return super.decideDayClaim(ctx)
+
+    // claimer == mySeat → 自分が role 騙り
+    switch (decoded.role) {
+      case 'seer':
+        // 初回偽 seer CO: results=[] で返す。翌朝の morning で proposeMorning が偽結果を生成。
+        return { type: 'seer_co', results: [] }
+      case 'medium':
+        return { type: 'medium_co', pastResults: [] }
+      case 'bodyguard':
+        return { type: 'bodyguard_co', targets: [] }
+      case 'nekomata':
+        return { type: 'nekomata_co' }
+      default:
+        return super.decideDayClaim(ctx)
+    }
+  }
+
+  /**
+   * 偽 seer 騙り中の翌朝結果生成 (B案、proposeMorning 経由)。
+   *
+   * action = target_idx × 2 + color (0=human, 1=wolf)。fakeDivineHistory に登録した上で
+   * `seer_result` DayClaim を返す。失敗時は super (heuristic) に委譲。
+   */
+  private decideMorningResult(
+    ctx: DecisionContext,
+    myPlayer: NonNullable<DecisionContext['myPlayer']>,
+  ): DayClaim {
+    const debug = process.env.SKOLLZ_WOLF_IMITATION_DEBUG === '1'
+    const r = this.imitationModule.proposeMorning(ctx, this.proposeOpts())
     if (debug) {
       process.stderr.write(`[wolf-imitation] proposeMorning result=${r ? `visits=${r.visits.size}` : 'null (fallback to heuristic)'}\n`)
     }
@@ -102,7 +163,6 @@ export class WolfImitationRoleAgent extends SkollZeroRoleAgent {
           () => ctx.rng.next(),
           temperatureForAlive(ctx.alivePlayers.length),
         )
-    // action = target_idx × 2 + color (0=human, 1=wolf)
     const targetSeat = (action >> 1) + 1
     const color: EnumSpecies = (action & 1) === 0 ? 'human' : 'wolf'
 

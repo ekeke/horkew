@@ -237,6 +237,24 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
   }
 
   /**
+   * Wolf imitation A案: 偽 CO 種別 + claimer の同時分布判断 (claim_decision)。
+   *
+   * action 空間: 57 = skip + 4 役職 (seer/medium/bg/nekomata) × 14 claimer。
+   * record headName は 'claim_decision'。root actor は ctx.mySeat 固定 (dispatch.ts の
+   * claim_decision case で decisionSeat = mySeat を actor として直接使う)。
+   *
+   * `state.wolfImitation = true` を root SimState に伝搬し、claim_decision phase が skip
+   * されないようにする (旧 4 phase は state.claims 一括書込により自動 skip)。
+   */
+  proposeClaimDecision(
+    ctx: DecisionContext,
+    opts?: { record?: boolean, bundle?: ModuleBundle },
+  ): McctsProposal | null {
+    const bundle = opts?.bundle ?? this.singletonBundle()
+    return this.runMctsProposal(ctx, bundle, 'claim_decision', 0, opts?.record ?? true)
+  }
+
+  /**
    * MCTS を介さず NN forward 1 回で policy 分布を返す。
    * runMctsProposal の setup (determinizer + SimState 構築) は再利用するが、runMCTS は呼ばず
    * NN.forward を 1 回呼んで返す。eval (single-shot evaluation) 用。
@@ -384,6 +402,13 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     // を pending 先頭に置いて root expand を成立させる。
     if (actionMode === 'morning' && !rootSimState.morningPending.includes(ctx.mySeat)) {
       rootSimState.morningPending = [ctx.mySeat, ...rootSimState.morningPending]
+    }
+    // proposeClaimDecision (root='claim_decision'): wolf imitation A案の root。
+    // state.wolfImitation=true を伝搬 → shouldSkipPhase が claim_decision を有効化し、
+    // 旧 4 phase (claim_*_fake) は state.claims 一括書込により自動 skip となる。
+    if (actionMode === 'claim_decision') {
+      rootSimState.wolfImitation = true
+      invariants.wolfImitation = true
     }
     // root snapshot 用の obs (buffer 記録に使う、現状は決定者の Module の captureObs)
     const rootObs = this.captureObs(ctx)
