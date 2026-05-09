@@ -1,8 +1,81 @@
 import { applyExecution, applyFollowDeaths, checkOutcome, simulateNight } from '../../hati/simulate.ts'
 import { popCount32, seatsFromMask } from '../../hati/types.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
+import type { SystemRole } from '../../types/index.ts'
 import type { World } from '../../hati/types.ts'
 import type { SimState, Phase, FakeDivineColor, DivineColor } from './world-state.ts'
+
+/**
+ * claim_decision phase の偽 CO 役職列。順序固定 (action ID encoding と整合)。
+ * action ID = role_index × SEATS_PER_ROLE_BLOCK + (claimerSeat - 1) + 1
+ *   role_index: 0=seer, 1=medium, 2=bodyguard, 3=nekomata
+ *   action 0 は skip
+ */
+export const CLAIM_DECISION_ROLES = ['seer', 'medium', 'bodyguard', 'nekomata'] as const satisfies readonly SystemRole[]
+export const CLAIM_DECISION_SEATS_PER_ROLE = 14
+/** claim_decision の action 空間サイズ: 1 (skip) + 4 役職 × 14 claimer = 57 */
+export const CLAIM_DECISION_ACTION_SIZE = 1 + CLAIM_DECISION_ROLES.length * CLAIM_DECISION_SEATS_PER_ROLE
+
+/**
+ * action ID (1..56) を (role, claimerSeat) に decode。0 は skip 扱いで null。
+ */
+export function decodeClaimDecisionAction(actionId: number): { role: SystemRole, claimerSeat: number } | null {
+  if (actionId === 0) return null
+  if (actionId < 1 || actionId > CLAIM_DECISION_ACTION_SIZE - 1) return null
+  const idx = actionId - 1
+  const roleIndex = Math.floor(idx / CLAIM_DECISION_SEATS_PER_ROLE)
+  const claimerSeat = (idx % CLAIM_DECISION_SEATS_PER_ROLE) + 1
+  if (roleIndex < 0 || roleIndex >= CLAIM_DECISION_ROLES.length) return null
+  return { role: CLAIM_DECISION_ROLES[roleIndex], claimerSeat }
+}
+
+/**
+ * (role, claimerSeat) を action ID に encode。
+ */
+export function encodeClaimDecisionAction(role: SystemRole, claimerSeat: number): number {
+  const roleIndex = (CLAIM_DECISION_ROLES as readonly SystemRole[]).indexOf(role)
+  if (roleIndex < 0) throw new Error(`encodeClaimDecisionAction: unsupported role '${role}'`)
+  if (claimerSeat < 1 || claimerSeat > CLAIM_DECISION_SEATS_PER_ROLE) {
+    throw new Error(`encodeClaimDecisionAction: claimerSeat ${claimerSeat} out of range`)
+  }
+  return 1 + roleIndex * CLAIM_DECISION_SEATS_PER_ROLE + (claimerSeat - 1)
+}
+
+/**
+ * claim_decision phase の合法 action ID 集合を返す。
+ *
+ * - 0 (skip) は常に legal
+ * - role × 14 + claimer は、当該 role が未偽 CO かつ claimer が未 CO の生存 wolf/fanatic
+ *   である場合に legal
+ *
+ * fanatic は wolf imitation の決定主体外と仮定するが、claimer 候補としては legal
+ * (狼の視点から「fanatic に騙らせる」案も MCTS で評価可能)。
+ */
+export function legalClaimDecisionActions(state: SimState): Set<number> {
+  const out = new Set<number>([0]) // skip 常に legal
+  const { world, alive, claims } = state
+  // 既に偽 CO されている role を除外
+  const roleAlreadyFakeClaimed = new Set<SystemRole>()
+  for (const entry of claims.values()) {
+    if (entry.isFake) roleAlreadyFakeClaimed.add(entry.role)
+  }
+  // 未 CO の wolf/fanatic 生存席
+  let unclaimedActorMask = fakeActorMask(world, alive)
+  for (const seat of claims.keys()) unclaimedActorMask &= ~(1 << seat)
+  if (unclaimedActorMask === 0) return out
+  for (let roleIndex = 0; roleIndex < CLAIM_DECISION_ROLES.length; roleIndex++) {
+    const role = CLAIM_DECISION_ROLES[roleIndex]
+    if (roleAlreadyFakeClaimed.has(role)) continue
+    let mask = unclaimedActorMask
+    while (mask !== 0) {
+      const bit = mask & (-mask)
+      const seat = 31 - Math.clz32(bit)
+      out.add(1 + roleIndex * CLAIM_DECISION_SEATS_PER_ROLE + (seat - 1))
+      mask ^= bit
+    }
+  }
+  return out
+}
 
 /**
  * 1 phase 分の意思決定 action。phase ごとに必要な情報だけを持つ
@@ -22,6 +95,7 @@ export type PhaseAction =
   | { type: 'claim_true', willClaim: boolean }
   | { type: 'claim_fake', willClaim: false }
   | { type: 'claim_fake', willClaim: true, claimerSeat: number }
+  | { type: 'claim_decision', actionId: number }
   | { type: 'execute', target: number }
   | { type: 'attack', target: number }
   | { type: 'divine', target: number }
@@ -103,7 +177,9 @@ function trueClaimRole(phase: Phase): 'seer' | 'medium' | 'bodyguard' | 'nekomat
  *
  * - morning: 偽 seer CO 済の actor が 0 → skip
  * - claim_*_true: 真役職の未 CO 生存席が 0 → skip
+ * - claim_decision: state.wolfImitation=false なら常に skip (旧経路)、true なら未 CO 狼/狂が 0 で skip
  * - claim_*_fake: 該当役職の偽 CO 既出 OR 未 CO の生存 wolf/fanatic が 0 → skip
+ *   (state.wolfImitation=true で claim_decision を通過済の場合、claims に偽 CO 一括書込済のため自動 skip)
  * - day / night_attack / night_divine / night_guard / terminal: skip しない
  *
  * 注意: night_attack は狼全滅で skip 候補になりうるが、その状態は前の day の
@@ -128,12 +204,21 @@ export function shouldSkipPhase(state: SimState): boolean {
       for (const seat of claims.keys()) unclaimed &= ~(1 << seat)
       return unclaimed === 0
     }
+    case 'claim_decision': {
+      // wolf imitation 経路でない rollout では常に skip (旧 claim_*_fake 経路を使う)
+      if (!state.wolfImitation) return true
+      // 未 CO の生存 wolf/fanatic が 0 → skip (騙る主体が居ない)
+      let unclaimedActors = fakeActorMask(world, alive)
+      for (const seat of claims.keys()) unclaimedActors &= ~(1 << seat)
+      return unclaimedActors === 0
+    }
     case 'claim_seer_fake':
     case 'claim_medium_fake':
     case 'claim_bg_fake':
     case 'claim_nekomata_fake': {
       const role = fakeClaimRole(phase)!
       // 既偽 CO 有なら skip (Stage 1 単純化: 同役職の重複偽 CO は扱わない)
+      // wolf imitation 経路で claim_decision で書込済の場合もこの判定で自動 skip される
       for (const entry of claims.values()) {
         if (entry.role === role && entry.isFake) return true
       }
@@ -161,7 +246,8 @@ function rawNextPhase(phase: Phase): Phase {
     case 'claim_medium_true': return 'claim_bg_true'
     case 'claim_bg_true': return 'claim_nekomata_true'
     case 'claim_nekomata_true': return 'claim_mason'
-    case 'claim_mason': return 'claim_seer_fake'
+    case 'claim_mason': return 'claim_decision'
+    case 'claim_decision': return 'claim_seer_fake'
     case 'claim_seer_fake': return 'claim_medium_fake'
     case 'claim_medium_fake': return 'claim_bg_fake'
     case 'claim_bg_fake': return 'claim_nekomata_fake'
@@ -239,6 +325,26 @@ export function stepPhase(state: SimState, action: PhaseAction): SimState {
       if (action.willClaim) {
         const role = fakeClaimRole(state.phase)!
         state.claims.set(action.claimerSeat, { role, isFake: true })
+      }
+      break
+    }
+    case 'claim_decision': {
+      assertActionType(action, 'claim_decision')
+      // action.actionId: 0=skip, 1..56 = role × 14 + claimer
+      if (action.actionId !== 0) {
+        const decoded = decodeClaimDecisionAction(action.actionId)
+        if (decoded) {
+          // 既に同 role が偽 CO されている or claimer が既 CO ならスキップ
+          let already = false
+          for (const entry of state.claims.values()) {
+            if (entry.role === decoded.role && entry.isFake) { already = true; break }
+          }
+          if (!already && !state.claims.has(decoded.claimerSeat)) {
+            state.claims.set(decoded.claimerSeat, { role: decoded.role, isFake: true })
+          }
+        } else {
+          warnInvalidTarget('claim_decision', action.actionId)
+        }
       }
       break
     }

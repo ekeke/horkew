@@ -42,6 +42,9 @@ export type NNOutput = {
  * - `claim_fake`: 狼/狂の偽 CO 判断 (15-dim: skip + claimer seat)
  * - `morning`: 偽占い報告 (28-dim: target_idx × {human, wolf})
  *
+ * Wolf imitation A案 (joint distribution):
+ * - `claim_decision`: 偽 CO 種別 + claimer の同時分布 (57-dim: skip + 4 役職 × 14 claimer)
+ *
  * Phase 2 (NN-direct、MCTS 不使用):
  * - `target`: 占い/護衛/forecast/defensiveClaim target (per-seat softmax)
  * - `claim`: 昼 claim (categorical 10)
@@ -52,7 +55,7 @@ export type NNOutput = {
  */
 export type HeadName =
   | 'execute' | 'attack' | 'divine' | 'guard' | 'target'
-  | 'claim_true' | 'claim_fake' | 'morning'
+  | 'claim_true' | 'claim_fake' | 'claim_decision' | 'morning'
   | 'claim' | 'comm' | 'leader'
   | 'propose' | 'predict'
 

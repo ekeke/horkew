@@ -3,7 +3,7 @@ import { hasSeat, popCount32 } from '../../hati/types.ts'
 import { cloneSimState } from '../simulator/world-state.ts'
 import type { SimState, Phase } from '../simulator/world-state.ts'
 import {
-  stepPhase, advancePhase, legalAttackActions, resolveNightSimulationAndAdvance,
+  stepPhase, advancePhase, legalAttackActions, legalClaimDecisionActions, resolveNightSimulationAndAdvance,
 } from '../simulator/rollout-sim.ts'
 import type { PhaseAction } from '../simulator/rollout-sim.ts'
 import type { SystemRole } from '../../types/index.ts'
@@ -127,6 +127,7 @@ export function visitEntropyRatio(visits: Map<number, number>): number {
 export type RootActionMode =
   | 'execute' | 'attack' | 'divine' | 'guard'
   | 'claim_seer_fake' | 'claim_medium_fake' | 'claim_bg_fake' | 'claim_nekomata_fake'
+  | 'claim_decision'
   | 'morning'
 
 /** action mode → MCTS root を置く initial phase */
@@ -140,6 +141,7 @@ function phaseFromActionMode(mode: RootActionMode): Phase {
     case 'claim_medium_fake': return 'claim_medium_fake'
     case 'claim_bg_fake': return 'claim_bg_fake'
     case 'claim_nekomata_fake': return 'claim_nekomata_fake'
+    case 'claim_decision': return 'claim_decision'
     case 'morning': return 'morning'
   }
 }
@@ -147,6 +149,7 @@ function phaseFromActionMode(mode: RootActionMode): Phase {
 /**
  * action mode → record の headName。
  * claim_*_fake (4 種) は全て 'claim_fake' に集約 (TF head 名)。
+ * claim_decision は wolf imitation A案で 1 phase 統合 head。
  */
 export function headNameFromActionMode(mode: RootActionMode): HeadName {
   switch (mode) {
@@ -159,6 +162,7 @@ export function headNameFromActionMode(mode: RootActionMode): HeadName {
     case 'claim_bg_fake':
     case 'claim_nekomata_fake':
       return 'claim_fake'
+    case 'claim_decision': return 'claim_decision'
     case 'morning': return 'morning'
   }
 }
@@ -893,6 +897,8 @@ function defaultActionForPhase(phase: Phase): PhaseAction {
     case 'claim_bg_fake':
     case 'claim_nekomata_fake':
       return { type: 'claim_fake', willClaim: false }
+    case 'claim_decision':
+      return { type: 'claim_decision', actionId: 0 } // skip
     case 'day': return { type: 'execute', target: -1 }
     case 'night_attack': return { type: 'attack', target: -1 }
     case 'night_divine': return { type: 'divine', target: -1 }
@@ -933,6 +939,8 @@ function buildPhaseActionFor(state: SimState, action: number): PhaseAction {
       return action === 0
         ? { type: 'claim_fake', willClaim: false }
         : { type: 'claim_fake', willClaim: true, claimerSeat: action }
+    case 'claim_decision':
+      return { type: 'claim_decision', actionId: action }
     case 'morning': {
       const seerSeat = state.morningPending[0] ?? -1
       const targetSeat = (action >> 1) + 1
@@ -1016,6 +1024,10 @@ export function legalActionIdsForPhase(state: SimState, actorSeat: number): Set<
         mask ^= bit
       }
       return out
+    }
+    case 'claim_decision': {
+      // 0 (skip) と未偽 CO role × 未 CO 生存 wolf/fanatic claimer の組合せ
+      return legalClaimDecisionActions(state)
     }
     case 'morning': {
       let mask = state.alive

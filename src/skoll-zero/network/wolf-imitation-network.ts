@@ -2,42 +2,53 @@
  * WolfImitationNetwork: skoll-zero の wolf 用 imitation NN。
  *
  * - wolf NN (trainable, `WOLF_IMITATION_ZERO_NETWORK_CONFIG`) をラップ
- * - frozen skoll-zero standard NN (= 村側 NN) を「真占いだったら」base policy として参照
- * - `claim_fake` / `morning` head の policy を凸結合で mix 出力
+ * - frozen skoll-zero standard NN (= 村側 NN) を「真役職だったら」base policy として参照
+ * - `claim_decision` / `morning` head の policy を凸結合で mix 出力
  *
  * Forward:
  *   1. wolf NN.forward(rootObs) → wolf logits + outcomeDist
- *   2. headName が claim_fake / morning なら frozen village NN.forward(virtualViewerObs)
- *      - claim_seer_fake / morning → viewer='seer'
- *      - claim_medium_fake         → viewer='medium'
- *      - claim_bg_fake             → viewer='bodyguard'
- *      - claim_nekomata_fake       → viewer='nekomata'
+ *   2. headName が claim_decision なら 4 種 virtualViewerObs (seer/medium/bg/nekomata) を
+ *      frozen village NN.forward に投げて 4 つの claim_true を取得 → village base 57-dim を構築
+ *      headName が morning なら virtualViewerObs.seer を frozen village に投げて divine を取得
  *   3. mix:
- *      - claim_fake: skip 部分を α_claim と π_v_co で凸結合、claimer 部分は wolf を再正規化
+ *      - claim_decision: 57-dim (skip + 4 役職 × 14 claimer) を α_claim と凸結合
  *      - morning: target 部分を α_morning と π_v_target で凸結合、white/black は wolf morning_res
- *   4. 既存 head 名 (`claim_fake` 15-dim, `morning` 28-dim) と互換の softmax 確率分布を返す
+ *   4. 既存 head 名 (`claim_decision` 57-dim, `morning` 28-dim) と互換の softmax 確率分布を返す
  *
  * State の alive は legal action mask 用 (per-seat head のみ使用)。
  */
 
+import type { SystemRole } from '../../types/index.ts'
 import type { HeadName, MasonZeroNN, NNOutput, RootObservation } from '../mcts/nn.ts'
 import { uniformOutcomeDist } from '../mcts/nn.ts'
 import type { SimState } from '../simulator/world-state.ts'
+import { CLAIM_DECISION_ROLES, CLAIM_DECISION_SEATS_PER_ROLE } from '../simulator/rollout-sim.ts'
 import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network.ts'
 import type { ForwardResult } from '../../fenrir/src/ml/nn.ts'
 import { createWolfImitationZeroNetwork } from './config.ts'
 
 const SEATS = 14
-const CLAIM_FAKE_SIZE = 1 + SEATS  // 15: skip + claimer seat
-const MORNING_SIZE = SEATS * 2     // 28: target × {white, black}
+const CLAIM_DECISION_SIZE = 1 + CLAIM_DECISION_ROLES.length * CLAIM_DECISION_SEATS_PER_ROLE  // 57
+const MORNING_SIZE = SEATS * 2  // 28
+
+/**
+ * 4 種 viewer 観測の bundle。caller (Module) が viewer role 別に encode して渡す。
+ * key の順序は CLAIM_DECISION_ROLES と整合: seer / medium / bodyguard / nekomata。
+ */
+export type VirtualViewerObsBundle = {
+  seer: Float32Array
+  medium: Float32Array
+  bodyguard: Float32Array
+  nekomata: Float32Array
+}
 
 export class WolfImitationNetwork implements MasonZeroNN {
   readonly net: TransformerNetwork
-  /** frozen skoll-zero standard NN — 真占い base policy を提供 (no grad) */
+  /** frozen skoll-zero standard NN — 真役職 base policy を提供 (no grad) */
   readonly frozenVillage: TransformerNetwork
 
   /**
-   * @param frozenVillage 真占い base 用の skoll-zero standard NN (deep clone 済を期待)
+   * @param frozenVillage 真役職 base 用の skoll-zero standard NN (deep clone 済を期待)
    * @param net           完成品の wolf imitation NN（省略時は fresh ネット）
    * @param opts.zeroValueHead true なら legacy scalar value head を zero reset (default true)
    */
@@ -57,8 +68,8 @@ export class WolfImitationNetwork implements MasonZeroNN {
   /**
    * MasonZeroNN.forward 実装。execute / attack のみ対応 (純 wolf head)。
    *
-   * claim_fake / morning は virtualViewerObs が必要なため、Module 側で `mixForward` を
-   * 直接呼ぶ必要がある (4 引数ではこれら head を呼ぶと throw)。
+   * claim_decision / morning は virtualViewerObs(Bundle) が必要なため、Module 側で
+   * `mixForward` を直接呼ぶ必要がある (4 引数ではこれら head を呼ぶと throw)。
    */
   forward(
     rootObs: RootObservation,
@@ -68,8 +79,8 @@ export class WolfImitationNetwork implements MasonZeroNN {
   ): NNOutput {
     if (headName !== 'execute' && headName !== 'attack') {
       throw new Error(
-        `WolfImitationNetwork.forward: head '${headName}' requires virtualViewerObs. ` +
-        `Use mixForward(rootObs, virtualViewerObs, ...) for claim_fake / morning.`,
+        `WolfImitationNetwork.forward: head '${headName}' requires virtualViewerObs(Bundle). ` +
+        `Use mixForward(rootObs, virtualViewerObs(Bundle), ...) for claim_decision / morning.`,
       )
     }
     const wolfResult = this.net.forward(rootObs)
@@ -81,21 +92,22 @@ export class WolfImitationNetwork implements MasonZeroNN {
   }
 
   /**
-   * Wolf imitation 専用の mix forward。virtualViewerObs を必要とする claim_fake / morning
-   * 用。execute / attack で呼ぶと内部的に通常 forward と同じ結果を返す (Module 側で
-   * 分岐ミス時の安全策)。
+   * Wolf imitation 専用の mix forward。virtualViewerObs(Bundle) を必要とする
+   * claim_decision / morning 用。
+   *
+   * - claim_decision: virtualViewerObs は Bundle (4 種 obs) を要求
+   * - morning: virtualViewerObs は seer obs (Float32Array 単体) を要求
+   * - execute / attack で呼ぶと内部的に通常 forward と同じ結果を返す (Module 側の保険)
    *
    * @param rootObs          wolf 観測 (1212 dim)
-   * @param virtualViewerObs virtual viewer obs (1029 dim、wolfSeat を真 {seer / medium /
-   *                         bodyguard / nekomata} と仮定。caller が phase / actionMode から
-   *                         viewer role を選択して構築する)
+   * @param virtualViewerObs claim_decision なら Bundle、morning なら seer obs (Float32Array)
    * @param state            legal action mask 用 (per-seat head)
    * @param wolfSeat         行動主体の seat
-   * @param headName         'execute' | 'attack' | 'claim_fake' | 'morning'
+   * @param headName         'execute' | 'attack' | 'claim_decision' | 'morning'
    */
   mixForward(
     rootObs: RootObservation,
-    virtualViewerObs: Float32Array,
+    virtualViewerObs: Float32Array | VirtualViewerObsBundle,
     state: SimState,
     wolfSeat: number,
     headName: HeadName,
@@ -110,14 +122,26 @@ export class WolfImitationNetwork implements MasonZeroNN {
       return { policy, outcomeDist }
     }
 
-    // claim_fake / morning は mix
-    const villageResult = this.frozenVillage.forward(virtualViewerObs)
-
-    if (headName === 'claim_fake') {
-      const policy = mixClaimFake(wolfResult, villageResult)
+    if (headName === 'claim_decision') {
+      if (virtualViewerObs instanceof Float32Array) {
+        throw new Error('WolfImitationNetwork.mixForward: claim_decision requires VirtualViewerObsBundle (4 viewer obs)')
+      }
+      const villageResults: Record<SystemRole, ForwardResult> = {
+        seer: this.frozenVillage.forward(virtualViewerObs.seer),
+        medium: this.frozenVillage.forward(virtualViewerObs.medium),
+        bodyguard: this.frozenVillage.forward(virtualViewerObs.bodyguard),
+        nekomata: this.frozenVillage.forward(virtualViewerObs.nekomata),
+      } as Record<SystemRole, ForwardResult>
+      const policy = mixClaimDecision(wolfResult, villageResults)
       return { policy, outcomeDist }
     }
+
     if (headName === 'morning') {
+      // morning は seer 視点のみ (偽占い結果 = 真 seer の divine head と mix)
+      const seerObs = virtualViewerObs instanceof Float32Array
+        ? virtualViewerObs
+        : virtualViewerObs.seer
+      const villageResult = this.frozenVillage.forward(seerObs)
       const policy = mixMorning(wolfResult, villageResult)
       return { policy, outcomeDist }
     }
@@ -130,41 +154,64 @@ export class WolfImitationNetwork implements MasonZeroNN {
 // ============================================================
 
 /**
- * claim_fake (15-dim) の mix。
+ * claim_decision (57-dim) の mix。
  *
- *   π_v_co       = softmax(village.claim_true)  // 2-dim [skip, co]
- *   π_w_full     = softmax(wolf.claim_fake_dev) // 15-dim
- *   α_claim      = softmax(wolf.alpha_claim)[1] // scalar [0,1]
+ * action 0       = skip
+ * action 1..14   = seer 騙り (claimer 1..14)
+ * action 15..28  = medium 騙り
+ * action 29..42  = bodyguard 騙り
+ * action 43..56  = nekomata 騙り
  *
- *   final[skip]      = (1-α) × π_v_co[0] + α × π_w_full[0]
- *   final[claimer i] = π_w_full[i] / Σ_{j=1..14} π_w_full[j] × (1 - final[skip])
+ * 入力:
+ *   π_w_full       = softmax(wolf.claim_decision_dev)  // 57-dim
+ *   α_claim        = softmax(wolf.alpha_claim)[1]
+ *   π_v_co_role[2] = softmax(village_role.claim_true)  // 各役職 viewer の [skip, co]
  *
- * これにより Σ final = 1 (確率分布として正規化済)。
+ * Village base 57-dim (4 viewer の意見を等加重 1/4 で混合):
+ *   base[skip]                = (1/4) × Σ_role π_v_co_role[skip]   = avg(skip_role)
+ *   base[role × 14 + claimer] = (1/4) × π_v_co_role[co] / 14       (claimer 内 uniform)
+ *
+ * Σ base = (1/4) × Σ_role (skip_role + co_role) = (1/4) × 4 = 1 (normalize 不要)
+ *
+ * Final:
+ *   final = (1 - α_claim) × base + α_claim × π_w_full
+ *
+ * 解釈: 「seer 騙りすべきか」「medium 騙りすべきか」… を独立な viewer claim_true で評価し、
+ * 4 viewer の意見を等加重で混合する。各 role の co 確率は claimer 14 席で uniform に
+ * 配分 (村 NN は claimer 嗜好を持たない、wolf NN の deviation で偏らせる)。
  */
-export function mixClaimFake(wolf: ForwardResult, village: ForwardResult): Map<number, number> {
-  const wolfDev = requireLogits(wolf, 'claim_fake_dev')
+export function mixClaimDecision(
+  wolf: ForwardResult,
+  village: Record<SystemRole, ForwardResult>,
+): Map<number, number> {
+  const wolfDev = requireLogits(wolf, 'claim_decision_dev')
   const wolfAlpha = requireLogits(wolf, 'alpha_claim')
-  const villageCo = requireLogits(village, 'claim_true')
-
-  const piVCo = softmaxArray(villageCo)         // 2-dim
-  const piWFull = softmaxArray(wolfDev)         // 15-dim
+  const piWFull = softmaxArray(wolfDev)         // 57-dim
   const alphaClaim = softmaxArray(wolfAlpha)[1] // [0,1]
 
-  const finalSkip = (1 - alphaClaim) * piVCo[0] + alphaClaim * piWFull[0]
-  const wolfNonSkipSum = 1 - piWFull[0]
-  const targetNonSkipSum = 1 - finalSkip
-
-  const out = new Map<number, number>()
-  out.set(0, finalSkip)
-  if (wolfNonSkipSum > 1e-9) {
-    const scale = targetNonSkipSum / wolfNonSkipSum
-    for (let i = 1; i < CLAIM_FAKE_SIZE; i++) {
-      out.set(i, piWFull[i] * scale)
+  const numRoles = CLAIM_DECISION_ROLES.length
+  // village base 57-dim 構築
+  const base = new Float32Array(CLAIM_DECISION_SIZE)
+  let baseSkipSum = 0
+  for (let roleIdx = 0; roleIdx < numRoles; roleIdx++) {
+    const role = CLAIM_DECISION_ROLES[roleIdx]
+    const villageCo = requireLogits(village[role], 'claim_true')
+    const piVCo = softmaxArray(villageCo) // 2-dim [skip, co]
+    baseSkipSum += piVCo[0]
+    // 各 role の co prob を 1/numRoles で weight、claimer 14 席で uniform
+    const coUniform = piVCo[1] / (numRoles * SEATS)
+    const offset = 1 + roleIdx * SEATS
+    for (let i = 0; i < SEATS; i++) {
+      base[offset + i] = coUniform
     }
-  } else {
-    // 退化ケース: wolf が skip を 100% 出した。claimer 部分を uniform 配分。
-    const u = targetNonSkipSum / SEATS
-    for (let i = 1; i < CLAIM_FAKE_SIZE; i++) out.set(i, u)
+  }
+  base[0] = baseSkipSum / numRoles
+
+  // mix
+  const out = new Map<number, number>()
+  const oneMinusAlpha = 1 - alphaClaim
+  for (let i = 0; i < CLAIM_DECISION_SIZE; i++) {
+    out.set(i, oneMinusAlpha * base[i] + alphaClaim * piWFull[i])
   }
   return out
 }

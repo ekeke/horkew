@@ -91,6 +91,13 @@ export type RolloutInvariants = {
    * null なら narrow bonus は no-op (rollout retar OFF または narrow coef=0 時の最適化)。
    */
   globalRetarSumAtRoot?: number | null
+  /**
+   * wolf imitation A案 (claim_decision 経路) を有効化するか。
+   * true なら buildInitialSimState 経由で SimState.wolfImitation=true に伝搬され、
+   * claim_decision phase の skip 判定が逆転する。
+   * default false (= 旧 claim_*_fake 経路で動作)。
+   */
+  wolfImitation?: boolean
 }
 
 /** signal の per-seat 累積カウンター (`collectObservation` 由来) */

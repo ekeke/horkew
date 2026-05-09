@@ -3,10 +3,11 @@ import type { World } from '../../hati/types.ts'
 import type { GameOutcome } from '../../hati/simulate.ts'
 
 /**
- * SimState.phase の 15 種。1 day-night cycle を細分化:
+ * SimState.phase の 16 種。1 day-night cycle を細分化:
  *
  *   morning
  *     → claim_seer_true / claim_medium_true / claim_bg_true / claim_nekomata_true / claim_mason
+ *     → claim_decision (wolf imitation A案: 偽 CO 種別 + claimer を一括 NN-MCTS で判断)
  *     → claim_seer_fake / claim_medium_fake / claim_bg_fake / claim_nekomata_fake
  *     → day
  *     → night_attack / night_divine / night_guard
@@ -14,6 +15,11 @@ import type { GameOutcome } from '../../hati/simulate.ts'
  *     → terminal or 翌 morning
  *
  * skip 条件は nextPhase / advancePhase で判定する。
+ *
+ * claim_decision は wolf imitation 経路 (state.wolfImitation=true) でのみ有効。
+ * imitation 経路では claim_decision で state.claims を一括書込 → 旧 4 phase
+ * (claim_*_fake) は同 role 偽 CO 既出で自動 skip する。
+ * non-imitation 経路では claim_decision を skip し旧 4 phase が逐次実行される。
  */
 export type Phase =
   | 'morning'
@@ -22,6 +28,7 @@ export type Phase =
   | 'claim_bg_true'
   | 'claim_nekomata_true'
   | 'claim_mason'
+  | 'claim_decision'
   | 'claim_seer_fake'
   | 'claim_medium_fake'
   | 'claim_bg_fake'
@@ -149,6 +156,18 @@ export type SimState = {
    * default null (= 未計算)。SKOLLZ_ROLLOUT_RETAR=0 では root snapshot で固定 (narrow bonus は no-op)。
    */
   globalRetarSum: number | null
+
+  /**
+   * wolf imitation A案 (claim_decision 経路) を有効化するかの flag。
+   *
+   * - true: claim_decision phase で 4 役職の偽 CO + claimer を一括判断 (NN-MCTS)。
+   *   旧 claim_*_fake phase は claim_decision で書込済の state.claims により自動 skip
+   * - false (default): claim_decision phase は常に skip、旧 4 phase が逐次実行
+   *
+   * 経路: WolfImitationModule.proposeClaimDecision で root SimState 構築時に true に設定。
+   * non-imitation の wolf module / determinizer 内部 rollout では false 維持。
+   */
+  wolfImitation: boolean
 }
 
 /**
@@ -181,6 +200,7 @@ export function createSimState(
     morningPending: [],
     foxAliveByViewer: true,
     globalRetarSum: null,
+    wolfImitation: false,
   }
 }
 
@@ -219,6 +239,7 @@ export function cloneSimState(state: SimState): SimState {
     morningPending: state.morningPending.slice(),
     foxAliveByViewer: state.foxAliveByViewer,
     globalRetarSum: state.globalRetarSum,
+    wolfImitation: state.wolfImitation,
   }
 }
 

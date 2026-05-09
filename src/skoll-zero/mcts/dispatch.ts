@@ -128,6 +128,14 @@ export function dispatchForPhase(
       if (!module) return null
       return { module, actorSeat, actorRole: role, headName: 'claim_true' }
     }
+    case 'claim_decision': {
+      // wolf imitation A案: root actor は decisionSeat (mySeat) 固定。
+      // module は bundle.wolf (WolfImitationModule の想定)。
+      const module = bundle.wolf
+      if (!module) return null
+      const role = world.roles[decisionSeat]
+      return { module, actorSeat: decisionSeat, actorRole: role, headName: 'claim_decision' }
+    }
     case 'claim_seer_fake':
     case 'claim_medium_fake':
     case 'claim_bg_fake':
