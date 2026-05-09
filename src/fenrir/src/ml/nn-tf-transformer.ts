@@ -1591,8 +1591,11 @@ export class TfTransformerNetwork {
    *
    * Forward の流れ:
    *   1. wolf NN.forwardTrunk(rootObs) → wolf clsOut + seatOutputs
-   *   2. frozen village NN.forwardForImitation(virtualSeerObs) → divineLogits + claimTrueLogits
-   *      (stopGradient で勾配を切る、village の weights は更新されない)
+   *   2. frozen village NN.forwardForImitation(virtualViewerObs) → divineLogits + claimTrueLogits
+   *      - virtualViewerObs は claim_seer_fake / morning なら viewer='seer' で構築済、
+   *        claim_medium_fake → 'medium'、claim_bg_fake → 'bodyguard'、
+   *        claim_nekomata_fake → 'nekomata' (viewer role は record 蓄積時の actionMode から導出)
+   *      - stopGradient で勾配を切る、village の weights は更新されない
    *   3. wolf の deviation/alpha head logits を取り出し
    *   4. mix:
    *      - claim_fake: skip 部分を α_claim と claim_true で凸結合、claimer は wolf 再正規化
@@ -1605,10 +1608,10 @@ export class TfTransformerNetwork {
    * 含まれないため、勾配は流れない (= 更新されない)。stopGradient はメモリリーク防止。
    */
   trainWolfImitation(batch: {
-    observations: Float32Array[]    // wolf 観測 [n, wolfInputSize]
-    virtualSeerObs: Float32Array[]  // virtual seer obs [n, villageInputSize]
-    policyTargets: Float32Array[]   // [n, 15] (claim_fake) or [n, 28] (morning)
-    outcomeTargets: Float32Array[]  // [n, outcomeDistOutputs]
+    observations: Float32Array[]      // wolf 観測 [n, wolfInputSize]
+    virtualViewerObs: Float32Array[]  // virtual viewer obs [n, villageInputSize]
+    policyTargets: Float32Array[]     // [n, 15] (claim_fake) or [n, 28] (morning)
+    outcomeTargets: Float32Array[]    // [n, outcomeDistOutputs]
     valueCoeff?: number
     headName: 'claim_fake' | 'morning'
     frozenVillageNet: TfTransformerNetwork
@@ -1647,7 +1650,7 @@ export class TfTransformerNetwork {
     const outcomeData = new Float32Array(n * outcomeSize)
     for (let i = 0; i < n; i++) {
       wolfObsData.set(batch.observations[i], i * wolfInputSize)
-      villageObsData.set(batch.virtualSeerObs[i], i * villageInputSize)
+      villageObsData.set(batch.virtualViewerObs[i], i * villageInputSize)
       policyData.set(batch.policyTargets[i], i * policySize)
       outcomeData.set(batch.outcomeTargets[i], i * outcomeSize)
     }

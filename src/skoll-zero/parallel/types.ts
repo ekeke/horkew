@@ -82,7 +82,8 @@ export type SelfPlayChunkRequest = {
   /**
    * Wolf imitation 用 frozen village NN の重み。
    * 指定時は worker が wolf slot を WolfImitationNetwork (frozen village + deviation/α) で
-   * 構築し、claim_fake / morning record に virtualSeerObs を inject する。
+   * 構築し、claim_*_fake / morning record に virtualViewerObs を inject する
+   * (viewer role は actionMode に応じて seer / medium / bodyguard / nekomata)。
    * 未指定なら従来通り (= 旧 wolf NN 構造)。
    */
   wolfImitationFrozenVillageWeights?: SharedWeights

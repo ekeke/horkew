@@ -343,10 +343,10 @@ export class MultiSkollZeroTrainer {
               // wolf imitation 経路。frozen village が無い (= wolf imitation 無効) なら skip。
               if (!slot.wolfImitationFrozen) continue
               const inputs = recordsToWolfImitationInputs(bucket)
-              if (inputs.observations.length === 0) continue  // virtualSeerObs 欠落
+              if (inputs.observations.length === 0) continue  // virtualViewerObs 欠落
               const res = slot.tfNet.trainWolfImitation({
                 observations: inputs.observations,
-                virtualSeerObs: inputs.virtualSeerObs,
+                virtualViewerObs: inputs.virtualViewerObs,
                 policyTargets: inputs.policyTargets,
                 outcomeTargets: inputs.outcomeTargets,
                 valueCoeff: this.config.valueCoeff,

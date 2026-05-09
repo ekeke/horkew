@@ -7,7 +7,11 @@
  *
  * Forward:
  *   1. wolf NN.forward(rootObs) → wolf logits + outcomeDist
- *   2. headName が claim_fake / morning なら frozen village NN.forward(virtualSeerObs)
+ *   2. headName が claim_fake / morning なら frozen village NN.forward(virtualViewerObs)
+ *      - claim_seer_fake / morning → viewer='seer'
+ *      - claim_medium_fake         → viewer='medium'
+ *      - claim_bg_fake             → viewer='bodyguard'
+ *      - claim_nekomata_fake       → viewer='nekomata'
  *   3. mix:
  *      - claim_fake: skip 部分を α_claim と π_v_co で凸結合、claimer 部分は wolf を再正規化
  *      - morning: target 部分を α_morning と π_v_target で凸結合、white/black は wolf morning_res
@@ -53,7 +57,7 @@ export class WolfImitationNetwork implements MasonZeroNN {
   /**
    * MasonZeroNN.forward 実装。execute / attack のみ対応 (純 wolf head)。
    *
-   * claim_fake / morning は virtualSeerObs が必要なため、Module 側で `mixForward` を
+   * claim_fake / morning は virtualViewerObs が必要なため、Module 側で `mixForward` を
    * 直接呼ぶ必要がある (4 引数ではこれら head を呼ぶと throw)。
    */
   forward(
@@ -64,8 +68,8 @@ export class WolfImitationNetwork implements MasonZeroNN {
   ): NNOutput {
     if (headName !== 'execute' && headName !== 'attack') {
       throw new Error(
-        `WolfImitationNetwork.forward: head '${headName}' requires virtualSeerObs. ` +
-        `Use mixForward(rootObs, virtualSeerObs, ...) for claim_fake / morning.`,
+        `WolfImitationNetwork.forward: head '${headName}' requires virtualViewerObs. ` +
+        `Use mixForward(rootObs, virtualViewerObs, ...) for claim_fake / morning.`,
       )
     }
     const wolfResult = this.net.forward(rootObs)
@@ -77,19 +81,21 @@ export class WolfImitationNetwork implements MasonZeroNN {
   }
 
   /**
-   * Wolf imitation 専用の mix forward。virtualSeerObs を必要とする claim_fake / morning
+   * Wolf imitation 専用の mix forward。virtualViewerObs を必要とする claim_fake / morning
    * 用。execute / attack で呼ぶと内部的に通常 forward と同じ結果を返す (Module 側で
    * 分岐ミス時の安全策)。
    *
-   * @param rootObs        wolf 観測 (1212 dim)
-   * @param virtualSeerObs virtual seer obs (1029 dim、wolfSeat を真 seer 仮定)
-   * @param state          legal action mask 用 (per-seat head)
-   * @param wolfSeat       行動主体の seat
-   * @param headName       'execute' | 'attack' | 'claim_fake' | 'morning'
+   * @param rootObs          wolf 観測 (1212 dim)
+   * @param virtualViewerObs virtual viewer obs (1029 dim、wolfSeat を真 {seer / medium /
+   *                         bodyguard / nekomata} と仮定。caller が phase / actionMode から
+   *                         viewer role を選択して構築する)
+   * @param state            legal action mask 用 (per-seat head)
+   * @param wolfSeat         行動主体の seat
+   * @param headName         'execute' | 'attack' | 'claim_fake' | 'morning'
    */
   mixForward(
     rootObs: RootObservation,
-    virtualSeerObs: Float32Array,
+    virtualViewerObs: Float32Array,
     state: SimState,
     wolfSeat: number,
     headName: HeadName,
@@ -105,7 +111,7 @@ export class WolfImitationNetwork implements MasonZeroNN {
     }
 
     // claim_fake / morning は mix
-    const villageResult = this.frozenVillage.forward(virtualSeerObs)
+    const villageResult = this.frozenVillage.forward(virtualViewerObs)
 
     if (headName === 'claim_fake') {
       const policy = mixClaimFake(wolfResult, villageResult)

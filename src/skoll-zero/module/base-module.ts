@@ -314,7 +314,7 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
 
   /**
    * record 蓄積前の hook。サブクラスで `auxObs` 等を追加できる (例: WolfImitationModule
-   * が virtualSeerObs を inject)。base 実装は no-op。
+   * が virtualViewerObs を inject)。base 実装は no-op。
    *
    * @param record   蓄積予定の PendingRecord
    * @param state    root SimState (rollout 開始 phase 適用済)
