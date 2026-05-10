@@ -3,6 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "exports": {
+    "./howl": "./src/howl/index.ts",
+    "./types": "./src/types/index.ts",
+    "./retar": "./src/retar/index.ts",
+    "./retar/wasm-helpers": "./src/retar/wasm-helpers.ts",
+    "./retar-rs/node": "./src/retar-rs/pkg/retar.js",
+    "./retar-rs/web": "./src/retar-rs/pkg-web/retar.js",
+    "./retar-rs/wasm-url": "./src/retar-rs/pkg/retar_bg.wasm"
+  },
   "scripts": {
     "build": "npm run build:lib && npm run build:demo",
     "build:lib": "tsc",
