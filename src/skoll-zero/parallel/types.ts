@@ -18,6 +18,15 @@ import type { SlotMap } from '../selfplay/multi-runner.ts'
 export type SlotName = keyof SlotMap & string
 
 /**
+ * Forward server に登録する slot 名。
+ *
+ * 6 役職 (`SlotName`) + `'frozenVillage'` (Wolf Imitation の frozen village 用、
+ * claim_decision の 4 viewer batched forward に使う)。
+ * SlotMap (= AgentSlot 集合) には含まれない (frozen village は agent ではないため)。
+ */
+export type ForwardSlotName = SlotName | 'frozenVillage'
+
+/**
  * MCTSConfig は rng が関数で structured clone 不可のため、
  * worker に渡すときは seed に変換し、worker 側で再構築する。
  */

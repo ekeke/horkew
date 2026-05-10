@@ -27,6 +27,9 @@ import type { TransformerNetwork } from '../../fenrir/src/ml/transformer-network
 import type { ForwardResult } from '../../fenrir/src/ml/nn.ts'
 import { createWolfImitationZeroNetwork } from './config.ts'
 
+/** mixClaimDecisionFromBatched: 順序固定 (CLAIM_DECISION_ROLES と整合) で 4 viewer の claim_true policy を渡す */
+const VIEWER_ORDER: ReadonlyArray<SystemRole> = CLAIM_DECISION_ROLES
+
 const SEATS = 14
 const CLAIM_DECISION_SIZE = 1 + CLAIM_DECISION_ROLES.length * CLAIM_DECISION_SEATS_PER_ROLE  // 57
 const MORNING_SIZE = SEATS * 2  // 28
@@ -44,21 +47,31 @@ export type VirtualViewerObsBundle = {
 
 export class WolfImitationNetwork implements MasonZeroNN {
   readonly net: TransformerNetwork
-  /** frozen skoll-zero standard NN — 真役職 base policy を提供 (no grad) */
+  /** frozen skoll-zero standard NN — 真役職 base policy を提供 (no grad)。morning 経路で使う */
   readonly frozenVillage: TransformerNetwork
+  /**
+   * Optional: 4 viewer obs を batched で forward する経路 (claim_decision 用)。
+   *
+   * 通常は ProxiedMasonZeroNN ('frozenVillage' slot) を渡し、worker → main GPU の
+   * 1 batched forward に集約する。未指定の場合は frozenVillage (Pure JS) で個別 forward
+   * (4 回) で fallback する (test 環境 / sequential mode 用)。
+   */
+  readonly frozenVillageBatched: MasonZeroNN | undefined
 
   /**
    * @param frozenVillage 真役職 base 用の skoll-zero standard NN (deep clone 済を期待)
    * @param net           完成品の wolf imitation NN（省略時は fresh ネット）
    * @param opts.zeroValueHead true なら legacy scalar value head を zero reset (default true)
+   * @param opts.frozenVillageBatched 4 viewer batched forward 用 (claim_decision 専用、proxy 経路)
    */
   constructor(
     frozenVillage: TransformerNetwork,
     net?: TransformerNetwork,
-    opts: { zeroValueHead?: boolean } = {},
+    opts: { zeroValueHead?: boolean, frozenVillageBatched?: MasonZeroNN } = {},
   ) {
     this.net = net ?? createWolfImitationZeroNetwork()
     this.frozenVillage = frozenVillage
+    this.frozenVillageBatched = opts.frozenVillageBatched
     const zeroValueHead = opts.zeroValueHead ?? true
     if (zeroValueHead) {
       this.net.zeroInitValueHead()
@@ -126,6 +139,24 @@ export class WolfImitationNetwork implements MasonZeroNN {
       if (virtualViewerObs instanceof Float32Array) {
         throw new Error('WolfImitationNetwork.mixForward: claim_decision requires VirtualViewerObsBundle (4 viewer obs)')
       }
+      if (this.frozenVillageBatched) {
+        // Batched 経路: 4 viewer obs を 1 forwardBatch にまとめて main GPU forward server
+        // へ proxy 経由で投げる。worker 跨ぎ集約で batch ~140 まで拡大可能。
+        // claim_true は global head なので state.alive / actorSeat は softmax mask に
+        // 使われないが、MasonZeroNN.forwardBatch interface 上必要なので渡す。
+        const obsList: Float32Array[] = [
+          virtualViewerObs.seer,
+          virtualViewerObs.medium,
+          virtualViewerObs.bodyguard,
+          virtualViewerObs.nekomata,
+        ]
+        const fakeStates: SimState[] = obsList.map(() => state)
+        const seats = obsList.map(() => wolfSeat)
+        const outputs = this.frozenVillageBatched.forwardBatch(obsList, fakeStates, seats, 'claim_true')
+        const policy = mixClaimDecisionFromBatched(wolfResult, outputs)
+        return { policy, outcomeDist }
+      }
+      // Pure JS fallback (test / sequential mode、proxy 経路 disabled)
       const villageResults: Record<SystemRole, ForwardResult> = {
         seer: this.frozenVillage.forward(virtualViewerObs.seer),
         medium: this.frozenVillage.forward(virtualViewerObs.medium),
@@ -208,6 +239,56 @@ export function mixClaimDecision(
   base[0] = baseSkipSum / numRoles
 
   // mix
+  const out = new Map<number, number>()
+  const oneMinusAlpha = 1 - alphaClaim
+  for (let i = 0; i < CLAIM_DECISION_SIZE; i++) {
+    out.set(i, oneMinusAlpha * base[i] + alphaClaim * piWFull[i])
+  }
+  return out
+}
+
+/**
+ * mixClaimDecision の batched 入力版。
+ *
+ * `mixClaimDecision` と同じ計算を、4 viewer の `claim_true` policy (global head の softmax 済
+ * Map<0, p_skip> + Map<1, p_co>) を順序固定 (CLAIM_DECISION_ROLES = seer/medium/bg/nekomata)
+ * で受け取って実行する。
+ *
+ * proxy 経路 (ProxiedMasonZeroNN.forwardBatch) からの戻り値 (NNOutput[]) を直接渡せるよう
+ * に NNOutput を受け取る (内部で .policy のみ使う、outcomeDist は無視)。
+ *
+ * 数値的には `mixClaimDecision` と同等 (softmax 済 vs raw logits の違いだけ)。
+ */
+export function mixClaimDecisionFromBatched(
+  wolf: ForwardResult,
+  villageBatched: NNOutput[],
+): Map<number, number> {
+  if (villageBatched.length !== VIEWER_ORDER.length) {
+    throw new Error(
+      `mixClaimDecisionFromBatched: expected ${VIEWER_ORDER.length} viewers, got ${villageBatched.length}`,
+    )
+  }
+  const wolfDev = requireLogits(wolf, 'claim_decision_dev')
+  const wolfAlpha = requireLogits(wolf, 'alpha_claim')
+  const piWFull = softmaxArray(wolfDev)         // 57-dim
+  const alphaClaim = softmaxArray(wolfAlpha)[1] // [0,1]
+
+  const numRoles = VIEWER_ORDER.length
+  const base = new Float32Array(CLAIM_DECISION_SIZE)
+  let baseSkipSum = 0
+  for (let roleIdx = 0; roleIdx < numRoles; roleIdx++) {
+    const policy = villageBatched[roleIdx].policy
+    const pSkip = policy.get(0) ?? 0
+    const pCo = policy.get(1) ?? 0
+    baseSkipSum += pSkip
+    const coUniform = pCo / (numRoles * SEATS)
+    const offset = 1 + roleIdx * SEATS
+    for (let i = 0; i < SEATS; i++) {
+      base[offset + i] = coUniform
+    }
+  }
+  base[0] = baseSkipSum / numRoles
+
   const out = new Map<number, number>()
   const oneMinusAlpha = 1 - alphaClaim
   for (let i = 0; i < CLAIM_DECISION_SIZE; i++) {

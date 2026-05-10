@@ -102,11 +102,29 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
   // この場合 wolf slot のみ ProxiedMasonZeroNN を bypass (mix forward は Pure JS で実行、
   // forward server 経路は未対応)。
   const wolfImitation = req.wolfImitationFrozenVillageWeights !== undefined
-  // Wolf imitation 用の frozen village (Pure JS) を一度だけ構築・unpack
+  // Wolf imitation 用の frozen village (Pure JS、morning 経路で使う) と、
+  // proxy 経路有効時の batched 版 (claim_decision 4 viewer 用) を構築。
   let frozenVillagePure: TransformerNetwork | undefined
+  let frozenVillageBatched: MasonZeroNN | undefined
   if (wolfImitation && req.wolfImitationFrozenVillageWeights) {
     frozenVillagePure = createStandardZeroNetwork()
     unpackWeights(frozenVillagePure, req.wolfImitationFrozenVillageWeights)
+    // proxy 経路有効時 (SKOLLZ_PARALLEL_GPU=1 + forwardSABs あり) は、
+    // claim_decision の 4 viewer obs を main thread の TF GPU で 1 batched forward に
+    // まとめるため、frozenVillage 用の ProxiedMasonZeroNN を構築。
+    // 内部 fallback として Pure JS net を MasonZeroNetwork で wrap (forward server エラー時用、
+    // 通常パスでは使われない)。
+    if (useProxy) {
+      const frozenMason = new MasonZeroNetwork(frozenVillagePure, { zeroValueHead: false })
+      frozenVillageBatched = new ProxiedMasonZeroNN(
+        'frozenVillage',
+        frozenMason,
+        req.forwardSABs!.signalSAB,
+        req.forwardSABs!.requestSAB,
+        req.forwardSABs!.responseSAB,
+        req.workerId!,
+      )
+    }
   }
 
   const slots: SlotMap = {}
@@ -118,8 +136,12 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
 
     let nn: MasonZeroNN
     if (slotName === 'wolf' && wolfImitation && frozenVillagePure) {
-      // WolfImitationNetwork で wrap (frozen village + deviation/α)
-      nn = new WolfImitationNetwork(frozenVillagePure, pureNet, { zeroValueHead: false })
+      // WolfImitationNetwork で wrap (frozen village + deviation/α)。
+      // proxy 経路有効時は frozenVillageBatched を渡して claim_decision を batched 化。
+      nn = new WolfImitationNetwork(frozenVillagePure, pureNet, {
+        zeroValueHead: false,
+        frozenVillageBatched,
+      })
     } else {
       const masonZero = new MasonZeroNetwork(pureNet, { zeroValueHead: false })
       nn = useProxy

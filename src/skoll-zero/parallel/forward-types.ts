@@ -12,7 +12,7 @@
  */
 
 import type { HeadName } from '../mcts/nn.ts'
-import type { SlotName } from './types.ts'
+import type { ForwardSlotName } from './types.ts'
 
 // ============================================================
 // signal の状態値
@@ -61,11 +61,11 @@ export const HEAD_NAME_TO_INDEX: ReadonlyMap<HeadName, number> = new Map(
   HEAD_NAMES.map((h, i) => [h, i]),
 )
 
-export const SLOT_NAMES: ReadonlyArray<SlotName> = [
-  'mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist',
+export const SLOT_NAMES: ReadonlyArray<ForwardSlotName> = [
+  'mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist', 'frozenVillage',
 ]
 
-export const SLOT_NAME_TO_INDEX: ReadonlyMap<SlotName, number> = new Map(
+export const SLOT_NAME_TO_INDEX: ReadonlyMap<ForwardSlotName, number> = new Map(
   SLOT_NAMES.map((s, i) => [s, i]),
 )
 

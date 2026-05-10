@@ -26,7 +26,7 @@ import {
   SIGNAL_RESPONSE_READY,
   SIGNAL_ERROR,
 } from './forward-types.ts'
-import type { SlotName } from './types.ts'
+import type { ForwardSlotName } from './types.ts'
 
 export type WorkerSABBundle = {
   signalSAB: SharedArrayBuffer
@@ -34,8 +34,13 @@ export type WorkerSABBundle = {
   responseSAB: SharedArrayBuffer
 }
 
-/** slot 名 → TfMasonZeroNetwork。GPU 推論担当 */
-export type ForwardServerSlots = Partial<Record<SlotName, TfMasonZeroNetwork>>
+/**
+ * slot 名 → TfMasonZeroNetwork。GPU 推論担当。
+ *
+ * 6 役職 (SlotName) + `'frozenVillage'` (Wolf Imitation の claim_decision 用 4 viewer
+ * batched forward) をキーに持てる。
+ */
+export type ForwardServerSlots = Partial<Record<ForwardSlotName, TfMasonZeroNetwork>>
 
 /** queue に保持する pending request (decode 済み + workerId) */
 type PendingRequest = DecodedRequest & {

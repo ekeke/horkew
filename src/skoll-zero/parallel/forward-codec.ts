@@ -25,7 +25,7 @@ import {
   MAX_POLICY_ENTRIES,
   OUTCOME_DIST_DIMS,
 } from './forward-types.ts'
-import type { SlotName } from './types.ts'
+import type { ForwardSlotName } from './types.ts'
 
 // ============================================================
 // Request encode / decode
@@ -33,7 +33,7 @@ import type { SlotName } from './types.ts'
 
 export function encodeRequest(
   requestSAB: SharedArrayBuffer,
-  slotName: SlotName,
+  slotName: ForwardSlotName,
   headName: HeadName,
   obsList: Float32Array[],
   actorSeats: number[],
@@ -77,7 +77,7 @@ export function encodeRequest(
 export type DecodedRequest = {
   batchSize: number
   headName: HeadName
-  slotName: SlotName
+  slotName: ForwardSlotName
   obsDims: number
   actorSeats: number[]
   /** 各 sample の SimState.alive bitmask。main 側で per-seat softmax mask に使う */

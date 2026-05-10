@@ -282,6 +282,14 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
       const s = slots[key]
       if (s) tfSlots[key] = new TfMasonZeroNetwork(s.tfNet)
     }
+    // Wolf Imitation の frozen village TF NN も forward server に登録
+    // (claim_decision phase の 4 viewer obs を 1 batched forward で処理する)。
+    // wolf slot が wolfImitationFrozen を持つ場合のみ追加。
+    const wolfSlot = slots.wolf
+    if (wolfSlot?.wolfImitationFrozen) {
+      tfSlots.frozenVillage = new TfMasonZeroNetwork(wolfSlot.wolfImitationFrozen.tfNet)
+      log('frozenVillage TF NN registered to forward server (claim_decision batched forward)')
+    }
     initSkollZeroForwardServer(tfSlots)
     log('SKOLLZ_PARALLEL_GPU=1 -> forward server 起動 (Stage 2: GPU forward via Atomics+SAB)')
   }

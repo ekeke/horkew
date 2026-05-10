@@ -12,7 +12,9 @@ import assert from 'node:assert/strict'
 
 import type { SystemRole } from '../../types/index.ts'
 import type { ForwardResult } from '../../fenrir/src/ml/nn.ts'
-import { mixClaimDecision, mixMorning } from './wolf-imitation-network.ts'
+import type { NNOutput } from '../mcts/nn.ts'
+import { uniformOutcomeDist } from '../mcts/nn.ts'
+import { mixClaimDecision, mixClaimDecisionFromBatched, mixMorning } from './wolf-imitation-network.ts'
 
 const SEATS = 14
 const ROLES: readonly SystemRole[] = ['seer', 'medium', 'bodyguard', 'nekomata']
@@ -235,6 +237,138 @@ describe('mixMorning', () => {
     for (let i = 0; i < SEATS * 2; i++) {
       assert.ok(policy.has(i), `missing entry ${i}`)
       assert.ok(policy.get(i)! >= 0, `entry ${i} negative: ${policy.get(i)}`)
+    }
+  })
+})
+
+// ============================================================
+// mixClaimDecisionFromBatched (proxy 経路: NNOutput[] 入力)
+// ============================================================
+
+/**
+ * NNOutput を構築する helper。
+ * claim_true は global head なので policy は Map<0, p_skip>, Map<1, p_co> の形。
+ */
+function fakeNNOutputClaimTrue(pSkip: number, pCo: number): NNOutput {
+  const policy = new Map<number, number>()
+  policy.set(0, pSkip)
+  policy.set(1, pCo)
+  return { policy, outcomeDist: uniformOutcomeDist() }
+}
+
+/** ForwardResult (raw logits 持ち) と同じ alpha+claim_decision_dev を持つ wolf を作る helper */
+function makeWolf(claimDecisionDev: number[], alphaClaim: number[]) {
+  return fakeResult({
+    claim_decision_dev: claimDecisionDev,
+    alpha_claim: alphaClaim,
+  })
+}
+
+describe('mixClaimDecisionFromBatched', () => {
+  const wolfDevUniform = new Array(CLAIM_DECISION_SIZE).fill(0)
+  // softmax([1, 0]) = [0.731, 0.269] → 4 viewer 全員に渡す想定
+  const piVSkipBias = softmax2(1, 0)
+
+  it('mixClaimDecision と数値同等 (4 viewer 全員 skip-bias、α≈0)', () => {
+    const wolf = makeWolf(wolfDevUniform, [10, -10])  // α ≈ 0
+    // batched 入力: 4 viewer 全員に [skip=0.731, co=0.269]
+    const villageBatched: NNOutput[] = [
+      fakeNNOutputClaimTrue(piVSkipBias[0], piVSkipBias[1]),
+      fakeNNOutputClaimTrue(piVSkipBias[0], piVSkipBias[1]),
+      fakeNNOutputClaimTrue(piVSkipBias[0], piVSkipBias[1]),
+      fakeNNOutputClaimTrue(piVSkipBias[0], piVSkipBias[1]),
+    ]
+    const policy = mixClaimDecisionFromBatched(wolf, villageBatched)
+
+    // 期待値: skip 部分 = avg(piVSkip) = piVSkip[0]
+    assert.ok(Math.abs(policy.get(0)! - piVSkipBias[0]) < 1e-3)
+    // role × claimer 部分: 各 entry = co / (4 × 14)
+    const expectedCo = piVSkipBias[1] / (ROLES.length * SEATS)
+    for (let roleIdx = 0; roleIdx < ROLES.length; roleIdx++) {
+      const offset = 1 + roleIdx * SEATS
+      for (let i = 0; i < SEATS; i++) {
+        assert.ok(Math.abs(policy.get(offset + i)! - expectedCo) < 1e-4)
+      }
+    }
+    assert.ok(Math.abs(sumPolicy(policy) - 1.0) < 1e-5)
+  })
+
+  it('α≈1 で wolf 完全 (uniform 1/57)', () => {
+    const wolf = makeWolf(wolfDevUniform, [-10, 10])  // α ≈ 1
+    const villageBatched: NNOutput[] = [
+      fakeNNOutputClaimTrue(0.5, 0.5),
+      fakeNNOutputClaimTrue(0.5, 0.5),
+      fakeNNOutputClaimTrue(0.5, 0.5),
+      fakeNNOutputClaimTrue(0.5, 0.5),
+    ]
+    const policy = mixClaimDecisionFromBatched(wolf, villageBatched)
+    const expected = 1 / CLAIM_DECISION_SIZE
+    for (let i = 0; i < CLAIM_DECISION_SIZE; i++) {
+      assert.ok(Math.abs(policy.get(i)! - expected) < 1e-3)
+    }
+    assert.ok(Math.abs(sumPolicy(policy) - 1.0) < 1e-5)
+  })
+
+  it('viewer 別差が反映される (seer skip / medium co、α≈0)', () => {
+    const wolf = makeWolf(wolfDevUniform, [10, -10])
+    // seer は skip 0.953、medium は co 0.953、bg/neko は中立
+    const seerProbs = softmax2(3, 0)   // [0.953, 0.047]
+    const mediumProbs = softmax2(0, 3) // [0.047, 0.953]
+    const villageBatched: NNOutput[] = [
+      fakeNNOutputClaimTrue(seerProbs[0], seerProbs[1]),     // seer
+      fakeNNOutputClaimTrue(mediumProbs[0], mediumProbs[1]), // medium
+      fakeNNOutputClaimTrue(0.5, 0.5),                       // bodyguard
+      fakeNNOutputClaimTrue(0.5, 0.5),                       // nekomata
+    ]
+    const policy = mixClaimDecisionFromBatched(wolf, villageBatched)
+
+    // skip = avg(0.953 + 0.047 + 0.5 + 0.5) = 0.5
+    const expectedSkip = (seerProbs[0] + mediumProbs[0] + 0.5 + 0.5) / ROLES.length
+    assert.ok(Math.abs(policy.get(0)! - expectedSkip) < 1e-3)
+    // medium 行の合計 = mediumProbs[1] / 4
+    let mediumSum = 0
+    for (let i = 0; i < SEATS; i++) mediumSum += policy.get(1 + 1 * SEATS + i)!
+    assert.ok(Math.abs(mediumSum - mediumProbs[1] / ROLES.length) < 1e-3)
+    assert.ok(Math.abs(sumPolicy(policy) - 1.0) < 1e-5)
+  })
+
+  it('viewer 数 mismatch で throw', () => {
+    const wolf = makeWolf(wolfDevUniform, [0, 0])
+    const villageBatched3: NNOutput[] = [
+      fakeNNOutputClaimTrue(0.5, 0.5),
+      fakeNNOutputClaimTrue(0.5, 0.5),
+      fakeNNOutputClaimTrue(0.5, 0.5),
+    ]
+    assert.throws(() => mixClaimDecisionFromBatched(wolf, villageBatched3))
+  })
+
+  it('mixClaimDecision (Pure JS 経路) と数値完全一致 (同入力)', () => {
+    // mixClaimDecision は raw logits + softmax 内部、mixClaimDecisionFromBatched は softmax 済 policy 入力。
+    // 同じ "softmax 後の値" を入力すれば結果は完全一致するはず。
+    const wolfDev = new Array(CLAIM_DECISION_SIZE).fill(0).map((_, i) => Math.sin(i))
+    const wolfAlpha = [0.5, -0.5]
+    const wolf = makeWolf(wolfDev, wolfAlpha)
+    // viewer ごとに異なる claim_true logits
+    const villageLogits: number[][] = [
+      [1, -1], [-0.5, 0.5], [0, 0], [2, -2],
+    ]
+    const villageRaw: Record<SystemRole, ReturnType<typeof fakeResult>> = {
+      seer: fakeResult({ claim_true: villageLogits[0] }),
+      medium: fakeResult({ claim_true: villageLogits[1] }),
+      bodyguard: fakeResult({ claim_true: villageLogits[2] }),
+      nekomata: fakeResult({ claim_true: villageLogits[3] }),
+    } as Record<SystemRole, ReturnType<typeof fakeResult>>
+    const policyA = mixClaimDecision(wolf, villageRaw)
+    const villageBatched: NNOutput[] = villageLogits.map(([a, b]) => {
+      const [pSkip, pCo] = softmax2(a, b)
+      return fakeNNOutputClaimTrue(pSkip, pCo)
+    })
+    const policyB = mixClaimDecisionFromBatched(wolf, villageBatched)
+
+    // 全 entry が一致 (浮動小数点誤差 1e-5 内)
+    for (let i = 0; i < CLAIM_DECISION_SIZE; i++) {
+      assert.ok(Math.abs(policyA.get(i)! - policyB.get(i)!) < 1e-5,
+        `entry ${i}: A=${policyA.get(i)} vs B=${policyB.get(i)}`)
     }
   })
 })

@@ -20,10 +20,10 @@ import {
   SIGNAL_ERROR,
   type ForwardRequestMessage,
 } from './forward-types.ts'
-import type { SlotName } from './types.ts'
+import type { ForwardSlotName } from './types.ts'
 
 export class ProxiedMasonZeroNN implements MasonZeroNN {
-  private readonly slotName: SlotName
+  private readonly slotName: ForwardSlotName
   private readonly innerNN: MasonZeroNN
   private readonly requestSAB: SharedArrayBuffer
   private readonly responseSAB: SharedArrayBuffer
@@ -31,7 +31,7 @@ export class ProxiedMasonZeroNN implements MasonZeroNN {
   private readonly signalView: Int32Array
 
   constructor(
-    slotName: SlotName,
+    slotName: ForwardSlotName,
     innerNN: MasonZeroNN,
     signalSAB: SharedArrayBuffer,
     requestSAB: SharedArrayBuffer,
