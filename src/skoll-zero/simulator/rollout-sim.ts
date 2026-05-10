@@ -216,9 +216,14 @@ export function shouldSkipPhase(state: SimState): boolean {
     case 'claim_medium_fake':
     case 'claim_bg_fake':
     case 'claim_nekomata_fake': {
+      // wolf imitation A案: claim_decision phase で全偽 CO 判断を完結する設計のため、
+      // 旧 4 phase は常に skip。claim_decision で書込み済 (state.claims に既偽 CO) でも、
+      // 書き込まなかった (action=0=skip 選択) ケースでも、ここで一括 skip する。
+      // これを設定しないと WolfImitationNetwork.forward が旧 head 'claim_fake' を要求し
+      // throw する (新 NN は claim_decision_dev のみ持ち claim_fake は無い)。
+      if (state.wolfImitation) return true
       const role = fakeClaimRole(phase)!
       // 既偽 CO 有なら skip (Stage 1 単純化: 同役職の重複偽 CO は扱わない)
-      // wolf imitation 経路で claim_decision で書込済の場合もこの判定で自動 skip される
       for (const entry of claims.values()) {
         if (entry.role === role && entry.isFake) return true
       }

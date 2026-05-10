@@ -43,6 +43,18 @@ export class WolfImitationModule extends WolfSkollZeroModule {
     this.imitationNN = opts.nn
   }
 
+  /**
+   * Wolf imitation A案を要求する Module であることを宣言。
+   *
+   * これにより BaseSkollZeroModule.runMctsProposal 内で、当該 Module が `bundle.wolf` に
+   * 入っている全 MCTS rollout で `state.wolfImitation = true` が設定される。
+   * 結果、claim_decision phase が active になり、旧 claim_*_fake は自動 skip される
+   * (WolfImitationNetwork に旧 'claim_fake' head が無いため、これを設定しないと throw する)。
+   */
+  override requiresWolfImitationMode(): boolean {
+    return true
+  }
+
   override forwardAt(
     state: SimState,
     actorSeat: number,

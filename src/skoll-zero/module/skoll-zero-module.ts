@@ -189,4 +189,20 @@ export interface SkollZeroModule {
     headName: HeadName,
     invariants: RolloutInvariants,
   ): NNOutput[]
+
+  /**
+   * Wolf imitation A案 を要求する Module か (optional、default false)。
+   *
+   * true を返すと、当該 Module を `bundle.wolf` に持つ MCTS rollout 全体で
+   * `state.wolfImitation = true` が設定される。これにより:
+   *   - claim_decision phase が active になる (root actor=mySeat 固定で WolfImitationModule.forwardAt
+   *     が mixForward 経由で 4 viewer 別 claim_true と合成した 57-dim を返す)
+   *   - 旧 claim_*_fake phase は state.claims に書込済 (claim_decision 経由) → 自動 skip
+   *
+   * これを設定しないと、claim_*_fake phase で WolfImitationNetwork.forward('claim_fake') が
+   * 要求され、新 head 名 (claim_decision_dev) しか持たない WolfImitationNetwork が throw する。
+   *
+   * 実装: WolfImitationModule のみ override で true、他の Module は default false。
+   */
+  requiresWolfImitationMode?(): boolean
 }

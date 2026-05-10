@@ -188,6 +188,49 @@ describe('dispatchForPhase', () => {
     const r = dispatchForPhase(state, 1, partial)
     assert.equal(r, null)
   })
+
+  // ------------------------------------------------------------
+  // claim_decision (wolf imitation A案): root actor は decisionSeat 固定、bundle.wolf を選択
+  // ------------------------------------------------------------
+
+  it('claim_decision: bundle.wolf + decisionSeat 固定 + headName=claim_decision', () => {
+    const world = makeWorld({
+      1: 'seer', 2: 'werewolf', 3: 'werewolf', 4: 'villager',
+    })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'claim_decision')
+    state.wolfImitation = true
+    // decisionSeat=3 (lowest wolf=2 とは別の wolf)。root actor は decisionSeat 固定の確認
+    const r = dispatchForPhase(state, 3, bundle)
+    assert.equal(r?.module, wolfMod)
+    assert.equal(r?.actorSeat, 3, 'actorSeat は decisionSeat 固定 (lowest wolf ではない)')
+    assert.equal(r?.actorRole, 'werewolf')
+    assert.equal(r?.headName, 'claim_decision')
+  })
+
+  it('claim_decision: bundle.wolf 不在で null (fanatic にフォールバックしない)', () => {
+    const fanaticMod = makeMock('fanatic')
+    // wolf module 無し、fanatic module だけ持たせる
+    const partial: ModuleBundle = { fanatic: fanaticMod, standard: stdMod }
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_decision')
+    state.wolfImitation = true
+    const r = dispatchForPhase(state, 2, partial)
+    assert.equal(r, null,
+      'claim_decision は bundle.wolf 専用 — fanatic フォールバック不可')
+  })
+
+  it('claim_decision: decisionSeat が fanatic でも bundle.wolf を返す (root actor の役職に依らない)', () => {
+    const world = makeWorld({
+      1: 'seer', 2: 'werewolf', 3: 'fanatic', 4: 'villager',
+    })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'claim_decision')
+    state.wolfImitation = true
+    const r = dispatchForPhase(state, 3, bundle) // decisionSeat = fanatic
+    assert.equal(r?.module, wolfMod, 'fanatic でも bundle.wolf を使う')
+    assert.equal(r?.actorSeat, 3)
+    assert.equal(r?.actorRole, 'fanatic')
+    assert.equal(r?.headName, 'claim_decision')
+  })
 })
 
 describe('outcomeDistToFactionValue (Stage 4)', () => {

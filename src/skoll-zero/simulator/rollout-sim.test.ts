@@ -8,6 +8,8 @@ import {
   stepPhase, advancePhase, shouldSkipPhase,
   legalExecuteActions, legalAttackActions, legalDivineActions, legalGuardActions,
   legalClaimTrueActions, legalClaimFakeActions, legalMorningActions,
+  legalClaimDecisionActions, encodeClaimDecisionAction, decodeClaimDecisionAction,
+  CLAIM_DECISION_ROLES, CLAIM_DECISION_ACTION_SIZE, CLAIM_DECISION_SEATS_PER_ROLE,
   enterMorningPhase,
 } from './rollout-sim.ts'
 
@@ -458,5 +460,247 @@ describe('legalMorningActions (per-actor)', () => {
     stepPhase(state, { type: 'morning', reports: [{ seerSeat: 2, target: 1, color: 'human' }] })
     assert.notEqual(state.phase, 'morning') // 全消費で次 phase へ
     assert.deepEqual(state.morningPending, [])
+  })
+})
+
+// ============================================================
+// claim_decision phase (wolf imitation A案)
+// ============================================================
+
+describe('encodeClaimDecisionAction / decodeClaimDecisionAction', () => {
+  it('skip (action 0) は decode で null', () => {
+    assert.equal(decodeClaimDecisionAction(0), null)
+  })
+
+  it('全 (role, claimerSeat) ペアの round-trip が一致', () => {
+    for (let roleIdx = 0; roleIdx < CLAIM_DECISION_ROLES.length; roleIdx++) {
+      const role = CLAIM_DECISION_ROLES[roleIdx]
+      for (let seat = 1; seat <= CLAIM_DECISION_SEATS_PER_ROLE; seat++) {
+        const id = encodeClaimDecisionAction(role, seat)
+        const decoded = decodeClaimDecisionAction(id)
+        assert.equal(decoded?.role, role, `roleIdx=${roleIdx} seat=${seat}`)
+        assert.equal(decoded?.claimerSeat, seat, `roleIdx=${roleIdx} seat=${seat}`)
+      }
+    }
+  })
+
+  it('encode の action ID は 1 + roleIdx*14 + (seat-1)', () => {
+    assert.equal(encodeClaimDecisionAction('seer', 1), 1)
+    assert.equal(encodeClaimDecisionAction('seer', 14), 14)
+    assert.equal(encodeClaimDecisionAction('medium', 1), 15)
+    assert.equal(encodeClaimDecisionAction('bodyguard', 1), 29)
+    assert.equal(encodeClaimDecisionAction('nekomata', 1), 43)
+    assert.equal(encodeClaimDecisionAction('nekomata', 14), 56)
+  })
+
+  it('action 空間サイズは 57 (skip + 4 役職 × 14 claimer)', () => {
+    assert.equal(CLAIM_DECISION_ACTION_SIZE, 57)
+  })
+
+  it('範囲外 action ID は decode で null', () => {
+    assert.equal(decodeClaimDecisionAction(-1), null)
+    assert.equal(decodeClaimDecisionAction(CLAIM_DECISION_ACTION_SIZE), null) // 57 は範囲外
+    assert.equal(decodeClaimDecisionAction(1000), null)
+  })
+
+  it('encode で未対応 role は throw', () => {
+    assert.throws(() => encodeClaimDecisionAction('villager', 1))
+    assert.throws(() => encodeClaimDecisionAction('werewolf', 1))
+  })
+
+  it('encode で seat 範囲外は throw', () => {
+    assert.throws(() => encodeClaimDecisionAction('seer', 0))
+    assert.throws(() => encodeClaimDecisionAction('seer', 15))
+  })
+})
+
+describe('legalClaimDecisionActions', () => {
+  it('未 CO の wolf 0 で skip のみ (1 件)', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2]), 1, 'claim_decision')
+    state.wolfImitation = true
+    const legal = legalClaimDecisionActions(state)
+    assert.equal(legal.size, 1)
+    assert.ok(legal.has(0))
+  })
+
+  it('wolf 2 匹生存・claim 0 件で skip + 4 役職 × 2 claimer = 9 件', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'werewolf', 4: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'claim_decision')
+    state.wolfImitation = true
+    const legal = legalClaimDecisionActions(state)
+    assert.equal(legal.size, 1 + 4 * 2)
+    // 各 role × claimer の ID が含まれる
+    for (const role of CLAIM_DECISION_ROLES) {
+      for (const seat of [2, 3]) {
+        assert.ok(legal.has(encodeClaimDecisionAction(role, seat)),
+          `legal must include ${role}/${seat}`)
+      }
+    }
+  })
+
+  it('fanatic も claimer 候補に含まれる', () => {
+    const world = makeWorld({
+      1: 'seer', 2: 'werewolf', 3: 'fanatic', 4: 'villager',
+    })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'claim_decision')
+    state.wolfImitation = true
+    const legal = legalClaimDecisionActions(state)
+    // skip + 4 役職 × (wolf 1 + fanatic 1) = 9
+    assert.equal(legal.size, 1 + 4 * 2)
+    assert.ok(legal.has(encodeClaimDecisionAction('seer', 3)))
+    assert.ok(legal.has(encodeClaimDecisionAction('nekomata', 3)))
+  })
+
+  it('既偽 CO 済の role は除外される', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'werewolf', 4: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'claim_decision')
+    state.wolfImitation = true
+    state.claims.set(2, { role: 'seer', isFake: true }) // wolf 2 が seer 騙り済
+    const legal = legalClaimDecisionActions(state)
+    // skip + 残 3 役職 × 残 1 claimer (seat 3) = 4
+    assert.equal(legal.size, 1 + 3 * 1)
+    // seer は全 claimer 除外
+    for (let s = 1; s <= 14; s++) {
+      assert.ok(!legal.has(encodeClaimDecisionAction('seer', s)),
+        `seer must be excluded for claimer ${s}`)
+    }
+    // medium/bg/nekomata × seat 3 が残る
+    assert.ok(legal.has(encodeClaimDecisionAction('medium', 3)))
+    assert.ok(legal.has(encodeClaimDecisionAction('bodyguard', 3)))
+    assert.ok(legal.has(encodeClaimDecisionAction('nekomata', 3)))
+  })
+
+  it('既 CO 済の wolf seat は claimer から除外される', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'werewolf', 4: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'claim_decision')
+    state.wolfImitation = true
+    state.claims.set(2, { role: 'medium', isFake: true })
+    const legal = legalClaimDecisionActions(state)
+    // skip + 残 3 役職 (medium 除外済) × 残 1 claimer (seat 3) = 4
+    assert.equal(legal.size, 1 + 3 * 1)
+    // wolf 2 が claimer の action は全除外
+    for (const role of CLAIM_DECISION_ROLES) {
+      assert.ok(!legal.has(encodeClaimDecisionAction(role, 2)),
+        `wolf 2 must be excluded for ${role}`)
+    }
+  })
+})
+
+describe('shouldSkipPhase: claim_decision', () => {
+  it('wolfImitation=false なら常に skip (旧経路)', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_decision')
+    // wolfImitation default false
+    assert.equal(shouldSkipPhase(state), true)
+  })
+
+  it('wolfImitation=true で未 CO 狼が 0 なら skip', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_decision')
+    state.wolfImitation = true
+    state.claims.set(2, { role: 'seer', isFake: true })
+    assert.equal(shouldSkipPhase(state), true)
+  })
+
+  it('wolfImitation=true で wolf/fanatic 全滅で skip', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2]), 1, 'claim_decision')
+    state.wolfImitation = true
+    assert.equal(shouldSkipPhase(state), true)
+  })
+
+  it('wolfImitation=true で未 CO 狼が 1 件以上なら skip しない', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_decision')
+    state.wolfImitation = true
+    assert.equal(shouldSkipPhase(state), false)
+  })
+})
+
+describe('shouldSkipPhase: claim_*_fake は wolfImitation=true で常に skip', () => {
+  it('claim_decision で seer 偽 CO を書込済 → claim_seer_fake は skip (state.claims 既出経由)', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_seer_fake')
+    state.wolfImitation = true
+    state.claims.set(2, { role: 'seer', isFake: true })
+    assert.equal(shouldSkipPhase(state), true)
+  })
+
+  it('claim_decision で skip 選択 (state.claims 空) でも claim_seer_fake は skip', () => {
+    // 設計: wolfImitation=true なら旧 4 phase は常に skip。claim_decision で skip を選んだ
+    // = 当該 wolf は偽 CO しない判断、後続 claim_*_fake で再考しない (joint 判断完結)。
+    // これを skip しないと WolfImitationNetwork が旧 'claim_fake' head を要求して throw する。
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_seer_fake')
+    state.wolfImitation = true
+    // claim_decision で何も書かない (action=0 skip)
+    assert.equal(shouldSkipPhase(state), true)
+  })
+
+  it('wolfImitation=false (旧経路) では claim_seer_fake は通常通り active', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_seer_fake')
+    // wolfImitation default false
+    assert.equal(shouldSkipPhase(state), false)
+  })
+})
+
+describe('stepPhase: claim_decision', () => {
+  it('action=0 (skip) で claims 不変、claim_*_fake 全 skip → day へ', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3]), 1, 'claim_decision')
+    state.wolfImitation = true
+    stepPhase(state, { type: 'claim_decision', actionId: 0 })
+    assert.equal(state.claims.size, 0)
+    // wolfImitation=true なら旧 4 phase は常に skip → day
+    assert.equal(state.phase, 'day')
+  })
+
+  it('action=role*14+seat で 1 件偽 CO 挿入', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'werewolf', 4: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'claim_decision')
+    state.wolfImitation = true
+    const id = encodeClaimDecisionAction('medium', 3)
+    stepPhase(state, { type: 'claim_decision', actionId: id })
+    assert.equal(state.claims.size, 1)
+    assert.equal(state.claims.get(3)?.role, 'medium')
+    assert.equal(state.claims.get(3)?.isFake, true)
+  })
+
+  it('action=role*14+seat で書込済の場合は重複しない (既 CO 同 role 偽 CO ガード)', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'werewolf', 4: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'claim_decision')
+    state.wolfImitation = true
+    state.claims.set(2, { role: 'seer', isFake: true })
+    // 別 wolf の seer 偽 CO は同 role 偽 CO 既出ガードでスキップ
+    const id = encodeClaimDecisionAction('seer', 3)
+    stepPhase(state, { type: 'claim_decision', actionId: id })
+    // seat 3 には書き込まれない
+    assert.equal(state.claims.has(3), false)
+    assert.equal(state.claims.size, 1)
+  })
+
+  it('action=role*14+seat で claimer が既 CO 済なら書き込まない', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'werewolf', 4: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'claim_decision')
+    state.wolfImitation = true
+    state.claims.set(3, { role: 'medium', isFake: true })
+    // wolf 3 に bodyguard 騙りを試みる → claimer 既 CO で書き込まれない
+    const id = encodeClaimDecisionAction('bodyguard', 3)
+    stepPhase(state, { type: 'claim_decision', actionId: id })
+    assert.equal(state.claims.get(3)?.role, 'medium') // 上書きされない
+    assert.equal(state.claims.size, 1)
+  })
+
+  it('phase 完了後の skip 連鎖: wolfImitation=true で旧 4 phase 全 skip → day へ', () => {
+    const world = makeWorld({ 1: 'seer', 2: 'werewolf', 3: 'werewolf', 4: 'villager' })
+    const state = createSimState(world, aliveOf([1, 2, 3, 4]), 1, 'claim_decision')
+    state.wolfImitation = true
+    state.claims.set(1, { role: 'seer', isFake: false }) // 真 seer 既 CO
+    const id = encodeClaimDecisionAction('seer', 2) // wolf 2 が seer 騙り
+    stepPhase(state, { type: 'claim_decision', actionId: id })
+    // wolfImitation=true なら claim_*_fake 4 phase は常に skip → day へ前進
+    assert.equal(state.phase, 'day')
   })
 })

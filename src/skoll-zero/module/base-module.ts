@@ -403,10 +403,18 @@ export abstract class BaseSkollZeroModule implements SkollZeroModule {
     if (actionMode === 'morning' && !rootSimState.morningPending.includes(ctx.mySeat)) {
       rootSimState.morningPending = [ctx.mySeat, ...rootSimState.morningPending]
     }
-    // proposeClaimDecision (root='claim_decision'): wolf imitation A案の root。
-    // state.wolfImitation=true を伝搬 → shouldSkipPhase が claim_decision を有効化し、
-    // 旧 4 phase (claim_*_fake) は state.claims 一括書込により自動 skip となる。
-    if (actionMode === 'claim_decision') {
+    // wolf imitation A案: bundle.wolf が WolfImitationModule (= requiresWolfImitationMode=true)
+    // の場合、actionMode に依らず rollout 全体で wolfImitation=true を設定する。
+    // 理由:
+    //   - WolfImitationNetwork は新 head (claim_decision_dev) のみ持ち、旧 head 'claim_fake' は無い。
+    //     wolfImitation=false で rollout が走ると claim_*_fake phase が active になり、
+    //     wolf module forward('claim_fake') で throw する (旧 head 不在)。
+    //   - wolfImitation=true なら claim_decision phase が active、claim_*_fake は state.claims
+    //     一括書込により自動 skip → WolfImitationModule.forwardAt は mixForward 経路に乗る。
+    // proposeClaimDecision (root='claim_decision') / proposeMorning / proposeFakeCO /
+    // proposeVote / proposeNightAction の全てで条件成立。
+    const wolfRequiresImitation = bundle.wolf?.requiresWolfImitationMode?.() ?? false
+    if (actionMode === 'claim_decision' || wolfRequiresImitation) {
       rootSimState.wolfImitation = true
       invariants.wolfImitation = true
     }
