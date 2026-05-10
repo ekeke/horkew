@@ -19,16 +19,16 @@ case "${1:-build}" in
     docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}cargo test 2>&1"
     ;;
   build)
-    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}wasm-pack build --target nodejs --out-dir pkg 2>&1"
+    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}wasm-pack build --target nodejs --out-dir pkg 2>&1 && rm -f pkg/.gitignore"
     ;;
   build-web)
-    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}wasm-pack build --target web --out-dir pkg-web 2>&1"
+    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}wasm-pack build --target web --out-dir pkg-web 2>&1 && rm -f pkg-web/.gitignore"
     ;;
   build-dump)
-    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}wasm-pack build --target nodejs --out-dir pkg -- --features dump 2>&1"
+    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}wasm-pack build --target nodejs --out-dir pkg -- --features dump 2>&1 && rm -f pkg/.gitignore"
     ;;
   all)
-    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}cargo test 2>&1 && wasm-pack build --target nodejs --out-dir pkg 2>&1 && wasm-pack build --target web --out-dir pkg-web 2>&1"
+    docker run --rm -v "$MOUNT_DIR:/app" retar-wasm -c "${CLEAN}cargo test 2>&1 && wasm-pack build --target nodejs --out-dir pkg 2>&1 && rm -f pkg/.gitignore && wasm-pack build --target web --out-dir pkg-web 2>&1 && rm -f pkg-web/.gitignore"
     ;;
   *)
     echo "Usage: $0 {test|build|build-web|build-dump|all}"

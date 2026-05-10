@@ -1,0 +1,15 @@
+{
+  "name": "retar",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "retar_bg.wasm",
+    "retar.js",
+    "retar.d.ts"
+  ],
+  "main": "retar.js",
+  "types": "retar.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
