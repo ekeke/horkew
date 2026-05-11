@@ -16,6 +16,7 @@
   import { scoreWolfPairs, type WolfPairSuggestion } from './status/wolfPairScorer.ts'
   import HelpPanel from './HelpPanel.svelte'
   import YouTubePlayer from './YouTubePlayer.svelte'
+  import NicoPlayer from './NicoPlayer.svelte'
   import ColorSwatchPane from './ColorSwatchPane.svelte'
   import HatiPane from './HatiPane.svelte'
   import SkollPane from './SkollPane.svelte'
@@ -578,9 +579,12 @@
   let trialMode = $state(false)
 
   // --- Video sync ---
+  type VideoType = 'youtube' | 'nico' | ''
   let videoId = $state('')
+  let videoType: VideoType = $state('')
   let youtubePlayer: YouTubePlayer | undefined = $state()
-  let videoSegments: { videoId: string, url: string, line: number, timestamps: { line: number, seconds: number }[] }[] = $state([])
+  let nicoPlayer: NicoPlayer | undefined = $state()
+  let videoSegments: { videoId: string, videoType: VideoType, url: string, line: number, timestamps: { line: number, seconds: number }[] }[] = $state([])
   let activeSegmentIdx = $state(0)
   let videoAutoplay = $state(false)
   let videoCurrentTime = $state(0)
@@ -599,6 +603,7 @@
 
   function resetVideoState() {
     videoId = ''
+    videoType = ''
     videoSegments = []
     activeSegmentIdx = 0
     videoAutoplay = false
@@ -614,6 +619,19 @@
   function extractYouTubeId(url: string): string {
     const m = url.match(/(?:youtu\.be\/|v=|\/embed\/)([A-Za-z0-9_-]{11})/)
     return m?.[1] ?? ''
+  }
+
+  function extractNicoId(url: string): string {
+    const m = url.match(/(?:nicovideo\.jp\/watch\/|embed\.nicovideo\.jp\/watch\/)((?:sm|so|nm)\d+)/)
+    return m?.[1] ?? ''
+  }
+
+  function parseVideoUrl(url: string): { type: VideoType, id: string } {
+    const ytId = extractYouTubeId(url)
+    if (ytId) return { type: 'youtube', id: ytId }
+    const nicoId = extractNicoId(url)
+    if (nicoId) return { type: 'nico', id: nicoId }
+    return { type: '', id: '' }
   }
 
   function buildDayLineMap(statements: any[]): Map<number, number> {
@@ -632,7 +650,8 @@
     let current: typeof videoSegments[number] | null = null
     for (const s of statements) {
       if (s.type === 'videoSource') {
-        current = { videoId: extractYouTubeId(s.url), url: s.url, line: s.line, timestamps: [] }
+        const parsed = parseVideoUrl(s.url)
+        current = { videoId: parsed.id, videoType: parsed.type, url: s.url, line: s.line, timestamps: [] }
         segments.push(current)
       } else if (current) {
         if (s.type === 'timestamp') current.timestamps.push({ line: s.line, seconds: s.seconds })
@@ -746,8 +765,9 @@
         }
       }
     }
-    if (videoChanged) await tick()  // wait for YouTubePlayer $effect to set ready=false
-    youtubePlayer?.seekTo(seconds)
+    if (videoChanged) await tick()  // wait for Player $effect to set ready=false
+    if (videoType === 'youtube') youtubePlayer?.seekTo(seconds)
+    else if (videoType === 'nico') nicoPlayer?.seekTo(seconds)
     videoCurrentTime = seconds
     videoSyncActive = true
     runWithCursor(getVideoCursorLine())
@@ -1518,9 +1538,12 @@
 
       // Build video segments from @URL + @MM:SS annotations
       videoSegments = buildVideoSegments(fullParse.statements)
-      const activeId = videoSegments[activeSegmentIdx]?.videoId ?? ''
-      if (activeId !== videoId) {
+      const activeSeg = videoSegments[activeSegmentIdx]
+      const activeId = activeSeg?.videoId ?? ''
+      const activeType: VideoType = activeSeg?.videoType ?? ''
+      if (activeId !== videoId || activeType !== videoType) {
         videoId = activeId
+        videoType = activeType
         videoSyncActive = !!activeId
       }
       // First parse of a new document: autoplay if video annotations present
@@ -1707,9 +1730,10 @@
     if (idx < 0 || idx >= videoSegments.length) return
     activeSegmentIdx = idx
     const seg = videoSegments[idx]
-    if (seg.videoId !== videoId) {
+    if (seg.videoId !== videoId || seg.videoType !== videoType) {
       videoAutoplay = true
       videoId = seg.videoId
+      videoType = seg.videoType
     }
   }
 
@@ -2283,7 +2307,11 @@
     {#if videoId}
     <div class="prod-left prod-video-col" class:hidden-by-fullscreen={videoFullscreen}>
       <div class="video-container">
-        <YouTubePlayer bind:this={youtubePlayer} {videoId} bind:currentTime={videoCurrentTime} autoplay={videoAutoplay} onended={onVideoEnded} />
+        {#if videoType === 'youtube'}
+          <YouTubePlayer bind:this={youtubePlayer} {videoId} bind:currentTime={videoCurrentTime} autoplay={videoAutoplay} onended={onVideoEnded} />
+        {:else if videoType === 'nico'}
+          <NicoPlayer bind:this={nicoPlayer} {videoId} bind:currentTime={videoCurrentTime} autoplay={videoAutoplay} onended={onVideoEnded} />
+        {/if}
       </div>
       <div class="day-nav">
         <button class="day-nav-btn" disabled={videoDay <= 1} onclick={() => goToDay(videoDay - 1)}>&lt;</button>
