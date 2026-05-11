@@ -15,18 +15,16 @@
   let ready = $state(false)
 
   const NICO_ORIGIN = 'https://embed.nicovideo.jp'
+  const PLAYER_ID = 'horkew'
 
-  // Direct iframe URL with empty referer (skipping the official script wrapper)
-  // to bypass the localhost referer rejection on niconico's side.
-  const src = $derived(`${NICO_ORIGIN}/watch/${videoId}?oldScript=1&referer=&from=0&allowProgrammaticFullScreen=1`)
+  // Minimal jsapi URL form from older niconico embed docs.
+  const src = $derived(`${NICO_ORIGIN}/watch/${videoId}?jsapi=1&playerId=${PLAYER_ID}`)
 
-  // Best-effort seek via postMessage. May silently no-op if jsapi is not enabled
-  // on this embed URL — playback will still work, users seek manually.
   export function seekTo(seconds: number) {
     if (!iframeEl?.contentWindow) return
     iframeEl.contentWindow.postMessage({
       sourceConnectorType: 1,
-      playerId: 'horkew',
+      playerId: PLAYER_ID,
       eventName: 'seek',
       data: { time: seconds * 1000 },
     }, '*')
@@ -34,7 +32,10 @@
 
   function onMessage(e: MessageEvent) {
     if (e.origin !== NICO_ORIGIN) return
-    const { eventName, data } = e.data ?? {}
+    const msg = e.data ?? {}
+    if (msg.playerId && msg.playerId !== PLAYER_ID) return
+    const { eventName, data } = msg
+    console.debug('[NicoPlayer] message', eventName, data)
     if (eventName === 'playerMetadataChange' && data) {
       if (typeof data.currentTime === 'number') {
         currentTime = data.currentTime / 1000
@@ -59,9 +60,9 @@
     width="100%"
     height="100%"
     frameborder="0"
-    referrerpolicy="no-referrer"
     allow="autoplay; fullscreen; encrypted-media"
     allowfullscreen
+    onload={() => ready = true}
     title="niconico player"
   ></iframe>
   {#if !ready}

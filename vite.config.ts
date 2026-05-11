@@ -402,7 +402,7 @@ export default defineConfig({
   plugins: [svelte({ configFile: '../svelte.config.js' }), serveInspect(), serveStats(), servePublicEarly(), serveScenarios(), serveSkollModels(), serveSkollZeroModels(), servePhase2Models(), serveHuginnModels(), servePretrainSnapshots()],
   root: 'demo',
   base: '/horkew/',
-  server: { port: 5375, strictPort: true },
+  server: { port: 5375, strictPort: true, allowedHosts: ['zinrou.test'] },
   build: {
     chunkSizeWarningLimit: 600,
     rollupOptions: {
