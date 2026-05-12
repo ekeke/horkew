@@ -1203,6 +1203,28 @@ export type Faction = 'village' | 'wolf' | 'hamster'
  * Stage 4: 'draw' (FinalOutcome) と 'ongoing' (GameOutcome) の両方を受ける。
  * tanh range 制限は無く (outcome dist の dot product なので)、-2.0 でも安定。
  */
+/**
+ * 狐勝ち時の村・狼ペナルティ env override。
+ *
+ * default: 村 -2.0、狼 -1.5 (Stage 5 で確定した値)。
+ * 学習中の狐勝率が高い場合に env で強化可能 (例: -3.0 / -2.5 で +1.0 強化)。
+ *
+ * 注意: 強化しすぎると wolf が本職 (噛み) を放棄して狐排除に執着する局所最適に
+ * 陥る (Stage 5 の経緯で -2.5 → -2.0 に緩和した経緯あり)。
+ */
+const VILLAGE_FOX_LOSE = (() => {
+  const raw = process.env.SKOLLZ_VILLAGE_FOX_LOSE
+  if (!raw) return -2.0
+  const v = parseFloat(raw)
+  return Number.isFinite(v) ? v : -2.0
+})()
+const WOLF_FOX_LOSE = (() => {
+  const raw = process.env.SKOLLZ_WOLF_FOX_LOSE
+  if (!raw) return -1.5
+  const v = parseFloat(raw)
+  return Number.isFinite(v) ? v : -1.5
+})()
+
 export function outcomeToValue(
   outcome: GameOutcome | 'draw' | null,
   faction: Faction,
@@ -1215,12 +1237,13 @@ export function outcomeToValue(
   // 案 A: 敗北ペナルティを bonus 分強化 (-1.0 → -1.3)。
   // endgame bonus +endgameCoef が乗ったときに「狐排除した上での敗北」が
   // 元の -1.0 相当に戻るよう、outcome 側で先取りで強める。
+  // hamster_win 時のペナルティは VILLAGE_FOX_LOSE / WOLF_FOX_LOSE (env override 可)。
   switch (faction) {
     case 'village':
-      base = outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.3 : outcome === 'hamster_win' ? -2.0 : 0
+      base = outcome === 'village_win' ? 1.0 : outcome === 'wolf_win' ? -1.3 : outcome === 'hamster_win' ? VILLAGE_FOX_LOSE : 0
       break
     case 'wolf':
-      base = outcome === 'wolf_win' ? 1.0 : outcome === 'village_win' ? -1.3 : outcome === 'hamster_win' ? -1.5 : 0
+      base = outcome === 'wolf_win' ? 1.0 : outcome === 'village_win' ? -1.3 : outcome === 'hamster_win' ? WOLF_FOX_LOSE : 0
       break
     case 'hamster':
       base = outcome === 'hamster_win' ? 1.0 : outcome === 'village_win' ? -1.0 : outcome === 'wolf_win' ? -1.0 : 0

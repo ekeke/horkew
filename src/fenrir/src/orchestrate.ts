@@ -42,7 +42,8 @@ import {
   type TrainingConfig,
 } from './training.ts'
 import { existsSync, readdirSync, readFileSync, unlinkSync, rmSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
-import { basename } from 'node:path'
+import { basename, join } from 'node:path'
+import { loadTrainConfig } from './train-config.ts'
 import { execSync } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { generatePlanTokenTrainingBatch, generateStructurePretrainBatch } from './ml/execution-plan-data.ts'
@@ -997,6 +998,27 @@ async function main(): Promise<void> {
 
   // === 起動モード選択 (checkpointBase + resume/ppoRestart を決定) ===
   await selectStartMode(config)
+
+  // === train-config.json auto-load (ckpt-base 配下) ===
+  // 既存の SKOLLZ_* / DESIGNATION_DEBUG 等の env 読み込みコードを変更せず、
+  // ckpt-base 配下に置いた JSON で設定を一元管理する。shell env / CLI が最優先で、
+  // train-config.json は default よりは強い (= 既設の env がある key は skip)。
+  // この段階で env を反映することで、後段で dynamic import される runner / ISMCTS
+  // 等の module init 時に新 env 値が見える。
+  try {
+    const configPath = join(config.checkpointBase, 'train-config.json')
+    const loadResult = loadTrainConfig(configPath)
+    if (loadResult.path !== null) {
+      log(`config: ${loadResult.path} loaded ${loadResult.loaded.length} keys`
+        + (loadResult.skipped.length > 0 ? `, skipped ${loadResult.skipped.length} (already in shell env)` : '')
+        + (loadResult.invalid.length > 0 ? `, invalid ${loadResult.invalid.length}` : ''))
+      if (loadResult.invalid.length > 0) {
+        log(`config: invalid keys (ignored): ${loadResult.invalid.join(', ')}`)
+      }
+    }
+  } catch (err) {
+    log(`config: train-config.json load FAILED (${err instanceof Error ? err.message : String(err)})`)
+  }
 
   process.title = `fenrir-orch [${config.checkpointBase}]`
 
