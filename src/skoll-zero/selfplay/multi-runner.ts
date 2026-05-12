@@ -82,10 +82,15 @@ export type SlotStats = {
   entropyRatioCount: number
 }
 
+/** ゲーム終了時の 1 seat 分の (真役職, 自称役職) スナップショット (claim matrix 集計用) */
+export type SeatClaim = { role: SystemRole, claimedRole: SystemRole | null }
+
 export type MultiAgentSelfPlayResult = {
   result: GameResult
   /** slot ごとの実行統計 (未設定の slot は undefined) */
   stats: Partial<Record<keyof SlotMap, SlotStats>>
+  /** ゲーム終了時の全 seat の (真役職, 自称役職)。claim matrix 集計用、常時詰める */
+  seatClaims: SeatClaim[]
   /** collectGameRecord=true 時のみ。formatHowl(events, state, config) で howl 文字列に整形可能 */
   record?: {
     events: ReadonlyArray<GameEvent | FenrirExtEvent>
@@ -256,7 +261,12 @@ export async function runMultiAgentSelfPlayGame(
     }
   }
 
-  const out: MultiAgentSelfPlayResult = { result, stats }
+  const seatClaims: SeatClaim[] = gameResult.state.players.map(p => ({
+    role: p.role,
+    claimedRole: p.claimedRole,
+  }))
+
+  const out: MultiAgentSelfPlayResult = { result, stats, seatClaims }
   if (cfg.collectGameRecord) {
     out.record = {
       events: gameResult.events,

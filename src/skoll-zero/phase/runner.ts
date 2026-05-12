@@ -53,6 +53,7 @@ import {
 import type { ForwardServerSlots } from '../parallel/forward-server.ts'
 import type { SlotMap, AgentSlot } from '../selfplay/multi-runner.ts'
 import type { SkollZeroTrainConfig } from '../training/schedule.ts'
+import type { ClaimMatrix } from '../eval/claim-matrix.ts'
 
 export type SkollZeroPhaseOptions = {
   checkpointBase: string
@@ -129,6 +130,7 @@ async function runEvalSession(
 ): Promise<{
   outcomes: { villagerWon: number, werewolfWon: number, werehamsterWon: number, draw: number }
   elapsedSec: number
+  claimMatrix: ClaimMatrix
 }> {
   const evalSlots: SlotMap = {}
   for (const k of SLOT_KEYS) {
@@ -138,7 +140,7 @@ async function runEvalSession(
     evalSlots[k] = slot
   }
   const t0 = Date.now()
-  const { outcomes } = await runSelfPlayParallel(
+  const { outcomes, claimMatrix } = await runSelfPlayParallel(
     {
       slots: evalSlots,
       seed: evalSeed,
@@ -155,7 +157,7 @@ async function runEvalSession(
     numGames,
   )
   const elapsedSec = (Date.now() - t0) / 1000
-  return { outcomes, elapsedSec }
+  return { outcomes, elapsedSec, claimMatrix }
 }
 
 function buildSlot(
@@ -440,6 +442,30 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
   const roundSummaries: Array<{ round: number, outcomes: { villagerWon: number, werewolfWon: number, werehamsterWon: number, draw: number } }> = []
 
   try {
+    // 起動直後 eval: round ループに入る前に現在の NN 状態で 1 度評価する。
+    // resume 時は前回完了 round 直後の状態、新ラン時は pretrain 直後の初期状態を記録。
+    // eval_log.jsonl の round は startRound - 1 (= 直前完了 round)、`startup: true` でマーク。
+    if (evalEvery > 0) {
+      const startupEvalRound = startRound - 1
+      log(`eval@R${startupEvalRound} (startup) starting (n=${evalGames}, argmax)...`)
+      const startupEval = await runEvalSession(
+        slots,
+        config,
+        evalGames,
+        options.seed + 1_000_000 + startupEvalRound,
+      )
+      log(`eval@R${startupEvalRound} (startup) elapsed=${startupEval.elapsedSec.toFixed(1)}s vill=${startupEval.outcomes.villagerWon} wolf=${startupEval.outcomes.werewolfWon} ham=${startupEval.outcomes.werehamsterWon} draw=${startupEval.outcomes.draw}`)
+      appendFileSync(evalLogPath, JSON.stringify({
+        round: startupEvalRound,
+        startup: true,
+        games: evalGames,
+        elapsedSec: startupEval.elapsedSec,
+        outcomes: startupEval.outcomes,
+        claimMatrix: startupEval.claimMatrix,
+        timestamp: new Date().toISOString(),
+      }) + '\n')
+    }
+
     for (let r = startRound; r <= options.rounds; r++) {
       const rolloutRetar: boolean | undefined = offRounds > 0 ? r > offRounds : undefined
       const retarTag = rolloutRetar === undefined ? 'env' : (rolloutRetar ? 'on' : 'off')
@@ -474,7 +500,7 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
       // Eval セッション (SKOLLZ_EVAL_EVERY > 0 のとき N round ごとに実行)
       if (evalEvery > 0 && r % evalEvery === 0) {
         log(`eval@R${r} starting (n=${evalGames}, argmax)...`)
-        const { outcomes: evalOut, elapsedSec: evalElapsed } = await runEvalSession(
+        const { outcomes: evalOut, elapsedSec: evalElapsed, claimMatrix: evalClaim } = await runEvalSession(
           slots,
           config,
           evalGames,
@@ -486,6 +512,7 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
           games: evalGames,
           elapsedSec: evalElapsed,
           outcomes: evalOut,
+          claimMatrix: evalClaim,
           timestamp: new Date().toISOString(),
         }) + '\n')
       }

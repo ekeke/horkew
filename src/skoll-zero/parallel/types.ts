@@ -13,6 +13,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { SharedWeights } from '../../fenrir/src/parallel.ts'
 import type { TrainingRecord } from '../selfplay/buffer.ts'
 import type { SlotMap } from '../selfplay/multi-runner.ts'
+import type { ClaimMatrix } from '../eval/claim-matrix.ts'
 
 /** SlotMap のキー集合 = 6 役職グループ */
 export type SlotName = keyof SlotMap & string
@@ -117,6 +118,12 @@ export type SelfPlayChunkResult = {
    * Dirichlet ε auto-decay の判定に使う。
    */
   entropyStats: Partial<Record<SlotName, { sum: number, count: number }>>
+  /**
+   * 役職騙り回数 matrix (chunk 内全 game の seat 単位集計)。
+   * 行 = 真役職、列 = 自称役職 (claimedRole) + 'none'。
+   * 学習経路では捨てられる。eval 経路で eval_log.jsonl に書き出される。
+   */
+  claimMatrix: ClaimMatrix
 }
 
 /** worker → main: エラー報告 (例外時) */

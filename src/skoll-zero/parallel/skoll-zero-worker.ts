@@ -40,6 +40,7 @@ import type {
   SerializedOutcomes,
   SlotName,
 } from './types.ts'
+import { createEmptyClaimMatrix, addClaim, type ClaimMatrix } from '../eval/claim-matrix.ts'
 
 if (!parentPort) throw new Error('skoll-zero-worker must run in a worker thread')
 
@@ -182,6 +183,7 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
     villagerWon: 0, werewolfWon: 0, werehamsterWon: 0, draw: 0,
   }
   const entropyStats: Partial<Record<SlotName, { sum: number, count: number }>> = {}
+  const claimMatrix: ClaimMatrix = createEmptyClaimMatrix()
 
   for (const seed of req.seeds) {
     const r = await runMultiAgentSelfPlayGame({
@@ -206,6 +208,9 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
       acc.count += s.entropyRatioCount
       entropyStats[slotName] = acc
     }
+    for (const sc of r.seatClaims) {
+      addClaim(claimMatrix, sc.role, sc.claimedRole)
+    }
   }
 
   const records: Partial<Record<SlotName, TrainingRecord[]>> = {}
@@ -215,5 +220,5 @@ async function processChunk(req: SelfPlayChunkRequest): Promise<SelfPlayChunkRes
     records[slotName] = [...slot.buffer.records()]
   }
 
-  return { type: 'self_play_result', records, outcomes, entropyStats }
+  return { type: 'self_play_result', records, outcomes, entropyStats, claimMatrix }
 }

@@ -41,6 +41,11 @@ import {
   REQUEST_SAB_BYTES,
   RESPONSE_SAB_BYTES,
 } from './forward-types.ts'
+import {
+  createEmptyClaimMatrix,
+  mergeClaimMatrix,
+  type ClaimMatrix,
+} from '../eval/claim-matrix.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -134,6 +139,8 @@ export type ParallelSelfPlayConfig = Omit<MultiAgentSelfPlayConfig, 'mctsConfig'
 export type ParallelSelfPlayOutput = {
   outcomes: SerializedOutcomes
   entropyStats: Partial<Record<SlotName, { sum: number, count: number }>>
+  /** 役職騙り回数 matrix (全 chunk の seat 単位集計)。eval 経路で eval_log.jsonl に出力 */
+  claimMatrix: ClaimMatrix
 }
 
 /**
@@ -185,12 +192,17 @@ export function runSelfPlayParallel(
       villagerWon: 0, werewolfWon: 0, werehamsterWon: 0, draw: 0,
     }
     const aggregatedEntropy: Partial<Record<SlotName, { sum: number, count: number }>> = {}
+    const aggregatedClaimMatrix: ClaimMatrix = createEmptyClaimMatrix()
     let completed = 0
     let rejected = false
 
     const finalize = (): void => {
       if (rejected) return
-      if (completed === n) resolve({ outcomes: aggregated, entropyStats: aggregatedEntropy })
+      if (completed === n) resolve({
+        outcomes: aggregated,
+        entropyStats: aggregatedEntropy,
+        claimMatrix: aggregatedClaimMatrix,
+      })
     }
 
     for (let i = 0; i < n; i++) {
@@ -236,6 +248,8 @@ export function runSelfPlayParallel(
           acc.count += e.count
           aggregatedEntropy[slotName] = acc
         }
+        // claim matrix を集計
+        mergeClaimMatrix(aggregatedClaimMatrix, result.claimMatrix)
         completed++
         finalize()
       }
