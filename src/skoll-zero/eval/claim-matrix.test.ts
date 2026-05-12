@@ -1,7 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createEmptyClaimMatrix, addClaim, mergeClaimMatrix } from './claim-matrix.ts'
+import {
+  createEmptyClaimMatrix, addClaim, mergeClaimMatrix,
+  createEmptyDayOneDeaths, addDayOneDeath, mergeDayOneDeaths,
+} from './claim-matrix.ts'
 
 test('createEmptyClaimMatrix returns {}', () => {
   const m = createEmptyClaimMatrix()
@@ -60,6 +63,33 @@ test('mergeClaimMatrix into empty target copies src', () => {
   mergeClaimMatrix(a, b)
   assert.equal(a.werewolf?.seer, 1)
   assert.equal(a.werewolf?.medium, 1)
+})
+
+test('createEmptyDayOneDeaths returns {}', () => {
+  assert.deepEqual(createEmptyDayOneDeaths(), {})
+})
+
+test('addDayOneDeath increments the role counter', () => {
+  const c = createEmptyDayOneDeaths()
+  addDayOneDeath(c, 'seer')
+  addDayOneDeath(c, 'seer')
+  addDayOneDeath(c, 'werewolf')
+  assert.equal(c.seer, 2)
+  assert.equal(c.werewolf, 1)
+  assert.equal(c.villager, undefined)
+})
+
+test('mergeDayOneDeaths sums per-role counts', () => {
+  const a = createEmptyDayOneDeaths()
+  addDayOneDeath(a, 'seer')
+  addDayOneDeath(a, 'medium')
+  const b = createEmptyDayOneDeaths()
+  addDayOneDeath(b, 'seer')
+  addDayOneDeath(b, 'werewolf')
+  mergeDayOneDeaths(a, b)
+  assert.equal(a.seer, 2)
+  assert.equal(a.medium, 1)
+  assert.equal(a.werewolf, 1)
 })
 
 test('row total across columns equals total addClaim calls for that role', () => {

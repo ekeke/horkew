@@ -19,6 +19,7 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import type { SystemRole } from '../../types/index.ts'
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
 import { TfMasonZeroNetwork } from '../network/tf-mason-zero.ts'
 import {
@@ -53,7 +54,7 @@ import {
 import type { ForwardServerSlots } from '../parallel/forward-server.ts'
 import type { SlotMap, AgentSlot } from '../selfplay/multi-runner.ts'
 import type { SkollZeroTrainConfig } from '../training/schedule.ts'
-import type { ClaimMatrix } from '../eval/claim-matrix.ts'
+import type { ClaimMatrix, ClaimedRoleKey, DayOneDeathCounts } from '../eval/claim-matrix.ts'
 
 export type SkollZeroPhaseOptions = {
   checkpointBase: string
@@ -131,6 +132,7 @@ async function runEvalSession(
   outcomes: { villagerWon: number, werewolfWon: number, werehamsterWon: number, draw: number }
   elapsedSec: number
   claimMatrix: ClaimMatrix
+  dayOneDeaths: DayOneDeathCounts
 }> {
   const evalSlots: SlotMap = {}
   for (const k of SLOT_KEYS) {
@@ -140,7 +142,7 @@ async function runEvalSession(
     evalSlots[k] = slot
   }
   const t0 = Date.now()
-  const { outcomes, claimMatrix } = await runSelfPlayParallel(
+  const { outcomes, claimMatrix, dayOneDeaths } = await runSelfPlayParallel(
     {
       slots: evalSlots,
       seed: evalSeed,
@@ -157,7 +159,58 @@ async function runEvalSession(
     numGames,
   )
   const elapsedSec = (Date.now() - t0) / 1000
-  return { outcomes, elapsedSec, claimMatrix }
+  return { outcomes, elapsedSec, claimMatrix, dayOneDeaths }
+}
+
+const ALL_SYSTEM_ROLES: readonly SystemRole[] = [
+  'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
+  'werewolf', 'fanatic', 'werehamster', 'immoralist', 'possessed',
+]
+
+const CLAIM_COL_KEYS: readonly ClaimedRoleKey[] = [
+  'seer', 'medium', 'bodyguard', 'mason', 'nekomata', 'villager', 'none',
+]
+
+const ROLE_SHORT_LABELS: Record<SystemRole, string> = {
+  villager: 'villager', seer: 'seer', medium: 'medium', bodyguard: 'bg',
+  mason: 'mason', nekomata: 'neko', werewolf: 'wolf', fanatic: 'fanat',
+  werehamster: 'fox', immoralist: 'immo', possessed: 'poss',
+}
+
+const CLAIM_COL_LABELS: Record<ClaimedRoleKey, string> = {
+  villager: 'vill', seer: 'seer', medium: 'med', bodyguard: 'bg',
+  mason: 'mason', nekomata: 'neko', werewolf: 'wolf', fanatic: 'fanat',
+  werehamster: 'fox', immoralist: 'immo', possessed: 'poss', none: 'none',
+}
+
+/** claim matrix を 1 行 1 役職の表として整形 */
+function formatClaimMatrixRows(matrix: ClaimMatrix, indent: string): string[] {
+  const colWidth = 6
+  const roleColWidth = 11
+  const header = 'role'.padEnd(roleColWidth) + CLAIM_COL_KEYS.map(k => CLAIM_COL_LABELS[k].padStart(colWidth)).join('')
+  const rows: string[] = [`${indent}${header}`]
+  for (const role of ALL_SYSTEM_ROLES) {
+    const row = matrix[role]
+    if (!row) continue
+    const total = Object.values(row).reduce((s, v) => s + (v ?? 0), 0)
+    if (total === 0) continue
+    const cells = CLAIM_COL_KEYS.map(k => String(row[k] ?? 0).padStart(colWidth)).join('')
+    rows.push(`${indent}${ROLE_SHORT_LABELS[role].padEnd(roleColWidth)}${cells}`)
+  }
+  return rows
+}
+
+/** day1 deaths を 1 行で整形: `vill=12 seer=8 ... (total=N)` */
+function formatDayOneDeaths(counts: DayOneDeathCounts): string {
+  const parts: string[] = []
+  let total = 0
+  for (const role of ALL_SYSTEM_ROLES) {
+    const n = counts[role] ?? 0
+    if (n === 0) continue
+    parts.push(`${ROLE_SHORT_LABELS[role]}=${n}`)
+    total += n
+  }
+  return `${parts.join(' ')} (total=${total})`
 }
 
 function buildSlot(
@@ -455,6 +508,9 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
         options.seed + 1_000_000 + startupEvalRound,
       )
       log(`eval@R${startupEvalRound} (startup) elapsed=${startupEval.elapsedSec.toFixed(1)}s vill=${startupEval.outcomes.villagerWon} wolf=${startupEval.outcomes.werewolfWon} ham=${startupEval.outcomes.werehamsterWon} draw=${startupEval.outcomes.draw}`)
+      log(`eval@R${startupEvalRound} (startup) claim matrix:`)
+      for (const row of formatClaimMatrixRows(startupEval.claimMatrix, '  ')) log(row)
+      log(`eval@R${startupEvalRound} (startup) day1 deaths: ${formatDayOneDeaths(startupEval.dayOneDeaths)}`)
       appendFileSync(evalLogPath, JSON.stringify({
         round: startupEvalRound,
         startup: true,
@@ -462,6 +518,7 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
         elapsedSec: startupEval.elapsedSec,
         outcomes: startupEval.outcomes,
         claimMatrix: startupEval.claimMatrix,
+        dayOneDeaths: startupEval.dayOneDeaths,
         timestamp: new Date().toISOString(),
       }) + '\n')
     }
@@ -500,19 +557,23 @@ export async function runSkollZero(opts: Partial<SkollZeroPhaseOptions> = {}): P
       // Eval セッション (SKOLLZ_EVAL_EVERY > 0 のとき N round ごとに実行)
       if (evalEvery > 0 && r % evalEvery === 0) {
         log(`eval@R${r} starting (n=${evalGames}, argmax)...`)
-        const { outcomes: evalOut, elapsedSec: evalElapsed, claimMatrix: evalClaim } = await runEvalSession(
+        const { outcomes: evalOut, elapsedSec: evalElapsed, claimMatrix: evalClaim, dayOneDeaths: evalDeaths } = await runEvalSession(
           slots,
           config,
           evalGames,
           options.seed + 1_000_000 + r,  // run-static seed offset (round 番号で variation)
         )
         log(`eval@R${r} elapsed=${evalElapsed.toFixed(1)}s vill=${evalOut.villagerWon} wolf=${evalOut.werewolfWon} ham=${evalOut.werehamsterWon} draw=${evalOut.draw}`)
+        log(`eval@R${r} claim matrix:`)
+        for (const row of formatClaimMatrixRows(evalClaim, '  ')) log(row)
+        log(`eval@R${r} day1 deaths: ${formatDayOneDeaths(evalDeaths)}`)
         appendFileSync(evalLogPath, JSON.stringify({
           round: r,
           games: evalGames,
           elapsedSec: evalElapsed,
           outcomes: evalOut,
           claimMatrix: evalClaim,
+          dayOneDeaths: evalDeaths,
           timestamp: new Date().toISOString(),
         }) + '\n')
       }

@@ -44,7 +44,10 @@ import {
 import {
   createEmptyClaimMatrix,
   mergeClaimMatrix,
+  createEmptyDayOneDeaths,
+  mergeDayOneDeaths,
   type ClaimMatrix,
+  type DayOneDeathCounts,
 } from '../eval/claim-matrix.ts'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -141,6 +144,8 @@ export type ParallelSelfPlayOutput = {
   entropyStats: Partial<Record<SlotName, { sum: number, count: number }>>
   /** 役職騙り回数 matrix (全 chunk の seat 単位集計)。eval 経路で eval_log.jsonl に出力 */
   claimMatrix: ClaimMatrix
+  /** 初日死亡した seat の役職別カウント (全 chunk 合計) */
+  dayOneDeaths: DayOneDeathCounts
 }
 
 /**
@@ -193,6 +198,7 @@ export function runSelfPlayParallel(
     }
     const aggregatedEntropy: Partial<Record<SlotName, { sum: number, count: number }>> = {}
     const aggregatedClaimMatrix: ClaimMatrix = createEmptyClaimMatrix()
+    const aggregatedDayOneDeaths: DayOneDeathCounts = createEmptyDayOneDeaths()
     let completed = 0
     let rejected = false
 
@@ -202,6 +208,7 @@ export function runSelfPlayParallel(
         outcomes: aggregated,
         entropyStats: aggregatedEntropy,
         claimMatrix: aggregatedClaimMatrix,
+        dayOneDeaths: aggregatedDayOneDeaths,
       })
     }
 
@@ -248,8 +255,9 @@ export function runSelfPlayParallel(
           acc.count += e.count
           aggregatedEntropy[slotName] = acc
         }
-        // claim matrix を集計
+        // claim matrix / day1 deaths を集計
         mergeClaimMatrix(aggregatedClaimMatrix, result.claimMatrix)
+        mergeDayOneDeaths(aggregatedDayOneDeaths, result.dayOneDeaths)
         completed++
         finalize()
       }

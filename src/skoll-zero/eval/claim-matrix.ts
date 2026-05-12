@@ -41,3 +41,26 @@ export function mergeClaimMatrix(target: ClaimMatrix, src: ClaimMatrix): void {
     }
   }
 }
+
+/**
+ * 初日死亡回数 (役職別)。
+ *
+ * 「初日死亡」= Day 1 終了 (= 最初の処刑 execution) までに死亡した seat の役職を集計。
+ * hasFirstGhost: true 設定では通常 1 件/game (= 合計 ~100/100 game)、
+ * 稀に狐呪殺等で複数件のゲームもあり得る。
+ */
+export type DayOneDeathCounts = Partial<Record<SystemRole, number>>
+
+export function createEmptyDayOneDeaths(): DayOneDeathCounts {
+  return {}
+}
+
+export function addDayOneDeath(counts: DayOneDeathCounts, role: SystemRole): void {
+  counts[role] = (counts[role] ?? 0) + 1
+}
+
+export function mergeDayOneDeaths(target: DayOneDeathCounts, src: DayOneDeathCounts): void {
+  for (const role of Object.keys(src) as SystemRole[]) {
+    target[role] = (target[role] ?? 0) + (src[role] ?? 0)
+  }
+}

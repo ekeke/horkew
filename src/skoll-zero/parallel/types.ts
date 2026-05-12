@@ -13,7 +13,7 @@ import type { SystemRole } from '../../types/index.ts'
 import type { SharedWeights } from '../../fenrir/src/parallel.ts'
 import type { TrainingRecord } from '../selfplay/buffer.ts'
 import type { SlotMap } from '../selfplay/multi-runner.ts'
-import type { ClaimMatrix } from '../eval/claim-matrix.ts'
+import type { ClaimMatrix, DayOneDeathCounts } from '../eval/claim-matrix.ts'
 
 /** SlotMap のキー集合 = 6 役職グループ */
 export type SlotName = keyof SlotMap & string
@@ -124,6 +124,8 @@ export type SelfPlayChunkResult = {
    * 学習経路では捨てられる。eval 経路で eval_log.jsonl に書き出される。
    */
   claimMatrix: ClaimMatrix
+  /** 初日死亡した seat の役職別カウント (chunk 内全 game) */
+  dayOneDeaths: DayOneDeathCounts
 }
 
 /** worker → main: エラー報告 (例外時) */

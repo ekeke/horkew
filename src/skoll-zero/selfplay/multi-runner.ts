@@ -91,12 +91,41 @@ export type MultiAgentSelfPlayResult = {
   stats: Partial<Record<keyof SlotMap, SlotStats>>
   /** ゲーム終了時の全 seat の (真役職, 自称役職)。claim matrix 集計用、常時詰める */
   seatClaims: SeatClaim[]
+  /** Day 1 終了 (= 最初の execution event) までに死亡した seat の役職 */
+  dayOneDeathRoles: SystemRole[]
   /** collectGameRecord=true 時のみ。formatHowl(events, state, config) で howl 文字列に整形可能 */
   record?: {
     events: ReadonlyArray<GameEvent | FenrirExtEvent>
     state: GameState
     config: GameConfig
   }
+}
+
+/**
+ * 初日死亡した seat の役職を events から抽出。
+ *
+ * events は時系列順。最初の `execution` event (= Day 1 day phase の終了) より前に発生した
+ * 死亡 events (night_kill / fox_kill / curse_kill / follow_kill) を集める。
+ * hasFirstGhost: true 設定では通常 1 件、稀に占い結果からの呪殺等で複数件。
+ */
+export function extractDayOneDeathRoles(
+  events: ReadonlyArray<GameEvent | FenrirExtEvent>,
+  players: ReadonlyArray<{ seat: number, role: SystemRole }>,
+): SystemRole[] {
+  const seatToRole = new Map<number, SystemRole>()
+  for (const p of players) seatToRole.set(p.seat, p.role)
+  const result: SystemRole[] = []
+  for (const ev of events) {
+    if (ev.type === 'execution') break
+    if (ev.type === 'night_kill'
+        || ev.type === 'fox_kill'
+        || ev.type === 'curse_kill'
+        || ev.type === 'follow_kill') {
+      const role = seatToRole.get(ev.target)
+      if (role) result.push(role)
+    }
+  }
+  return result
 }
 
 /** role → slot bucket mapping */
@@ -265,8 +294,9 @@ export async function runMultiAgentSelfPlayGame(
     role: p.role,
     claimedRole: p.claimedRole,
   }))
+  const dayOneDeathRoles = extractDayOneDeathRoles(gameResult.events, gameResult.state.players)
 
-  const out: MultiAgentSelfPlayResult = { result, stats, seatClaims }
+  const out: MultiAgentSelfPlayResult = { result, stats, seatClaims, dayOneDeathRoles }
   if (cfg.collectGameRecord) {
     out.record = {
       events: gameResult.events,
