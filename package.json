@@ -10,7 +10,9 @@
     "./retar/wasm-helpers": "./src/retar/wasm-helpers.ts",
     "./retar-rs/node": "./src/retar-rs/pkg/retar.js",
     "./retar-rs/web": "./src/retar-rs/pkg-web/retar.js",
-    "./retar-rs/wasm-url": "./src/retar-rs/pkg/retar_bg.wasm"
+    "./retar-rs/wasm-url": "./src/retar-rs/pkg/retar_bg.wasm",
+    "./lykaon": "./src/lykaon/index.ts",
+    "./lykaon/theme.css": "./src/lykaon/theme.css"
   },
   "scripts": {
     "build": "npm run build:lib && npm run build:demo",
