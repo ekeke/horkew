@@ -157,7 +157,9 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       case 'join': {
         const s = stmt as JoinStatement
         const seat = nextSeat++
-        dict.add(String(seat), [s.name, ...s.aliases])
+        const seatStr = String(seat)
+        const keywords = new Set<string>([s.name, ...s.aliases, seatStr])
+        dict.add(seatStr, [...keywords])
         statuses.set(seat, createSeatStatus())
         players.set(seat, s.name)
         if (s.shortName) shortNames.set(seat, s.shortName)
@@ -169,7 +171,9 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         for (let i = 0; i < s.players.length; i++) {
           const seat = nextSeat++
           const name = s.players[i]
-          dict.add(String(seat), [name])
+          const seatStr = String(seat)
+          const keywords = new Set<string>([name, seatStr])
+          dict.add(seatStr, [...keywords])
           statuses.set(seat, createSeatStatus())
           players.set(seat, name)
         }

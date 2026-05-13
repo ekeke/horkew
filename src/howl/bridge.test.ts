@@ -569,3 +569,36 @@ setup: { seer: 1, werewolf: 1, villager: 3 }
     }
   })
 })
+
+describe('bridge: seat number references', () => {
+  test('seat number resolves alongside player name in vote', () => {
+    const howl = `++Alice,Bob,Charlie
+1→2`
+    const { statements, meta } = parse(howl)
+    const { vs, players } = buildVillageStatus(statements, meta)
+    const aliceSeat = [...players.entries()].find(([, n]) => n === 'Alice')![0]
+    const bobSeat = [...players.entries()].find(([, n]) => n === 'Bob')![0]
+    const alice = vs.statuses.get(aliceSeat)!
+    assert.strictEqual(alice.voted, true)
+    assert.strictEqual(alice.votedTarget, bobSeat)
+  })
+
+  test('seat number resolves with synthesized players when JOIN omitted', () => {
+    const howl = `---
+setup:
+  villager: 1
+  seer: 1
+  werewolf: 1
+---
+1→3
+3→1
+吊り 1`
+    const { statements, meta } = parse(howl)
+    const { vs, players } = buildVillageStatus(statements, meta)
+    assert.strictEqual(players.get(1), 'プレイヤー1')
+    assert.strictEqual(players.get(3), 'プレイヤー3')
+    const seat1 = vs.statuses.get(1)!
+    assert.strictEqual(seat1.surviving, false)
+    assert.strictEqual(seat1.causeOfDeath, 'execution')
+  })
+})

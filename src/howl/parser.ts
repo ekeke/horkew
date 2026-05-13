@@ -10,6 +10,12 @@ import {
   type LynchStatement,
   type CurseStatement,
   type FollowStatement,
+  type ForecastStatement,
+  type SuddenDeathStatement,
+  type RevoteStatement,
+  type RevealStatement,
+  type SpoilerStatement,
+  type MasonStatement,
   type AssertStatement,
   type UnknownStatement,
   type SetupStatement,
@@ -20,6 +26,20 @@ import { FlexibleDictionary } from './flexibleDictionary.ts'
 export type ParseOptions = {
   rules?: Record<string, any>
   cursorLine?: number
+}
+
+// JOIN 文がない .howl で自動生成する仮想プレイヤー名のプレフィックス
+const SYNTHESIZED_PLAYER_PREFIX = 'プレイヤー'
+
+// 数字席番号 (半角・全角) を判定する
+const seatNumberRegex = /^[0-9０-９]+$/
+
+// FlexibleDictionary に join/joinMulti 1 件分のエントリを登録する。
+// 数字エイリアス (席番号) も自動付与する。既存名と重複するときは省く。
+function registerJoinInDict(dict: FlexibleDictionary, name: string, extraAliases: string[], seatNumber: number): void {
+  const seatAlias = String(seatNumber)
+  const aliases = new Set<string>([name, ...extraAliases, seatAlias])
+  dict.add(name, [...aliases])
 }
 
 function collectExplicitVoters(round: Statement[]): Set<string> {
@@ -87,6 +107,7 @@ function fillMultiVoteVoters(statements: Statement[], options: ParseOptions): St
   const result: Statement[] = []
   let round: Statement[] = []
   let isRevoteRound = false
+  let seatIdx = 0
 
   function flushRound() {
     if (round.length > 0) {
@@ -99,16 +120,18 @@ function fillMultiVoteVoters(statements: Statement[], options: ParseOptions): St
     switch (s.type) {
       case 'join': {
         const js = s as JoinStatement
+        seatIdx++
         alive.add(js.name)
-        dict.add(js.name, [js.name, ...js.aliases])
+        registerJoinInDict(dict, js.name, js.aliases, seatIdx)
         result.push(s)
         break
       }
       case 'joinMulti': {
         const players = (s as JoinMultiStatement).players
         for (let i = 0; i < players.length; i++) {
+          seatIdx++
           alive.add(players[i])
-          dict.add(players[i], [players[i]])
+          registerJoinInDict(dict, players[i], [], seatIdx)
         }
         result.push(s)
         break
@@ -179,15 +202,18 @@ function fillMediumTargets(statements: Statement[]): Statement[] {
   const claimedMediums = new Set<string>()
   // 日付→処刑対象名のマップ
   const lynchByDay = new Map<number, string>()
+  let seatIdx = 0
 
   // First pass: collect join names, medium claimants, lynch-by-day
   for (const s of statements) {
     if (s.type === 'join') {
       const js = s as JoinStatement
-      dict.add(js.name, [js.name, ...js.aliases])
+      seatIdx++
+      registerJoinInDict(dict, js.name, js.aliases, seatIdx)
     } else if (s.type === 'joinMulti') {
       for (const p of (s as JoinMultiStatement).players) {
-        dict.add(p, [p])
+        seatIdx++
+        registerJoinInDict(dict, p, [], seatIdx)
       }
     } else if (s.type === 'lynch') {
       const target = (s as LynchStatement).target
@@ -255,14 +281,17 @@ const bareGuardRegex = new RegExp(
 function fillBodyguardGuards(statements: Statement[]): Statement[] {
   const dict = new FlexibleDictionary()
   const bodyguardClaimants = new Set<string>()
+  let seatIdx = 0
 
   for (const s of statements) {
     if (s.type === 'join') {
       const js = s as JoinStatement
-      dict.add(js.name, [js.name, ...js.aliases])
+      seatIdx++
+      registerJoinInDict(dict, js.name, js.aliases, seatIdx)
     } else if (s.type === 'joinMulti') {
       for (const p of (s as JoinMultiStatement).players) {
-        dict.add(p, [p])
+        seatIdx++
+        registerJoinInDict(dict, p, [], seatIdx)
       }
     } else if (s.type === 'assert') {
       const st = s as AssertStatement
@@ -296,20 +325,23 @@ function expandSurvivorAsserts(statements: Statement[]): Statement[] {
   const alive = new Set<string>()
   const dict = new FlexibleDictionary()
   const result: Statement[] = []
+  let seatIdx = 0
 
   for (const s of statements) {
     switch (s.type) {
       case 'join': {
         const js = s as JoinStatement
+        seatIdx++
         alive.add(js.name)
-        dict.add(js.name, [js.name, ...js.aliases])
+        registerJoinInDict(dict, js.name, js.aliases, seatIdx)
         result.push(s)
         break
       }
       case 'joinMulti': {
         for (const p of (s as JoinMultiStatement).players) {
+          seatIdx++
           alive.add(p)
-          dict.add(p, [p])
+          registerJoinInDict(dict, p, [], seatIdx)
         }
         result.push(s)
         break
@@ -388,6 +420,98 @@ function applySetupStatements(meta: any, statements: Statement[]): Statement[] {
   return statements.filter(s => s.type !== 'setup')
 }
 
+function computeSetupTotal(meta: any): number {
+  const setup = meta?.setup
+  if (!setup || typeof setup !== 'object') return 0
+  let total = 0
+  for (const k of Object.keys(setup)) {
+    const v = setup[k]
+    if (typeof v === 'number' && v > 0) total += v
+  }
+  return total
+}
+
+function countJoinPlayers(statements: Statement[]): number {
+  let count = 0
+  for (const s of statements) {
+    if (s.type === 'join') count++
+    else if (s.type === 'joinMulti') count += (s as JoinMultiStatement).players.length
+  }
+  return count
+}
+
+function hasJoinStatement(statements: Statement[]): boolean {
+  return statements.some(s => s.type === 'join' || s.type === 'joinMulti')
+}
+
+function collectPlayerRefs(s: Statement): string[] {
+  switch (s.type) {
+    case 'vote': { const x = s as VoteStatement; return [x.voter, x.target] }
+    case 'multiVote': { const x = s as MultiVoteStatement; return [...x.voters, x.target] }
+    case 'attack': return (s as AttackStatement).target
+    case 'lynch': { const t = (s as LynchStatement).target; return t ? [t] : [] }
+    case 'curse': return [(s as CurseStatement).target]
+    case 'follow': return [(s as FollowStatement).target]
+    case 'forecast': { const x = s as ForecastStatement; return [x.actor, x.target] }
+    case 'suddenDeath': return [(s as SuddenDeathStatement).target]
+    case 'revote': return (s as RevoteStatement).targets
+    case 'reveal': return [(s as RevealStatement).player]
+    case 'spoiler': return [(s as SpoilerStatement).player]
+    case 'mason': return (s as MasonStatement).players
+    case 'assert': {
+      const x = s as AssertStatement
+      const out: string[] = [x.actor]
+      for (const a of x.assertions) {
+        if (a.player) out.push(a.player)
+        if (a.target) out.push(a.target)
+      }
+      return out
+    }
+    default: return []
+  }
+}
+
+function containsSeatNumberReference(statements: Statement[]): boolean {
+  for (const s of statements) {
+    for (const ref of collectPlayerRefs(s)) {
+      if (seatNumberRegex.test(ref)) return true
+    }
+  }
+  return false
+}
+
+// JOIN 文がない .howl で setup から仮想プレイヤー (プレイヤー1..N) を合成し、
+// あるいは座席数の不整合を warnings に追加する。
+function synthesizeJoinsAndValidate(meta: any, statements: Statement[]): Statement[] {
+  if (!Array.isArray(meta.warnings)) meta.warnings = []
+
+  const hasJoin = hasJoinStatement(statements)
+  const setupTotal = computeSetupTotal(meta)
+
+  if (!hasJoin) {
+    if (setupTotal === 0) {
+      if (containsSeatNumberReference(statements)) {
+        throw new Error('Howl parse error: 数字席番号が使われていますが、setup も JOIN も指定されていません')
+      }
+      return statements
+    }
+    const players: string[] = []
+    for (let i = 1; i <= setupTotal; i++) players.push(`${SYNTHESIZED_PLAYER_PREFIX}${i}`)
+    const synthesized: JoinMultiStatement = { type: 'joinMulti', line: 0, players }
+    return [synthesized, ...statements]
+  }
+
+  if (setupTotal > 0) {
+    const joinCount = countJoinPlayers(statements)
+    if (joinCount > setupTotal) {
+      meta.warnings.push(`JOIN 数 (${joinCount}) が setup 合計 (${setupTotal}) を超えています`)
+    } else if (joinCount < setupTotal) {
+      meta.warnings.push(`JOIN 数 (${joinCount}) が setup 合計 (${setupTotal}) より少ないです`)
+    }
+  }
+  return statements
+}
+
 export function parse(text: string, options: ParseOptions = {}): { meta: any, statements: Statement[] } {
   const { meta, lines }: { meta: any; lines: Line[] } = preprocess(text, options.cursorLine)
   const mergedOptions: ParseOptions = {
@@ -407,6 +531,7 @@ export function parse(text: string, options: ParseOptions = {}): { meta: any, st
   }
 
   statements = applySetupStatements(meta, statements)
+  statements = synthesizeJoinsAndValidate(meta, statements)
   statements = fillMultiVoteVoters(statements, mergedOptions)
   statements = expandSurvivorAsserts(statements)
   statements = assignDays(statements)

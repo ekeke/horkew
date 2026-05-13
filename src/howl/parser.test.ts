@@ -809,3 +809,87 @@ Bob　村人CO`
     assert.deepStrictEqual(a.roles.sort(), ['bodyguard', 'mason', 'medium', 'nekomata', 'seer'])
   })
 })
+
+describe('seat number references and JOIN omission', () => {
+  test('JOIN present + seat numbers as aliases in vote', () => {
+    const text = `++Alice,Bob,Charlie
+1→2
+吊り 2`
+    const parsed = parse(text)
+    const votes = parsed.statements.filter((s: any) => s.type === 'vote')
+    assert.strictEqual(votes.length, 1)
+    const v = votes[0] as any
+    // 数字エイリアスは parser ステージでは canonical 名に解決されない (raw のまま保存)
+    // bridge ステージで seat 番号に解決される
+    assert.strictEqual(v.voter, '1')
+    assert.strictEqual(v.target, '2')
+  })
+
+  test('JOIN omitted: setup auto-generates プレイヤーN', () => {
+    const text = `---
+setup:
+  villager: 1
+  seer: 1
+  werewolf: 1
+---
+1→2
+2→3`
+    const parsed = parse(text)
+    const joinMulti = parsed.statements.find((s: any) => s.type === 'joinMulti') as any
+    assert.ok(joinMulti, 'synthesized joinMulti should exist')
+    assert.deepStrictEqual(joinMulti.players, ['プレイヤー1', 'プレイヤー2', 'プレイヤー3'])
+    assert.strictEqual(joinMulti.line, 0)
+  })
+
+  test('JOIN over setup total emits warning', () => {
+    const text = `---
+setup:
+  villager: 1
+  werewolf: 1
+---
+++Alice,Bob,Charlie,Dave`
+    const parsed = parse(text)
+    assert.ok(Array.isArray(parsed.meta.warnings))
+    assert.ok(
+      parsed.meta.warnings.some((w: string) => w.includes('超え')),
+      `expected 超え warning, got: ${JSON.stringify(parsed.meta.warnings)}`
+    )
+  })
+
+  test('JOIN below setup total emits warning', () => {
+    const text = `---
+setup:
+  villager: 2
+  werewolf: 2
+---
+++Alice,Bob`
+    const parsed = parse(text)
+    assert.ok(
+      parsed.meta.warnings.some((w: string) => w.includes('少ない')),
+      `expected 少ない warning, got: ${JSON.stringify(parsed.meta.warnings)}`
+    )
+  })
+
+  test('no JOIN and no setup, but seat numbers used → throws', () => {
+    const text = `1→2`
+    assert.throws(() => parse(text), /数字席番号/)
+  })
+
+  test('no JOIN and no setup and no seat numbers → no error', () => {
+    const text = `Alice→Bob`
+    const parsed = parse(text)
+    const votes = parsed.statements.filter((s: any) => s.type === 'vote')
+    assert.strictEqual(votes.length, 1)
+  })
+
+  test('no warning when JOIN count matches setup total', () => {
+    const text = `---
+setup:
+  villager: 1
+  werewolf: 1
+---
+++Alice,Bob`
+    const parsed = parse(text)
+    assert.deepStrictEqual(parsed.meta.warnings ?? [], [])
+  })
+})
