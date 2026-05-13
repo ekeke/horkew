@@ -3,5 +3,5 @@
   "compilerOptions": {
     "lib": ["ESNext", "WebWorker"]
   },
-  "include": ["analysis.worker.ts", "commandGame.worker.ts"]
+  "include": ["commandGame.worker.ts"]
 }

@@ -4,8 +4,8 @@ import type {
   RevoteStatement, OverStatement,
   AssertStatement, RevealStatement, UnknownStatement,
   Assertion,
-} from '../src/howl/statement.ts'
-import { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
+} from '../howl/statement.ts'
+import { FlexibleDictionary } from '../howl/flexibleDictionary.ts'
 
 const gameResultLabels: Record<string, string> = {
   villageWin: '村人陣営が勝利しました。',

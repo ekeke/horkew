@@ -1,8 +1,8 @@
-import wasmInit, { analyze } from '../src/retar-rs/pkg-web/retar.js'
+import wasmInit, { analyze } from '../retar-rs/pkg-web/retar.js'
 // @ts-ignore — Vite ?url import
-import wasmUrl from '../src/retar-rs/pkg/retar_bg.wasm?url'
-import { VillageRetar } from '../src/retar/index.ts'
-import type { SystemRole } from '../src/types/index.ts'
+import wasmUrl from '../retar-rs/pkg/retar_bg.wasm?url'
+import { VillageRetar } from '../retar/index.ts'
+import type { SystemRole } from '../types/index.ts'
 
 export type RetarRequest = {
   vsJson: string

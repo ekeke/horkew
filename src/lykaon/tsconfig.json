@@ -1,8 +1,8 @@
 {
-  "extends": "../tsconfig.json",
+  "extends": "../../tsconfig.json",
   "compilerOptions": {
     "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
   "include": ["."],
-  "exclude": ["commandGame.worker.ts"]
+  "exclude": ["analysis.worker.ts"]
 }

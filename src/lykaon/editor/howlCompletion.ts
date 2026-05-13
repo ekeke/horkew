@@ -26,7 +26,7 @@
 import { StateEffect, StateField, type Extension } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { autocompletion, startCompletion, type CompletionSource, type Completion } from '@codemirror/autocomplete'
-import * as V from '../../src/howl/vocabulary.ts'
+import * as V from '../../howl/vocabulary.ts'
 
 // ---- カナ→ローマ字変換 ----
 

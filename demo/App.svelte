@@ -4,10 +4,10 @@
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import { statementsToPublicEvents } from '../src/howl/events-bridge.ts'
   import { systemRoles } from '../src/types/index.ts'
-  import { stringifyStatements, type StringifiedLine } from './stringify.ts'
-  import type { SeatResult } from './analysis.worker.ts'
+  import { stringifyStatements, type StringifiedLine } from '../src/lykaon/stringify.ts'
+  import type { SeatResult } from '../src/lykaon/analysis.worker.ts'
   import type { SystemRole, VillageStatus, CauseOfDeath } from '../src/types/index.ts'
-  import { requestAnalysis, type AnalysisStats } from './runAnalysis.ts'
+  import { requestAnalysis, type AnalysisStats } from '../src/lykaon/runAnalysis.ts'
   import { serializeVillageStatus } from '../src/retar/wasm-helpers.ts'
   import StatusPane from './status/StatusPane.svelte'
   import PlayerName from './status/PlayerName.svelte'
@@ -27,7 +27,7 @@
   import CommandPlayPane from './CommandPlayPane.svelte'
   import FileSidebar from './FileSidebar.svelte'
   import { commandPlayStore } from './commandPlayStore.ts'
-  import './theme.css'
+  import '../src/lykaon/theme.css'
   import { runGame } from '../src/lupa/engine.ts'
   import { agentAdapter } from '../src/verify/agent-adapter.ts'
   import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../src/fenrir/src/agents/rule-based-agent.ts'
@@ -35,10 +35,10 @@
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
   import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
   import type { EditorView } from '@codemirror/view'
-  import { setOnSeek } from './editor/howlLanguage.ts'
-  import type { StatementInfo, PlayerNameInfo } from './editor/howlLanguage.ts'
+  import { setOnSeek } from '../src/lykaon/editor/howlLanguage.ts'
+  import type { StatementInfo, PlayerNameInfo } from '../src/lykaon/editor/howlLanguage.ts'
 
-  type EditorModule = typeof import('./editor/index.ts')
+  type EditorModule = typeof import('../src/lykaon/editor/index.ts')
   let editorModule: EditorModule | undefined
 
   export type SourceLines = {
@@ -1112,7 +1112,7 @@
   // destroy/recreate loops on document switch.
   $effect(() => {
     if (!editorParent) return
-    import('./editor/index.ts').then(mod => {
+    import('../src/lykaon/editor/index.ts').then(mod => {
       editorModule = mod
       if (!editorParent || editorView) return
       mod.setVideoTimeGetter(() => videoId ? videoCurrentTime : null)

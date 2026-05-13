@@ -93,8 +93,8 @@
 
 import { StateEffect, StateField, RangeSet, type Extension } from '@codemirror/state'
 import { Decoration, type DecorationSet, EditorView, GutterMarker, gutter } from '@codemirror/view'
-import type { StatementType } from '../../src/howl/statement.ts'
-import * as V from '../../src/howl/vocabulary.ts'
+import type { StatementType } from '../../howl/statement.ts'
+import * as V from '../../howl/vocabulary.ts'
 
 // ---- Public API ----
 

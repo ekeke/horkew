@@ -1,9 +1,9 @@
 <script lang="ts">
   import type { SeatStatus, SystemRole, CauseOfDeath, VillageStatus, EnumSpecies } from '../../src/types/index.ts'
   import { systemRoles } from '../../src/types/index.ts'
-  import type { SeatResult } from '../analysis.worker.ts'
+  import type { SeatResult } from '../../src/lykaon/analysis.worker.ts'
   import { extractVoteStatus, computeVerdicts } from './extract.ts'
-  import { runParallelAnalysis } from '../runAnalysis.ts'
+  import { runParallelAnalysis } from '../../src/lykaon/runAnalysis.ts'
   import { serializeVillageStatus } from '../../src/retar/wasm-helpers.ts'
   import SpeciesIcon from './SpeciesIcon.svelte'
 

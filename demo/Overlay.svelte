@@ -6,7 +6,7 @@
   import type { SourceLines } from './App.svelte'
   import StatusPane from './status/StatusPane.svelte'
   import FitContainer from './FitContainer.svelte'
-  import './theme.css'
+  import '../src/lykaon/theme.css'
 
   type CanvasSize = 'hd' | 'fhd'
   type Alignment = 'top' | 'bottom' | 'left' | 'right'

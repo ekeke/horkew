@@ -1,4 +1,4 @@
-import type { SystemRole } from '../src/types/index.ts'
+import type { SystemRole } from '../types/index.ts'
 
 export type SeatResult = {
   seat: number

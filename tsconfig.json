@@ -16,5 +16,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "cli"]
+  "include": ["src", "cli"],
+  "exclude": ["src/lykaon"]
 }
