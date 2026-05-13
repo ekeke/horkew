@@ -7,7 +7,7 @@ import { howlThemeExtension } from './howlTheme.ts'
 import { howlCompletionExtension } from './howlCompletion.ts'
 
 export { EditorView } from '@codemirror/view'
-export { setStatements, type StatementInfo, type HighlightPayload, type PlayerNameInfo } from './howlLanguage.ts'
+export { setStatements, setOnSeek, type StatementInfo, type HighlightPayload, type PlayerNameInfo } from './howlLanguage.ts'
 export { setPlayerList, setSetup, setCurrentDay, setGameStats, setVideoTimeGetter, type PlayerEntry } from './howlCompletion.ts'
 
 import type { Extension } from '@codemirror/state'
