@@ -55,6 +55,7 @@ import type { ForwardServerSlots } from '../parallel/forward-server.ts'
 import type { SlotMap, AgentSlot } from '../selfplay/multi-runner.ts'
 import type { SkollZeroTrainConfig } from '../training/schedule.ts'
 import type { ClaimMatrix, ClaimedRoleKey, DayOneDeathCounts } from '../eval/claim-matrix.ts'
+import { RUN_PROFILES } from '../eval/run-profile.ts'
 
 export type SkollZeroPhaseOptions = {
   checkpointBase: string
@@ -153,7 +154,7 @@ async function runEvalSession(
         rootDirichletAlpha: 0,
         rootDirichletEps: 0,
       },
-      selectionMode: 'policy_argmax',
+      selectionMode: RUN_PROFILES.eval.selectionMode,
       // rolloutRetar: 学習時の env を維持 (worker 起動時の SKOLLZ_ROLLOUT_RETAR を使う)
     },
     numGames,

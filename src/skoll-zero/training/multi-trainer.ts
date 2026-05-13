@@ -30,6 +30,7 @@ import { runSelfPlayParallel, skollZeroWorkerPoolSize } from '../parallel/index.
 import { groupRecordsByHead, recordsToBatchInputs, recordsToWolfImitationInputs } from './trainer.ts'
 import type { SkollZeroTrainConfig, DirichletAutoConfig } from './schedule.ts'
 import { DEFAULT_DIRICHLET_AUTO_CONFIG, applyDirichletDecay } from './schedule.ts'
+import { RUN_PROFILES } from '../eval/run-profile.ts'
 
 /** SlotMap のキー集合 — 順序を固定しておくと resume / log で安定 */
 const SLOT_KEYS = ['mason', 'village', 'wolf', 'fanatic', 'hamster', 'immoralist'] as const
@@ -253,7 +254,7 @@ export class MultiSkollZeroTrainer {
             nightParallel: this.config.nightParallel ?? false,
             narrowBonusCoef: this.config.narrowBonusCoef ?? 0,
           },
-          selectionMode: 'sample',
+          selectionMode: RUN_PROFILES.training.selectionMode,
           rolloutRetar: opts.rolloutRetar,
           dirichletEpsBySlot: epsThisRound,
           // Wolf imitation: wolf slot に wolfImitationFrozen 設定済なら、その Pure JS net の
@@ -293,7 +294,7 @@ export class MultiSkollZeroTrainer {
           slots: this.asSlotMap(),
           seed: this.gameSeedCounter,
           mctsConfig,
-          selectionMode: 'sample',
+          selectionMode: RUN_PROFILES.training.selectionMode,
           dirichletEpsBySlot: epsThisRound,
         },
         this.config.gamesPerRound,

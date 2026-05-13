@@ -2,48 +2,46 @@
  * skoll-zero self-play playback CLI: ckpt をロードして N ゲームを self-play で
  * 走らせ、各ゲームを howl 形式でファイル出力する。NN の判断異常を診断する用途。
  *
- * 学習時と同じ multi-runner / fullAdapter / 6 slot 構成で走らせるため、cross-module
- * dispatch (claim_*_true / claim_*_fake / morning phase) が機能する。bb-style.ts は
- * BrainBattleAdapter (通信フェーズ無し) で評価するため、両者は補完関係にある。
+ * **設定の出所**: 必ず eval プロファイル ([eval/run-profile.ts] の `RUN_PROFILES.eval`)
+ * を使い、SlotMap 構築は [eval/build-eval-slots.ts] の `buildEvalSlots` を経由する。
+ * これにより、学習中の eval ループ ([phase/runner.ts] の `runEvalSession`) と
+ * 完全に同じ条件で再生される。CLI から selectionMode を override する余地は
+ * 意図的に残していない (設定の乖離を防ぐため)。
  *
  * 用例:
  *   node --experimental-strip-types src/skoll-zero/eval/self-play-howl.ts \
- *     --ckpt-base tmp/orch-skollz-stage5c-300r-v1/phases/00-skoll-zero \
- *     --games 5 --rollouts 50 --selection-mode argmax
+ *     --ckpt-base tmp/orch-skollz-.../phases/00-skoll-zero \
+ *     --games 10
  *
  *   # 特定 round の重みで再生
  *   node --experimental-strip-types src/skoll-zero/eval/self-play-howl.ts \
- *     --ckpt-base tmp/orch-skollz-stage5c-300r-v1/phases/00-skoll-zero \
- *     --round 1 --games 5
+ *     --ckpt-base tmp/orch-skollz-.../phases/00-skoll-zero \
+ *     --round 100 --games 5
+ *
+ * 注: SKOLLZ_WOLF_IMITATION 等の env は学習時と同じ値を渡すこと
+ * (= 同じ train-config.json 配下の ckpt を読むなら、その config を export しておく)。
  */
 
 import { execSync } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { LupaConfig } from '../../lupa/types.ts'
 import { formatHowl } from '../../lupa/format.ts'
-import { loadCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 
-import { MasonZeroNetwork } from '../network/mason-zero.ts'
-import {
-  createSkollZeroNetwork, createStandardZeroNetwork,
-  createWolfZeroNetwork, createFanaticZeroNetwork,
-} from '../network/config.ts'
-import { TrainingBuffer } from '../selfplay/buffer.ts'
 import {
   runMultiAgentSelfPlayGame,
-  type SlotMap,
   type GameResult,
 } from '../selfplay/multi-runner.ts'
 import { DEFAULT_MCTS_CONFIG, type MCTSConfig } from '../mcts/ISMCTS.ts'
+import { RUN_PROFILES } from './run-profile.ts'
+import { buildEvalSlots } from './build-eval-slots.ts'
 
 type CliOptions = {
   ckptBase: string
   games: number
   seed: number
   rollouts: number
-  selectionMode: 'sample' | 'argmax' | 'policy_argmax'
   round: number | null
   out: string | null
 }
@@ -56,52 +54,6 @@ function resultTag(r: GameResult): string {
     case 'werehamster_won': return 'hamster'
     case 'draw': return 'draw'
     default: return 'unknown'
-  }
-}
-
-/** ckpt 重みファイルのファイル名: round 指定なら round_NNNN/weights.json、無指定なら final.json */
-function weightFileName(round: number | null): string {
-  if (round == null) return 'final.json'
-  return join(`round_${String(round).padStart(4, '0')}`, 'weights.json')
-}
-
-/** ckptBase 配下 6 slot をロードして Pure JS net を返す */
-function loadAllNets(ckptBase: string, round: number | null) {
-  const fileName = weightFileName(round)
-  const paths = {
-    mason: join(ckptBase, 'mason', fileName),
-    village: join(ckptBase, 'village', fileName),
-    wolf: join(ckptBase, 'wolf', fileName),
-    fanatic: join(ckptBase, 'fanatic', fileName),
-    hamster: join(ckptBase, 'hamster', fileName),
-    immoralist: join(ckptBase, 'immoralist', fileName),
-  }
-  for (const [k, p] of Object.entries(paths)) {
-    if (!existsSync(p)) throw new Error(`${k} ckpt not found: ${p}`)
-  }
-  const masonNet = createSkollZeroNetwork()
-  loadCheckpoint(masonNet, paths.mason)
-  const villageNet = createStandardZeroNetwork()
-  loadCheckpoint(villageNet, paths.village)
-  const wolfNet = createWolfZeroNetwork()
-  loadCheckpoint(wolfNet, paths.wolf)
-  const fanaticNet = createFanaticZeroNetwork()
-  loadCheckpoint(fanaticNet, paths.fanatic)
-  const hamsterNet = createStandardZeroNetwork()
-  loadCheckpoint(hamsterNet, paths.hamster)
-  const immoralistNet = createStandardZeroNetwork()
-  loadCheckpoint(immoralistNet, paths.immoralist)
-  return { masonNet, villageNet, wolfNet, fanaticNet, hamsterNet, immoralistNet }
-}
-
-function buildSlotMap(nets: ReturnType<typeof loadAllNets>): SlotMap {
-  return {
-    mason:      { nn: new MasonZeroNetwork(nets.masonNet,      { zeroValueHead: false }), buffer: new TrainingBuffer() },
-    village:    { nn: new MasonZeroNetwork(nets.villageNet,    { zeroValueHead: false }), buffer: new TrainingBuffer() },
-    wolf:       { nn: new MasonZeroNetwork(nets.wolfNet,       { zeroValueHead: false }), buffer: new TrainingBuffer() },
-    fanatic:    { nn: new MasonZeroNetwork(nets.fanaticNet,    { zeroValueHead: false }), buffer: new TrainingBuffer() },
-    hamster:    { nn: new MasonZeroNetwork(nets.hamsterNet,    { zeroValueHead: false }), buffer: new TrainingBuffer() },
-    immoralist: { nn: new MasonZeroNetwork(nets.immoralistNet, { zeroValueHead: false }), buffer: new TrainingBuffer() },
   }
 }
 
@@ -142,9 +94,11 @@ function readGitSha(): string {
 }
 
 async function runPlayback(opts: CliOptions): Promise<void> {
-  const nets = loadAllNets(opts.ckptBase, opts.round)
-  const slots = buildSlotMap(nets)
+  const slots = buildEvalSlots({ ckptBase: opts.ckptBase, round: opts.round })
 
+  // RUN_PROFILES.eval を使う。policy_argmax は MCTS 不使用なので mctsConfig はダミー値で OK
+  // (= runner.ts の runEvalSession と同じ扱い)。
+  const selectionMode = RUN_PROFILES.eval.selectionMode
   const mctsConfig: MCTSConfig = {
     ...DEFAULT_MCTS_CONFIG,
     nRollouts: opts.rollouts,
@@ -160,7 +114,7 @@ async function runPlayback(opts: CliOptions): Promise<void> {
   const gitSha = readGitSha()
 
   process.stderr.write(
-    `[self-play-howl] ckpt=${opts.ckptBase} round=${opts.round ?? 'final'} games=${opts.games} rollouts=${opts.rollouts} mode=${opts.selectionMode}\n`,
+    `[self-play-howl] ckpt=${opts.ckptBase} round=${opts.round ?? 'final'} games=${opts.games} mode=${selectionMode} (eval profile)\n`,
   )
   process.stderr.write(`[self-play-howl] out=${outDir}\n`)
 
@@ -173,7 +127,7 @@ async function runPlayback(opts: CliOptions): Promise<void> {
       slots,
       seed,
       mctsConfig,
-      selectionMode: opts.selectionMode,
+      selectionMode,
       collectGameRecord: true,
     })
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1)
@@ -193,7 +147,7 @@ async function runPlayback(opts: CliOptions): Promise<void> {
       result: r.result ?? 'unknown',
       ckptBase: opts.ckptBase,
       round: opts.round,
-      selectionMode: opts.selectionMode,
+      selectionMode,
       rollouts: opts.rollouts,
       gitSha,
     })
@@ -209,7 +163,7 @@ async function runPlayback(opts: CliOptions): Promise<void> {
     '=== self-play howl playback ===',
     `ckpt-base: ${opts.ckptBase}`,
     `round: ${opts.round ?? 'final'}`,
-    `games: ${total}, rollouts: ${opts.rollouts}, mode: ${opts.selectionMode}`,
+    `games: ${total}, rollouts: ${opts.rollouts}, mode: ${selectionMode} (eval profile)`,
     `village: ${tally.village} (${(tally.village / total * 100).toFixed(1)}%)`,
     `wolf:    ${tally.wolf} (${(tally.wolf / total * 100).toFixed(1)}%)`,
     `hamster: ${tally.hamster} (${(tally.hamster / total * 100).toFixed(1)}%)`,
@@ -224,7 +178,6 @@ function parseArgs(argv: string[]): CliOptions {
     games: 10,
     seed: 1,
     rollouts: 50,
-    selectionMode: 'argmax',
     round: null,
     out: null,
   }
@@ -234,19 +187,20 @@ function parseArgs(argv: string[]): CliOptions {
       case '--games': opts.games = parseInt(argv[++i], 10); break
       case '--seed': opts.seed = parseInt(argv[++i], 10); break
       case '--rollouts': opts.rollouts = parseInt(argv[++i], 10); break
-      case '--selection-mode': opts.selectionMode = argv[++i] as 'sample' | 'argmax' | 'policy_argmax'; break
       case '--round': opts.round = parseInt(argv[++i], 10); break
       case '--out': opts.out = argv[++i]; break
       case '-h': case '--help':
         process.stderr.write([
           'Usage: self-play-howl.ts [options]',
-          '  --ckpt-base PATH    skoll-zero phase dir (e.g. tmp/orch-skollz-...-v1/phases/00-skoll-zero) (required)',
+          '  --ckpt-base PATH    skoll-zero phase dir (e.g. tmp/orch-skollz-.../phases/00-skoll-zero) (required)',
           '  --games N           number of games (default: 10)',
           '  --seed N            base seed (default: 1)',
-          '  --rollouts N        MCTS rollouts (default: 50)',
-          '  --selection-mode M  sample | argmax | policy_argmax (default: argmax; use policy_argmax for NN-only eval-equivalent)',
+          '  --rollouts N        MCTS rollouts (default: 50, used only if eval profile uses MCTS)',
           '  --round NNNN        load round_NNNN/weights.json instead of final.json',
           '  --out PATH          output dir (default: <ckpt-base>/self-play-howl[/round_NNNN])',
+          '',
+          '  selection mode は eval プロファイル ([eval/run-profile.ts]) で固定。',
+          '  CLI から override 不可 (学習中 eval と設定を一致させるため)。',
         ].join('\n') + '\n')
         process.exit(0)
     }
