@@ -2,12 +2,8 @@
   import { onMount, onDestroy, tick } from 'svelte'
   import { parse, parseFrontmatter, buildFrontmatter, parseStatement } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
-  import { statementsToPublicEvents } from '../src/howl/events-bridge.ts'
   import { systemRoles } from '../src/types/index.ts'
-  import { stringifyStatements, type StringifiedLine } from '../src/lykaon/stringify.ts'
-  import type { SeatResult } from '../src/lykaon/analysis.worker.ts'
-  import type { SystemRole, VillageStatus, CauseOfDeath } from '../src/types/index.ts'
-  import { requestAnalysis, type AnalysisStats } from '../src/lykaon/runAnalysis.ts'
+  import type { SystemRole, CauseOfDeath } from '../src/types/index.ts'
   import { serializeVillageStatus } from '../src/retar/wasm-helpers.ts'
   import {
     createAnalysisContext,
@@ -17,9 +13,7 @@
     GmorkDebugPane,
   } from '../src/lykaon/index.ts'
   import PlayerName from './status/PlayerName.svelte'
-  import { findReason, findConfirmationReason } from '../src/gmork/index.ts'
-  import { formatReason, formatConfirmationReason } from '../src/gmork/format.ts'
-  import { scoreWolfPairs, type WolfPairSuggestion } from './status/wolfPairScorer.ts'
+  import type { WolfPairSuggestion } from './status/wolfPairScorer.ts'
   import HelpPanel from './HelpPanel.svelte'
   import YouTubePlayer from './YouTubePlayer.svelte'
   import NicoPlayer from './NicoPlayer.svelte'
@@ -239,10 +233,6 @@
         setEditorContent('')
         rawStatements = ''
         analyzerJson = ''
-        parsedLines = []
-        analysisSeats = []
-        analysisColumns = []
-        analysisError = ''
         assumptions = new Map()
       }
     }
@@ -478,44 +468,16 @@
   let isActivePendingDelete = $derived(!!activeKey && pendingDeletes.has(activeKey))
   let rawStatements = $state('')
   let analyzerJson = $state('')
-  let parsedLines: StringifiedLine[] = $state([])
-  let statementLines: number[] = []
-  let analysisSeats: SeatResult[] = $state([])
-  let analysisColumns: SystemRole[] = $state([])
-  let analysisError = $state('')
-  let analyzing = $state(false)
-  let analysisDuration = $state(0)
-  let analysisStatsInfo = $state<AnalysisStats | null>(null)
-  let analysisCached = $state(false)
-  let analysisTotalElapsed = $state(0)
-  let analysisStart = 0
-  let survivorInfo = $state({ alive: 0, total: 0 })
   let deadSeats: Set<number> = $state(new Set())
   let nightKilledSeats: Set<number> = $state(new Set())
   let executedSeats: Set<number> = $state(new Set())
-  let players: Map<number, string> = $state(new Map())
-  let playerShortNames: Map<number, string> = $state(new Map())
-  let villageStatus: VillageStatus | null = $state(null)
-  let currentEvents: import('../src/lupa/types.ts').GameEvent[] = $state([])
-  let sourceLines: SourceLines = $state({ survivor: new Map(), claimRow: new Map(), claimCell: new Map(), kill: new Map(), exec: new Map(), vote: new Map() })
   let cursorLine = $state(0)
-  let claimShortNames: Map<number, string> = $derived(
-    villageStatus
-      ? new Map([...villageStatus.statuses.entries()]
-          .filter(([, s]) => s.claiming)
-          .map(([seat, s]) => [seat, systemRoles.get(s.claimingRole as SystemRole)?.shortName ?? s.claimingRole] as const))
-      : new Map()
-  )
   let assumptions: Map<number, SystemRole> = $state(new Map())
   let hocusPocusSeats: Set<number> = $state(new Set())
   let forceTs = $state(false)
   let denyWolfGroups: number[][] = $state([])
   let showDenyWolfDialog = $state(false)
   let denyWolfSelection: Set<number> = $state(new Set())
-  let gmorkResult = $state('')
-  let wolfPairSuggestions: WolfPairSuggestion[] = $state([])
-  let baseAnalysisSeats: SeatResult[] = []
-  let pendingGmorkEntry: { seat: number, role: SystemRole } | null = null
 
   // lykaon Phase 7 Stage A: demo state ↔ ctx の一時ブリッジ (Stage B/C で解消予定)
   const ctx = createAnalysisContext()
@@ -549,57 +511,20 @@
     return unsub
   })
 
-  let allRolesDetermined = $derived(
-    analysisSeats.length > 0
-    && players.size > 0
-    && analysisSeats.length === players.size
-    && analysisSeats.every(s => s.roles.length === 1)
+  let claimShortNames: Map<number, string> = $derived(
+    ctx.villageStatus
+      ? new Map([...ctx.villageStatus.statuses.entries()]
+          .filter(([, s]) => s.claiming)
+          .map(([seat, s]) => [seat, systemRoles.get(s.claimingRole as SystemRole)?.shortName ?? s.claimingRole] as const))
+      : new Map()
   )
-  // Retar結果キャッシュ: 行番号 → {hash, cached}
-  let analysisCache = new Map<number, { hash: string, cached: SeatResult[], stats: AnalysisStats | null }>()
+  let allRolesDetermined = $derived(
+    ctx.analysisSeats.length > 0
+    && ctx.players.size > 0
+    && ctx.analysisSeats.length === ctx.players.size
+    && ctx.analysisSeats.every(s => s.roles.length === 1)
+  )
 
-  function computeAnalysisHash(text: string, line: number, assumptionsMap: Map<number, SystemRole>): { key: number, hash: string } {
-    // カーソル位置で巻いたテキスト（空行・末尾空白・コメント行を除去）+ assumptions のハッシュ
-    const rawLines = text.split('\n').slice(0, line)
-    let h = 0x811c9dc5 // FNV-1a offset basis
-    let effectiveLines = 0
-    for (const raw of rawLines) {
-      const trimmed = raw.trim()
-      if (trimmed.length === 0 || trimmed.startsWith('#')) continue
-      effectiveLines++
-      for (let i = 0; i < trimmed.length; i++) {
-        h ^= trimmed.charCodeAt(i)
-        h = Math.imul(h, 0x01000193)
-      }
-      // 行区切りをハッシュに混ぜる
-      h ^= 0x0a
-      h = Math.imul(h, 0x01000193)
-    }
-    // assumptions をハッシュに混ぜる
-    for (const [seat, role] of assumptionsMap) {
-      h ^= seat * 31 + role.length
-      h = Math.imul(h, 0x01000193)
-    }
-    // wolfPairDenyals をハッシュに混ぜる
-    for (const group of denyWolfGroups) {
-      for (const seat of group) {
-        h ^= seat * 37
-        h = Math.imul(h, 0x01000193)
-      }
-    }
-    // hocusPocus をハッシュに混ぜる
-    for (const seat of hocusPocusSeats) {
-      h ^= seat * 41
-      h = Math.imul(h, 0x01000193)
-    }
-    // forceTs をハッシュに混ぜる（WASM/TS で結果が異なる可能性があるためキャッシュ分離）
-    if (forceTs) {
-      h ^= 0x5a5a5a5a
-      h = Math.imul(h, 0x01000193)
-    }
-    return { key: effectiveLines, hash: (h >>> 0).toString(36) }
-  }
-  let currentSetup: Map<SystemRole, number> = $state(new Map())
   let skin: Skin = $state(settings.skin)
   let devMode = $state(settings.devMode)
   let debugMode: DebugLayout = $state(settings.debug)
@@ -882,10 +807,6 @@
     setEditorContent(body)
     rawStatements = ''
     analyzerJson = ''
-    parsedLines = []
-    analysisSeats = []
-    analysisColumns = []
-    analysisError = ''
     assumptions = new Map()
   }
 
@@ -947,10 +868,6 @@
     setEditorContent(input)
     updateSettings({ active: key })
     rawStatements = ''
-    parsedLines = []
-    analysisSeats = []
-    analysisColumns = []
-    analysisError = ''
     assumptions = new Map()
   }
 
@@ -1002,10 +919,6 @@
     showModal = false
     rawStatements = ''
     analyzerJson = ''
-    parsedLines = []
-    analysisSeats = []
-    analysisColumns = []
-    analysisError = ''
     assumptions = new Map()
   }
 
@@ -1048,13 +961,13 @@
   }
 
   function scrollRawToCursor() {
-    if (!rawBodyEl || statementLines.length === 0) return
+    if (!rawBodyEl || ctx.statementLines.length === 0) return
     const cursorLine = getCursorLine()
 
     // Find the last statement whose source line <= cursor line
     let stmtIndex = 0
-    for (let i = 0; i < statementLines.length; i++) {
-      if (statementLines[i] <= cursorLine) stmtIndex = i
+    for (let i = 0; i < ctx.statementLines.length; i++) {
+      if (ctx.statementLines[i] <= cursorLine) stmtIndex = i
       else break
     }
 
@@ -1276,43 +1189,6 @@
     return { status: 'default', fixed: false, label }
   }
 
-  const GMORK_DEBUG = true
-
-  function runGmork(): string {
-    if (!devMode) return ''
-    if (assumptions.size !== 1 || !villageStatus) return ''
-    const [[seat, role]] = [...assumptions]
-    const possibilities = new Map(baseAnalysisSeats.map(s => [s.seat, new Set(s.roles)]))
-    const playerName = players.get(seat) ?? `席${seat}`
-    const roleName = systemRoles.get(role)?.name ?? role
-
-    // 確定済み役職をトグルした場合は確定理由を表示
-    const possibleRoles = possibilities.get(seat)
-    if (possibleRoles && possibleRoles.size === 1 && possibleRoles.has(role)) {
-      const confirmObj = findConfirmationReason(villageStatus, currentSetup, seat, role, players, possibilities)
-      const confirmText = confirmObj ? formatConfirmationReason(confirmObj, role) : 'わかりません'
-      let debugKey = ''
-      if (GMORK_DEBUG && confirmObj) {
-        debugKey = ` [${confirmObj.type}]`
-      }
-      return `「${playerName}」が「${roleName}」に確定した理由： ${confirmText}${debugKey}`
-    }
-
-    // 未確定プレイヤーの可能性がある役職をトグルした場合は何もしない
-    if (possibleRoles && possibleRoles.has(role)) {
-      return ''
-    }
-
-    const reasonObj = findReason(villageStatus, currentSetup, seat, role, possibilities, players)
-    const reasonText = reasonObj ? formatReason(reasonObj, role) : 'わかりません'
-    let debugKey = ''
-    if (GMORK_DEBUG && reasonObj) {
-      const inner = 'bustReason' in reasonObj ? (reasonObj as any).bustReason.type : null
-      debugKey = inner ? ` [${reasonObj.type} > ${inner}]` : ` [${reasonObj.type}]`
-    }
-    return `「${playerName}」が「${roleName}」ではありえない理由： ${reasonText}${debugKey}`
-  }
-
   function toggleAssumption(seat: number, role: SystemRole) {
     const current = assumptions.get(seat)
     if (current === role) {
@@ -1321,8 +1197,6 @@
       assumptions.set(seat, role)
     }
     assumptions = new Map(assumptions)
-    // baseAnalysisSeats(assumption未適用)でgmorkを計算
-    gmorkResult = runGmork()
     run()
   }
 
@@ -1330,7 +1204,6 @@
     assumptions = new Map()
     denyWolfGroups = []
     hocusPocusSeats = new Set()
-    gmorkResult = ''
     run()
   }
 
@@ -1345,8 +1218,8 @@
   }
 
   function buildRevealText(): string {
-    const lines = analysisSeats.map(s => {
-      const name = players.get(s.seat) ?? `#${s.seat}`
+    const lines = ctx.analysisSeats.map(s => {
+      const name = ctx.players.get(s.seat) ?? `#${s.seat}`
       const roleName = systemRoles.get(s.roles[0])?.name ?? s.roles[0]
       return `${name}=${roleName}`
     })
@@ -1407,7 +1280,7 @@
     const group = [suggestion.seatA, suggestion.seatB]
     denyWolfGroups = [...denyWolfGroups, group]
     // 即座にUIから除外し、run()後にRetar結果で再計算される
-    wolfPairSuggestions = wolfPairSuggestions.filter(s =>
+    ctx.wolfPairSuggestions = ctx.wolfPairSuggestions.filter(s =>
       !(s.seatA === suggestion.seatA && s.seatB === suggestion.seatB)
     )
     run()
@@ -1477,74 +1350,6 @@
     return result
   }
 
-  function buildSourceLines(statements: any[], dict: FlexibleDictionary): SourceLines {
-    const survivor = new Map<number, number>()
-    const claimRow = new Map<number, number>()
-    const claimCell = new Map<string, number>()
-    const kill = new Map<number, number>()
-    const exec = new Map<number, number>()
-    const vote = new Map<number, number>()
-
-    function resolve(name: string): number {
-      const res = dict.search(name)
-      return res.length > 0 ? Number(res[0]) : -1
-    }
-
-    for (const stmt of statements) {
-      const line = stmt.line as number
-      switch (stmt.type) {
-        case 'join':
-          survivor.set(resolve(stmt.name), line)
-          break
-        case 'joinMulti':
-          for (const name of stmt.players) survivor.set(resolve(name), line)
-          break
-        case 'vote':
-          vote.set(resolve(stmt.voter), line)
-          break
-        case 'multiVote':
-          for (const name of stmt.voters) vote.set(resolve(name), line)
-          break
-        case 'attack':
-          kill.set((stmt.day ?? 1) - 1, line)
-          break
-        case 'peace':
-          kill.set((stmt.day ?? 1) - 1, line)
-          break
-        case 'lynch':
-          exec.set(stmt.day, line)
-          break
-        case 'curse':
-        case 'follow':
-          kill.set((stmt.day ?? 1) - 1, line)
-          break
-        case 'assert': {
-          const seat = resolve(stmt.actor)
-          claimRow.set(seat, line)
-          // Compute which nights this assert populates (right-aligned, same as bridge)
-          const day = stmt.day ?? 1
-          const lastNight = day - 1
-          const divResults = (stmt.assertions ?? []).filter((a: any) => a.target && a.result)
-          for (let i = 0; i < divResults.length; i++) {
-            const night = lastNight - (divResults.length - 1 - i)
-            claimCell.set(`${seat}:${night}`, line)
-          }
-          const guardTargets = (stmt.assertions ?? []).filter((a: any) => a.action === 'guard')
-          for (let i = 0; i < guardTargets.length; i++) {
-            const night = lastNight - (guardTargets.length - 1 - i)
-            claimCell.set(`${seat}:${night}`, line)
-          }
-          break
-        }
-        case 'mason':
-          for (const name of stmt.players) claimRow.set(resolve(name), line)
-          break
-      }
-    }
-
-    return { survivor, claimRow, claimCell, kill, exec, vote }
-  }
-
   function runWithCursor(overrideCursorLine?: number) {
     runningWithCursor = true
     try { runWithCursorInner(overrideCursorLine) }
@@ -1552,14 +1357,8 @@
   }
 
   function runWithCursorInner(overrideCursorLine?: number) {
-    const runStart = performance.now()
-    analysisSeats = []
-    analysisError = ''
-    if (assumptions.size === 0) gmorkResult = ''
     rawStatements = ''
     analyzerJson = ''
-    parsedLines = []
-    sourceLines = { survivor: new Map(), claimRow: new Map(), claimCell: new Map(), kill: new Map(), exec: new Map(), vote: new Map() }
 
     const effectiveCursorLine = overrideCursorLine ?? getCursorLine()
 
@@ -1595,12 +1394,8 @@
 
       const { meta, statements } = parse(input, { cursorLine: effectiveCursorLine })
       rawStatements = JSON.stringify(statements, null, 2)
-      parsedLines = stringifyStatements(statements)
-      statementLines = statements.map((s: any) => s.line as number)
 
-      const { vs, setup, players: playersMap, shortNames: shortNamesMap, dict } = buildVillageStatus(statements, meta)
-      sourceLines = buildSourceLines(statements, dict)
-      currentEvents = statementsToPublicEvents(statements, dict).map(de => de.event)
+      const { vs, setup, dict } = buildVillageStatus(statements, meta)
 
       // Feed parse results to CM6 for syntax highlighting (after buildVillageStatus so dict is available)
       if (editorView) {
@@ -1646,14 +1441,8 @@
         ] })
       }
       cursorLine = effectiveCursorLine
-      players = playersMap
-      playerShortNames = shortNamesMap
-      villageStatus = vs
-      currentSetup = setup
       overlayChannel.postMessage({ type: 'howl', text: input, cursorLine: effectiveCursorLine })
       if (obsSocket?.readyState === WebSocket.OPEN) obsSocket.send(input)
-      const alive = [...vs.statuses.values()].filter(s => s.surviving).length
-      survivorInfo = { alive, total: vs.statuses.size }
       deadSeats = new Set([...vs.statuses.entries()].filter(([, s]) => !s.surviving).map(([seat]) => seat))
       nightKilledSeats = new Set(
         [...vs.statuses.entries()]
@@ -1669,92 +1458,11 @@
           .map(([seat]) => seat)
       )
 
-      const roleOrder = [...systemRoles.keys()] as SystemRole[]
-      analysisColumns = roleOrder.filter(r => setup.has(r as SystemRole))
-
       const vsJson = JSON.stringify(serializeVillageStatus(vs))
       const setupJson = JSON.stringify(Object.fromEntries(setup))
-      const workerPayload = {
-        vsJson,
-        setupJson,
-        players: [...playersMap],
-        assumptions: [...assumptions],
-        wolfPairDenyals: denyWolfGroups.map(g => [g[0], g[1]] as [number, number]),
-        hocusPocus: [...hocusPocusSeats],
-        forceTs,
-      }
       analyzerJson = JSON.stringify({ vs: JSON.parse(vsJson), setup: JSON.parse(setupJson) }, null, 2)
-
-      // 突然死を含む盤面は Retar が対応していないため解析をスキップ
-      const hasSuddenDeath = [...vs.statuses.values()].some(s => !s.surviving && s.causeOfDeath === 'sudden_death')
-      if (hasSuddenDeath) {
-        analysisSeats = []
-        analysisError = '突然死を含む盤面は解析できません'
-        analysisStatsInfo = null
-        analysisCached = false
-        analysisTotalElapsed = Math.round(performance.now() - runStart)
-        gmorkResult = ''
-        analyzing = false
-        return
-      }
-
-      // キャッシュチェック: 同じ行で同じテキスト+assumptionsならRetar再計算をスキップ
-      const { key: cacheKey, hash: cacheHash } = computeAnalysisHash(input, cursorLine, assumptions)
-      const cached = analysisCache.get(cacheKey)
-      if (cached && cached.hash === cacheHash) {
-        analysisSeats = cached.cached
-        analysisError = ''
-        analysisStatsInfo = cached.stats
-        analysisCached = true
-        analysisTotalElapsed = Math.round(performance.now() - runStart)
-        if (assumptions.size === 0) baseAnalysisSeats = cached.cached
-        if (pendingGmorkEntry && assumptions.size === 0) {
-          const pe = pendingGmorkEntry
-          pendingGmorkEntry = null
-          assumptions = new Map([[pe.seat, pe.role]])
-          gmorkResult = runGmork()
-        }
-        analyzing = false
-        return
-      }
-
-      analyzing = true
-      analysisCached = false
-      analysisStart = performance.now()
-      requestAnalysis(workerPayload, (data) => {
-        analyzing = false
-        analysisDuration = Math.round(performance.now() - analysisStart)
-        analysisTotalElapsed = Math.round(performance.now() - runStart)
-        if (data.type === 'result') {
-          analysisSeats = data.seats
-          analysisError = ''
-          analysisStatsInfo = data.stats
-          if (assumptions.size === 0) baseAnalysisSeats = data.seats
-          // Gmork Debug ペインからの pending entry を処理
-          if (pendingGmorkEntry && assumptions.size === 0) {
-            const pe = pendingGmorkEntry
-            pendingGmorkEntry = null
-            assumptions = new Map([[pe.seat, pe.role]])
-            gmorkResult = runGmork()
-          }
-          // Retar結果から狼候補を抽出し提案を更新
-          const wolfCandidates = new Set(data.seats.filter(s => s.roles.includes('werewolf')).map(s => s.seat))
-          if (villageStatus && (currentSetup.get('werewolf') ?? 0) >= 2) {
-            wolfPairSuggestions = scoreWolfPairs(villageStatus, players, denyWolfGroups, wolfCandidates)
-          }
-          // キャッシュに保存
-          analysisCache.set(cacheKey, { hash: cacheHash, cached: data.seats, stats: data.stats })
-        } else {
-          analysisSeats = []
-          analysisError = data.message
-          analysisStatsInfo = null
-          gmorkResult = ''
-        }
-      })
     } catch (e: any) {
-      analysisSeats = []
-      analysisError = e.message
-      villageStatus = null
+      console.error('[demo] runWithCursorInner failed:', e)
     }
   }
 
@@ -2037,7 +1745,7 @@
     <section class="pane">
       <div class="pane-header">Status</div>
       <div class="pane-body">
-        {#if villageStatus}
+        {#if ctx.villageStatus}
           <StatusPane {ctx} />
         {/if}
       </div>
@@ -2048,20 +1756,20 @@
     <section class="pane">
       <div class="pane-header">Analysis</div>
       <div class="pane-body">
-        {#if analysisError}
-          <pre class="output">Error: {analysisError}</pre>
+        {#if ctx.analysisError}
+          <pre class="output">Error: {ctx.analysisError}</pre>
         {/if}
-        {#if analysisColumns.length > 0 && players.size > 0}
-          {@const currentMap = new Map(analysisSeats.map(s => [s.seat, s.roles]))}
+        {#if ctx.analysisColumns.length > 0 && ctx.players.size > 0}
+          {@const currentMap = new Map(ctx.analysisSeats.map(s => [s.seat, s.roles]))}
           <div class="analysis-layout">
             <div class="analysis-table-wrap">
               <table class="analysis-table">
                 <tbody>
-                  {#each [...players] as [seat, name]}
+                  {#each [...ctx.players] as [seat, name]}
                     {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
                     <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
-                      <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)} claim={claimShortNames.get(seat)}>{playerShortNames.get(seat) ?? name}</PlayerName></td>
-                      {#each analysisColumns as role}
+                      <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)} claim={claimShortNames.get(seat)}>{ctx.playerShortNames.get(seat) ?? name}</PlayerName></td>
+                      {#each ctx.analysisColumns as role}
                         <td
                           class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"
                           onclick={() => toggleAssumption(seat, role)}
@@ -2077,10 +1785,8 @@
                   {/each}
                 </tbody>
               </table>
-              {#if analysisCached}
-                <div class="analysis-duration">total {analysisTotalElapsed}ms (cached) — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, wall {analysisStatsInfo.wallClock}ms, worker {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms, {analysisStatsInfo.wasm ? 'WASM' : 'JS'}){/if}</div>
-              {:else if analysisDuration > 0}
-                <div class="analysis-duration">total {analysisTotalElapsed}ms — retar {analysisDuration}ms{#if analysisStatsInfo} ({analysisStatsInfo.workers}w, wall {analysisStatsInfo.wallClock}ms, worker {analysisStatsInfo.minElapsed}-{analysisStatsInfo.maxElapsed}ms, {analysisStatsInfo.wasm ? 'WASM' : 'JS'}){/if}</div>
+              {#if ctx.analysisDuration > 0}
+                <div class="analysis-duration">retar {ctx.analysisDuration}ms{#if ctx.analysisStats} ({ctx.analysisStats.workers}w, wall {ctx.analysisStats.wallClock}ms, worker {ctx.analysisStats.minElapsed}-{ctx.analysisStats.maxElapsed}ms, {ctx.analysisStats.wasm ? 'WASM' : 'JS'}){/if}</div>
               {/if}
               {#if devMode}
                 <div class="analysis-dev-bar">
@@ -2095,7 +1801,7 @@
               <div class="assumptions-list">
                 <div class="assumptions-header">
                   仮説
-                  {#if (currentSetup.get('werewolf') ?? 0) >= 2}
+                  {#if (ctx.setup.get('werewolf') ?? 0) >= 2}
                     <button class="assumption-add" onclick={openDenyWolfDialog}>追加</button>
                   {/if}
                   {#if assumptions.size > 0 || denyWolfGroups.length > 0 || hocusPocusSeats.size > 0}
@@ -2110,29 +1816,29 @@
                 {/if}
                 {#each [...assumptions] as [seat, role]}
                   <div class="assumption-item">
-                    <span class="assumption-text">{playerShortNames.get(seat) ?? players.get(seat) ?? `#${seat}`}は{systemRoles.get(role)?.name ?? role}である</span>
+                    <span class="assumption-text">{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}は{systemRoles.get(role)?.name ?? role}である</span>
                     <button class="assumption-remove" onclick={() => toggleAssumption(seat, role)}>&times;</button>
                   </div>
                 {/each}
                 {#each denyWolfGroups as group, i}
                   <div class="assumption-item">
-                    <span class="assumption-text deny-wolf">{group.map(s => playerShortNames.get(s) ?? players.get(s) ?? `#${s}`).join(' と ')} は両狼でない</span>
+                    <span class="assumption-text deny-wolf">{group.map(s => ctx.playerShortNames.get(s) ?? ctx.players.get(s) ?? `#${s}`).join(' と ')} は両狼でない</span>
                     <button class="assumption-remove" onclick={() => removeDenyWolfGroup(i)}>&times;</button>
                   </div>
                 {/each}
-                {#if wolfPairSuggestions.length > 0}
+                {#if ctx.wolfPairSuggestions.length > 0}
                   <div class="suggestions-section">
                     <div class="suggestions-label">提案</div>
-                    {#each wolfPairSuggestions as suggestion}
+                    {#each ctx.wolfPairSuggestions as suggestion}
                       <button class="suggestion-item" onclick={() => addSuggestion(suggestion)}>
-                        「{playerShortNames.get(suggestion.seatA) ?? players.get(suggestion.seatA) ?? `#${suggestion.seatA}`}と{playerShortNames.get(suggestion.seatB) ?? players.get(suggestion.seatB) ?? `#${suggestion.seatB}`}の両狼はない」仮説を追加する
+                        「{ctx.playerShortNames.get(suggestion.seatA) ?? ctx.players.get(suggestion.seatA) ?? `#${suggestion.seatA}`}と{ctx.playerShortNames.get(suggestion.seatB) ?? ctx.players.get(suggestion.seatB) ?? `#${suggestion.seatB}`}の両狼はない」仮説を追加する
                       </button>
                     {/each}
                   </div>
                 {/if}
               </div>
-              {#if gmorkResult}
-                <div class="gmork-results">{gmorkResult}</div>
+              {#if ctx.gmorkResult}
+                <div class="gmork-results">{ctx.gmorkResult}</div>
               {/if}
             </div>
           </div>
@@ -2179,7 +1885,7 @@
       <div class="pane-header">Parsed</div>
       <div class="pane-body">
         <div class="output parsed-output">
-          {#each parsedLines as line}
+          {#each ctx.parsedLines as line}
             {#if line.type === 'blank'}
               <div class="parsed-blank">&nbsp;</div>
             {:else if line.type === 'day'}
@@ -2250,7 +1956,7 @@
     <section class="pane">
       <div class="pane-header">Skoll (確率分布)</div>
       <div class="pane-body">
-        <SkollPane vs={villageStatus} setup={currentSetup} {players} publicEvents={currentEvents} />
+        <SkollPane vs={ctx.villageStatus} setup={ctx.setup} players={ctx.players} publicEvents={ctx.currentEvents} />
       </div>
     </section>
     {/if}
@@ -2442,7 +2148,7 @@
       <div class="modal-title">狼同士を否定</div>
       <div class="modal-hint">両狼ではない2人を選択</div>
       <div class="deny-wolf-players">
-        {#each [...players] as [seat, name]}
+        {#each [...ctx.players] as [seat, name]}
           {@const selected = denyWolfSelection.has(seat)}
           {@const disabled = !selected && denyWolfSelection.size >= 2}
           <button
@@ -2450,7 +2156,7 @@
             class:selected
             {disabled}
             onclick={() => toggleDenyWolfPlayer(seat)}
-          >{playerShortNames.get(seat) ?? name}</button>
+          >{ctx.playerShortNames.get(seat) ?? name}</button>
         {/each}
       </div>
       <div class="deny-wolf-actions">
