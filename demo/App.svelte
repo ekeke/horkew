@@ -228,7 +228,7 @@
         switchTo(next.key)
       } else {
         activeKey = ''
-        input = ''
+        ctx.howlText = ''
         updateSettings({ active: '' })
         setEditorContent('')
         rawStatements = ''
@@ -379,7 +379,7 @@
     const ws = new WebSocket(`${protocol}://${obsPartyHost()}/party/${room}`)
     ws.onopen = () => {
       obsConnected = true
-      if (input) ws.send(input)
+      if (ctx.howlText) ws.send(ctx.howlText)
     }
     ws.onclose = () => { obsConnected = false }
     ws.onerror = () => { obsConnected = false }
@@ -419,7 +419,7 @@
     ws.onclose = () => { obsConnected = false }
     ws.onerror = () => { obsConnected = false }
     obsSocket = ws
-    if (input && ws.readyState === WebSocket.OPEN) ws.send(input)
+    if (ctx.howlText && ws.readyState === WebSocket.OPEN) ws.send(ctx.howlText)
   }
 
   function copyObsUrl() {
@@ -464,28 +464,25 @@
     saveObsSettings()
   }
 
-  let input = $state(activeKey ? loadText(activeKey) : '')
   let isActivePendingDelete = $derived(!!activeKey && pendingDeletes.has(activeKey))
   let rawStatements = $state('')
   let analyzerJson = $state('')
   let deadSeats: Set<number> = $state(new Set())
   let nightKilledSeats: Set<number> = $state(new Set())
   let executedSeats: Set<number> = $state(new Set())
-  let cursorLine = $state(0)
   let showDenyWolfDialog = $state(false)
   let denyWolfSelection: Set<number> = $state(new Set())
 
-  // lykaon Phase 7 Stage A: demo の input ↔ ctx.howlText の一時ブリッジ (Stage B-4 で解消予定)
   const ctx = createAnalysisContext()
+  if (activeKey) ctx.howlText = loadText(activeKey)
   onDestroy(() => ctx.destroy())
 
-  $effect(() => { if (ctx.howlText !== input) ctx.howlText = input })
-  $effect(() => { if (ctx.cursorLine !== cursorLine) ctx.cursorLine = cursorLine })
-
+  // ctx.howlText 変化を CodeMirror に反映 (ファイル切替・trial mode 等)。
+  // editor onChange からの ctx.howlText 更新は doc と一致するためループしない。
+  // Stage C で EditorPane に置換すれば解消。
   $effect(() => {
     const text = ctx.howlText
-    if (text !== input) {
-      input = text
+    if (editorView && editorView.state.doc.toString() !== text) {
       setEditorContent(text)
     }
   })
@@ -642,7 +639,7 @@
       changes: { from, insert: text },
       selection: { anchor: from + text.length },
     })
-    input = editorView.state.doc.toString()
+    ctx.howlText = editorView.state.doc.toString()
     run()
   }
 
@@ -682,12 +679,12 @@
     // Show up to the end of this day
     const nextDay = day + 1
     if (dayLineMap.has(nextDay)) {
-      cursorLine = dayLineMap.get(nextDay)! - 1
+      ctx.cursorLine = dayLineMap.get(nextDay)! - 1
     } else {
-      cursorLine = 999999
+      ctx.cursorLine = 999999
     }
     videoSyncActive = false  // Disable auto-sync when manually navigating
-    runWithCursor(cursorLine)
+    runWithCursor(ctx.cursorLine)
   }
 
   function resumeVideoSync() {
@@ -747,8 +744,8 @@
   })
 
   $effect(() => {
-    if (activeKey && input !== undefined && !trialMode) {
-      saveText(activeKey, input)
+    if (activeKey && !trialMode) {
+      saveText(activeKey, ctx.howlText)
     }
   })
 
@@ -792,7 +789,7 @@
     fileIndex[key] = { title: title || undefined, createdAt: now, updatedAt: now }
     saveIndex(fileIndex)
     activeKey = key
-    input = body
+    ctx.howlText = body
     saveText(key, body)
     entries = fileEntries()
     updateSettings({ active: key })
@@ -839,7 +836,7 @@
   function handleStartTrial(text: string) {
     trialMode = true
     resetVideoState()
-    input = text
+    ctx.howlText = text
     setEditorContent(text)
     showHelp = false
   }
@@ -847,8 +844,8 @@
   function exitTrialMode() {
     trialMode = false
     if (activeKey) {
-      input = loadText(activeKey)
-      setEditorContent(input)
+      ctx.howlText = loadText(activeKey)
+      setEditorContent(ctx.howlText)
     }
   }
 
@@ -856,8 +853,8 @@
     if (trialMode) trialMode = false
     resetVideoState()
     activeKey = key
-    input = loadText(key)
-    setEditorContent(input)
+    ctx.howlText = loadText(key)
+    setEditorContent(ctx.howlText)
     updateSettings({ active: key })
     rawStatements = ''
     ctx.assumptions = new Map()
@@ -904,8 +901,8 @@
     fileIndex[key] = { title: trimmed || undefined, createdAt: now, updatedAt: now }
     saveIndex(fileIndex)
     activeKey = key
-    input = template
-    setEditorContent(input)
+    ctx.howlText = template
+    setEditorContent(ctx.howlText)
     saveText(key, template)
     entries = fileEntries()
     showModal = false
@@ -1018,8 +1015,8 @@
       if (!trialMode) {
         trialMode = true
         resetVideoState()
-        input = cmdPlayEditorText || ''
-        setEditorContent(input)
+        ctx.howlText = cmdPlayEditorText || ''
+        setEditorContent(ctx.howlText)
         showHelp = false
       }
     }
@@ -1058,9 +1055,9 @@
       if (!editorParent || editorView) return
       mod.setVideoTimeGetter(() => videoId ? videoCurrentTime : null)
       editorView = mod.createHowlEditor(editorParent, {
-        doc: input,
+        doc: ctx.howlText,
         onChange(value) {
-          input = value
+          ctx.howlText = value
         },
         onCursorChange(_line) {
           onCursorMove()
@@ -1357,7 +1354,7 @@
 
     try {
       // First parse without cursor filter to build dayLineMap
-      const fullParse = parse(input)
+      const fullParse = parse(ctx.howlText)
       const fullMeta = fullParse.meta
 
       // Deprecation warnings for old frontmatter fields
@@ -1385,7 +1382,7 @@
       dayLineMap = buildDayLineMap(fullParse.statements)
       maxDay = Math.max(1, ...dayLineMap.keys())
 
-      const { meta, statements } = parse(input, { cursorLine: effectiveCursorLine })
+      const { meta, statements } = parse(ctx.howlText, { cursorLine: effectiveCursorLine })
       rawStatements = JSON.stringify(statements, null, 2)
 
       const { vs, setup, dict } = buildVillageStatus(statements, meta)
@@ -1433,9 +1430,9 @@
           editorModule!.setGameStats.of({ day: vs.day, executions: vs.executions.size }),
         ] })
       }
-      cursorLine = effectiveCursorLine
-      overlayChannel.postMessage({ type: 'howl', text: input, cursorLine: effectiveCursorLine })
-      if (obsSocket?.readyState === WebSocket.OPEN) obsSocket.send(input)
+      ctx.cursorLine = effectiveCursorLine
+      overlayChannel.postMessage({ type: 'howl', text: ctx.howlText, cursorLine: effectiveCursorLine })
+      if (obsSocket?.readyState === WebSocket.OPEN) obsSocket.send(ctx.howlText)
       deadSeats = new Set([...vs.statuses.entries()].filter(([, s]) => !s.surviving).map(([seat]) => seat))
       nightKilledSeats = new Set(
         [...vs.statuses.entries()]
