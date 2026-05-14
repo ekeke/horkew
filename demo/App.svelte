@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte'
+  import { onMount, onDestroy, tick } from 'svelte'
   import { parse, parseFrontmatter, buildFrontmatter, parseStatement } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import { statementsToPublicEvents } from '../src/howl/events-bridge.ts'
@@ -9,7 +9,13 @@
   import type { SystemRole, VillageStatus, CauseOfDeath } from '../src/types/index.ts'
   import { requestAnalysis, type AnalysisStats } from '../src/lykaon/runAnalysis.ts'
   import { serializeVillageStatus } from '../src/retar/wasm-helpers.ts'
-  import StatusPane from './status/StatusPane.svelte'
+  import {
+    createAnalysisContext,
+    HatiPane,
+    StatusPane,
+    InspectPane,
+    GmorkDebugPane,
+  } from '../src/lykaon/index.ts'
   import PlayerName from './status/PlayerName.svelte'
   import { findReason, findConfirmationReason } from '../src/gmork/index.ts'
   import { formatReason, formatConfirmationReason } from '../src/gmork/format.ts'
@@ -18,10 +24,7 @@
   import YouTubePlayer from './YouTubePlayer.svelte'
   import NicoPlayer from './NicoPlayer.svelte'
   import ColorSwatchPane from './ColorSwatchPane.svelte'
-  import HatiPane from './HatiPane.svelte'
   import SkollPane from './SkollPane.svelte'
-  import GmorkDebugPane from './GmorkDebugPane.svelte'
-  import InspectPane from './InspectPane.svelte'
   import PretrainPane from './PretrainPane.svelte'
   import StatsPane from './StatsPane.svelte'
   import CommandPlayPane from './CommandPlayPane.svelte'
@@ -513,6 +516,39 @@
   let wolfPairSuggestions: WolfPairSuggestion[] = $state([])
   let baseAnalysisSeats: SeatResult[] = []
   let pendingGmorkEntry: { seat: number, role: SystemRole } | null = null
+
+  // lykaon Phase 7 Stage A: demo state ↔ ctx の一時ブリッジ (Stage B/C で解消予定)
+  const ctx = createAnalysisContext()
+  onDestroy(() => ctx.destroy())
+
+  $effect(() => { if (ctx.howlText !== input) ctx.howlText = input })
+  $effect(() => { if (ctx.cursorLine !== cursorLine) ctx.cursorLine = cursorLine })
+  $effect(() => { ctx.assumptions = assumptions })
+  $effect(() => { ctx.hocusPocusSeats = hocusPocusSeats })
+  $effect(() => { ctx.denyWolfGroups = denyWolfGroups })
+  $effect(() => { ctx.forceTs = forceTs })
+
+  $effect(() => {
+    const text = ctx.howlText
+    if (text !== input) {
+      input = text
+      setEditorContent(text)
+    }
+  })
+
+  $effect(() => {
+    const unsub = ctx.onJump((ev) => {
+      if (!editorView) return
+      const docLine = editorView.state.doc.line(ev.line)
+      editorView.dispatch({
+        selection: { anchor: docLine.from },
+        scrollIntoView: true,
+      })
+      editorView.focus()
+    })
+    return unsub
+  })
+
   let allRolesDetermined = $derived(
     analysisSeats.length > 0
     && players.size > 0
@@ -2002,7 +2038,7 @@
       <div class="pane-header">Status</div>
       <div class="pane-body">
         {#if villageStatus}
-          <StatusPane vs={villageStatus} {players} setup={currentSetup} shortNames={playerShortNames} {sourceLines} {cursorLine} />
+          <StatusPane {ctx} />
         {/if}
       </div>
     </section>
@@ -2205,7 +2241,7 @@
     <section class="pane">
       <div class="pane-header">Hati (詰み探索)</div>
       <div class="pane-body">
-        <HatiPane vs={villageStatus} setup={currentSetup} {players} />
+        <HatiPane {ctx} />
       </div>
     </section>
     {/if}
@@ -2223,20 +2259,7 @@
     <section class="pane">
       <div class="pane-header">Gmork Debug</div>
       <div class="pane-body">
-        <GmorkDebugPane onLoadEntry={(entry, text) => {
-          input = text
-          if (editorView) {
-            editorView.dispatch({
-              changes: { from: 0, to: editorView.state.doc.length, insert: text },
-              selection: { anchor: text.length },
-              scrollIntoView: true,
-            })
-            editorView.focus()
-          }
-          // Retar 解析完了後に assumption をセットして Gmork を連動させる
-          assumptions = new Map()
-          pendingGmorkEntry = { seat: entry.seat, role: entry.role }
-        }} />
+        <GmorkDebugPane {ctx} />
       </div>
     </section>
     {/if}
@@ -2245,9 +2268,7 @@
     <section class="pane">
       <div class="pane-header">Fenrir Inspect</div>
       <div class="pane-body">
-        <InspectPane onLoadHowl={(howl) => {
-          handleStartTrial(howl)
-        }} />
+        <InspectPane {ctx} />
       </div>
     </section>
     {/if}
@@ -2295,9 +2316,7 @@
     <div class="fenrir-right">
       <section class="pane">
         <div class="pane-body">
-          <InspectPane onLoadHowl={(howl) => {
-            handleStartTrial(howl)
-          }} />
+          <InspectPane {ctx} />
         </div>
       </section>
     </div>
