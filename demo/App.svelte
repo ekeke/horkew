@@ -233,7 +233,7 @@
         setEditorContent('')
         rawStatements = ''
         analyzerJson = ''
-        assumptions = new Map()
+        ctx.assumptions = new Map()
       }
     }
   }
@@ -472,23 +472,15 @@
   let nightKilledSeats: Set<number> = $state(new Set())
   let executedSeats: Set<number> = $state(new Set())
   let cursorLine = $state(0)
-  let assumptions: Map<number, SystemRole> = $state(new Map())
-  let hocusPocusSeats: Set<number> = $state(new Set())
-  let forceTs = $state(false)
-  let denyWolfGroups: number[][] = $state([])
   let showDenyWolfDialog = $state(false)
   let denyWolfSelection: Set<number> = $state(new Set())
 
-  // lykaon Phase 7 Stage A: demo state ↔ ctx の一時ブリッジ (Stage B/C で解消予定)
+  // lykaon Phase 7 Stage A: demo の input ↔ ctx.howlText の一時ブリッジ (Stage B-4 で解消予定)
   const ctx = createAnalysisContext()
   onDestroy(() => ctx.destroy())
 
   $effect(() => { if (ctx.howlText !== input) ctx.howlText = input })
   $effect(() => { if (ctx.cursorLine !== cursorLine) ctx.cursorLine = cursorLine })
-  $effect(() => { ctx.assumptions = assumptions })
-  $effect(() => { ctx.hocusPocusSeats = hocusPocusSeats })
-  $effect(() => { ctx.denyWolfGroups = denyWolfGroups })
-  $effect(() => { ctx.forceTs = forceTs })
 
   $effect(() => {
     const text = ctx.howlText
@@ -807,7 +799,7 @@
     setEditorContent(body)
     rawStatements = ''
     analyzerJson = ''
-    assumptions = new Map()
+    ctx.assumptions = new Map()
   }
 
   function setEditorContent(text: string) {
@@ -868,7 +860,7 @@
     setEditorContent(input)
     updateSettings({ active: key })
     rawStatements = ''
-    assumptions = new Map()
+    ctx.assumptions = new Map()
   }
 
   const defaultNames = [
@@ -919,7 +911,7 @@
     showModal = false
     rawStatements = ''
     analyzerJson = ''
-    assumptions = new Map()
+    ctx.assumptions = new Map()
   }
 
   function cancelNew() {
@@ -1190,30 +1182,31 @@
   }
 
   function toggleAssumption(seat: number, role: SystemRole) {
-    const current = assumptions.get(seat)
-    if (current === role) {
-      assumptions.delete(seat)
+    const next = new Map(ctx.assumptions)
+    if (next.get(seat) === role) {
+      next.delete(seat)
     } else {
-      assumptions.set(seat, role)
+      next.set(seat, role)
     }
-    assumptions = new Map(assumptions)
+    ctx.assumptions = next
     run()
   }
 
   function clearAssumptions() {
-    assumptions = new Map()
-    denyWolfGroups = []
-    hocusPocusSeats = new Set()
+    ctx.assumptions = new Map()
+    ctx.denyWolfGroups = []
+    ctx.hocusPocusSeats = new Set()
     run()
   }
 
   function toggleHocusPocus(seat: number) {
-    if (hocusPocusSeats.has(seat)) {
-      hocusPocusSeats.delete(seat)
+    const next = new Set(ctx.hocusPocusSeats)
+    if (next.has(seat)) {
+      next.delete(seat)
     } else {
-      hocusPocusSeats.add(seat)
+      next.add(seat)
     }
-    hocusPocusSeats = new Set(hocusPocusSeats)
+    ctx.hocusPocusSeats = next
     run()
   }
 
@@ -1261,24 +1254,24 @@
     if (denyWolfSelection.size < 2) return
     const group = [...denyWolfSelection].sort((a, b) => a - b)
     // 重複チェック
-    const isDuplicate = denyWolfGroups.some(g =>
+    const isDuplicate = ctx.denyWolfGroups.some(g =>
       g.length === group.length && g.every((s, i) => s === group[i])
     )
     if (!isDuplicate) {
-      denyWolfGroups = [...denyWolfGroups, group]
+      ctx.denyWolfGroups = [...ctx.denyWolfGroups, group]
     }
     showDenyWolfDialog = false
     run()
   }
 
   function removeDenyWolfGroup(index: number) {
-    denyWolfGroups = denyWolfGroups.filter((_, i) => i !== index)
+    ctx.denyWolfGroups = ctx.denyWolfGroups.filter((_, i) => i !== index)
     run()
   }
 
   function addSuggestion(suggestion: WolfPairSuggestion) {
     const group = [suggestion.seatA, suggestion.seatB]
-    denyWolfGroups = [...denyWolfGroups, group]
+    ctx.denyWolfGroups = [...ctx.denyWolfGroups, group]
     // 即座にUIから除外し、run()後にRetar結果で再計算される
     ctx.wolfPairSuggestions = ctx.wolfPairSuggestions.filter(s =>
       !(s.seatA === suggestion.seatA && s.seatB === suggestion.seatB)
@@ -1771,13 +1764,13 @@
                       <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)} claim={claimShortNames.get(seat)}>{ctx.playerShortNames.get(seat) ?? name}</PlayerName></td>
                       {#each ctx.analysisColumns as role}
                         <td
-                          class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{assumptions.get(seat) === role ? ' role-assumed' : ''}"
+                          class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{ctx.assumptions.get(seat) === role ? ' role-assumed' : ''}"
                           onclick={() => toggleAssumption(seat, role)}
                         >{roleToShort(role)}</td>
                       {/each}
                       <td class="hocuspocus-spacer"></td>
                       <td
-                        class="hocuspocus-cell{hocusPocusSeats.has(seat) ? ' hocuspocus-on' : ''}"
+                        class="hocuspocus-cell{ctx.hocusPocusSeats.has(seat) ? ' hocuspocus-on' : ''}"
                         title="HocusPocus: この席のCOを無視して解析"
                         onclick={() => toggleHocusPocus(seat)}
                       >?</td>
@@ -1791,7 +1784,7 @@
               {#if devMode}
                 <div class="analysis-dev-bar">
                   <label class="dev-toggle" title="WASM を無効化して TypeScript 版 Retar を強制使用（デバッグ用）">
-                    <input type="checkbox" bind:checked={forceTs} />
+                    <input type="checkbox" checked={ctx.forceTs} onchange={(e) => { ctx.forceTs = e.currentTarget.checked; run() }} />
                     <span>強制TSモード</span>
                   </label>
                 </div>
@@ -1804,7 +1797,7 @@
                   {#if (ctx.setup.get('werewolf') ?? 0) >= 2}
                     <button class="assumption-add" onclick={openDenyWolfDialog}>追加</button>
                   {/if}
-                  {#if assumptions.size > 0 || denyWolfGroups.length > 0 || hocusPocusSeats.size > 0}
+                  {#if ctx.assumptions.size > 0 || ctx.denyWolfGroups.length > 0 || ctx.hocusPocusSeats.size > 0}
                     <button class="assumption-clear" onclick={() => clearAssumptions()}>全削除</button>
                   {/if}
                 </div>
@@ -1814,13 +1807,13 @@
                     <button class="determined-insert" onclick={insertRevealRoles}>挿入</button>
                   </div>
                 {/if}
-                {#each [...assumptions] as [seat, role]}
+                {#each [...ctx.assumptions] as [seat, role]}
                   <div class="assumption-item">
                     <span class="assumption-text">{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}は{systemRoles.get(role)?.name ?? role}である</span>
                     <button class="assumption-remove" onclick={() => toggleAssumption(seat, role)}>&times;</button>
                   </div>
                 {/each}
-                {#each denyWolfGroups as group, i}
+                {#each ctx.denyWolfGroups as group, i}
                   <div class="assumption-item">
                     <span class="assumption-text deny-wolf">{group.map(s => ctx.playerShortNames.get(s) ?? ctx.players.get(s) ?? `#${s}`).join(' と ')} は両狼でない</span>
                     <button class="assumption-remove" onclick={() => removeDenyWolfGroup(i)}>&times;</button>
