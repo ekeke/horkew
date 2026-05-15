@@ -126,7 +126,7 @@
       const res = await fetch(`${base}inspect/${entry.file}`)
       if (!res.ok) throw new Error(`${res.status}`)
       game = await res.json()
-      if (game?.howl) ctx.howlText = game.howl
+      if (game?.howl) ctx.loadHowl(game.howl)
     } catch (e) {
       error = `game 読み込み失敗: ${e}`
     } finally {
@@ -265,7 +265,7 @@
   }
 
   function loadHowlIntoEditor() {
-    if (game?.howl) ctx.howlText = game.howl
+    if (game?.howl) ctx.loadHowl(game.howl)
   }
 </script>
 

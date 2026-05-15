@@ -500,6 +500,15 @@
     return unsub
   })
 
+  // lykaon ペイン (InspectPane / GmorkDebugPane) から howl が読み込まれたら
+  // trial モードへ遷移し、作業中ドキュメントの上書きを防ぐ。
+  $effect(() => {
+    const unsub = ctx.onExternalLoad((text) => {
+      handleStartTrial(text)
+    })
+    return unsub
+  })
+
   let claimShortNames: Map<number, string> = $derived(
     ctx.villageStatus
       ? new Map([...ctx.villageStatus.statuses.entries()]

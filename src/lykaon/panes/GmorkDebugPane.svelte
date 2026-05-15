@@ -98,11 +98,13 @@
   }
 
   function loadInEditor() {
-    if (scenarioText) {
-      ctx.howlText = scenarioText
-      const lineCount = scenarioText.split('\n').length
-      ctx.jumpTo({ line: lineCount })
-    }
+    if (!scenarioText || !selected) return
+    ctx.loadHowl(scenarioText)
+    const lineCount = scenarioText.split('\n').length
+    ctx.jumpTo({ line: lineCount })
+    // Retar 解析完了後に該当 entry の assumption を自動投入させる
+    ctx.assumptions = new Map()
+    ctx.pendingGmorkEntry = { seat: selected.seat, role: selected.role }
   }
 
   function prev() {

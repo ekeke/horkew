@@ -228,12 +228,20 @@ export class AnalysisContext {
   gmorkResult = $state('')
   wolfPairSuggestions = $state<WolfPairSuggestion[]>([])
 
+  /**
+   * GmorkDebugPane から「エディタに読込」した時に、Retar 解析完了後に
+   * assumptions へ自動投入される {seat, role}。consumer 側はセットだけ
+   * すればよく、解析後のクリアは ctx が自動で行う。
+   */
+  pendingGmorkEntry = $state<{ seat: number, role: SystemRole } | null>(null)
+
   // -----------------------------------------------------------------
   // Cross-pane イベントバス
   // -----------------------------------------------------------------
 
   #seekListeners = new Set<(ev: SeekEvent) => void>()
   #jumpListeners = new Set<(ev: JumpEvent) => void>()
+  #externalLoadListeners = new Set<(text: string) => void>()
 
   onSeek(listener: (ev: SeekEvent) => void): () => void {
     this.#seekListeners.add(listener)
@@ -251,6 +259,24 @@ export class AnalysisContext {
 
   jumpTo(ev: JumpEvent): void {
     for (const fn of this.#jumpListeners) fn(ev)
+  }
+
+  /**
+   * 「外部 (InspectPane / GmorkDebugPane 等) から howl を読み込んだ」イベントを購読する。
+   * consumer (demo 等) は trial mode への遷移・動画リセット・保存抑止などの副作用を扱う。
+   */
+  onExternalLoad(listener: (text: string) => void): () => void {
+    this.#externalLoadListeners.add(listener)
+    return () => { this.#externalLoadListeners.delete(listener) }
+  }
+
+  /**
+   * 外部ペインから howl を読み込む。howlText を更新しつつ onExternalLoad listener も通知する。
+   * editor onChange 経由の更新と区別するために、外部ペインは this method を使う。
+   */
+  loadHowl(text: string): void {
+    this.howlText = text
+    for (const fn of this.#externalLoadListeners) fn(text)
   }
 
   // -----------------------------------------------------------------
@@ -320,6 +346,13 @@ export class AnalysisContext {
             this.analysisStats = data.stats
             if (this.assumptions.size === 0) this.baseAnalysisSeats = data.seats
 
+            // pendingGmorkEntry (GmorkDebugPane からの読込) を assumptions に投入
+            if (this.pendingGmorkEntry && this.assumptions.size === 0) {
+              const pe = this.pendingGmorkEntry
+              this.pendingGmorkEntry = null
+              this.assumptions = new Map([[pe.seat, pe.role]])
+            }
+
             if ((setup.get('werewolf' as SystemRole) ?? 0) >= 2) {
               const wolfCandidates = new Set(
                 data.seats.filter(s => s.roles.includes('werewolf' as SystemRole)).map(s => s.seat)
@@ -372,6 +405,7 @@ export class AnalysisContext {
     this.#cleanup = null
     this.#seekListeners.clear()
     this.#jumpListeners.clear()
+    this.#externalLoadListeners.clear()
   }
 }
 
