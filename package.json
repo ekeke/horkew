@@ -27,6 +27,7 @@
     "bench:retar": "node --experimental-strip-types src/retar/bench.ts",
     "bench:retar:wasm": "node --experimental-strip-types src/retar/bench-wasm.ts",
     "bench:hati": "node --experimental-strip-types src/hati/bench.ts",
+    "puzzle": "node --experimental-strip-types src/hati/puzzle-cli.ts",
     "lupa": "node --experimental-strip-types src/lupa/cli.ts",
     "verify:retar": "node --experimental-strip-types src/verify/retar-verify.ts",
     "verify:hati": "node --experimental-strip-types src/hati/verify.ts",
