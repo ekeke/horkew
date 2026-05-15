@@ -3,7 +3,7 @@
   import { parse } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import type { VillageStatus, SystemRole } from '../src/types/index.ts'
-  import type { SourceLines } from './App.svelte'
+  import type { SourceLines } from '../src/lykaon/index.ts'
   import StatusPane from './status/StatusPane.svelte'
   import FitContainer from './FitContainer.svelte'
   import '../src/lykaon/theme.css'

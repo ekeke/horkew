@@ -38,15 +38,6 @@
   type EditorModule = typeof import('../src/lykaon/editor/index.ts')
   let editorModule: EditorModule | undefined
 
-  export type SourceLines = {
-    survivor: Map<number, number>   // seat → line
-    claimRow: Map<number, number>   // seat → line (CO declaration / row highlight)
-    claimCell: Map<string, number>  // "seat:night" → line (per-cell highlight)
-    kill: Map<number, number>       // nightDay (kills map key) → line
-    exec: Map<number, number>       // execDay → line
-    vote: Map<number, number>       // voterSeat → line
-  }
-
   const nightKillCauses: Set<CauseOfDeath> = new Set([
     'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
   ])
