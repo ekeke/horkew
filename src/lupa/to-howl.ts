@@ -141,7 +141,8 @@ function eventToLines(
       return [serializeStatement(makeReveal(name(ev.seat), ev.role))]
 
     case 'fox_kill':
-      return [commentLine(`${name(ev.target)} 妖狐（噛み無効）`)]
+      // 占い呪殺の死亡は朝に公開される。howl では通常の夜死と同様に attack 文で表現する。
+      return [serializeStatement(makeAttack([name(ev.target)]))]
   }
 }
 
