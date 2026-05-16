@@ -29,6 +29,7 @@ import { getPersona } from './personas.ts'
 import { buildPrompts, type PrivateInfo } from './prompt-builder.ts'
 import { precomputeViewerRetar } from './retar-precompute.ts'
 import { decodeToolCalls, type DecodeResult } from './action-decoder.ts'
+import { renameSeatNames } from './rename-seats.ts'
 import { allTools } from './tools.ts'
 import type {
   BloodhoundEvent, BloodhoundPhase, SpeechEvent, ToolCall,
@@ -145,7 +146,7 @@ export function createBloodhoundHandlers(
       viewerSeat: seat, viewerRole: role,
     })
 
-    const howlText = formatHowl(ctx.events, state, lupaConfig)
+    const howlText = renameSeatNames(formatHowl(ctx.events, state, lupaConfig), state.players)
 
     const { system, user } = buildPrompts({
       phase, role, selfSeat: seat, persona, howlText, retar, legal,
