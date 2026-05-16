@@ -52,6 +52,8 @@ export type BloodhoundHandlersOptions = {
   maxDiscussionRounds?: number
   onLLMExchange?: (info: LLMExchange) => void
   onSpeechEvent?: (event: SpeechEvent) => void
+  /** Forwarded as the engine's onEvent? — fires for every GameEvent | BloodhoundEvent. */
+  onEvent?: (event: GameEvent | BloodhoundEvent) => void
 }
 
 export function createBloodhoundHandlers(
@@ -184,6 +186,8 @@ export function createBloodhoundHandlers(
     onSetup(_roles, _state) {
       // No setup state needed beyond what lupa tracks.
     },
+
+    onEvent: opts.onEvent,
 
     async onNight(ctx) {
       const map = new Map<number, NightAction>()

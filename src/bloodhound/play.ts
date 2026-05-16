@@ -22,6 +22,7 @@ import { formatHowl } from '../lupa/format.ts'
 import { AnthropicClient } from './anthropic-client.ts'
 import { createBloodhoundHandlers } from './handlers.ts'
 import { BloodhoundLogger } from './logger.ts'
+import { formatEventLine } from './howl-stream.ts'
 import type { BloodhoundEvent } from './types.ts'
 
 // Sonnet 4.6 pricing (USD per 1M tokens) — adjust if the rate changes.
@@ -60,7 +61,11 @@ async function main(): Promise<void> {
     },
     onSpeechEvent: (ev) => {
       logger.logSpeech(ev)
-      console.log(`[bloodhound] speech seat-${ev.actor}: ${ev.text}`)
+    },
+    // Live Howl stream → stderr so the operator can abort if the game derails.
+    onEvent: (event) => {
+      const line = formatEventLine(event)
+      if (line !== null) process.stderr.write(line + '\n')
     },
   })
 
