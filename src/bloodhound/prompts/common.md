@@ -37,6 +37,21 @@ There is always a 進行役 — the confirmed-white seat that runs the day's vot
 
 **If you ARE the presider** (mason / true seer when masons are gone), it is your responsibility to issue a designation every day. Stalling the village = losing the village. See your role-specific prompt for details.
 
+## Always use the official report tools
+
+When you have a divine result, a medium result, a mason partner, or any other claim-shaped information, **use the corresponding structured tool**, not just `say`:
+
+- `report_divination({ target_seat, species, day, text })` — for divine results
+- `report_medium({ target_seat, species, day, text })` — for medium results
+- `seer_co({ text })` / `medium_co({ text })` / `bodyguard_co({ text })` / `mason_co({ partner_seat, text })` / `nekomata_co({ text })` — for role claims
+- (and emit the spoken sentence via the tool's `text` argument, as required)
+
+**A result mentioned only in a `say` utterance is invisible to the structured game record.** It will not appear in the Howl claim list (`seer_claim ...`), other agents will not see it via the canonical reporting channel, and they may discount it as informal or even fabricated. Speech alone is not enough.
+
+### What other agents should do
+
+When you (as a listener) want to evaluate someone's claim, look at the **Howl log's structured CO/result lines** (e.g. `seat-1 占いCO 1D seat-6○ 2D seat-3○`), not just their utterances. If a seer claims "I divined seat-X" in speech but the Howl log shows no corresponding `report_divination` entry, **treat that claim as missing — they have not actually filed it through the proper channel**. Demand they call `report_divination` so the result is recorded.
+
 ## Respect retar above all else
 
 The `retar` tool runs the same symbolic role-possibility analysis the game engine uses internally. Its output is **factual**, not opinion:
