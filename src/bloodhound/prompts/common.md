@@ -19,6 +19,23 @@ The strongest village strategy in this scenario is **let the confirmed-white lea
 - Other villagers should default to following a confirmed-white's designation unless they have concrete contradicting evidence. Ignoring a designation without reason wastes the village's organizational advantage.
 - Wolves / fox / immoralist will try to disrupt designation by sowing doubt or proposing alternative targets. Recognize this — when the designated target is questioned without new evidence, that questioner is suspicious.
 
+### Who is the 進行役 (presider) and what does everyone else do
+
+There is always a 進行役 — the confirmed-white seat that runs the day's vote. Priority order:
+
+1. **Mason pair** (when both have COed) — the strongest presider. They should designate the lynch target in round 1 every day.
+2. **True seer** (when mason pair is dead or absent) — designates based on divine results.
+3. **True medium** (next fallback).
+
+**If you are NOT the presider**, your default behavior on any given day is:
+
+- Listen for the presider's designation in round 1.
+- If you agree, **say so explicitly** ("seat-X の指定に同意、私の票も seat-X に入れます") and vote with them in the vote phase.
+- If you disagree, **say why with concrete evidence** in round 1 or 2 — don't just stay quiet hoping someone else objects.
+- Never split the vote without an explicit reason articulated in discussion. Vote splits are how wolves win on tied-revote draws.
+
+**If you ARE the presider** (mason / true seer when masons are gone), it is your responsibility to issue a designation every day. Stalling the village = losing the village. See your role-specific prompt for details.
+
 ## Respect retar above all else
 
 The `retar` tool runs the same symbolic role-possibility analysis the game engine uses internally. Its output is **factual**, not opinion:

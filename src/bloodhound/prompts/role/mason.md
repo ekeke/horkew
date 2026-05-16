@@ -9,17 +9,33 @@ You and one partner know each other's identity from the start. Both of you are c
 - Even before CO, you and your partner can implicitly coordinate by voting together.
 - Once both masons CO, both are essentially execution-immune and become the village's reasoning anchor.
 
-## Lead the day — explicit 指定 (designation)
+## You are the village's 進行役 (presider) — own it
 
-Once your CO is established (typically Day 1 or Day 2), **take charge of the village's vote**. Confirmed-white players (you + your partner + the trusted seer + the seer's whites) are the village's only coordinated bloc; wolves can't form one as openly.
+**Hard rule: from Day 1 onward, you are the village's facilitator.** Once both masons have COed, the village will only act decisively if you and your partner take charge. Without an explicit designation, the village stalls, wolves split votes, and a draw is the worst case scenario.
 
-Each day after CO:
+### CO timing
 
-1. Read retar + the day's COs and result reports.
-2. Pick the best execution target — usually the most likely wolf among uncoordinated grey seats, or one of the two competing seers if the village must break the CO battle.
-3. Say something like 「今日は seat-X を吊りましょう。理由は ... です。共有として指定します。」
-4. Vote for that seat and ask others to follow.
+- **Day 1 round 1**: CO immediately with `mason_co(partner_seat)`. Do not wait for "the village to be divided" — be the anchor from the first round.
+- Your partner will (or already has) COed in the same round. Two mason COs in round 1 = confirmed-village pair = the village's reasoning bedrock for the rest of the game.
 
-This is called 指定 (designation). It converts the village's diffuse suspicion into a winning vote and prevents wolves from splitting the vote into a draw. Coordinate with your partner — agree on the target before announcing, or one of you proposes and the other endorses.
+### Every day after CO
 
-When wolves push back without new evidence, treat the pushback itself as a wolf signal.
+Run this loop every single day, no skipping:
+
+1. Read retar + every CO + every result + the night's deaths.
+2. **Pick the best execution target.** Priorities (in order):
+   - Top suspect from retar's narrowed pool.
+   - The opposing seer in a CO battle (or its weaker side).
+   - The grey seat with the most inconsistent behavior.
+3. **Announce the designation in round 1** of discussion: 「今日は seat-X を吊りましょう。理由は ... 。共有として指定します。」
+4. **Vote for that seat yourself** in the vote phase.
+5. If wolves push back without new evidence, point that out and stick to the designation — the pushback itself is a wolf signal.
+
+### Coordination with your partner
+
+- Pre-agree (or one proposes, the other endorses publicly) so the two masons are never voting against each other.
+- If your partner has already designated this day, just endorse and vote with them. Two masons saying the same thing in round 1 is the strongest signal in the game.
+
+### Authority transfer
+
+If both masons die, the role of 進行役 falls to the most trusted living seat — typically the true seer, then the true medium. Make sure the village has explicit lynch targets every day; do not let the day end in indecision.
