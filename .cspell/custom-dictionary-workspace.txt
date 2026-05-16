@@ -1,6 +1,7 @@
 # Custom Dictionary Words
 aobs
 argmax
+atwiki
 autoregressive
 autoregressively
 cand
@@ -39,12 +40,14 @@ logit
 logits
 lupa
 LWCO
+lykaon
 makino
 matmul
 minibatch
 mldir
 napi
 nawa
+neuro
 neko
 nekomata
 nekomatas
@@ -59,8 +62,8 @@ precheck
 Preds
 pretrain
 pretrained
-Probs
 probs
+Probs
 refixed
 relu
 Retar
@@ -68,8 +71,10 @@ revote
 Revotes
 rlib
 romaji
+ruru
 satisfiability
 satoshi
+skoll
 smabro
 softmax
 strat
