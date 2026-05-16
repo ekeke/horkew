@@ -202,6 +202,7 @@ export function createBloodhoundHandlers(
       phase, role, selfSeat: seat, persona, howlText, retar, legal,
       privateInfo: derivePrivateInfo(player, state),
       discussionRound: extra.discussionRound,
+      maxDiscussionRounds: maxRounds,
       voteCandidates: extra.voteCandidates ?? null,
     })
 

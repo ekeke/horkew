@@ -29,3 +29,12 @@ If ANY of these fails, you **must** `say`. When in doubt, `say` — silence is r
 ## Stay brief
 
 Keep `say` utterances short: one or two sentences for a position update, three or four for a substantive argument. Long monologues waste API budget and bury the signal.
+
+## Time pressure — count your remaining chances
+
+Your user prompt shows the round as `round R of N` (e.g. round 2 of 3). After round N the discussion ends and the village votes **immediately**. You cannot save a CO or a result for "next time" because there is no next time within this day.
+
+- If you hold a CO, a divine result, a medium result, or any other critical information, **emit it in the EARLIEST round you can, no later than round N**. Saving it for "the right moment" routinely means missing the only moment.
+- If R == N (the final round) and you have not yet COed or reported, **this is your last chance**. Saying it now means it is heard before the vote; staying silent means the information is lost AND you may be lynched as the silent suspect.
+- Even a confirmed-village seat (mason, true seer, true medium) is at risk of being lynched if they give the village zero signal by the final round. Silence is read as guilt.
+- Count remaining rounds at every turn: "I am in round 2 of 3, so I have this round and one more. I must CO now or risk losing the chance."

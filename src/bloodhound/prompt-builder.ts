@@ -82,6 +82,7 @@ export type BuildPromptInput = {
   legal: LegalActions
   privateInfo?: PrivateInfo
   discussionRound?: number
+  maxDiscussionRounds?: number
   voteCandidates?: readonly number[] | null
 }
 
@@ -191,10 +192,12 @@ function renderRetar(retar: RetarResult, selfSeat: number): string {
 }
 
 function renderLegalActions(input: BuildPromptInput): string {
-  const { legal, phase, discussionRound, voteCandidates } = input
+  const { legal, phase, discussionRound, maxDiscussionRounds, voteCandidates } = input
   const lines: string[] = [`## This turn`, ``]
   if (phase === 'discussion' && discussionRound !== undefined) {
-    lines.push(`- Phase: discussion (round ${discussionRound})`)
+    const total = maxDiscussionRounds ?? '?'
+    const remaining = typeof total === 'number' ? Math.max(0, total - discussionRound) : '?'
+    lines.push(`- Phase: discussion (round ${discussionRound} of ${total}; ${remaining} round${remaining === 1 ? '' : 's'} remaining after this one)`)
   } else {
     lines.push(`- Phase: ${phase}`)
   }
