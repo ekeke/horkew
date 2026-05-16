@@ -3,26 +3,45 @@
  *
  * Drives the tool-use loop:
  *   1. Send system + user prompts with the legal tool set.
- *   2. If the LLM returns retar tool_use blocks, run them locally and feed
- *      the results back as tool_result blocks; repeat.
- *   3. As soon as the LLM emits at least one action tool (non-retar), we
- *      treat that response as terminal and return all tool calls verbatim
- *      to the caller.
+ *   2. If the LLM returns auxiliary tool_use blocks (retar / craft_deception),
+ *      execute them locally and feed results back as tool_result blocks;
+ *      repeat.
+ *   3. As soon as the LLM emits at least one non-auxiliary (action) tool,
+ *      the response is terminal and all tool calls are returned verbatim.
  *
- * The loop is bounded by `maxRetarIterations`.
+ * The loop is bounded by `maxAuxIterations`. On overflow we force one
+ * final call with auxiliary tools stripped so the LLM must commit.
  */
+
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 
 import Anthropic from '@anthropic-ai/sdk'
 import type { RetarResult } from '../fenrir/src/retar-bridge.ts'
 import type { SystemRole } from '../types/index.ts'
-import type { ToolCall, ToolName } from './types.ts'
+import type { ToolCall, ToolName, Persona } from './types.ts'
 import type { ToolDef } from './tools.ts'
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_MAX_TOKENS = 1024
-const DEFAULT_MAX_RETAR_ITERATIONS = 10
+const DEFAULT_MAX_AUX_ITERATIONS = 10
+const DECEPTION_MAX_TOKENS = 600
+
+const AUXILIARY_TOOL_NAMES = new Set<ToolName>(['retar', 'craft_deception'])
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 export type RetarRunner = (assumptions: Map<number, SystemRole>) => RetarResult
+
+export type DeceptionInput = {
+  intent: string
+  topic: string
+  style_hint?: string
+}
+export type DeceptionRunner = (input: DeceptionInput) => Promise<string>
 
 export type RunTurnInput = {
   system: string
@@ -34,20 +53,39 @@ export type RunTurnInput = {
 export type RunTurnOptions = {
   model?: string
   maxTokens?: number
+  /** Backwards-compatible alias for the auxiliary tool-loop bound. */
   maxRetarIterations?: number
+  maxAuxIterations?: number
   retarRunner: RetarRunner
-  /** Optional observer for every message exchanged with the API (for logging). */
+  /** Required when craft_deception is in the exposed tool set. */
+  craftDeceptionRunner?: DeceptionRunner
   onMessage?: (msg: { role: 'user' | 'assistant'; content: unknown }) => void
 }
 
 export type RunTurnResult = {
   toolCalls: ToolCall[]
-  thinking: string         // concatenation of all text blocks in the final response
+  thinking: string
   usage: {
     inputTokens: number
     outputTokens: number
   }
 }
+
+// ---------------------------------------------------------------------------
+// Deception system prompt (loaded once, cached)
+// ---------------------------------------------------------------------------
+
+let cachedDeceptionPrompt: string | null = null
+function loadDeceptionPrompt(): string {
+  if (cachedDeceptionPrompt !== null) return cachedDeceptionPrompt
+  const dir = dirname(fileURLToPath(import.meta.url))
+  cachedDeceptionPrompt = readFileSync(join(dir, 'prompts', 'deception.md'), 'utf8')
+  return cachedDeceptionPrompt
+}
+
+// ---------------------------------------------------------------------------
+// Client
+// ---------------------------------------------------------------------------
 
 export class AnthropicClient {
   private readonly sdk: Anthropic
@@ -62,10 +100,49 @@ export class AnthropicClient {
     this.defaultModel = opts.model ?? DEFAULT_MODEL
   }
 
+  /**
+   * Invoke a separate LLM call that crafts one Japanese utterance for a
+   * non-village seat. Used as the local executor for the `craft_deception`
+   * auxiliary tool. Returns the raw utterance text (trimmed, no quotes).
+   */
+  async craftDeception(input: DeceptionInput, persona: Persona): Promise<string> {
+    const system = loadDeceptionPrompt()
+    const userPrompt = [
+      `persona:`,
+      `  seat: seat-${persona.seat}`,
+      `  gender: ${persona.gender}`,
+      `  trait: ${persona.trait}`,
+      `  voice sample: ${persona.toneSample}`,
+      ``,
+      `intent: ${input.intent}`,
+      `topic: ${input.topic}`,
+      `style_hint: ${input.style_hint ?? '(none)'}`,
+      ``,
+      `Output the utterance only.`,
+    ].join('\n')
+
+    const response = await this.sdk.messages.create({
+      model: this.defaultModel,
+      max_tokens: DECEPTION_MAX_TOKENS,
+      system,
+      messages: [{ role: 'user', content: userPrompt }],
+    })
+
+    const text = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map(b => b.text).join('\n').trim()
+    if (text.length === 0) {
+      throw new Error('craft_deception sub-call returned empty text')
+    }
+    return text
+  }
+
   async runTurn(input: RunTurnInput, options: RunTurnOptions): Promise<RunTurnResult> {
     const model = options.model ?? this.defaultModel
     const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS
-    const maxIter = options.maxRetarIterations ?? DEFAULT_MAX_RETAR_ITERATIONS
+    const maxIter = options.maxAuxIterations
+      ?? options.maxRetarIterations
+      ?? DEFAULT_MAX_AUX_ITERATIONS
 
     const toolChoice = encodeToolChoice(input.toolChoice)
     const messages: Anthropic.MessageParam[] = [
@@ -102,8 +179,8 @@ export class AnthropicClient {
         )
       }
 
-      const nonRetar = toolUseBlocks.filter(b => b.name !== 'retar')
-      if (nonRetar.length > 0) {
+      const nonAux = toolUseBlocks.filter(b => !AUXILIARY_TOOL_NAMES.has(b.name as ToolName))
+      if (nonAux.length > 0) {
         return {
           toolCalls: toolUseBlocks.map(b => ({
             id: b.id,
@@ -115,32 +192,28 @@ export class AnthropicClient {
         }
       }
 
-      // Only retar calls in this response: run them, append, loop.
+      // Only auxiliary calls in this response: run each locally and loop.
       messages.push({ role: 'assistant', content: response.content })
-      const toolResults: Anthropic.ToolResultBlockParam[] = toolUseBlocks.map(block => {
-        const assumptions = decodeRetarAssumptions(block.input)
-        const result = options.retarRunner(assumptions)
-        return {
-          type: 'tool_result',
-          tool_use_id: block.id,
-          content: formatRetarResult(result),
-        }
-      })
+      const toolResults: Anthropic.ToolResultBlockParam[] = []
+      for (const block of toolUseBlocks) {
+        const content = await executeAuxiliary(block, options)
+        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content })
+      }
       messages.push({ role: 'user', content: toolResults })
       options.onMessage?.({ role: 'user', content: toolResults })
     }
 
-    // Safeguard: max retar iterations exhausted. Force a final call with retar
-    // removed from the tool set so the LLM has no choice but to pick an action.
-    const actionTools = input.tools.filter(t => t.name !== 'retar')
+    // Safeguard: max auxiliary iterations exhausted. Force a final call with
+    // ALL auxiliary tools removed so the LLM must pick an action.
+    const actionTools = input.tools.filter(t => !AUXILIARY_TOOL_NAMES.has(t.name as ToolName))
     if (actionTools.length === 0) {
-      throw new Error(`Tool-use loop exceeded ${maxIter} iterations and no non-retar tools are available`)
+      throw new Error(`Tool-use loop exceeded ${maxIter} iterations and no action tools are available`)
     }
 
     const lastMsg = messages[messages.length - 1]
     const nudge: Anthropic.TextBlockParam = {
       type: 'text',
-      text: `You have queried retar ${maxIter} times. That is enough analysis. Pick exactly one action tool from [${actionTools.map(t => t.name).join(', ')}] and commit. The retar tool is no longer available.`,
+      text: `You have used auxiliary tools (retar / craft_deception) ${maxIter} times. That is enough preparation. Pick exactly one action tool from [${actionTools.map(t => t.name).join(', ')}] and commit. Auxiliary tools are no longer available.`,
     }
     if (lastMsg && lastMsg.role === 'user' && Array.isArray(lastMsg.content)) {
       lastMsg.content = [...lastMsg.content, nudge]
@@ -183,6 +256,33 @@ export class AnthropicClient {
 }
 
 // ---------------------------------------------------------------------------
+// Auxiliary execution dispatch
+// ---------------------------------------------------------------------------
+
+async function executeAuxiliary(
+  block: Anthropic.ToolUseBlock,
+  options: RunTurnOptions,
+): Promise<string> {
+  if (block.name === 'retar') {
+    const assumptions = decodeRetarAssumptions(block.input)
+    const result = options.retarRunner(assumptions)
+    return formatRetarResult(result)
+  }
+  if (block.name === 'craft_deception') {
+    if (!options.craftDeceptionRunner) {
+      return 'ERROR: craft_deception is not available for this seat (no deception runner provided). Pick an action tool directly.'
+    }
+    try {
+      const text = await options.craftDeceptionRunner(decodeDeceptionInput(block.input))
+      return text
+    } catch (err) {
+      return `ERROR: craft_deception failed: ${(err as Error).message}. Pick an action tool directly or call say with your own wording.`
+    }
+  }
+  return `ERROR: unknown auxiliary tool: ${block.name}`
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -206,6 +306,14 @@ function decodeRetarAssumptions(input: unknown): Map<number, SystemRole> {
     }
   }
   return out
+}
+
+function decodeDeceptionInput(input: unknown): DeceptionInput {
+  const obj = (typeof input === 'object' && input !== null) ? input as Record<string, unknown> : {}
+  const intent = typeof obj.intent === 'string' ? obj.intent : ''
+  const topic = typeof obj.topic === 'string' ? obj.topic : ''
+  const style_hint = typeof obj.style_hint === 'string' ? obj.style_hint : undefined
+  return { intent, topic, style_hint }
 }
 
 function formatRetarResult(result: RetarResult): string {

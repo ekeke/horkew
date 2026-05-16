@@ -165,6 +165,7 @@ export function createBloodhoundHandlers(
         viewerSeat: seat, viewerRole: role,
         extraAssumptions: assumptions,
       }),
+      craftDeceptionRunner: (input) => opts.client.craftDeception(input, persona),
     }
 
     const result = await opts.client.runTurn(

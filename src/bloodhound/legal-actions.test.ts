@@ -36,15 +36,53 @@ describe('legalActions: discussion phase', () => {
     assert.deepEqual(result.targets.report_medium, ALL_SEATS)
   })
 
-  test('all 14 roles see the same toolset (no role leakage via legal actions)', () => {
-    const roles: SystemRole[] = [
+  test('village roles share an identical toolset (no leakage)', () => {
+    const villageRoles: SystemRole[] = [
       'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
-      'werewolf', 'fanatic', 'werehamster', 'immoralist',
     ]
     const reference = legalActions(input({ phase: 'discussion', role: 'villager' }))
-    for (const role of roles) {
+    for (const role of villageRoles) {
       const r = legalActions(input({ phase: 'discussion', role }))
-      assert.deepEqual(r.toolNames, reference.toolNames, `role=${role} sees different toolset`)
+      assert.deepEqual(r.toolNames, reference.toolNames, `role=${role} sees different toolset from villager`)
+    }
+    assert.ok(!reference.toolNames.includes('craft_deception'),
+      'village toolset should NOT include craft_deception')
+  })
+
+  test('non-village roles get craft_deception, village does not', () => {
+    const nonVillage: SystemRole[] = ['werewolf', 'fanatic', 'werehamster', 'immoralist']
+    for (const role of nonVillage) {
+      const r = legalActions(input({ phase: 'discussion', role }))
+      assert.ok(r.toolNames.includes('craft_deception'),
+        `non-village role=${role} should include craft_deception`)
+    }
+    const village: SystemRole[] = [
+      'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
+    ]
+    for (const role of village) {
+      const r = legalActions(input({ phase: 'discussion', role }))
+      assert.ok(!r.toolNames.includes('craft_deception'),
+        `village role=${role} should NOT include craft_deception`)
+    }
+  })
+
+  test('non-village roles share an identical toolset among themselves', () => {
+    const nonVillage: SystemRole[] = ['werewolf', 'fanatic', 'werehamster', 'immoralist']
+    const reference = legalActions(input({ phase: 'discussion', role: 'werewolf' }))
+    for (const role of nonVillage) {
+      const r = legalActions(input({ phase: 'discussion', role }))
+      assert.deepEqual(r.toolNames, reference.toolNames, `non-village role=${role} differs from werewolf`)
+    }
+  })
+
+  test('craft_deception is discussion-only (not exposed in vote / night / last_will)', () => {
+    const phases: BloodhoundPhase[] = [
+      'vote', 'revote', 'night_seer', 'night_bodyguard', 'night_wolf', 'last_will',
+    ]
+    for (const phase of phases) {
+      const r = legalActions(input({ phase, role: 'werewolf', fellowWolves: [] }))
+      assert.ok(!r.toolNames.includes('craft_deception'),
+        `craft_deception leaked into phase=${phase}`)
     }
   })
 })

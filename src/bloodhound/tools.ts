@@ -176,6 +176,33 @@ export const retarTool: ToolDef = {
 }
 
 // ---------------------------------------------------------------------------
+// Deception speech-writer (non-village roles only)
+// ---------------------------------------------------------------------------
+
+export const craftDeceptionTool: ToolDef = {
+  name: 'craft_deception',
+  description: 'Internal helper for non-village roles. Calls a separate LLM that writes one polished Japanese utterance disguised as villager-style. Use this when you want to lie or bluff and need help producing wording that does NOT leak your faction. The returned text can be used verbatim as the argument to a subsequent `say` call.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      intent: {
+        type: 'string',
+        description: 'What this utterance should accomplish (e.g. "fake_seer_co", "shift suspicion off self", "appear sympathetic to village", "discredit seat-7\'s CO").',
+      },
+      topic: {
+        type: 'string',
+        description: 'The concrete content to convey (e.g. "I divined seat-4 and they were black"; "seat-2 has been suspicious because X and Y").',
+      },
+      style_hint: {
+        type: 'string',
+        description: 'Optional brevity/tone hint (e.g. "very short", "calm", "match my usual register").',
+      },
+    },
+    required: ['intent', 'topic'],
+  },
+}
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -194,4 +221,5 @@ export const allTools: Record<ToolName, ToolDef> = {
   guard: guardTool,
   attack: attackTool,
   retar: retarTool,
+  craft_deception: craftDeceptionTool,
 }

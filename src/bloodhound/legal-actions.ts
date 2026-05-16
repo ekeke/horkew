@@ -47,19 +47,26 @@ const LAST_WILL_TOOLS: ToolName[] = [
   'retar',
 ]
 
+const NON_VILLAGE_ROLES = new Set<SystemRole>([
+  'werewolf', 'fanatic', 'werehamster', 'immoralist',
+])
+
 export function legalActions(input: LegalActionsInput): LegalActions {
-  const { phase, selfSeat, alivePlayers, voteCandidates, fellowWolves, allSeats } = input
+  const { phase, role, selfSeat, alivePlayers, voteCandidates, fellowWolves, allSeats } = input
   const aliveExceptSelf = alivePlayers.filter(s => s !== selfSeat)
 
   switch (phase) {
-    case 'discussion':
+    case 'discussion': {
+      const toolNames = [...DISCUSSION_TOOLS]
+      if (NON_VILLAGE_ROLES.has(role)) toolNames.push('craft_deception')
       return {
-        toolNames: [...DISCUSSION_TOOLS],
+        toolNames,
         targets: {
           report_divination: [...allSeats],
           report_medium: [...allSeats],
         },
       }
+    }
 
     case 'vote':
     case 'revote': {
