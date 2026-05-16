@@ -20,7 +20,7 @@ import type { ToolDef } from './tools.ts'
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_MAX_TOKENS = 1024
-const DEFAULT_MAX_RETAR_ITERATIONS = 5
+const DEFAULT_MAX_RETAR_ITERATIONS = 10
 
 export type RetarRunner = (assumptions: Map<number, SystemRole>) => RetarResult
 
@@ -130,7 +130,55 @@ export class AnthropicClient {
       options.onMessage?.({ role: 'user', content: toolResults })
     }
 
-    throw new Error(`Tool-use loop exceeded ${maxIter} iterations`)
+    // Safeguard: max retar iterations exhausted. Force a final call with retar
+    // removed from the tool set so the LLM has no choice but to pick an action.
+    const actionTools = input.tools.filter(t => t.name !== 'retar')
+    if (actionTools.length === 0) {
+      throw new Error(`Tool-use loop exceeded ${maxIter} iterations and no non-retar tools are available`)
+    }
+
+    const lastMsg = messages[messages.length - 1]
+    const nudge: Anthropic.TextBlockParam = {
+      type: 'text',
+      text: `You have queried retar ${maxIter} times. That is enough analysis. Pick exactly one action tool from [${actionTools.map(t => t.name).join(', ')}] and commit. The retar tool is no longer available.`,
+    }
+    if (lastMsg && lastMsg.role === 'user' && Array.isArray(lastMsg.content)) {
+      lastMsg.content = [...lastMsg.content, nudge]
+    } else {
+      messages.push({ role: 'user', content: [nudge] })
+    }
+
+    const forced = await this.sdk.messages.create({
+      model, max_tokens: maxTokens,
+      system: input.system,
+      tools: actionTools,
+      tool_choice: { type: 'any' },
+      messages,
+    })
+    usage.inputTokens += forced.usage.input_tokens
+    usage.outputTokens += forced.usage.output_tokens
+    options.onMessage?.({ role: 'assistant', content: forced.content })
+
+    const forcedToolUses = forced.content.filter(
+      (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+    )
+    const forcedText = forced.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map(b => b.text).join('\n').trim()
+    if (forcedToolUses.length === 0) {
+      throw new Error(
+        `Forced-action retry returned no tool calls. First 200 chars: ${forcedText.slice(0, 200)}`,
+      )
+    }
+    return {
+      toolCalls: forcedToolUses.map(b => ({
+        id: b.id,
+        name: b.name as ToolName,
+        input: b.input as Record<string, unknown>,
+      })),
+      thinking: forcedText,
+      usage,
+    }
   }
 }
 
