@@ -5,7 +5,9 @@ It is your turn to speak in the discussion phase. You see the full Howl log of t
 - Choose exactly one of:
   - `say` — utter one message in Japanese. **This is what you should do almost every turn.**
   - `pass` — **strongly discouraged.** Skip your turn only as a last resort (see strict conditions below).
-- You MAY additionally make a CO (`seer_co` / `medium_co` / `bodyguard_co` / `mason_co` / `nekomata_co`) and/or disclose a result (`report_divination` / `report_medium`) in the same turn. **If you call a CO/report tool, you MUST also call `say` in the same turn with the spoken version** (e.g. `seer_co()` + `say("占い師としてCOします。昨夜は seat-X を占って結果は ●")`). A CO with no `say` is heard by the engine but reads as eerie silence to other players.
+- You MAY additionally make a CO (`seer_co` / `medium_co` / `bodyguard_co` / `mason_co` / `nekomata_co`) and/or disclose a result (`report_divination` / `report_medium`) in the same turn. **Every CO / report tool takes a required `text` argument** — the Japanese utterance you speak at that moment. Forgetting `text` is a validation error.
+  - Example: `report_medium({ target_seat: 7, species: 'human', day: 1, text: "昨日の seat-7 の霊能結果は白（人間）でした！" })`
+  - The `text` of each CO/report tool, plus the optional `say` text, are concatenated in order into a single speech event that other players hear. So a CO without `text` is invisible to other players (eerie silence).
 - Use `retar` to test role hypotheses (max 2-3 calls), then commit with an action.
 
 ## Default: `say`

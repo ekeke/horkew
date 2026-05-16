@@ -114,13 +114,26 @@ function decodeRetarQuery(tc: ToolCall, invalid: string[]): RetarQuery | null {
 }
 
 function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: boolean): DiscussionAction {
-  let speech: string | undefined
+  let saySpeech: string | undefined
   let pass = false
   // Collect raw CO/report fragments first; compose into a single DayClaim at the end.
   let coKind: 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata' | null = null
   let masonPartner: number | undefined
   const seerResults: Array<{ day: number; target: number; result: EnumSpecies }> = []
   const mediumResults: EnumSpecies[] = []
+  // CO/report tools each carry a `text` argument. All such texts are
+  // concatenated (in order) into the final speech so the LLM cannot announce
+  // a CO without also voicing it to other players.
+  const claimTexts: string[] = []
+
+  function takeText(tc: ToolCall): string | undefined {
+    const t = (tc.input as { text?: unknown }).text
+    if (typeof t !== 'string' || t.length === 0) {
+      invalid.push(`${tc.name} call ${tc.id}: text is required and must be non-empty`)
+      return undefined
+    }
+    return t
+  }
 
   for (const tc of toolCalls) {
     switch (tc.name) {
@@ -134,8 +147,8 @@ function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: bo
           invalid.push(`say is not available in last_will phase (call ${tc.id} ignored)`)
           break
         }
-        if (speech !== undefined) invalid.push(`multiple say calls; last one wins`)
-        speech = text
+        if (saySpeech !== undefined) invalid.push(`multiple say calls; last one wins`)
+        saySpeech = text
         break
       }
       case 'pass': {
@@ -146,9 +159,21 @@ function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: bo
         pass = true
         break
       }
-      case 'seer_co':   coKind = 'seer'; break
-      case 'medium_co': coKind = 'medium'; break
-      case 'bodyguard_co': coKind = 'bodyguard'; break
+      case 'seer_co': {
+        coKind = 'seer'
+        const t = takeText(tc); if (t) claimTexts.push(t)
+        break
+      }
+      case 'medium_co': {
+        coKind = 'medium'
+        const t = takeText(tc); if (t) claimTexts.push(t)
+        break
+      }
+      case 'bodyguard_co': {
+        coKind = 'bodyguard'
+        const t = takeText(tc); if (t) claimTexts.push(t)
+        break
+      }
       case 'mason_co': {
         coKind = 'mason'
         const partner = (tc.input as { partner_seat?: unknown }).partner_seat
@@ -157,9 +182,14 @@ function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: bo
         } else {
           masonPartner = partner
         }
+        const t = takeText(tc); if (t) claimTexts.push(t)
         break
       }
-      case 'nekomata_co': coKind = 'nekomata'; break
+      case 'nekomata_co': {
+        coKind = 'nekomata'
+        const t = takeText(tc); if (t) claimTexts.push(t)
+        break
+      }
       case 'report_divination': {
         const target = (tc.input as { target_seat?: unknown }).target_seat
         const species = (tc.input as { species?: unknown }).species
@@ -169,6 +199,7 @@ function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: bo
           break
         }
         seerResults.push({ day, target, result: species })
+        const t = takeText(tc); if (t) claimTexts.push(t)
         break
       }
       case 'report_medium': {
@@ -179,12 +210,21 @@ function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: bo
           break
         }
         mediumResults.push(species)
+        const t = takeText(tc); if (t) claimTexts.push(t)
         break
       }
       default:
         invalid.push(`tool ${tc.name} not allowed in discussion phase`)
     }
   }
+
+  // Merge say text + all CO/report texts into one speech event so the
+  // utterance order is preserved (say first if present, then claim texts).
+  let speech: string | undefined
+  const allTexts: string[] = []
+  if (saySpeech) allTexts.push(saySpeech)
+  allTexts.push(...claimTexts)
+  if (allTexts.length > 0) speech = allTexts.join('\n')
 
   // Compose the final claim. We always emit *_co shaped claims (with results
   // arrays / pastResults) even for "result-only" turns — this lets the

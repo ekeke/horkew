@@ -36,40 +36,70 @@ export const passTool: ToolDef = {
 // CO (role claim) tools — every seat may call any of these (truth or bluff)
 // ---------------------------------------------------------------------------
 
+// All CO / report tools take a required `text` argument: the Japanese
+// utterance the player will speak alongside the structured action. Without
+// this, other players see the CO event but no voice — they read it as
+// suspicious silence. text MUST be in your persona's voice.
+
 export const seerCoTool: ToolDef = {
   name: 'seer_co',
-  description: 'Claim to be the seer.',
-  input_schema: { type: 'object', properties: {} },
+  description: 'Claim to be the seer. text is the Japanese utterance you speak when announcing the CO.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: 'Japanese spoken announcement (e.g. "占い師としてCOします。").' },
+    },
+    required: ['text'],
+  },
 }
 
 export const mediumCoTool: ToolDef = {
   name: 'medium_co',
-  description: 'Claim to be the medium.',
-  input_schema: { type: 'object', properties: {} },
+  description: 'Claim to be the medium. text is the Japanese utterance you speak.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: 'Japanese spoken announcement.' },
+    },
+    required: ['text'],
+  },
 }
 
 export const bodyguardCoTool: ToolDef = {
   name: 'bodyguard_co',
-  description: 'Claim to be the bodyguard.',
-  input_schema: { type: 'object', properties: {} },
+  description: 'Claim to be the bodyguard. text is the Japanese utterance you speak.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: 'Japanese spoken announcement.' },
+    },
+    required: ['text'],
+  },
 }
 
 export const masonCoTool: ToolDef = {
   name: 'mason_co',
-  description: 'Claim to be a mason. partner_seat is the seat number of your fellow mason.',
+  description: 'Claim to be a mason. partner_seat is the seat number of your fellow mason. text is the Japanese utterance you speak.',
   input_schema: {
     type: 'object',
     properties: {
       partner_seat: { type: 'integer', minimum: 1, description: 'Seat number of your mason partner.' },
+      text: { type: 'string', description: 'Japanese spoken announcement.' },
     },
-    required: ['partner_seat'],
+    required: ['partner_seat', 'text'],
   },
 }
 
 export const nekomataCoTool: ToolDef = {
   name: 'nekomata_co',
-  description: 'Claim to be the nekomata.',
-  input_schema: { type: 'object', properties: {} },
+  description: 'Claim to be the nekomata. text is the Japanese utterance you speak.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: 'Japanese spoken announcement.' },
+    },
+    required: ['text'],
+  },
 }
 
 // ---------------------------------------------------------------------------
@@ -78,29 +108,31 @@ export const nekomataCoTool: ToolDef = {
 
 export const reportDivinationTool: ToolDef = {
   name: 'report_divination',
-  description: 'Disclose a divination result. Use only if you have COed as seer (truthful seer or false-CO).',
+  description: 'Disclose a divination result. Use only if you have COed as seer (truthful seer or false-CO). text is the Japanese utterance you speak when reporting.',
   input_schema: {
     type: 'object',
     properties: {
       target_seat: { type: 'integer', minimum: 1 },
       species: { type: 'string', enum: ['human', 'wolf'] },
       day: { type: 'integer', minimum: 0, description: 'Night number the divination was performed on (0-indexed).' },
+      text: { type: 'string', description: 'Japanese spoken report (e.g. "昨夜は seat-4 を占って、結果は●（人狼）でした。").' },
     },
-    required: ['target_seat', 'species', 'day'],
+    required: ['target_seat', 'species', 'day', 'text'],
   },
 }
 
 export const reportMediumTool: ToolDef = {
   name: 'report_medium',
-  description: 'Disclose a medium result. Use only if you have COed as medium.',
+  description: 'Disclose a medium result. Use only if you have COed as medium. text is the Japanese utterance you speak when reporting.',
   input_schema: {
     type: 'object',
     properties: {
       target_seat: { type: 'integer', minimum: 1 },
       species: { type: 'string', enum: ['human', 'wolf'] },
       day: { type: 'integer', minimum: 0 },
+      text: { type: 'string', description: 'Japanese spoken report.' },
     },
-    required: ['target_seat', 'species', 'day'],
+    required: ['target_seat', 'species', 'day', 'text'],
   },
 }
 
