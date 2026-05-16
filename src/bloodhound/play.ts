@@ -61,6 +61,7 @@ async function main(): Promise<void> {
     },
     onSpeechEvent: (ev) => {
       logger.logSpeech(ev)
+      console.log(`seat-${ev.actor} > ${ev.text}`)
     },
     // Live Howl stream → stderr so the operator can abort if the game derails.
     onEvent: (event) => {
