@@ -42,6 +42,8 @@ const DEFAULT_MAX_DISCUSSION_ROUNDS = 3
 export type LLMExchange = {
   seat: number
   phase: BloodhoundPhase
+  /** Discussion round (1-indexed) when phase === 'discussion'; otherwise undefined. */
+  discussionRound?: number
   system: string
   user: string
   thinking: string
@@ -215,7 +217,9 @@ export function createBloodhoundHandlers(
     )
 
     opts.onLLMExchange?.({
-      seat, phase, system, user,
+      seat, phase,
+      discussionRound: extra.discussionRound,
+      system, user,
       thinking: result.thinking,
       toolCalls: result.toolCalls,
       usage: result.usage,

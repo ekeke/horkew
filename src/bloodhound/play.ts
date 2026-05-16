@@ -97,7 +97,8 @@ async function main(): Promise<void> {
     replayMap,
     onLLMExchange: (ex) => {
       logger.logLLMExchange(ex)
-      console.log(`[bloodhound] LLM call seat-${ex.seat} ${ex.phase} (in=${ex.usage.inputTokens} out=${ex.usage.outputTokens})`)
+      const roundStr = ex.discussionRound !== undefined ? `[r${ex.discussionRound}] ` : ''
+      console.log(`[bloodhound] LLM call seat-${ex.seat} ${ex.phase} ${roundStr}(in=${ex.usage.inputTokens} out=${ex.usage.outputTokens})`)
     },
     onSpeechEvent: (ev) => {
       logger.logSpeech(ev)
