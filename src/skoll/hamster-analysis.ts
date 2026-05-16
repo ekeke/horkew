@@ -23,6 +23,7 @@ import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask } from '.
 import { enumerateWorlds } from '../hati/worlds.ts'
 import { checkOutcome, applyExecution } from '../hati/simulate.ts'
 import { minimaxNightHamsterRate } from './hamsterWinrate.ts'
+import { DEFAULT_MAX_WORLDS } from './constants.ts'
 
 export type HamsterVoteCandidate = {
   seat: Seat
@@ -39,8 +40,6 @@ export type HamsterVoteAnalysis = {
   /** 全候補で重み付け平均した hamster 勝率（vote しない場合の参考値ではなく overall） */
   overallHamsterWinRate: number
 }
-
-const DEFAULT_MAX_WORLDS = 500_000
 
 /**
  * 狐視点の day vote 分析。

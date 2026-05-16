@@ -15,6 +15,7 @@ import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask } from '.
 import { enumerateWorlds } from '../hati/worlds.ts'
 import { checkOutcome, applyExecution } from '../hati/simulate.ts'
 import { minimaxNightWinRate } from './winrate.ts'
+import { DEFAULT_MAX_WORLDS } from './constants.ts'
 
 export type WorldExecutionAnalysis = {
   totalWorlds: number
@@ -23,8 +24,6 @@ export type WorldExecutionAnalysis = {
   bestExecution: Seat
   overallWinRate: number
 }
-
-const DEFAULT_MAX_WORLDS = 500_000
 
 /**
  * ワールド列挙ベースで各吊り候補の村勝率を計算する。

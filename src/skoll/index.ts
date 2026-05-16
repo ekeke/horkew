@@ -1,6 +1,7 @@
 import type { SystemRole } from '../types/index.ts'
 import type { Possibilities } from '../retar/possibilities.ts'
 import { ROLE_COUNT, RoleBitIndex, bitIndicesFromMask } from '../retar/possibilities.ts'
+import { DEFAULT_MAX_WORLDS } from './constants.ts'
 
 export type RoleProbabilities = {
   totalWorlds: number
@@ -13,8 +14,6 @@ export type RoleProbabilities = {
    */
   probabilities: Float64Array
 }
-
-const DEFAULT_MAX_WORLDS = 500_000
 
 /**
  * Retar の Possibilities から全ワールドを列挙し、

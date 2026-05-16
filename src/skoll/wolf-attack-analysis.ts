@@ -20,6 +20,7 @@ import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask } from '.
 import { enumerateWorlds } from '../hati/worlds.ts'
 import { checkOutcome, applyFollowDeaths, validBiteTargetsMask } from '../hati/simulate.ts'
 import { minimaxWinRate } from './winrate.ts'
+import { DEFAULT_MAX_WORLDS } from './constants.ts'
 
 export type WorldAttackAnalysis = {
   totalWorlds: number
@@ -28,8 +29,6 @@ export type WorldAttackAnalysis = {
   /** 最も狼勝率が高い噛み先 */
   bestAttack: Seat
 }
-
-const DEFAULT_MAX_WORLDS = 500_000
 
 /**
  * ワールド列挙ベースで各噛み候補の狼勝率を計算する。
