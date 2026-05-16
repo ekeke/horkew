@@ -60,9 +60,12 @@ export class BloodhoundLogger {
       JSON.stringify({
         seat: ex.seat,
         phase: ex.phase,
+        discussionRound: ex.discussionRound,
         usage: ex.usage,
+        auxiliaryCalls: ex.auxiliaryCalls,
         thinking: ex.thinking,
         toolCalls: ex.toolCalls,
+        iterations: ex.iterations,
         system: ex.system,
         user: ex.user,
       }, null, 2),
