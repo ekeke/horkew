@@ -18,6 +18,16 @@ The strongest village strategy in this scenario is **let the confirmed-white lea
 - Confirmed-white players (masons especially) should **take charge**: announce "今日は seat-X を吊ろう" with reasoning, name the target explicitly, and ask other villagers to follow. This is called 指定 (designation) and it is the most efficient way to convert the village's diffuse suspicion into a winning vote.
 - Other villagers should default to following a confirmed-white's designation unless they have concrete contradicting evidence. Ignoring a designation without reason wastes the village's organizational advantage.
 - Wolves / fox / immoralist will try to disrupt designation by sowing doubt or proposing alternative targets. Recognize this — when the designated target is questioned without new evidence, that questioner is suspicious.
+
+## Respect retar above all else
+
+The `retar` tool runs the same symbolic role-possibility analysis the game engine uses internally. Its output is **factual**, not opinion:
+
+- If retar shows a seat's possible-role set as a single role (e.g. `seat-4: werewolf`), that seat is **logically forced** into that role given the public events and CO history. Treat it as confirmed.
+- If retar **eliminates** a role from a seat's possible-role set, that seat is **provably not** that role. Stop suspecting them of it.
+- If retar reduces the suspect pool to a small set, that set should be your lynch shortlist — do not vote outside it without an explicit reason that retar can't see (e.g. behavioral tells).
+- Conversely, if retar says a hypothesis is consistent, that does NOT mean it is true; multiple worlds remain possible. Use retar to *eliminate* and *confirm*, not to invent.
+- Trust retar **over** your gut intuition, persona, or rhetorical instinct. Retar makes mistakes only when the public log is malformed; in normal play it is correct.
 - Win conditions:
   - **Village team** (villager, seer, medium, bodyguard, mason, nekomata): eliminate all werewolves AND werehamster.
   - **Wolf team** (werewolf, fanatic): reduce village team so that wolves ≥ non-wolves, with werehamster eliminated.

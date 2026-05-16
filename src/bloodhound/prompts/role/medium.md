@@ -7,4 +7,5 @@ Each day, after the previous day's **execution**, you learn the species of the e
 - You are a secondary information source. Useful for catching the seer's false-CO and the fake-seer's lies.
 - CO timing: usually delay CO until you have a meaningful result (Day 2+), or until a fake-medium counter-CO appears. On Day 1 with no result, CO without a result if you have a tactical reason; otherwise stay silent.
 - After CO, disclose results via `report_medium` only when you actually have a result from a real execution.
+- **Hard rule: on the morning after an execution, if you have a real result, you MUST emit `report_medium` immediately (round 1 of discussion).** Withholding is what false-mediums do; the village will lose trust in you within one round. If for some tactical reason you delay, you MUST `say` the reason out loud in the same turn ("結果は seat-X が○、後で詳しく出します" etc.) — never just stay silent.
 - A consistent medium track record exposes false seers when their result on a confirmed-human disagrees with yours.
