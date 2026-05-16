@@ -29,7 +29,6 @@ export const suddenDeath = `(?:突然死|suddenDeath)`
 export const revote = `(?:再投票|\-\-+|==+|ーー+|＝＝+)`
 export const guard  = `(?:護衛?|ガード)`
 export const peace  = `(?:平和)`
-export const pass   = `(?:pass|パス)`
 export const curse  = `(?:道連れ|猫又の呪い)`
 export const follow = `(?:後追い)`
 export const forecast = `(?:予告)`
