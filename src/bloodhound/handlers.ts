@@ -20,6 +20,7 @@ import type {
 import type {
   GameState, GameEvent, NightAction, DayClaim, LupaConfig, PlayerState,
 } from '../lupa/types.ts'
+import type { SystemRole } from '../types/index.ts'
 import { buildPlayerView } from '../lupa/player-view.ts'
 import { formatHowl } from '../lupa/format.ts'
 
@@ -193,6 +194,18 @@ export function createBloodhoundHandlers(
     async onNight(ctx) {
       const map = new Map<number, NightAction>()
       const state = ctx.state as GameState
+
+      // Day 0 (initial night, before the first victim): no information is
+      // available, so any LLM reasoning is pure waste. Pick random targets.
+      if (ctx.day === 0) {
+        for (const seat of ctx.alivePlayers) {
+          const player = state.players.find(p => p.seat === seat)!
+          const action = randomNightAction(seat, player.role, state, ctx.alivePlayers)
+          if (action) map.set(seat, action)
+        }
+        return map
+      }
+
       for (const seat of ctx.alivePlayers) {
         const player = state.players.find(p => p.seat === seat)!
         let phase: BloodhoundPhase
@@ -281,4 +294,33 @@ export function createBloodhoundHandlers(
       return map
     },
   }
+}
+
+// Pick a uniformly random night action for the given role. Used for Night 0
+// when there is no information yet, so any LLM reasoning would be wasted.
+function randomNightAction(
+  seat: number,
+  role: SystemRole,
+  state: GameState,
+  alivePlayers: readonly number[],
+): NightAction | null {
+  const view = buildPlayerView(state, seat)
+  const aliveExceptSelf = alivePlayers.filter(s => s !== seat)
+  switch (role) {
+    case 'seer':
+      return { type: 'divine', target: pickRandom(aliveExceptSelf) }
+    case 'bodyguard':
+      return { type: 'guard', target: pickRandom(aliveExceptSelf) }
+    case 'werewolf': {
+      const allies = new Set([seat, ...(view.wolfTeammates ?? [])])
+      const targets = alivePlayers.filter(s => !allies.has(s))
+      return { type: 'attack', target: pickRandom(targets) }
+    }
+    default:
+      return null
+  }
+}
+
+function pickRandom<T>(arr: readonly T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]
 }
