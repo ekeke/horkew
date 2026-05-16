@@ -41,6 +41,24 @@ const ROLE_ABBREV_TO_ENGLISH: Record<string, string> = {
   '狂': 'possessed',
 }
 
+/**
+ * Strip Howl comment lines (`# …`) from the text before handing it to the LLM.
+ *
+ * Lupa's `resolveNight` emits `comment` events with the truth — "占い: A → B ●",
+ * "護衛: A → B", "襲撃: A → B" — and `formatHowl` renders them as `# …` lines.
+ * That bypasses the information firewall entirely: every player would see every
+ * night action. We must remove all `#` lines before any LLM reads the Howl.
+ *
+ * (Seed comment "# seed: N" is also stripped. The seed is a deterministic
+ * fingerprint, not gameplay info, but there is no reason to expose it.)
+ */
+export function stripPrivateComments(text: string): string {
+  return text
+    .split('\n')
+    .filter(line => !/^\s*#/.test(line))
+    .join('\n')
+}
+
 /** Replace the "配役 …" setup line with an unambiguous "Setup: role=count …" form. */
 export function rewriteSetupLine(text: string): string {
   const lines = text.split('\n')

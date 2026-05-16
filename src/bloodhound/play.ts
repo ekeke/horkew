@@ -98,7 +98,12 @@ async function main(): Promise<void> {
     onLLMExchange: (ex) => {
       logger.logLLMExchange(ex)
       const roundStr = ex.discussionRound !== undefined ? `[r${ex.discussionRound}] ` : ''
-      console.log(`[bloodhound] LLM call seat-${ex.seat} ${ex.phase} ${roundStr}(in=${ex.usage.inputTokens} out=${ex.usage.outputTokens})`)
+      const aux = ex.auxiliaryCalls
+      const auxStr = aux && (aux.retar + aux.craft_deception > 0)
+        ? ` retar=${aux.retar}${aux.craft_deception > 0 ? ` deceive=${aux.craft_deception}` : ''}`
+        : ''
+      const iterStr = ex.iterations && ex.iterations.length > 1 ? ` iter=${ex.iterations.length}` : ''
+      console.log(`[bloodhound] LLM call seat-${ex.seat} ${ex.phase} ${roundStr}(in=${ex.usage.inputTokens} out=${ex.usage.outputTokens}${auxStr}${iterStr})`)
     },
     onSpeechEvent: (ev) => {
       logger.logSpeech(ev)

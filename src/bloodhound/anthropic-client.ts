@@ -89,6 +89,13 @@ export type RunTurnOptions = {
   onMessage?: (msg: { role: 'user' | 'assistant'; content: unknown }) => void
 }
 
+export type RunIteration = {
+  /** Free-text reasoning the LLM produced in this iteration (may be empty). */
+  thinking: string
+  /** Names of tools the LLM invoked in this iteration (in order). */
+  toolNames: string[]
+}
+
 export type RunTurnResult = {
   toolCalls: ToolCall[]
   thinking: string
@@ -96,6 +103,13 @@ export type RunTurnResult = {
     inputTokens: number
     outputTokens: number
   }
+  /** Number of auxiliary tool invocations during the loop (split per name). */
+  auxiliaryCalls: {
+    retar: number
+    craft_deception: number
+  }
+  /** Per-iteration trace: each LLM response in the auxiliary loop including the terminal one. */
+  iterations: RunIteration[]
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +195,8 @@ export class AnthropicClient {
     options.onMessage?.({ role: 'user', content: input.user })
 
     const usage = { inputTokens: 0, outputTokens: 0 }
+    const auxiliaryCalls = { retar: 0, craft_deception: 0 }
+    const iterations: RunIteration[] = []
 
     for (let iter = 0; iter <= maxIter; iter++) {
       const response = await retryTransient(
@@ -205,6 +221,7 @@ export class AnthropicClient {
         (b): b is Anthropic.TextBlock => b.type === 'text',
       )
       const thinking = textBlocks.map(b => b.text).join('\n').trim()
+      iterations.push({ thinking, toolNames: toolUseBlocks.map(b => b.name) })
 
       if (toolUseBlocks.length === 0) {
         throw new Error(
@@ -213,6 +230,13 @@ export class AnthropicClient {
       }
 
       const nonAux = toolUseBlocks.filter(b => !AUXILIARY_TOOL_NAMES.has(b.name as ToolName))
+      // Count auxiliary tool calls observed in THIS response (whether or not
+      // we loop). When the response is terminal but contained auxiliary blocks
+      // alongside an action tool, those also count.
+      for (const block of toolUseBlocks) {
+        if (block.name === 'retar') auxiliaryCalls.retar += 1
+        else if (block.name === 'craft_deception') auxiliaryCalls.craft_deception += 1
+      }
       if (nonAux.length > 0) {
         return {
           toolCalls: toolUseBlocks.map(b => ({
@@ -222,6 +246,8 @@ export class AnthropicClient {
           })),
           thinking,
           usage,
+          auxiliaryCalls,
+          iterations,
         }
       }
 
@@ -274,6 +300,7 @@ export class AnthropicClient {
     const forcedText = forced.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
       .map(b => b.text).join('\n').trim()
+    iterations.push({ thinking: forcedText, toolNames: forcedToolUses.map(b => b.name) })
     if (forcedToolUses.length === 0) {
       throw new Error(
         `Forced-action retry returned no tool calls. First 200 chars: ${forcedText.slice(0, 200)}`,
@@ -287,6 +314,8 @@ export class AnthropicClient {
       })),
       thinking: forcedText,
       usage,
+      auxiliaryCalls,
+      iterations,
     }
   }
 }

@@ -31,7 +31,7 @@ import { getPersona } from './personas.ts'
 import { buildPrompts, type PrivateInfo } from './prompt-builder.ts'
 import { precomputeViewerRetar } from './retar-precompute.ts'
 import { decodeToolCalls, type DecodeResult } from './action-decoder.ts'
-import { rewriteSetupLine } from './rename-seats.ts'
+import { rewriteSetupLine, stripPrivateComments } from './rename-seats.ts'
 import { allTools } from './tools.ts'
 import type {
   BloodhoundEvent, BloodhoundPhase, SpeechEvent, ToolCall,
@@ -49,6 +49,10 @@ export type LLMExchange = {
   thinking: string
   toolCalls: ToolCall[]
   usage: { inputTokens: number; outputTokens: number }
+  /** Per-iteration trace (thinking + tool names) of the auxiliary tool-use loop. */
+  iterations?: Array<{ thinking: string; toolNames: string[] }>
+  /** Counts of auxiliary tool invocations during the loop. */
+  auxiliaryCalls?: { retar: number; craft_deception: number }
 }
 
 /** Replay record for one historical LLM call. */
@@ -190,7 +194,9 @@ export function createBloodhoundHandlers(
       viewerSeat: seat, viewerRole: role,
     })
 
-    const howlText = rewriteSetupLine(formatHowl(ctx.events, state, lupaConfig))
+    const howlText = stripPrivateComments(
+      rewriteSetupLine(formatHowl(ctx.events, state, lupaConfig)),
+    )
 
     const { system, user } = buildPrompts({
       phase, role, selfSeat: seat, persona, howlText, retar, legal,
@@ -223,6 +229,8 @@ export function createBloodhoundHandlers(
       thinking: result.thinking,
       toolCalls: result.toolCalls,
       usage: result.usage,
+      iterations: result.iterations,
+      auxiliaryCalls: result.auxiliaryCalls,
     })
 
     return decodeToolCalls(result.toolCalls, phase)

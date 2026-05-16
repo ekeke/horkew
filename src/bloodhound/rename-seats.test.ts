@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import type { PlayerState } from '../lupa/types.ts'
-import { renameSeatNames, rewriteSetupLine } from './rename-seats.ts'
+import { renameSeatNames, rewriteSetupLine, stripPrivateComments } from './rename-seats.ts'
 
 function p(seat: number, name: string): PlayerState {
   return {
@@ -64,5 +64,36 @@ describe('rewriteSetupLine', () => {
     const input = '配役 狼2 ?5'
     const out = rewriteSetupLine(input)
     assert.equal(out, 'Setup: werewolf=2 ?=5')
+  })
+})
+
+describe('stripPrivateComments', () => {
+  test('removes Howl # comment lines (truth leakage from resolveNight)', () => {
+    const input = [
+      'Setup: werewolf=3',
+      '++seat-1, seat-2',
+      '# 占い: seat-1 → seat-7 ●',
+      '# 護衛: seat-5 → seat-3',
+      '# 襲撃: seat-9 → seat-7',
+      'seat-7 死亡',
+      '# seed: 1',
+    ].join('\n')
+    const out = stripPrivateComments(input)
+    assert.equal(out, [
+      'Setup: werewolf=3',
+      '++seat-1, seat-2',
+      'seat-7 死亡',
+    ].join('\n'))
+  })
+
+  test('preserves non-comment lines unchanged', () => {
+    const input = 'no comments here\nseat-3 > hello'
+    assert.equal(stripPrivateComments(input), input)
+  })
+
+  test('handles leading whitespace on comment lines', () => {
+    const input = 'seat-1 voted\n  # leaked comment\n  seat-2 voted'
+    const out = stripPrivateComments(input)
+    assert.equal(out, 'seat-1 voted\n  seat-2 voted')
   })
 })
