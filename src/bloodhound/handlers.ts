@@ -224,31 +224,28 @@ export function createBloodhoundHandlers(
       return map
     },
 
-    async onDayClaims(ctx) {
-      // Day-of-game CO opportunity: we ask each alive seat to optionally
-      // emit a CO/report via the same discussion tool set. Unlike onPreVote,
-      // this is a one-shot per seat (no round-robin) and the result is
-      // mapped to a DayClaim if the LLM emitted one.
-      const map = new Map<number, DayClaim>()
-      for (const seat of ctx.alivePlayers) {
-        const decoded = await callLLM(seat, 'discussion', ctx, { discussionRound: 0 })
-        if (decoded.finalAction?.kind === 'discussion' && decoded.finalAction.claim) {
-          map.set(seat, decoded.finalAction.claim)
-        }
-      }
-      return map
+    onDayClaims(_ctx) {
+      // No-op: Bloodhound consolidates CO into the discussion phase so that
+      // CO + accompanying utterance go through onPreVote together (CO via
+      // additionalClaims, utterance via events). This keeps the Howl log in
+      // chronological order and makes both visible to later seats.
+      return new Map<number, DayClaim>()
     },
 
     async onPreVote(ctx): Promise<PreVoteResult<BloodhoundEvent>> {
       // β + pass + II discussion mini-loop.
-      // `events` is the cumulative output we hand back to the engine.
+      // Both utterances (speech events) and CO/reports (DayClaim) collected
+      // here are forwarded to the engine: speech via `events`, claims via
+      // `additionalClaims`. A seat may only CO once per game; later CO calls
+      // by the same seat are ignored.
       const events: BloodhoundEvent[] = []
+      const additionalClaims = new Map<number, DayClaim>()
       let round = 1
       while (round <= maxRounds) {
         let allPassed = true
         for (const seat of ctx.alivePlayers) {
-          // Build a temporary ctx that includes our in-progress speech events
-          // so subsequent seats see prior utterances this round.
+          // Build a temporary ctx that includes our in-progress events so
+          // subsequent seats see prior utterances and CO within this round.
           const localCtx: PhaseContext<BloodhoundEvent> = {
             ...ctx,
             events: [...ctx.events, ...events],
@@ -265,15 +262,15 @@ export function createBloodhoundHandlers(
             opts.onSpeechEvent?.(ev)
             allPassed = false
           }
-          // claim from `*_co` / `report_*` tools during pre-vote is not
-          // routed into DayClaim here (DayClaim was already collected via
-          // onDayClaims). In a future iteration we can let CO during
-          // pre-vote append additionalClaims; MVP keeps it simple.
+          if (action.claim && !additionalClaims.has(seat)) {
+            additionalClaims.set(seat, action.claim)
+            allPassed = false
+          }
         }
         if (allPassed) break
         round += 1
       }
-      return { events, continueDiscussion: false }
+      return { events, additionalClaims, continueDiscussion: false }
     },
 
     async onVote(ctx: VoteContext<BloodhoundEvent>) {
