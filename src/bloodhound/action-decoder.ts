@@ -1,0 +1,268 @@
+/**
+ * Decode the LLM's final tool calls into structured Bloodhound actions
+ * suitable for handing to lupa's GameHandlers.
+ *
+ * The LLM may emit multiple tool calls in one response. The decoder:
+ *   1. Splits out retar tool calls (handled by the tool-use loop, not actions).
+ *   2. For the current phase, picks the action-shaped tool calls and merges
+ *      them into a single discriminated action (e.g. say + seer_co + report
+ *      collapse into a discussion action with a `claim` field).
+ *
+ * Invalid combinations are surfaced via `invalid: string`, so the caller
+ * (anthropic-client retry loop) can decide whether to ask the LLM again.
+ */
+
+import type { DayClaim, NightAction } from '../lupa/types.ts'
+import type { EnumSpecies, SystemRole } from '../types/index.ts'
+import type { BloodhoundPhase, ToolCall } from './types.ts'
+
+// ---------------------------------------------------------------------------
+// Output types
+// ---------------------------------------------------------------------------
+
+export type RetarQuery = {
+  callId: string
+  assumptions: Map<number, SystemRole>
+}
+
+export type DiscussionAction = {
+  kind: 'discussion'
+  speech?: string         // present iff `say` was called
+  pass: boolean           // true iff `pass` was called
+  claim?: DayClaim        // composed from `*_co` + `report_*` tool calls
+}
+
+export type VoteAction = {
+  kind: 'vote'
+  target: number
+}
+
+export type NightActionDecoded = {
+  kind: 'night'
+  action: NightAction
+}
+
+export type FinalAction = DiscussionAction | VoteAction | NightActionDecoded
+
+export type DecodeResult = {
+  retarQueries: RetarQuery[]
+  finalAction: FinalAction | null
+  invalid: string[]         // accumulated complaints; empty = clean
+}
+
+// ---------------------------------------------------------------------------
+// Public entry
+// ---------------------------------------------------------------------------
+
+export function decodeToolCalls(toolCalls: readonly ToolCall[], phase: BloodhoundPhase): DecodeResult {
+  const retarQueries: RetarQuery[] = []
+  const others: ToolCall[] = []
+  const invalid: string[] = []
+
+  for (const tc of toolCalls) {
+    if (tc.name === 'retar') {
+      const q = decodeRetarQuery(tc, invalid)
+      if (q) retarQueries.push(q)
+    } else {
+      others.push(tc)
+    }
+  }
+
+  let finalAction: FinalAction | null = null
+  switch (phase) {
+    case 'discussion':
+    case 'last_will':
+      finalAction = decodeDiscussion(others, invalid, phase === 'last_will')
+      break
+    case 'vote':
+    case 'revote':
+      finalAction = decodeVote(others, invalid)
+      break
+    case 'night_seer':
+      finalAction = decodeSingleNight(others, 'divine', invalid)
+      break
+    case 'night_bodyguard':
+      finalAction = decodeSingleNight(others, 'guard', invalid)
+      break
+    case 'night_wolf':
+      finalAction = decodeSingleNight(others, 'attack', invalid)
+      break
+  }
+
+  return { retarQueries, finalAction, invalid }
+}
+
+// ---------------------------------------------------------------------------
+// Per-phase decoders
+// ---------------------------------------------------------------------------
+
+function decodeRetarQuery(tc: ToolCall, invalid: string[]): RetarQuery | null {
+  const raw = (tc.input as { assumptions?: unknown }).assumptions
+  if (!Array.isArray(raw)) {
+    invalid.push(`retar call ${tc.id}: assumptions must be an array`)
+    return null
+  }
+  const assumptions = new Map<number, SystemRole>()
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue
+    const seat = (item as { seat?: unknown }).seat
+    const role = (item as { role?: unknown }).role
+    if (typeof seat !== 'number' || typeof role !== 'string') continue
+    assumptions.set(seat, role as SystemRole)
+  }
+  return { callId: tc.id, assumptions }
+}
+
+function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: boolean): DiscussionAction {
+  let speech: string | undefined
+  let pass = false
+  // Collect raw CO/report fragments first; compose into a single DayClaim at the end.
+  let coKind: 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata' | null = null
+  let masonPartner: number | undefined
+  const seerResults: Array<{ day: number; target: number; result: EnumSpecies }> = []
+  const mediumResults: EnumSpecies[] = []
+  // Standalone result tool calls (no CO this turn): emitted as result-only claim.
+  let standaloneSeer: { target: number; result: EnumSpecies; day: number } | null = null
+  let standaloneMedium: EnumSpecies | null = null
+
+  for (const tc of toolCalls) {
+    switch (tc.name) {
+      case 'say': {
+        const text = (tc.input as { text?: unknown }).text
+        if (typeof text !== 'string' || text.length === 0) {
+          invalid.push(`say call ${tc.id}: text must be a non-empty string`)
+          break
+        }
+        if (lastWill) {
+          invalid.push(`say is not available in last_will phase (call ${tc.id} ignored)`)
+          break
+        }
+        if (speech !== undefined) invalid.push(`multiple say calls; last one wins`)
+        speech = text
+        break
+      }
+      case 'pass': {
+        if (lastWill) {
+          invalid.push(`pass is not available in last_will phase (call ${tc.id} ignored)`)
+          break
+        }
+        pass = true
+        break
+      }
+      case 'seer_co':   coKind = 'seer'; break
+      case 'medium_co': coKind = 'medium'; break
+      case 'bodyguard_co': coKind = 'bodyguard'; break
+      case 'mason_co': {
+        coKind = 'mason'
+        const partner = (tc.input as { partner_seat?: unknown }).partner_seat
+        if (typeof partner !== 'number') {
+          invalid.push(`mason_co call ${tc.id}: partner_seat missing or non-numeric`)
+        } else {
+          masonPartner = partner
+        }
+        break
+      }
+      case 'nekomata_co': coKind = 'nekomata'; break
+      case 'report_divination': {
+        const target = (tc.input as { target_seat?: unknown }).target_seat
+        const species = (tc.input as { species?: unknown }).species
+        const day = (tc.input as { day?: unknown }).day
+        if (typeof target !== 'number' || (species !== 'human' && species !== 'wolf') || typeof day !== 'number') {
+          invalid.push(`report_divination call ${tc.id}: bad arguments`)
+          break
+        }
+        seerResults.push({ day, target, result: species })
+        standaloneSeer = { target, result: species, day }
+        break
+      }
+      case 'report_medium': {
+        const target = (tc.input as { target_seat?: unknown }).target_seat
+        const species = (tc.input as { species?: unknown }).species
+        if ((species !== 'human' && species !== 'wolf') || typeof target !== 'number') {
+          invalid.push(`report_medium call ${tc.id}: bad arguments`)
+          break
+        }
+        mediumResults.push(species)
+        standaloneMedium = species
+        break
+      }
+      default:
+        invalid.push(`tool ${tc.name} not allowed in discussion phase`)
+    }
+  }
+
+  // Compose the final claim
+  let claim: DayClaim | undefined
+  if (coKind === 'seer') {
+    claim = { type: 'seer_co', results: [...seerResults] }
+  } else if (coKind === 'medium') {
+    claim = { type: 'medium_co', pastResults: mediumResults.length > 0 ? [...mediumResults] : undefined }
+  } else if (coKind === 'bodyguard') {
+    claim = { type: 'bodyguard_co', targets: [] }
+  } else if (coKind === 'mason') {
+    if (masonPartner === undefined) {
+      invalid.push(`mason_co: partner_seat is required`)
+    } else {
+      claim = { type: 'mason_co', partner: masonPartner }
+    }
+  } else if (coKind === 'nekomata') {
+    claim = { type: 'nekomata_co' }
+  } else if (standaloneSeer) {
+    // No CO this turn: assume the seat already COed as seer, emit a result-only claim
+    claim = { type: 'seer_result', target: standaloneSeer.target, result: standaloneSeer.result }
+  } else if (standaloneMedium !== null) {
+    claim = { type: 'medium_result', result: standaloneMedium }
+  }
+
+  // In normal discussion phase, exactly one of speech/pass should be present
+  if (!lastWill && speech === undefined && !pass && claim === undefined) {
+    invalid.push(`discussion phase: at least one of say/pass/<co>/<report> must be called`)
+  }
+  if (!lastWill && speech !== undefined && pass) {
+    invalid.push(`discussion phase: say and pass are mutually exclusive`)
+  }
+
+  return { kind: 'discussion', speech, pass, claim }
+}
+
+function decodeVote(toolCalls: ToolCall[], invalid: string[]): VoteAction | null {
+  const voteCalls = toolCalls.filter(tc => tc.name === 'vote')
+  if (voteCalls.length === 0) {
+    invalid.push('vote phase: no vote tool call found')
+    return null
+  }
+  if (voteCalls.length > 1) invalid.push(`vote phase: multiple vote calls; last wins`)
+  const last = voteCalls[voteCalls.length - 1]
+  const target = (last.input as { target_seat?: unknown }).target_seat
+  if (typeof target !== 'number') {
+    invalid.push(`vote call ${last.id}: target_seat must be a number`)
+    return null
+  }
+  for (const tc of toolCalls) {
+    if (tc.name !== 'vote') invalid.push(`tool ${tc.name} not allowed in vote phase`)
+  }
+  return { kind: 'vote', target }
+}
+
+function decodeSingleNight(
+  toolCalls: ToolCall[],
+  expectName: 'divine' | 'guard' | 'attack',
+  invalid: string[],
+): NightActionDecoded | null {
+  const matches = toolCalls.filter(tc => tc.name === expectName)
+  if (matches.length === 0) {
+    invalid.push(`night phase: no ${expectName} tool call found`)
+    return null
+  }
+  if (matches.length > 1) invalid.push(`night phase: multiple ${expectName} calls; last wins`)
+  const last = matches[matches.length - 1]
+  const target = (last.input as { target_seat?: unknown }).target_seat
+  if (typeof target !== 'number') {
+    invalid.push(`${expectName} call ${last.id}: target_seat must be a number`)
+    return null
+  }
+  for (const tc of toolCalls) {
+    if (tc.name !== expectName) invalid.push(`tool ${tc.name} not allowed in this night phase`)
+  }
+  return { kind: 'night', action: { type: expectName, target } }
+}
