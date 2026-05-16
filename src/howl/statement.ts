@@ -1,6 +1,6 @@
 import * as V from './vocabulary.ts'
 
-export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'spoiler' | 'speech' | 'videoSource' | 'timestamp' | 'unknown'
+export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'pass' | 'reveal' | 'spoiler' | 'speech' | 'videoSource' | 'timestamp' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf'
@@ -106,6 +106,11 @@ export type SpeechStatement = Statement & {
     type: 'speech'
     actor: string
     text: string
+}
+
+export type PassStatement = Statement & {
+    type: 'pass'
+    actor: string
 }
 
 export type CurseStatement = Statement & {
@@ -317,6 +322,14 @@ export function parseSpeechStatement(text: string, line: number): SpeechStatemen
   const content = match[2].trim()
   if (content.length === 0) return null
   return { type: 'speech', line, actor: match[1].trim(), text: content }
+}
+
+// Pass statement: seat-3 pass / アリス パス
+const passRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})${V.whiteSpaces}${V.pass}${V.optionalSpace}$`)
+export function parsePassStatement(text: string, line: number): PassStatement | null {
+  const match = passRegex.exec(text)
+  if (!match) return null
+  return { type: 'pass', line, actor: match[1].trim() }
 }
 
 export function parseGrelanStatement(text: string, line: number): GrelanStatement | null {
@@ -637,6 +650,7 @@ export function parseStatement (text: string, line: number): Statement {
     parseTimestampStatement,
     parseSpoilerStatement,
     parseSpeechStatement,
+    parsePassStatement,
     parseSetupStatement,
     parseJoinMultiStatement,
     parseJoinStatement,

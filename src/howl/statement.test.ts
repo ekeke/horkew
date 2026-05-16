@@ -1258,3 +1258,43 @@ describe('speech statement', () => {
     assert.equal(result.type, 'vote')
   })
 })
+
+describe('pass statement', () => {
+  test('ASCII keyword', () => {
+    const result = S.parsePassStatement('seat-3 pass', 1)
+    assert.deepEqual(result, { type: 'pass', line: 1, actor: 'seat-3' })
+  })
+
+  test('Japanese katakana keyword', () => {
+    const result = S.parsePassStatement('アリス パス', 2)
+    assert.deepEqual(result, { type: 'pass', line: 2, actor: 'アリス' })
+  })
+
+  test('full-width space between actor and keyword', () => {
+    const result = S.parsePassStatement('アリス　パス', 3)
+    assert.deepEqual(result, { type: 'pass', line: 3, actor: 'アリス' })
+  })
+
+  test('missing whitespace returns null', () => {
+    const result = S.parsePassStatement('Alicepass', 4)
+    assert.equal(result, null)
+  })
+
+  test('trailing content returns null', () => {
+    const result = S.parsePassStatement('Alice pass now', 5)
+    assert.equal(result, null)
+  })
+
+  test('integrated with parseStatement', () => {
+    const result = S.parseStatement('seat-7 pass', 42)
+    assert.equal(result.type, 'pass')
+    assert.equal((result as S.PassStatement).actor, 'seat-7')
+    assert.equal(result.line, 42)
+  })
+
+  test('does not consume speech with text "pass"', () => {
+    const result = S.parseStatement('Alice > pass', 1)
+    assert.equal(result.type, 'speech')
+    assert.equal((result as S.SpeechStatement).text, 'pass')
+  })
+})

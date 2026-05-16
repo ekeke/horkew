@@ -21,7 +21,7 @@ import type {
   AttackStatement, LynchStatement, SuddenDeathStatement,
   PeaceStatement, CurseStatement, FollowStatement, ForecastStatement,
   OverStatement, AssertStatement, MasonStatement,
-  RevealStatement, SpoilerStatement, SpeechStatement,
+  RevealStatement, SpoilerStatement, SpeechStatement, PassStatement,
   VideoSourceStatement, TimestampStatement, UnknownStatement,
   Species, GameResult, Role, Assertion,
 } from './statement.ts'
@@ -150,6 +150,10 @@ export function makeSpoiler(player: string, role: string): SpoilerStatement {
   return { type: 'spoiler', line: 0, player, role }
 }
 
+export function makePass(actor: string): PassStatement {
+  return { type: 'pass', line: 0, actor }
+}
+
 /**
  * 占いCO（役職主張 + 0件以上の結果）用の AssertStatement ファクトリ。
  */
@@ -252,6 +256,7 @@ export function serializeStatement(stmt: Statement): string {
     case 'reveal':     return serializeReveal(stmt as RevealStatement)
     case 'spoiler':    return serializeSpoiler(stmt as SpoilerStatement)
     case 'speech':     return serializeSpeech(stmt as SpeechStatement)
+    case 'pass':       return serializePass(stmt as PassStatement)
     case 'videoSource':return (stmt as VideoSourceStatement).url
     case 'timestamp':  return `@${(stmt as TimestampStatement).raw}`
     case 'unknown':    return (stmt as UnknownStatement).text
@@ -319,6 +324,10 @@ function serializeSpoiler(stmt: SpoilerStatement): string {
 
 function serializeSpeech(stmt: SpeechStatement): string {
   return `${stmt.actor} > ${stmt.text}`
+}
+
+function serializePass(stmt: PassStatement): string {
+  return `${stmt.actor} pass`
 }
 
 function serializeAssert(stmt: AssertStatement): string {
