@@ -27,6 +27,33 @@ const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_MAX_TOKENS = 1024
 const DEFAULT_MAX_AUX_ITERATIONS = 10
 const DECEPTION_MAX_TOKENS = 600
+const API_MAX_RETRIES = 5
+const API_INITIAL_BACKOFF_MS = 1000
+const API_MAX_BACKOFF_MS = 30000
+
+// Retry transient API errors (5xx, 429, network) with exponential backoff.
+// Non-retryable errors (4xx other than 429) bubble up immediately.
+async function retryTransient<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= API_MAX_RETRIES; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      const status = (err as { status?: number }).status
+      const isRetryable = status === undefined
+        || (status >= 500 && status < 600)
+        || status === 429
+      if (!isRetryable || attempt === API_MAX_RETRIES) throw err
+      const wait = Math.min(API_INITIAL_BACKOFF_MS * (2 ** attempt), API_MAX_BACKOFF_MS)
+      const tag = status !== undefined ? `status=${status}` : 'network error'
+      // eslint-disable-next-line no-console
+      console.error(`[bloodhound] ${label}: ${tag}, retrying in ${wait}ms (attempt ${attempt + 1}/${API_MAX_RETRIES})`)
+      await new Promise(r => setTimeout(r, wait))
+    }
+  }
+  throw lastErr
+}
 
 const AUXILIARY_TOOL_NAMES = new Set<ToolName>(['retar', 'craft_deception'])
 
@@ -121,12 +148,15 @@ export class AnthropicClient {
       `Output the utterance only.`,
     ].join('\n')
 
-    const response = await this.sdk.messages.create({
-      model: this.defaultModel,
-      max_tokens: DECEPTION_MAX_TOKENS,
-      system,
-      messages: [{ role: 'user', content: userPrompt }],
-    })
+    const response = await retryTransient(
+      () => this.sdk.messages.create({
+        model: this.defaultModel,
+        max_tokens: DECEPTION_MAX_TOKENS,
+        system,
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
+      'craftDeception API call',
+    )
 
     const text = response.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
@@ -153,14 +183,17 @@ export class AnthropicClient {
     const usage = { inputTokens: 0, outputTokens: 0 }
 
     for (let iter = 0; iter <= maxIter; iter++) {
-      const response = await this.sdk.messages.create({
-        model,
-        max_tokens: maxTokens,
-        system: input.system,
-        tools: input.tools,
-        tool_choice: toolChoice,
-        messages,
-      })
+      const response = await retryTransient(
+        () => this.sdk.messages.create({
+          model,
+          max_tokens: maxTokens,
+          system: input.system,
+          tools: input.tools,
+          tool_choice: toolChoice,
+          messages,
+        }),
+        `runTurn iter=${iter}`,
+      )
       usage.inputTokens += response.usage.input_tokens
       usage.outputTokens += response.usage.output_tokens
       options.onMessage?.({ role: 'assistant', content: response.content })
@@ -221,13 +254,16 @@ export class AnthropicClient {
       messages.push({ role: 'user', content: [nudge] })
     }
 
-    const forced = await this.sdk.messages.create({
-      model, max_tokens: maxTokens,
-      system: input.system,
-      tools: actionTools,
-      tool_choice: { type: 'any' },
-      messages,
-    })
+    const forced = await retryTransient(
+      () => this.sdk.messages.create({
+        model, max_tokens: maxTokens,
+        system: input.system,
+        tools: actionTools,
+        tool_choice: { type: 'any' },
+        messages,
+      }),
+      'runTurn forced-action retry',
+    )
     usage.inputTokens += forced.usage.input_tokens
     usage.outputTokens += forced.usage.output_tokens
     options.onMessage?.({ role: 'assistant', content: forced.content })

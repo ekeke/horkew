@@ -23,6 +23,7 @@ import type {
 import type { SystemRole } from '../types/index.ts'
 import { buildPlayerView } from '../lupa/player-view.ts'
 import { formatHowl } from '../lupa/format.ts'
+import { Rng } from '../lupa/random.ts'
 
 import { AnthropicClient, type RunTurnOptions } from './anthropic-client.ts'
 import { legalActions } from './legal-actions.ts'
@@ -48,6 +49,12 @@ export type LLMExchange = {
   usage: { inputTokens: number; outputTokens: number }
 }
 
+/** Replay record for one historical LLM call. */
+export type ReplayRecord = {
+  thinking: string
+  toolCalls: ToolCall[]
+}
+
 export type BloodhoundHandlersOptions = {
   client: AnthropicClient
   config: { roles: LupaConfig['roles']; seed?: number }
@@ -56,6 +63,12 @@ export type BloodhoundHandlersOptions = {
   onSpeechEvent?: (event: SpeechEvent) => void
   /** Forwarded as the engine's onEvent? — fires for every GameEvent | BloodhoundEvent. */
   onEvent?: (event: GameEvent | BloodhoundEvent) => void
+  /**
+   * Replay map keyed by `seat{NN}-{phase}-{turn}` (matches logger filename
+   * stem). When a key matches, the LLM is NOT called and the historical
+   * toolCalls are replayed verbatim. Used for resume.
+   */
+  replayMap?: Map<string, ReplayRecord>
 }
 
 export function createBloodhoundHandlers(
@@ -63,6 +76,24 @@ export function createBloodhoundHandlers(
 ): GameHandlers<BloodhoundEvent> {
   const lupaConfig = opts.config as LupaConfig
   const maxRounds = opts.maxDiscussionRounds ?? DEFAULT_MAX_DISCUSSION_ROUNDS
+
+  // Deterministic RNG for handler-side random choices (Night 0 random actions).
+  // Seeded from the game seed so the same seed reproduces identical handler
+  // randomness, which makes replay deterministic.
+  const rng = new Rng(opts.config.seed)
+
+  // Per-(seat, phase) turn counter, mirroring the logger's filename scheme.
+  // Used to build replay keys.
+  const seatPhaseCounters = new Map<string, number>()
+  function nextTurn(seat: number, phase: BloodhoundPhase): number {
+    const key = `${seat}-${phase}`
+    const turn = (seatPhaseCounters.get(key) ?? 0) + 1
+    seatPhaseCounters.set(key, turn)
+    return turn
+  }
+  function replayKey(seat: number, phase: BloodhoundPhase, turn: number): string {
+    return `seat${String(seat).padStart(2, '0')}-${phase}-${String(turn).padStart(2, '0')}`
+  }
 
   // ----- per-seat tracking that lupa doesn't store for us ---------------
   // The lupa engine fills in state.players[seer].divineHistory / guardHistory
@@ -126,6 +157,16 @@ export function createBloodhoundHandlers(
       discussionRound?: number
     } = {},
   ): Promise<DecodeResult> {
+    // Determine this call's replay key BEFORE doing any expensive setup
+    // (retar, prompt building). If a replay record exists, skip the LLM
+    // entirely and decode the historical toolCalls.
+    const turn = nextTurn(seat, phase)
+    const key = replayKey(seat, phase, turn)
+    const replay = opts.replayMap?.get(key)
+    if (replay) {
+      return decodeToolCalls(replay.toolCalls, phase)
+    }
+
     const state = ctx.state as GameState
     const player = state.players.find(p => p.seat === seat)
     if (!player) throw new Error(`No player at seat ${seat}`)
@@ -197,11 +238,12 @@ export function createBloodhoundHandlers(
       const state = ctx.state as GameState
 
       // Day 0 (initial night, before the first victim): no information is
-      // available, so any LLM reasoning is pure waste. Pick random targets.
+      // available, so any LLM reasoning is pure waste. Pick random targets
+      // using the seeded RNG so the choice is deterministic per seed.
       if (ctx.day === 0) {
         for (const seat of ctx.alivePlayers) {
           const player = state.players.find(p => p.seat === seat)!
-          const action = randomNightAction(seat, player.role, state, ctx.alivePlayers)
+          const action = randomNightAction(seat, player.role, state, ctx.alivePlayers, rng)
           if (action) map.set(seat, action)
         }
         return map
@@ -296,29 +338,27 @@ export function createBloodhoundHandlers(
 
 // Pick a uniformly random night action for the given role. Used for Night 0
 // when there is no information yet, so any LLM reasoning would be wasted.
+// Uses the supplied seeded RNG so the choice is deterministic.
 function randomNightAction(
   seat: number,
   role: SystemRole,
   state: GameState,
   alivePlayers: readonly number[],
+  rng: Rng,
 ): NightAction | null {
   const view = buildPlayerView(state, seat)
   const aliveExceptSelf = alivePlayers.filter(s => s !== seat)
   switch (role) {
     case 'seer':
-      return { type: 'divine', target: pickRandom(aliveExceptSelf) }
+      return { type: 'divine', target: rng.pick(aliveExceptSelf as number[]) }
     case 'bodyguard':
-      return { type: 'guard', target: pickRandom(aliveExceptSelf) }
+      return { type: 'guard', target: rng.pick(aliveExceptSelf as number[]) }
     case 'werewolf': {
       const allies = new Set([seat, ...(view.wolfTeammates ?? [])])
       const targets = alivePlayers.filter(s => !allies.has(s))
-      return { type: 'attack', target: pickRandom(targets) }
+      return { type: 'attack', target: rng.pick(targets as number[]) }
     }
     default:
       return null
   }
-}
-
-function pickRandom<T>(arr: readonly T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)]
 }
