@@ -31,7 +31,7 @@ import { getPersona } from './personas.ts'
 import { buildPrompts, type PrivateInfo } from './prompt-builder.ts'
 import { precomputeViewerRetar } from './retar-precompute.ts'
 import { decodeToolCalls, type DecodeResult } from './action-decoder.ts'
-import { renameSeatNames } from './rename-seats.ts'
+import { rewriteSetupLine } from './rename-seats.ts'
 import { allTools } from './tools.ts'
 import type {
   BloodhoundEvent, BloodhoundPhase, SpeechEvent, ToolCall,
@@ -190,7 +190,7 @@ export function createBloodhoundHandlers(
       viewerSeat: seat, viewerRole: role,
     })
 
-    const howlText = renameSeatNames(formatHowl(ctx.events, state, lupaConfig), state.players)
+    const howlText = rewriteSetupLine(formatHowl(ctx.events, state, lupaConfig))
 
     const { system, user } = buildPrompts({
       phase, role, selfSeat: seat, persona, howlText, retar, legal,
@@ -231,8 +231,16 @@ export function createBloodhoundHandlers(
   // ----- GameHandlers ---------------------------------------------------
 
   return {
-    onSetup(_roles, _state) {
-      // No setup state needed beyond what lupa tracks.
+    onSetup(_roles, state) {
+      // Overwrite each player's display name to "seat-N" right at setup.
+      // Lupa's nameStyle:'seat' actually produces "<role-abbrev><seat>" (e.g.
+      // "占1"), which leaks every role through formatHowl's player list and
+      // looks confusingly similar to seat references like "seat-1".
+      // By overriding name here, every downstream rendering (formatHowl,
+      // events, etc.) is already seat-N from the start.
+      for (const player of state.players) {
+        player.name = `seat-${player.seat}`
+      }
     },
 
     onEvent: opts.onEvent,

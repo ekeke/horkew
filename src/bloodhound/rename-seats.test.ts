@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import type { PlayerState } from '../lupa/types.ts'
-import { renameSeatNames } from './rename-seats.ts'
+import { renameSeatNames, rewriteSetupLine } from './rename-seats.ts'
 
 function p(seat: number, name: string): PlayerState {
   return {
@@ -43,5 +43,26 @@ describe('renameSeatNames', () => {
     const players = [p(1, '占1')]
     const text = 'seat-1 said hello'
     assert.equal(renameSeatNames(text, players), 'seat-1 said hello')
+  })
+})
+
+describe('rewriteSetupLine', () => {
+  test('translates 14d-neko setup line to English notation', () => {
+    const input = '配役 狼3 村2 占1 霊1 狩1 共2 猫1 信1 狐1 背1\n\n# seed: 1'
+    const out = rewriteSetupLine(input)
+    assert.ok(out.startsWith('Setup: werewolf=3 villager=2 seer=1 medium=1 bodyguard=1 mason=2 nekomata=1 fanatic=1 werehamster=1 immoralist=1'),
+      `setup line not rewritten: ${out.split('\n')[0]}`)
+    assert.ok(out.includes('# seed: 1'), 'unrelated lines must be preserved')
+  })
+
+  test('no-op when no 配役 line is present', () => {
+    const input = 'just some text\nno setup here'
+    assert.equal(rewriteSetupLine(input), input)
+  })
+
+  test('handles unknown role abbreviation by keeping it', () => {
+    const input = '配役 狼2 ?5'
+    const out = rewriteSetupLine(input)
+    assert.equal(out, 'Setup: werewolf=2 ?=5')
   })
 })
