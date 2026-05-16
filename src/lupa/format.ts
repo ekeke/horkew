@@ -73,6 +73,10 @@ export function formatHowl(events: readonly any[], state: GameState, config: Lup
         lines.push(`# ${event.text}`)
         break
       }
+      case 'speech': {
+        lines.push(`${playerName(event.actor)} > ${event.text}`)
+        break
+      }
       case 'night_kill':
       case 'fox_kill': {
         if (lastType !== 'night_kill' && lastType !== 'fox_kill' && lastType !== 'comment') {

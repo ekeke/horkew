@@ -1,0 +1,80 @@
+/**
+ * Bloodhound MVP entry point.
+ *
+ * Run one 14d-neko game with all 14 seats controlled by Bloodhound
+ * (LLM agent). Persistent artifacts (Howl log, per-LLM-call messages,
+ * cost summary) are written under `logs/bloodhound/<timestamp>/`.
+ *
+ * Usage:
+ *   ANTHROPIC_API_KEY=sk-... npm run bloodhound:play
+ *
+ * Options (env vars):
+ *   BLOODHOUND_MODEL        — Anthropic model (default: claude-sonnet-4-6)
+ *   BLOODHOUND_SEED         — game seed (default: 1)
+ *   BLOODHOUND_DISCUSSION_ROUNDS — max discussion rounds per day (default: 3)
+ */
+
+import { runGame } from '../lupa/engine.ts'
+import { findScenario, scenarioToRoles } from '../lupa/scenarios.ts'
+import type { GameConfig } from '../lupa/handlers.ts'
+import { formatHowl } from '../lupa/format.ts'
+
+import { AnthropicClient } from './anthropic-client.ts'
+import { createBloodhoundHandlers } from './handlers.ts'
+import { BloodhoundLogger } from './logger.ts'
+import type { BloodhoundEvent } from './types.ts'
+
+// Sonnet 4.6 pricing (USD per 1M tokens) — adjust if the rate changes.
+const PRICE_INPUT_PER_MTOK  = 3
+const PRICE_OUTPUT_PER_MTOK = 15
+
+async function main(): Promise<void> {
+  const scenarioName = '14d-neko'
+  const scenario = findScenario(scenarioName)
+  if (!scenario) throw new Error(`Scenario not found: ${scenarioName}`)
+
+  const seed = Number(process.env.BLOODHOUND_SEED ?? '1')
+  const model = process.env.BLOODHOUND_MODEL ?? 'claude-sonnet-4-6'
+  const maxRounds = Number(process.env.BLOODHOUND_DISCUSSION_ROUNDS ?? '3')
+
+  const config: GameConfig = {
+    roles: scenarioToRoles(scenario),
+    seed,
+    hasFirstGhost: scenario.hasFirstGhost ?? false,
+    revoteConfig: scenario.revoteConfig,
+    nameStyle: 'seat',
+  }
+
+  const logger = new BloodhoundLogger()
+  console.log(`[bloodhound] starting game (scenario=${scenarioName}, seed=${seed}, model=${model})`)
+  console.log(`[bloodhound] log dir: ${logger.runDir}`)
+
+  const client = new AnthropicClient({ model })
+  const handlers = createBloodhoundHandlers({
+    client,
+    config: { roles: config.roles, seed: config.seed },
+    maxDiscussionRounds: maxRounds,
+    onLLMExchange: (ex) => {
+      logger.logLLMExchange(ex)
+      console.log(`[bloodhound] LLM call seat-${ex.seat} ${ex.phase} (in=${ex.usage.inputTokens} out=${ex.usage.outputTokens})`)
+    },
+    onSpeechEvent: (ev) => {
+      logger.logSpeech(ev)
+      console.log(`[bloodhound] speech seat-${ev.actor}: ${ev.text}`)
+    },
+  })
+
+  const result = await runGame<BloodhoundEvent>(config, handlers)
+
+  const howl = formatHowl(result.events, result.state, { roles: config.roles, seed: config.seed })
+  logger.writeGameHowl(howl)
+  logger.writeCostSummary(model, PRICE_INPUT_PER_MTOK, PRICE_OUTPUT_PER_MTOK)
+
+  console.log(`[bloodhound] game finished: ${result.state.result}`)
+  console.log(`[bloodhound] artifacts written to ${logger.runDir}`)
+}
+
+main().catch(err => {
+  console.error('[bloodhound] error:', err)
+  process.exit(1)
+})
