@@ -326,8 +326,9 @@ export function createBloodhoundHandlers(
             opts.onSpeechEvent?.(ev)
             allPassed = false
           }
-          if (action.claim && !additionalClaims.has(seat)) {
-            additionalClaims.set(seat, action.claim)
+          if (action.claim) {
+            const merged = mergeClaim(additionalClaims.get(seat), action.claim)
+            additionalClaims.set(seat, merged)
             allPassed = false
           }
         }
@@ -382,4 +383,38 @@ function randomNightAction(
     default:
       return null
   }
+}
+
+/**
+ * Merge a fresh DayClaim into an existing one from the same seat. The
+ * onPreVote loop calls callLLM multiple times per seat (one per round), and
+ * the engine accepts a single DayClaim per seat in additionalClaims. Without
+ * merging, a seat that COed in round 1 and reported a fresh result in round 2
+ * would have round-2 silently dropped. Merge rules:
+ *
+ * - seer_co + seer_co       → append results (dedupe by day+target)
+ * - medium_co + medium_co   → append pastResults
+ * - bodyguard_co + bodyguard_co → append targets (dedupe)
+ * - mason_co / nekomata_co  → first claim wins (subsequent are no-ops)
+ * - role mismatch           → first claim wins (a seat cannot change role)
+ */
+function mergeClaim(existing: DayClaim | undefined, fresh: DayClaim): DayClaim {
+  if (!existing) return fresh
+
+  if (existing.type === 'seer_co' && fresh.type === 'seer_co') {
+    const seen = new Set(existing.results.map(r => `${r.day}-${r.target}`))
+    const added = fresh.results.filter(r => !seen.has(`${r.day}-${r.target}`))
+    return { ...existing, results: [...existing.results, ...added] }
+  }
+  if (existing.type === 'medium_co' && fresh.type === 'medium_co') {
+    const exPast = existing.pastResults ?? []
+    const frPast = fresh.pastResults ?? []
+    return { ...existing, pastResults: [...exPast, ...frPast] }
+  }
+  if (existing.type === 'bodyguard_co' && fresh.type === 'bodyguard_co') {
+    const seen = new Set(existing.targets)
+    const added = fresh.targets.filter(t => !seen.has(t))
+    return { ...existing, targets: [...existing.targets, ...added] }
+  }
+  return existing
 }

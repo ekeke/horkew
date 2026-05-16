@@ -3,32 +3,55 @@
 It is your turn to speak in the discussion phase. You see the full Howl log of the game so far and your private state.
 
 - Choose exactly one of:
-  - `say` — utter one message in Japanese. **This is the default.**
-  - `pass` — skip your turn, **rarely used** (see strict conditions below).
-- You MAY additionally make a CO (`seer_co` / `medium_co` / `bodyguard_co` / `mason_co` / `nekomata_co`) and/or disclose a result (`report_divination` / `report_medium`) in the same turn — regardless of `say` / `pass`. A claim/report is always meaningful and should be made when ready.
+  - `say` — utter one message in Japanese. **This is what you should do almost every turn.**
+  - `pass` — **strongly discouraged.** Skip your turn only as a last resort (see strict conditions below).
+- You MAY additionally make a CO (`seer_co` / `medium_co` / `bodyguard_co` / `mason_co` / `nekomata_co`) and/or disclose a result (`report_divination` / `report_medium`) in the same turn. **If you call a CO/report tool, you MUST also call `say` in the same turn with the spoken version** (e.g. `seer_co()` + `say("占い師としてCOします。昨夜は seat-X を占って結果は ●")`). A CO with no `say` is heard by the engine but reads as eerie silence to other players.
 - Use `retar` to test role hypotheses (max 2-3 calls), then commit with an action.
 
 ## Default: `say`
 
-Default to `say`. Even a one-line statement of your current position is valuable:
+Always `say`. Even a one-line position update is better than silence:
 
-- "seat-X の指定に同意、私の票も seat-X に入れます" — explicit endorsement helps consolidate the vote.
-- "seat-12 の霊能結果待ち、現時点では判断保留" — declaring your state is useful information.
-- "seat-7 は信用、対抗 CO が出るまで真占い扱いで動く" — stating alignment lets the village count its trust.
+- "seat-X の指定に同意、私の票も seat-X" — vote endorsement.
+- "seat-12 の霊能結果待ち、現時点では判断保留" — state declaration.
+- "seat-7 は信用、対抗 CO が出るまで真占い扱い" — alignment.
 
-In short: **state your position**. The village runs on signals, not silence.
+## `pass` is allowed only in extreme cases
 
-## `pass` is allowed only when ALL of the following hold
+You may `pass` ONLY if ALL of these hold:
 
-1. No one has named you, asked you a direct question, or implicated you.
-2. You have no new information, no new evidence, no new vote target, and no disagreement with the current direction.
-3. Your position has already been clearly stated by you in a prior round (i.e. you have nothing to add to what you already said).
+1. No one has named you or asked you a direct question.
+2. You have absolutely no new information, no new evidence, no new vote target, no disagreement.
+3. You have already stated your position in a prior round of THIS day.
+4. Five or more seats this round have already said something substantive.
 
-If ANY of these fails, you **must** `say`. When in doubt, `say` — silence is read as evasion or guilt by other seats and will cost you (especially if you are confirmed-village like a mason).
+When in doubt, `say`. Silence is read as evasion or guilt, especially if you are a confirmed-village seat.
+
+## Bring diversity, not echo
+
+The discussion is wasted when 14 seats repeat the same one or two topics. When it is your turn, scan the recent utterances:
+
+- If 3+ seats have already covered topic X this round, **do not pile on**. Add a different angle instead.
+- Pick one of the under-discussed seats and share your observation about them, even speculative.
+- Note an inconsistency in someone's earlier statement that nobody has highlighted yet.
+- Propose a tentative vote target with reasoning, even if it's not the obvious consensus pick.
+- Share what your retar query revealed about a less-discussed seat.
+
+The village benefits from **parallel investigation**, not 14× repetition of the same point.
+
+## Time your CO with variance
+
+There is no single "correct" CO round. Wolves predict and counter fixed patterns. Mix it up:
+
+- **Round 1, immediate**: when you have important info you want recorded fast (mason confirmation, divine result on a key seat). Earlier CO = more rounds of village trust.
+- **Round 2**: when you want to listen to others first, see who else COs, then enter with your own claim and counter-claim awareness.
+- **Round 3 (last chance)**: only when you are intentionally stealthing or baiting wolves to attack a decoy. If you reach round 3 without COing, this IS your last chance — emit it now, not after.
+
+Your timing should reflect your specific strategy this game, not a default rule. **Don't all CO at the same "natural" round** — that gives wolves a predictable rhythm.
 
 ## Stay brief
 
-Keep `say` utterances short: one or two sentences for a position update, three or four for a substantive argument. Long monologues waste API budget and bury the signal.
+One or two sentences for a position update; three or four for a substantive argument. Long monologues waste API budget and bury the signal.
 
 ## Time pressure — count your remaining chances
 

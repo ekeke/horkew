@@ -121,9 +121,6 @@ function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: bo
   let masonPartner: number | undefined
   const seerResults: Array<{ day: number; target: number; result: EnumSpecies }> = []
   const mediumResults: EnumSpecies[] = []
-  // Standalone result tool calls (no CO this turn): emitted as result-only claim.
-  let standaloneSeer: { target: number; result: EnumSpecies; day: number } | null = null
-  let standaloneMedium: EnumSpecies | null = null
 
   for (const tc of toolCalls) {
     switch (tc.name) {
@@ -172,7 +169,6 @@ function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: bo
           break
         }
         seerResults.push({ day, target, result: species })
-        standaloneSeer = { target, result: species, day }
         break
       }
       case 'report_medium': {
@@ -183,7 +179,6 @@ function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: bo
           break
         }
         mediumResults.push(species)
-        standaloneMedium = species
         break
       }
       default:
@@ -191,7 +186,9 @@ function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: bo
     }
   }
 
-  // Compose the final claim
+  // Compose the final claim. We always emit *_co shaped claims (with results
+  // arrays / pastResults) even for "result-only" turns — this lets the
+  // handler merge across rounds (seer_co.results gets appended each round).
   let claim: DayClaim | undefined
   if (coKind === 'seer') {
     claim = { type: 'seer_co', results: [...seerResults] }
@@ -207,11 +204,13 @@ function decodeDiscussion(toolCalls: ToolCall[], invalid: string[], lastWill: bo
     }
   } else if (coKind === 'nekomata') {
     claim = { type: 'nekomata_co' }
-  } else if (standaloneSeer) {
-    // No CO this turn: assume the seat already COed as seer, emit a result-only claim
-    claim = { type: 'seer_result', target: standaloneSeer.target, result: standaloneSeer.result }
-  } else if (standaloneMedium !== null) {
-    claim = { type: 'medium_result', result: standaloneMedium }
+  } else if (seerResults.length > 0) {
+    // No CO this turn but seer results were reported — emit as seer_co
+    // with the reported results. The handler will merge into prior seer_co.
+    claim = { type: 'seer_co', results: [...seerResults] }
+  } else if (mediumResults.length > 0) {
+    // Same idea for medium results.
+    claim = { type: 'medium_co', pastResults: [...mediumResults] }
   }
 
   // In normal discussion phase, exactly one of speech/pass should be present
