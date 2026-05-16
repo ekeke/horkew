@@ -1208,3 +1208,53 @@ describe('spoiler statement', () => {
     assert.equal(result.line, 42)
   })
 })
+
+describe('speech statement', () => {
+  test('basic ASCII', () => {
+    const result = S.parseSpeechStatement('Alice > こんにちは', 1)
+    assert.deepEqual(result, { type: 'speech', line: 1, actor: 'Alice', text: 'こんにちは' })
+  })
+
+  test('full-width arrow with Japanese name', () => {
+    const result = S.parseSpeechStatement('アリス ＞ こんばんは', 2)
+    assert.deepEqual(result, { type: 'speech', line: 2, actor: 'アリス', text: 'こんばんは' })
+  })
+
+  test('no spaces around arrow', () => {
+    const result = S.parseSpeechStatement('Bob>hi', 3)
+    assert.deepEqual(result, { type: 'speech', line: 3, actor: 'Bob', text: 'hi' })
+  })
+
+  test('content contains > (split on first only)', () => {
+    const result = S.parseSpeechStatement('Alice > a > b > c', 4)
+    assert.deepEqual(result, { type: 'speech', line: 4, actor: 'Alice', text: 'a > b > c' })
+  })
+
+  test('leading/trailing spaces in content are trimmed', () => {
+    const result = S.parseSpeechStatement('Alice >   hello world   ', 5)
+    assert.deepEqual(result, { type: 'speech', line: 5, actor: 'Alice', text: 'hello world' })
+  })
+
+  test('empty content returns null', () => {
+    const result = S.parseSpeechStatement('Alice > ', 6)
+    assert.equal(result, null)
+  })
+
+  test('missing arrow returns null', () => {
+    const result = S.parseSpeechStatement('Alice hello', 7)
+    assert.equal(result, null)
+  })
+
+  test('integrated with parseStatement', () => {
+    const result = S.parseStatement('マドック ＞ 占いCOします', 42)
+    assert.equal(result.type, 'speech')
+    assert.equal((result as S.SpeechStatement).actor, 'マドック')
+    assert.equal((result as S.SpeechStatement).text, '占いCOします')
+    assert.equal(result.line, 42)
+  })
+
+  test('does not conflict with vote (->) via parseStatement', () => {
+    const result = S.parseStatement('Alice -> Bob', 1)
+    assert.equal(result.type, 'vote')
+  })
+})

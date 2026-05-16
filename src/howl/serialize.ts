@@ -21,7 +21,7 @@ import type {
   AttackStatement, LynchStatement, SuddenDeathStatement,
   PeaceStatement, CurseStatement, FollowStatement, ForecastStatement,
   OverStatement, AssertStatement, MasonStatement,
-  RevealStatement, SpoilerStatement,
+  RevealStatement, SpoilerStatement, SpeechStatement,
   VideoSourceStatement, TimestampStatement, UnknownStatement,
   Species, GameResult, Role, Assertion,
 } from './statement.ts'
@@ -251,6 +251,7 @@ export function serializeStatement(stmt: Statement): string {
     case 'mason':      return serializeMason(stmt as MasonStatement)
     case 'reveal':     return serializeReveal(stmt as RevealStatement)
     case 'spoiler':    return serializeSpoiler(stmt as SpoilerStatement)
+    case 'speech':     return serializeSpeech(stmt as SpeechStatement)
     case 'videoSource':return (stmt as VideoSourceStatement).url
     case 'timestamp':  return `@${(stmt as TimestampStatement).raw}`
     case 'unknown':    return (stmt as UnknownStatement).text
@@ -314,6 +315,10 @@ function serializeReveal(stmt: RevealStatement): string {
 
 function serializeSpoiler(stmt: SpoilerStatement): string {
   return `>!${stmt.player} ${stmt.role}!<`
+}
+
+function serializeSpeech(stmt: SpeechStatement): string {
+  return `${stmt.actor} > ${stmt.text}`
 }
 
 function serializeAssert(stmt: AssertStatement): string {

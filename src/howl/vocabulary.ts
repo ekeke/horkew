@@ -5,6 +5,7 @@ export const optionalSpace   = `${whiteSpace}*?`
 export const whiteSpaces     = `${whiteSpace}+?`
 export const rightArrow      = `(?:→|⇒|⟶|⟹|➡️|->|=>|ー＞|＝＞)`
 export const leftArrow       = `(?:←|⇐|⟵|⟸|⬅️|<-|<=|＜ー|＜＝)`
+export const speechArrow     = `(?:>|＞)`
 export const plus            = `(?:\\+|\\＋)`
 export const delimiterClass  = `,;:\\u3001\\uFF0C\\uFF1B\\uFF1A` // full-width comma, full-width semicolon, full-width colon
 export const delimiter       = `[${delimiterClass}${whiteSpaceClass}]${optionalSpace}`
