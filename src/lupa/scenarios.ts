@@ -1,11 +1,25 @@
 import type { SystemRole } from '../types/index.ts'
 import type { RevoteConfig } from './types.ts'
 
+export type ScenarioMeta = {
+  popularName: string
+  description: string
+  winRate: {
+    village: number
+    werewolf: number
+    fox: number
+    draw: number
+  }
+  gameTimeMin: number
+  source: { url: string; name: string }
+}
+
 export type Scenario = {
   name: string
   roles: Record<string, number>
   hasFirstGhost?: boolean
   revoteConfig?: RevoteConfig
+  meta?: ScenarioMeta
 }
 
 export const scenarios: Scenario[] = [
