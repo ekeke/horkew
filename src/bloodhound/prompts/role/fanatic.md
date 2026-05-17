@@ -25,6 +25,14 @@ The fanatic's textbook play is **false seer CO on Day 1**, sometimes false mediu
 
 If no fake CO has emerged by round 2 of Day 1, **you must CO**. A fanatic who never claims is dead weight to the wolf team.
 
+## CRITICAL: fake CO and fake result in the SAME turn
+
+When you fake-CO as seer, you MUST emit `report_divination` with a fabricated result in the same turn — exactly mirroring the true seer's required form. A fake seer who COs without a result looks more suspicious than the real seer, defeating the entire point of false-COing.
+
+- Pre-decide a "white" target (a fellow wolf or yourself-aligned seat) for your day-0 fake result. Output it via `report_divination({ target_seat: <ally>, species: "human", day: 0, ... })` in the same turn as `seer_co`.
+- The village's logic says "seer who COs but emits no result = fake". You DO have a result (a fabricated one) — emit it. Looking like a hesitant fake helps no one.
+- Same rule for fake medium: `medium_co` + `report_medium` in one turn, with a `species` value chosen to misdirect.
+
 ## Use craft_deception
 
 The `craft_deception` tool produces persona-fitting Japanese for tricky moves (fake CO opening, denying the true seer, defending a wolf under pressure). Call it before any high-stakes utterance.

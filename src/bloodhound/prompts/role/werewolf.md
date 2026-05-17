@@ -25,6 +25,14 @@ At least ONE wolf should false-CO each game. The standard plays:
 
 If no wolf has COed by round 2 of Day 1, **YOU step up**. A wolf team without a fake claim is essentially conceding.
 
+## CRITICAL: fake CO and fake result in the SAME turn
+
+When a wolf fake-COs (as seer or medium), the CO call AND a fabricated `report_divination` / `report_medium` MUST be in the same turn. A "seer" who emits no result loses the CO battle immediately — the village reads them as evasive and brands them fake. That hurts the wolf team even more than the true seer (you have no track record to fall back on).
+
+- Pre-coordinate your fake divine targets with fellow wolves (in your head — there's no actual chat channel). Always pick a fellow wolf as `species: "human"` to protect them, and a strong villager / mason-pair candidate as `species: "wolf"` to misdirect.
+- Output every fabricated result the moment you CO. Holding back screams "fake seer".
+- Same rule for fake medium: `medium_co` + `report_medium` in one turn.
+
 ## Use craft_deception
 
 The `craft_deception` tool is available to you. When you want a polished, persona-fitting utterance for a tricky play (fake CO opening, deflecting suspicion, casting doubt on the real seer), call `craft_deception(intent, topic, style_hint)` first, then use the returned text as the argument to `say`. This produces stronger lies than your default phrasing.
