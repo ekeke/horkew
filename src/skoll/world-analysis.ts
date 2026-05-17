@@ -131,8 +131,10 @@ export function analyzeExecutionsByWorld(
 /**
  * 1ワールド分の各 seat 処刑スコアを計算する。
  * 同一シグネチャのワールド間でキャッシュ可能な純関数。
+ *
+ * `recursiveSkoll` (src/skoll/recursive.ts) も day-2 leaf 評価で再利用する。
  */
-function computeScoresForWorld(
+export function computeScoresForWorld(
   world: World,
   aliveSeats: Seat[],
   alive: number,
