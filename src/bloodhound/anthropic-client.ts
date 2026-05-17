@@ -270,9 +270,32 @@ export class AnthropicClient {
         if (seerCoOnly && !coCompletionRetryDone) {
           coCompletionRetryDone = true
           messages.push({ role: 'assistant', content: response.content })
-          const correction = `あなたは \`seer_co\` を呼びましたが \`report_divination\` を呼んでいません。これは seer.md / werewolf.md / fanatic.md の CRITICAL ルール違反です。占い師としての CO は、必ず同じレスポンスの中で \`report_divination(target_seat, species, day, text)\` (持っている過去夜の占い結果ぶんすべて) を伴って出してください。今すぐ \`seer_co\` と \`report_divination\` を両方含めて出し直してください。結果を伴わない CO は偽占い扱いされ、即座にあなたを失敗させます。`
-          messages.push({ role: 'user', content: correction })
-          options.onMessage?.({ role: 'user', content: correction })
+          // Anthropic spec: every tool_use in the assistant message must
+          // be answered with a tool_result block in the next user message.
+          // Execute auxiliary tools normally; reject action tools with a
+          // corrective is_error result so the LLM understands the CO
+          // attempt was not accepted.
+          const toolResults: Anthropic.ToolResultBlockParam[] = []
+          for (const block of toolUseBlocks) {
+            if (AUXILIARY_TOOL_NAMES.has(block.name as ToolName)) {
+              const content = await executeAuxiliary(block, options)
+              toolResults.push({ type: 'tool_result', tool_use_id: block.id, content })
+            } else {
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: `REJECTED: ${block.name} は report_divination を伴わなかったため受理されませんでした。同じレスポンスで両方を出し直してください。`,
+                is_error: true,
+              })
+            }
+          }
+          const correction: Anthropic.TextBlockParam = {
+            type: 'text',
+            text: `あなたは \`seer_co\` を呼びましたが \`report_divination\` を呼んでいません。これは seer.md / werewolf.md / fanatic.md の CRITICAL ルール違反です。占い師としての CO は、必ず同じレスポンスの中で \`report_divination(target_seat, species, day, text)\` (持っている過去夜の占い結果ぶんすべて) を伴って出してください。今すぐ \`seer_co\` と \`report_divination\` を両方含めて出し直してください。結果を伴わない CO は偽占い扱いされ、即座にあなたを失敗させます。`,
+          }
+          const userContent: Anthropic.ContentBlockParam[] = [...toolResults, correction]
+          messages.push({ role: 'user', content: userContent })
+          options.onMessage?.({ role: 'user', content: userContent })
           continue
         }
 
