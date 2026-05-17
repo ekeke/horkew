@@ -211,6 +211,11 @@ export class AnthropicClient {
     const usage = { inputTokens: 0, outputTokens: 0 }
     const auxiliaryCalls = { retar: 0, skoll: 0, hati: 0, craft_deception: 0 }
     const iterations: RunIteration[] = []
+    // Per-turn one-shot retry: when the LLM calls seer_co without
+    // report_divination (or medium_co without report_medium AND it has at
+    // least one past execution to report on), we push a corrective user
+    // message and re-prompt ONCE. After that we accept whatever comes back.
+    let coCompletionRetryDone = false
 
     for (let iter = 0; iter <= maxIter; iter++) {
       const response = await retryTransient(
@@ -254,6 +259,23 @@ export class AnthropicClient {
         else if (block.name === 'craft_deception') auxiliaryCalls.craft_deception += 1
       }
       if (nonAux.length > 0) {
+        // Validate "CO + result in same turn" for seer. If the LLM emitted
+        // seer_co without an accompanying report_divination, push a
+        // corrective user message ONCE and re-prompt. The CRITICAL hard
+        // rule in seer.md / werewolf.md / fanatic.md says this is a lose
+        // move, but Sonnet 4.6 occasionally ignores it; this is the
+        // technical backstop.
+        const seerCoOnly = nonAux.some(b => b.name === 'seer_co')
+          && !nonAux.some(b => b.name === 'report_divination')
+        if (seerCoOnly && !coCompletionRetryDone) {
+          coCompletionRetryDone = true
+          messages.push({ role: 'assistant', content: response.content })
+          const correction = `あなたは \`seer_co\` を呼びましたが \`report_divination\` を呼んでいません。これは seer.md / werewolf.md / fanatic.md の CRITICAL ルール違反です。占い師としての CO は、必ず同じレスポンスの中で \`report_divination(target_seat, species, day, text)\` (持っている過去夜の占い結果ぶんすべて) を伴って出してください。今すぐ \`seer_co\` と \`report_divination\` を両方含めて出し直してください。結果を伴わない CO は偽占い扱いされ、即座にあなたを失敗させます。`
+          messages.push({ role: 'user', content: correction })
+          options.onMessage?.({ role: 'user', content: correction })
+          continue
+        }
+
         return {
           toolCalls: toolUseBlocks.map(b => ({
             id: b.id,
