@@ -63,23 +63,6 @@ The werehamster (妖狐 / 狐) is a separate third faction that wins simply by *
 - **The only way to kill the fox is for the seer to divine them** ("curse death" — the engine kills the fox the morning after they are divined; medium does not learn fox identity either).
 - Their teammate the **immoralist (背徳者)** knows who the fox is and will actively misdirect blame.
 
-### CRITICAL: read the public log for fox-curse evidence
-
-A fox curse-kill is **publicly identifiable** by combining two pieces of information that ALL seats can see:
-
-1. The seer COed and reported `report_divination(target=PX, species=human)` on a specific night.
-2. The next morning's log shows `PX 死亡` (PX died at night).
-
-When BOTH are true for the same PX on consecutive turns, the most likely explanation is **the seer is genuine AND PX was the werehamster (狐). The fox is now dead.** Wolves cannot kill a seat the seer just divined as human unless they coincidentally chose the same target — but then the log would show `PX 死亡` as a wolf attack, while the seer-then-死亡 pattern with no other death cause is the curse signature.
-
-- If you see "seer X said PY = ○, then PY 死亡 next morning" → **assume the fox is eliminated** unless there's a strong reason to doubt the seer is real.
-- This flips the village's strategy: once you believe the fox is gone, **stop holding back on lynching the last wolf**. The "wait for fox confirmation" excuse is no longer valid.
-- Conversely, if the seer reports ○ and the target *doesn't* die overnight, the fox is still alive (and that seat is now confirmed human).
-
-### Symmetric reasoning for fake seers
-
-If a fake seer reports ○ and the target dies overnight, that is **wolves attacking the fake seer's white-call** — possible but rare (wolves usually don't burn an attack on a fresh white). Combined with other evidence (mason CO contradiction, hati judgment, etc.) you can distinguish "real seer → fox dead" from "fake seer → wolves attacked their white". When the genuine seer is well-established, default to the curse-kill interpretation.
-
 ### Village priorities (in this order)
 
 1. Identify and execute / contain all werewolves.
@@ -118,15 +101,6 @@ A "last wolf" situation means **only one werewolf remains alive** (out of the 3 
 - **Vote concentration is everything.** A split vote at LW = LW survives one more day = village probably loses on time. Followers, do NOT pick "I have a hunch about this other seat" at LW.
 - Use `hati` aggressively here — at LW the game tree is usually small enough for hati to return `Tsumi: yes` with a forced lynch order. If hati says tsumi, execute the order to the letter.
 - The seer should already have pivoted to fox-hunting by now (see fox section). The LW is for the village's votes; the fox is for the seer's divine.
-
-### CRITICAL: confirm fox status BEFORE lynching the last wolf
-
-Lynching the last wolf with the fox still alive ends the game in a **fox win** — the village just helped the fox achieve their victory condition. This is the textbook way to throw a winning position. Before locking in the LW lynch, run the following checklist:
-
-1. **Is the fox already dead?** Look for past "seer reported ○ on PX, PX died next night" patterns in the log — that is a fox curse-kill (see the fox section). If you find one, the fox is gone and you can lynch the LW safely.
-2. **If the fox is not confirmed dead**, the village must hold off the LW lynch for at least one more day so the seer can divine a fox candidate. Lynch a grey suspect today instead, even at slightly lower win-rate, and let the seer take the fox next night.
-3. The presider MUST explicitly state "fox status confirmed" or "fox status NOT confirmed, holding LW" in the day's designation message. Silent assumption is how runs end with fox-win.
-4. If `hati` returns `Tsumi: yes`, that already incorporates the fox-elimination requirement into the forced lynch order — follow it as-is. `Tsumi: no` while LW is exposed often means the fox path is the missing piece.
 
 ### Hamster team (werehamster + immoralist) playbook around LW
 
