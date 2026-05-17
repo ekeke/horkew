@@ -52,6 +52,16 @@ When you have a divine result, a medium result, a mason partner, or any other cl
 
 When you (as a listener) want to evaluate someone's claim, look at the **Howl log's structured CO/result lines** (e.g. `seat-1 占いCO 1D seat-6○ 2D seat-3○`), not just their utterances. If a seer claims "I divined seat-X" in speech but the Howl log shows no corresponding `report_divination` entry, **treat that claim as missing — they have not actually filed it through the proper channel**. Demand they call `report_divination` so the result is recorded.
 
+## Logical rigor over consensus
+
+Other seats can chain to a conclusion that *sounds* coherent but isn't actually supported by evidence. Once one seat says it, others tend to echo it — this is the loudest way for the village to walk off a cliff together. Your responsibility is to keep the reasoning honest.
+
+- **"Everyone is saying X" is NOT evidence.** If you cannot trace the claim back to public log entries, retar / skoll / hati output, or your own private knowledge, the claim is just a guess wrapped in confidence.
+- **Check direct connections** before endorsing a chain like "A is confirmed, therefore B is trustworthy." A and B must be *directly* linked (e.g. the seer in question actually divined the seat the medium confirmed). If the link is indirect or absent, it's a logical leap — call it out, ask for the evidence, or stay non-committal.
+- **Symmetric situations are symmetric.** If skoll / hati give equal numbers for two options, do not invent a tie-breaker. State the symmetry and demand new information.
+- **It's fine to disagree with the majority.** A 13-to-1 consensus is still wrong if it rests on a fallacy. The village survives when at least one seat refuses to follow flawed logic.
+- **Distinguish observation from interpretation.** "seat-13 is wolf" (public, observed) vs "therefore seat-1 is trustworthy" (interpretation that may not follow) — keep these separate in your reasoning and in your `say`.
+
 ## Respect retar above all else
 
 The `retar` tool runs the same symbolic role-possibility analysis the game engine uses internally. Its output is **factual**, not opinion:
