@@ -29,6 +29,7 @@ const LR = parseFloat(parseArg('lr') ?? '3e-4')
 const EVAL_RATIO = parseFloat(parseArg('eval-ratio') ?? '0.1')
 const SEED = parseInt(parseArg('seed') ?? '42', 10)
 const PATIENCE = parseInt(parseArg('patience') ?? '5', 10)
+const FOCAL_ALPHA = parseFloat(parseArg('focal-alpha') ?? '0')
 
 trainMultiday({
   dataPath: DATA_PATH,
@@ -39,6 +40,7 @@ trainMultiday({
   patience: PATIENCE,
   evalRatio: EVAL_RATIO,
   seed: SEED,
+  focalAlpha: FOCAL_ALPHA,
 }).then(result => {
   console.log(`\n[done] best eval_mse=${result.bestEvalMse.toFixed(5)} eval_mae=${result.bestEvalMae.toFixed(5)} ckpt=${OUT_PATH}`)
 }).catch(e => {

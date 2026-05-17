@@ -292,11 +292,17 @@ export class TfMultidaySkollNetwork {
 
   /**
    * 1 minibatch の SL 学習 (forward + backward + optimizer step)。
+   *
+   * focalAlpha + labelMean を指定すると focal-like weighting:
+   *   per-sample weight = 1 + focalAlpha * |label - labelMean|
+   * これにより中央値から離れた rare な high/low value sample の loss 寄与を増やす。
+   * focalAlpha=0 (default) で通常 MSE。
+   *
    * @param clsBatch [batch * CLS_FEATURES] flat
    * @param seatBatch [batch * MAX_SEAT * SEAT_FEATURES] flat
    * @param labels [batch * MAX_SEAT] flat (per-seat winRate label)
    * @param masks [batch * MAX_SEAT] flat (1 if alive, 0 if dead)
-   * @returns scalar loss (mean masked MSE)
+   * @returns scalar loss (mean masked MSE / weighted)
    */
   trainStep(
     clsBatch: Float32Array,
@@ -304,6 +310,8 @@ export class TfMultidaySkollNetwork {
     labels: Float32Array,
     masks: Float32Array,
     batchSize: number,
+    focalAlpha: number = 0,
+    labelMean: number = 0.2,
   ): number {
     let lossVal = 0
     this.optimizer.minimize(() => {
@@ -315,8 +323,18 @@ export class TfMultidaySkollNetwork {
       const pred = this.forwardImpl(clsTensor, seatTensor)
       const diff = tf.sub(pred, labelTensor)
       const sqErr = tf.square(diff)
-      const maskedErr = tf.mul(sqErr, maskTensor)
-      // mean over alive entries only
+
+      // focal weighting: 1 + α * |label - labelMean|
+      let weightedErr: tf.Tensor
+      if (focalAlpha > 0) {
+        const dev = tf.abs(tf.sub(labelTensor, tf.scalar(labelMean)))
+        const weight = tf.add(tf.scalar(1), tf.mul(tf.scalar(focalAlpha), dev))
+        weightedErr = tf.mul(sqErr, weight)
+      } else {
+        weightedErr = sqErr
+      }
+
+      const maskedErr = tf.mul(weightedErr, maskTensor)
       const sumMask = tf.sum(maskTensor)
       const loss = tf.div(tf.sum(maskedErr), tf.maximum(sumMask, tf.scalar(1e-6))) as tf.Scalar
       lossVal = loss.dataSync()[0]

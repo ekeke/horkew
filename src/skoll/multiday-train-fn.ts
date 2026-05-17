@@ -41,6 +41,8 @@ export type TrainMultidayOptions = {
   patience: number
   evalRatio: number
   seed: number
+  /** Focal-style reweighting α (= |label - mean| 係数)。 0 で通常 MSE */
+  focalAlpha?: number
 }
 
 export type TrainMultidayResult = {
@@ -184,7 +186,10 @@ export async function trainMultiday(options: TrainMultidayOptions): Promise<Trai
       const batchIdx = shuffled.slice(i, i + options.batchSize)
       if (batchIdx.length === 0) continue
       const batch = buildBatch(all, batchIdx)
-      const loss = network.trainStep(batch.cls, batch.seat, batch.label, batch.mask, batchIdx.length)
+      const loss = network.trainStep(
+        batch.cls, batch.seat, batch.label, batch.mask, batchIdx.length,
+        options.focalAlpha ?? 0, labelMean,
+      )
       trainLossSum += loss
       batchCount++
     }
