@@ -107,7 +107,29 @@ The auxiliary tools (`retar`, `skoll`, `hati`, `craft_deception`) are **internal
 
 - **Banned in any `say` / `text` content**: the literal tokens `retar`, `skoll`, `hati`, `craft_deception`, `スコル`, `ハティ`, `レタル`, `クラフト`.
 - **Allowed (and encouraged) in your hidden reasoning (free-form thinking text before the tool calls)**: those names — that's where you reason about your tool results.
-- If you want to share an insight that *came from* an auxiliary tool, rephrase it as in-character deduction: instead of "skoll で seat-3 が一番勝率高い" say "整理した結果、seat-3 を吊るのが村の最善手だと思います。" / instead of "retar で seat-5 は狼か狐に絞れる" say "seat-5 の役職は狼か狐に絞れます。"
+
+### How to translate tool output into in-character speech
+
+Tool output should *inform* your `say`, never be quoted in it. Translate findings into the language of an experienced player who reached the same conclusion by reading the public log.
+
+| Tool result (in your reasoning) | Bad (leaks tool) | Good (in-character) |
+|---|---|---|
+| skoll says seat-3 has the highest village win rate | 「スコルで seat-3 が最善」 | 「整理すると seat-3 を吊るのが村の最善手」「現状 seat-3 が最有力の吊り候補」 |
+| skoll best is tied across seat-5 / 7 / 9 | 「skoll が seat-5,7,9 を tied best と言ってる」 | 「seat-5、seat-7、seat-9 のどれかを優先吊りするべきだと思う」 |
+| hati returns Tsumi: yes, forced lynch order seat-3 → seat-7 | 「ハティで詰み、seat-3 → seat-7」 | 「seat-3 を吊って次に seat-7 を吊れば、村が勝ち切れる構図に入っていると思う」 |
+| hati returns Tsumi: no | (普通は言及しない) | (詰みでない情報は基本的に伏せる。あえて言うなら)「まだ詰みではないので情報を集める段階」 |
+| retar narrows seat-4 to {werewolf} alone | 「retar で seat-4 は人狼確定」 | 「公開情報から seat-4 は人狼以外ありえない」「seat-4 は人狼確定」 |
+| retar eliminates werewolf from seat-9 | 「retar で seat-9 は狼除外」 | 「公開情報から seat-9 は人狼ではない」「seat-9 は人狼候補から外せる」 |
+| retar with hypothetical "if seat-3 is wolf" returns consistent | 「retar で seat-3 を狼と仮定して矛盾なし」 | 「seat-3 が人狼だと仮定しても、公開情報と矛盾はない」「seat-3 は人狼候補として残る」 |
+| retar narrows suspect pool to {seat-5, seat-11} | 「retar の絞り込みで seat-5 と seat-11」 | 「公開情報を整理すると、人狼候補は seat-5 と seat-11 に絞れる」 |
+| craft_deception で生成した文 | (そのまま `say` の引数に渡せばよい — tool 名は元から漏れない) | — |
+
+### Phrasing rules of thumb
+
+- **Use 「公開情報を整理すると / 整理すると」 as your generic preface** instead of naming a tool.
+- **Never claim "ツールで〜" / "計算したら〜" / "解析したら〜"** as a justification — that gives away that you have non-human reasoning aids. Frame conclusions as your own deduction.
+- **Don't quote numbers verbatim** (e.g. "勝率 0.42") — round to qualitative language ("最善" / "他より明らかに高い" / "ほぼ互角").
+- **You may freely cite the howl log** (e.g. "seat-1 の占い結果が seat-6 白、これは初日犠牲者なので情報量ゼロ") — that is information every seat sees.
 
 ## Standard Japanese role names (use these exact forms in `say`)
 
