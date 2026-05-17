@@ -97,6 +97,12 @@ export type BloodhoundHandlersOptions = {
    * the engine can advance. Lets us walk through seats in dry-run mode.
    */
   dryRun?: boolean
+  /**
+   * Fires once during onSetup with the engine state, so the caller can
+   * capture seat→name mapping for downstream rendering (live howl stream,
+   * cost summary, etc.).
+   */
+  onState?: (state: GameState) => void
 }
 
 export function createBloodhoundHandlers(
@@ -358,15 +364,20 @@ export function createBloodhoundHandlers(
 
   return {
     onSetup(_roles, state) {
-      // Overwrite each player's display name to "seat-N" right at setup.
-      // Lupa's nameStyle:'seat' actually produces "<role-abbrev><seat>" (e.g.
-      // "占1"), which leaks every role through formatHowl's player list and
-      // looks confusingly similar to seat references like "seat-1".
-      // By overriding name here, every downstream rendering (formatHowl,
-      // events, etc.) is already seat-N from the start.
+      // Overwrite each player's display name to their persona's character
+      // name (e.g. seat-1 → "マドック"). Without this:
+      //   1. Lupa's nameStyle:'seat' produces "<role-abbrev><seat>" (e.g.
+      //      "占1") which leaks every role through formatHowl.
+      //   2. Using bare "seat-N" makes the game read like a spreadsheet —
+      //      the persona names defined in personas.ts never reach the howl
+      //      log or other seats' prompts.
+      // Howl's flexible dictionary resolves the persona name back to a
+      // seat number when parsing later, so retar / skoll / hati keep
+      // working unchanged.
       for (const player of state.players) {
-        player.name = `seat-${player.seat}`
+        player.name = getPersona(player.seat).name
       }
+      opts.onState?.(state)
     },
 
     onEvent: opts.onEvent,

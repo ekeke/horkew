@@ -38,6 +38,7 @@ import { runGame } from '../lupa/engine.ts'
 import { findScenario, scenarioToRoles } from '../lupa/scenarios.ts'
 import type { GameConfig } from '../lupa/handlers.ts'
 import { formatHowl } from '../lupa/format.ts'
+import type { GameState } from '../lupa/types.ts'
 
 import { AnthropicClient } from './anthropic-client.ts'
 import { createBloodhoundHandlers, type ReplayRecord } from './handlers.ts'
@@ -169,6 +170,10 @@ async function main(): Promise<void> {
   console.log(`[bloodhound] starting game (scenario=${scenarioName}, seed=${cli.seed}, model=${cli.model})`)
   console.log(`[bloodhound] log dir: ${logger.runDir}`)
 
+  // Captured on onSetup; used by the stderr live stream so events read with
+  // persona names ("マドック 死亡") instead of bare "seat-6 死亡".
+  let seatNames: Map<number, string> | null = null
+
   // In dry-run mode we never hit the API; AnthropicClient still requires an
   // API key in its constructor, so stub it with a placeholder. The handler's
   // onPromptBuilt callback exits before any client method is called.
@@ -182,6 +187,9 @@ async function main(): Promise<void> {
     maxDiscussionRounds: cli.rounds,
     replayMap,
     dryRun: cli.dryRun,
+    onState: (state: GameState) => {
+      seatNames = new Map(state.players.map(p => [p.seat, p.name]))
+    },
     onPromptBuilt: cli.dryRun ? (info) => {
       // Optional seat filter: skip until we reach the requested seat. Day-0
       // night actions don't run callLLM (handler picks random), so for any
@@ -210,11 +218,12 @@ async function main(): Promise<void> {
     },
     onSpeechEvent: (ev) => {
       logger.logSpeech(ev)
-      console.log(`seat-${ev.actor} > ${ev.text}`)
+      const speaker = seatNames?.get(ev.actor) ?? `seat-${ev.actor}`
+      console.log(`${speaker} > ${ev.text}`)
     },
     // Live Howl stream → stderr so the operator can abort if the game derails.
     onEvent: (event) => {
-      const line = formatEventLine(event)
+      const line = formatEventLine(event, seatNames ?? undefined)
       if (line !== null) process.stderr.write(line + '\n')
     },
   })
