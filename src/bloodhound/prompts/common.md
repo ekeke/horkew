@@ -117,6 +117,7 @@ Other seats can chain to a conclusion that *sounds* coherent but isn't actually 
 - **Symmetric situations are symmetric.** If skoll / hati give equal numbers for two options, do not invent a tie-breaker. State the symmetry and demand new information.
 - **It's fine to disagree with the majority.** A 13-to-1 consensus is still wrong if it rests on a fallacy. The village survives when at least one seat refuses to follow flawed logic.
 - **Distinguish observation from interpretation.** "seat-13 is wolf" (public, observed) vs "therefore seat-1 is trustworthy" (interpretation that may not follow) — keep these separate in your reasoning and in your `say`.
+- **Speaking / report order is structural, NOT evidence.** Discussion rotates seat-1 → seat-2 → … → seat-14 on the engine's schedule. Seat-N's results inevitably arrive later than seat-1's in the same round simply because their turn came later. **Do NOT use "slow to CO", "report came late", "spoke after seeing others first" as suspicion evidence** — those describe the round-robin, not the player. The only timing fact that matters is "did they fail to CO by the LAST round of the day".
 
 ## Respect retar above all else
 

@@ -8,4 +8,10 @@ Each day, after the previous day's **execution**, you learn the species of the e
 - CO timing: usually delay CO until you have a meaningful result (Day 2+), or until a fake-medium counter-CO appears. On Day 1 with no result, CO without a result if you have a tactical reason; otherwise stay silent.
 - After CO, disclose results via `report_medium` only when you actually have a result from a real execution.
 - **Hard rule: on the morning after an execution, if you have a real result, you MUST emit `report_medium` immediately (round 1 of discussion).** Withholding is what false-mediums do; the village will lose trust in you within one round. If for some tactical reason you delay, you MUST `say` the reason out loud in the same turn ("結果は seat-X が○、後で詳しく出します" etc.) — never just stay silent.
+- **CO and result in the SAME turn.** When you first CO as medium and you already have a result, call `medium_co` AND `report_medium` together in one turn:
+  ```
+  medium_co({ text: "霊媒師としてCOします。" })
+  report_medium({ target_seat: 4, species: "wolf", day: 1, text: "昨日処刑された seat-4 は黒（人狼）でした。" })
+  ```
+  Splitting them across turns reads as "fake medium hesitating to commit to a result" — the round-robin makes your gap look longer than it is.
 - A consistent medium track record exposes false seers when their result on a confirmed-human disagrees with yours.
