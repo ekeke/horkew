@@ -38,13 +38,13 @@ const DISCUSSION_TOOLS: ToolName[] = [
   'say', 'pass',
   'seer_co', 'medium_co', 'bodyguard_co', 'mason_co', 'nekomata_co',
   'report_divination', 'report_medium',
-  'retar',
+  'retar', 'skoll', 'hati',
 ]
 
 const LAST_WILL_TOOLS: ToolName[] = [
   'seer_co', 'medium_co', 'bodyguard_co', 'mason_co', 'nekomata_co',
   'report_divination', 'report_medium',
-  'retar',
+  'retar', 'skoll', 'hati',
 ]
 
 const NON_VILLAGE_ROLES = new Set<SystemRole>([
@@ -75,27 +75,27 @@ export function legalActions(input: LegalActionsInput): LegalActions {
         : alivePlayers
       const candidates = base.filter(s => s !== selfSeat)
       return {
-        toolNames: ['vote', 'retar'],
+        toolNames: ['vote', 'retar', 'skoll', 'hati'],
         targets: { vote: candidates },
       }
     }
 
     case 'night_seer':
       return {
-        toolNames: ['divine', 'retar'],
+        toolNames: ['divine', 'retar', 'skoll', 'hati'],
         targets: { divine: aliveExceptSelf },
       }
 
     case 'night_bodyguard':
       return {
-        toolNames: ['guard', 'retar'],
+        toolNames: ['guard', 'retar', 'skoll', 'hati'],
         targets: { guard: aliveExceptSelf },
       }
 
     case 'night_wolf': {
       const allies = new Set([selfSeat, ...(fellowWolves ?? [])])
       return {
-        toolNames: ['attack', 'retar'],
+        toolNames: ['attack', 'retar', 'skoll', 'hati'],
         targets: { attack: alivePlayers.filter(s => !allies.has(s)) },
       }
     }

@@ -55,7 +55,7 @@ export type ToolName =
   | 'seer_co' | 'medium_co' | 'bodyguard_co' | 'mason_co' | 'nekomata_co'
   | 'report_divination' | 'report_medium'
   | 'vote' | 'divine' | 'guard' | 'attack'
-  | 'retar' | 'craft_deception'
+  | 'retar' | 'skoll' | 'hati' | 'craft_deception'
 
 export type ToolCall = {
   id: string

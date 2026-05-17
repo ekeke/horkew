@@ -25,7 +25,7 @@ describe('legalActions: discussion phase', () => {
       'say', 'pass',
       'seer_co', 'medium_co', 'bodyguard_co', 'mason_co', 'nekomata_co',
       'report_divination', 'report_medium',
-      'retar',
+      'retar', 'skoll', 'hati',
     ])
   })
 
@@ -90,7 +90,7 @@ describe('legalActions: discussion phase', () => {
 describe('legalActions: vote phase', () => {
   test('initial vote (voteCandidates null) → all alive minus self', () => {
     const result = legalActions(input({ phase: 'vote', selfSeat: 7, voteCandidates: null }))
-    assert.deepEqual(result.toolNames, ['vote', 'retar'])
+    assert.deepEqual(result.toolNames, ['vote', 'retar', 'skoll', 'hati'])
     assert.deepEqual(result.targets.vote, [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14])
   })
 
@@ -119,13 +119,13 @@ describe('legalActions: vote phase', () => {
 describe('legalActions: night phases', () => {
   test('night_seer: divine candidates exclude self', () => {
     const result = legalActions(input({ phase: 'night_seer', role: 'seer', selfSeat: 4, alivePlayers: [1, 2, 4, 5] }))
-    assert.deepEqual(result.toolNames, ['divine', 'retar'])
+    assert.deepEqual(result.toolNames, ['divine', 'retar', 'skoll', 'hati'])
     assert.deepEqual(result.targets.divine, [1, 2, 5])
   })
 
   test('night_bodyguard: guard candidates exclude self', () => {
     const result = legalActions(input({ phase: 'night_bodyguard', role: 'bodyguard', selfSeat: 4, alivePlayers: [1, 2, 4, 5] }))
-    assert.deepEqual(result.toolNames, ['guard', 'retar'])
+    assert.deepEqual(result.toolNames, ['guard', 'retar', 'skoll', 'hati'])
     assert.deepEqual(result.targets.guard, [1, 2, 5])
   })
 
@@ -134,7 +134,7 @@ describe('legalActions: night phases', () => {
       phase: 'night_wolf', role: 'werewolf', selfSeat: 2,
       alivePlayers: [1, 2, 3, 5, 8], fellowWolves: [5, 8],
     }))
-    assert.deepEqual(result.toolNames, ['attack', 'retar'])
+    assert.deepEqual(result.toolNames, ['attack', 'retar', 'skoll', 'hati'])
     assert.deepEqual(result.targets.attack, [1, 3])
   })
 
@@ -161,7 +161,7 @@ describe('legalActions: last_will phase', () => {
     assert.deepEqual(result.toolNames, [
       'seer_co', 'medium_co', 'bodyguard_co', 'mason_co', 'nekomata_co',
       'report_divination', 'report_medium',
-      'retar',
+      'retar', 'skoll', 'hati',
     ])
     assert.deepEqual(result.targets.report_divination, ALL_SEATS)
     assert.deepEqual(result.targets.report_medium, ALL_SEATS)
@@ -177,6 +177,20 @@ describe('legalActions: invariants', () => {
     for (const phase of phases) {
       const result = legalActions(input({ phase, fellowWolves: [] }))
       assert.ok(result.toolNames.includes('retar'), `phase=${phase} missing retar`)
+    }
+  })
+
+  test('skoll tool is always exposed', () => {
+    for (const phase of phases) {
+      const result = legalActions(input({ phase, fellowWolves: [] }))
+      assert.ok(result.toolNames.includes('skoll'), `phase=${phase} missing skoll`)
+    }
+  })
+
+  test('hati tool is always exposed', () => {
+    for (const phase of phases) {
+      const result = legalActions(input({ phase, fellowWolves: [] }))
+      assert.ok(result.toolNames.includes('hati'), `phase=${phase} missing hati`)
     }
   })
 

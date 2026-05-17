@@ -24,13 +24,17 @@ import type { SystemRole } from '../types/index.ts'
 import { buildPlayerView } from '../lupa/player-view.ts'
 import { formatHowl } from '../lupa/format.ts'
 import { Rng } from '../lupa/random.ts'
+import { buildAssumptions } from '../fenrir/src/retar-bridge.ts'
 
 import { AnthropicClient, type RunTurnOptions } from './anthropic-client.ts'
 import { legalActions } from './legal-actions.ts'
 import { getPersona } from './personas.ts'
 import { buildPrompts, type PrivateInfo } from './prompt-builder.ts'
-import { precomputeViewerRetar } from './retar-precompute.ts'
-import { decodeToolCalls, type DecodeResult } from './action-decoder.ts'
+import { precomputeViewerRetar, precomputePublicRetar } from './retar-precompute.ts'
+import { injectViewerClaims } from './inject-viewer-claims.ts'
+import { precomputeSkoll, type SkollResult } from './skoll-precompute.ts'
+import { precomputeHati, type HatiResult } from './hati-precompute.ts'
+import { decodeToolCalls, type DecodeResult, type FinalAction } from './action-decoder.ts'
 import { rewriteSetupLine, stripPrivateComments } from './rename-seats.ts'
 import { allTools } from './tools.ts'
 import type {
@@ -52,7 +56,7 @@ export type LLMExchange = {
   /** Per-iteration trace (thinking + tool names) of the auxiliary tool-use loop. */
   iterations?: Array<{ thinking: string; toolNames: string[] }>
   /** Counts of auxiliary tool invocations during the loop. */
-  auxiliaryCalls?: { retar: number; craft_deception: number }
+  auxiliaryCalls?: { retar: number; skoll: number; hati: number; craft_deception: number }
 }
 
 /** Replay record for one historical LLM call. */
@@ -75,6 +79,24 @@ export type BloodhoundHandlersOptions = {
    * toolCalls are replayed verbatim. Used for resume.
    */
   replayMap?: Map<string, ReplayRecord>
+  /**
+   * Called right after the prompt is built and before the LLM is invoked.
+   * Useful for debugging the prompt contents without spending API budget.
+   * If the callback throws or calls process.exit, the LLM call is skipped.
+   */
+  onPromptBuilt?: (info: {
+    seat: number
+    phase: BloodhoundPhase
+    discussionRound?: number
+    system: string
+    user: string
+  }) => void
+  /**
+   * When true, every callLLM builds the prompt (firing onPromptBuilt) but
+   * skips the actual API call and substitutes a minimal valid action so
+   * the engine can advance. Lets us walk through seats in dry-run mode.
+   */
+  dryRun?: boolean
 }
 
 export function createBloodhoundHandlers(
@@ -188,33 +210,128 @@ export function createBloodhoundHandlers(
       fellowWolves: view.wolfTeammates ?? undefined,
     })
 
+    // Viewer-private knowledge feeds retar via two channels:
+    //  1. CO + result events appended to the event list (for village roles
+    //     where the howl pipeline already knows how to interpret them —
+    //     this is the only way to express "seat-X is human" from a ○).
+    //  2. assumption pairs (for wolf-team / hamster-team facts where no
+    //     public CO exists, e.g. fellow wolves, known werehamster).
+    // Both channels are applied; refix reconciles any overlap (mason CO
+    // and mason partner assumption produce the same constraint).
+    const eventsWithSelfCo = injectViewerClaims(
+      ctx.events as readonly GameEvent[], player, state,
+    )
+    const baseAssumptions = buildAssumptions(state, player)
+
+    // Public retar: what every seat can derive from the bare event log,
+    // no viewer-private knowledge applied. Embedded alongside the viewer
+    // retar so the LLM can see "what others see" vs "what I privately know".
+    const retarPublic = precomputePublicRetar({
+      events: ctx.events as readonly GameEvent[],
+      state, config: lupaConfig,
+    })
+
     const retar = precomputeViewerRetar({
-      events: [...ctx.events] as GameEvent[],
+      events: eventsWithSelfCo,
       state, config: lupaConfig,
       viewerSeat: seat, viewerRole: role,
+      extraAssumptions: baseAssumptions,
     })
+
+    // Skoll / Hati piggy-back on the same vs/setup/Possibilities. Both are
+    // null when the Howl log isn't cleanly parseable yet (e.g. early-game
+    // edge cases the howl parser stumbles on); the prompt-builder renders
+    // nothing in that case.
+    let skoll: SkollResult | null = null
+    let hati: HatiResult | null = null
+    if (retar.vs && retar.setup && retar.possibilitiesBitmask) {
+      try {
+        skoll = precomputeSkoll({
+          possibilities: retar.possibilitiesBitmask,
+          vs: retar.vs, setup: retar.setup,
+        })
+      } catch { skoll = null }
+      try {
+        hati = precomputeHati({
+          possibilities: retar.possibilitiesBitmask,
+          vs: retar.vs, setup: retar.setup,
+        })
+      } catch { hati = null }
+    }
 
     const howlText = stripPrivateComments(
       rewriteSetupLine(formatHowl(ctx.events, state, lupaConfig)),
     )
 
     const { system, user } = buildPrompts({
-      phase, role, selfSeat: seat, persona, howlText, retar, legal,
+      phase, role, selfSeat: seat, persona, howlText,
+      publicVs: retarPublic.vs,
+      retarPublic, retar, skoll, hati, legal,
       privateInfo: derivePrivateInfo(player, state),
       discussionRound: extra.discussionRound,
       maxDiscussionRounds: maxRounds,
       voteCandidates: extra.voteCandidates ?? null,
     })
 
+    opts.onPromptBuilt?.({
+      seat, phase, discussionRound: extra.discussionRound, system, user,
+    })
+
+    // Dry-run: skip the API call entirely and synthesise a minimal action
+    // so the engine advances to the next seat / phase. Used by play.ts to
+    // inspect prompt contents without spending API budget.
+    if (opts.dryRun) {
+      return {
+        retarQueries: [],
+        finalAction: dryRunFinalAction(phase, legal),
+        invalid: [],
+      }
+    }
+
     const tools = legal.toolNames.map(name => allTools[name])
+
+    // Aux tool runners: merge base private-knowledge assumptions with whatever
+    // the LLM passed in. LLM-supplied entries win on key conflict so the LLM
+    // can ask "what if seat-X is wolf?" even when base says otherwise.
+    const mergedAssumptions = (extra: Map<number, SystemRole>): Map<number, SystemRole> => {
+      const out = new Map(baseAssumptions)
+      for (const [s, r] of extra) out.set(s, r)
+      return out
+    }
 
     const runOptions: RunTurnOptions = {
       retarRunner: (assumptions) => precomputeViewerRetar({
-        events: [...ctx.events] as GameEvent[],
+        events: eventsWithSelfCo,
         state, config: lupaConfig,
         viewerSeat: seat, viewerRole: role,
-        extraAssumptions: assumptions,
+        extraAssumptions: mergedAssumptions(assumptions),
       }),
+      skollRunner: (assumptions) => {
+        const r = precomputeViewerRetar({
+          events: eventsWithSelfCo,
+          state, config: lupaConfig,
+          viewerSeat: seat, viewerRole: role,
+          extraAssumptions: mergedAssumptions(assumptions),
+        })
+        if (!r.vs || !r.setup || !r.possibilitiesBitmask) return null
+        return precomputeSkoll({
+          possibilities: r.possibilitiesBitmask,
+          vs: r.vs, setup: r.setup,
+        })
+      },
+      hatiRunner: (assumptions) => {
+        const r = precomputeViewerRetar({
+          events: eventsWithSelfCo,
+          state, config: lupaConfig,
+          viewerSeat: seat, viewerRole: role,
+          extraAssumptions: mergedAssumptions(assumptions),
+        })
+        if (!r.vs || !r.setup || !r.possibilitiesBitmask) return null
+        return precomputeHati({
+          possibilities: r.possibilitiesBitmask,
+          vs: r.vs, setup: r.setup,
+        })
+      },
       craftDeceptionRunner: (input) => opts.client.craftDeception(input, persona),
     }
 
@@ -355,6 +472,36 @@ export function createBloodhoundHandlers(
       }
       return map
     },
+  }
+}
+
+// Build a minimal valid finalAction for dry-run mode so the engine advances.
+// Discussion → pass; vote → first legal candidate; night → first legal target.
+function dryRunFinalAction(
+  phase: BloodhoundPhase,
+  legal: ReturnType<typeof legalActions>,
+): FinalAction | null {
+  switch (phase) {
+    case 'discussion':
+    case 'last_will':
+      return { kind: 'discussion', pass: true }
+    case 'vote':
+    case 'revote': {
+      const t = legal.targets.vote?.[0]
+      return t === undefined ? null : { kind: 'vote', target: t }
+    }
+    case 'night_seer': {
+      const t = legal.targets.divine?.[0]
+      return t === undefined ? null : { kind: 'night', action: { type: 'divine', target: t } }
+    }
+    case 'night_bodyguard': {
+      const t = legal.targets.guard?.[0]
+      return t === undefined ? null : { kind: 'night', action: { type: 'guard', target: t } }
+    }
+    case 'night_wolf': {
+      const t = legal.targets.attack?.[0]
+      return t === undefined ? null : { kind: 'night', action: { type: 'attack', target: t } }
+    }
   }
 }
 

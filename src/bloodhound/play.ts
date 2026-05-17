@@ -14,6 +14,13 @@
  *   BLOODHOUND_DISCUSSION_ROUNDS — max discussion rounds per day (default: 3)
  *   BLOODHOUND_REPLAY       — path to a previous run's messages/ directory
  *                             (deterministic replay; same seed required)
+ *   BLOODHOUND_DRY_RUN      — set to "1" to print the first built prompt and
+ *                             exit without making any LLM call (cost $0).
+ *                             Useful for inspecting prompt content during
+ *                             development.
+ *   BLOODHOUND_DRY_RUN_SEAT — only used when DRY_RUN is on. Seat number to
+ *                             wait for; earlier seats' prompts are skipped.
+ *                             Example: "5" → exit on seat-5's first prompt.
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -62,6 +69,10 @@ async function main(): Promise<void> {
   const model = process.env.BLOODHOUND_MODEL ?? 'claude-sonnet-4-6'
   const maxRounds = Number(process.env.BLOODHOUND_DISCUSSION_ROUNDS ?? '3')
   const replayPath = process.env.BLOODHOUND_REPLAY
+  const dryRun = process.env.BLOODHOUND_DRY_RUN === '1'
+  const dryRunSeat = process.env.BLOODHOUND_DRY_RUN_SEAT !== undefined
+    ? Number(process.env.BLOODHOUND_DRY_RUN_SEAT)
+    : null
 
   let replayMap: Map<string, ReplayRecord> | undefined
   if (replayPath) {
@@ -89,18 +100,41 @@ async function main(): Promise<void> {
   console.log(`[bloodhound] starting game (scenario=${scenarioName}, seed=${seed}, model=${model})`)
   console.log(`[bloodhound] log dir: ${logger.runDir}`)
 
-  const client = new AnthropicClient({ model })
+  // In dry-run mode we never hit the API; AnthropicClient still requires an
+  // API key in its constructor, so stub it with a placeholder. The handler's
+  // onPromptBuilt callback exits before any client method is called.
+  const client = new AnthropicClient({
+    model,
+    apiKey: dryRun ? (process.env.ANTHROPIC_API_KEY ?? 'sk-dry-run-placeholder') : undefined,
+  })
   const handlers = createBloodhoundHandlers({
     client,
     config: { roles: config.roles, seed: config.seed },
     maxDiscussionRounds: maxRounds,
     replayMap,
+    dryRun,
+    onPromptBuilt: dryRun ? (info) => {
+      // Optional seat filter: skip until we reach the requested seat. Day-0
+      // night actions don't run callLLM (handler picks random), so for any
+      // seat the first hit is its Day-1 discussion round-1 prompt.
+      if (dryRunSeat !== null && info.seat !== dryRunSeat) return
+      const round = info.discussionRound !== undefined ? ` r${info.discussionRound}` : ''
+      process.stdout.write(`\n========== seat-${info.seat} ${info.phase}${round} ==========\n\n`)
+      process.stdout.write(`---------- SYSTEM ----------\n${info.system}\n\n`)
+      process.stdout.write(`---------- USER ----------\n${info.user}\n\n`)
+      process.stdout.write(`[bloodhound] DRY_RUN: prompt emitted, exiting.\n`)
+      process.exit(0)
+    } : undefined,
     onLLMExchange: (ex) => {
       logger.logLLMExchange(ex)
       const roundStr = ex.discussionRound !== undefined ? `[r${ex.discussionRound}] ` : ''
       const aux = ex.auxiliaryCalls
-      const auxStr = aux && (aux.retar + aux.craft_deception > 0)
-        ? ` retar=${aux.retar}${aux.craft_deception > 0 ? ` deceive=${aux.craft_deception}` : ''}`
+      const auxTotal = aux ? (aux.retar + aux.skoll + aux.hati + aux.craft_deception) : 0
+      const auxStr = aux && auxTotal > 0
+        ? ` retar=${aux.retar}`
+          + (aux.skoll > 0 ? ` skoll=${aux.skoll}` : '')
+          + (aux.hati > 0 ? ` hati=${aux.hati}` : '')
+          + (aux.craft_deception > 0 ? ` deceive=${aux.craft_deception}` : '')
         : ''
       const iterStr = ex.iterations && ex.iterations.length > 1 ? ` iter=${ex.iterations.length}` : ''
       console.log(`[bloodhound] LLM call seat-${ex.seat} ${ex.phase} ${roundStr}(in=${ex.usage.inputTokens} out=${ex.usage.outputTokens}${auxStr}${iterStr})`)

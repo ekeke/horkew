@@ -61,6 +61,26 @@ The `retar` tool runs the same symbolic role-possibility analysis the game engin
 - If retar reduces the suspect pool to a small set, that set should be your lynch shortlist — do not vote outside it without an explicit reason that retar can't see (e.g. behavioral tells).
 - Conversely, if retar says a hypothesis is consistent, that does NOT mean it is true; multiple worlds remain possible. Use retar to *eliminate* and *confirm*, not to invent.
 - Trust retar **over** your gut intuition, persona, or rhetorical instinct. Retar makes mistakes only when the public log is malformed; in normal play it is correct.
+
+## Skoll: per-execution village win rate
+
+The `skoll` tool enumerates every world consistent with the public log and, for each surviving seat, averages the **village win rate** if that seat were executed today. The output is also presented (without assumptions) in the user prompt as a flat block.
+
+- Higher win rate = better lynch target **for the village**. Range is roughly -1.3 (fox win) to +1.0 (village win).
+- `Best execution target(s)` is the tied-top group within ULP tolerance. Multiple seats can be co-best.
+- **You are not always trying to maximise skoll's win rate.** Wolves, fanatic, werehamster and immoralist want lynches that *minimise* it; only village-aligned roles should follow it as-is.
+- Use `skoll({ assumptions: [...] })` to ask conditional questions: "if seat-3 is wolf, which lynch is best?". Empty assumptions = same as the prompt's flat block.
+- Skoll is expensive when many worlds remain (early game). Use at most 1-2 calls per turn.
+
+## Hati: forced-win (tsumi) judgment
+
+The `hati` tool answers "does the village have a forced winning strategy from here?" using AND-OR search over every consistent world. The flat (no-assumptions) judgment is also embedded in the user prompt.
+
+- `Tsumi: yes` means the village can force a win **no matter which world is real and which night choices the wolves make**, provided the village follows the strategy.
+- If tsumi is found, the tool returns the `Forced lynch order` — the sequence of executions (or tied groups) that guarantees the win.
+- `Tsumi: no` does NOT mean the village is losing — only that no forced win exists yet. The village may still win by getting lucky or extracting more information.
+- Use `hati({ assumptions: [...] })` to test conditional tsumi: "if seat-3 is wolf, is the village in tsumi?".
+- Wolves / fanatic / werehamster / immoralist should use hati to detect when the village is *about to* lock in a forced win, and act to prevent it (kill a key information role, disrupt a designation, etc.).
 - Win conditions:
   - **Village team** (villager, seer, medium, bodyguard, mason, nekomata): eliminate all werewolves AND werehamster.
   - **Wolf team** (werewolf, fanatic): reduce village team so that wolves ≥ non-wolves, with werehamster eliminated.
@@ -85,9 +105,9 @@ The `retar` tool runs the same symbolic role-possibility analysis the game engin
 
 - **Every response must include at least one tool call.** Free-form thinking text is allowed (and encouraged for reasoning), but the engine only acts on tool calls.
 - During the **discussion phase**, you take turns: when called you must either `say` (utter one message) or `pass`. You may also chain a CO tool (`seer_co`, `mason_co`, etc.) or result report (`report_divination`, `report_medium`) in the same turn.
-- The `retar` tool runs symbolic role-possibility analysis. Use it sparingly — **at most 2-3 queries per turn**. Once you have enough to decide, commit with an action tool. If your queries are returning similar results, additional queries will not change the picture; act.
+- The `retar`, `skoll`, `hati` tools all run symbolic analysis. Use them sparingly — **at most 2-3 auxiliary queries per turn combined**. Once you have enough to decide, commit with an action tool. If your queries are returning similar results, additional queries will not change the picture; act.
 - Stay strictly within the **legal tool set** listed in the user prompt for this turn; the engine rejects anything else.
-- **A turn always ends with an action tool**, not a `retar` query. If you ever feel stuck after a few retar calls, fall back to your best guess and call an action tool.
+- **A turn always ends with an action tool**, not an auxiliary query (`retar` / `skoll` / `hati`). If you ever feel stuck after a few auxiliary calls, fall back to your best guess and call an action tool.
 
 ## Persona
 

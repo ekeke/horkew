@@ -20,8 +20,11 @@ import { dirname, join } from 'node:path'
 import Anthropic from '@anthropic-ai/sdk'
 import type { RetarResult } from '../fenrir/src/retar-bridge.ts'
 import type { SystemRole } from '../types/index.ts'
+import type { StrategyNode, VillageAction } from '../hati/index.ts'
 import type { ToolCall, ToolName, Persona } from './types.ts'
 import type { ToolDef } from './tools.ts'
+import { SKOLL_TIE_TOLERANCE, type SkollResult } from './skoll-precompute.ts'
+import type { HatiResult } from './hati-precompute.ts'
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_MAX_TOKENS = 1024
@@ -55,13 +58,18 @@ async function retryTransient<T>(fn: () => Promise<T>, label: string): Promise<T
   throw lastErr
 }
 
-const AUXILIARY_TOOL_NAMES = new Set<ToolName>(['retar', 'craft_deception'])
+const AUXILIARY_TOOL_NAMES = new Set<ToolName>(['retar', 'skoll', 'hati', 'craft_deception'])
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type RetarRunner = (assumptions: Map<number, SystemRole>) => RetarResult
+
+/** Returns null when the public log can't be parsed cleanly enough for skoll. */
+export type SkollRunner = (assumptions: Map<number, SystemRole>) => SkollResult | null
+/** Returns null when the public log can't be parsed cleanly enough for hati. */
+export type HatiRunner = (assumptions: Map<number, SystemRole>) => HatiResult | null
 
 export type DeceptionInput = {
   intent: string
@@ -84,6 +92,8 @@ export type RunTurnOptions = {
   maxRetarIterations?: number
   maxAuxIterations?: number
   retarRunner: RetarRunner
+  skollRunner: SkollRunner
+  hatiRunner: HatiRunner
   /** Required when craft_deception is in the exposed tool set. */
   craftDeceptionRunner?: DeceptionRunner
   onMessage?: (msg: { role: 'user' | 'assistant'; content: unknown }) => void
@@ -106,6 +116,8 @@ export type RunTurnResult = {
   /** Number of auxiliary tool invocations during the loop (split per name). */
   auxiliaryCalls: {
     retar: number
+    skoll: number
+    hati: number
     craft_deception: number
   }
   /** Per-iteration trace: each LLM response in the auxiliary loop including the terminal one. */
@@ -195,7 +207,7 @@ export class AnthropicClient {
     options.onMessage?.({ role: 'user', content: input.user })
 
     const usage = { inputTokens: 0, outputTokens: 0 }
-    const auxiliaryCalls = { retar: 0, craft_deception: 0 }
+    const auxiliaryCalls = { retar: 0, skoll: 0, hati: 0, craft_deception: 0 }
     const iterations: RunIteration[] = []
 
     for (let iter = 0; iter <= maxIter; iter++) {
@@ -235,6 +247,8 @@ export class AnthropicClient {
       // alongside an action tool, those also count.
       for (const block of toolUseBlocks) {
         if (block.name === 'retar') auxiliaryCalls.retar += 1
+        else if (block.name === 'skoll') auxiliaryCalls.skoll += 1
+        else if (block.name === 'hati') auxiliaryCalls.hati += 1
         else if (block.name === 'craft_deception') auxiliaryCalls.craft_deception += 1
       }
       if (nonAux.length > 0) {
@@ -272,7 +286,7 @@ export class AnthropicClient {
     const lastMsg = messages[messages.length - 1]
     const nudge: Anthropic.TextBlockParam = {
       type: 'text',
-      text: `You have used auxiliary tools (retar / craft_deception) ${maxIter} times. That is enough preparation. Pick exactly one action tool from [${actionTools.map(t => t.name).join(', ')}] and commit. Auxiliary tools are no longer available.`,
+      text: `You have used auxiliary tools (retar / skoll / hati / craft_deception) ${maxIter} times. That is enough preparation. Pick exactly one action tool from [${actionTools.map(t => t.name).join(', ')}] and commit. Auxiliary tools are no longer available.`,
     }
     if (lastMsg && lastMsg.role === 'user' && Array.isArray(lastMsg.content)) {
       lastMsg.content = [...lastMsg.content, nudge]
@@ -333,6 +347,30 @@ async function executeAuxiliary(
     const result = options.retarRunner(assumptions)
     return formatRetarResult(result)
   }
+  if (block.name === 'skoll') {
+    const assumptions = decodeRetarAssumptions(block.input)
+    try {
+      const result = options.skollRunner(assumptions)
+      if (result === null) {
+        return 'ERROR: skoll could not run (the public log is not yet parseable, or contradictory). Pick an action tool directly or call retar to inspect.'
+      }
+      return formatSkollResult(result)
+    } catch (err) {
+      return `ERROR: skoll failed: ${(err as Error).message}. Pick an action tool directly or call retar instead.`
+    }
+  }
+  if (block.name === 'hati') {
+    const assumptions = decodeRetarAssumptions(block.input)
+    try {
+      const result = options.hatiRunner(assumptions)
+      if (result === null) {
+        return 'ERROR: hati could not run (the public log is not yet parseable, or contradictory). Pick an action tool directly or call retar to inspect.'
+      }
+      return formatHatiResult(result)
+    } catch (err) {
+      return `ERROR: hati failed: ${(err as Error).message}. Pick an action tool directly or call retar instead.`
+    }
+  }
   if (block.name === 'craft_deception') {
     if (!options.craftDeceptionRunner) {
       return 'ERROR: craft_deception is not available for this seat (no deception runner provided). Pick an action tool directly.'
@@ -390,4 +428,81 @@ function formatRetarResult(result: RetarResult): string {
   }
   lines.push(`Max surviving non-village: ${result.maxSurvivingNV}`)
   return lines.join('\n')
+}
+
+export function formatSkollResult(result: SkollResult): string {
+  const lines: string[] = []
+  lines.push(`Worlds enumerated: ${result.totalWorlds}${result.truncated ? ' (truncated)' : ''}`)
+  lines.push(`Overall best village win rate: ${result.overallWinRate.toFixed(3)}`)
+  lines.push(`Best execution target(s) (tied within ${SKOLL_TIE_TOLERANCE}): ${result.bestSeats.map(s => `seat-${s}`).join(', ')}`)
+  lines.push(`Per-seat village win rate if executed today (sorted, higher = better for village):`)
+  const sorted = [...result.executions].sort((a, b) => b.winRate - a.winRate)
+  for (const e of sorted) {
+    lines.push(`  - seat-${e.seat}: ${e.winRate.toFixed(3)}`)
+  }
+  return lines.join('\n')
+}
+
+export function formatHatiResult(result: HatiResult): string {
+  const lines: string[] = []
+  lines.push(`Tsumi: ${result.isTsumi ? 'yes (village has a forced win)' : 'no'}`)
+  const p = result.judgment.profile
+  const aliveCount = countSetBits(result.judgment.alive)
+  lines.push(`Alive: ${aliveCount}; ropes (int): ${p.nawaInt} (effective ${p.effectiveNawa.toFixed(1)}); max non-village threat: ${p.threat}`)
+  lines.push(`Required executions: ${p.requiredExecs} (fox=${p.foxCandidates}, fox+wolf=${p.foxWolfCandidates}, wolf=${p.wolfCandidates}, wolf-confirmed=${p.wolfConfirmedCount}, white-NV=${p.whiteNVThreat})`)
+  lines.push(`Surviving hamster possible: ${p.possibleSurvivingHamster}; surviving nekomata possible: ${p.possibleSurvivingNekomata}; neko parity shift: ${p.nekoParityShift}`)
+  if (result.isTsumi && result.strategy) {
+    const summary = summarizeStrategy(result.strategy)
+    if (summary) lines.push(`Strategy: ${summary}`)
+  }
+  return lines.join('\n')
+}
+
+/**
+ * Reduce a strategy tree to a one-line summary so the LLM does not have to
+ * parse a deeply nested AND-OR record. Uses `execSetsFromEnd` when present
+ * (lynch sequence forced in every branch); falls back to today's action.
+ */
+function summarizeStrategy(node: StrategyNode): string {
+  if (node.type === 'win') return '(village already won — no executions needed)'
+  const parts: string[] = []
+  if (node.execSetsFromEnd && node.execSetsFromEnd.length > 0) {
+    const order: string[] = []
+    for (let i = node.execSetsFromEnd.length - 1; i >= 0; i--) {
+      const mask = node.execSetsFromEnd[i]
+      const seats = bitsToSeats(mask)
+      order.push(seats.length === 1
+        ? `seat-${seats[0]}`
+        : `[${seats.map(s => `seat-${s}`).join('|')}]`)
+    }
+    parts.push(`Forced lynch order: ${order.join(' → ')}`)
+  } else {
+    parts.push(formatAction(node.action))
+  }
+  return parts.join('; ')
+}
+
+function formatAction(action: VillageAction): string {
+  const out: string[] = [`Today: execute seat-${action.execute}`]
+  if (action.bodyguardTarget !== null) out.push(`guard seat-${action.bodyguardTarget}`)
+  if (action.seerTargets.length > 0) out.push(`divine ${action.seerTargets.map(s => `seat-${s}`).join(', ')}`)
+  return out.join(', ')
+}
+
+function bitsToSeats(mask: number): number[] {
+  const out: number[] = []
+  let m = mask
+  while (m !== 0) {
+    const bit = m & (-m)
+    out.push(31 - Math.clz32(bit))
+    m ^= bit
+  }
+  return out
+}
+
+function countSetBits(mask: number): number {
+  let count = 0
+  let m = mask
+  while (m !== 0) { m &= m - 1; count += 1 }
+  return count
 }

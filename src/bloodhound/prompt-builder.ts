@@ -13,10 +13,13 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
-import type { SystemRole } from '../types/index.ts'
+import type { SystemRole, VillageStatus, SeatStatus } from '../types/index.ts'
 import type { RetarResult } from '../fenrir/src/retar-bridge.ts'
 import type { BloodhoundPhase, Persona } from './types.ts'
 import type { LegalActions } from './legal-actions.ts'
+import type { SkollResult } from './skoll-precompute.ts'
+import type { HatiResult } from './hati-precompute.ts'
+import { formatSkollResult, formatHatiResult } from './anthropic-client.ts'
 
 // ---------------------------------------------------------------------------
 // Prompt file loading (cached)
@@ -78,7 +81,16 @@ export type BuildPromptInput = {
   selfSeat: number
   persona: Persona
   howlText: string
+  /** VillageStatus parsed from the public event log; null if unparseable. */
+  publicVs?: VillageStatus | null
+  /** Public retar from the event log alone, no private knowledge applied. */
+  retarPublic?: RetarResult
+  /** Viewer-perspective retar: self role + private knowledge injected. */
   retar: RetarResult
+  /** Optional flat skoll pre-compute (viewer-role assumed). null when log was unparseable. */
+  skoll?: SkollResult | null
+  /** Optional flat hati pre-compute (viewer-role assumed). null when log was unparseable. */
+  hati?: HatiResult | null
   legal: LegalActions
   privateInfo?: PrivateInfo
   discussionRound?: number
@@ -110,7 +122,11 @@ function buildUserPrompt(input: BuildPromptInput): string {
   sections.push(renderSelf(input))
   sections.push(renderPrivateInfo(input))
   sections.push(renderHowl(input.howlText))
+  sections.push(renderCoTable(input.publicVs))
+  sections.push(renderRetarPublic(input.retarPublic, input.selfSeat))
   sections.push(renderRetar(input.retar, input.selfSeat))
+  sections.push(renderSkoll(input.skoll))
+  sections.push(renderHati(input.hati))
   sections.push(renderLegalActions(input))
   sections.push(renderTask())
   return sections.filter(s => s.length > 0).join('\n\n')
@@ -173,8 +189,112 @@ function renderHowl(howlText: string): string {
   return [`## Game log (Howl format)`, ``, '```howl', howlText.trimEnd(), '```'].join('\n')
 }
 
+function renderCoTable(vs: VillageStatus | null | undefined): string {
+  if (!vs) return ''
+  const lines: string[] = [`## Public CO table`, ``]
+
+  type Entry = { seat: number; role: SystemRole; claimedAt?: number; claimOrder?: number; status: SeatStatus }
+  const entries: Entry[] = []
+  for (const [seat, status] of vs.statuses) {
+    if (!status.claiming) continue
+    entries.push({
+      seat,
+      role: status.claimingRole as SystemRole,
+      claimedAt: status.claimedAt,
+      claimOrder: status.claimOrder,
+      status,
+    })
+  }
+  entries.sort((a, b) => (a.claimOrder ?? 0) - (b.claimOrder ?? 0))
+
+  if (entries.length === 0) {
+    lines.push(`(No CO yet.)`)
+  } else {
+    for (const e of entries) {
+      const dayStr = e.claimedAt !== undefined ? `D${e.claimedAt}` : 'D?'
+      const extras = renderCoExtras(e.role, e.status)
+      lines.push(`- seat-${e.seat} — ${e.role} (CO on ${dayStr})${extras.length > 0 ? ' — ' + extras.join(' — ') : ''}`)
+    }
+    const claimed = new Set(entries.map(e => e.role))
+    const claimable: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+    const missing = claimable.filter(r => !claimed.has(r))
+    if (missing.length > 0) {
+      lines.push(``)
+      lines.push(`No CO yet for: ${missing.join(', ')}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+/**
+ * Pull per-role detail out of a SeatStatus for the CO table.
+ *
+ * Storage conventions used by `howl/bridge.ts`:
+ *   - seer / medium results: `status.assertions` with **positive** key = night
+ *   - mason partner(s):      `status.assertions` with **negative** key
+ *   - bodyguard guards:      `status.actions` (Map<night, target>)
+ *   - seer forecasts:        `status.forecasts` (Map<day, target>)
+ */
+function renderCoExtras(role: SystemRole, status: SeatStatus): string[] {
+  const extras: string[] = []
+  if (role === 'seer') {
+    const results: string[] = []
+    const nights = [...status.assertions.keys()].filter(k => k >= 0).sort((a, b) => a - b)
+    for (const night of nights) {
+      const a = status.assertions.get(night)!
+      const sym = a.species === 'wolf' ? '●' : a.species === 'human' ? '○' : '?'
+      results.push(`D${night} seat-${a.target}→${sym}`)
+    }
+    const forecastDays = [...status.forecasts.keys()].sort((a, b) => a - b)
+    for (const day of forecastDays) {
+      results.push(`D${day} forecast seat-${status.forecasts.get(day)!}`)
+    }
+    if (results.length > 0) extras.push(`results: ${results.join(', ')}`)
+  } else if (role === 'medium') {
+    const results: string[] = []
+    const days = [...status.assertions.keys()].filter(k => k >= 0).sort((a, b) => a - b)
+    for (const day of days) {
+      const a = status.assertions.get(day)!
+      const sym = a.species === 'wolf' ? '●' : a.species === 'human' ? '○' : '?'
+      results.push(`D${day} seat-${a.target}→${sym}`)
+    }
+    if (results.length > 0) extras.push(`results: ${results.join(', ')}`)
+  } else if (role === 'bodyguard') {
+    const nights = [...status.actions.keys()].sort((a, b) => a - b)
+    const guards = nights.map(n => `D${n} seat-${status.actions.get(n)!}`)
+    if (guards.length > 0) extras.push(`guards: ${guards.join(', ')}`)
+  } else if (role === 'mason') {
+    // Partners can land at either negative-key (joint mason statement) or
+    // positive-key (assert statement that named the partner). De-dup seats.
+    const seen = new Set<number>()
+    for (const [, a] of status.assertions) {
+      if (a.target !== undefined) seen.add(a.target)
+    }
+    if (seen.size > 0) {
+      const partners = [...seen].sort((a, b) => a - b).map(s => `seat-${s}`)
+      extras.push(`partner: ${partners.join(', ')}`)
+    }
+  }
+  return extras
+}
+
+function renderRetarPublic(retar: RetarResult | undefined, selfSeat: number): string {
+  if (!retar) return ''
+  return renderRetarSection(
+    retar, selfSeat,
+    `## Retar (public — what every seat can derive from the log alone)`,
+  )
+}
+
 function renderRetar(retar: RetarResult, selfSeat: number): string {
-  const lines: string[] = [`## Retar analysis (flat, with your role assumed)`, ``]
+  return renderRetarSection(
+    retar, selfSeat,
+    `## Retar (your view — your own role plus private knowledge assumed)`,
+  )
+}
+
+function renderRetarSection(retar: RetarResult, selfSeat: number, header: string): string {
+  const lines: string[] = [header, ``]
   const seats = [...retar.possibilities.keys()].sort((a, b) => a - b)
   if (seats.length === 0) {
     lines.push(`(no possibilities computed; the game log may not yet be parseable)`)
@@ -189,6 +309,37 @@ function renderRetar(retar: RetarResult, selfSeat: number): string {
   lines.push(``)
   lines.push(`Max surviving non-village count: ${retar.maxSurvivingNV}`)
   return lines.join('\n')
+}
+
+function renderSkoll(skoll: SkollResult | null | undefined): string {
+  if (!skoll) return ''
+  // When world enumeration hit the cap the per-seat averages are biased by
+  // whichever worlds were visited first, so embedding them in the prompt
+  // would mislead the LLM more than it helps. Tell the LLM to narrow the
+  // analysis with an assumption-bearing tool call instead.
+  if (skoll.truncated) {
+    return [
+      `## Skoll: village win rate per execution (flat, your role assumed)`,
+      ``,
+      `(Skipped — world enumeration hit the ${skoll.totalWorlds.toLocaleString('en-US')}-world cap.`,
+      `The flat per-seat averages would be biased here. Call the \`skoll\` tool with`,
+      `\`assumptions\` to constrain the world set if you need a number.)`,
+    ].join('\n')
+  }
+  return [
+    `## Skoll: village win rate per execution (flat, your role assumed)`,
+    ``,
+    formatSkollResult(skoll),
+  ].join('\n')
+}
+
+function renderHati(hati: HatiResult | null | undefined): string {
+  if (!hati) return ''
+  return [
+    `## Hati: tsumi judgment (flat, your role assumed)`,
+    ``,
+    formatHatiResult(hati),
+  ].join('\n')
 }
 
 function renderLegalActions(input: BuildPromptInput): string {
@@ -220,8 +371,8 @@ function renderTask(): string {
     `## Your task`,
     ``,
     `Reason briefly, then call one or more tools to take your action.`,
-    `You may call \`retar\` multiple times before settling on your final action;`,
-    `the tool result will be returned to you in a subsequent turn.`,
+    `You may call auxiliary tools (\`retar\`, \`skoll\`, \`hati\`) multiple times before`,
+    `settling on your final action; each result is returned to you in a subsequent turn.`,
     `Stay within the legal tool set above.`,
   ].join('\n')
 }

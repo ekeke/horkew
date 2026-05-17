@@ -208,6 +208,60 @@ export const retarTool: ToolDef = {
 }
 
 // ---------------------------------------------------------------------------
+// Skoll (always available within the tool-use loop)
+// ---------------------------------------------------------------------------
+
+export const skollTool: ToolDef = {
+  name: 'skoll',
+  description: 'Estimate the village win rate for executing each surviving seat today, enumerated over every world consistent with the public log. Output: per-seat win rate (-1.3..+1.0), the tied-best seat group, and the overall win rate of the best move. Supports optional hypothetical assumptions to ask "if seat-3 is wolf, which lynch maximises village win rate?".',
+  input_schema: {
+    type: 'object',
+    properties: {
+      assumptions: {
+        type: 'array',
+        description: 'Hypothetical role assignments to constrain the analysis. Empty array means analyze with no extra assumptions (your own role is always assumed).',
+        items: {
+          type: 'object',
+          properties: {
+            seat: { type: 'integer', minimum: 1 },
+            role: { type: 'string', description: 'System role identifier (e.g. werewolf, seer, fanatic).' },
+          },
+          required: ['seat', 'role'],
+        },
+      },
+    },
+    required: ['assumptions'],
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Hati (always available within the tool-use loop)
+// ---------------------------------------------------------------------------
+
+export const hatiTool: ToolDef = {
+  name: 'hati',
+  description: 'Check if the village has a forced winning strategy ("tsumi") from the current position. Returns a boolean judgment plus the threat profile (rope count, required executions, surviving non-village threats). If tsumi is found, also returns the AND-OR strategy tree showing the execution plan. Supports optional hypothetical assumptions to ask "if seat-3 is wolf, is the village in tsumi?".',
+  input_schema: {
+    type: 'object',
+    properties: {
+      assumptions: {
+        type: 'array',
+        description: 'Hypothetical role assignments to constrain the analysis. Empty array means analyze with no extra assumptions (your own role is always assumed).',
+        items: {
+          type: 'object',
+          properties: {
+            seat: { type: 'integer', minimum: 1 },
+            role: { type: 'string', description: 'System role identifier (e.g. werewolf, seer, fanatic).' },
+          },
+          required: ['seat', 'role'],
+        },
+      },
+    },
+    required: ['assumptions'],
+  },
+}
+
+// ---------------------------------------------------------------------------
 // Deception speech-writer (non-village roles only)
 // ---------------------------------------------------------------------------
 
@@ -253,5 +307,7 @@ export const allTools: Record<ToolName, ToolDef> = {
   guard: guardTool,
   attack: attackTool,
   retar: retarTool,
+  skoll: skollTool,
+  hati: hatiTool,
   craft_deception: craftDeceptionTool,
 }
