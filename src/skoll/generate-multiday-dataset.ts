@@ -43,6 +43,10 @@ const HAS_FIRST_GHOST = true
 // 1 snapshot あたり何人の viewer を作るか (public + N-1 ranom)
 const VIEWERS_PER_SNAPSHOT = 2
 
+// snapshot を取る最小 day (= 終盤重視のため Day 1-2 をスキップ可能)
+// 1 にすると全 day、 3 にすると Day 1-2 を skip
+const MIN_SNAPSHOT_DAY = parseInt(process.env.SKOLL_MULTIDAY_MIN_DAY ?? '1', 10)
+
 // ---- snapshot capture adapter ----
 type Snapshot = {
   day: number
@@ -55,7 +59,8 @@ class SnapshotAdapter extends StrategyBaseAdapter {
 
   override onVote(vctx: VoteContext<FenrirExtEvent, FenrirExt>): Map<number, number> {
     // 初回投票時のみ snapshot 取得 (再投票は重複データ)
-    if (vctx.revoteRound === 0) {
+    // Day MIN_SNAPSHOT_DAY 未満は skip (= 終盤重視)
+    if (vctx.revoteRound === 0 && vctx.day >= MIN_SNAPSHOT_DAY) {
       this.snapshots.push({
         day: vctx.day,
         events: [...vctx.events],
