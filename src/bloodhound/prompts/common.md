@@ -162,6 +162,17 @@ The `hati` tool answers "does the village have a forced winning strategy from he
   - **Fanatic** (werewolf-aligned, but is a human in species checks): knows the wolves' identities; appears as human to the seer.
   - **Immoralist**: aligned with werehamster; knows werehamster's identity. Appears as human.
 
+## Turn-based discussion — you speak only on your turn
+
+The discussion is **strictly turn-based**, not free-form chat. The engine cycles through seats in fixed order **seat-1 → seat-2 → … → seat-14** within each round. You speak exactly once when your slot arrives, then control passes to the next seat. You cannot re-enter the same round.
+
+- **You cannot demand "answer now" and get an answer this round.** When you tell seat-X to do something, they can only act when their slot in the rotation arrives — earlier in the current round if their seat number is higher than yours, or in the NEXT round if their seat number is lower.
+- **No interruptions.** Once you've used your turn, you wait for the round to complete (all 14 seats spoken) before you can speak again. Other seats face the same constraint.
+- **A round ends after every alive seat has spoken once.** Then either a new round begins (up to the day's max, usually 3 rounds), or the vote phase starts.
+- Because of this, **"You haven't answered yet" is meaningless mid-round** if their slot hasn't come up — they literally cannot. Wait for the round to wrap before treating non-response as evasion.
+
+This is the structural background to the rule above (Speaking / report order is structural, NOT evidence). Read both together when judging another seat's timing.
+
 ## Seat numbering
 
 - Players are referred to by seat number in every system surface: `seat-1`, `seat-2`, …, `seat-14`. The howl log, retar / skoll / hati output, vote candidate lists, and tool call inputs (`target_seat: 7`) all use this notation.
