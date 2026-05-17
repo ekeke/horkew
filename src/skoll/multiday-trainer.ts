@@ -31,6 +31,12 @@ const SEED = parseInt(parseArg('seed') ?? '42', 10)
 const PATIENCE = parseInt(parseArg('patience') ?? '5', 10)
 const FOCAL_ALPHA = parseFloat(parseArg('focal-alpha') ?? '0')
 
+// Network config overrides (default = DEFAULT_MULTIDAY_SKOLL_CONFIG)
+const D_MODEL = parseInt(parseArg('d-model') ?? '64', 10)
+const NUM_LAYERS = parseInt(parseArg('layers') ?? '3', 10)
+const NUM_HEADS = parseInt(parseArg('heads') ?? '4', 10)
+const D_FF = parseInt(parseArg('d-ff') ?? '128', 10)
+
 trainMultiday({
   dataPath: DATA_PATH,
   outPath: OUT_PATH,
@@ -41,6 +47,12 @@ trainMultiday({
   evalRatio: EVAL_RATIO,
   seed: SEED,
   focalAlpha: FOCAL_ALPHA,
+  networkConfig: {
+    dModel: D_MODEL,
+    numLayers: NUM_LAYERS,
+    numHeads: NUM_HEADS,
+    dFf: D_FF,
+  },
 }).then(result => {
   console.log(`\n[done] best eval_mse=${result.bestEvalMse.toFixed(5)} eval_mae=${result.bestEvalMae.toFixed(5)} ckpt=${OUT_PATH}`)
 }).catch(e => {

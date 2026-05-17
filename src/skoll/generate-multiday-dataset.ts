@@ -24,6 +24,8 @@ import type { GameEvent, GameState } from '../lupa/types.ts'
 import type { GameConfig, VoteContext } from '../lupa/handlers.ts'
 import { StrategyBaseAdapter } from '../fenrir/src/adapters/strategy-base-adapter.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../fenrir/src/agents/rule-based-agent.ts'
+import { RandomAgent } from '../fenrir/src/agents/random-agent.ts'
+import type { Agent } from '../fenrir/src/agents/agent.ts'
 import {
   analyzeFromEventsDetailed,
   retarResultToPossibilities,
@@ -71,11 +73,30 @@ class SnapshotAdapter extends StrategyBaseAdapter {
   }
 }
 
+type AgentMode = 'heuristic' | 'random' | 'mixed'
+
 // ---- 1 ゲーム実行 ----
-async function runOneGame(seed: number): Promise<Snapshot[]> {
+async function runOneGame(seed: number, agentMode: AgentMode, rng: () => number): Promise<Snapshot[]> {
+  // mixed: 各 seat ごとに random/heuristic を確率で振り分け (~50%)
+  let defaultAgent: Agent
+  const perSeatAgents = new Map<number, Agent>()
+  if (agentMode === 'random') {
+    defaultAgent = new RandomAgent()
+  } else if (agentMode === 'mixed') {
+    // 各 seat に独立に random/heuristic を割当
+    // (defaultAgent は heuristic、 一部 seat に random を per-seat 設定)
+    defaultAgent = new RuleBasedAgent()
+    const totalPlayers = Array.from(ROLES.values()).reduce((a, b) => a + b, 0)
+    for (let seat = 1; seat <= totalPlayers; seat++) {
+      if (rng() < 0.5) perSeatAgents.set(seat, new RandomAgent())
+    }
+  } else {
+    defaultAgent = new RuleBasedAgent()
+  }
+
   const adapter = new SnapshotAdapter({
-    agents: new Map(),
-    defaultAgent: new RuleBasedAgent(),
+    agents: perSeatAgents,
+    defaultAgent,
     wolfTeamAgent: new WolfTeamRuleAgent(),
     masonTeamAgent: new MasonTeamRuleAgent(),
     enableRetar: false,  // retar はデータ生成側で別途呼ぶので不要
@@ -180,10 +201,12 @@ const NUM_GAMES = parseInt(parseArg('games') ?? '100', 10)
 const OUT_PATH = parseArg('out') ?? 'data/skoll-multiday-train.jsonl'
 const SEED_BASE = parseInt(parseArg('seed-base') ?? '0', 10)
 const RESUME = parseArg('resume') === 'true' || parseArg('resume') === '1'
+const AGENT_MODE_ARG = parseArg('agent-mode') ?? 'heuristic'
+const AGENT_MODE: AgentMode = (AGENT_MODE_ARG === 'random' || AGENT_MODE_ARG === 'mixed' ? AGENT_MODE_ARG : 'heuristic')
 
 // ---- main ----
 async function main(): Promise<void> {
-  console.log(`[generate-multiday-dataset] games=${NUM_GAMES} out=${OUT_PATH} seed_base=${SEED_BASE} resume=${RESUME}`)
+  console.log(`[generate-multiday-dataset] games=${NUM_GAMES} out=${OUT_PATH} seed_base=${SEED_BASE} resume=${RESUME} agent_mode=${AGENT_MODE}`)
 
   mkdirSync(dirname(OUT_PATH), { recursive: true })
   if (!RESUME && existsSync(OUT_PATH)) {
@@ -208,7 +231,7 @@ async function main(): Promise<void> {
     const gameStart = Date.now()
     let snapshots: Snapshot[]
     try {
-      snapshots = await runOneGame(seed)
+      snapshots = await runOneGame(seed, AGENT_MODE, rng)
     } catch (e) {
       console.error(`[game ${i}/${NUM_GAMES}] seed=${seed} failed: ${(e as Error).message}`)
       continue

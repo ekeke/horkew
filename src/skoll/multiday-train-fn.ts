@@ -11,6 +11,7 @@ import {
   CLS_FEATURES,
   SEAT_FEATURES,
   MAX_SEAT,
+  type MultidaySkollConfig,
 } from '../fenrir/src/ml/multiday-skoll-network.ts'
 
 type RawSample = {
@@ -43,6 +44,8 @@ export type TrainMultidayOptions = {
   seed: number
   /** Focal-style reweighting α (= |label - mean| 係数)。 0 で通常 MSE */
   focalAlpha?: number
+  /** NN architecture override (default: DEFAULT_MULTIDAY_SKOLL_CONFIG) */
+  networkConfig?: MultidaySkollConfig
 }
 
 export type TrainMultidayResult = {
@@ -167,8 +170,9 @@ export async function trainMultiday(options: TrainMultidayOptions): Promise<Trai
   const labelMean = labelCount > 0 ? labelSum / labelCount : 0
   console.log(`[trainMultiday] training label mean: ${labelMean.toFixed(4)} (initializing output bias)`)
 
-  const network = new TfMultidaySkollNetwork(DEFAULT_MULTIDAY_SKOLL_CONFIG, options.learningRate, labelMean)
-  console.log(`[trainMultiday] network: ${JSON.stringify(DEFAULT_MULTIDAY_SKOLL_CONFIG)}`)
+  const cfg = options.networkConfig ?? DEFAULT_MULTIDAY_SKOLL_CONFIG
+  const network = new TfMultidaySkollNetwork(cfg, options.learningRate, labelMean)
+  console.log(`[trainMultiday] network: ${JSON.stringify(cfg)}`)
 
   let bestMse = Infinity
   let bestMae = Infinity
