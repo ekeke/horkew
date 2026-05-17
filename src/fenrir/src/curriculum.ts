@@ -232,8 +232,10 @@ export type PhaseStep = PretrainStep | TransferStep | TrainingStep
 /** カリキュラム名: 'default' = 本流, 'brain-battle' = BB, 'bb-plus' = BB+個別役職学習,
  *  'skoll-pretrain' = skoll を教師にした vote head 教師あり pretrain（独立パイプライン）,
  *  'skoll-zero' = AlphaZero 系 multi-agent self-play,
- *  'huginn' = 交渉投票 NN の独立学習 */
-export type CurriculumName = 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn'
+ *  'huginn' = 交渉投票 NN の独立学習,
+ *  'skoll-multiday' = recursive skoll (多日 lookahead) を教師にした per-X winRate NN
+ *    の SL pretrain（独立パイプライン、 ckpt は Pure JS MultidaySkollNetwork で再利用可） */
+export type CurriculumName = 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn' | 'skoll-multiday'
 
 export type CurriculumOptions = {
   phase1Only?: boolean

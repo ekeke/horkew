@@ -102,7 +102,7 @@ type OrchestratorConfig = {
   wre?: string
   /** WRE再学習間隔 (iteration数、0=再学習無効)。サンプルバッファが batch×14×5×n×4.8KB 蓄積するため batch=64 なら n≤40 推奨 */
   wreRefresh: number
-  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn'
+  curriculum: 'default' | 'brain-battle' | 'bb-plus' | 'skoll-pretrain' | 'skoll-zero' | 'huginn' | 'skoll-multiday'
   /** huginn 専用パラメータ (curriculum === 'huginn' のときのみ参照) */
   huginnScenarios?: string[]
   huginnIterations?: number
@@ -1097,6 +1097,18 @@ async function main(): Promise<void> {
     })
     shutdownCleanup('completed')
     log(`${BOLD}Skoll Pretrain complete!${RESET}`)
+    return
+  }
+
+  // === Skoll-Multiday カリキュラム: recursive skoll を教師にした per-X winRate NN ===
+  if (config.curriculum === 'skoll-multiday') {
+    const { runSkollMultiday } = await import('../../skoll/multiday-runner.ts')
+    await runSkollMultiday({
+      checkpointBase: config.checkpointBase,
+      learningRate: config.learningRate,
+    })
+    shutdownCleanup('completed')
+    log(`${BOLD}Skoll Multiday complete!${RESET}`)
     return
   }
 
