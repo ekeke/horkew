@@ -1,14 +1,16 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
   import type { EditorView } from '@codemirror/view'
+  import type { Extension } from '@codemirror/state'
   import type { AnalysisContext } from '../AnalysisContext.svelte.ts'
   import type { StatementInfo } from '../editor/howlLanguage.ts'
   import type { Statement } from '../../howl/statement.ts'
   import { buildPlayerNames } from '../editor/playerNames.ts'
 
-  let { ctx, readonly = false }: {
+  let { ctx, readonly = false, extraExtensions }: {
     ctx: AnalysisContext
     readonly?: boolean
+    extraExtensions?: Extension[]
   } = $props()
 
   function toStmtInfo(s: Statement): StatementInfo {
@@ -52,6 +54,7 @@
         onCursorChange(line) {
           ctx.cursorLine = line
         },
+        extensions: extraExtensions,
       })
     })
   })

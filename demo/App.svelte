@@ -7,11 +7,15 @@
   import { serializeVillageStatus } from '../src/retar/wasm-helpers.ts'
   import {
     createAnalysisContext,
+    EditorPane,
     HatiPane,
     StatusPane,
     InspectPane,
     GmorkDebugPane,
   } from '../src/lykaon/index.ts'
+  import { setVideoTimeGetter } from '../src/lykaon/editor/index.ts'
+  import { EditorView } from '@codemirror/view'
+  import type { Extension } from '@codemirror/state'
   import PlayerName from './status/PlayerName.svelte'
   import type { WolfPairSuggestion } from './status/wolfPairScorer.ts'
   import HelpPanel from './HelpPanel.svelte'
@@ -30,13 +34,6 @@
   import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../src/fenrir/src/agents/rule-based-agent.ts'
   import { formatHowl } from '../src/lupa/format.ts'
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
-  import type { FlexibleDictionary } from '../src/howl/flexibleDictionary.ts'
-  import type { EditorView } from '@codemirror/view'
-  import { setOnSeek } from '../src/lykaon/editor/howlLanguage.ts'
-  import type { StatementInfo, PlayerNameInfo } from '../src/lykaon/editor/howlLanguage.ts'
-
-  type EditorModule = typeof import('../src/lykaon/editor/index.ts')
-  let editorModule: EditorModule | undefined
 
   const nightKillCauses: Set<CauseOfDeath> = new Set([
     'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
@@ -221,7 +218,6 @@
         activeKey = ''
         ctx.howlText = ''
         updateSettings({ active: '' })
-        setEditorContent('')
         rawStatements = ''
         analyzerJson = ''
         ctx.assumptions = new Map()
@@ -468,29 +464,6 @@
   if (activeKey) ctx.howlText = loadText(activeKey)
   onDestroy(() => ctx.destroy())
 
-  // ctx.howlText 変化を CodeMirror に反映 (ファイル切替・trial mode 等)。
-  // editor onChange からの ctx.howlText 更新は doc と一致するためループしない。
-  // Stage C で EditorPane に置換すれば解消。
-  $effect(() => {
-    const text = ctx.howlText
-    if (editorView && editorView.state.doc.toString() !== text) {
-      setEditorContent(text)
-    }
-  })
-
-  $effect(() => {
-    const unsub = ctx.onJump((ev) => {
-      if (!editorView) return
-      const docLine = editorView.state.doc.line(ev.line)
-      editorView.dispatch({
-        selection: { anchor: docLine.from },
-        scrollIntoView: true,
-      })
-      editorView.focus()
-    })
-    return unsub
-  })
-
   // lykaon ペイン (InspectPane / GmorkDebugPane) から howl が読み込まれたら
   // trial モードへ遷移し、作業中ドキュメントの上書きを防ぐ。
   $effect(() => {
@@ -522,8 +495,6 @@
   let showModal = $state(false)
   let showHelp = $state(false)
   let newTitle = $state('')
-  let editorParent: HTMLElement | undefined = $state()
-  let editorView: EditorView | undefined = $state()
   let rawBodyEl: HTMLElement | undefined = $state()
   let helpPanel: HelpPanel | undefined = $state()
   let trialMode = $state(false)
@@ -619,27 +590,19 @@
   }
 
   function insertTimeAnnotation() {
-    if (!editorView || !videoId) return
+    if (!videoId) return
     const time = formatSeconds(videoCurrentTime)
-    const pos = editorView.state.selection.main.head
-    const line = editorView.state.doc.lineAt(pos)
-    const lineContent = line.text.trim()
-    let text: string
-    let from: number
-    if (lineContent.length > 0) {
+    const lines = ctx.howlText.split('\n')
+    const lineIdx = Math.max(0, Math.min(lines.length - 1, ctx.cursorLine - 1))
+    const lineContent = lines[lineIdx] ?? ''
+    if (lineContent.trim().length > 0) {
       // Inline: append @MM:SS at end of current line
-      text = ` @${time}`
-      from = line.to
+      lines[lineIdx] = `${lineContent} @${time}`
     } else {
       // Standalone: insert @MM:SS on blank line
-      text = `@${time}\n`
-      from = line.from
+      lines[lineIdx] = `@${time}`
     }
-    editorView.dispatch({
-      changes: { from, insert: text },
-      selection: { anchor: from + text.length },
-    })
-    ctx.howlText = editorView.state.doc.toString()
+    ctx.howlText = lines.join('\n')
     run()
   }
 
@@ -684,7 +647,6 @@
       ctx.cursorLine = 999999
     }
     videoSyncActive = false  // Disable auto-sync when manually navigating
-    runWithCursor(ctx.cursorLine)
   }
 
   function resumeVideoSync() {
@@ -723,7 +685,12 @@
     runWithCursor(getVideoCursorLine())
   }
 
-  setOnSeek(seekVideo)
+  // lykaon EditorPane の時刻トークン → ctx.emitSeek → demo の動画 player へ橋渡し
+  $effect(() => {
+    return ctx.onSeek(({ seconds }) => {
+      seekVideo(seconds)
+    })
+  })
 
   function doOpenHelp(sectionId?: string) {
     showHelp = true
@@ -733,6 +700,8 @@
   }
 
   onMount(() => {
+    // editor 補完が動画時刻を参照できるよう、現在動画時刻 getter を 1 回登録 (closure で reactive)
+    setVideoTimeGetter(() => videoId ? videoCurrentTime : null)
     onOpenHelp(doOpenHelp)
     onStartTrial(handleStartTrial)
     const hash = location.hash.slice(1)
@@ -754,9 +723,8 @@
   let docMenuOpen = $state(false)
 
   async function copyCompressed() {
-    if (!editorView) return
     try {
-      const body = editorView.state.doc.toString()
+      const body = ctx.howlText
       const entry = activeKey ? fileIndex[activeKey] : undefined
       const existing = parseFrontmatter(body)
       const meta = { ...existing.meta }
@@ -793,20 +761,9 @@
     saveText(key, body)
     entries = fileEntries()
     updateSettings({ active: key })
-    setEditorContent(body)
     rawStatements = ''
     analyzerJson = ''
     ctx.assumptions = new Map()
-  }
-
-  function setEditorContent(text: string) {
-    if (editorView) {
-      editorView.dispatch({
-        changes: { from: 0, to: editorView.state.doc.length, insert: text },
-        selection: { anchor: text.length },
-      })
-      editorView.focus()
-    }
   }
 
   async function generateLupaGame() {
@@ -829,7 +786,7 @@
     if (trialMode || !activeKey) {
       handleStartTrial(howl)
     } else {
-      setEditorContent(howl)
+      ctx.howlText = howl
     }
   }
 
@@ -837,7 +794,6 @@
     trialMode = true
     resetVideoState()
     ctx.howlText = text
-    setEditorContent(text)
     showHelp = false
   }
 
@@ -845,7 +801,6 @@
     trialMode = false
     if (activeKey) {
       ctx.howlText = loadText(activeKey)
-      setEditorContent(ctx.howlText)
     }
   }
 
@@ -854,7 +809,6 @@
     resetVideoState()
     activeKey = key
     ctx.howlText = loadText(key)
-    setEditorContent(ctx.howlText)
     updateSettings({ active: key })
     rawStatements = ''
     ctx.assumptions = new Map()
@@ -902,7 +856,6 @@
     saveIndex(fileIndex)
     activeKey = key
     ctx.howlText = template
-    setEditorContent(ctx.howlText)
     saveText(key, template)
     entries = fileEntries()
     showModal = false
@@ -944,9 +897,7 @@
   }
 
   function getCursorLine(): number {
-    if (!editorView) return 1
-    const head = editorView.state.selection.main.head
-    return editorView.state.doc.lineAt(head).number
+    return ctx.cursorLine || 1
   }
 
   function scrollRawToCursor() {
@@ -983,14 +934,16 @@
 
   let runningWithCursor = false
 
-  function onCursorMove() {
-    if (runningWithCursor) return  // prevent re-entrant calls from editor dispatch
-    if (videoSyncActive) {
-      videoSyncActive = false
-    }
+  // ctx.cursorLine 変化 (editor onCursorChange / goToDay / runWithCursorInner の自己更新)
+  // を watch して demo 派生 state を更新。
+  // runningWithCursor ガードで runWithCursorInner の自己更新 (effectiveCursorLine 書き戻し) による再入を防ぐ。
+  $effect(() => {
+    void ctx.cursorLine  // depend on cursorLine
+    if (runningWithCursor) return
+    if (videoSyncActive) videoSyncActive = false
     run()
     tick().then(scrollRawToCursor)
-  }
+  })
 
   // ============================================================
   // Command Play 連動: ゲーム進行を formatHowl でエディタに書き出し
@@ -1016,146 +969,107 @@
         trialMode = true
         resetVideoState()
         ctx.howlText = cmdPlayEditorText || ''
-        setEditorContent(ctx.howlText)
         showHelp = false
       }
     }
     cmdPlayWasRunning = cmdPlayRunning
   })
 
-  // 実行中 editorText 変化 → エディタに書き込み、カーソルを末尾へ
+  // 実行中 editorText 変化 → ctx.howlText に書き込み (lykaon EditorPane が doc へ反映)
   $effect(() => {
-    if (!editorView) return
     if (!cmdPlayRunning) return
     if (!cmdPlayEditorText) return
-    const current = editorView.state.doc.toString()
-    if (current === cmdPlayEditorText) return
-    editorView.dispatch({
-      changes: { from: 0, to: editorView.state.doc.length, insert: cmdPlayEditorText },
-      selection: { anchor: cmdPlayEditorText.length },
-      scrollIntoView: true,
-    })
+    if (ctx.howlText === cmdPlayEditorText) return
+    ctx.howlText = cmdPlayEditorText
   })
 
-  // エディタの編集可否: cmd-play 実行中 / 動画同期中 / アクティブファイル削除保留中 のいずれかで read-only
-  $effect(() => {
-    if (!editorView || !editorModule) return
-    const editable = !cmdPlayRunning && !videoSyncActive && !isActivePendingDelete
-    editorModule.setEditable(editorView, editable)
-  })
-
-  // Initialize CM6 editor when parent element is available (lazy-loaded)
-  // Only depends on editorParent (DOM availability via {#if activeKey} block).
-  // activeKey and editorView are intentionally NOT dependencies to avoid
-  // destroy/recreate loops on document switch.
-  $effect(() => {
-    if (!editorParent) return
-    import('../src/lykaon/editor/index.ts').then(mod => {
-      editorModule = mod
-      if (!editorParent || editorView) return
-      mod.setVideoTimeGetter(() => videoId ? videoCurrentTime : null)
-      editorView = mod.createHowlEditor(editorParent, {
-        doc: ctx.howlText,
-        onChange(value) {
-          ctx.howlText = value
-        },
-        onCursorChange(_line) {
-          onCursorMove()
-        },
-        extensions: [
-          mod.EditorView.domEventHandlers({
-            paste(event, view) {
-              const clip = event.clipboardData?.getData('text')
-              if (!clip) return false
-              const sel = view.state.selection.main
-              const fullSelection = sel.from === 0 && sel.to === view.state.doc.length
-              if (!fullSelection) return false
-              const trimmed = clip.trim()
-              if (!/^[A-Za-z0-9+/=\s]+$/.test(trimmed)) return false
-              let binary: string
-              try { binary = atob(trimmed) } catch { return false }
-              if (binary.length < 2 || binary.charCodeAt(0) !== 0x1f || binary.charCodeAt(1) !== 0x8b) return false
-              event.preventDefault()
-              const bytes = new Uint8Array(binary.length)
-              for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-              const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
-              new Response(stream).text().then(text => {
-                const fm = parseFrontmatter(text)
-                const title = typeof fm.meta.title === 'string' ? fm.meta.title : ''
-                if (title) {
-                  importCompressedText(title, fm.body)
-                } else {
-                  view.dispatch({
-                    changes: { from: 0, to: view.state.doc.length, insert: text },
-                    selection: { anchor: text.length },
-                  })
-                }
-              }).catch(() => {})
-              return true
-            },
-          }),
-          mod.EditorView.updateListener.of(update => {
-            if (!update.docChanged) return
-
-            // Detect newline insertion — identifies which line was just finalized.
-            let finalizedLineNumber: number | null = null
-            update.changes.iterChanges((fromA, _toA, _fromB, _toB, inserted) => {
-              if (finalizedLineNumber !== null) return
-              if (!inserted.toString().includes('\n')) return
-              finalizedLineNumber = update.startState.doc.lineAt(fromA).number
+  // demo 固有 CodeMirror Extension (gzip ペースト + auto-timestamp)。
+  // Extension は static で 1 回だけ作成。closure 内部で reactive な値 (videoCurrentTime / autoTimestampEnabled 等) を読むので reactivity は維持される。
+  const demoEditorExtensions: Extension[] = [
+    EditorView.domEventHandlers({
+      paste(event, view) {
+        const clip = event.clipboardData?.getData('text')
+        if (!clip) return false
+        const sel = view.state.selection.main
+        const fullSelection = sel.from === 0 && sel.to === view.state.doc.length
+        if (!fullSelection) return false
+        const trimmed = clip.trim()
+        if (!/^[A-Za-z0-9+/=\s]+$/.test(trimmed)) return false
+        let binary: string
+        try { binary = atob(trimmed) } catch { return false }
+        if (binary.length < 2 || binary.charCodeAt(0) !== 0x1f || binary.charCodeAt(1) !== 0x8b) return false
+        event.preventDefault()
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
+        new Response(stream).text().then(text => {
+          const fm = parseFrontmatter(text)
+          const title = typeof fm.meta.title === 'string' ? fm.meta.title : ''
+          if (title) {
+            importCompressedText(title, fm.body)
+          } else {
+            view.dispatch({
+              changes: { from: 0, to: view.state.doc.length, insert: text },
+              selection: { anchor: text.length },
             })
+          }
+        }).catch(() => {})
+        return true
+      },
+    }),
+    EditorView.updateListener.of(update => {
+      if (!update.docChanged) return
 
-            if (
-              autoTimestampEnabled &&
-              finalizedLineNumber !== null &&
-              autoTimestampLine === finalizedLineNumber &&
-              autoTimestampStartTime !== null &&
-              videoId
-            ) {
-              const line = update.state.doc.line(finalizedLineNumber)
-              const text = line.text
-              if (!EXISTING_TIMESTAMP_RE.test(text)) {
-                const stmt = parseStatement(text, finalizedLineNumber)
-                if (AUTO_TIMESTAMP_TYPES.has(stmt.type)) {
-                  const timeStr = formatSeconds(autoTimestampStartTime)
-                  const insertPos = line.to
-                  const view = update.view
-                  queueMicrotask(() => {
-                    view.dispatch({
-                      changes: { from: insertPos, insert: ` @${timeStr}` },
-                    })
-                  })
-                }
-              }
-            }
-
-            if (finalizedLineNumber !== null) {
-              autoTimestampStartTime = null
-              autoTimestampLine = null
-            }
-
-            // Record start time on blank→non-blank transition of the cursor's line.
-            const head = update.state.selection.main.head
-            const currentLine = update.state.doc.lineAt(head)
-            const isNonBlank = currentLine.text.trim() !== ''
-            if (isNonBlank && autoTimestampLine !== currentLine.number) {
-              autoTimestampStartTime = videoCurrentTime
-              autoTimestampLine = currentLine.number
-            } else if (!isNonBlank && autoTimestampLine === currentLine.number) {
-              autoTimestampStartTime = null
-              autoTimestampLine = null
-            }
-          }),
-        ],
+      // Detect newline insertion — identifies which line was just finalized.
+      let finalizedLineNumber: number | null = null
+      update.changes.iterChanges((fromA, _toA, _fromB, _toB, inserted) => {
+        if (finalizedLineNumber !== null) return
+        if (!inserted.toString().includes('\n')) return
+        finalizedLineNumber = update.startState.doc.lineAt(fromA).number
       })
-    })
-    return () => {
-      if (editorView) {
-        editorView.destroy()
-        editorView = undefined
+
+      if (
+        autoTimestampEnabled &&
+        finalizedLineNumber !== null &&
+        autoTimestampLine === finalizedLineNumber &&
+        autoTimestampStartTime !== null &&
+        videoId
+      ) {
+        const line = update.state.doc.line(finalizedLineNumber)
+        const text = line.text
+        if (!EXISTING_TIMESTAMP_RE.test(text)) {
+          const stmt = parseStatement(text, finalizedLineNumber)
+          if (AUTO_TIMESTAMP_TYPES.has(stmt.type)) {
+            const timeStr = formatSeconds(autoTimestampStartTime)
+            const insertPos = line.to
+            const view = update.view
+            queueMicrotask(() => {
+              view.dispatch({
+                changes: { from: insertPos, insert: ` @${timeStr}` },
+              })
+            })
+          }
+        }
       }
-    }
-  })
+
+      if (finalizedLineNumber !== null) {
+        autoTimestampStartTime = null
+        autoTimestampLine = null
+      }
+
+      // Record start time on blank→non-blank transition of the cursor's line.
+      const head = update.state.selection.main.head
+      const currentLine = update.state.doc.lineAt(head)
+      const isNonBlank = currentLine.text.trim() !== ''
+      if (isNonBlank && autoTimestampLine !== currentLine.number) {
+        autoTimestampStartTime = videoCurrentTime
+        autoTimestampLine = currentLine.number
+      } else if (!isNonBlank && autoTimestampLine === currentLine.number) {
+        autoTimestampStartTime = null
+        autoTimestampLine = null
+      }
+    }),
+  ]
 
   function roleToShort(role: SystemRole): string {
     return systemRoles.get(role)?.shortName ?? role
@@ -1217,14 +1131,8 @@
   }
 
   function insertRevealRoles() {
-    if (!editorView || !allRolesDetermined) return
-    const text = buildRevealText()
-    const docLen = editorView.state.doc.length
-    editorView.dispatch({
-      changes: { from: docLen, insert: text },
-      selection: { anchor: docLen + text.length },
-    })
-    editorView.focus()
+    if (!allRolesDetermined) return
+    ctx.howlText = ctx.howlText + buildRevealText()
   }
 
   function openDenyWolfDialog() {
@@ -1276,70 +1184,6 @@
     run()
   }
 
-  function extractRefNames(stmt: any): string[] {
-    switch (stmt.type) {
-      case 'vote': return [stmt.voter, stmt.target]
-      case 'multiVote': return [...stmt.voters, stmt.target]
-      case 'attack': return [...stmt.target]
-      case 'lynch': return stmt.target ? [stmt.target] : []
-      case 'curse': case 'follow': return [stmt.target]
-      case 'revote': return stmt.targets ?? []
-      case 'assert': {
-        const names = [stmt.actor]
-        for (const a of stmt.assertions ?? []) {
-          if (a.target) names.push(a.target)
-        }
-        return names
-      }
-      case 'mason': return stmt.players ?? []
-      case 'reveal': return [stmt.player]
-      default: return []
-    }
-  }
-
-  function extractDefNames(stmt: any): string[] {
-    switch (stmt.type) {
-      case 'join': return [stmt.name, ...(stmt.shortName ? [stmt.shortName] : []), ...stmt.aliases]
-      case 'joinMulti': return stmt.players ?? []
-      default: return []
-    }
-  }
-
-  type NameEntry = { name: string, kind: 'definition' | 'resolved' | 'unresolved' }
-
-  function buildPlayerNames(statements: any[], dict: FlexibleDictionary, doc: string): PlayerNameInfo[] {
-    const lines = doc.split('\n')
-    const result: PlayerNameInfo[] = []
-    for (const stmt of statements) {
-      const entries: NameEntry[] = []
-      for (const name of extractDefNames(stmt)) {
-        if (name) entries.push({ name, kind: 'definition' })
-      }
-      for (const name of extractRefNames(stmt)) {
-        if (name) entries.push({ name, kind: dict.search(name).length > 0 ? 'resolved' : 'unresolved' })
-      }
-      if (entries.length === 0) continue
-      const lineIdx = stmt.line - 1
-      if (lineIdx < 0 || lineIdx >= lines.length) continue
-      const lineText = lines[lineIdx]
-      const used: [number, number][] = []
-      for (const { name, kind } of entries) {
-        let searchFrom = 0
-        let idx = -1
-        while ((idx = lineText.indexOf(name, searchFrom)) !== -1) {
-          const end = idx + name.length
-          if (!used.some(([f, t]) => idx < t && end > f)) {
-            used.push([idx, end])
-            result.push({ line: stmt.line, offset: idx, length: name.length, kind })
-            break
-          }
-          searchFrom = idx + 1
-        }
-      }
-    }
-    return result
-  }
-
   function runWithCursor(overrideCursorLine?: number) {
     runningWithCursor = true
     try { runWithCursorInner(overrideCursorLine) }
@@ -1385,51 +1229,10 @@
       const { meta, statements } = parse(ctx.howlText, { cursorLine: effectiveCursorLine })
       rawStatements = JSON.stringify(statements, null, 2)
 
-      const { vs, setup, dict } = buildVillageStatus(statements, meta)
+      const { vs, setup } = buildVillageStatus(statements, meta)
 
-      // Feed parse results to CM6 for syntax highlighting (after buildVillageStatus so dict is available)
-      if (editorView) {
-        const toStmtInfo = (s: any): StatementInfo => {
-          const info: StatementInfo = { type: s.type, line: s.line }
-          if (s.type === 'videoSource') info.timestamp = { seconds: 0, raw: '0:00' }
-          else if (s.type === 'timestamp') info.timestamp = { seconds: s.seconds, raw: s.raw }
-          else if (s.timestamp !== undefined) {
-            const m = Math.floor(s.timestamp / 60)
-            const sec = s.timestamp % 60
-            info.timestamp = { seconds: s.timestamp, raw: `${m}:${String(sec).padStart(2, '0')}` }
-          }
-          return info
-        }
-        const stmtInfo: StatementInfo[] = statements.map(toStmtInfo)
-        const allStmtInfo: StatementInfo[] = fullParse.statements.map(toStmtInfo)
-        const playerNameInfos = buildPlayerNames(statements, dict, editorView.state.doc.toString())
-        const playerList: { name: string, shortName?: string, aliases: string[], surviving: boolean, claimingRole?: string }[] = []
-        let seat = 1
-        for (const s of statements) {
-          if (s.type === 'join') {
-            const status = vs.statuses.get(seat)
-            const surviving = status?.surviving ?? true
-            const claimingRole = status?.claiming ? status.claimingRole : undefined
-            playerList.push({ name: s.name, shortName: s.shortName, aliases: s.aliases, surviving, claimingRole })
-            seat++
-          } else if (s.type === 'joinMulti') {
-            for (const p of s.players) {
-              const status = vs.statuses.get(seat)
-              const surviving = status?.surviving ?? true
-              const claimingRole = status?.claiming ? status.claimingRole : undefined
-              playerList.push({ name: p, aliases: [], surviving, claimingRole })
-              seat++
-            }
-          }
-        }
-        editorView.dispatch({ effects: [
-          editorModule!.setStatements.of({ statements: stmtInfo, allStatements: allStmtInfo, cursorLine: effectiveCursorLine, playerNames: playerNameInfos }),
-          editorModule!.setPlayerList.of(playerList),
-          editorModule!.setSetup.of(setup),
-          editorModule!.setCurrentDay.of(vs.day),
-          editorModule!.setGameStats.of({ day: vs.day, executions: vs.executions.size }),
-        ] })
-      }
+      // editor wiring (setStatements / setPlayerList / setSetup / setCurrentDay / setGameStats) は
+      // lykaon EditorPane が ctx の派生から自動で行う。
       ctx.cursorLine = effectiveCursorLine
       overlayChannel.postMessage({ type: 'howl', text: ctx.howlText, cursorLine: effectiveCursorLine })
       if (obsSocket?.readyState === WebSocket.OPEN) obsSocket.send(ctx.howlText)
@@ -1715,7 +1518,13 @@
       <div class="pane-header">Input</div>
       <div class="pane-body pane-body-input">
         {#if activeKey || trialMode}
-          <div class="input-editor" bind:this={editorParent}></div>
+          <div class="input-editor">
+            <EditorPane
+              {ctx}
+              readonly={cmdPlayRunning || videoSyncActive || isActivePendingDelete}
+              extraExtensions={demoEditorExtensions}
+            />
+          </div>
           {#if isActivePendingDelete}
             <div class="pending-delete-overlay">
               <div class="pending-delete-banner">
