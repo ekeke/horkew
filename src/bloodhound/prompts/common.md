@@ -78,6 +78,36 @@ The skoll win-rate numbers in your prompt already bake in a -1.3 penalty for fox
 - **Other villagers**: Notice if a seat is suspiciously *enthusiastic* about pushing the lynch onto wolves while never raising suspicion of the fox — that pattern fits immoralist (defending the fox by redirecting).
 - **Wolves / fanatic**: The fox is also your enemy. A fox-win means you lose too. If the village is missing the fox, you may sometimes need to feed information that helps them find it — better than losing the whole game to a third party.
 
+## Last wolf (LW) — preserve or destroy, depending on your faction
+
+A "last wolf" situation means **only one werewolf remains alive** (out of the 3 in the setup). 14d-neko has 3 wolves, so once 2 have been executed (or one executed + one killed by nekomata curse), the survivor is the LW. This is the most leveraged single seat in the game — every faction's win condition pivots on whether the LW survives the next vote.
+
+### How to recognise an LW situation
+
+- Public information: count executions + nekomata curse-kills against confirmed wolves. Retar's `Max surviving non-village count` drop and hati's threat profile (`wolfConfirmedCount`, `wolfCandidates`) make it explicit.
+- Skoll will show **one or two seats with dramatically higher village win-rate than the rest** — those are the LW candidates. Trust the spike.
+
+### Wolf / fanatic playbook when YOU are the LW (or your last teammate)
+
+- **Do NOT trade with a villager** late game. Surviving one more day is worth more than killing one more villager — the village runs out of ropes before you run out of nights.
+- Pick attack targets that **shrink the village's rope count without exposing your identity** (kill the next-most-trusted information role, not someone who would obviously point to you).
+- **Maintain your false CO straight to the end.** A dropped fake at LW is an instant loss. Keep producing consistent fake divines / fake medium results.
+- Bait the village into splitting their vote — even a 1-vote miss on you is a win for your team.
+- Remember: a fox-win also makes you lose. If the village can't find the fox and is about to time-out, sometimes the LW must help eliminate the fox first.
+
+### Village playbook when an LW situation forms
+
+- **Confirmed-white presider MUST issue an explicit single-target designation** for the LW candidate skoll points at. No "let's see how today goes" — that's how the LW survives.
+- **Vote concentration is everything.** A split vote at LW = LW survives one more day = village probably loses on time. Followers, do NOT pick "I have a hunch about this other seat" at LW.
+- Use `hati` aggressively here — at LW the game tree is usually small enough for hati to return `Tsumi: yes` with a forced lynch order. If hati says tsumi, execute the order to the letter.
+- The seer should already have pivoted to fox-hunting by now (see fox section). The LW is for the village's votes; the fox is for the seer's divine.
+
+### Hamster team (werehamster + immoralist) playbook around LW
+
+- The LW is your ally of convenience — every day the LW survives, the village burns ropes you would otherwise have to dodge.
+- Protect the LW with vote split / sowing doubt on alternative targets, as long as it doesn't expose you as fox or immoralist.
+- The ideal endgame: LW alive, fox alive, village runs out of executions → fox wins (and the LW loses but that's not your problem).
+
 ## Logical rigor over consensus
 
 Other seats can chain to a conclusion that *sounds* coherent but isn't actually supported by evidence. Once one seat says it, others tend to echo it — this is the loudest way for the village to walk off a cliff together. Your responsibility is to keep the reasoning honest.
