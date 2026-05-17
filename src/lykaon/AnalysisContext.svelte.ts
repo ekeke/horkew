@@ -242,6 +242,7 @@ export class AnalysisContext {
   #seekListeners = new Set<(ev: SeekEvent) => void>()
   #jumpListeners = new Set<(ev: JumpEvent) => void>()
   #externalLoadListeners = new Set<(text: string) => void>()
+  #cursorChangeListeners = new Set<(line: number) => void>()
 
   onSeek(listener: (ev: SeekEvent) => void): () => void {
     this.#seekListeners.add(listener)
@@ -277,6 +278,23 @@ export class AnalysisContext {
   loadHowl(text: string): void {
     this.howlText = text
     for (const fn of this.#externalLoadListeners) fn(text)
+  }
+
+  /**
+   * editor 内で cursor が動いたとき (CodeMirror onCursorChange 由来) のみ発火するイベント。
+   * `ctx.cursorLine = X` の単純な代入 (goToDay 等) では発火しない。
+   *
+   * 用途: consumer が「ユーザーの cursor 移動」と「プログラム的な cursor 設定」を区別したい場合
+   * (例: video sync 解除、demo 派生 state 更新の trigger)。$effect で ctx.cursorLine を watch すると
+   * runWithCursorInner 等の内部書き戻しで無限ループになるため、この event bus 経由が安全。
+   */
+  onCursorChange(listener: (line: number) => void): () => void {
+    this.#cursorChangeListeners.add(listener)
+    return () => { this.#cursorChangeListeners.delete(listener) }
+  }
+
+  emitCursorChange(line: number): void {
+    for (const fn of this.#cursorChangeListeners) fn(line)
   }
 
   // -----------------------------------------------------------------
@@ -406,6 +424,7 @@ export class AnalysisContext {
     this.#seekListeners.clear()
     this.#jumpListeners.clear()
     this.#externalLoadListeners.clear()
+    this.#cursorChangeListeners.clear()
   }
 }
 

@@ -641,12 +641,13 @@
     videoDay = day
     // Show up to the end of this day
     const nextDay = day + 1
-    if (dayLineMap.has(nextDay)) {
-      ctx.cursorLine = dayLineMap.get(nextDay)! - 1
-    } else {
-      ctx.cursorLine = 999999
-    }
+    const totalLines = Math.max(1, ctx.howlText.split('\n').length)
+    const line = dayLineMap.has(nextDay)
+      ? Math.max(1, dayLineMap.get(nextDay)! - 1)
+      : totalLines
     videoSyncActive = false  // Disable auto-sync when manually navigating
+    // editor の物理 cursor を動かす → onCursorChange → demo listener が run() を呼ぶ
+    ctx.jumpTo({ line })
   }
 
   function resumeVideoSync() {
@@ -685,10 +686,11 @@
     runWithCursor(getVideoCursorLine())
   }
 
-  // lykaon EditorPane の時刻トークン → ctx.emitSeek → demo の動画 player へ橋渡し
+  // lykaon EditorPane の時刻トークン → ctx.emitSeek → demo の動画 player へ橋渡し。
+  // line は seekVideo の動画切り替え判定 (timestamp が所属する segment 特定) に必須。
   $effect(() => {
-    return ctx.onSeek(({ seconds }) => {
-      seekVideo(seconds)
+    return ctx.onSeek(({ seconds, line }) => {
+      seekVideo(seconds, line)
     })
   })
 
@@ -932,17 +934,15 @@
     rawBodyEl.scrollTop = jsonLine * lineHeight
   }
 
-  let runningWithCursor = false
-
-  // ctx.cursorLine 変化 (editor onCursorChange / goToDay / runWithCursorInner の自己更新)
-  // を watch して demo 派生 state を更新。
-  // runningWithCursor ガードで runWithCursorInner の自己更新 (effectiveCursorLine 書き戻し) による再入を防ぐ。
+  // editor cursor 移動 (CodeMirror onCursorChange 由来) のみを購読。
+  // ctx.cursorLine の watch effect だと runWithCursorInner 内の `ctx.cursorLine = effectiveCursorLine`
+  // 自己書き戻しで effect_update_depth_exceeded を起こすため、event bus 経由で reactive 系の外で run() を呼ぶ。
   $effect(() => {
-    void ctx.cursorLine  // depend on cursorLine
-    if (runningWithCursor) return
-    if (videoSyncActive) videoSyncActive = false
-    run()
-    tick().then(scrollRawToCursor)
+    return ctx.onCursorChange((_line) => {
+      if (videoSyncActive) videoSyncActive = false
+      run()
+      tick().then(scrollRawToCursor)
+    })
   })
 
   // ============================================================
@@ -1185,9 +1185,7 @@
   }
 
   function runWithCursor(overrideCursorLine?: number) {
-    runningWithCursor = true
-    try { runWithCursorInner(overrideCursorLine) }
-    finally { runningWithCursor = false }
+    runWithCursorInner(overrideCursorLine)
   }
 
   function runWithCursorInner(overrideCursorLine?: number) {

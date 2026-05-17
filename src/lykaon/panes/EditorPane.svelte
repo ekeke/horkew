@@ -53,6 +53,7 @@
         },
         onCursorChange(line) {
           ctx.cursorLine = line
+          ctx.emitCursorChange(line)
         },
         extensions: extraExtensions,
       })
