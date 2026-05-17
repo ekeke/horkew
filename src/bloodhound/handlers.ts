@@ -438,9 +438,16 @@ export function createBloodhoundHandlers(
         for (const seat of ctx.alivePlayers) {
           // Build a temporary ctx that includes our in-progress events so
           // subsequent seats see prior utterances and CO within this round.
+          // additionalClaims are still pending engine commit (the engine
+          // only applies them after onPreVote returns); synthesize the
+          // matching claim events here so retar/skoll/hati downstream see
+          // the CO during the same-day discussion rather than only on the
+          // next day. Without this, Day-1 round-2+ prompts show "No CO yet."
+          // while every seat has actually been told who COed via speech.
+          const synthClaimEvents = synthesizeClaimEvents(additionalClaims)
           const localCtx: PhaseContext<BloodhoundEvent> = {
             ...ctx,
-            events: [...ctx.events, ...events],
+            events: [...ctx.events, ...synthClaimEvents, ...events],
           }
           const decoded = await callLLM(seat, 'discussion', localCtx, { discussionRound: round })
           const action = decoded.finalAction
@@ -484,6 +491,44 @@ export function createBloodhoundHandlers(
       return map
     },
   }
+}
+
+/**
+ * Convert pending DayClaim entries (held in our discussion-loop buffer
+ * before the engine has committed them) into the matching GameEvent
+ * shapes so retar / skoll / hati / CO-table see the CO information as
+ * soon as it happens inside the same day's discussion.
+ *
+ * Mirrors the engine's `applyClaim` switch in lupa/engine.ts; keep in
+ * sync if new claim shapes are introduced.
+ */
+function synthesizeClaimEvents(claims: ReadonlyMap<number, DayClaim>): GameEvent[] {
+  const out: GameEvent[] = []
+  for (const [seat, claim] of claims) {
+    switch (claim.type) {
+      case 'seer_co':
+        out.push({ type: 'seer_claim', actor: seat, results: claim.results })
+        break
+      case 'medium_co':
+        out.push({ type: 'medium_claim', actor: seat, pastResults: claim.pastResults })
+        break
+      case 'bodyguard_co':
+        out.push({ type: 'bodyguard_claim', actor: seat, targets: claim.targets })
+        break
+      case 'mason_co':
+        out.push({ type: 'mason_claim', actor: seat, partner: claim.partner })
+        break
+      case 'nekomata_co':
+        out.push({ type: 'nekomata_claim', actor: seat })
+        break
+      case 'seer_result':
+      case 'medium_result':
+      case 'forecast':
+      case 'none':
+        break
+    }
+  }
+  return out
 }
 
 // Build a minimal valid finalAction for dry-run mode so the engine advances.
