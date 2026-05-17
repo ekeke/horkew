@@ -44,11 +44,21 @@ import { AnthropicClient } from './anthropic-client.ts'
 import { createBloodhoundHandlers, type ReplayRecord } from './handlers.ts'
 import { BloodhoundLogger } from './logger.ts'
 import { formatEventLine } from './howl-stream.ts'
+import { getPersona } from './personas.ts'
 import type { BloodhoundEvent, ToolCall } from './types.ts'
 
 // Sonnet 4.6 pricing (USD per 1M tokens) — adjust if the rate changes.
 const PRICE_INPUT_PER_MTOK  = 3
 const PRICE_OUTPUT_PER_MTOK = 15
+
+/**
+ * Substitute every "seat-N" occurrence in `text` with the corresponding
+ * character name from `names`. LLM-facing surfaces all use "seat-N", but
+ * the master watches stdout/stderr and prefers persona names there.
+ */
+function replaceSeatRefs(text: string, names: ReadonlyMap<number, string>): string {
+  return text.replace(/seat-(\d+)/g, (_, n) => names.get(Number(n)) ?? `seat-${n}`)
+}
 
 type CliOptions = {
   seed: number
@@ -174,8 +184,9 @@ async function main(): Promise<void> {
   console.log(`[bloodhound] starting game (scenario=${scenarioName}, seed=${cli.seed}, model=${cli.model})`)
   console.log(`[bloodhound] log dir: ${logger.runDir}`)
 
-  // Captured on onSetup; used by the stderr live stream so events read with
-  // persona names ("マドック 死亡") instead of bare "seat-6 死亡".
+  // seat → persona-name map, built on onSetup. Used at every stdout/stderr
+  // boundary to substitute "seat-N" → character name for master readability.
+  // (player.name itself stays "seat-N" — see handlers.onSetup.)
   let seatNames: Map<number, string> | null = null
 
   // In dry-run mode we never hit the API; AnthropicClient still requires an
@@ -192,7 +203,7 @@ async function main(): Promise<void> {
     replayMap,
     dryRun: cli.dryRun,
     onState: (state: GameState) => {
-      seatNames = new Map(state.players.map(p => [p.seat, p.name]))
+      seatNames = new Map(state.players.map(p => [p.seat, getPersona(p.seat).name]))
     },
     onPromptBuilt: cli.dryRun ? (info) => {
       // Optional seat filter: skip until we reach the requested seat. Day-0
@@ -218,17 +229,23 @@ async function main(): Promise<void> {
           + (aux.craft_deception > 0 ? ` deceive=${aux.craft_deception}` : '')
         : ''
       const iterStr = ex.iterations && ex.iterations.length > 1 ? ` iter=${ex.iterations.length}` : ''
-      console.log(`[bloodhound] LLM call seat-${ex.seat} ${ex.phase} ${roundStr}(in=${ex.usage.inputTokens} out=${ex.usage.outputTokens}${auxStr}${iterStr})`)
+      const actor = seatNames?.get(ex.seat) ?? `seat-${ex.seat}`
+      console.log(`[bloodhound] LLM call ${actor} ${ex.phase} ${roundStr}(in=${ex.usage.inputTokens} out=${ex.usage.outputTokens}${auxStr}${iterStr})`)
     },
     onSpeechEvent: (ev) => {
       logger.logSpeech(ev)
       const speaker = seatNames?.get(ev.actor) ?? `seat-${ev.actor}`
-      console.log(`${speaker} > ${ev.text}`)
+      // The LLM writes "seat-N さん" inside the speech text; substitute those
+      // too so the master sees a fully name-flavoured log.
+      const body = seatNames ? replaceSeatRefs(ev.text, seatNames) : ev.text
+      console.log(`${speaker} > ${body}`)
     },
     // Live Howl stream → stderr so the operator can abort if the game derails.
     onEvent: (event) => {
       const line = formatEventLine(event, seatNames ?? undefined)
-      if (line !== null) process.stderr.write(line + '\n')
+      if (line === null) return
+      const rendered = seatNames ? replaceSeatRefs(line, seatNames) : line
+      process.stderr.write(rendered + '\n')
     },
   })
 

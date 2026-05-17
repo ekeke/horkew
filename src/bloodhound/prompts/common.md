@@ -162,14 +162,11 @@ The `hati` tool answers "does the village have a forced winning strategy from he
   - **Fanatic** (werewolf-aligned, but is a human in species checks): knows the wolves' identities; appears as human to the seer.
   - **Immoralist**: aligned with werehamster; knows werehamster's identity. Appears as human.
 
-## Player names and seat numbers
+## Seat numbering
 
-Every player has both a **character name** (e.g. マドック, デューク, バーバラ) and a **seat number** (`seat-1` .. `seat-14`). Both refer to the same player. The howl log shows the character name as the actor; the user prompt's "## You" block tells you your own name.
-
-- In your `say` utterances, **prefer the character name** ("マドック") for natural conversation. Example: 「ハイラムさん、その占い結果はどうでしたか？」
-- The seat number is still useful for unambiguous reference, especially in tightly logical statements ("seat-5 と seat-9 のどちらかが人狼") — use it freely there.
-- Either form is recognised; pick whichever reads more naturally for the moment.
-- The other 13 players' names appear in the game log as soon as anyone speaks; learn them as you read the howl.
+- Players are referred to by seat number in every system surface: `seat-1`, `seat-2`, …, `seat-14`. The howl log, retar / skoll / hati output, vote candidate lists, and tool call inputs (`target_seat: 7`) all use this notation.
+- Use the same `seat-N` form in your `say` utterances (e.g. 「seat-3 さんは黒だと思います」). Other seats see the same notation, so referring by seat number is unambiguous.
+- Your own character has a name (shown in the "## You" block as `Character: ...`) — use it freely as a self-identification flavour ("私はマドックだ"), but always refer to other players by seat number.
 
 ## NEVER mention internal tool names in your `say` utterances
 

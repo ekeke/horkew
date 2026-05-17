@@ -364,18 +364,18 @@ export function createBloodhoundHandlers(
 
   return {
     onSetup(_roles, state) {
-      // Overwrite each player's display name to their persona's character
-      // name (e.g. seat-1 → "マドック"). Without this:
-      //   1. Lupa's nameStyle:'seat' produces "<role-abbrev><seat>" (e.g.
-      //      "占1") which leaks every role through formatHowl.
-      //   2. Using bare "seat-N" makes the game read like a spreadsheet —
-      //      the persona names defined in personas.ts never reach the howl
-      //      log or other seats' prompts.
-      // Howl's flexible dictionary resolves the persona name back to a
-      // seat number when parsing later, so retar / skoll / hati keep
-      // working unchanged.
+      // Standardise display names to "seat-N" for the LLM-visible layer:
+      // - retar / skoll / hati and the prompt all use "seat-N" uniformly
+      // - tool calls take seat-number integers (target_seat: 7) so seat-N
+      //   is the most direct surface form
+      // Lupa's nameStyle:'seat' actually produces "<role-abbrev><seat>"
+      // (e.g. "占1") which would leak every role, so we still overwrite —
+      // just to seat-N instead of persona names.
+      //
+      // Character names are surfaced to the master ONLY at the log
+      // boundary (play.ts substitutes seat-N → name in stdout/stderr).
       for (const player of state.players) {
-        player.name = getPersona(player.seat).name
+        player.name = `seat-${player.seat}`
       }
       opts.onState?.(state)
     },
