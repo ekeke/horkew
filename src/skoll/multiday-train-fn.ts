@@ -150,7 +150,22 @@ export async function trainMultiday(options: TrainMultidayOptions): Promise<Trai
   const trainIndices = allIndices.slice(evalCount)
   console.log(`[trainMultiday] split: train=${trainIndices.length} eval=${evalIndices.length}`)
 
-  const network = new TfMultidaySkollNetwork(DEFAULT_MULTIDAY_SKOLL_CONFIG, options.learningRate)
+  // 訓練 label の平均で出力 bias を初期化 (= 収束加速、 NN が中央値から始まる)
+  let labelSum = 0
+  let labelCount = 0
+  for (const idx of trainIndices) {
+    const s = all[idx]
+    for (let i = 0; i < s.label.length; i++) {
+      if (s.mask[i] > 0) {
+        labelSum += s.label[i]
+        labelCount++
+      }
+    }
+  }
+  const labelMean = labelCount > 0 ? labelSum / labelCount : 0
+  console.log(`[trainMultiday] training label mean: ${labelMean.toFixed(4)} (initializing output bias)`)
+
+  const network = new TfMultidaySkollNetwork(DEFAULT_MULTIDAY_SKOLL_CONFIG, options.learningRate, labelMean)
   console.log(`[trainMultiday] network: ${JSON.stringify(DEFAULT_MULTIDAY_SKOLL_CONFIG)}`)
 
   let bestMse = Infinity

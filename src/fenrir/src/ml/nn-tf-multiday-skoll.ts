@@ -62,7 +62,12 @@ export class TfMultidaySkollNetwork {
   private readonly numHeads: number
   private readonly dHead: number
 
-  constructor(config: MultidaySkollConfig = DEFAULT_MULTIDAY_SKOLL_CONFIG, lr: number = 3e-4) {
+  constructor(
+    config: MultidaySkollConfig = DEFAULT_MULTIDAY_SKOLL_CONFIG,
+    lr: number = 3e-4,
+    /** 出力 bias の初期値。 訓練 label の平均で初期化すると収束が早い。 */
+    outputBiasInit: number = 0,
+  ) {
     const prefix = `mds${_instId++}_`
     this.config = config
     this.allVariables = []
@@ -117,7 +122,7 @@ export class TfMultidaySkollNetwork {
 
     // 出力ヘッド
     this.outputW = this.makeVar([dm, 1], dm, `${prefix}out_w`)
-    this.outputB = this.makeZeroVar([1], `${prefix}out_b`)
+    this.outputB = tf.variable(tf.fill([1], outputBiasInit), true, `${prefix}out_b`)
 
     // 射影層と出力層も allVariables に追加
     this.allVariables.unshift(this.projClsW, this.projClsB, this.projSeatW, this.projSeatB)
