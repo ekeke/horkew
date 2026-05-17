@@ -12,6 +12,7 @@ import { runGame } from '../lupa/engine.ts'
 import { makeRandomHandlers } from '../lupa/test-helpers.ts'
 import { Rng } from '../lupa/random.ts'
 import { gameToHowl } from '../lupa/to-howl.ts'
+import { findScenario, scenarioToRoles, type Scenario } from '../lupa/scenarios.ts'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi } from './index.ts'
@@ -92,6 +93,12 @@ export function generateRandomSetup(rng: Rng): Map<SystemRole, number> {
 export type FindTsumiPuzzleOptions = {
   /** 詰みが見つからなかった場合に試行するゲームの上限本数 (default 1) */
   maxGames?: number
+  /** 指定すると村構成をランダム生成せず scenarios.ts の該当プリセットに固定する */
+  scenario?: string
+  /** 投票直前時点での最低生存者数 (これ未満の puzzle は不採用) */
+  minAlive?: number
+  /** 投票直前時点で指定役職すべてが 1 人以上生存している必要がある (AND 条件) */
+  aliveRoles?: SystemRole[]
 }
 
 class TsumiFoundError extends Error {
@@ -117,11 +124,18 @@ export async function findTsumiPuzzle(
 ): Promise<string | null> {
   const masterRng = new Rng(seed)
   const maxGames = opts.maxGames ?? 1
+  let fixedScenario: Scenario | undefined
+  if (opts.scenario !== undefined) {
+    fixedScenario = findScenario(opts.scenario)
+    if (fixedScenario === undefined) {
+      throw new Error(`findTsumiPuzzle: unknown scenario "${opts.scenario}"`)
+    }
+  }
 
   for (let g = 0; g < maxGames; g++) {
-    const setup = generateRandomSetup(masterRng)
+    const setup = fixedScenario ? scenarioToRoles(fixedScenario) : generateRandomSetup(masterRng)
     const gameSeed = (masterRng.next() * 0x7FFFFFFF) | 0
-    const found = await tryFindInOneGame(setup, gameSeed)
+    const found = await tryFindInOneGame(setup, gameSeed, fixedScenario, opts.minAlive ?? 0, opts.aliveRoles ?? [])
     if (found !== null) return injectSeedComment(found, seed)
   }
   return null
@@ -137,10 +151,15 @@ function injectSeedComment(howl: string, seed: number): string {
 async function tryFindInOneGame(
   setup: Map<SystemRole, number>,
   gameSeed: number,
+  scenario: Scenario | undefined,
+  minAlive: number,
+  requiredAliveRoles: SystemRole[],
 ): Promise<string | null> {
   const config: GameConfig = {
     roles: setup,
     seed: gameSeed,
+    ...(scenario?.hasFirstGhost !== undefined ? { hasFirstGhost: scenario.hasFirstGhost } : {}),
+    ...(scenario?.revoteConfig !== undefined ? { revoteConfig: scenario.revoteConfig } : {}),
   }
 
   const base = makeRandomHandlers(gameSeed)
@@ -151,6 +170,16 @@ async function tryFindInOneGame(
     onDayClaims: base.onDayClaims,
     onVote: base.onVote,
     onPreVote: (ctx) => {
+      if (ctx.alivePlayers.length < minAlive) return {}
+      if (requiredAliveRoles.length > 0) {
+        const aliveRoleSet = new Set<SystemRole>()
+        for (const p of ctx.state.players) {
+          if (p.alive) aliveRoleSet.add(p.role)
+        }
+        for (const r of requiredAliveRoles) {
+          if (!aliveRoleSet.has(r)) return {}
+        }
+      }
       const partial = { events: ctx.events as any, state: ctx.state as any, config }
       const howl = gameToHowl(partial, { includeExpect: false, includeRoles: false })
       const parsed = parse(howl)

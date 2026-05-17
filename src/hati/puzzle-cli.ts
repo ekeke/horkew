@@ -10,15 +10,23 @@
  */
 
 import { findTsumiPuzzle } from './puzzle.ts'
+import { systemRoles } from '../types/index.ts'
+import type { SystemRole } from '../types/index.ts'
 
 type CliArgs = {
   seed: number
   maxGames: number
+  scenario?: string
+  minAlive?: number
+  aliveRoles?: SystemRole[]
 }
 
 function parseArgs(argv: string[]): CliArgs {
   let seed: number | undefined
   let maxGames = 1
+  let scenario: string | undefined
+  let minAlive: number | undefined
+  const aliveRoles: SystemRole[] = []
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -28,6 +36,23 @@ function parseArgs(argv: string[]): CliArgs {
     }
     if (a === '--max-games' && i + 1 < argv.length) {
       maxGames = Number(argv[++i])
+      continue
+    }
+    if (a === '--scenario' && i + 1 < argv.length) {
+      scenario = argv[++i]
+      continue
+    }
+    if (a === '--min-alive' && i + 1 < argv.length) {
+      minAlive = Number(argv[++i])
+      continue
+    }
+    if (a === '--alive-role' && i + 1 < argv.length) {
+      const role = argv[++i] as SystemRole
+      if (!systemRoles.has(role)) {
+        console.error(`error: unknown role "${role}". valid: ${Array.from(systemRoles.keys()).join(', ')}`)
+        process.exit(2)
+      }
+      aliveRoles.push(role)
       continue
     }
     if (a === '-h' || a === '--help') {
@@ -53,16 +78,21 @@ function parseArgs(argv: string[]): CliArgs {
     process.exit(2)
   }
 
-  return { seed, maxGames }
+  if (minAlive !== undefined && (!Number.isFinite(minAlive) || minAlive < 0)) {
+    console.error('error: --min-alive must be a non-negative integer')
+    process.exit(2)
+  }
+
+  return { seed, maxGames, scenario, minAlive, aliveRoles: aliveRoles.length > 0 ? aliveRoles : undefined }
 }
 
 function printUsage(): void {
-  console.error('usage: npm run puzzle -- [<seed>] [--max-games <K>]')
+  console.error('usage: npm run puzzle -- [<seed>] [--max-games <K>] [--scenario <name>] [--min-alive <N>] [--alive-role <role>]...')
 }
 
 async function main(): Promise<void> {
-  const { seed, maxGames } = parseArgs(process.argv.slice(2))
-  const howl = await findTsumiPuzzle(seed, { maxGames })
+  const { seed, maxGames, scenario, minAlive, aliveRoles } = parseArgs(process.argv.slice(2))
+  const howl = await findTsumiPuzzle(seed, { maxGames, scenario, minAlive, aliveRoles })
   if (howl === null) {
     console.error(`no tsumi found for seed=${seed}, maxGames=${maxGames}`)
     process.exit(1)
