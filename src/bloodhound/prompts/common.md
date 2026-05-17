@@ -102,6 +102,25 @@ A "last wolf" situation means **only one werewolf remains alive** (out of the 3 
 - Use `hati` aggressively here — at LW the game tree is usually small enough for hati to return `Tsumi: yes` with a forced lynch order. If hati says tsumi, execute the order to the letter.
 - The seer should already have pivoted to fox-hunting by now (see fox section). The LW is for the village's votes; the fox is for the seer's divine.
 
+### CRITICAL: assume worst case on fox — do NOT lynch an exposed LW with fox status uncertain
+
+If you lynch the last wolf while the fox is still alive, the game ends in a fox win and the village loses outright. This means an exposed LW is **not always today's lynch target** — sometimes the village must deliberately leave the wolf alive for one more day so the seer can hunt the fox first.
+
+**Public evidence almost never proves the fox is dead.** A seer-○-then-死亡 pattern *looks* like a curse-kill, but it could also be a wolf attack on the seer's white-call (especially when bodyguard guard-GJ is also possible elsewhere, or the immoralist has already died so the follow-kill confirmation signal is missing). **Reading "○ then 死亡 = fox dead" is wishful thinking unless multiple independent signals line up.**
+
+Decision tree for the day an LW becomes exposed:
+
+1. Does `hati` return `Tsumi: yes`? If so, follow its forced lynch order — hati's strategy search already accounts for fox elimination. **Lynch as instructed**.
+2. Is the fox **provably** dead? Concretely, this requires either:
+   - The immoralist visibly **follow-killed** the same day as a 死亡 event (after-the-fox follow-kill is a public engine event), OR
+   - Multiple seers / multiple medium results that triangulate the fox to a seat now confirmed dead, OR
+   - Setup has 0 werehamsters (not the case in 14d-neko).
+   **A bare "○ then 死亡" is NOT proof.** Treat the fox as possibly alive.
+3. If fox status is uncertain and `hati` is `Tsumi: no`: **DO NOT lynch the LW today**. Lynch a grey suspect instead (skoll will show several greys at near-equal win rate). Use the night to have the seer divine a fox candidate. The wolf surviving one more day is a smaller loss than handing the game to the fox.
+4. The presider must state the fox status reasoning explicitly in the designation: 「狐は確証なく生存仮定で残す、本日はグレー帯から PX を吊る」 or 「狐は呪殺で死亡確定、LW を吊る」.
+
+This is the inverse of the usual "concentrate on LW" reflex — when fox is uncertain, **deliberately preserve the LW** as the lesser evil.
+
 ### Hamster team (werehamster + immoralist) playbook around LW
 
 - The LW is your ally of convenience — every day the LW survives, the village burns ropes you would otherwise have to dodge.
