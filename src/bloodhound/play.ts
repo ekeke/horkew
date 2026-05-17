@@ -5,22 +5,30 @@
  * (LLM agent). Persistent artifacts (Howl log, per-LLM-call messages,
  * cost summary) are written under `logs/bloodhound/<timestamp>/`.
  *
- * Usage:
- *   ANTHROPIC_API_KEY=sk-... npm run bloodhound:play
+ * Usage (git-bash / sh):
+ *   ANTHROPIC_API_KEY=sk-... npm run bloodhound:play -- --seed 42
+ *   ANTHROPIC_API_KEY=sk-... npm run bloodhound:play -- --seed 7 --dry-run
  *
- * Options (env vars):
- *   BLOODHOUND_MODEL        — Anthropic model (default: claude-sonnet-4-6)
- *   BLOODHOUND_SEED         — game seed (default: 1)
- *   BLOODHOUND_DISCUSSION_ROUNDS — max discussion rounds per day (default: 3)
- *   BLOODHOUND_REPLAY       — path to a previous run's messages/ directory
- *                             (deterministic replay; same seed required)
- *   BLOODHOUND_DRY_RUN      — set to "1" to print the first built prompt and
- *                             exit without making any LLM call (cost $0).
- *                             Useful for inspecting prompt content during
- *                             development.
- *   BLOODHOUND_DRY_RUN_SEAT — only used when DRY_RUN is on. Seat number to
- *                             wait for; earlier seats' prompts are skipped.
- *                             Example: "5" → exit on seat-5's first prompt.
+ *   The `--` after the script name lets npm hand the remaining flags to
+ *   play.ts unchanged.
+ *
+ * Options:
+ *   --seed N             game seed (default: 1)
+ *   --model NAME         Anthropic model (default: claude-sonnet-4-6)
+ *   --rounds N           max discussion rounds per day (default: 3)
+ *   --replay PATH        path to a previous run's dir or messages/ subdir
+ *                        (deterministic replay; same seed required)
+ *   --dry-run            print the first built prompt and exit without
+ *                        making any LLM call (cost $0). For prompt debug.
+ *   --dry-run-seat N     with --dry-run, skip until reaching this seat
+ *   -h, --help           show this message
+ *
+ * ANTHROPIC_API_KEY is read from the environment (it's a secret, not a
+ * flag). When --dry-run is set the key is optional.
+ *
+ * NOTE (PowerShell users only): `npm run … -- --foo` strips the `--foo`
+ * flag on Windows PowerShell. Use `npm --% run bloodhound:play -- --seed 42`
+ * (stop-parsing token) or invoke `node` directly. git-bash works as-is.
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -40,6 +48,74 @@ import type { BloodhoundEvent, ToolCall } from './types.ts'
 // Sonnet 4.6 pricing (USD per 1M tokens) — adjust if the rate changes.
 const PRICE_INPUT_PER_MTOK  = 3
 const PRICE_OUTPUT_PER_MTOK = 15
+
+type CliOptions = {
+  seed: number
+  model: string
+  rounds: number
+  replay: string | null
+  dryRun: boolean
+  dryRunSeat: number | null
+}
+
+const USAGE = `Usage: npm run bloodhound:play -- [options]   (git-bash / sh)
+
+Options:
+  --seed N             game seed (default: 1)
+  --model NAME         Anthropic model (default: claude-sonnet-4-6)
+  --rounds N           max discussion rounds per day (default: 3)
+  --replay PATH        replay from a previous run's dir or messages/ subdir
+  --dry-run            print first built prompt and exit (cost $0)
+  --dry-run-seat N     with --dry-run, skip until reaching this seat
+  -h, --help           show this message
+
+PowerShell note: npm strips --flags. Use \`npm --% run bloodhound:play -- ...\`
+or invoke \`node --experimental-strip-types src/bloodhound/play.ts ...\` directly.
+`
+
+function parseCli(argv: readonly string[]): CliOptions {
+  const opts: CliOptions = {
+    seed: 1,
+    model: 'claude-sonnet-4-6',
+    rounds: 3,
+    replay: null,
+    dryRun: false,
+    dryRunSeat: null,
+  }
+  const takeValue = (flag: string, i: number): string => {
+    const next = argv[i + 1]
+    if (next === undefined || next.startsWith('-')) {
+      throw new Error(`Option ${flag} requires a value`)
+    }
+    return next
+  }
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    switch (arg) {
+      case '-h':
+      case '--help':
+        process.stdout.write(USAGE)
+        process.exit(0)
+        break
+      case '--dry-run':
+        opts.dryRun = true
+        break
+      case '--seed':
+        opts.seed = Number(takeValue(arg, i)); i++; break
+      case '--model':
+        opts.model = takeValue(arg, i); i++; break
+      case '--rounds':
+        opts.rounds = Number(takeValue(arg, i)); i++; break
+      case '--replay':
+        opts.replay = takeValue(arg, i); i++; break
+      case '--dry-run-seat':
+        opts.dryRunSeat = Number(takeValue(arg, i)); i++; break
+      default:
+        throw new Error(`Unknown option: ${arg}\n${USAGE}`)
+    }
+  }
+  return opts
+}
 
 /**
  * Load a replay map from a previous run's messages directory.
@@ -61,28 +137,21 @@ function loadReplayMap(dir: string): Map<string, ReplayRecord> {
 }
 
 async function main(): Promise<void> {
+  const cli = parseCli(process.argv.slice(2))
+
   const scenarioName = '14d-neko'
   const scenario = findScenario(scenarioName)
   if (!scenario) throw new Error(`Scenario not found: ${scenarioName}`)
 
-  const seed = Number(process.env.BLOODHOUND_SEED ?? '1')
-  const model = process.env.BLOODHOUND_MODEL ?? 'claude-sonnet-4-6'
-  const maxRounds = Number(process.env.BLOODHOUND_DISCUSSION_ROUNDS ?? '3')
-  const replayPath = process.env.BLOODHOUND_REPLAY
-  const dryRun = process.env.BLOODHOUND_DRY_RUN === '1'
-  const dryRunSeat = process.env.BLOODHOUND_DRY_RUN_SEAT !== undefined
-    ? Number(process.env.BLOODHOUND_DRY_RUN_SEAT)
-    : null
-
   let replayMap: Map<string, ReplayRecord> | undefined
-  if (replayPath) {
+  if (cli.replay) {
     // Accept either a run dir (contains `messages/`) or the messages dir itself
     const messagesDir = (() => {
       try {
-        const inner = join(replayPath, 'messages')
+        const inner = join(cli.replay, 'messages')
         if (statSync(inner).isDirectory()) return inner
       } catch { /* ignore */ }
-      return replayPath
+      return cli.replay
     })()
     replayMap = loadReplayMap(messagesDir)
     console.log(`[bloodhound] replay map loaded from ${messagesDir} (${replayMap.size} records)`)
@@ -90,34 +159,34 @@ async function main(): Promise<void> {
 
   const config: GameConfig = {
     roles: scenarioToRoles(scenario),
-    seed,
+    seed: cli.seed,
     hasFirstGhost: scenario.hasFirstGhost ?? false,
     revoteConfig: scenario.revoteConfig,
     nameStyle: 'seat',
   }
 
   const logger = new BloodhoundLogger()
-  console.log(`[bloodhound] starting game (scenario=${scenarioName}, seed=${seed}, model=${model})`)
+  console.log(`[bloodhound] starting game (scenario=${scenarioName}, seed=${cli.seed}, model=${cli.model})`)
   console.log(`[bloodhound] log dir: ${logger.runDir}`)
 
   // In dry-run mode we never hit the API; AnthropicClient still requires an
   // API key in its constructor, so stub it with a placeholder. The handler's
   // onPromptBuilt callback exits before any client method is called.
   const client = new AnthropicClient({
-    model,
-    apiKey: dryRun ? (process.env.ANTHROPIC_API_KEY ?? 'sk-dry-run-placeholder') : undefined,
+    model: cli.model,
+    apiKey: cli.dryRun ? (process.env.ANTHROPIC_API_KEY ?? 'sk-dry-run-placeholder') : undefined,
   })
   const handlers = createBloodhoundHandlers({
     client,
     config: { roles: config.roles, seed: config.seed },
-    maxDiscussionRounds: maxRounds,
+    maxDiscussionRounds: cli.rounds,
     replayMap,
-    dryRun,
-    onPromptBuilt: dryRun ? (info) => {
+    dryRun: cli.dryRun,
+    onPromptBuilt: cli.dryRun ? (info) => {
       // Optional seat filter: skip until we reach the requested seat. Day-0
       // night actions don't run callLLM (handler picks random), so for any
       // seat the first hit is its Day-1 discussion round-1 prompt.
-      if (dryRunSeat !== null && info.seat !== dryRunSeat) return
+      if (cli.dryRunSeat !== null && info.seat !== cli.dryRunSeat) return
       const round = info.discussionRound !== undefined ? ` r${info.discussionRound}` : ''
       process.stdout.write(`\n========== seat-${info.seat} ${info.phase}${round} ==========\n\n`)
       process.stdout.write(`---------- SYSTEM ----------\n${info.system}\n\n`)
@@ -154,7 +223,7 @@ async function main(): Promise<void> {
 
   const howl = formatHowl(result.events, result.state, { roles: config.roles, seed: config.seed })
   logger.writeGameHowl(howl)
-  logger.writeCostSummary(model, PRICE_INPUT_PER_MTOK, PRICE_OUTPUT_PER_MTOK)
+  logger.writeCostSummary(cli.model, PRICE_INPUT_PER_MTOK, PRICE_OUTPUT_PER_MTOK)
 
   console.log(`[bloodhound] game finished: ${result.state.result}`)
   console.log(`[bloodhound] artifacts written to ${logger.runDir}`)
