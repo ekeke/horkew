@@ -169,13 +169,13 @@ export function createBloodhoundHandlers(
 
   function deriveMediumHistory(
     _medium: PlayerState, state: GameState,
-  ): Array<{ day: number; result: 'human' | 'wolf' }> {
-    const out: Array<{ day: number; result: 'human' | 'wolf' }> = []
+  ): Array<{ day: number; executedSeat: number; result: 'human' | 'wolf' }> {
+    const out: Array<{ day: number; executedSeat: number; result: 'human' | 'wolf' }> = []
     for (const [day, seat] of state.executionHistory.entries()) {
       const executed = state.players.find(p => p.seat === seat)
       if (!executed) continue
       const isWolf = executed.role === 'werewolf'
-      out.push({ day, result: isWolf ? 'wolf' : 'human' })
+      out.push({ day, executedSeat: seat, result: isWolf ? 'wolf' : 'human' })
     }
     return out.sort((a, b) => a.day - b.day)
   }

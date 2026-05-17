@@ -72,7 +72,7 @@ export type PrivateInfo = {
   immoralistKnownFox?: number
   divineHistory?: ReadonlyArray<{ day: number; target: number; result: 'human' | 'wolf' }>
   guardHistory?: ReadonlyArray<{ day: number; target: number }>
-  mediumHistory?: ReadonlyArray<{ day: number; result: 'human' | 'wolf' }>
+  mediumHistory?: ReadonlyArray<{ day: number; executedSeat?: number; result: 'human' | 'wolf' }>
 }
 
 export type BuildPromptInput = {
@@ -178,9 +178,14 @@ function renderPrivateInfo(input: BuildPromptInput): string {
     }
   }
   if (info.mediumHistory && info.mediumHistory.length > 0) {
-    lines.push(`- Your medium history:`)
+    // EXECUTION results only. The medium NEVER receives info about night-kill
+    // victims (first ghost / wolf attacks / curse / follow). Render the
+    // executed seat by number so the LLM cannot misread it as "the seat that
+    // died last night".
+    lines.push(`- Your medium history (species of players EXECUTED, never night-kill victims):`)
     for (const r of info.mediumHistory) {
-      lines.push(`  - Day ${r.day} executed: ${r.result}`)
+      const seatStr = r.executedSeat !== undefined ? `seat-${r.executedSeat}` : '(unknown seat)'
+      lines.push(`  - Day ${r.day} の処刑者 ${seatStr} → ${r.result === 'wolf' ? '●（人狼/狂信者）' : '○（人間）'}`)
     }
   }
   return lines.length > 2 ? lines.join('\n') : ''
