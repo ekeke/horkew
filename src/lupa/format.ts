@@ -74,7 +74,11 @@ export function formatHowl(events: readonly any[], state: GameState, config: Lup
         break
       }
       case 'speech': {
-        lines.push(`${playerName(event.actor)} > ${event.text}`)
+        // Collapse newlines: the howl parser is line-oriented and would
+        // treat each post-newline line as a separate (unknown) statement,
+        // which makes the whole log unparseable and breaks retar.
+        const oneLine = event.text.replace(/\r?\n+/g, ' ')
+        lines.push(`${playerName(event.actor)} > ${oneLine}`)
         break
       }
       case 'night_kill':
