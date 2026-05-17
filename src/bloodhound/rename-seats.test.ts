@@ -16,15 +16,15 @@ describe('renameSeatNames', () => {
   test('replaces single-digit names', () => {
     const players = [p(1, '占1'), p(4, '狼4'), p(7, '占7')]
     const text = '++占1、狼4、占7'
-    assert.equal(renameSeatNames(text, players), '++seat-1、seat-4、seat-7')
+    assert.equal(renameSeatNames(text, players), '++P1、P4、P7')
   })
 
   test('handles two-digit names without partial-match corruption', () => {
-    // If "狼1" were replaced before "狼12", we'd corrupt "狼12" into "seat-12".
+    // If "狼1" were replaced before "狼12", we'd corrupt "狼12" into "P12".
     // The function must replace longest-name-first.
     const players = [p(1, '狼1'), p(12, '狼12'), p(13, '狼13')]
     const text = '狼1、狼12、狼13'
-    assert.equal(renameSeatNames(text, players), 'seat-1、seat-12、seat-13')
+    assert.equal(renameSeatNames(text, players), 'P1、P12、P13')
   })
 
   test('mixed role abbreviations', () => {
@@ -35,14 +35,14 @@ describe('renameSeatNames', () => {
     const text = '++信1、狐2、村3、共10、霊12'
     assert.equal(
       renameSeatNames(text, players),
-      '++seat-1、seat-2、seat-3、seat-10、seat-12',
+      '++P1、P2、P3、P10、P12',
     )
   })
 
   test('idempotent on already-renamed text', () => {
     const players = [p(1, '占1')]
-    const text = 'seat-1 said hello'
-    assert.equal(renameSeatNames(text, players), 'seat-1 said hello')
+    const text = 'P1 said hello'
+    assert.equal(renameSeatNames(text, players), 'P1 said hello')
   })
 })
 

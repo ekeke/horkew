@@ -375,7 +375,11 @@ export function createBloodhoundHandlers(
       // Character names are surfaced to the master ONLY at the log
       // boundary (play.ts substitutes seat-N → name in stdout/stderr).
       for (const player of state.players) {
-        player.name = `seat-${player.seat}`
+        // Use a short non-Japanese identifier ("P1" … "P14") instead of
+        // "seat-N". The LLM tends to translate "seat" → 「座」 mid-utterance
+        // ("座-4殿"), producing garbled references. "Pn" survives Japanese
+        // prose unchanged because there's nothing for the model to localise.
+        player.name = `P${player.seat}`
       }
       opts.onState?.(state)
     },

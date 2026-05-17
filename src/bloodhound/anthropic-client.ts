@@ -162,7 +162,7 @@ export class AnthropicClient {
     const system = loadDeceptionPrompt()
     const userPrompt = [
       `persona:`,
-      `  seat: seat-${persona.seat}`,
+      `  seat: P${persona.seat}`,
       `  name: ${persona.name}`,
       `  gender: ${persona.gender}`,
       `  occupation: ${persona.occupation}`,
@@ -472,7 +472,7 @@ function formatRetarResult(result: RetarResult): string {
   const lines: string[] = []
   for (const seat of seats) {
     const roles = [...result.possibilities.get(seat)!].sort()
-    lines.push(`- seat-${seat}: ${roles.length === 0 ? '(contradiction)' : roles.join(', ')}`)
+    lines.push(`- P${seat}: ${roles.length === 0 ? '(contradiction)' : roles.join(', ')}`)
   }
   lines.push(`Max surviving non-village: ${result.maxSurvivingNV}`)
   return lines.join('\n')
@@ -482,11 +482,11 @@ export function formatSkollResult(result: SkollResult): string {
   const lines: string[] = []
   lines.push(`Worlds enumerated: ${result.totalWorlds}${result.truncated ? ' (truncated)' : ''}`)
   lines.push(`Overall best village win rate: ${result.overallWinRate.toFixed(3)}`)
-  lines.push(`Best execution target(s) (tied within ${SKOLL_TIE_TOLERANCE}): ${result.bestSeats.map(s => `seat-${s}`).join(', ')}`)
+  lines.push(`Best execution target(s) (tied within ${SKOLL_TIE_TOLERANCE}): ${result.bestSeats.map(s => `P${s}`).join(', ')}`)
   lines.push(`Per-seat village win rate if executed today (sorted, higher = better for village):`)
   const sorted = [...result.executions].sort((a, b) => b.winRate - a.winRate)
   for (const e of sorted) {
-    lines.push(`  - seat-${e.seat}: ${e.winRate.toFixed(3)}`)
+    lines.push(`  - P${e.seat}: ${e.winRate.toFixed(3)}`)
   }
   return lines.join('\n')
 }
@@ -520,8 +520,8 @@ function summarizeStrategy(node: StrategyNode): string {
       const mask = node.execSetsFromEnd[i]
       const seats = bitsToSeats(mask)
       order.push(seats.length === 1
-        ? `seat-${seats[0]}`
-        : `[${seats.map(s => `seat-${s}`).join('|')}]`)
+        ? `P${seats[0]}`
+        : `[${seats.map(s => `P${s}`).join('|')}]`)
     }
     parts.push(`Forced lynch order: ${order.join(' → ')}`)
   } else {
@@ -531,9 +531,9 @@ function summarizeStrategy(node: StrategyNode): string {
 }
 
 function formatAction(action: VillageAction): string {
-  const out: string[] = [`Today: execute seat-${action.execute}`]
-  if (action.bodyguardTarget !== null) out.push(`guard seat-${action.bodyguardTarget}`)
-  if (action.seerTargets.length > 0) out.push(`divine ${action.seerTargets.map(s => `seat-${s}`).join(', ')}`)
+  const out: string[] = [`Today: execute P${action.execute}`]
+  if (action.bodyguardTarget !== null) out.push(`guard P${action.bodyguardTarget}`)
+  if (action.seerTargets.length > 0) out.push(`divine ${action.seerTargets.map(s => `P${s}`).join(', ')}`)
   return out.join(', ')
 }
 

@@ -27,7 +27,7 @@ Run this loop every single day, no skipping:
    - Top suspect from retar's narrowed pool.
    - The opposing seer in a CO battle (or its weaker side).
    - The grey seat with the most inconsistent behavior.
-3. **Announce the designation in round 1** of discussion: 「今日は seat-X を吊りましょう。理由は ... 。共有として指定します。」
+3. **Announce the designation in round 1** of discussion: 「今日は P-X を吊りましょう。理由は ... 。共有として指定します。」
 4. **Vote for that seat yourself** in the vote phase.
 5. If wolves push back without new evidence, point that out and stick to the designation — the pushback itself is a wolf signal.
 

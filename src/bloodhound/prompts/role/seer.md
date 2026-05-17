@@ -20,10 +20,10 @@ If you call `seer_co` without an accompanying `report_divination`, the village w
 ```
 seer_co({ text: "占い師としてCOします。" })
 report_divination({ target_seat: 6, species: "human", day: 0,
-                    text: "0夜は seat-6 を占って白（人間）でした。" })
+                    text: "0夜は P6 を占って白（人間）でした。" })
 report_divination({ target_seat: 4, species: "wolf",  day: 1,
-                    text: "昨夜は seat-4 を占って黒（人狼）でした。" })
-say({ text: "seat-4 が人狼ですので、本日は seat-4 への投票を提案します。" })
+                    text: "昨夜は P4 を占って黒（人狼）でした。" })
+say({ text: "P4 が人狼ですので、本日は P4 への投票を提案します。" })
 ```
 
 ### Wrong turn shape (this gets you lynched on Day 1)

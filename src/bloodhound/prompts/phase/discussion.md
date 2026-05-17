@@ -6,7 +6,7 @@ It is your turn to speak in the discussion phase. You see the full Howl log of t
   - `say` — utter one message in Japanese. **This is what you should do almost every turn.**
   - `pass` — **strongly discouraged.** Skip your turn only as a last resort (see strict conditions below).
 - You MAY additionally make a CO (`seer_co` / `medium_co` / `bodyguard_co` / `mason_co` / `nekomata_co`) and/or disclose a result (`report_divination` / `report_medium`) in the same turn. **Every CO / report tool takes a required `text` argument** — the Japanese utterance you speak at that moment. Forgetting `text` is a validation error.
-  - Example: `report_medium({ target_seat: 7, species: 'human', day: 1, text: "昨日の seat-7 の霊能結果は白（人間）でした！" })`
+  - Example: `report_medium({ target_seat: 7, species: 'human', day: 1, text: "昨日の P7 の霊能結果は白（人間）でした！" })`
   - The `text` of each CO/report tool, plus the optional `say` text, are concatenated in order into a single speech event that other players hear. So a CO without `text` is invisible to other players (eerie silence).
 - Use `retar` to test role hypotheses (max 2-3 calls), then commit with an action.
 
@@ -14,9 +14,9 @@ It is your turn to speak in the discussion phase. You see the full Howl log of t
 
 Always `say`. Even a one-line position update is better than silence:
 
-- "seat-X の指定に同意、私の票も seat-X" — vote endorsement.
-- "seat-12 の霊能結果待ち、現時点では判断保留" — state declaration.
-- "seat-7 は信用、対抗 CO が出るまで真占い扱い" — alignment.
+- "P-X の指定に同意、私の票も P-X" — vote endorsement.
+- "P12 の霊能結果待ち、現時点では判断保留" — state declaration.
+- "P7 は信用、対抗 CO が出るまで真占い扱い" — alignment.
 
 ## `pass` is allowed only in extreme cases
 

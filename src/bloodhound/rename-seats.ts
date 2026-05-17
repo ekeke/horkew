@@ -22,7 +22,7 @@ export function renameSeatNames(text: string, players: readonly PlayerState[]): 
   const sorted = [...players].sort((a, b) => b.name.length - a.name.length)
   let result = text
   for (const p of sorted) {
-    result = result.split(p.name).join(`seat-${p.seat}`)
+    result = result.split(p.name).join(`P${p.seat}`)
   }
   return result
 }

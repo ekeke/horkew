@@ -141,7 +141,7 @@ function renderSelf(input: BuildPromptInput): string {
   return [
     `## You`,
     ``,
-    `- Seat: seat-${selfSeat}`,
+    `- Seat: P${selfSeat}`,
     `- Role: ${role}`,
     `- Character: ${persona.name} (${persona.gender}, ${persona.occupation})`,
     `- Personality: ${persona.trait}`,
@@ -154,27 +154,27 @@ function renderPrivateInfo(input: BuildPromptInput): string {
   if (!info) return ''
   const lines: string[] = [`## Private knowledge`, ``]
   if (info.masonPartner !== undefined) {
-    lines.push(`- Mason partner: seat-${info.masonPartner}`)
+    lines.push(`- Mason partner: P${info.masonPartner}`)
   }
   if (info.fellowWolves && info.fellowWolves.length > 0) {
-    lines.push(`- Fellow wolves: ${info.fellowWolves.map(s => `seat-${s}`).join(', ')}`)
+    lines.push(`- Fellow wolves: ${info.fellowWolves.map(s => `P${s}`).join(', ')}`)
   }
   if (info.fanaticKnownWolves && info.fanaticKnownWolves.length > 0) {
-    lines.push(`- Wolves you secretly know (fanatic): ${info.fanaticKnownWolves.map(s => `seat-${s}`).join(', ')}`)
+    lines.push(`- Wolves you secretly know (fanatic): ${info.fanaticKnownWolves.map(s => `P${s}`).join(', ')}`)
   }
   if (info.immoralistKnownFox !== undefined) {
-    lines.push(`- Werehamster you secretly know (immoralist): seat-${info.immoralistKnownFox}`)
+    lines.push(`- Werehamster you secretly know (immoralist): P${info.immoralistKnownFox}`)
   }
   if (info.divineHistory && info.divineHistory.length > 0) {
     lines.push(`- Your divine history:`)
     for (const r of info.divineHistory) {
-      lines.push(`  - Night ${r.day}: seat-${r.target} → ${r.result}`)
+      lines.push(`  - Night ${r.day}: P${r.target} → ${r.result}`)
     }
   }
   if (info.guardHistory && info.guardHistory.length > 0) {
     lines.push(`- Your guard history:`)
     for (const r of info.guardHistory) {
-      lines.push(`  - Night ${r.day}: seat-${r.target}`)
+      lines.push(`  - Night ${r.day}: P${r.target}`)
     }
   }
   if (info.mediumHistory && info.mediumHistory.length > 0) {
@@ -184,7 +184,7 @@ function renderPrivateInfo(input: BuildPromptInput): string {
     // died last night".
     lines.push(`- Your medium history (species of players EXECUTED, never night-kill victims):`)
     for (const r of info.mediumHistory) {
-      const seatStr = r.executedSeat !== undefined ? `seat-${r.executedSeat}` : '(unknown seat)'
+      const seatStr = r.executedSeat !== undefined ? `P${r.executedSeat}` : '(unknown seat)'
       lines.push(`  - Day ${r.day} の処刑者 ${seatStr} → ${r.result === 'wolf' ? '●（人狼/狂信者）' : '○（人間）'}`)
     }
   }
@@ -219,7 +219,7 @@ function renderCoTable(vs: VillageStatus | null | undefined): string {
     for (const e of entries) {
       const dayStr = e.claimedAt !== undefined ? `D${e.claimedAt}` : 'D?'
       const extras = renderCoExtras(e.role, e.status)
-      lines.push(`- seat-${e.seat} — ${e.role} (CO on ${dayStr})${extras.length > 0 ? ' — ' + extras.join(' — ') : ''}`)
+      lines.push(`- P${e.seat} — ${e.role} (CO on ${dayStr})${extras.length > 0 ? ' — ' + extras.join(' — ') : ''}`)
     }
     const claimed = new Set(entries.map(e => e.role))
     const claimable: SystemRole[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
@@ -249,11 +249,11 @@ function renderCoExtras(role: SystemRole, status: SeatStatus): string[] {
     for (const night of nights) {
       const a = status.assertions.get(night)!
       const sym = a.species === 'wolf' ? '●' : a.species === 'human' ? '○' : '?'
-      results.push(`D${night} seat-${a.target}→${sym}`)
+      results.push(`D${night} P${a.target}→${sym}`)
     }
     const forecastDays = [...status.forecasts.keys()].sort((a, b) => a - b)
     for (const day of forecastDays) {
-      results.push(`D${day} forecast seat-${status.forecasts.get(day)!}`)
+      results.push(`D${day} forecast P${status.forecasts.get(day)!}`)
     }
     if (results.length > 0) extras.push(`results: ${results.join(', ')}`)
   } else if (role === 'medium') {
@@ -262,12 +262,12 @@ function renderCoExtras(role: SystemRole, status: SeatStatus): string[] {
     for (const day of days) {
       const a = status.assertions.get(day)!
       const sym = a.species === 'wolf' ? '●' : a.species === 'human' ? '○' : '?'
-      results.push(`D${day} seat-${a.target}→${sym}`)
+      results.push(`D${day} P${a.target}→${sym}`)
     }
     if (results.length > 0) extras.push(`results: ${results.join(', ')}`)
   } else if (role === 'bodyguard') {
     const nights = [...status.actions.keys()].sort((a, b) => a - b)
-    const guards = nights.map(n => `D${n} seat-${status.actions.get(n)!}`)
+    const guards = nights.map(n => `D${n} P${status.actions.get(n)!}`)
     if (guards.length > 0) extras.push(`guards: ${guards.join(', ')}`)
   } else if (role === 'mason') {
     // Partners can land at either negative-key (joint mason statement) or
@@ -277,7 +277,7 @@ function renderCoExtras(role: SystemRole, status: SeatStatus): string[] {
       if (a.target !== undefined) seen.add(a.target)
     }
     if (seen.size > 0) {
-      const partners = [...seen].sort((a, b) => a - b).map(s => `seat-${s}`)
+      const partners = [...seen].sort((a, b) => a - b).map(s => `P${s}`)
       extras.push(`partner: ${partners.join(', ')}`)
     }
   }
@@ -309,7 +309,7 @@ function renderRetarSection(retar: RetarResult, selfSeat: number, header: string
       const set = retar.possibilities.get(seat)!
       const roles = [...set].sort()
       const tag = seat === selfSeat ? ' (you)' : ''
-      lines.push(`- seat-${seat}${tag}: ${roles.length === 0 ? '(none — contradiction)' : roles.join(', ')}`)
+      lines.push(`- P${seat}${tag}: ${roles.length === 0 ? '(none — contradiction)' : roles.join(', ')}`)
     }
   }
   lines.push(``)
@@ -360,14 +360,14 @@ function renderLegalActions(input: BuildPromptInput): string {
   }
   lines.push(`- Legal tools: ${legal.toolNames.join(', ')}`)
   if (legal.targets.vote) {
-    lines.push(`- Vote candidates: ${legal.targets.vote.map(s => `seat-${s}`).join(', ')}`)
+    lines.push(`- Vote candidates: ${legal.targets.vote.map(s => `P${s}`).join(', ')}`)
   } else if (voteCandidates && voteCandidates.length > 0) {
-    lines.push(`- Vote candidates: ${voteCandidates.map(s => `seat-${s}`).join(', ')}`)
+    lines.push(`- Vote candidates: ${voteCandidates.map(s => `P${s}`).join(', ')}`)
   }
   for (const key of ['divine', 'guard', 'attack', 'report_divination', 'report_medium'] as const) {
     const targets = legal.targets[key]
     if (!targets || targets.length === 0) continue
-    lines.push(`- ${key} candidates: ${targets.map(s => `seat-${s}`).join(', ')}`)
+    lines.push(`- ${key} candidates: ${targets.map(s => `P${s}`).join(', ')}`)
   }
   return lines.join('\n')
 }

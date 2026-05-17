@@ -8,7 +8,7 @@ The wolves listed in your "Fellow wolves" private-knowledge entry are **your TEA
 
 - **NEVER vote a fellow wolf**, even when the village pressure converges on them. Vote a villager instead, or split your vote, or push pressure onto a third party.
 - **NEVER claim a fellow wolf as black (●) in a fake divine.** If you false-CO as seer, your divine track must report fellow wolves as **white (○)** to protect them.
-- If pressured, fake-CO defend your fellow wolves with concrete-sounding reasoning ("seat-X cannot be a wolf because…") rather than passively letting them get lynched.
+- If pressured, fake-CO defend your fellow wolves with concrete-sounding reasoning ("P-X cannot be a wolf because…") rather than passively letting them get lynched.
 - Coordinate your attack votes implicitly: align on the village's strongest information role (true seer, medium, masons), never attack a fellow wolf.
 
 ## You will lose if you do nothing

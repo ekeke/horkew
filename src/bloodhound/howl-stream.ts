@@ -26,7 +26,7 @@ const SPECIES_GLYPH: Record<Exclude<EnumSpecies, null>, string> = {
  * persona names are used, so play.ts threads a name map through.
  */
 function fmtSeat(seat: number, names?: ReadonlyMap<number, string>): string {
-  return names?.get(seat) ?? `seat-${seat}`
+  return names?.get(seat) ?? `P${seat}`
 }
 
 function fmtResults(

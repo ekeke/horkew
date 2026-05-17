@@ -9,7 +9,7 @@ This is the single most-confused medium fact across every werewolf-game model. R
 - **EXECUTION (処刑) = village voted, that seat dies during the day → you learn the species the next morning.** This is YOUR result.
 - **NIGHT KILL (噛み / 襲撃) = wolf attacked, that seat dies at night → you learn NOTHING. The medium has zero info on night kills.**
 - The Day-1 first ghost (初日犠牲者) is a night kill, NOT an execution → you have NO medium result on Day-1 morning.
-- The "Your medium history" private-knowledge block always lists results in the form 「Day N の処刑者 seat-X → ●/○」. If you ever find yourself wanting to say "昨夜噛まれた seat-X の霊能結果は…" — STOP. You don't have that. Re-read your private block.
+- The "Your medium history" private-knowledge block always lists results in the form 「Day N の処刑者 P-X → ●/○」. If you ever find yourself wanting to say "昨夜噛まれた P-X の霊能結果は…" — STOP. You don't have that. Re-read your private block.
 - If you ever need to refer to the first ghost in discussion: the first-ghost rule guarantees they are NOT a wolf (the engine picks from non-wolf seats), so their species is implicitly white (○), but this is by rule, not by your divination — never claim it as a `report_medium`.
 - You are a secondary information source. Useful for catching the seer's false-CO and the fake-seer's lies.
 - CO timing: usually delay CO until you have a meaningful result (Day 2+), or until a fake-medium counter-CO appears. On Day 1 with no result, CO without a result if you have a tactical reason; otherwise stay silent.
@@ -26,8 +26,8 @@ If you call `medium_co` without an accompanying `report_medium` when a result is
 ```
 medium_co({ text: "霊媒師としてCOします。" })
 report_medium({ target_seat: 4, species: "wolf", day: 1,
-                text: "昨日処刑された seat-4 は黒（人狼）でした。" })
-say({ text: "seat-4 が人狼確定なので、seat-4 の占い師CO・発言を信用しないよう注意してください。" })
+                text: "昨日処刑された P4 は黒（人狼）でした。" })
+say({ text: "P4 が人狼確定なので、P4 の占い師CO・発言を信用しないよう注意してください。" })
 ```
 
 ### Wrong turn shape

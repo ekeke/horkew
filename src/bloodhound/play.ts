@@ -52,12 +52,14 @@ const PRICE_INPUT_PER_MTOK  = 3
 const PRICE_OUTPUT_PER_MTOK = 15
 
 /**
- * Substitute every "seat-N" occurrence in `text` with the corresponding
- * character name from `names`. LLM-facing surfaces all use "seat-N", but
- * the master watches stdout/stderr and prefers persona names there.
+ * Substitute every "P<N>" occurrence in `text` with the corresponding
+ * character name from `names`. LLM-facing surfaces all use "P1" … "P14",
+ * but the master watches stdout/stderr and prefers persona names there.
+ * Word-boundary anchors avoid clobbering unrelated identifiers like
+ * "Persona" — \b after \d+ ensures we only match the P<digits> form.
  */
 function replaceSeatRefs(text: string, names: ReadonlyMap<number, string>): string {
-  return text.replace(/seat-(\d+)/g, (_, n) => names.get(Number(n)) ?? `seat-${n}`)
+  return text.replace(/\bP(\d+)\b/g, (m, n) => names.get(Number(n)) ?? m)
 }
 
 type CliOptions = {
@@ -211,7 +213,7 @@ async function main(): Promise<void> {
       // seat the first hit is its Day-1 discussion round-1 prompt.
       if (cli.dryRunSeat !== null && info.seat !== cli.dryRunSeat) return
       const round = info.discussionRound !== undefined ? ` r${info.discussionRound}` : ''
-      process.stdout.write(`\n========== seat-${info.seat} ${info.phase}${round} ==========\n\n`)
+      process.stdout.write(`\n========== P${info.seat} ${info.phase}${round} ==========\n\n`)
       process.stdout.write(`---------- SYSTEM ----------\n${info.system}\n\n`)
       process.stdout.write(`---------- USER ----------\n${info.user}\n\n`)
       process.stdout.write(`[bloodhound] DRY_RUN: prompt emitted, exiting.\n`)
@@ -229,12 +231,12 @@ async function main(): Promise<void> {
           + (aux.craft_deception > 0 ? ` deceive=${aux.craft_deception}` : '')
         : ''
       const iterStr = ex.iterations && ex.iterations.length > 1 ? ` iter=${ex.iterations.length}` : ''
-      const actor = seatNames?.get(ex.seat) ?? `seat-${ex.seat}`
+      const actor = seatNames?.get(ex.seat) ?? `P${ex.seat}`
       console.log(`[bloodhound] LLM call ${actor} ${ex.phase} ${roundStr}(in=${ex.usage.inputTokens} out=${ex.usage.outputTokens}${auxStr}${iterStr})`)
     },
     onSpeechEvent: (ev) => {
       logger.logSpeech(ev)
-      const speaker = seatNames?.get(ev.actor) ?? `seat-${ev.actor}`
+      const speaker = seatNames?.get(ev.actor) ?? `P${ev.actor}`
       // The LLM writes "seat-N さん" inside the speech text; substitute those
       // too so the master sees a fully name-flavoured log.
       const body = seatNames ? replaceSeatRefs(ev.text, seatNames) : ev.text
