@@ -108,7 +108,7 @@ export const nekomataCoTool: ToolDef = {
 
 export const reportDivinationTool: ToolDef = {
   name: 'report_divination',
-  description: 'Disclose a divination result. Use only if you have COed as seer (truthful seer or false-CO). text is the Japanese utterance you speak when reporting.',
+  description: 'Disclose a divination result. Use only if you have COed as seer (truthful seer or false-CO). target_seat = the seat YOU CHOSE to divine that night (NOT a victim of an attack or first ghost — the seer learns species, not death). text is the Japanese utterance you speak when reporting.',
   input_schema: {
     type: 'object',
     properties: {
@@ -123,7 +123,7 @@ export const reportDivinationTool: ToolDef = {
 
 export const reportMediumTool: ToolDef = {
   name: 'report_medium',
-  description: 'Disclose a medium result. Use only if you have COed as medium. text is the Japanese utterance you speak when reporting.',
+  description: 'Disclose a medium result. Use only if you have COed as medium. target_seat MUST be the player who was EXECUTED (処刑) at the end of the previous day — NEVER a player who died by night attack (噛み/襲撃), first ghost, curse, or follow-kill. The medium has NO information on night deaths. Check your private knowledge "Your medium history" block for the correct seat (formatted as 「Day N の処刑者 seat-X → species」). text is the Japanese utterance you speak when reporting.',
   input_schema: {
     type: 'object',
     properties: {
