@@ -163,7 +163,9 @@ export class AnthropicClient {
     const userPrompt = [
       `persona:`,
       `  seat: seat-${persona.seat}`,
+      `  name: ${persona.name}`,
       `  gender: ${persona.gender}`,
+      `  occupation: ${persona.occupation}`,
       `  trait: ${persona.trait}`,
       `  voice sample: ${persona.toneSample}`,
       ``,

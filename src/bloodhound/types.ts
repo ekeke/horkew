@@ -41,8 +41,10 @@ export type Gender = 'male' | 'female'
 
 export type Persona = {
   seat: number
+  name: string        // Character name (e.g. "マドック")
   gender: Gender
-  trait: string       // English short trait (e.g. "calm analyst", "cheerful")
+  occupation: string  // Job / role-in-the-village (e.g. "医師", "騎士団長")
+  trait: string       // Short personality description (e.g. "calm analyst")
   toneSample: string  // Japanese sample utterance to anchor LLM tone
 }
 

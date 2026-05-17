@@ -143,7 +143,8 @@ function renderSelf(input: BuildPromptInput): string {
     ``,
     `- Seat: seat-${selfSeat}`,
     `- Role: ${role}`,
-    `- Persona: ${persona.gender}, ${persona.trait}`,
+    `- Character: ${persona.name} (${persona.gender}, ${persona.occupation})`,
+    `- Personality: ${persona.trait}`,
     `  - Voice sample (use this tone for \`say\` only): "${persona.toneSample}"`,
   ].join('\n')
 }
