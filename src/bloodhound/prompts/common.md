@@ -52,6 +52,32 @@ When you have a divine result, a medium result, a mason partner, or any other cl
 
 When you (as a listener) want to evaluate someone's claim, look at the **Howl log's structured CO/result lines** (e.g. `seat-1 占いCO 1D seat-6○ 2D seat-3○`), not just their utterances. If a seer claims "I divined seat-X" in speech but the Howl log shows no corresponding `report_divination` entry, **treat that claim as missing — they have not actually filed it through the proper channel**. Demand they call `report_divination` so the result is recorded.
 
+## The werehamster (fox) MUST be eliminated — village's silent deadline
+
+The werehamster (妖狐 / 狐) is a separate third faction that wins simply by **being alive when the game ends**. Killing every werewolf is **not enough** for the village — if the fox survives, the village loses too. Past runs have repeatedly lost this way: the village cleans up the wolves while ignoring the fox, then concedes the game to a single hidden seat.
+
+### Hard facts about the fox
+
+- **Vote / execution does NOT reveal them as fox** (they show as 人間 in medium's result if executed, indistinguishable from any other villager).
+- **Wolf night attacks do NOT kill the fox** (attack passes through harmlessly).
+- **The only way to kill the fox is for the seer to divine them** ("curse death" — the engine kills the fox the morning after they are divined; medium does not learn fox identity either).
+- Their teammate the **immoralist (背徳者)** knows who the fox is and will actively misdirect blame.
+
+### Village priorities (in this order)
+
+1. Identify and execute / contain all werewolves.
+2. **Identify and have the seer divine the werehamster.** The seer's divine slot every night is precious — once wolves are confirmed-white narrowed enough, **the seer must pivot to fox-hunting** even if some wolf candidates remain.
+3. Reach the endgame with at least 1 seer alive and all foxes divined.
+
+The skoll win-rate numbers in your prompt already bake in a -1.3 penalty for fox-win outcomes, so seats that lynch in a way that lets the fox survive will see their suggested moves rank low. **Trust the win-rate signal** — when skoll prefers a seemingly counterintuitive target, it is often because that move keeps the fox-elimination path alive.
+
+### Action items by role
+
+- **Seer**: After 1-2 nights confirming key gray-area suspects as wolves, **shift divine targets to grays who could be the fox** (grays with no consistent wolf-pattern behavior, especially talkative defenders of the suspect-pool). Divining a fox kills them silently the next morning — that death in the log is your team's biggest win short of executing all wolves.
+- **Mason / confirmed-white presider**: Explicitly remind the seer in discussion: 「次の占いは狐候補を狙ってください」 / 「狼の絞り込みが進んだので、占いは狐視点に切り替える時です」.
+- **Other villagers**: Notice if a seat is suspiciously *enthusiastic* about pushing the lynch onto wolves while never raising suspicion of the fox — that pattern fits immoralist (defending the fox by redirecting).
+- **Wolves / fanatic**: The fox is also your enemy. A fox-win means you lose too. If the village is missing the fox, you may sometimes need to feed information that helps them find it — better than losing the whole game to a third party.
+
 ## Logical rigor over consensus
 
 Other seats can chain to a conclusion that *sounds* coherent but isn't actually supported by evidence. Once one seat says it, others tend to echo it — this is the loudest way for the village to walk off a cliff together. Your responsibility is to keep the reasoning honest.
