@@ -13,7 +13,7 @@
  *   play.ts unchanged.
  *
  * Options:
- *   --seed N             game seed (default: 1)
+ *   --seed N             game seed (default: random; printed at startup)
  *   --model NAME         Anthropic model (default: claude-sonnet-4-6)
  *   --rounds N           max discussion rounds per day (default: 3)
  *   --replay PATH        path to a previous run's dir or messages/ subdir
@@ -62,7 +62,7 @@ type CliOptions = {
 const USAGE = `Usage: npm run bloodhound:play -- [options]   (git-bash / sh)
 
 Options:
-  --seed N             game seed (default: 1)
+  --seed N             game seed (default: random; printed at startup)
   --model NAME         Anthropic model (default: claude-sonnet-4-6)
   --rounds N           max discussion rounds per day (default: 3)
   --replay PATH        replay from a previous run's dir or messages/ subdir
@@ -76,7 +76,11 @@ or invoke \`node --experimental-strip-types src/bloodhound/play.ts ...\` directl
 
 function parseCli(argv: readonly string[]): CliOptions {
   const opts: CliOptions = {
-    seed: 1,
+    // Random by default so successive runs explore different role
+    // assignments. The chosen value is printed in the startup log and
+    // recorded in the game.howl so any run can be replayed by passing
+    // `--seed <N>` explicitly.
+    seed: Math.floor(Math.random() * 1_000_000),
     model: 'claude-sonnet-4-6',
     rounds: 3,
     replay: null,
