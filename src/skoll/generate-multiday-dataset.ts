@@ -49,6 +49,11 @@ const VIEWERS_PER_SNAPSHOT = 2
 // 1 にすると全 day、 3 にすると Day 1-2 を skip
 const MIN_SNAPSHOT_DAY = parseInt(process.env.SKOLL_MULTIDAY_MIN_DAY ?? '1', 10)
 
+// recursiveSkoll の lookahead 深さ (default = 1)。
+// depth >= 2 は cost 爆発するので depth-min-day と組み合わせて day 別に切替推奨。
+// CLI: --depth 2 --depth-min-day 4 → Day 1-3 は depth=1、 Day 4+ は depth=2
+const DEFAULT_DEPTH = 1
+
 // ---- snapshot capture adapter ----
 type Snapshot = {
   day: number
@@ -130,6 +135,7 @@ function generateSample(
   config: GameConfig,
   viewer: { seat: number, role: SystemRole } | null,
   gameSeed: number,
+  maxDepth: number,
 ): Sample | null {
   let assumptions: Map<number, SystemRole> | undefined
   if (viewer !== null) {
@@ -159,8 +165,8 @@ function generateSample(
   }
   if (aliveSeats.length < 2) return null  // recursive skoll に意味なし
 
-  // recursive skoll
-  const result = recursiveSkoll(possibilitiesObj, detailed.setup, vs)
+  // recursive skoll (depth は呼び出し側で day 別に決定)
+  const result = recursiveSkoll(possibilitiesObj, detailed.setup, vs, { maxDepth })
 
   const labels = result.perX.map(r => ({ seat: r.executeToday, winRate: r.expectedWinRate }))
 
@@ -204,9 +210,16 @@ const RESUME = parseArg('resume') === 'true' || parseArg('resume') === '1'
 const AGENT_MODE_ARG = parseArg('agent-mode') ?? 'heuristic'
 const AGENT_MODE: AgentMode = (AGENT_MODE_ARG === 'random' || AGENT_MODE_ARG === 'mixed' ? AGENT_MODE_ARG : 'heuristic')
 
+// depth 設定: --depth N と --depth-min-day D
+//   Day < D の snapshot は depth=1 (cheap)
+//   Day >= D の snapshot は depth=N (deep, cost 注意)
+// 全 snapshot を depth=N にしたい場合は --depth N --depth-min-day 1 (or 省略)
+const DEPTH_N = parseInt(parseArg('depth') ?? String(DEFAULT_DEPTH), 10)
+const DEPTH_MIN_DAY = parseInt(parseArg('depth-min-day') ?? '1', 10)
+
 // ---- main ----
 async function main(): Promise<void> {
-  console.log(`[generate-multiday-dataset] games=${NUM_GAMES} out=${OUT_PATH} seed_base=${SEED_BASE} resume=${RESUME} agent_mode=${AGENT_MODE}`)
+  console.log(`[generate-multiday-dataset] games=${NUM_GAMES} out=${OUT_PATH} seed_base=${SEED_BASE} resume=${RESUME} agent_mode=${AGENT_MODE} depth=${DEPTH_N} depth_min_day=${DEPTH_MIN_DAY}`)
 
   mkdirSync(dirname(OUT_PATH), { recursive: true })
   if (!RESUME && existsSync(OUT_PATH)) {
@@ -249,10 +262,11 @@ async function main(): Promise<void> {
         if (picked) viewers.push(picked)
       }
 
+      const depthForSnapshot = snapshot.day >= DEPTH_MIN_DAY ? DEPTH_N : 1
       for (const viewer of viewers) {
         let sample: Sample | null
         try {
-          sample = generateSample(snapshot, config, viewer, seed)
+          sample = generateSample(snapshot, config, viewer, seed, depthForSnapshot)
         } catch (e) {
           failedSnapshots++
           continue

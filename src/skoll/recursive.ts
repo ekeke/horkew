@@ -18,12 +18,19 @@
  *   3. 各 (X, Y, Z, G) tuple で per-world simulation + obsKey group 化 + day-2 leaf 評価
  *   4. X が nekomata の world は curse 候補列挙して 1/N 加重平均
  *
- * 既知の限界 (今回 polish 後も残る)
- * --------------------------------
- * - depth=1 のみ (翌々日以降は leaf の抽象 minimax)
+ * Depth 拡張 (maxDepth >= 2)
+ * --------------------------
+ * `options.maxDepth = k` を指定すると、 各 obsKey group で「翌朝 skoll」を呼ぶ代わりに
+ * 同 group worlds に対して `recursiveSkollCore(depth=k-1)` を再帰呼び出しする。
+ * depth=2 なら「今日 + 今夜 + 翌日 X' 選択 + 翌夜 + 翌々日抽象 leaf」を表現。
+ *
+ * 既知の限界
+ * ----------
  * - viewer 視点は consumer 側で possibilities を作るときに assumption を入れる
  *   (recursive.ts 自体は viewer-agnostic)
  * - mixed Nash equilibrium は計算せず pure strategy で maxmin (= V* の下界)
+ * - depth >= 2 は Day 2-3 では cost 爆発する (alive ≈ 10 で hours オーダー)。
+ *   Day 4+ または小 alive 盤面でのみ実用的
  */
 
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
@@ -35,7 +42,7 @@ import {
 import { cloneWorld } from '../hati/worlds.ts'
 import { checkOutcome, applyExecution, simulateNight } from '../hati/simulate.ts'
 import { computeScoresForWorld, FOX_WIN_PENALTY } from './world-analysis.ts'
-import { enumerateCanonicalWorlds, computeEquivalenceClasses } from './canonical-worlds.ts'
+import { enumerateCanonicalWorlds } from './canonical-worlds.ts'
 import { DEFAULT_MAX_WORLDS } from './constants.ts'
 
 export type RecursiveSkollOptions = {
@@ -49,6 +56,11 @@ export type RecursiveSkollOptions = {
   guardCandidates?: ReadonlySet<Seat | null>
   /** World 列挙の上限 (memory budget)。 default = DEFAULT_MAX_WORLDS */
   maxWorlds?: number
+  /**
+   * 再帰深さ。 default = 1 (今日 + 今夜 + 翌朝抽象 leaf)。
+   * k >= 2 にすると group ごとに k-1 日分の追加 lookahead を行う (cost 爆発注意)。
+   */
+  maxDepth?: number
 }
 
 export type RecursivePerDivine = {
@@ -81,6 +93,8 @@ export type RecursiveSkollResult = {
 
 /**
  * Top-level: per-X expected win rate を多日 lookahead で計算する。
+ *
+ * `options.maxDepth = k` で k 日分の lookahead (default k=1)。
  */
 export function recursiveSkoll(
   possibilities: Possibilities,
@@ -88,6 +102,9 @@ export function recursiveSkoll(
   vs: VillageStatus,
   options: RecursiveSkollOptions = {},
 ): RecursiveSkollResult {
+  const maxDepth = options.maxDepth ?? 1
+  if (maxDepth < 1) throw new Error('recursiveSkoll: maxDepth must be >= 1')
+
   const aliveSeats: Seat[] = []
   for (const [seat, status] of vs.statuses) {
     if (status.surviving) aliveSeats.push(seat)
@@ -112,16 +129,37 @@ export function recursiveSkoll(
     totalWeight += weight
   })
 
-  // Equivalence class info: canonical world の per-seat score を class 内で uniformly
-  // 集約するために必要 (= per-X output は同 class seats で同一になる、 対称性論)
-  const classes = computeEquivalenceClasses(possibilities)
-  const seatToClassIdx = new Map<number, number>()
-  for (let i = 0; i < classes.length; i++) {
-    for (const s of classes[i].seats) seatToClassIdx.set(s, i)
-  }
-
-  // Day-2 leaf 評価で minimax cache を共有する
+  // Day-(d+1) leaf 評価で minimax cache を共有する (再帰の全 depth で共通)
   const leafCache = new Map<number, number>()
+
+  const perX = recursiveSkollCore(worlds, weights, alive, setup, maxDepth, leafCache, options)
+
+  return { totalWorlds: worlds.length, truncated, perX }
+}
+
+/**
+ * 内部 core: 事前列挙された worlds[] + weights[] に対し、 depth 日分の lookahead を行う。
+ *
+ * - `depth >= 2` 時は obsKey group ごとに自身を `depth-1` で再帰呼び出し。
+ * - `depth = 1` 時は leaf として `analyzeExecutionsFromWorlds` を呼ぶ (= 抽象 minimax)。
+ * - Equivalence classes は worlds[] (= 公開 obs フィルタ後の subset) から re-derive する。
+ *
+ * 内部再帰時は candidate restrictions (executeCandidates 等) を継承しない (= 全 alive default)。
+ */
+function recursiveSkollCore(
+  worlds: World[],
+  weights: number[],
+  alive: number,
+  setup: Map<SystemRole, number>,
+  depth: number,
+  leafCache: Map<number, number>,
+  options: RecursiveSkollOptions = {},
+): RecursivePerXResult[] {
+  const aliveSeats = seatsFromMask(alive)
+  if (aliveSeats.length === 0 || worlds.length === 0) return []
+
+  // Equivalence classes を worlds から re-derive (= 公開観測上同値な seats を集約)
+  const seatToClassIdx = computeSeatToClassIdxFromWorlds(worlds, aliveSeats)
 
   const executeCandidates = options.executeCandidates ?? new Set(aliveSeats)
   const divineCandidates = options.divineCandidates ?? new Set(aliveSeats)
@@ -162,7 +200,10 @@ export function recursiveSkoll(
         let argTerminalRatio = 0
 
         for (const Z of zCandidates) {
-          const r = evaluateXYZG(worlds, weights, alive, X, Y, Z, G, leafCache, seatToClassIdx)
+          const r = evaluateXYZG(
+            worlds, weights, alive, X, Y, Z, G,
+            leafCache, seatToClassIdx, depth, setup,
+          )
           if (r.winRate < minZValue) {
             minZValue = r.winRate
             argMinZ = Z
@@ -253,13 +294,51 @@ export function recursiveSkoll(
     }
   }
 
-  return { totalWorlds: worlds.length, truncated, perX }
+  return perX
 }
 
 /**
- * (X 吊り, Y 占い, Z 襲撃, G 護衛) 1 ペアの per-world 評価 + day-2 leaf 集約。
+ * worlds[] の alive seats に対し、 per-seat possibility mask (= OR of role bits) で
+ * equivalence classes を構築し、 seat → class index map を返す。
+ *
+ * 再帰呼び出し時、 親レベルの possibilities ではなく実際の filtered worlds から
+ * derive することで、 公開観測フィルタ後の真の対称性を捉える。
+ */
+function computeSeatToClassIdxFromWorlds(worlds: World[], aliveSeats: Seat[]): Map<Seat, number> {
+  const seatPoss = new Map<Seat, number>()
+  for (const seat of aliveSeats) seatPoss.set(seat, 0)
+  for (const w of worlds) {
+    for (const seat of aliveSeats) {
+      seatPoss.set(seat, seatPoss.get(seat)! | (1 << w.roleIds[seat]))
+    }
+  }
+  // group seats by identical possibility mask
+  const possToClass = new Map<number, number>()
+  const seatToClassIdx = new Map<Seat, number>()
+  // determinism: assign class idx in order of seats ASC (= aliveSeats already sorted)
+  const sortedAlive = [...aliveSeats].sort((a, b) => a - b)
+  let nextClass = 0
+  for (const seat of sortedAlive) {
+    const poss = seatPoss.get(seat)!
+    let cls = possToClass.get(poss)
+    if (cls === undefined) {
+      cls = nextClass++
+      possToClass.set(poss, cls)
+    }
+    seatToClassIdx.set(seat, cls)
+  }
+  return seatToClassIdx
+}
+
+/**
+ * (X 吊り, Y 占い, Z 襲撃, G 護衛) 1 ペアの per-world 評価 + day-(d+1) leaf/再帰 集約。
  *
  * Nekomata X 処理: X が nekomata の world では curse 候補を 1/N 加重で分岐。
+ *
+ * `depth` パラメータ:
+ *  - depth = 1: 各 obsKey group で `analyzeExecutionsFromWorlds` (抽象 minimax leaf)
+ *  - depth > 1: 各 obsKey group で `recursiveSkollCore(depth-1)` を再帰呼び出し
+ *               (= 翌日 X' 選択 + 翌夜 + 翌々日 leaf を 1 段深く)
  */
 function evaluateXYZG(
   worlds: World[],
@@ -271,6 +350,8 @@ function evaluateXYZG(
   G: Seat | null,
   leafCache: Map<number, number>,
   seatToClassIdx: Map<number, number>,
+  depth: number,
+  setup: Map<SystemRole, number>,
 ): { winRate: number, terminalRatio: number } {
   // group key: obsKey (deathMask + seerResult) + nextAlive + curseTarget
   // → 同じ key の world は同一の公開観測を生む
@@ -348,16 +429,31 @@ function evaluateXYZG(
     g.totalWeight += branchWeight
   }
 
-  // 各 group で day-2 skoll 評価 (weighted + class-aware uniformity)
+  // 各 group で day-(d+1) 評価 (weighted + class-aware uniformity)
+  // depth = 1: 抽象 minimax leaf を呼ぶ
+  // depth > 1: 自身を depth-1 で再帰呼び出し、 perX[].expectedWinRate の最大 (= 村の day-2 best)
   let nonTerminalScore = 0
   let nonTerminalWeight = 0
   for (const g of groups.values()) {
     const day2AliveSeats = seatsFromMask(g.nextAlive)
     if (day2AliveSeats.length === 0) continue
-    const day2 = analyzeExecutionsFromWorlds(
-      g.worlds, day2AliveSeats, g.nextAlive, leafCache, g.weights, seatToClassIdx,
-    )
-    nonTerminalScore += g.totalWeight * day2.overallWinRate
+    let groupValue: number
+    if (depth > 1) {
+      const innerPerX = recursiveSkollCore(
+        g.worlds, g.weights, g.nextAlive, setup, depth - 1, leafCache,
+      )
+      let bestInner = -Infinity
+      for (const r of innerPerX) {
+        if (r.expectedWinRate > bestInner) bestInner = r.expectedWinRate
+      }
+      groupValue = bestInner === -Infinity ? 0 : bestInner
+    } else {
+      const day2 = analyzeExecutionsFromWorlds(
+        g.worlds, day2AliveSeats, g.nextAlive, leafCache, g.weights, seatToClassIdx,
+      )
+      groupValue = day2.overallWinRate
+    }
+    nonTerminalScore += g.totalWeight * groupValue
     nonTerminalWeight += g.totalWeight
   }
 
