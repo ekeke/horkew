@@ -42,7 +42,7 @@ import {
 import { cloneWorld } from '../hati/worlds.ts'
 import { checkOutcome, applyExecution, simulateNight } from '../hati/simulate.ts'
 import { computeScoresForWorld, FOX_WIN_PENALTY } from './world-analysis.ts'
-import { enumerateCanonicalWorlds } from './canonical-worlds.ts'
+import { enumerateCanonicalWorlds, computeEquivalenceClasses } from './canonical-worlds.ts'
 import { DEFAULT_MAX_WORLDS } from './constants.ts'
 
 export type RecursiveSkollOptions = {
@@ -132,7 +132,16 @@ export function recursiveSkoll(
   // Day-(d+1) leaf 評価で minimax cache を共有する (再帰の全 depth で共通)
   const leafCache = new Map<number, number>()
 
-  const perX = recursiveSkollCore(worlds, weights, alive, setup, maxDepth, leafCache, options)
+  // Equivalence classes は **元の possibilities** から derive する。
+  // worlds[] からの derive は canonical 順序割当により偽の非対称が出るためバグる
+  // (例: class {12,14} の multiset {wolf,fox} で必ず seat-12=wolf 固定 → 別 class 扱い)
+  const classes = computeEquivalenceClasses(possibilities)
+  const seatToClassIdx = new Map<number, number>()
+  for (let i = 0; i < classes.length; i++) {
+    for (const s of classes[i].seats) seatToClassIdx.set(s, i)
+  }
+
+  const perX = recursiveSkollCore(worlds, weights, alive, setup, maxDepth, leafCache, options, seatToClassIdx)
 
   return { totalWorlds: worlds.length, truncated, perX }
 }
@@ -154,12 +163,19 @@ function recursiveSkollCore(
   depth: number,
   leafCache: Map<number, number>,
   options: RecursiveSkollOptions = {},
+  /**
+   * 親 (top-level) から渡される seat → class idx map。
+   * top-level: 元 possibilities から `computeEquivalenceClasses` で derive (正しい)。
+   * depth > 1 の inner 再帰でこの引数を省略すると、 worlds から derive する fallback
+   * (近似、 canonical 順序固定で対称性が失われる既知バグあり)。
+   */
+  seatToClassIdxIn?: Map<number, number>,
 ): RecursivePerXResult[] {
   const aliveSeats = seatsFromMask(alive)
   if (aliveSeats.length === 0 || worlds.length === 0) return []
 
-  // Equivalence classes を worlds から re-derive (= 公開観測上同値な seats を集約)
-  const seatToClassIdx = computeSeatToClassIdxFromWorlds(worlds, aliveSeats)
+  // class derive: 親から渡されていれば使う、 なければ worlds fallback (depth>1 inner)
+  const seatToClassIdx = seatToClassIdxIn ?? computeSeatToClassIdxFromWorlds(worlds, aliveSeats)
 
   const executeCandidates = options.executeCandidates ?? new Set(aliveSeats)
   const divineCandidates = options.divineCandidates ?? new Set(aliveSeats)
@@ -301,8 +317,17 @@ function recursiveSkollCore(
  * worlds[] の alive seats に対し、 per-seat possibility mask (= OR of role bits) で
  * equivalence classes を構築し、 seat → class index map を返す。
  *
- * 再帰呼び出し時、 親レベルの possibilities ではなく実際の filtered worlds から
- * derive することで、 公開観測フィルタ後の真の対称性を捉える。
+ * **既知バグ**: canonical world enumeration は同 class 内で role を deterministic
+ * 順序 (seat ASC × role bit ASC) で割当てるため、 worlds[] からの OR では同 class
+ * の seats が異なる role になる (例: class {12,14} multiset {wolf,fox} で常に
+ * seat-12=wolf 固定 → seat-12={wolf}, seat-14={fox} と誤認識)。
+ *
+ * 結果として「真の (公開観測上の) 等価 class」を取りこぼし、 class uniformity
+ * post-process が効かず非対称な per-X 値が出る。
+ *
+ * 正しくは元 `possibilities` から `computeEquivalenceClasses` で derive すべき。
+ * top-level は `recursiveSkoll` 側で正しく derive して `recursiveSkollCore` に渡す。
+ * inner 再帰 (depth > 1) でこの関数を fallback として呼ぶが、 上記制限あり。
  */
 function computeSeatToClassIdxFromWorlds(worlds: World[], aliveSeats: Seat[]): Map<Seat, number> {
   const seatPoss = new Map<Seat, number>()
