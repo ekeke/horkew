@@ -409,6 +409,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'demo/index.html'),
         overlay: resolve(__dirname, 'demo/overlay.html'),
+        plain: resolve(__dirname, 'demo/plain.html'),
       },
     },
   },

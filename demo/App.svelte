@@ -3,7 +3,7 @@
   import { parse, parseFrontmatter, buildFrontmatter, parseStatement } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import { systemRoles } from '../src/types/index.ts'
-  import type { SystemRole, CauseOfDeath } from '../src/types/index.ts'
+  import type { SystemRole } from '../src/types/index.ts'
   import { serializeVillageStatus } from '../src/retar/wasm-helpers.ts'
   import {
     createAnalysisContext,
@@ -12,12 +12,12 @@
     StatusPane,
     InspectPane,
     GmorkDebugPane,
+    AnalysisTable,
   } from '../src/lykaon/index.ts'
   import { setVideoTimeGetter } from '../src/lykaon/editor/index.ts'
   import { EditorView } from '@codemirror/view'
   import type { Extension } from '@codemirror/state'
-  import PlayerName from './status/PlayerName.svelte'
-  import type { WolfPairSuggestion } from './status/wolfPairScorer.ts'
+  import PlayerName from '../src/lykaon/status/PlayerName.svelte'
   import HelpPanel from './HelpPanel.svelte'
   import YouTubePlayer from './YouTubePlayer.svelte'
   import NicoPlayer from './NicoPlayer.svelte'
@@ -34,10 +34,6 @@
   import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../src/fenrir/src/agents/rule-based-agent.ts'
   import { formatHowl } from '../src/lupa/format.ts'
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
-
-  const nightKillCauses: Set<CauseOfDeath> = new Set([
-    'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
-  ])
 
   const STORAGE_PREFIX = 'horkew:'
   const SETTINGS_KEY = 'horkew:__settings__'
@@ -454,9 +450,6 @@
   let isActivePendingDelete = $derived(!!activeKey && pendingDeletes.has(activeKey))
   let rawStatements = $state('')
   let analyzerJson = $state('')
-  let deadSeats: Set<number> = $state(new Set())
-  let nightKilledSeats: Set<number> = $state(new Set())
-  let executedSeats: Set<number> = $state(new Set())
   let showDenyWolfDialog = $state(false)
   let denyWolfSelection: Set<number> = $state(new Set())
 
@@ -472,20 +465,6 @@
     })
     return unsub
   })
-
-  let claimShortNames: Map<number, string> = $derived(
-    ctx.villageStatus
-      ? new Map([...ctx.villageStatus.statuses.entries()]
-          .filter(([, s]) => s.claiming)
-          .map(([seat, s]) => [seat, systemRoles.get(s.claimingRole as SystemRole)?.shortName ?? s.claimingRole] as const))
-      : new Map()
-  )
-  let allRolesDetermined = $derived(
-    ctx.analysisSeats.length > 0
-    && ctx.players.size > 0
-    && ctx.analysisSeats.length === ctx.players.size
-    && ctx.analysisSeats.every(s => s.roles.length === 1)
-  )
 
   let skin: Skin = $state(settings.skin)
   let devMode = $state(settings.devMode)
@@ -1071,56 +1050,6 @@
     }),
   ]
 
-  function roleToShort(role: SystemRole): string {
-    return systemRoles.get(role)?.shortName ?? role
-  }
-
-  type NameStatus = 'default' | 'not-village' | 'village' | 'wolf' | 'fox'
-
-  function classifyPlayer(roles: SystemRole[]): { status: NameStatus, fixed: boolean, label: string } {
-    if (roles.length === 0) return { status: 'default', fixed: false, label: '?' }
-    const fixed = roles.length === 1
-    const label = fixed ? (systemRoles.get(roles[0])?.shortName ?? '?') : '?'
-    const alignments = new Set(roles.map(r => systemRoles.get(r)!.alignment))
-    if (alignments.size === 1) {
-      const a = [...alignments][0]
-      if (a === 'villager') return { status: 'village', fixed, label }
-      if (a === 'werewolf') return { status: 'wolf', fixed, label }
-      if (a === 'werehamster') return { status: 'fox', fixed, label }
-    }
-    if (!alignments.has('villager')) return { status: 'not-village', fixed: false, label }
-    return { status: 'default', fixed: false, label }
-  }
-
-  function toggleAssumption(seat: number, role: SystemRole) {
-    const next = new Map(ctx.assumptions)
-    if (next.get(seat) === role) {
-      next.delete(seat)
-    } else {
-      next.set(seat, role)
-    }
-    ctx.assumptions = next
-    run()
-  }
-
-  function clearAssumptions() {
-    ctx.assumptions = new Map()
-    ctx.denyWolfGroups = []
-    ctx.hocusPocusSeats = new Set()
-    run()
-  }
-
-  function toggleHocusPocus(seat: number) {
-    const next = new Set(ctx.hocusPocusSeats)
-    if (next.has(seat)) {
-      next.delete(seat)
-    } else {
-      next.add(seat)
-    }
-    ctx.hocusPocusSeats = next
-    run()
-  }
-
   function buildRevealText(): string {
     const lines = ctx.analysisSeats.map(s => {
       const name = ctx.players.get(s.seat) ?? `#${s.seat}`
@@ -1131,7 +1060,7 @@
   }
 
   function insertRevealRoles() {
-    if (!allRolesDetermined) return
+    if (!ctx.allRolesDetermined) return
     ctx.howlText = ctx.howlText + buildRevealText()
   }
 
@@ -1166,21 +1095,6 @@
       ctx.denyWolfGroups = [...ctx.denyWolfGroups, group]
     }
     showDenyWolfDialog = false
-    run()
-  }
-
-  function removeDenyWolfGroup(index: number) {
-    ctx.denyWolfGroups = ctx.denyWolfGroups.filter((_, i) => i !== index)
-    run()
-  }
-
-  function addSuggestion(suggestion: WolfPairSuggestion) {
-    const group = [suggestion.seatA, suggestion.seatB]
-    ctx.denyWolfGroups = [...ctx.denyWolfGroups, group]
-    // 即座にUIから除外し、run()後にRetar結果で再計算される
-    ctx.wolfPairSuggestions = ctx.wolfPairSuggestions.filter(s =>
-      !(s.seatA === suggestion.seatA && s.seatB === suggestion.seatB)
-    )
     run()
   }
 
@@ -1234,20 +1148,6 @@
       ctx.cursorLine = effectiveCursorLine
       overlayChannel.postMessage({ type: 'howl', text: ctx.howlText, cursorLine: effectiveCursorLine })
       if (obsSocket?.readyState === WebSocket.OPEN) obsSocket.send(ctx.howlText)
-      deadSeats = new Set([...vs.statuses.entries()].filter(([, s]) => !s.surviving).map(([seat]) => seat))
-      nightKilledSeats = new Set(
-        [...vs.statuses.entries()]
-          .filter(([, s]) => !s.surviving && s.causeOfDeath && nightKillCauses.has(s.causeOfDeath))
-          .map(([seat]) => seat)
-      )
-      const executionCauses: Set<CauseOfDeath> = new Set([
-        'execution', 'cursed_by_executed_nekomata', 'follow_executed_hamster',
-      ])
-      executedSeats = new Set(
-        [...vs.statuses.entries()]
-          .filter(([, s]) => !s.surviving && s.causeOfDeath && executionCauses.has(s.causeOfDeath))
-          .map(([seat]) => seat)
-      )
 
       const vsJson = JSON.stringify(serializeVillageStatus(vs))
       const setupJson = JSON.stringify(Object.fromEntries(setup))
@@ -1549,97 +1449,25 @@
     </section>
   {/snippet}
 
+  {#snippet devModeAnalysisFooter()}
+    <div class="analysis-dev-bar">
+      <label class="dev-toggle" title="WASM を無効化して TypeScript 版 Retar を強制使用（デバッグ用）">
+        <input type="checkbox" checked={ctx.forceTs} onchange={(e) => { ctx.forceTs = e.currentTarget.checked; run() }} />
+        <span>強制TSモード</span>
+      </label>
+    </div>
+  {/snippet}
+
   {#snippet analysisPane()}
     <section class="pane">
       <div class="pane-header">Analysis</div>
       <div class="pane-body">
-        {#if ctx.analysisError}
-          <pre class="output">Error: {ctx.analysisError}</pre>
-        {/if}
-        {#if ctx.analysisColumns.length > 0 && ctx.players.size > 0}
-          {@const currentMap = new Map(ctx.analysisSeats.map(s => [s.seat, s.roles]))}
-          <div class="analysis-layout">
-            <div class="analysis-table-wrap">
-              <table class="analysis-table">
-                <tbody>
-                  {#each [...ctx.players] as [seat, name]}
-                    {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
-                    <tr class={deadSeats.has(seat) ? 'dead-row' : ''}>
-                      <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}><span class="analysis-label">{cls.label}</span><PlayerName dead={deadSeats.has(seat)} nightKill={nightKilledSeats.has(seat)} executed={executedSeats.has(seat)} claim={claimShortNames.get(seat)}>{ctx.playerShortNames.get(seat) ?? name}</PlayerName></td>
-                      {#each ctx.analysisColumns as role}
-                        <td
-                          class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{ctx.assumptions.get(seat) === role ? ' role-assumed' : ''}"
-                          onclick={() => toggleAssumption(seat, role)}
-                        >{roleToShort(role)}</td>
-                      {/each}
-                      <td class="hocuspocus-spacer"></td>
-                      <td
-                        class="hocuspocus-cell{ctx.hocusPocusSeats.has(seat) ? ' hocuspocus-on' : ''}"
-                        title="HocusPocus: この席のCOを無視して解析"
-                        onclick={() => toggleHocusPocus(seat)}
-                      >?</td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-              {#if ctx.analysisDuration > 0}
-                <div class="analysis-duration">retar {ctx.analysisDuration}ms{#if ctx.analysisStats} ({ctx.analysisStats.workers}w, wall {ctx.analysisStats.wallClock}ms, worker {ctx.analysisStats.minElapsed}-{ctx.analysisStats.maxElapsed}ms, {ctx.analysisStats.wasm ? 'WASM' : 'JS'}){/if}</div>
-              {/if}
-              {#if devMode}
-                <div class="analysis-dev-bar">
-                  <label class="dev-toggle" title="WASM を無効化して TypeScript 版 Retar を強制使用（デバッグ用）">
-                    <input type="checkbox" checked={ctx.forceTs} onchange={(e) => { ctx.forceTs = e.currentTarget.checked; run() }} />
-                    <span>強制TSモード</span>
-                  </label>
-                </div>
-              {/if}
-            </div>
-            <div class="analysis-sidebar">
-              <div class="assumptions-list">
-                <div class="assumptions-header">
-                  仮説
-                  {#if (ctx.setup.get('werewolf') ?? 0) >= 2}
-                    <button class="assumption-add" onclick={openDenyWolfDialog}>追加</button>
-                  {/if}
-                  {#if ctx.assumptions.size > 0 || ctx.denyWolfGroups.length > 0 || ctx.hocusPocusSeats.size > 0}
-                    <button class="assumption-clear" onclick={() => clearAssumptions()}>全削除</button>
-                  {/if}
-                </div>
-                {#if allRolesDetermined}
-                  <div class="determined-banner">
-                    <span class="determined-label">配役確定</span>
-                    <button class="determined-insert" onclick={insertRevealRoles}>挿入</button>
-                  </div>
-                {/if}
-                {#each [...ctx.assumptions] as [seat, role]}
-                  <div class="assumption-item">
-                    <span class="assumption-text">{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}は{systemRoles.get(role)?.name ?? role}である</span>
-                    <button class="assumption-remove" onclick={() => toggleAssumption(seat, role)}>&times;</button>
-                  </div>
-                {/each}
-                {#each ctx.denyWolfGroups as group, i}
-                  <div class="assumption-item">
-                    <span class="assumption-text deny-wolf">{group.map(s => ctx.playerShortNames.get(s) ?? ctx.players.get(s) ?? `#${s}`).join(' と ')} は両狼でない</span>
-                    <button class="assumption-remove" onclick={() => removeDenyWolfGroup(i)}>&times;</button>
-                  </div>
-                {/each}
-                {#if ctx.wolfPairSuggestions.length > 0}
-                  <div class="suggestions-section">
-                    <div class="suggestions-label">提案</div>
-                    {#each ctx.wolfPairSuggestions as suggestion}
-                      <button class="suggestion-item" onclick={() => addSuggestion(suggestion)}>
-                        「{ctx.playerShortNames.get(suggestion.seatA) ?? ctx.players.get(suggestion.seatA) ?? `#${suggestion.seatA}`}と{ctx.playerShortNames.get(suggestion.seatB) ?? ctx.players.get(suggestion.seatB) ?? `#${suggestion.seatB}`}の両狼はない」仮説を追加する
-                      </button>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-              {#if ctx.gmorkResult}
-                <div class="gmork-results">{ctx.gmorkResult}</div>
-              {/if}
-            </div>
-          </div>
-        {/if}
+        <AnalysisTable
+          {ctx}
+          onInsertRevealRoles={insertRevealRoles}
+          onOpenDenyWolfDialog={openDenyWolfDialog}
+          extraFooter={devMode ? devModeAnalysisFooter : undefined}
+        />
       </div>
     </section>
   {/snippet}
@@ -3075,205 +2903,6 @@
     border-color: var(--color-accent);
   }
 
-  .analysis-layout {
-    display: flex;
-    align-items: flex-start;
-    gap: 0;
-  }
-
-  .analysis-table-wrap {
-    flex: 0 0 auto;
-    overflow: auto;
-    padding: 2px;
-  }
-
-  .analysis-table {
-    border-collapse: collapse;
-    font-family: 'Consolas', 'Menlo', monospace;
-    font-size: 13px;
-  }
-
-  .analysis-table td {
-    text-align: center;
-    padding: 2px 4px;
-    border: 1px solid var(--color-border);
-  }
-
-  .analysis-name-col {
-    text-align: left !important;
-    white-space: nowrap;
-    padding-right: 12px !important;
-    font-weight: 500;
-  }
-
-  .role-possible,
-  .role-impossible {
-    cursor: pointer;
-  }
-
-  .role-possible:hover,
-  .role-impossible:hover {
-    outline: 1px solid var(--color-accent);
-    outline-offset: -1px;
-  }
-
-  .role-possible {
-    background: var(--color-surface-hover);
-    color: var(--color-text);
-  }
-
-  .role-impossible {
-    background: var(--color-bg-sunken);
-    color: var(--color-border);
-  }
-
-  .role-assumed {
-    background: var(--color-accent);
-    color: var(--color-bg);
-    font-weight: 600;
-  }
-
-  .hocuspocus-spacer {
-    border: none !important;
-    background: transparent !important;
-    width: 16px;
-    padding: 0 !important;
-  }
-
-  .hocuspocus-cell {
-    cursor: pointer;
-    background: var(--color-bg-sunken);
-    color: var(--color-border);
-    font-weight: 700;
-    user-select: none;
-  }
-
-  .hocuspocus-cell:hover {
-    outline: 1px solid var(--color-accent);
-    outline-offset: -1px;
-  }
-
-  .hocuspocus-cell.hocuspocus-on {
-    background: var(--color-accent);
-    color: var(--color-bg);
-  }
-
-  .analysis-label {
-    display: inline-block;
-    width: 1.8em;
-    text-align: center;
-    opacity: 0.6;
-    font-size: 0.85em;
-  }
-
-  .analysis-name-col { font-weight: 700; }
-  .analysis-name-col.village { background: var(--color-village-bg); }
-  .analysis-name-col.wolf { background: var(--color-wolf-bg); }
-  .analysis-name-col.fox { background: var(--color-fox-bg); }
-  .analysis-name-col.not-village { background: var(--color-unknown-team-bg); }
-
-  /* dead player opacity is handled by PlayerName component */
-
-
-
-  .analysis-sidebar {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .assumptions-list {
-    padding: 8px;
-    font-family: 'Consolas', 'Menlo', monospace;
-    font-size: 13px;
-  }
-
-  .assumptions-header {
-    color: var(--color-text-muted);
-    margin-bottom: 4px;
-  }
-
-  .assumption-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 0;
-  }
-
-  .assumption-text {
-    color: var(--color-text);
-  }
-
-  .assumption-remove {
-    background: none;
-    border: none;
-    color: var(--color-text-faint);
-    cursor: pointer;
-    font-size: 14px;
-    padding: 0 4px;
-    line-height: 1;
-  }
-
-  .assumption-remove:hover {
-    color: var(--color-text);
-  }
-
-  .assumption-add,
-  .assumption-clear {
-    background: none;
-    border: 1px solid var(--color-text-faint);
-    border-radius: 3px;
-    color: var(--color-text-faint);
-    cursor: pointer;
-    font-size: 11px;
-    padding: 1px 6px;
-    margin-left: 4px;
-  }
-
-  .assumption-add:hover,
-  .assumption-clear:hover {
-    color: var(--color-text);
-    border-color: var(--color-text-muted);
-  }
-
-  .determined-banner {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    margin-bottom: 4px;
-    border: 1px solid var(--color-village);
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--color-village) 12%, transparent);
-  }
-
-  .determined-label {
-    color: var(--color-village);
-    font-weight: bold;
-    font-size: 12px;
-  }
-
-  .determined-insert {
-    background: none;
-    border: 1px solid var(--color-village);
-    border-radius: 3px;
-    color: var(--color-village);
-    cursor: pointer;
-    font-size: 11px;
-    padding: 1px 6px;
-    margin-left: auto;
-  }
-
-  .determined-insert:hover {
-    background: color-mix(in srgb, var(--color-village) 20%, transparent);
-  }
-
-  .deny-wolf {
-    color: var(--color-wolf);
-  }
-
   .deny-wolf-modal {
     max-width: 320px;
   }
@@ -3328,49 +2957,6 @@
   .deny-wolf-confirm:disabled {
     opacity: 0.4;
     cursor: not-allowed;
-  }
-
-  .suggestions-section {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--color-border);
-  }
-
-  .suggestions-label {
-    font-size: 11px;
-    color: var(--color-text-faint);
-    margin-bottom: 4px;
-  }
-
-  .suggestion-item {
-    display: block;
-    background: none;
-    border: none;
-    color: var(--color-text-muted);
-    font-size: 12px;
-    font-family: inherit;
-    padding: 2px 0;
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .suggestion-item:hover {
-    color: var(--color-text);
-  }
-
-  .gmork-results {
-    padding: 8px;
-    font-family: 'Consolas', 'Menlo', monospace;
-    font-size: 13px;
-    color: var(--color-text-muted);
-    white-space: pre-wrap;
-  }
-
-  .analysis-duration {
-    padding: 2px;
-    font-size: 10px;
-    color: var(--color-text-faint);
-    text-align: right;
   }
 
   .analysis-dev-bar {

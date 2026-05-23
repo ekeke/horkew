@@ -65,6 +65,14 @@ const EMPTY_SOURCE_LINES: SourceLines = {
   kill: new Map(), exec: new Map(), vote: new Map(),
 }
 
+const NIGHT_KILL_CAUSES: Set<CauseOfDeath> = new Set([
+  'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
+])
+
+const EXECUTION_CAUSES: Set<CauseOfDeath> = new Set([
+  'execution', 'cursed_by_executed_nekomata', 'follow_executed_hamster',
+])
+
 // =====================================================================
 // Helpers
 // =====================================================================
@@ -211,6 +219,42 @@ export class AnalysisContext {
   })
 
   // -----------------------------------------------------------------
+  // 死亡カテゴリ・確定状態の派生
+  // -----------------------------------------------------------------
+
+  deadSeats = $derived<Set<number>>(
+    this.villageStatus
+      ? new Set([...this.villageStatus.statuses.entries()]
+          .filter(([, s]) => !s.surviving)
+          .map(([seat]) => seat))
+      : new Set()
+  )
+
+  nightKilledSeats = $derived<Set<number>>(
+    this.villageStatus
+      ? new Set([...this.villageStatus.statuses.entries()]
+          .filter(([, s]) => !s.surviving && s.causeOfDeath && NIGHT_KILL_CAUSES.has(s.causeOfDeath))
+          .map(([seat]) => seat))
+      : new Set()
+  )
+
+  executedSeats = $derived<Set<number>>(
+    this.villageStatus
+      ? new Set([...this.villageStatus.statuses.entries()]
+          .filter(([, s]) => !s.surviving && s.causeOfDeath && EXECUTION_CAUSES.has(s.causeOfDeath))
+          .map(([seat]) => seat))
+      : new Set()
+  )
+
+  claimShortNames = $derived<Map<number, string>>(
+    this.villageStatus
+      ? new Map([...this.villageStatus.statuses.entries()]
+          .filter(([, s]) => s.claiming)
+          .map(([seat, s]) => [seat, systemRoles.get(s.claimingRole as SystemRole)?.shortName ?? s.claimingRole as string] as const))
+      : new Map()
+  )
+
+  // -----------------------------------------------------------------
   // 解析結果 — worker から書き込まれる
   // -----------------------------------------------------------------
 
@@ -220,6 +264,13 @@ export class AnalysisContext {
   analysisDuration = $state(0)
   analysisStats = $state<AnalysisStats | null>(null)
   baseAnalysisSeats = $state<SeatResult[]>([])
+
+  allRolesDetermined = $derived<boolean>(
+    this.analysisSeats.length > 0
+    && this.players.size > 0
+    && this.analysisSeats.length === this.players.size
+    && this.analysisSeats.every(s => s.roles.length === 1)
+  )
 
   // -----------------------------------------------------------------
   // Gmork + 派生
@@ -295,6 +346,53 @@ export class AnalysisContext {
 
   emitCursorChange(line: number): void {
     for (const fn of this.#cursorChangeListeners) fn(line)
+  }
+
+  // -----------------------------------------------------------------
+  // 仮説 (assumptions / denyWolfGroups / hocusPocusSeats) 操作 API
+  // -----------------------------------------------------------------
+
+  /**
+   * 席 × 役職 の役職仮定をトグルする。既に同じ仮定があれば解除、なければ設定。
+   * 別役職の仮定があれば上書き (1 席につき 1 仮定)。
+   */
+  toggleAssumption(seat: number, role: SystemRole): void {
+    const next = new Map(this.assumptions)
+    if (next.get(seat) === role) next.delete(seat)
+    else next.set(seat, role)
+    this.assumptions = next
+  }
+
+  /** その席の CO を無視して解析する hocuspocus フラグをトグルする。 */
+  toggleHocusPocus(seat: number): void {
+    const next = new Set(this.hocusPocusSeats)
+    if (next.has(seat)) next.delete(seat)
+    else next.add(seat)
+    this.hocusPocusSeats = next
+  }
+
+  /** assumptions / denyWolfGroups / hocusPocusSeats を全てクリアする。 */
+  clearAssumptions(): void {
+    this.assumptions = new Map()
+    this.denyWolfGroups = []
+    this.hocusPocusSeats = new Set()
+  }
+
+  /** denyWolfGroups の index 番目を削除する。 */
+  removeDenyWolfGroup(index: number): void {
+    this.denyWolfGroups = this.denyWolfGroups.filter((_, i) => i !== index)
+  }
+
+  /**
+   * wolfPairSuggestions の 1 件を denyWolfGroups に昇格させる。
+   * suggestion 一覧からは即座に取り除く (Retar 再解析で再生成される)。
+   */
+  addSuggestion(suggestion: WolfPairSuggestion): void {
+    const group = [suggestion.seatA, suggestion.seatB]
+    this.denyWolfGroups = [...this.denyWolfGroups, group]
+    this.wolfPairSuggestions = this.wolfPairSuggestions.filter(s =>
+      !(s.seatA === suggestion.seatA && s.seatB === suggestion.seatB)
+    )
   }
 
   // -----------------------------------------------------------------
