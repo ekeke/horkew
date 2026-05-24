@@ -26,13 +26,31 @@
 ### ファイル構成
 ```
 demo/
-├── App.svelte          # メインレイアウト、ペインシステム
-├── theme.css           # カラー変数定義（信頼できるソース）
-├── editor/             # CodeMirror 関連
-├── status/             # ステータス表示コンポーネント群
-├── ColorSwatchPane.svelte  # 色見本（devMode 用）
-└── HelpPanel.svelte    # ヘルプパネル
+├── App.svelte             # メインレイアウト、ペインシステム
+├── main.ts                # main entry (index.html)
+├── Overlay.svelte         # OBS 用オーバーレイ
+├── overlay.ts             # overlay entry (overlay.html)
+├── PlainLykaonPane.svelte # 裸の lykaon 確認画面
+├── plain.ts               # plain entry (plain.html)
+├── FileSidebar.svelte     # ファイル一覧サイドバー
+├── HelpPanel.svelte       # ヘルプパネル
+├── ColorSwatchPane.svelte # 色見本（devMode 用）
+├── SkollPane / PretrainPane / StatsPane / CommandPlayPane / NicoPlayer / YouTubePlayer  # demo 固有
+├── status/                # Overlay 専用の status 部品群 (lykaon 化前の旧版を温存)
+└── (lykaon 由来の EditorPane / StatusPane / HatiPane / AnalysisTable は src/lykaon から import)
 ```
+
+### Entry points (vite.config.ts の rollupOptions.input)
+
+| URL | entry | 用途 |
+|---|---|---|
+| `/horkew/` | `main.ts` → `App.svelte` | メイン UI (FileSidebar + 全ペイン + 動画連動) |
+| `/horkew/overlay.html` | `overlay.ts` → `Overlay.svelte` | OBS / BroadcastChannel 連携の配信用オーバーレイ |
+| `/horkew/plain.html` | `plain.ts` → `PlainLykaonPane.svelte` | 拡張なしの裸 lykaon 動作確認用 (EditorPane + StatusPane + AnalysisTable) |
+
+### lykaon との関係
+
+demo は `src/lykaon/` を consume する薄い shell。 エディタ・StatusPane・AnalysisTable・HatiPane などの解析 UI は lykaon に集約されており、 demo はそれらに動画 player・FileSidebar・Skoll/Pretrain/Stats/CommandPlay 等の demo 固有機能をかぶせるだけ。 新規 UI 機能を足すときは「lykaon に入れるべきか demo に入れるべきか」を最初に判断する (mirurou など外部 consumer で再利用したいなら lykaon)。
 
 ## スタイリングルール
 

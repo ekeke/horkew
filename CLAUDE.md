@@ -18,6 +18,7 @@ Horkew is a werewolf（人狼）game analysis and AI toolkit. Game state parsing
 | **gmork** | 役職否定/確定の理由説明。Retar の結果を人間が読める日本語テキストに変換 |
 | **lupa** | ゲームシミュレーション。プラガブルな戦略インターフェースで完全な人狼ゲームを実行 |
 | **fenrir** | 強化学習（PPO）による AI プレイヤー。Lupa 上でゲームを回し、役職別ニューラルネットを訓練 |
+| **lykaon** | `.howl` エディタ + 解析サイドカーの Svelte 5 UI ライブラリ。`createAnalysisContext` + `EditorPane` を core に、`StatusPane` / `AnalysisTable` / `HatiPane` 等の optional ペインを並べて使う。詳細は [src/lykaon/README.md](src/lykaon/README.md) |
 
 ### Data Flow
 ```
