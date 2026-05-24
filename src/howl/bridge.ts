@@ -472,12 +472,16 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           const lastNight = day - 1
           for (let i = 0; i < divinationResults.length; i++) {
             const night = lastNight - (divinationResults.length - 1 - i)
-            if (actorStatus.assertions.has(night)) {
+            const existing = actorStatus.assertions.get(night)
+            const next = divinationResults[i]
+            // Only treat as slide (push to previousAssertions) when the new result actually differs
+            // from the existing one. Identical re-statements (same target + same species) are no-ops.
+            if (existing && (existing.target !== next.target || existing.species !== next.species)) {
               if (!actorStatus.previousAssertions) actorStatus.previousAssertions = new Map()
               if (!actorStatus.previousAssertions.has(night)) actorStatus.previousAssertions.set(night, [])
-              actorStatus.previousAssertions.get(night)!.push(actorStatus.assertions.get(night)!)
+              actorStatus.previousAssertions.get(night)!.push(existing)
             }
-            actorStatus.assertions.set(night, divinationResults[i])
+            actorStatus.assertions.set(night, next)
           }
         }
 

@@ -442,6 +442,110 @@ describe('bridge: assertion right-alignment', () => {
     assert.deepStrictEqual(assertions.get(1), { target: charSeat, species: 'wolf' })
   })
 
+  test('restate identical result: no previousAssertions slide on night 0', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
+
+アリス: 占いCO ボブ白
+
+吊り デイブ
+
+噛み エミリー
+
+アリス: 占いCO ボブ白 チャーリー黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const charSeat = seat(players, 'チャーリー')
+    const status = vs.statuses.get(aliceSeat)!
+
+    // Final assertions: night 0 = ボブ白, night 1 = チャーリー黒
+    assert.strictEqual(status.assertions.size, 2)
+    assert.deepStrictEqual(status.assertions.get(0), { target: bobSeat, species: 'human' })
+    assert.deepStrictEqual(status.assertions.get(1), { target: charSeat, species: 'wolf' })
+
+    // Identical restate must NOT create a previousAssertions entry for night 0
+    if (status.previousAssertions) {
+      assert.ok(!status.previousAssertions.has(0), 'night 0 must not appear in previousAssertions for identical restate')
+    }
+  })
+
+  test('restate with different target: previousAssertions records the slide', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー、フランク
+
+アリス: 占いCO ボブ白
+
+吊り デイブ
+
+噛み エミリー
+
+アリス: 占いCO チャーリー白 フランク黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const charSeat = seat(players, 'チャーリー')
+    const frankSeat = seat(players, 'フランク')
+    const status = vs.statuses.get(aliceSeat)!
+
+    assert.deepStrictEqual(status.assertions.get(0), { target: charSeat, species: 'human' })
+    assert.deepStrictEqual(status.assertions.get(1), { target: frankSeat, species: 'wolf' })
+
+    // Genuine slide on night 0: previous target ボブ白 → new target チャーリー白
+    assert.ok(status.previousAssertions, 'previousAssertions should be set')
+    const prev = status.previousAssertions!.get(0)
+    assert.ok(prev && prev.length === 1)
+    assert.deepStrictEqual(prev[0], { target: bobSeat, species: 'human' })
+  })
+
+  test('restate with different species: previousAssertions records the slide', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
+
+アリス: 占いCO ボブ白
+
+吊り デイブ
+
+噛み エミリー
+
+アリス: 占いCO ボブ黒 チャーリー黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const charSeat = seat(players, 'チャーリー')
+    const status = vs.statuses.get(aliceSeat)!
+
+    assert.deepStrictEqual(status.assertions.get(0), { target: bobSeat, species: 'wolf' })
+    assert.deepStrictEqual(status.assertions.get(1), { target: charSeat, species: 'wolf' })
+
+    // Genuine slide on night 0: same target, species flipped 白 → 黒
+    assert.ok(status.previousAssertions, 'previousAssertions should be set')
+    const prev = status.previousAssertions!.get(0)
+    assert.ok(prev && prev.length === 1)
+    assert.deepStrictEqual(prev[0], { target: bobSeat, species: 'human' })
+  })
+
+  test('multiple consecutive identical restates accumulate no previousAssertions', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー、フランク、ジョージ
+
+アリス: 占いCO ボブ白
+
+吊り デイブ
+
+噛み エミリー
+
+アリス: 占いCO ボブ白 チャーリー黒
+
+吊り フランク
+
+噛み ジョージ
+
+アリス: 占いCO ボブ白 チャーリー黒 アリス白`)
+    const aliceSeat = seat(players, 'アリス')
+    const status = vs.statuses.get(aliceSeat)!
+
+    // Three identical restatements across three days: night 0 and night 1 must remain slide-free
+    assert.strictEqual(status.assertions.size, 3)
+    if (status.previousAssertions) {
+      assert.ok(!status.previousAssertions.has(0), 'night 0 must not slide on identical restate')
+      assert.ok(!status.previousAssertions.has(1), 'night 1 must not slide on identical restate')
+    }
+  })
+
   test('mason assertions use negative day keys', () => {
     const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
 
