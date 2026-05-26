@@ -1,9 +1,19 @@
 export type Seat = number
 export type Day = number
 
-export type SystemRole = 'werewolf' | 'possessed' | 'fanatic' | 'werehamster' | 'immoralist' | 'villager' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata'
+export type SystemRole = 'werewolf' | 'possessed' | 'fanatic' | 'werehamster' | 'immoralist' | 'villager' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata' | 'paparazzi'
 
 export type EnumSpecies = 'human' | 'wolf' | null
+
+export type Faction = 'village' | 'wolf' | 'fox'
+
+export type RoleTrait =
+  | { kind: 'passive', sub: 'attack-immune' | 'die-when-divined' }
+  | { kind: 'knowledge', sub: 'know-werewolves' | 'know-foxes' | 'know-masons' }
+  | { kind: 'action', sub: 'divine' | 'guard' | 'attack' }
+  | { kind: 'reactive', sub: 'curse-on-executed' | 'curse-on-killed' }
+  | { kind: 'auto-info', sub: 'execution-species' }
+  | { kind: 'channel', sub: 'wolf-chat' }
 
 export type CauseOfDeath =
   | 'execution'
@@ -26,11 +36,13 @@ export type Role = {
   systemName: string
   description: string
   alignment: 'villager' | 'werewolf' | 'werehamster'
+  faction: Faction
   category: 'villager' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'werewolf' | 'possessed' | 'werehamster' | 'fanatic' | 'immoralist' | 'other'
   humanCount: number
   wolfCount: number
   seerResult: EnumSpecies
   mediumResult: EnumSpecies
+  traits: RoleTrait[]
 }
 
 export type SeatStatus = {
@@ -87,69 +99,97 @@ export type VillageStatus = {
 export const systemRoles: Map<SystemRole, Role> = new Map([
   ["villager", {
     name: "村人", shortName: "村", systemName: "villager",
-    alignment: "villager", category: "villager",
+    alignment: "villager", faction: "village", category: "villager",
     description: "能力を持たない村人",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [],
   }],
   ["seer", {
     name: "占い師", shortName: "占", systemName: "seer",
-    alignment: "villager", category: "seer",
+    alignment: "villager", faction: "village", category: "seer",
     description: "毎晩、生存者から一人を選び人狼かどうかを知ることができる",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [{ kind: "action", sub: "divine" }],
   }],
   ["medium", {
     name: "霊能者", shortName: "霊", systemName: "medium",
-    alignment: "villager", category: "medium",
+    alignment: "villager", faction: "village", category: "medium",
     description: "毎晩、前日に処刑された人物が人狼かどうかを知ることができる",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [{ kind: "auto-info", sub: "execution-species" }],
   }],
   ["bodyguard", {
     name: "狩人", shortName: "狩", systemName: "bodyguard",
-    alignment: "villager", category: "bodyguard",
+    alignment: "villager", faction: "village", category: "bodyguard",
     description: "毎晩、生存者から一人を選び人狼の襲撃から守ることができる",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [{ kind: "action", sub: "guard" }],
   }],
   ["mason", {
     name: "共有者", shortName: "共", systemName: "mason",
-    alignment: "villager", category: "mason",
+    alignment: "villager", faction: "village", category: "mason",
     description: "特別な能力はないが、最初から他の共有者を知っている",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [{ kind: "knowledge", sub: "know-masons" }],
   }],
   ["nekomata", {
     name: "猫又", shortName: "猫", systemName: "nekomata",
-    alignment: "villager", category: "other",
+    alignment: "villager", faction: "village", category: "other",
     description: "処刑されると、生存者の一人をランダムに道連れにする\n人狼に襲撃されると、人狼を道連れにする",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [
+      { kind: "reactive", sub: "curse-on-executed" },
+      { kind: "reactive", sub: "curse-on-killed" },
+    ],
   }],
   ["werewolf", {
     name: "人狼", shortName: "狼", systemName: "werewolf",
-    alignment: "werewolf", category: "werewolf",
+    alignment: "werewolf", faction: "wolf", category: "werewolf",
     description: "夜に生存者から一人を選んで食べる\n人狼は他の人狼を知っている",
     humanCount: 0, wolfCount: 1, seerResult: "wolf", mediumResult: "wolf",
+    traits: [
+      { kind: "knowledge", sub: "know-werewolves" },
+      { kind: "action", sub: "attack" },
+      { kind: "channel", sub: "wolf-chat" },
+    ],
   }],
   ["possessed", {
     name: "狂人", shortName: "狂", systemName: "possessed",
-    alignment: "werewolf", category: "possessed",
+    alignment: "werewolf", faction: "wolf", category: "possessed",
     description: "能力を持たない村人だが、人狼の味方をする",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [],
   }],
   ["fanatic", {
     name: "狂信者", shortName: "信", systemName: "fanatic",
-    alignment: "werewolf", category: "possessed",
+    alignment: "werewolf", faction: "wolf", category: "possessed",
     description: "能力を持たない村人だが、人狼の味方をする\n最初から人狼が誰かを知っている",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [{ kind: "knowledge", sub: "know-werewolves" }],
   }],
   ["werehamster", {
     name: "妖狐", shortName: "狐", systemName: "werehamster",
-    alignment: "werehamster", category: "werehamster",
+    alignment: "werehamster", faction: "fox", category: "werehamster",
     description: "人狼と村人の戦いが終わったときに生存していると勝利する\n多数決の判定の際には無視される\n人狼に襲撃されても死なない\n占い師に占われると死亡する",
     humanCount: 0, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [
+      { kind: "passive", sub: "attack-immune" },
+      { kind: "passive", sub: "die-when-divined" },
+    ],
   }],
   ["immoralist", {
     name: "背徳者", shortName: "背", systemName: "immoralist",
-    alignment: "werehamster", category: "immoralist",
+    alignment: "werehamster", faction: "fox", category: "immoralist",
     description: "特別な能力はない村人だが、妖狐の味方をする",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [{ kind: "knowledge", sub: "know-foxes" }],
+  }],
+  ["paparazzi", {
+    name: "パパラッチ", shortName: "パ", systemName: "paparazzi",
+    alignment: "werewolf", faction: "wolf", category: "possessed",
+    description: "毎晩、生存者から一人を選び人狼かどうかを知ることができる\n人狼の味方をする",
+    humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [{ kind: "action", sub: "divine" }],
   }],
 ])
 
