@@ -100,7 +100,10 @@ impl SystemRole {
                 RoleTrait::PassiveAttackImmune,
                 RoleTrait::PassiveDieWhenDivined,
             ],
-            SystemRole::Immoralist => &[RoleTrait::KnowledgeKnowFoxes],
+            SystemRole::Immoralist => &[
+                RoleTrait::KnowledgeKnowFoxes,
+                RoleTrait::ReactiveFollowFoxDeath,
+            ],
             SystemRole::Paparazzi => &[RoleTrait::ActionDivine],
         }
     }
@@ -145,6 +148,7 @@ pub enum RoleTrait {
     ActionAttack,
     ReactiveCurseOnExecuted,
     ReactiveCurseOnKilled,
+    ReactiveFollowFoxDeath,
     AutoInfoExecutionSpecies,
     ChannelWolfChat,
 }

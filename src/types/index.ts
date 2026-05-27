@@ -11,7 +11,7 @@ export type RoleTrait =
   | { kind: 'passive', sub: 'attack-immune' | 'die-when-divined' }
   | { kind: 'knowledge', sub: 'know-werewolves' | 'know-foxes' | 'know-masons' }
   | { kind: 'action', sub: 'divine' | 'guard' | 'attack' }
-  | { kind: 'reactive', sub: 'curse-on-executed' | 'curse-on-killed' }
+  | { kind: 'reactive', sub: 'curse-on-executed' | 'curse-on-killed' | 'follow-fox-death' }
   | { kind: 'auto-info', sub: 'execution-species' }
   | { kind: 'channel', sub: 'wolf-chat' }
 
@@ -180,9 +180,12 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
   ["immoralist", {
     name: "背徳者", shortName: "背", systemName: "immoralist",
     alignment: "werehamster", faction: "fox", category: "immoralist",
-    description: "特別な能力はない村人だが、妖狐の味方をする",
+    description: "特別な能力はない村人だが、妖狐の味方をする\n妖狐が全滅すると後追いで死亡する",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
-    traits: [{ kind: "knowledge", sub: "know-foxes" }],
+    traits: [
+      { kind: "knowledge", sub: "know-foxes" },
+      { kind: "reactive", sub: "follow-fox-death" },
+    ],
   }],
   ["paparazzi", {
     name: "パパラッチ", shortName: "パ", systemName: "paparazzi",
