@@ -1,4 +1,4 @@
-use crate::types::{CauseOfDeath, SeatStatus, VillageStatus, SystemRole, Seat, Day};
+use crate::types::{CauseOfDeath, RoleTrait, SeatStatus, VillageStatus, SystemRole, Seat, Day};
 use crate::possibilities::Possibilities;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -56,7 +56,7 @@ pub struct RoleTesterEnv<'a> {
 
 pub struct ContextSnapshot {
     pub poss_arr: Vec<u16>,
-    pub poss_setup: [u8; 11],
+    pub poss_setup: [u8; 12],
     pub hamsters_max_surviving_day: i32,
     pub need_seer_at_day: Option<Day>,
     pub hamsters_killed_by_seer_len: usize,
@@ -70,7 +70,7 @@ impl ContextSnapshot {
     pub fn new_empty(poss_len: usize, chronicle_len: usize) -> Self {
         ContextSnapshot {
             poss_arr: vec![0u16; poss_len],
-            poss_setup: [0u8; 11],
+            poss_setup: [0u8; 12],
             hamsters_max_surviving_day: 0,
             need_seer_at_day: None,
             hamsters_killed_by_seer_len: 0,
@@ -137,18 +137,28 @@ fn is_exec_phase(c: CauseOfDeath) -> bool {
     c == CauseOfDeath::Execution || c == CauseOfDeath::CursedByExecutedNekomata
 }
 
-pub fn test_hamster(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
-    let mut hamsters = BTreeSet::new();
+#[derive(Debug, Clone)]
+enum SeerTarget {
+    Known(Seat),
+    Unknown,
+}
+
+// ============================================================================
+// trait verifiers
+//
+// 各 verifier は「trait に対応する能力・性質」を検証する。
+// test_role が role に紐付く traits を見て該当 verifier を順次呼び出す。
+// 前提: selected の seat は test_role 側で既に fix_role 済み。
+// ============================================================================
+
+/// passive: attack-immune + die-when-divined (旧 test_hamster 相当、狐の生存/呪殺制約)
+fn verify_hamster_passive(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat], role: SystemRole) -> bool {
     let mut last_hamster_died_at: i32 = i32::MIN;
     let mut last_hamster_died_by: Option<CauseOfDeath> = None;
     let mut living_hamsters = 0u32;
     let mut seer_killed_hamster_at: i32 = i32::MIN;
 
     for &seat in selected {
-        hamsters.insert(seat);
-        if !ctx.possibilities.fix_role(seat, SystemRole::Werehamster) {
-            return false;
-        }
         let status = get_status(env, seat);
         if status.surviving {
             living_hamsters += 1;
@@ -187,7 +197,7 @@ pub fn test_hamster(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[S
     }
 
     for &seat in rest {
-        ctx.possibilities.deny_role(seat, SystemRole::Werehamster);
+        ctx.possibilities.deny_role(seat, role);
         if living_hamsters == 0 {
             let status = get_status(env, seat);
             if status.surviving || last_hamster_died_at < status.died_day.unwrap_or(i32::MAX) {
@@ -204,7 +214,8 @@ pub fn test_hamster(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[S
     true
 }
 
-pub fn test_seer(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
+/// action: divine (旧 test_seer 相当、占い能力者の assertion 検証 + 狐呪殺)
+fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat], role: SystemRole) -> bool {
     let mut seers = BTreeSet::new();
     let mut max_surviving: i32 = i32::MIN;
     let mut seer_targets: BTreeMap<Day, Vec<SeerTarget>> = BTreeMap::new();
@@ -218,10 +229,6 @@ pub fn test_seer(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat
 
     for &seat in selected {
         seers.insert(seat);
-        if !ctx.possibilities.fix_role(seat, SystemRole::Seer) {
-            return false;
-        }
-
         let self_status = get_status(env, seat);
 
         if !self_status.claiming {
@@ -381,7 +388,7 @@ pub fn test_seer(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat
     for &seat in rest {
         let status = get_status(env, seat);
         if !status.claiming {
-            if !ctx.possibilities.deny_role(seat, SystemRole::Seer) {
+            if !ctx.possibilities.deny_role(seat, role) {
                 return false;
             }
         } else {
@@ -391,25 +398,18 @@ pub fn test_seer(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat
         }
     }
 
-    if !deny_role_for_others(env, ctx, SystemRole::Seer, &seers) {
+    if !deny_role_for_others(env, ctx, role, &seers) {
         return false;
     }
     true
 }
 
-#[derive(Debug, Clone)]
-enum SeerTarget {
-    Known(Seat),
-    Unknown,
-}
-
-pub fn test_medium(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
+/// auto-info: execution-species (旧 test_medium 相当、霊媒結果の検証)
+fn verify_mediumship_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat], role: SystemRole) -> bool {
     let mut mediums = BTreeSet::new();
+    let role_name = role.to_string();
     for &seat in selected {
         mediums.insert(seat);
-        if !ctx.possibilities.fix_role(seat, SystemRole::Medium) {
-            return false;
-        }
         let self_status = get_status(env, seat);
         for (_, assertion) in &self_status.assertions {
             if assertion.species == Some(crate::types::EnumSpecies::Wolf) {
@@ -425,8 +425,8 @@ pub fn test_medium(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Se
     }
     for &seat in rest {
         let status = get_status(env, seat);
-        if !status.claiming || status.claiming_role != "medium" {
-            if !ctx.possibilities.deny_role(seat, SystemRole::Medium) {
+        if !status.claiming || status.claiming_role != role_name {
+            if !ctx.possibilities.deny_role(seat, role) {
                 return false;
             }
         } else {
@@ -435,24 +435,23 @@ pub fn test_medium(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Se
             }
         }
     }
-    if !deny_role_for_others(env, ctx, SystemRole::Medium, &mediums) {
+    if !deny_role_for_others(env, ctx, role, &mediums) {
         return false;
     }
     true
 }
 
-pub fn test_bodyguard(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
+/// action: guard (旧 test_bodyguard 相当、護衛能力者の rest 処理のみ — assertion 検証なし)
+fn verify_guard_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat], role: SystemRole) -> bool {
     let mut bodyguards = BTreeSet::new();
+    let role_name = role.to_string();
     for &seat in selected {
         bodyguards.insert(seat);
-        if !ctx.possibilities.fix_role(seat, SystemRole::Bodyguard) {
-            return false;
-        }
     }
     for &seat in rest {
         let status = get_status(env, seat);
-        if !status.claiming || status.claiming_role != "bodyguard" {
-            if !ctx.possibilities.deny_role(seat, SystemRole::Bodyguard) {
+        if !status.claiming || status.claiming_role != role_name {
+            if !ctx.possibilities.deny_role(seat, role) {
                 return false;
             }
         } else {
@@ -461,26 +460,25 @@ pub fn test_bodyguard(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &
             }
         }
     }
-    if !deny_role_for_others(env, ctx, SystemRole::Bodyguard, &bodyguards) {
+    if !deny_role_for_others(env, ctx, role, &bodyguards) {
         return false;
     }
     true
 }
 
-pub fn test_mason(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
+/// knowledge: know-masons (旧 test_mason 相当、共有相方の固定)
+fn verify_mason_bond(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat], role: SystemRole) -> bool {
     let mut masons = BTreeSet::new();
+    let role_name = role.to_string();
     for &seat in selected {
         masons.insert(seat);
-        if !ctx.possibilities.fix_role(seat, SystemRole::Mason) {
-            return false;
-        }
         let self_status = get_status(env, seat);
         for (_, assertion) in &self_status.assertions {
             if assertion.species == Some(crate::types::EnumSpecies::Wolf) {
                 // Mason asserts partner as human. Wolf assertion → contradiction.
                 return false;
             } else {
-                if !ctx.possibilities.fix_role(assertion.target, SystemRole::Mason) {
+                if !ctx.possibilities.fix_role(assertion.target, role) {
                     return false;
                 }
                 masons.insert(assertion.target);
@@ -489,28 +487,27 @@ pub fn test_mason(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Sea
     }
     for &seat in rest {
         let status = get_status(env, seat);
-        if !status.claiming || status.claiming_role != "mason" {
+        if !status.claiming || status.claiming_role != role_name {
             continue;
         }
         if !ctx.possibilities.mark_as_liar(seat) {
             return false;
         }
     }
-    if !deny_role_for_others(env, ctx, SystemRole::Mason, &masons) {
+    if !deny_role_for_others(env, ctx, role, &masons) {
         return false;
     }
     true
 }
 
-pub fn test_nekomata(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat]) -> bool {
+/// reactive: curse-on-executed + curse-on-killed (旧 test_nekomata 相当、道連れ検証)
+fn verify_nekomata_curse(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat], role: SystemRole) -> bool {
     let mut nekomatas = BTreeSet::new();
     let mut possible_cursed: Vec<Seat> = Vec::new();
+    let role_name = role.to_string();
 
     for &seat in selected {
         nekomatas.insert(seat);
-        if !ctx.possibilities.fix_role(seat, SystemRole::Nekomata) {
-            return false;
-        }
         let self_status = get_status(env, seat);
         if !self_status.surviving {
             if self_status.cause_of_death == CauseOfDeath::NightKill {
@@ -571,8 +568,8 @@ pub fn test_nekomata(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[
 
     for &seat in rest {
         let status = get_status(env, seat);
-        if !status.claiming || status.claiming_role != "nekomata" {
-            if !ctx.possibilities.deny_role(seat, SystemRole::Nekomata) {
+        if !status.claiming || status.claiming_role != role_name {
+            if !ctx.possibilities.deny_role(seat, role) {
                 return false;
             }
         } else {
@@ -581,11 +578,16 @@ pub fn test_nekomata(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[
             }
         }
     }
-    if !deny_role_for_others(env, ctx, SystemRole::Nekomata, &nekomatas) {
+    if !deny_role_for_others(env, ctx, role, &nekomatas) {
         return false;
     }
     true
 }
+
+// ============================================================================
+// test_role: trait ベース dispatcher
+// 新役職は SystemRole::traits() に traits を追加するだけで自動的にここから対応 verifier に分配される。
+// ============================================================================
 
 pub fn test_role(
     env: &RoleTesterEnv,
@@ -594,13 +596,46 @@ pub fn test_role(
     selected: &[Seat],
     rest: &[Seat],
 ) -> bool {
-    match role {
-        SystemRole::Werehamster => test_hamster(env, ctx, selected, rest),
-        SystemRole::Seer => test_seer(env, ctx, selected, rest),
-        SystemRole::Medium => test_medium(env, ctx, selected, rest),
-        SystemRole::Bodyguard => test_bodyguard(env, ctx, selected, rest),
-        SystemRole::Mason => test_mason(env, ctx, selected, rest),
-        SystemRole::Nekomata => test_nekomata(env, ctx, selected, rest),
-        _ => true,
+    // 1. selected を role に固定
+    for &seat in selected {
+        if !ctx.possibilities.fix_role(seat, role) {
+            return false;
+        }
     }
+
+    // 2. role の traits に応じた verifier を順次呼ぶ
+    let traits = role.traits();
+
+    if traits.contains(&RoleTrait::PassiveAttackImmune) || traits.contains(&RoleTrait::PassiveDieWhenDivined) {
+        if !verify_hamster_passive(env, ctx, selected, rest, role) {
+            return false;
+        }
+    }
+    if traits.contains(&RoleTrait::ActionDivine) {
+        if !verify_divine_ability(env, ctx, selected, rest, role) {
+            return false;
+        }
+    }
+    if traits.contains(&RoleTrait::AutoInfoExecutionSpecies) {
+        if !verify_mediumship_ability(env, ctx, selected, rest, role) {
+            return false;
+        }
+    }
+    if traits.contains(&RoleTrait::ActionGuard) {
+        if !verify_guard_ability(env, ctx, selected, rest, role) {
+            return false;
+        }
+    }
+    if traits.contains(&RoleTrait::KnowledgeKnowMasons) {
+        if !verify_mason_bond(env, ctx, selected, rest, role) {
+            return false;
+        }
+    }
+    if traits.contains(&RoleTrait::ReactiveCurseOnExecuted) || traits.contains(&RoleTrait::ReactiveCurseOnKilled) {
+        if !verify_nekomata_curse(env, ctx, selected, rest, role) {
+            return false;
+        }
+    }
+
+    true
 }
