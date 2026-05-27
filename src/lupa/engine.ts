@@ -20,6 +20,7 @@ import {
   killPlayer, checkWinCondition,
 } from './roles.ts'
 import { forceTrueRoleCO, resolveVotes } from './engine-utils.ts'
+import { hasTrait, getFaction, isHamster } from './role-traits.ts'
 
 const MAX_DAYS = 50
 
@@ -90,17 +91,22 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
     const divine = player.divineHistory.get(0)
     if (!divine) continue
     const target = players.find(p => p.seat === divine.target)!
-    if (target.role === 'werehamster' && target.alive) {
+    if (hasTrait(target.role, 'passive', 'die-when-divined') && target.alive) {
       killPlayer(state, target.seat)
       emit({ type: 'fox_kill', target: target.seat })
       checkImmoralistFollow(state, emit)
     }
   }
 
-  // 初日犠牲者
+  // 初日犠牲者: 襲撃側の狼 / 妖狐 / 道連れ役職を除外 (それ以外は対象)
   if (hasFirstVictim) {
-    const immuneRoles: SystemRole[] = ['werewolf', 'nekomata', 'werehamster']
-    const candidates = alivePlayers(state).filter(p => !immuneRoles.includes(p.role))
+    const candidates = alivePlayers(state).filter(p => {
+      if (hasTrait(p.role, 'action', 'attack')) return false
+      if (isHamster(p.role)) return false
+      if (hasTrait(p.role, 'reactive', 'curse-on-executed')) return false
+      if (hasTrait(p.role, 'reactive', 'curse-on-killed')) return false
+      return true
+    })
     if (candidates.length > 0) {
       const victim = rng.pick(candidates)
       killPlayer(state, victim.seat)
@@ -344,12 +350,12 @@ async function runGameLoop<E = never, Ext = unknown>(
     const medResult = getSeerResult(executedPlayer.role)
     emit({ type: 'comment', text: `霊能: ${executedPlayer.name} = ${medResult === 'human' ? '○' : '●'}` })
 
-    // 猫又道連れ
-    if (executedPlayer.role === 'nekomata') {
+    // 猫又道連れ (処刑時の呪い)
+    if (hasTrait(executedPlayer.role, 'reactive', 'curse-on-executed')) {
       let curseCandidates = alivePlayers(state)
       if (rules['role.nekomata.curse-target'] === 'villager') {
-        const wolfFoxRoles: SystemRole[] = ['werewolf', 'werehamster']
-        curseCandidates = curseCandidates.filter(p => !wolfFoxRoles.includes(p.role))
+        // 「村人陣営のみを呪う」設定: 襲撃可能な狼と妖狐を除外
+        curseCandidates = curseCandidates.filter(p => !hasTrait(p.role, 'action', 'attack') && !isHamster(p.role))
       }
       if (curseCandidates.length > 0) {
         const curseTarget = rng.pick(curseCandidates)
@@ -451,7 +457,7 @@ function resolveNight(
   for (const { action } of actions) {
     if (action.type !== 'divine') continue
     const target = state.players.find(p => p.seat === action.target)!
-    if (target.role === 'werehamster' && target.alive) {
+    if (hasTrait(target.role, 'passive', 'die-when-divined') && target.alive) {
       killPlayer(state, action.target)
       foxKilled.add(action.target)
       emit({ type: 'fox_kill', target: action.target })
@@ -491,12 +497,12 @@ function resolveNight(
     const chosenAttackers = attacksByTarget.get(chosenTarget)!
     const target = state.players.find(p => p.seat === chosenTarget)!
 
-    if (target.role === 'werehamster') {
-      // 妖狐は襲撃されても死なない
+    if (hasTrait(target.role, 'passive', 'attack-immune')) {
+      // 襲撃免疫 (妖狐) は襲撃されても死なない
     } else if (guardTargets.has(chosenTarget)) {
       // 護衛成功 (どれかの狩人が守っていれば成功)
-    } else if (target.role === 'nekomata') {
-      // 猫又襲撃: 猫又は死亡、襲撃した狼のうちランダム 1 匹を道連れ
+    } else if (hasTrait(target.role, 'reactive', 'curse-on-killed')) {
+      // 道連れ役職 (猫又) 襲撃: 本体は死亡、襲撃した狼のうちランダム 1 匹を道連れ
       killPlayer(state, chosenTarget)
       emit({ type: 'night_kill', target: chosenTarget })
       const cursed = rng.pick(chosenAttackers)
@@ -566,13 +572,15 @@ function applyClaim(
   }
 }
 
-/** 妖狐死亡時の背徳者後追いチェック */
+/** 妖狐退場時の狐陣営後追いチェック */
 function checkImmoralistFollow(state: GameState, emit: EmitFn): void {
-  const aliveHamsters = state.players.filter(p => p.role === 'werehamster' && p.alive)
+  // 妖狐 (狐陣営 + 占い呪殺対象) が 1 人でも生存していれば後追いは発生しない
+  const aliveHamsters = state.players.filter(p => isHamster(p.role) && p.alive)
   if (aliveHamsters.length > 0) return
 
-  const aliveImmoralists = state.players.filter(p => p.role === 'immoralist' && p.alive)
-  for (const imm of aliveImmoralists) {
+  // 妖狐以外の狐陣営 (背徳者) が後追い
+  const followers = state.players.filter(p => getFaction(p.role) === 'fox' && !isHamster(p.role) && p.alive)
+  for (const imm of followers) {
     killPlayer(state, imm.seat)
     emit({ type: 'follow_kill', target: imm.seat })
   }

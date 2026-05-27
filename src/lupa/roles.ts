@@ -1,6 +1,7 @@
 import { systemRoles } from '../types/index.ts'
 import type { SystemRole, EnumSpecies } from '../types/index.ts'
 import type { GameState, PlayerState } from './types.ts'
+import { hasTrait, isHamster } from './role-traits.ts'
 
 export function assignRoles(
   roleConfig: Map<SystemRole, number>,
@@ -69,11 +70,12 @@ export function killPlayer(state: GameState, seat: number): void {
 /** 勝利判定。勝利条件を満たした場合resultをセット */
 export function checkWinCondition(state: GameState): void {
   const alive = alivePlayers(state)
-  const wolves = alive.filter(p => p.role === 'werewolf')
-  const hamsters = alive.filter(p => p.role === 'werehamster')
+  // 襲撃可能個体 (= 人狼) のみで勝利判定。パパラッチ等の狼陣営非襲撃役は wolves には含まれない
+  const wolves = alive.filter(p => hasTrait(p.role, 'action', 'attack'))
+  const hamsters = alive.filter(p => isHamster(p.role))
   // 勝利判定では妖狐は人数にカウントしない
-  const nonHamsterAlive = alive.filter(p => p.role !== 'werehamster')
-  const nonWolfCount = nonHamsterAlive.filter(p => p.role !== 'werewolf').length
+  const nonHamsterAlive = alive.filter(p => !isHamster(p.role))
+  const nonWolfCount = nonHamsterAlive.filter(p => !hasTrait(p.role, 'action', 'attack')).length
 
   if (wolves.length === 0) {
     // 人狼全滅

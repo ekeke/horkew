@@ -8,9 +8,7 @@ import type { GameHandlers } from './handlers.ts'
 import { alivePlayers } from './roles.ts'
 import { Rng } from './random.ts'
 import { forceTrueRoleCO } from './engine-utils.ts'
-
-const WOLF_ROLES: SystemRole[] = ['werewolf']
-const NIGHT_ROLES: SystemRole[] = ['seer', 'bodyguard', 'werewolf']
+import { hasTrait } from './role-traits.ts'
 
 export function makeRandomHandlers(seed?: number): GameHandlers {
   const rng = new Rng(seed)
@@ -28,30 +26,25 @@ export function makeRandomHandlers(seed?: number): GameHandlers {
       const aliveSeats = alive.map(p => p.seat)
 
       for (const player of alive) {
-        switch (player.role) {
-          case 'seer': {
-            const targets = aliveSeats.filter(s => s !== player.seat)
-            if (targets.length > 0) {
-              actions.set(player.seat, { type: 'divine', target: targets[Math.floor(rng.next() * targets.length)] })
-            }
-            break
+        // 占い (action:divine) を持つ役職は divine action を発行 (seer / paparazzi)
+        if (hasTrait(player.role, 'action', 'divine')) {
+          const targets = aliveSeats.filter(s => s !== player.seat)
+          if (targets.length > 0) {
+            actions.set(player.seat, { type: 'divine', target: targets[Math.floor(rng.next() * targets.length)] })
           }
-          case 'bodyguard': {
-            const targets = aliveSeats.filter(s => s !== player.seat)
-            if (targets.length > 0) {
-              actions.set(player.seat, { type: 'guard', target: targets[Math.floor(rng.next() * targets.length)] })
-            }
-            break
+        } else if (hasTrait(player.role, 'action', 'guard')) {
+          const targets = aliveSeats.filter(s => s !== player.seat)
+          if (targets.length > 0) {
+            actions.set(player.seat, { type: 'guard', target: targets[Math.floor(rng.next() * targets.length)] })
           }
-          case 'werewolf': {
-            const targets = aliveSeats.filter(s => {
-              const r = seatRoles.get(s)
-              return r !== undefined && !WOLF_ROLES.includes(r)
-            })
-            if (targets.length > 0) {
-              actions.set(player.seat, { type: 'attack', target: targets[Math.floor(rng.next() * targets.length)] })
-            }
-            break
+        } else if (hasTrait(player.role, 'action', 'attack')) {
+          // 襲撃: 同 seat の襲撃可能個体 (味方狼) は対象外
+          const targets = aliveSeats.filter(s => {
+            const r = seatRoles.get(s)
+            return r !== undefined && !hasTrait(r, 'action', 'attack')
+          })
+          if (targets.length > 0) {
+            actions.set(player.seat, { type: 'attack', target: targets[Math.floor(rng.next() * targets.length)] })
           }
         }
       }
@@ -61,12 +54,9 @@ export function makeRandomHandlers(seed?: number): GameHandlers {
     onDayClaims(ctx) {
       const state = ctx.state as GameState
       const claims = new Map<number, DayClaim>()
+      // forceTrueRoleCO は対象外役職に対し { type: 'none' } を返すので、生存者全員に呼んで良い
       for (const player of alivePlayers(state)) {
-        if (NIGHT_ROLES.includes(player.role) || player.role === 'medium' || player.role === 'mason' || player.role === 'nekomata') {
-          claims.set(player.seat, forceTrueRoleCO(state, player, ctx.day, state.executionHistory.get(ctx.day - 1) ?? null))
-        } else {
-          claims.set(player.seat, { type: 'none' })
-        }
+        claims.set(player.seat, forceTrueRoleCO(state, player, ctx.day, state.executionHistory.get(ctx.day - 1) ?? null))
       }
       return claims
     },
