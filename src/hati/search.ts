@@ -10,14 +10,8 @@ import {
   obsKeyToString, executionObsKeyToString,
   getMediumResult, applyFollowDeaths,
 } from './simulate.ts'
-import { RoleBitIndex } from '../retar/possibilities.ts'
-
-/** 村人側role IDセット（数値判定用） */
-const VILLAGER_ROLE_IDS: Set<number> = new Set([
-  RoleBitIndex.villager, RoleBitIndex.seer, RoleBitIndex.medium,
-  RoleBitIndex.bodyguard, RoleBitIndex.mason, RoleBitIndex.nekomata,
-])
-const NEKOMATA_ROLE_ID = RoleBitIndex.nekomata
+// 役職名・役職IDの直接参照は禁止。世界判定は World 上の属性マスクで行う
+// (role-attributes.ts の ATTR.* 参照)。
 
 /** 戦略木省略時のセンチネル（詰みありを示す軽量値） */
 const WIN: StrategyNode = { type: 'win' }
@@ -190,7 +184,7 @@ function mid(
   // 狼カウントで初期ソート（証明しやすい候補を先に）
   const wolfCounts = new Uint16Array(32)
   for (const w of worlds) {
-    let mask = w.wolfMask & state.alive
+    let mask = w.attackCapableMask & state.alive
     while (mask !== 0) {
       const bit = mask & (-mask)
       wolfCounts[31 - Math.clz32(bit)]++
@@ -321,7 +315,7 @@ function dfpnNight(
   const seerCandidates = getSeerCandidates(worlds, alive)
   let maxSeerCount = 0
   for (const w of worlds) {
-    const c = popCount32(w.seerMask & alive)
+    const c = popCount32(w.divineCapableMask & alive)
     if (c > maxSeerCount) maxSeerCount = c
   }
 
@@ -408,10 +402,10 @@ function dfpnNightAction(
         world, alive, biteTarget, bodyguardTarget, seerTargets,
       )
 
-      const isNekoBite = world.roleIds[biteTarget] === NEKOMATA_ROLE_ID
+      const isNekoBite = (world.curseOnKilledMask & (1 << biteTarget)) !== 0
         && hasSeat(alive, biteTarget)
-        && (bodyguardTarget !== biteTarget || !hasSeat(alive, world.bodyguardSeat))
-      const curseWolfMask = isNekoBite ? (world.wolfMask & baseAlive) : 0
+        && (bodyguardTarget !== biteTarget || (world.guardCapableMask & alive) === 0)
+      const curseWolfMask = isNekoBite ? (world.attackCapableMask & baseAlive) : 0
 
       if (curseWolfMask === 0) {
         const outcome = checkOutcome(world, baseAlive)
@@ -420,7 +414,7 @@ function dfpnNightAction(
         if (group) { if (!group.worlds.includes(world)) group.worlds.push(world) }
         else possibleByObs.set(baseKey, { worlds: [world], alive: baseAlive })
       } else {
-        const seerShift = popCount32(world.seerMask) * 2
+        const seerShift = popCount32(world.divineCapableMask) * 2
         let wolfBits = curseWolfMask
         while (wolfBits !== 0) {
           const wolfBit = wolfBits & (-wolfBits)
@@ -497,7 +491,7 @@ function computeBiteRepMask(worlds: World[], alive: number): number {
     mask ^= bit
     let alwaysWolf = true
     for (let wi = 0; wi < worlds.length; wi++) {
-      if (!hasSeat(worlds[wi].wolfMask, seat)) { alwaysWolf = false; break }
+      if (!hasSeat(worlds[wi].attackCapableMask, seat)) { alwaysWolf = false; break }
     }
     if (alwaysWolf) { biteRepMask |= bit; continue }
     let h = 0x811c9dc5
@@ -610,7 +604,7 @@ function isTsumi(
   const candidates = getExecutionCandidates(worlds, state.alive)
   const wolfCounts = new Uint16Array(32)
   for (const w of worlds) {
-    const wolvesAlive = w.wolfMask & state.alive
+    const wolvesAlive = w.attackCapableMask & state.alive
     let mask = wolvesAlive
     while (mask !== 0) {
       const bit = mask & (-mask)
@@ -780,13 +774,13 @@ export function precheckWorlds(worlds: World[], alive: number, _disableHamsterPr
 
   for (let i = 0; i < worlds.length; i++) {
     const w = worlds[i]
-    const wolvesAlive = w.wolfMask & alive
+    const wolvesAlive = w.attackCapableMask & alive
     wolfUnion |= wolvesAlive
     if (i === 0) wolfIntersection = wolvesAlive
     else wolfIntersection &= wolvesAlive
     const wolfCount = popCount32(wolvesAlive)
     let nonWolfNonHamster = aliveCount - wolfCount
-    const aliveHamsters = w.hamsterMask & alive
+    const aliveHamsters = w.dieWhenDivinedMask & alive
     if (aliveHamsters !== 0) {
       nonWolfNonHamster -= popCount32(aliveHamsters)
       hasAliveHamster = true
@@ -828,14 +822,15 @@ function getExecutionCandidates(worlds: World[], alive: number): Seat[] {
   const seen = new Set<number>()
 
   // 狐生存時は確定村吊り（時間稼ぎ）が有効戦略になりうる
-  const hasAliveHamster = worlds.some(w => (w.hamsterMask & alive) !== 0)
+  const hasAliveHamster = worlds.some(w => (w.dieWhenDivinedMask & alive) !== 0)
   let addedVillagerRep = false
 
   forEachSeat(alive, seat => {
-    // #4: 数値IDで村人確定判定（Set再生成不要）
+    // 「全ワールドでこの seat は村陣営 (wolf 陣営でも狐陣営でもない)」を判定
+    const bit = 1 << seat
     let isVillager = true
     for (const w of worlds) {
-      if (!VILLAGER_ROLE_IDS.has(w.roleIds[seat])) { isVillager = false; break }
+      if (((w.wolfFactionMask | w.foxFactionMask) & bit) !== 0) { isVillager = false; break }
     }
     if (isVillager) {
       if (!hasAliveHamster) return
@@ -928,11 +923,12 @@ function partitionWorldsByExecution(
 
   const result = new Map<ObservationKey, { worlds: World[], alive: number }>()
 
+  const targetBit = 1 << target
   for (const [mediumKey, mediumWorlds] of byMedium) {
     const mediumResult = mediumKey === 'null' ? null : mediumKey as EnumSpecies
 
-    const hasNekomata = mediumWorlds.some(w => w.roleIds[target] === NEKOMATA_ROLE_ID)
-    const hasNonNekomata = mediumWorlds.some(w => w.roleIds[target] !== NEKOMATA_ROLE_ID)
+    const hasNekomata = mediumWorlds.some(w => (w.curseOnExecutedMask & targetBit) !== 0)
+    const hasNonNekomata = mediumWorlds.some(w => (w.curseOnExecutedMask & targetBit) === 0)
 
     if (!hasNekomata) {
       const obsKey = executionObsKeyToString(mediumResult, null)
@@ -944,8 +940,8 @@ function partitionWorldsByExecution(
         addToPartition(result, obsKey, mediumWorlds, aliveAfterCurse)
       })
     } else {
-      const nekoWorlds = mediumWorlds.filter(w => w.roleIds[target] === NEKOMATA_ROLE_ID)
-      const nonNekoWorlds = mediumWorlds.filter(w => w.roleIds[target] !== NEKOMATA_ROLE_ID)
+      const nekoWorlds = mediumWorlds.filter(w => (w.curseOnExecutedMask & targetBit) !== 0)
+      const nonNekoWorlds = mediumWorlds.filter(w => (w.curseOnExecutedMask & targetBit) === 0)
 
       const obsKey = executionObsKeyToString(mediumResult, null)
       addToPartition(result, obsKey, nonNekoWorlds, aliveAfterExec)
@@ -1013,7 +1009,7 @@ function searchNight(
   // 占い師の最大人数（ワールド間の最大値）
   let maxSeerCount = 0
   for (const w of worlds) {
-    const c = popCount32(w.seerMask & alive)
+    const c = popCount32(w.divineCapableMask & alive)
     if (c > maxSeerCount) maxSeerCount = c
   }
 
@@ -1066,14 +1062,14 @@ function enumerateSeerTargetCombos(candidates: (Seat | null)[], count: number): 
  * #7: roleIds で等価クラスハッシュ
  */
 function getBodyguardCandidates(worlds: World[], alive: number): (Seat | null)[] {
-  const hasAliveBodyguard = worlds.some(w => w.bodyguardSeat !== -1 && hasSeat(alive, w.bodyguardSeat))
+  const hasAliveBodyguard = worlds.some(w => (w.guardCapableMask & alive) !== 0)
   if (!hasAliveBodyguard) return [null]
 
   const candidates: (Seat | null)[] = [null]
   const seen = new Set<number>()
   forEachSeat(alive, seat => {
     // 全ワールドで狼確定の席は護衛しても無意味
-    if (worlds.every(w => hasSeat(w.wolfMask, seat))) return
+    if (worlds.every(w => hasSeat(w.attackCapableMask, seat))) return
     // 等価クラス: 護衛先の役職IDパターンが同一なら1つだけ
     let h = 0x811c9dc5
     for (const w of worlds) {
@@ -1092,7 +1088,7 @@ function getBodyguardCandidates(worlds: World[], alive: number): (Seat | null)[]
  * #7: roleIds で等価クラスハッシュ + 情報ゲイン判定
  */
 function getSeerCandidates(worlds: World[], alive: number): (Seat | null)[] {
-  const hasAliveSeer = worlds.some(w => (w.seerMask & alive) !== 0)
+  const hasAliveSeer = worlds.some(w => (w.divineCapableMask & alive) !== 0)
   if (!hasAliveSeer) return [null]
 
   const candidates: (Seat | null)[] = [null]
@@ -1164,10 +1160,10 @@ function tryNightAction(
       )
 
       // 猫又噛みチェック: 道連れ狼を全生存狼に対して分岐（AND節点）
-      const isNekoBite = world.roleIds[biteTarget] === NEKOMATA_ROLE_ID
+      const isNekoBite = (world.curseOnKilledMask & (1 << biteTarget)) !== 0
         && hasSeat(alive, biteTarget)
-        && (bodyguardTarget !== biteTarget || !hasSeat(alive, world.bodyguardSeat))
-      const curseWolfMask = isNekoBite ? (world.wolfMask & baseAlive) : 0
+        && (bodyguardTarget !== biteTarget || (world.guardCapableMask & alive) === 0)
+      const curseWolfMask = isNekoBite ? (world.attackCapableMask & baseAlive) : 0
 
       if (curseWolfMask === 0) {
         // 通常噛み or 猫又以外 or 護衛成功 or 狼全滅
@@ -1182,7 +1178,7 @@ function tryNightAction(
       } else {
         // 猫又噛み: 各生存狼が道連れ対象（狼が選択するAND分岐）
         // obsKey に道連れ狼の死亡を反映: deathMask は seerCount*2 ビットシフトされている
-        const seerShift = popCount32(world.seerMask) * 2
+        const seerShift = popCount32(world.divineCapableMask) * 2
         let wolfBits = curseWolfMask
         while (wolfBits !== 0) {
           const wolfBit = wolfBits & (-wolfBits)

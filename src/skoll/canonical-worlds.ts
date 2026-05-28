@@ -28,7 +28,7 @@
 import type { SystemRole, Seat, VillageStatus } from '../types/index.ts'
 import type { Possibilities, RolePossibility } from '../retar/possibilities.ts'
 import type { World } from '../hati/types.ts'
-import { maskFromSeats } from '../hati/types.ts'
+import { maskFromSeats, getGuardSeat } from '../hati/types.ts'
 import {
   RoleBitIndex, RoleSignatureBitsReverseMap, ROLE_COUNT,
   bitIndicesFromMask, combinationWithReplacementBit,
@@ -82,35 +82,35 @@ function multinomial(k: number, counts: number[]): number {
 }
 
 type MasksSnapshot = {
-  wolfMask: number
-  hamsterMask: number
-  immoralistMask: number
-  seerMask: number
-  mediumMask: number
-  nekomataMask: number
-  bodyguardSeat: number
+  attackCapableMask: number
+  dieWhenDivinedMask: number
+  followFoxDeathMask: number
+  divineCapableMask: number
+  mediumshipMask: number
+  curseOnExecutedMask: number
+  guardCapableMask: number
 }
 
 function snapshotMasks(world: World): MasksSnapshot {
   return {
-    wolfMask: world.wolfMask,
-    hamsterMask: world.hamsterMask,
-    immoralistMask: world.immoralistMask,
-    seerMask: world.seerMask,
-    mediumMask: world.mediumMask,
-    nekomataMask: world.nekomataMask,
-    bodyguardSeat: world.bodyguardSeat,
+    attackCapableMask: world.attackCapableMask,
+    dieWhenDivinedMask: world.dieWhenDivinedMask,
+    followFoxDeathMask: world.followFoxDeathMask,
+    divineCapableMask: world.divineCapableMask,
+    mediumshipMask: world.mediumshipMask,
+    curseOnExecutedMask: world.curseOnExecutedMask,
+    guardCapableMask: world.guardCapableMask,
   }
 }
 
 function restoreMasks(world: World, snap: MasksSnapshot): void {
-  world.wolfMask = snap.wolfMask
-  world.hamsterMask = snap.hamsterMask
-  world.immoralistMask = snap.immoralistMask
-  world.seerMask = snap.seerMask
-  world.mediumMask = snap.mediumMask
-  world.nekomataMask = snap.nekomataMask
-  world.bodyguardSeat = snap.bodyguardSeat
+  world.attackCapableMask = snap.attackCapableMask
+  world.dieWhenDivinedMask = snap.dieWhenDivinedMask
+  world.followFoxDeathMask = snap.followFoxDeathMask
+  world.divineCapableMask = snap.divineCapableMask
+  world.mediumshipMask = snap.mediumshipMask
+  world.curseOnExecutedMask = snap.curseOnExecutedMask
+  world.guardCapableMask = snap.guardCapableMask
 }
 
 /**
@@ -143,13 +143,17 @@ export function enumerateCanonicalWorlds(
   const world: World = {
     roles: rolesArr,
     roleIds,
-    wolfMask: 0,
-    hamsterMask: 0,
-    immoralistMask: 0,
-    seerMask: 0,
-    mediumMask: 0,
-    nekomataMask: 0,
-    bodyguardSeat: -1,
+    wolfFactionMask: 0,
+    foxFactionMask: 0,
+    attackCapableMask: 0,
+    divineCapableMask: 0,
+    guardCapableMask: 0,
+    attackImmuneMask: 0,
+    dieWhenDivinedMask: 0,
+    curseOnExecutedMask: 0,
+    curseOnKilledMask: 0,
+    followFoxDeathMask: 0,
+    mediumshipMask: 0,
   }
 
   let stopped = false
@@ -197,13 +201,13 @@ export function enumerateCanonicalWorlds(
           rolesArr[seat] = role
           roleIds[seat] = lc.bitIdx
           switch (lc.bitIdx) {
-            case RoleBitIndex.werewolf: world.wolfMask |= bit; break
-            case RoleBitIndex.werehamster: world.hamsterMask |= bit; break
-            case RoleBitIndex.immoralist: world.immoralistMask |= bit; break
-            case RoleBitIndex.seer: world.seerMask |= bit; break
-            case RoleBitIndex.medium: world.mediumMask |= bit; break
-            case RoleBitIndex.nekomata: world.nekomataMask |= bit; break
-            case RoleBitIndex.bodyguard: world.bodyguardSeat = seat; break
+            case RoleBitIndex.werewolf: world.attackCapableMask |= bit; break
+            case RoleBitIndex.werehamster: world.dieWhenDivinedMask |= bit; break
+            case RoleBitIndex.immoralist: world.followFoxDeathMask |= bit; break
+            case RoleBitIndex.seer: world.divineCapableMask |= bit; break
+            case RoleBitIndex.medium: world.mediumshipMask |= bit; break
+            case RoleBitIndex.nekomata: world.curseOnExecutedMask |= bit; break
+            case RoleBitIndex.bodyguard: world.guardCapableMask |= bit; break
             // villager / possessed / fanatic は mask に乗らない
           }
         }
@@ -287,11 +291,11 @@ export function analyzeExecutionsByWorldCanonical(
     totalWeight += weight
 
     // signature cache
-    const key1 = world.wolfMask | (world.hamsterMask << 15)
-    const key2 = world.seerMask
-      + world.mediumMask * 0x8000
-      + world.nekomataMask * 0x40000000
-      + (world.bodyguardSeat + 2) * 0x200000000000
+    const key1 = world.attackCapableMask | (world.dieWhenDivinedMask << 15)
+    const key2 = world.divineCapableMask
+      + world.mediumshipMask * 0x8000
+      + world.curseOnExecutedMask * 0x40000000
+      + (getGuardSeat(world) + 2) * 0x200000000000
     let inner = sigCache.get(key1)
     if (inner === undefined) { inner = new Map(); sigCache.set(key1, inner) }
     let scores = inner.get(key2)

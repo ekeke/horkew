@@ -139,7 +139,7 @@ export type SimState = {
    * retar 再計算時に更新される (`from-sim-state.ts:resolveRetarBoth`)。
    * day bonus / endgame bonus の faction-aware 切替に使う:
    * 観測上 fox 死亡確認後 (= retar の生存席に werehamster 候補ゼロ) は固定 endgame bonus に切り替わる。
-   * 完全情報 (`world.hamsterMask & alive`) ではなく viewer 視点の retar 結果を使うこと
+   * 完全情報 (`world.dieWhenDivinedMask & alive`) ではなく viewer 視点の retar 結果を使うこと
    * (エージェントから見えない情報を value 計算に混ぜない)。default true (生存扱い、互換)。
    */
   foxAliveByViewer: boolean

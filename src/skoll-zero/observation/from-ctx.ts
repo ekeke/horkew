@@ -23,6 +23,7 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import type { World } from '../../hati/types.ts'
+import { getGuardSeat } from '../../hati/types.ts'
 import type { DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import type { FenrirEvent } from '../../fenrir/src/events.ts'
 import { createSimState } from '../simulator/world-state.ts'
@@ -85,7 +86,7 @@ export function buildInitialSimState(ctx: DecisionContext, world: World): SimSta
         break
       }
       case 'bodyguard_claim': {
-        const isFake = world.bodyguardSeat !== event.actor
+        const isFake = getGuardSeat(world) !== event.actor
         state.claims.set(event.actor, { role: 'bodyguard', isFake })
         break
       }

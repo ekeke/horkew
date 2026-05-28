@@ -37,7 +37,7 @@ import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { Possibilities } from '../retar/possibilities.ts'
 import type { World } from '../hati/types.ts'
 import {
-  maskFromSeats, hasSeat, removeSeat, seatsFromMask, popCount32,
+  maskFromSeats, hasSeat, removeSeat, seatsFromMask, popCount32, getGuardSeat,
 } from '../hati/types.ts'
 import { cloneWorld } from '../hati/worlds.ts'
 import { checkOutcome, applyExecution, simulateNight } from '../hati/simulate.ts'
@@ -392,7 +392,7 @@ function evaluateXYZG(
   for (let wi = 0; wi < worlds.length; wi++) {
     const world = worlds[wi]
     const worldWeight = weights[wi]
-    const isNekoX = (world.nekomataMask & (1 << X)) !== 0
+    const isNekoX = (world.curseOnExecutedMask & (1 << X)) !== 0
 
     if (isNekoX) {
       // Curse 候補列挙
@@ -543,11 +543,11 @@ export function analyzeExecutionsFromWorlds(
     const w = weights ? weights[wi] : 1
     totalWeight += w
 
-    const key1 = world.wolfMask | (world.hamsterMask << 15)
-    const key2 = world.seerMask
-      + world.mediumMask * 0x8000
-      + world.nekomataMask * 0x40000000
-      + (world.bodyguardSeat + 2) * 0x200000000000
+    const key1 = world.attackCapableMask | (world.dieWhenDivinedMask << 15)
+    const key2 = world.divineCapableMask
+      + world.mediumshipMask * 0x8000
+      + world.curseOnExecutedMask * 0x40000000
+      + (getGuardSeat(world) + 2) * 0x200000000000
     let inner = sigCache.get(key1)
     if (inner === undefined) {
       inner = new Map()

@@ -1,5 +1,5 @@
 import type { GameOutcome } from '../../hati/simulate.ts'
-import { hasSeat, popCount32 } from '../../hati/types.ts'
+import { hasSeat, popCount32, getGuardSeat } from '../../hati/types.ts'
 import { cloneSimState } from '../simulator/world-state.ts'
 import type { SimState, Phase } from '../simulator/world-state.ts'
 import {
@@ -433,7 +433,7 @@ function sampleWolfAttack(
   rng: () => number,
   cache?: NightSampleCache,
 ): number | undefined {
-  const wolfSeat = lowestSetSeat(state.world.wolfMask & state.alive)
+  const wolfSeat = lowestSetSeat(state.world.attackCapableMask & state.alive)
   if (wolfSeat < 0) return undefined
   const module = bundle.wolf
   if (!module) return undefined
@@ -471,7 +471,7 @@ function sampleSeerDivine(
   rng: () => number,
   cache?: NightSampleCache,
 ): number | undefined {
-  const seerSeat = lowestSetSeat(state.world.seerMask & state.alive)
+  const seerSeat = lowestSetSeat(state.world.divineCapableMask & state.alive)
   if (seerSeat < 0) return undefined
   const module = bundle.standard
   if (!module) return undefined
@@ -512,7 +512,7 @@ function sampleBgGuard(
   rng: () => number,
   cache?: NightSampleCache,
 ): number | undefined {
-  const bgSeat = state.world.bodyguardSeat
+  const bgSeat = getGuardSeat(state.world)
   if (bgSeat < 0 || (state.alive & (1 << bgSeat)) === 0) return undefined
   const module = bundle.standard
   if (!module) return undefined
@@ -1016,7 +1016,7 @@ export function legalActionIdsForPhase(state: SimState, actorSeat: number): Set<
       for (let s = 1; s < w.roleIds.length; s++) {
         if (w.roleIds[s] === RoleBitIndexFanatic) fanaticMask |= (1 << s)
       }
-      let mask = (w.wolfMask | fanaticMask) & state.alive
+      let mask = (w.attackCapableMask | fanaticMask) & state.alive
       for (const seat of state.claims.keys()) mask &= ~(1 << seat)
       while (mask !== 0) {
         const bit = mask & (-mask)

@@ -8,6 +8,7 @@ import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import { Possibilities } from '../retar/possibilities.ts'
 import { buildThreatProfile, isThreatExceeded } from './index.ts'
 import { popCount32, forEachSeat, removeSeat } from './types.ts'
+import { ATTR, possibilityHasAttribute } from './role-attributes.ts'
 
 export type WolfRiskResult = {
   /** 襲撃成功時の詰み率 (0.0-1.0)。seat インデックス、0番未使用 */
@@ -63,7 +64,7 @@ export function evaluateWolfRisk(
   const seerClaimants = vs.claims.get('seer' as SystemRole) ?? []
   for (const s of seerClaimants) {
     if (!(alive & (1 << s))) continue // 死亡済み
-    if (!wolfPossibilities.hasRole(s, 'seer' as SystemRole)) continue // 仲間 or 真占い不可能
+    if (!possibilityHasAttribute(wolfPossibilities.possibilities[s], ATTR.ACTION_DIVINE)) continue // 仲間 or 占い能力不可能
 
     // グレー候補: 生存中、未占い、占い師自身以外
     const divined = new Set<Seat>()
@@ -88,7 +89,7 @@ export function evaluateWolfRisk(
     const mediumClaimants = vs.claims.get('medium' as SystemRole) ?? []
     for (const m of mediumClaimants) {
       if (!(alive & (1 << m))) continue
-      if (!wolfPossibilities.hasRole(m, 'medium' as SystemRole)) continue
+      if (!possibilityHasAttribute(wolfPossibilities.possibilities[m], ATTR.AUTO_INFO_EXECUTION_SPECIES)) continue
       mediumCandidates.push(m)
     }
   }
@@ -97,8 +98,9 @@ export function evaluateWolfRisk(
   let needAttackBranch = false
   forEachSeat(alive, seat => {
     if (needAttackBranch) return
-    if (wolfPossibilities.hasRole(seat, 'bodyguard' as SystemRole)) needAttackBranch = true
-    if (wolfPossibilities.hasRole(seat, 'werehamster' as SystemRole)) needAttackBranch = true
+    const p = wolfPossibilities.possibilities[seat]
+    if (possibilityHasAttribute(p, ATTR.ACTION_GUARD)) needAttackBranch = true
+    if (possibilityHasAttribute(p, ATTR.PASSIVE_DIE_WHEN_DIVINED)) needAttackBranch = true
   })
 
   // --- 出力配列 ---

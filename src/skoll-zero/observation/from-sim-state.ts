@@ -255,7 +255,7 @@ export function collectFromSimState(
   // wolf チームの仲間情報
   const wolfTeamSeats: number[] = []
   if (viewerRole === 'werewolf' || viewerRole === 'fanatic') {
-    let mask = world.wolfMask
+    let mask = world.attackCapableMask
     while (mask !== 0) {
       const bit = mask & (-mask)
       const s = 31 - Math.clz32(bit)
@@ -278,7 +278,7 @@ export function collectFromSimState(
   // 妖狐の知識: immoralist は werehamster 席を知る
   let knownHamster: number | null = null
   if (viewerRole === 'immoralist') {
-    let mask = world.hamsterMask
+    let mask = world.dieWhenDivinedMask
     if (mask !== 0) {
       const bit = mask & (-mask)
       knownHamster = 31 - Math.clz32(bit)
@@ -398,8 +398,8 @@ function debugDumpOnPanic(
   lines.push(`guardLog: ${JSON.stringify(state.guardLog)}`)
   lines.push(`morningPending: ${JSON.stringify(state.morningPending)}`)
   lines.push(`world.roles: ${JSON.stringify(state.world.roles)}`)
-  lines.push(`world.wolfMask: 0x${state.world.wolfMask.toString(16)}`)
-  lines.push(`world.hamsterMask: 0x${state.world.hamsterMask.toString(16)}`)
+  lines.push(`world.attackCapableMask: 0x${state.world.attackCapableMask.toString(16)}`)
+  lines.push(`world.dieWhenDivinedMask: 0x${state.world.dieWhenDivinedMask.toString(16)}`)
   try {
     const vs = simStateToVillageStatus(state)
     lines.push(`vs.statuses: ${JSON.stringify([...vs.statuses.entries()].map(([k, v]) => [k, {
@@ -577,7 +577,7 @@ export function encodeWolfCollectiveFromSimState(
   const obs = new Float32Array(WOLF_COLLECTIVE_OBSERVATION_SIZE)
   const base = encodeIndividualFromSimState(state, viewerSeat, viewerRole, invariants)
   obs.set(base)
-  const teamSeats = seatsFromMask(state.world.wolfMask)
+  const teamSeats = seatsFromMask(state.world.attackCapableMask)
   overrideForCollective(obs, teamSeats)
   obs[COLLECTIVE_TEAM_SIZE_START] = teamSeats.length / SEATS
 

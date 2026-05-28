@@ -135,6 +135,28 @@ PNS や反復深化の効果を測る良いベンチマーク。「詰みなし�
 verify.ts: 全通過（2,455詰み検証）
 DFS worst: 25.9ms → 10.2ms（噛み等価クラス不要ケースでも non-build 分岐削除により改善）
 
+### 9. 役職名参照を属性ベース化 (Phase 6, 2026-05-28)
+
+`World` 型の役職別マスク (`wolfMask` / `hamsterMask` / `seerMask` / `mediumMask` / `nekomataMask` / `immoralistMask` / `bodyguardSeat`) を属性別マスクに置換。
+
+新ファイル `role-attributes.ts` に `ATTR.*` ビット定数と `RoleAttributeBits` (RoleBitIndex → 属性ビット集合) を集約。`worlds.ts` の backtrack は trait に基づき 11 マスクを増分更新する。
+
+設計目的: 新役職 (paparazzi 等) を追加するとき Hati 側のコード変更を不要にする。Hati 内のロジック (`buildThreatProfile` / `checkOutcome` / `simulateNight` / `validBiteTargetsMask` / `applyFollowDeaths` / `isExecInsufficient`) は属性マスクの AND・補集合・popCount だけで判定。
+
+BEFORE / AFTER (14d-neko + small-8p + 14d-neko-10k 連続実行、ベンチマーク同一機械):
+
+| 項目 | BEFORE | AFTER | 差 |
+|---|---|---|---|
+| Total wall | 986627ms | 976616ms | −1% (perf 中立) |
+| 14d-neko-10k Day1 max | 8.5ms | 8.4ms | −0.1ms |
+| 14d-neko-10k Day2 max | 7.7ms | 9.0ms | +1.3ms |
+| 14d-neko-10k Day10 avg | 0.01ms | 0.01ms | 同 |
+| Total checkpoints | 49521 | 49521 | 同 |
+
+backtrack 内で 1 役職あたり最大 11 個の属性マスク AND/OR 演算が発生するが、`if (attr & ATTR.X)` 早期排他により実質的に「その役職が持つ trait 数」分の書き込みのみ。多くの役職は 0〜2 traits なので overhead は最小。
+
+副次効果: `reactive:follow-fox-death` trait を [src/types/index.ts](../types/index.ts) に追加し immoralist の能力を明示。retar-rs (Rust) 側も同期。
+
 ## 未実装の最適化案
 
 ### 反復深化

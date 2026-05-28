@@ -1,5 +1,5 @@
 import { applyExecution, applyFollowDeaths, checkOutcome, simulateNight } from '../../hati/simulate.ts'
-import { popCount32, seatsFromMask } from '../../hati/types.ts'
+import { popCount32, seatsFromMask, getGuardSeat } from '../../hati/types.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
 import type { SystemRole } from '../../types/index.ts'
 import type { World } from '../../hati/types.ts'
@@ -135,10 +135,13 @@ function maskOfRoleId(world: World, roleId: number): number {
 /** その phase の「真役職」生存マスクを返す */
 function trueRoleMask(world: World, phase: Phase, alive: number): number {
   switch (phase) {
-    case 'claim_seer_true': return world.seerMask & alive
-    case 'claim_medium_true': return world.mediumMask & alive
-    case 'claim_bg_true': return world.bodyguardSeat >= 0 && (alive & (1 << world.bodyguardSeat)) ? (1 << world.bodyguardSeat) : 0
-    case 'claim_nekomata_true': return world.nekomataMask & alive
+    case 'claim_seer_true': return world.divineCapableMask & alive
+    case 'claim_medium_true': return world.mediumshipMask & alive
+    case 'claim_bg_true': {
+      const bgSeat = getGuardSeat(world)
+      return bgSeat >= 0 && (alive & (1 << bgSeat)) ? (1 << bgSeat) : 0
+    }
+    case 'claim_nekomata_true': return world.curseOnExecutedMask & alive
     case 'claim_mason': return maskOfRoleId(world, MASON_ROLE_ID) & alive
     default: return 0
   }
@@ -146,7 +149,7 @@ function trueRoleMask(world: World, phase: Phase, alive: number): number {
 
 /** wolf + fanatic の生存マスク (偽 CO の actor 候補) */
 function fakeActorMask(world: World, alive: number): number {
-  return (world.wolfMask | maskOfRoleId(world, FANATIC_ROLE_ID)) & alive
+  return (world.attackCapableMask | maskOfRoleId(world, FANATIC_ROLE_ID)) & alive
 }
 
 /** その phase の偽 CO 対象 SystemRole 名 (claim を state.claims に書くため) */
@@ -233,9 +236,9 @@ export function shouldSkipPhase(state: SimState): boolean {
       return unclaimedActors === 0
     }
     case 'night_attack':
-      return (world.wolfMask & alive) === 0
+      return (world.attackCapableMask & alive) === 0
     case 'night_divine':
-      return (world.seerMask & alive) === 0
+      return (world.divineCapableMask & alive) === 0
     case 'day':
     case 'night_guard':
     case 'terminal':
@@ -436,9 +439,9 @@ export function legalExecuteActions(state: SimState): PhaseAction[] {
 /** night_attack phase の legal attack actions。狼が噛める seat 一覧 */
 export function legalAttackActions(state: SimState): PhaseAction[] {
   const out: PhaseAction[] = []
-  const wolves = state.world.wolfMask & state.alive
+  const wolves = state.world.attackCapableMask & state.alive
   if (wolves === 0) return out
-  let targets = state.alive & ~state.world.wolfMask
+  let targets = state.alive & ~state.world.attackCapableMask
   // LW (狼 1 匹) は猫又を噛むと道連れ全滅で負けるため除外
   if (popCount32(wolves) === 1) {
     let scan = targets
@@ -458,7 +461,7 @@ export function legalAttackActions(state: SimState): PhaseAction[] {
 /** night_divine phase の legal divine actions。真 seer の占い先一覧 */
 export function legalDivineActions(state: SimState): PhaseAction[] {
   const out: PhaseAction[] = []
-  if ((state.world.seerMask & state.alive) === 0) return out
+  if ((state.world.divineCapableMask & state.alive) === 0) return out
   for (const seat of seatsFromMask(state.alive)) {
     out.push({ type: 'divine', target: seat })
   }
@@ -468,7 +471,7 @@ export function legalDivineActions(state: SimState): PhaseAction[] {
 /** night_guard phase の legal guard actions。真 bg の護衛先一覧 (-1 = 無護衛) */
 export function legalGuardActions(state: SimState): PhaseAction[] {
   const out: PhaseAction[] = []
-  const bg = state.world.bodyguardSeat
+  const bg = getGuardSeat(state.world)
   if (bg < 0 || (state.alive & (1 << bg)) === 0) {
     // bg 不在 → 護衛先選択肢は -1 (無護衛) 1 つのみ
     out.push({ type: 'guard', target: -1 })
@@ -554,7 +557,7 @@ export function resolveNightSimulationAndAdvance(state: SimState): void {
   }
   const wolfBiteTarget = state.pendingAttack ?? -1
   const beforeAlive = state.alive
-  const aliveSeers = state.world.seerMask & beforeAlive
+  const aliveSeers = state.world.divineCapableMask & beforeAlive
   const result = simulateNight(
     state.world,
     state.alive,
@@ -577,10 +580,12 @@ export function resolveNightSimulationAndAdvance(state: SimState): void {
       cursedTargets.add(t)
     }
   }
-  const guardSucceeded = state.pendingGuard !== null
-    && state.pendingGuard === wolfBiteTarget
-    && state.world.bodyguardSeat >= 0
-    && (beforeAlive & (1 << state.world.bodyguardSeat)) !== 0
+  const guardSucceeded = (() => {
+    if (state.pendingGuard === null) return false
+    if (state.pendingGuard !== wolfBiteTarget) return false
+    const bgSeat = getGuardSeat(state.world)
+    return bgSeat >= 0 && (beforeAlive & (1 << bgSeat)) !== 0
+  })()
   for (const seat of seatsFromMask(deadMask)) {
     let cause: 'execute' | 'night_kill' | 'follow' | 'curse' | 'nekomata_revenge'
     if (cursedTargets.has(seat)) cause = 'curse'
@@ -593,7 +598,7 @@ export function resolveNightSimulationAndAdvance(state: SimState): void {
   }
 
   // 真占い結果の log: 生存中の seer のみが結果を観測
-  // simulateNight と同じ順序 (seerMask の low-bit 順) で pendingDivineTargets を割り当て
+  // simulateNight と同じ順序 (divineCapableMask の low-bit 順) で pendingDivineTargets を割り当て
   let seerIdx = 0
   let scan = aliveSeers
   while (scan !== 0) {

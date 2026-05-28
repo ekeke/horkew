@@ -7,7 +7,10 @@ import { DEFAULT_SEARCH_OPTIONS, popCount32 } from './types.ts'
 import { collectWorlds } from './worlds.ts'
 import { searchTsumi as runSearch } from './search.ts'
 import { simulateFoxElimination } from './foxResolver.ts'
-import { RoleBitIndex } from '../retar/possibilities.ts'
+import {
+  ATTR, possibilityHasAttribute, possibilityHasAttributePattern,
+  isActualAttribute, setupCountByAttribute, setupCountByAttributePattern,
+} from './role-attributes.ts'
 
 export type { TsumiResult, TsumiJudgment, ThreatProfile, SearchOptions } from './types.ts'
 export type { StrategyNode, World, VillageAction } from './types.ts'
@@ -70,7 +73,7 @@ export function computeFoxResolvability(
   conclusions: Possibilities,
   alive: number,
 ): FoxResolvability {
-  const setupSeerCount = setup.get('seer' as SystemRole) ?? 0
+  const setupSeerCount = setupCountByAttribute(setup, ATTR.ACTION_DIVINE)
   const seerClaimants = vs.claims.get('seer' as SystemRole) ?? []
 
   const deadSeers: number[] = []
@@ -96,20 +99,20 @@ export function computeFoxResolvability(
     seerTargets.set(seat, targets)
   }
 
-  // 生存狐候補
+  // 生存狐候補 (passive:die-when-divined を持ち得る席)
   const aliveFoxSeats: number[] = []
   for (let seat = 1; seat < conclusions.possibilities.length; seat++) {
     if (!(alive & (1 << seat))) continue
-    if (conclusions.hasRole(seat, 'werehamster' as SystemRole)) {
+    if (possibilityHasAttribute(conclusions.possibilities[seat], ATTR.PASSIVE_DIE_WHEN_DIVINED)) {
       aliveFoxSeats.push(seat)
     }
   }
 
-  // 狩人確定生存チェック: possibilitiesでbodyguardが唯一の役職の生存席
+  // 狩人確定生存チェック: 生存席で action:guard が確定している
   let bodyguardConfirmed = false
   for (let seat = 1; seat < conclusions.possibilities.length; seat++) {
     if (!(alive & (1 << seat))) continue
-    if (conclusions.isActualRole(seat, 'bodyguard' as SystemRole)) {
+    if (isActualAttribute(conclusions.possibilities[seat], ATTR.ACTION_GUARD)) {
       bodyguardConfirmed = true
       break
     }
@@ -211,25 +214,28 @@ export function buildThreatProfile(
 
   for (let seat = 1; seat < conclusions.possibilities.length; seat++) {
     if (!(alive & (1 << seat))) continue
-    const foxCandidate = conclusions.hasRole(seat, 'werehamster' as SystemRole)
-    const wolfCandidate = conclusions.hasRole(seat, 'werewolf' as SystemRole)
-    const wolfConfirmed = conclusions.isActualRole(seat, 'werewolf' as SystemRole)
+    const p = conclusions.possibilities[seat]
+    const foxCandidate = possibilityHasAttribute(p, ATTR.PASSIVE_DIE_WHEN_DIVINED)
+    const wolfCandidate = possibilityHasAttribute(p, ATTR.ACTION_ATTACK)
+    const wolfConfirmed = isActualAttribute(p, ATTR.ACTION_ATTACK)
     if (foxCandidate && wolfCandidate) foxWolfCandidates++
     else if (foxCandidate) foxCandidates++
     else if (wolfCandidate) {
       wolfCandidates++
       if (wolfConfirmed) wolfConfirmedCount++
-      if (conclusions.hasRole(seat, 'nekomata' as SystemRole)) nekoWolfCandidates++
-    } else if (conclusions.hasRole(seat, 'fanatic' as SystemRole) || conclusions.hasRole(seat, 'possessed' as SystemRole)) {
+      if (possibilityHasAttribute(p, ATTR.REACTIVE_CURSE_ON_EXECUTED)) nekoWolfCandidates++
+    } else if (possibilityHasAttributePattern(p, ATTR.WOLF_FACTION, ATTR.ACTION_ATTACK)) {
+      // 「色白人外」: 狼陣営かつ攻撃能力を持たない (fanatic/possessed/paparazzi)
       whiteNVCandidates++
     }
     if (foxCandidate) possibleSurvivingHamster = true
-    if (conclusions.hasRole(seat, 'nekomata' as SystemRole)) possibleSurvivingNekomata = true
-    if (conclusions.hasRole(seat, 'immoralist' as SystemRole)) immoralistCandidates++
+    if (possibilityHasAttribute(p, ATTR.REACTIVE_CURSE_ON_EXECUTED)) possibleSurvivingNekomata = true
+    if (possibilityHasAttribute(p, ATTR.REACTIVE_FOLLOW_FOX_DEATH)) immoralistCandidates++
   }
 
-  const setupWhiteNV = (setup.get('fanatic' as SystemRole) ?? 0)
-    + (setup.get('possessed' as SystemRole) ?? 0)
+  // 「色白人外」の setup 上限 = 狼陣営かつ攻撃能力を持たない役職の合計数
+  // (fanatic + possessed + paparazzi)
+  const setupWhiteNV = setupCountByAttributePattern(setup, ATTR.WOLF_FACTION, ATTR.ACTION_ATTACK)
   const whiteNVThreat = Math.min(whiteNVCandidates, setupWhiteNV)
   const nawa = (aliveCount - 1) / 2
   const effectiveNawa = (aliveCount - 1 - (possibleSurvivingHamster ? 1 : 0)) / 2
@@ -245,7 +251,7 @@ export function buildThreatProfile(
   const nekoParityShift = possibleSurvivingNekomata && effectiveNawa % 1 === 0
   // 猫又処刑リスク: 猫又兼狼候補を処刑して猫又だった場合、
   // 道連れで生存者が追加死亡し実効縄が 0.5 減る。
-  const nekoExecRisk = Math.min(nekoWolfCandidates, setup.get('nekomata' as SystemRole) ?? 0)
+  const nekoExecRisk = Math.min(nekoWolfCandidates, setupCountByAttribute(setup, ATTR.REACTIVE_CURSE_ON_EXECUTED))
 
   return {
     foxCandidates, foxWolfCandidates, wolfCandidates, wolfConfirmedCount,
@@ -326,7 +332,7 @@ export function judgeTsumi(
     const adjPossibleHamster = unresolved > 0
     // 背徳者道連れ: 全狐解決時、背徳者が後追いで死亡し alive が減少
     const immoralistFollowDeaths = adjPossibleHamster ? 0
-      : Math.min(profile.immoralistCandidates, setup.get('immoralist' as SystemRole) ?? 0)
+      : Math.min(profile.immoralistCandidates, setupCountByAttribute(setup, ATTR.REACTIVE_FOLLOW_FOX_DEATH))
     const adjEffectiveNawa = (aliveCount - 1 - (adjPossibleHamster ? 1 : 0) - immoralistFollowDeaths) / 2
     const adjNawaInt = adjEffectiveNawa | 0
     const adjRequiredExecs = adjFoxCandidates + Math.min(adjFoxWolfCandidates, 1) + adjWolfCandidates
@@ -362,20 +368,15 @@ export function judgeTsumi(
  * 全ワールドで縄数を超えていれば探索不要。
  */
 function isExecInsufficient(worlds: World[], alive: number, nawaInt: number): boolean {
-  const fanaticId = RoleBitIndex.fanatic
-  const possessedId = RoleBitIndex.possessed
   for (const w of worlds) {
-    const aliveWolves = popCount32(w.wolfMask & alive)
-    const hasHamsterAlive = (w.hamsterMask & alive) !== 0
-    let whiteNonVillagers = 0
-    let m = alive
-    while (m !== 0) {
-      const bit = m & (-m); m ^= bit
-      const seat = 31 - Math.clz32(bit)
-      const rid = w.roleIds[seat]
-      if (rid === fanaticId || rid === possessedId) whiteNonVillagers++
-    }
-    const requiredExecs = aliveWolves + (hasHamsterAlive ? 1 : 0) + whiteNonVillagers
+    // 「攻撃できる狼」(werewolf) 数
+    const aliveAttackers = popCount32(w.attackCapableMask & alive)
+    // 狐核心 (werehamster) 生存
+    const hasFoxCoreAlive = (w.dieWhenDivinedMask & alive) !== 0
+    // 「色白人外」= 狼陣営かつ攻撃能力を持たない (狂人/狂信者/パパラッチ)
+    // (faction='wolf' && !action:attack)
+    const whiteNonVillagers = popCount32(w.wolfFactionMask & ~w.attackCapableMask & alive)
+    const requiredExecs = aliveAttackers + (hasFoxCoreAlive ? 1 : 0) + whiteNonVillagers
     if (requiredExecs <= nawaInt) return false
   }
   return true

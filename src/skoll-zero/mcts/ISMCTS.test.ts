@@ -8,6 +8,7 @@ import { Determinizer } from './determinize.ts'
 import { runMCTS, outcomeToMasonValue, legalActionIdsForPhase } from './ISMCTS.ts'
 import { RoleBitIndex as RBI } from '../../retar/possibilities.ts'
 import type { World } from '../../hati/types.ts'
+import { ATTR, RoleAttributeBits } from '../../hati/role-attributes.ts'
 import type { ModuleBundle } from './dispatch.ts'
 import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
 import type { Faction } from './ISMCTS.ts'
@@ -101,22 +102,44 @@ function makeWorldFor(roles: Record<number, SystemRole>): World {
   const maxSeat = Math.max(...Object.keys(roles).map(Number))
   const roleArr: SystemRole[] = new Array(maxSeat + 1)
   const roleIds = new Uint8Array(maxSeat + 1)
-  let wolfMask = 0, hamsterMask = 0, immoralistMask = 0
-  let seerMask = 0, mediumMask = 0, nekomataMask = 0
-  let bodyguardSeat = -1
+  let wolfFactionMask = 0
+  let foxFactionMask = 0
+  let attackCapableMask = 0
+  let divineCapableMask = 0
+  let guardCapableMask = 0
+  let attackImmuneMask = 0
+  let dieWhenDivinedMask = 0
+  let curseOnExecutedMask = 0
+  let curseOnKilledMask = 0
+  let followFoxDeathMask = 0
+  let mediumshipMask = 0
   for (const [s, r] of Object.entries(roles)) {
     const seat = Number(s)
     roleArr[seat] = r
-    roleIds[seat] = RBI[r]
-    if (r === 'werewolf') wolfMask |= (1 << seat)
-    if (r === 'werehamster') hamsterMask |= (1 << seat)
-    if (r === 'immoralist') immoralistMask |= (1 << seat)
-    if (r === 'seer') seerMask |= (1 << seat)
-    if (r === 'medium') mediumMask |= (1 << seat)
-    if (r === 'nekomata') nekomataMask |= (1 << seat)
-    if (r === 'bodyguard') bodyguardSeat = seat
+    const bitIdx = RBI[r]
+    roleIds[seat] = bitIdx
+    const attr = RoleAttributeBits[bitIdx]
+    const bit = 1 << seat
+    if (attr & ATTR.WOLF_FACTION)                wolfFactionMask |= bit
+    if (attr & ATTR.FOX_FACTION)                 foxFactionMask |= bit
+    if (attr & ATTR.ACTION_ATTACK)               attackCapableMask |= bit
+    if (attr & ATTR.ACTION_DIVINE)               divineCapableMask |= bit
+    if (attr & ATTR.ACTION_GUARD)                guardCapableMask |= bit
+    if (attr & ATTR.PASSIVE_ATTACK_IMMUNE)       attackImmuneMask |= bit
+    if (attr & ATTR.PASSIVE_DIE_WHEN_DIVINED)    dieWhenDivinedMask |= bit
+    if (attr & ATTR.REACTIVE_CURSE_ON_EXECUTED)  curseOnExecutedMask |= bit
+    if (attr & ATTR.REACTIVE_CURSE_ON_KILLED)    curseOnKilledMask |= bit
+    if (attr & ATTR.REACTIVE_FOLLOW_FOX_DEATH)   followFoxDeathMask |= bit
+    if (attr & ATTR.AUTO_INFO_EXECUTION_SPECIES) mediumshipMask |= bit
   }
-  return { roles: roleArr, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, mediumMask, nekomataMask, bodyguardSeat }
+  return {
+    roles: roleArr, roleIds,
+    wolfFactionMask, foxFactionMask,
+    attackCapableMask, divineCapableMask, guardCapableMask,
+    attackImmuneMask, dieWhenDivinedMask,
+    curseOnExecutedMask, curseOnKilledMask, followFoxDeathMask,
+    mediumshipMask,
+  }
 }
 
 describe('legalActionIdsForPhase: night_attack', () => {
@@ -308,7 +331,7 @@ describe('runMCTS: Stage 3 claim/morning expansion', () => {
     // 偽 seer CO を仕込んで翌日 morning phase で wolf module の morning head が呼ばれる
     // 形にする (seat 4 が wolf と仮定して fake seer CO)
     const wolfSeat = (() => {
-      let m = w.wolfMask
+      let m = w.attackCapableMask
       const bit = m & (-m)
       return 31 - Math.clz32(bit)
     })()
