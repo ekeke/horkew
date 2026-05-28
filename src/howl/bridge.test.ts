@@ -628,6 +628,20 @@ describe('bridge: spoiler assumptions', () => {
     assert.throws(() => buildVillageStatus(statements, meta), /矛盾する仮定/)
   })
 
+  test('paparazzi spoiler is resolved (both カタカナ and ASCII)', () => {
+    const howl = `+アリス
++ボブ
+!アリス=パパラッチ
+!ボブ=paparazzi`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, players } = buildVillageStatus(statements, meta)
+
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+    assert.strictEqual(assumptions.get(seatOf('アリス')), 'paparazzi')
+    assert.strictEqual(assumptions.get(seatOf('ボブ')), 'paparazzi')
+  })
+
   test('spoiler for unknown player throws', () => {
     const howl = `+アリス
 +ボブ

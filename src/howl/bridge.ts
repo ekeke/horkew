@@ -83,6 +83,7 @@ const spoilerRoleSpecs: { systemRole: SystemRole, pattern: RegExp }[] = [
   { systemRole: 'fanatic',     pattern: new RegExp(`^${V.fanatic}$`) },
   { systemRole: 'werehamster', pattern: new RegExp(`^${V.werehamster}$`) },
   { systemRole: 'immoralist',  pattern: new RegExp(`^${V.immoralist}$`) },
+  { systemRole: 'paparazzi',   pattern: new RegExp(`^${V.paparazzi}$`) },
 ]
 
 function resolveSpoilerRole(raw: string): SystemRole | null {
