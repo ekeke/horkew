@@ -59,6 +59,7 @@ const Liar = RoleSignatureBits['werewolf']
   | RoleSignatureBits['fanatic']
   | RoleSignatureBits['werehamster']
   | RoleSignatureBits['immoralist']
+  | RoleSignatureBits['paparazzi']
 
 export function popCount(x: number): number {
   const a = x - (x >>> 1 & 0x55555555)

@@ -146,7 +146,16 @@ function runCheckpoint(
 ) {
   let options = buildOptions(meta)
   const { statements } = parse(partialText)
-  const { vs, setup, players } = buildVillageStatus(statements, meta)
+  const { vs, setup, players, assumptions: spoilerAssumptions } = buildVillageStatus(statements, meta)
+
+  // spoiler 文 (`!プレイヤー=役職`) 由来の assumptions を options に merge
+  // production .howl 表記で paparazzi 等の役職を pin できる
+  if (spoilerAssumptions.size > 0) {
+    options = {
+      ...options,
+      assumptions: new Map([...options.assumptions, ...spoilerAssumptions]),
+    }
+  }
 
   if (checkpoint.assumptions.size > 0) {
     const merged = new Map(options.assumptions)

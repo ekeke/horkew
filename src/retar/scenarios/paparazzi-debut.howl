@@ -1,0 +1,39 @@
+---
+title: paparazzi-debut
+tags: [paparazzi]
+setup:
+  werewolf: 3
+  villager: 1
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  mason: 2
+  nekomata: 1
+  fanatic: 1
+  werehamster: 1
+  immoralist: 1
+  paparazzi: 1
+---
+
+# パパラッチ初登場シナリオ
+# 構成は lupa engine.test.ts と同じ 14d-neko ベース + パパラッチ 1。
+# Alice をパパラッチに固定 (spoiler 経由)。
+# Alice の占いCO は偽 → retar は Alice の判定を信用せず、真の seer は Carol と推論できる。
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy、Jack、Kate、Leo、Mia、Ned
+
+!Alice=パパラッチ
+
+# Day 1: 占いCO 2 件 (Alice = 偽パパラッチ / Carol = 真の占い候補)
+Alice 占いCO Bob●
+Carol 占いCO Dave○
+
+# Checkpoint 1: 両 CO が出揃った時点
+# - Alice はパパラッチ固定
+# - 真の seer は Alice 以外の占いCO なので Carol に確定
+# - Carol の白判定先 Dave は werewolf でも werehamster (呪殺がなかった) でもない
+# - Alice の黒判定 Bob は信用されない (paparazzi の判定はそのまま werewolf 固定にならない)
+# @expect Alice: [paparazzi]
+# @expect Carol: [seer]
+# @expect Dave: [!seer, !paparazzi, !werewolf, !werehamster, ...]
+# @expect Bob: [!seer, !paparazzi, ...]
