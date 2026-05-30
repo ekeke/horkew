@@ -18,7 +18,11 @@ setup:
 # パパラッチ初登場シナリオ
 # 構成は lupa engine.test.ts と同じ 14d-neko ベース + パパラッチ 1。
 # Alice をパパラッチに固定 (spoiler 経由)。
-# Alice の占いCO は偽 → retar は Alice の判定を信用せず、真の seer は Carol と推論できる。
+# パパラッチは狼陣営の占い能力者で能力上は本物の judgement を行うが、retar は
+# 観測者視点で動くため paparazzi の判定発言は信用しない (発言された判定が能力
+# 結果と一致する保証がなく、外部からは真偽判別不能)。
+# よって Alice の Bob 黒判定は retar には反映されず、Carol の Dave 白判定は
+# Carol が seer 確定 (seer due date 制約) のため retar が信用する。
 
 ++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy、Jack、Kate、Leo、Mia、Ned
 
@@ -29,11 +33,18 @@ Alice 占いCO Bob●
 Carol 占いCO Dave○
 
 # Checkpoint 1: 両 CO が出揃った時点
-# - Alice はパパラッチ固定
-# - 真の seer は Alice 以外の占いCO なので Carol に確定
-# - Carol の白判定先 Dave は werewolf でも werehamster (呪殺がなかった) でもない
-# - Alice の黒判定 Bob は信用されない (paparazzi の判定はそのまま werewolf 固定にならない)
+# - Alice = paparazzi 固定 (spoiler) → seer ではない (CO=seer は身分の偽)
+# - Carol は seer 候補 (Day 1 CO 済み) だが、本来は Day 2 で潜伏 seer の CO 可能性
+#   が残るため単独確定しないはず。現状の retar は Carol を [seer] 単独に絞るが、
+#   これは seerClaimingDueDate ロジックの誤りの疑いあり (バグ #4)。
+#   forward compatible にするため @expect は partial で記述。
+# - Bob の黒判定は Alice (paparazzi) の発言 → retar は信用しない (Bob は何でも可)
 # @expect Alice: [paparazzi]
-# @expect Carol: [seer]
+# @expect Carol: [seer, ...]
 # @expect Dave: [!seer, !paparazzi, !werewolf, !werehamster, ...]
 # @expect Bob: [!seer, !paparazzi, ...]
+# spoiler `!Alice=パパラッチ` 由来の確定/否定は gmork のスコープ外 (axiomatic ではない)。
+# 現状の Day 1 状態では gmork は paparazzi 関連の説明を出さない。
+# @gmork-confirm Alice/paparazzi: null
+# @gmork-deny Alice/seer: null
+# @gmork-confirm Carol/seer: null

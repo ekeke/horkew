@@ -228,8 +228,11 @@ describe('lupa engine', () => {
       mason: 2, nekomata: 1, fanatic: 1, werehamster: 1, immoralist: 1,
       paparazzi: 1,
     }
+    // 50 seed 試行で 1 回でも paparazzi の divine 発動を観測できれば pass。
+    // 完全確定的な handler (paparazzi 強制 divine) の導入は別タスクで詳細設計する。
     let paparazziDivineFound = false
-    for (let seed = 0; seed < 5; seed++) {
+    const SEED_TRIES = 50
+    for (let seed = 0; seed < SEED_TRIES; seed++) {
       let paparazziSeat: number | null = null
       const handlers = makeRandomHandlers(seed)
       const wrapped = {
@@ -241,13 +244,12 @@ describe('lupa engine', () => {
       }
       const { state } = await runGame(makeGameConfig(roles, seed), wrapped)
       const paparazziPlayer = state.players.find(p => p.seat === paparazziSeat)!
-      // paparazzi が少なくとも 1 回 divine action を発行している (divineHistory に entry あり)
       if (paparazziPlayer.divineHistory.size > 0) {
         paparazziDivineFound = true
         break
       }
     }
-    assert.ok(paparazziDivineFound, '5 seed 中にパパラッチの divine が 1 回も発行されなかった')
+    assert.ok(paparazziDivineFound, `${SEED_TRIES} seed 中にパパラッチの divine が 1 回も発行されなかった`)
   })
 
   it('パパラッチは狼陣営として勝利判定される (人狼過半数シナリオ)', () => {

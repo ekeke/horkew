@@ -1,0 +1,66 @@
+---
+title: paparazzi-executed
+tags: [paparazzi]
+setup:
+  werewolf: 3
+  villager: 1
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  mason: 2
+  nekomata: 1
+  fanatic: 1
+  werehamster: 1
+  immoralist: 1
+  paparazzi: 1
+---
+
+# paparazzi (Alice) が処刑される。翌日 medium (Eve) が霊媒結果を白と発表。
+# paparazzi は alignment=werewolf だが mediumResult=human なので
+# 霊媒結果「白」は整合する (もし Alice が werewolf なら「黒」が出て矛盾していた)。
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy、Jack、Kate、Leo、Mia、Ned
+
+!Alice=パパラッチ
+!Eve=霊媒師
+
+# Day 1: 占いCO 2 件
+Alice 占いCO Bob●
+Carol 占いCO Dave○
+
+# Alice 処刑
+Alice処刑
+
+# Checkpoint 1: Alice 処刑直後 (Eve の霊媒CO 前)
+# - Alice = paparazzi 固定 (spoiler)
+# - Alice claim は seer のまま (生前 CO)
+# - Eve はまだ CO していない
+# @expect Alice: [paparazzi]
+# @expect-faction Alice: wolf
+# @expect-alignment Alice: werewolf
+# @expect-claim Alice: seer
+# @expect-claim Eve: none
+# Alice の seer CO 単独 → 他の村役職は axiomatic に否定される
+# @gmork-deny Alice/villager: co_implies_not_other_village_role
+# @gmork-deny Alice/medium: co_implies_not_other_village_role
+# @gmork-deny Alice/bodyguard: co_implies_not_other_village_role
+# @gmork-deny Alice/mason: co_implies_not_other_village_role
+# @gmork-deny Alice/nekomata: co_implies_not_other_village_role
+
+# Day 2: Eve 霊媒CO + Alice 白
+Eve 霊媒CO Alice白
+
+# Checkpoint 2: Eve 霊媒CO 後
+# - Eve = medium 固定 (spoiler)
+# - 霊媒結果「Alice 白」は paparazzi の mediumResult=human と整合
+# - retar は Eve を medium として受け入れる
+# @expect Eve: [medium]
+# @expect-claim Eve: medium
+# @expect-faction Eve: village
+# @expect-alignment Eve: villager
+# Eve の medium CO 単独 → 他の村役職は axiomatic に否定
+# @gmork-deny Eve/villager: co_implies_not_other_village_role
+# @gmork-deny Eve/seer: co_implies_not_other_village_role
+# @gmork-deny Eve/bodyguard: co_implies_not_other_village_role
+# @gmork-deny Eve/mason: co_implies_not_other_village_role
+# @gmork-deny Eve/nekomata: co_implies_not_other_village_role

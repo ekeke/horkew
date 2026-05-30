@@ -138,9 +138,20 @@ function runGmorkCheckpoint(
   checkpoint: GmorkCheckpoint,
   label: string,
 ) {
-  const options = buildOptions(meta)
+  let options = buildOptions(meta)
   const { statements } = parse(partialText)
-  const { vs, setup, players } = buildVillageStatus(statements, meta)
+  const { vs, setup, players, assumptions: spoilerAssumptions } = buildVillageStatus(statements, meta)
+
+  // spoiler 文 (`!プレイヤー=役職`) 由来の assumptions を options に merge
+  // retar/integration.test.ts と同じ規約。これがないと paparazzi シナリオの
+  // `!Alice=パパラッチ` が retar 推論に効かず、gmork も paparazzi を考慮できない。
+  if (spoilerAssumptions.size > 0) {
+    options = {
+      ...options,
+      assumptions: new Map([...options.assumptions, ...spoilerAssumptions]),
+    }
+  }
+
   const retar = new VillageRetar(vs, setup, options)
   const result = retar.analyze()
   const possibilities = result.result

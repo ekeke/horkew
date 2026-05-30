@@ -1,0 +1,45 @@
+---
+title: paparazzi-attacked
+tags: [paparazzi]
+setup:
+  werewolf: 3
+  villager: 1
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  mason: 2
+  nekomata: 1
+  fanatic: 1
+  werehamster: 1
+  immoralist: 1
+  paparazzi: 1
+---
+
+# paparazzi (Alice) が夜襲撃される。狐 (werehamster) と違って attack-immune trait が
+# ないため、普通に死亡する。
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy、Jack、Kate、Leo、Mia、Ned
+
+!Alice=パパラッチ
+
+# Day 1: 占いCO 2 件
+Alice 占いCO Bob●
+Carol 占いCO Dave○
+
+# Day 1 終わりに Eve 処刑
+Eve処刑
+
+# Day 2 朝: Alice 襲撃死
+Alice死亡
+
+# Checkpoint: Alice 死亡後
+# - Alice = paparazzi 固定 + 死亡 (狐との違い: attack-immune trait が無い)
+# @expect Alice: [paparazzi]
+# @expect-status Alice: dead
+# @expect-status Eve: dead
+# @expect-faction Alice: wolf
+# @expect-claim Alice: seer
+# @gmork-confirm Alice/paparazzi: null
+# @gmork-deny Alice/villager: co_implies_not_other_village_role
+# 単独襲撃死 → Alice は werewolf ではない (人狼が自陣営を襲わない)
+# @gmork-deny Alice/werewolf: sole_night_kill

@@ -1,0 +1,51 @@
+---
+title: paparazzi-divined
+tags: [paparazzi]
+setup:
+  werewolf: 3
+  villager: 1
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  mason: 2
+  nekomata: 1
+  fanatic: 1
+  werehamster: 1
+  immoralist: 1
+  paparazzi: 1
+---
+
+# 真 seer (Carol) が paparazzi (Alice) を Day 2 朝に占う。
+# paparazzi は seerResult=human なので白判定が出る。
+# 狐 (werehamster) と違って呪殺されないので Alice は生存し続ける。
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy、Jack、Kate、Leo、Mia、Ned
+
+!Alice=パパラッチ
+!Carol=占い師
+
+# Day 1: 占いCO 2 件
+Alice 占いCO Bob●
+Carol 占いCO Dave○
+
+# Day 1 投票: Bob 処刑 (Alice の黒判定に乗る形)
+Bob処刑
+
+# Day 2 朝: Carol が前夜 Alice を占って白判定 (Dave/Alice の順で Day 1/2)
+Carol 占いCO Dave○ Alice○
+
+# Checkpoint: Carol の Day 2 判定後
+# - Alice 生存 (狐と違って占われても呪殺されない)
+# - Carol の白判定 Alice は paparazzi (seerResult=human) と整合
+# - Carol は真 seer 候補のまま、Alice の paparazzi 確定は spoiler 由来
+# @expect Alice: [paparazzi]
+# @expect Carol: [seer]
+# @expect-status Alice: alive
+# @expect-status Carol: alive
+# @expect-status Bob: dead
+# @expect-faction Alice: wolf
+# @expect-claim Alice: seer
+# @expect-claim Carol: seer
+# spoiler 由来は gmork スコープ外
+# @gmork-confirm Alice/paparazzi: null
+# @gmork-deny Alice/villager: co_implies_not_other_village_role

@@ -1,0 +1,50 @@
+---
+title: paparazzi-vs-fox
+tags: [paparazzi]
+setup: { werewolf: 1, paparazzi: 1, seer: 1, werehamster: 1, villager: 2 }
+spoilers:
+  roles:
+    アリス: パパラッチ
+    ボブ: 人狼
+    キャロル: 占い師
+    デイブ: 妖狐
+    エミリー: 村人
+    フランク: 村人
+---
+
+# paparazzi (狼陣営) と werehamster (狐陣営) が共存。
+# - faction 分離: パパラッチ=wolf、妖狐=fox を @expect-faction で確認
+# - 能力レベルでは paparazzi の占いも本物 (狐を占うと呪殺) だが、retar は
+#   paparazzi judgement を信用しないため Dave の死亡は狼 (Bob) の襲撃と解釈
+#   される。全 6 席 spoiler 固定で結果が一意に決まる。
+
+++アリス、ボブ、キャロル、デイブ、エミリー、フランク
+
+# Day 1: アリス paparazzi で デイブ (狐) を占い、キャロル seer で ボブ (狼) を占う
+アリス 占いCO デイブ○
+キャロル 占いCO ボブ●
+
+# Day 2 朝: デイブ呪殺 (paparazzi の占いも本物の能力なので狐は呪殺死亡)
+デイブ死亡
+
+# Checkpoint: デイブ呪殺後
+# @expect アリス: [paparazzi]
+# @expect ボブ: [werewolf]
+# @expect キャロル: [seer]
+# @expect デイブ: [werehamster]
+# @expect エミリー: [villager]
+# @expect フランク: [villager]
+# @expect-status アリス: alive
+# @expect-status デイブ: dead
+# @expect-faction アリス: wolf
+# @expect-faction ボブ: wolf
+# @expect-faction キャロル: village
+# @expect-faction デイブ: fox
+# @expect-faction エミリー: village
+# @expect-alignment アリス: werewolf
+# @expect-alignment デイブ: werehamster
+# @expect-claim アリス: seer
+# @expect-claim キャロル: seer
+# spoiler 由来は gmork スコープ外
+# @gmork-confirm アリス/paparazzi: null
+# @gmork-deny アリス/villager: co_implies_not_other_village_role

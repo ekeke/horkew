@@ -205,6 +205,7 @@ export function enumerateCanonicalWorlds(
             case RoleBitIndex.werehamster: world.dieWhenDivinedMask |= bit; break
             case RoleBitIndex.immoralist: world.followFoxDeathMask |= bit; break
             case RoleBitIndex.seer: world.divineCapableMask |= bit; break
+            case RoleBitIndex.paparazzi: world.divineCapableMask |= bit; break
             case RoleBitIndex.medium: world.mediumshipMask |= bit; break
             case RoleBitIndex.nekomata: world.curseOnExecutedMask |= bit; break
             case RoleBitIndex.bodyguard: world.guardCapableMask |= bit; break
