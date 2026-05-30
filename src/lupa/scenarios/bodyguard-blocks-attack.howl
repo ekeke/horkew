@@ -1,0 +1,44 @@
+---
+title: 狩人が襲撃を防ぐ
+setup: { bodyguard: 1, werewolf: 1, villager: 3 }
+---
+# Day 1 終わりの夜: Alice (狩) が Carol を護衛、Bob (狼) が Carol を襲撃 → 護衛成功 → 平和。
+# Day 2 投票で Bob (狼) 処刑 → 狼全滅 → 村勝。
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=狩人
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+!Eve=村人
+!Alice 1夜 護衛 Carol
+!Bob 1夜 襲撃 Carol
+
+# Day 1 投票で Eve 処刑
+Alice→Eve
+Bob→Eve
+Carol→Eve
+Dave→Eve
+Eve→Alice
+
+# Day 1 終わりの夜は襲撃成功なし → 平和
+平和
+
+# Day 2 投票で Bob 処刑 → 狼全滅 → 村勝
+Alice→Bob
+Bob→Bob
+Carol→Bob
+Dave→Bob
+
+# @expect-status Alice: alive
+# @expect-status Bob: dead
+# @expect-status Carol: alive
+# @expect-status Dave: alive
+# @expect-status Eve: dead
+# @expect-event peace
+# @expect-event execution target:Eve
+# @expect-event execution target:Bob
+# @expect-cause Bob: execution
+# @expect-cause Eve: execution
+# @expect-result: villager_won
+# @expect-finished: true

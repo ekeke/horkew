@@ -1,0 +1,45 @@
+---
+title: 占い師が狐を占うと呪殺できる
+setup: { seer: 1, werehamster: 1, werewolf: 1, villager: 2 }
+---
+# Day 1 投票で Eve 処刑 → Day 1 終わりの夜で Alice (占) が Bob (狐) を占い → 呪殺。
+# 「平和」を挟んで Day 2 へ進める (assignDays が day を進めるため必要)。
+# Day 2 投票で Carol (狼) 処刑 → 村勝終局。
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=占い師
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+!Eve=村人
+!Alice 1夜 占い Bob
+
+# Day 1 投票で Eve 処刑
+Alice→Eve
+Bob→Eve
+Carol→Eve
+Dave→Eve
+Eve→Alice
+
+# Day 1 終わりの夜は人狼 attack なし → 平和 (engine が peace event 発火想定、
+# 同時に Alice が Bob 占い → Bob 呪殺で fox_kill event も発火)
+平和
+
+# Day 2 投票で Carol (狼) 処刑
+Alice→Carol
+Carol→Alice
+Dave→Carol
+
+# @expect-status Alice: alive
+# @expect-status Bob: dead
+# @expect-status Carol: dead
+# @expect-status Dave: alive
+# @expect-status Eve: dead
+# @expect-cause Bob: fox_kill
+# @expect-cause Carol: execution
+# @expect-cause Eve: execution
+# @expect-event fox_kill target:Bob
+# @expect-event execution target:Eve
+# @expect-event execution target:Carol
+# @expect-result: villager_won
+# @expect-finished: true

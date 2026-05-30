@@ -1,0 +1,36 @@
+---
+title: パパラッチが秘匿で占いを実行する
+setup: { paparazzi: 1, werewolf: 1, villager: 2 }
+---
+# Day 1 終わりの夜に Alice (パパラッチ) が Bob (人狼) を占い、Day 2 で seer CO 発表。
+# パパラッチも seer と同じ divine 能力を持つ (狼陣営の占い能力者)。
+
+++Alice、Bob、Carol、Dave
+!Alice=パパラッチ
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+!Alice 1夜 占い Bob
+
+# Day 1 投票で Dave 処刑
+Alice→Dave
+Bob→Dave
+Carol→Dave
+Dave→Alice
+
+# Day 1 終わりの夜は人狼 attack なし → 平和 (day 進める用)
+平和
+
+# Day 2 朝: Alice の seer CO (パパラッチが seer を騙る)
+Alice 占いCO Bob●
+
+# Day 2 投票で Bob 処刑 → 狼全滅、Alice (パパラッチ) は人扱いで生存 → 村勝
+Alice→Bob
+Bob→Bob
+Carol→Bob
+
+# @expect-status Alice: alive
+# @expect-status Bob: dead
+# @expect-event seer_claim actor:Alice
+# @expect-event execution target:Bob
+# @expect-result: villager_won
