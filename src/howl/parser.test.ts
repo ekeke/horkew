@@ -156,6 +156,81 @@ Bob→Charlie
     assert.strictEqual(stmts[3].day, 2) // vote
     assert.strictEqual(stmts[4].day, 2) // lynch
   })
+
+  test('dayMark advances day without peace dummy', () => {
+    const text = `++Alice,Bob,Charlie
+Alice→Bob
+吊り Bob
+Day 2:
+Charlie→Alice
+吊り Alice`
+    const stmts = parse(text).statements
+    assert.strictEqual(stmts[0].day, 1) // join
+    assert.strictEqual(stmts[1].day, 1) // vote
+    assert.strictEqual(stmts[2].day, 1) // lynch Bob
+    assert.strictEqual(stmts[3].type, 'dayMark')
+    assert.strictEqual(stmts[3].day, 2)
+    assert.strictEqual((stmts[3] as any).advanced, true)
+    assert.strictEqual(stmts[4].day, 2) // vote
+    assert.strictEqual(stmts[5].day, 2) // lynch Alice
+  })
+
+  test('dayMark Japanese form `N日目:` advances day', () => {
+    const text = `++Alice,Bob,Charlie
+吊り Alice
+2日目:
+Bob→Charlie`
+    const stmts = parse(text).statements
+    assert.strictEqual(stmts[0].day, 1) // join
+    assert.strictEqual(stmts[1].day, 1) // lynch
+    assert.strictEqual(stmts[2].type, 'dayMark')
+    assert.strictEqual(stmts[2].day, 2)
+    assert.strictEqual((stmts[2] as any).advanced, true)
+    assert.strictEqual(stmts[3].day, 2) // vote
+  })
+
+  test('dayMark to current day is a no-op (advanced=false)', () => {
+    // After 平和, day is already 2. `Day 2:` should be redundant but not error.
+    const text = `++Alice,Bob,Charlie
+吊り Alice
+平和
+Day 2:
+Bob→Charlie`
+    const stmts = parse(text).statements
+    assert.strictEqual(stmts[2].day, 2) // peace → day 2
+    assert.strictEqual(stmts[3].type, 'dayMark')
+    assert.strictEqual(stmts[3].day, 2)
+    assert.strictEqual((stmts[3] as any).advanced, false)
+    assert.strictEqual(stmts[4].day, 2) // vote (still day 2)
+  })
+
+  test('backward dayMark degrades to unknown', () => {
+    // After 平和, current day = 2. `Day 1:` should be rejected.
+    const text = `++Alice,Bob,Charlie
+吊り Alice
+平和
+Day 1:
+Bob→Charlie`
+    const stmts = parse(text).statements
+    assert.strictEqual(stmts[2].day, 2) // peace
+    assert.strictEqual(stmts[3].type, 'unknown')
+    // current day is preserved on the unknown statement so downstream day tagging stays sane
+    assert.strictEqual(stmts[3].day, 2)
+    assert.strictEqual(stmts[4].day, 2) // following vote stays day 2
+  })
+
+  test('multi-step skip dayMark degrades to unknown', () => {
+    // At day 1, `Day 4:` skips multiple days. MVP rejects.
+    const text = `++Alice,Bob,Charlie
+Alice→Bob
+Day 4:
+Bob→Charlie`
+    const stmts = parse(text).statements
+    assert.strictEqual(stmts[1].day, 1) // vote
+    assert.strictEqual(stmts[2].type, 'unknown')
+    assert.strictEqual(stmts[2].day, 1)
+    assert.strictEqual(stmts[3].day, 1) // current day unchanged
+  })
 })
 
 describe('fillMultiVoteVoters', () => {

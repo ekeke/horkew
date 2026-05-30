@@ -25,6 +25,7 @@ import type {
   AssertStatement,
   MasonStatement,
   SpoilerStatement,
+  DayMarkStatement,
 } from './statement.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
 import * as V from './vocabulary.ts'
@@ -93,6 +94,13 @@ function resolveSpoilerRole(raw: string): SystemRole | null {
   return null
 }
 
+export type SpoilerActionRecord = {
+  day: number
+  by: number
+  action: 'divine' | 'guard' | 'attack'
+  target: number
+}
+
 export type BridgeResult = {
   vs: VillageStatus
   setup: Map<SystemRole, number>
@@ -101,6 +109,7 @@ export type BridgeResult = {
   dict: FlexibleDictionary
   rules: ResolvedRules
   assumptions: Map<number, SystemRole>
+  spoilerActions: SpoilerActionRecord[]
 }
 
 export function buildVillageStatus(statements: Statement[], meta?: Record<string, any>): BridgeResult {
@@ -238,6 +247,21 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       }
 
       case 'peace': {
+        for (const status of statuses.values()) {
+          status.voted = false
+          status.votedCount = 0
+          status.votedTarget = -1
+          status.votedOrder = 0
+        }
+        voteOrderCounter = 0
+        revoteTargets = new Set()
+        hasMultiVote = false
+        break
+      }
+
+      case 'dayMark': {
+        // 同一 day への dayMark は no-op (assignDays が advanced=false で印).
+        if (!(stmt as DayMarkStatement).advanced) break
         for (const status of statuses.values()) {
           status.voted = false
           status.votedCount = 0
@@ -573,9 +597,11 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     }
   }
 
-  // spoiler 文を集約して assumptions を構築する。
+  // spoiler 文を集約して assumptions / spoilerActions を構築する。
+  // 役職 pin (role あり) → assumptions、秘匿行動 (action あり) → spoilerActions に分離。
   // 同一プレイヤーに対して異なる役職の spoiler が存在する場合はエラー（同じ役職の重複は許容）。
   const assumptions = new Map<number, SystemRole>()
+  const spoilerActions: SpoilerActionRecord[] = []
   for (const stmt of statements) {
     if (stmt.type !== 'spoiler') continue
     const s = stmt as SpoilerStatement
@@ -583,17 +609,53 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     if (seat === null) {
       throw new Error(`spoiler: 未知のプレイヤー "${s.player}" (line ${s.line})`)
     }
-    const role = resolveSpoilerRole(s.role)
-    if (role === null) {
-      throw new Error(`spoiler: 役職名を解決できません "${s.role}" (line ${s.line})`)
+    if (s.role !== undefined) {
+      const role = resolveSpoilerRole(s.role)
+      if (role === null) {
+        throw new Error(`spoiler: 役職名を解決できません "${s.role}" (line ${s.line})`)
+      }
+      const existing = assumptions.get(seat)
+      if (existing !== undefined && existing !== role) {
+        const name = players.get(seat) ?? s.player
+        throw new Error(`spoiler: ${name} に対する矛盾する仮定 (${existing} vs ${role}) (line ${s.line})`)
+      }
+      assumptions.set(seat, role)
+    } else if (s.action !== undefined && s.day !== undefined && s.target !== undefined) {
+      const target = resolveSeat(s.target)
+      if (target === null) {
+        throw new Error(`spoiler action: 未知のターゲット "${s.target}" (line ${s.line})`)
+      }
+      spoilerActions.push({ day: s.day, by: seat, action: s.action, target })
+    } else {
+      throw new Error(`spoiler: 形式不正 (role も action も無い) (line ${s.line})`)
     }
-    const existing = assumptions.get(seat)
-    if (existing !== undefined && existing !== role) {
-      const name = players.get(seat) ?? s.player
-      throw new Error(`spoiler: ${name} に対する矛盾する仮定 (${existing} vs ${role}) (line ${s.line})`)
-    }
-    assumptions.set(seat, role)
   }
 
-  return { vs, setup, players, shortNames, dict, rules, assumptions }
+  // frontmatter `spoilers.roles` も同じ assumptions に集約する。
+  // ヘッダーで pin 役職を一覧できるためテストシナリオで読みやすい。
+  // `!Player=Role` spoiler 文と同等の意味を持ち、両者が同一プレイヤーに別役職を
+  // 指定した場合は矛盾エラー。
+  const fmSpoilerRoles = meta?.spoilers?.roles
+  if (fmSpoilerRoles !== undefined && fmSpoilerRoles !== null) {
+    if (typeof fmSpoilerRoles !== 'object' || Array.isArray(fmSpoilerRoles)) {
+      throw new Error('spoilers.roles: object 形式 ({ Player: role, ... }) で指定してください')
+    }
+    for (const [playerName, roleRaw] of Object.entries(fmSpoilerRoles)) {
+      const seat = resolveSeat(playerName)
+      if (seat === null) {
+        throw new Error(`spoilers.roles: 未知のプレイヤー "${playerName}"`)
+      }
+      const role = resolveSpoilerRole(String(roleRaw))
+      if (role === null) {
+        throw new Error(`spoilers.roles: 役職名を解決できません "${roleRaw}" (player: ${playerName})`)
+      }
+      const existing = assumptions.get(seat)
+      if (existing !== undefined && existing !== role) {
+        throw new Error(`spoilers.roles: ${playerName} に対する矛盾する仮定 (${existing} vs ${role})`)
+      }
+      assumptions.set(seat, role)
+    }
+  }
+
+  return { vs, setup, players, shortNames, dict, rules, assumptions, spoilerActions }
 }

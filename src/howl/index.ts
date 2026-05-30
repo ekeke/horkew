@@ -32,6 +32,7 @@ export type {
   AssertStatement,
   MasonStatement,
   PeaceStatement,
+  DayMarkStatement,
   RevealStatement,
   UnknownStatement,
   GrelanStatement,
