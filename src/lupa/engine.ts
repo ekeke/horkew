@@ -80,13 +80,16 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
   const night0Ctx = makePhaseContext(state, events, rules)
   const night0Actions = await handlers.onNight(night0Ctx)
 
-  // 夜行動を適用
+  // 夜行動を適用 (resolveAttacks に渡す actionsList も同時に構築)
+  const night0ActionsList: Array<{ player: PlayerState, action: NightAction }> = []
   for (const [seat, action] of night0Actions) {
     const player = players.find(p => p.seat === seat)!
     applyNightAction(state, player, 0, action)
+    night0ActionsList.push({ player, action })
   }
 
   // 占い呪殺チェック (Night 0)
+  let foxKilledInNight0 = false
   for (const player of players) {
     const divine = player.divineHistory.get(0)
     if (!divine) continue
@@ -94,11 +97,13 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
     if (hasTrait(target.role, 'passive', 'die-when-divined') && target.alive) {
       killPlayer(state, target.seat)
       emit({ type: 'fox_kill', target: target.seat })
-      checkImmoralistFollow(state, emit)
+      foxKilledInNight0 = true
     }
   }
 
-  // 初日犠牲者: 襲撃側の狼 / 妖狐 / 道連れ役職を除外 (それ以外は対象)
+  // 初日犠牲者: first-victim ルールで分岐
+  // - 'random' (hasFirstVictim === true): 既存の random pick (狼以外/狐以外/猫又以外から)
+  // - 'none' (hasFirstVictim === false): handler の attack action を resolveAttacks で解決
   if (hasFirstVictim) {
     const candidates = alivePlayers(state).filter(p => {
       if (hasTrait(p.role, 'action', 'attack')) return false
@@ -111,8 +116,13 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
       const victim = rng.pick(candidates)
       killPlayer(state, victim.seat)
       emit({ type: 'night_kill', target: victim.seat })
-      checkImmoralistFollow(state, emit)
     }
+  } else {
+    resolveAttacks(state, night0ActionsList, emit, rng, foxKilledInNight0)
+  }
+
+  if (foxKilledInNight0) {
+    checkImmoralistFollow(state, emit)
   }
 
   // ============================================================
@@ -464,6 +474,26 @@ function resolveNight(
     }
   }
 
+  resolveAttacks(state, actions, emit, rng, foxKilled.size > 0)
+
+  // 妖狐死亡による背徳者後追い
+  if (foxKilled.size > 0) {
+    checkImmoralistFollow(state, emit)
+  }
+}
+
+/**
+ * guard 集約 + 襲撃集約 + 死亡判定 + peace emit。
+ * Night N≥1 の resolveNight() と Night 0 (`first-victim: 'none'` 時) の両方から呼ばれる。
+ * 占い呪殺は呼び出し側で処理済みなので、その分は alreadyKilled で渡す。
+ */
+function resolveAttacks(
+  state: GameState,
+  actions: Array<{ player: PlayerState, action: NightAction }>,
+  emit: EmitFn,
+  rng: Rng,
+  alreadyKilled: boolean,
+): void {
   // 護衛先を取得 (複数狩人がいる場合は全 guard を集約 — 各狩人の意思決定は独立)
   const guardTargets = new Set<number>()
   for (const { action } of actions) {
@@ -473,9 +503,9 @@ function resolveNight(
   }
 
   // 襲撃処理: 狼チームの襲撃先を多数決で 1 つに集約 (同票はランダム)。
-  // 個別の attack action はゲーム履歴 (上の comment emit) に残るが、実際に死ぬのは
+  // 個別の attack action はゲーム履歴 (呼び出し側の comment emit) に残るが、実際に死ぬのは
   // 集約された 1 target のみ。猫又道連れも襲撃した狼のうちランダム 1 匹だけ。
-  let hadNightKill = foxKilled.size > 0
+  let hadNightKill = alreadyKilled
   const attacksByTarget = new Map<number, PlayerState[]>()
   for (const { player, action } of actions) {
     if (action.type !== 'attack') continue
@@ -514,11 +544,6 @@ function resolveNight(
       emit({ type: 'night_kill', target: chosenTarget })
       hadNightKill = true
     }
-  }
-
-  // 妖狐死亡による背徳者後追い
-  if (foxKilled.size > 0) {
-    checkImmoralistFollow(state, emit)
   }
 
   // 平和

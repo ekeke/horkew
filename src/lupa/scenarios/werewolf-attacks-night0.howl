@@ -1,0 +1,33 @@
+---
+title: 人狼が初夜に襲撃する
+setup: { werewolf: 1, villager: 3 }
+rules:
+  first-victim: none
+---
+# first-victim: none のとき engine は Night 0 で attack action を resolve する。
+# Day 1 朝の時点で Alice (人狼) が初夜噛んだ Bob が死んでいる状態でゲーム開始。
+# 残り Alice (狼) + Carol + Dave の 3 人で Day 1 投票 → Dave 処刑。
+# 残り Alice (狼) + Carol (村) で狼 >= 村 → 狼勝。
+
+++Alice、Bob、Carol、Dave
+!Alice=人狼
+!Bob=村人
+!Carol=村人
+!Dave=村人
+!Alice 0夜 襲撃 Bob
+
+# Day 1 投票 (Bob は初夜に死亡しているため投票しない)
+Alice→Dave
+Carol→Dave
+Dave→Alice
+
+# @expect-status Alice: alive
+# @expect-status Bob: dead
+# @expect-status Carol: alive
+# @expect-status Dave: dead
+# @expect-cause Bob: night_kill
+# @expect-cause Dave: execution
+# @expect-event night_kill target:Bob
+# @expect-event execution target:Dave
+# @expect-result: werewolf_won
+# @expect-finished: true

@@ -42,7 +42,9 @@ export function buildLupaScenario(input: AdapterInput): AdapterOutput {
   // - day=0 = 初夜 (lupa night 0、ctx.day=0)
   // - day=1 = Day 1 終わりの夜 (lupa night 1、ctx.day=2)
   // - day=N (N>=1) = Day N 終わりの夜 (lupa night N、ctx.day=N+1)
-  // 初夜は engine の attack action を resolve しないので、襲撃は day>=1 で書く。
+  // 初夜 attack は ruleset `first-victim: 'none'` のときだけ engine が resolve する。
+  // default の `first-victim: 'random'` のときは初夜の死者は random で決まり、
+  // 0夜 襲撃の spoiler 指定は engine に無視される。
   function ctxDayToActionDay(ctxDay: number): number {
     return ctxDay === 0 ? 0 : ctxDay - 1
   }
