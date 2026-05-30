@@ -48,9 +48,10 @@ export const possessed   = `(?:狂人?|possessed)`
 export const fanatic     = `(?:狂信者?|信|fanatic)`
 export const werehamster = `(?:妖?狐|werehamster)`
 export const immoralist    = `(?:背(?:徳者?)?|immoralist)`
+export const paparazzi     = `(?:パパラッチ|paparazzi)`
 export const plainVillager = `(?:素村人?|plainVillager)`
 export const nonVillage    = `(?:人外|nonVillage)`
-export const anyRole       = `(?:${plainVillager}|${villager}|${seer}|${medium}|${bodyguard}|${mason}|${nekomata}|${werewolf}|${possessed}|${fanatic}|${werehamster}|${immoralist}|${nonVillage})`
+export const anyRole       = `(?:${plainVillager}|${villager}|${seer}|${medium}|${bodyguard}|${mason}|${nekomata}|${werewolf}|${possessed}|${fanatic}|${werehamster}|${immoralist}|${paparazzi}|${nonVillage})`
 
 // ********************************* Alignments
 

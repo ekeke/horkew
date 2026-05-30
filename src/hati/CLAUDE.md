@@ -52,9 +52,24 @@ Hatiは当初、AND-OR全探索で詰みを判定する設計だった。
 |---------|------|
 | `index.ts` | 公開API: `searchTsumi`, `judgeTsumi`, `searchTsumiStrategy` |
 | `types.ts` | 型定義: `World`, `TsumiJudgment`, `TsumiResult`, `SearchOptions` |
+| `role-attributes.ts` | 役職 → 属性ビット の事前計算ルックアップ + helper |
 | `search.ts` | AND-OR木探索エンジン |
 | `foxResolver.ts` | 狐排除可能性の探索（探索フェーズの枝刈り） |
 | `simulate.ts` | 夜フェーズシミュレーション |
 | `worlds.ts` | ワールド列挙（探索フェーズ用） |
 | `verify.ts` | 正しさ検証スクリプト |
 | `bench.ts` | ベンチマーク |
+
+## 属性ベース判定 (役職名を内部参照しない)
+
+Hati のロジックは役職名（`'werewolf'` 等）を直接見ない。役職の能力・陣営は属性 (trait + faction) に展開し、`World` 型の属性別マスク経由で判定する。
+
+- `wolfFactionMask` / `foxFactionMask` — 陣営マスク (勝利判定で使う)
+- `attackCapableMask` (action:attack) / `divineCapableMask` (action:divine) / `guardCapableMask` (action:guard)
+- `attackImmuneMask` / `dieWhenDivinedMask` — 受動 trait
+- `curseOnExecutedMask` / `curseOnKilledMask` / `followFoxDeathMask` — 反応 trait
+- `mediumshipMask` — auto-info: execution-species
+
+`Possibilities` / `setup` の役職名キーは [role-attributes.ts](role-attributes.ts) の `possibilityHasAttribute` / `setupCountByAttribute` 等を介して属性問い合わせに置き換える。
+
+新役職を増やしても `systemRoles` に trait を埋めれば Hati 側の変更は不要。

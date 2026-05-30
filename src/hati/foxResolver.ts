@@ -34,7 +34,7 @@ export function simulateFoxElimination(
   // 狐候補: いずれかのワールドで hamster が生存している席
   let foxMask = 0
   for (const w of worlds) {
-    foxMask |= (w.hamsterMask & alive)
+    foxMask |= (w.dieWhenDivinedMask & alive)
   }
   if (foxMask === 0) return true // 狐なし or 全ワールドで狐死亡
 
@@ -53,8 +53,8 @@ export function simulateFoxElimination(
   let bodyguardAlive = false
   let anySeerAlive = false
   for (const w of worlds) {
-    wolfUnion |= (w.wolfMask & alive)
-    const aliveSeerMask = w.seerMask & alive
+    wolfUnion |= (w.attackCapableMask & alive)
+    const aliveSeerMask = w.divineCapableMask & alive
     if (aliveSeerMask !== 0) {
       anySeerAlive = true
       seerMaskUnion |= aliveSeerMask
@@ -63,7 +63,7 @@ export function simulateFoxElimination(
     } else {
       confirmedSeerMask = 0
     }
-    if (w.bodyguardSeat !== -1 && hasSeat(alive, w.bodyguardSeat)) {
+    if ((w.guardCapableMask & alive) !== 0) {
       bodyguardAlive = true
     }
   }
@@ -181,7 +181,7 @@ function tryExecuteThenNight(
   for (const [, { worlds: branchWorlds, alive: branchAlive }] of byKey) {
     let branchFoxMask = 0
     for (const w of branchWorlds) {
-      branchFoxMask |= (w.hamsterMask & branchAlive)
+      branchFoxMask |= (w.dieWhenDivinedMask & branchAlive)
     }
 
     if (branchFoxMask === 0) continue // この分岐では狐解決済み
@@ -245,18 +245,19 @@ function tryNightForFox(
  */
 function worstCaseBite(w: World, alive: number, guardTarget: Seat | null): Seat {
   // 複数占い師: 最も低ビットの生存占い師を狙う
-  const aliveSeerMask = w.seerMask & alive
+  const aliveSeerMask = w.divineCapableMask & alive
   if (aliveSeerMask !== 0) {
     const targetSeer = 31 - Math.clz32(aliveSeerMask & (-aliveSeerMask))
     // BGが占い師を護衛中 → BGを噛んで護衛を剥がす
-    if (guardTarget === targetSeer && w.bodyguardSeat !== -1 && hasSeat(alive, w.bodyguardSeat)) {
-      return w.bodyguardSeat
+    const aliveGuard = w.guardCapableMask & alive
+    if (guardTarget === targetSeer && aliveGuard !== 0) {
+      return 31 - Math.clz32(aliveGuard & (-aliveGuard))
     }
     // 占い師を直接噛む
     return targetSeer
   }
   // 占い師なし → 非狼の生存者を噛む（alive を減らす）
-  const nonWolf = alive & ~w.wolfMask
+  const nonWolf = alive & ~w.attackCapableMask
   if (nonWolf === 0) return -1  // 噛み先なし
   return 31 - Math.clz32(nonWolf & (-nonWolf))
 }
@@ -286,7 +287,7 @@ function simulateWorstCaseNight(
 
     // foxResolverでは全占い師が同じ対象を占う（簡易判定）
     const seerTargets = divineTarget !== null
-      ? new Array(popCount32(w.seerMask)).fill(divineTarget) as Seat[]
+      ? new Array(popCount32(w.divineCapableMask)).fill(divineTarget) as Seat[]
       : []
     const { nextAlive, obsKey } = simulateNight(w, alive, bite, guardTarget, seerTargets)
 
@@ -303,7 +304,7 @@ function simulateWorstCaseNight(
   for (const [, group] of byObs) {
     let branchFoxMask = 0
     for (const w of group.worlds) {
-      branchFoxMask |= (w.hamsterMask & group.alive)
+      branchFoxMask |= (w.dieWhenDivinedMask & group.alive)
     }
 
     if (branchFoxMask === 0) continue // 狐解決済み

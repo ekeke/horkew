@@ -628,6 +628,166 @@ describe('bridge: spoiler assumptions', () => {
     assert.throws(() => buildVillageStatus(statements, meta), /矛盾する仮定/)
   })
 
+  test('paparazzi spoiler is resolved (both カタカナ and ASCII)', () => {
+    const howl = `+アリス
++ボブ
+!アリス=パパラッチ
+!ボブ=paparazzi`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, players } = buildVillageStatus(statements, meta)
+
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+    assert.strictEqual(assumptions.get(seatOf('アリス')), 'paparazzi')
+    assert.strictEqual(assumptions.get(seatOf('ボブ')), 'paparazzi')
+  })
+
+  test('frontmatter spoilers.roles is resolved', () => {
+    const howl = `---
+spoilers:
+  roles:
+    アリス: パパラッチ
+    ボブ: paparazzi
+    チャーリー: 占い師
+---
++アリス
++ボブ
++チャーリー`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, players } = buildVillageStatus(statements, meta)
+
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+    assert.strictEqual(assumptions.get(seatOf('アリス')), 'paparazzi')
+    assert.strictEqual(assumptions.get(seatOf('ボブ')), 'paparazzi')
+    assert.strictEqual(assumptions.get(seatOf('チャーリー')), 'seer')
+  })
+
+  test('frontmatter spoilers + ! spoiler with same role is OK', () => {
+    const howl = `---
+spoilers:
+  roles:
+    アリス: 占い師
+---
++アリス
++ボブ
+!アリス=占い師`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, players } = buildVillageStatus(statements, meta)
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+    assert.strictEqual(assumptions.get(seatOf('アリス')), 'seer')
+  })
+
+  test('frontmatter spoilers + ! spoiler with different role throws', () => {
+    const howl = `---
+spoilers:
+  roles:
+    アリス: 占い師
+---
++アリス
++ボブ
+!アリス=パパラッチ`
+
+    const { statements, meta } = parse(howl)
+    assert.throws(() => buildVillageStatus(statements, meta), /矛盾する仮定/)
+  })
+
+  test('frontmatter spoilers with unknown player throws', () => {
+    const howl = `---
+spoilers:
+  roles:
+    キャロル: 占い師
+---
++アリス
++ボブ`
+
+    const { statements, meta } = parse(howl)
+    assert.throws(() => buildVillageStatus(statements, meta), /未知のプレイヤー/)
+  })
+
+  test('frontmatter spoilers with bad role name throws', () => {
+    const howl = `---
+spoilers:
+  roles:
+    アリス: ぱぱらっち
+---
++アリス`
+
+    const { statements, meta } = parse(howl)
+    assert.throws(() => buildVillageStatus(statements, meta), /役職名を解決できません/)
+  })
+
+  test('spoiler action (divine) is recorded in spoilerActions', () => {
+    const howl = `+アリス
++ボブ
+!アリス=占い師
+!アリス 1夜 占い ボブ`
+
+    const { statements, meta } = parse(howl)
+    const { spoilerActions, players } = buildVillageStatus(statements, meta)
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+    assert.strictEqual(spoilerActions.length, 1)
+    assert.deepStrictEqual(spoilerActions[0], {
+      day: 1, by: seatOf('アリス'), action: 'divine', target: seatOf('ボブ'),
+    })
+  })
+
+  test('spoiler actions (guard, attack) work', () => {
+    const howl = `+アリス
++ボブ
++キャロル
+!ボブ 1夜 護衛 アリス
+!キャロル 1夜 襲撃 アリス`
+
+    const { statements, meta } = parse(howl)
+    const { spoilerActions, players } = buildVillageStatus(statements, meta)
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+    assert.strictEqual(spoilerActions.length, 2)
+    assert.deepStrictEqual(spoilerActions[0], {
+      day: 1, by: seatOf('ボブ'), action: 'guard', target: seatOf('アリス'),
+    })
+    assert.deepStrictEqual(spoilerActions[1], {
+      day: 1, by: seatOf('キャロル'), action: 'attack', target: seatOf('アリス'),
+    })
+  })
+
+  test('spoiler action with ASCII verbs (divine/guard/attack) works', () => {
+    const howl = `+アリス
++ボブ
+!アリス 2夜 divine ボブ`
+
+    const { statements, meta } = parse(howl)
+    const { spoilerActions, players } = buildVillageStatus(statements, meta)
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+    assert.strictEqual(spoilerActions.length, 1)
+    assert.deepStrictEqual(spoilerActions[0], {
+      day: 2, by: seatOf('アリス'), action: 'divine', target: seatOf('ボブ'),
+    })
+  })
+
+  test('spoiler action with unknown target throws', () => {
+    const howl = `+アリス
+!アリス 1夜 占い キャロル`
+
+    const { statements, meta } = parse(howl)
+    assert.throws(() => buildVillageStatus(statements, meta), /未知のターゲット/)
+  })
+
+  test('role pin and spoiler action coexist for same player', () => {
+    const howl = `+アリス
++ボブ
+!アリス=占い師
+!アリス 1夜 占い ボブ`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, spoilerActions, players } = buildVillageStatus(statements, meta)
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+    assert.strictEqual(assumptions.get(seatOf('アリス')), 'seer')
+    assert.strictEqual(spoilerActions.length, 1)
+    assert.strictEqual(spoilerActions[0].action, 'divine')
+  })
+
   test('spoiler for unknown player throws', () => {
     const howl = `+アリス
 +ボブ

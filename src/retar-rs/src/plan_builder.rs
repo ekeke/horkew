@@ -9,6 +9,7 @@ pub const LIAR_ROLES: &[SystemRole] = &[
     SystemRole::Immoralist,
     SystemRole::Possessed,
     SystemRole::Fanatic,
+    SystemRole::Paparazzi,
 ];
 
 const ROLES_IN_TEST_PLANNING: &[SystemRole] = &[

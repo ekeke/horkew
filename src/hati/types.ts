@@ -9,6 +9,16 @@ export function seatBit(seat: Seat): number { return 1 << seat }
 export function hasSeat(mask: number, seat: Seat): boolean { return (mask & (1 << seat)) !== 0 }
 /** ビットマスクから seat を除去 */
 export function removeSeat(mask: number, seat: Seat): number { return mask & ~(1 << seat) }
+/**
+ * 単一護衛者の seat を返す。複数 (今のところ想定外) なら最も低い bit。0 (護衛者なし) なら -1。
+ * 旧 `bodyguardSeat` 互換のための helper。
+ */
+export function getGuardSeat(world: { guardCapableMask: number }): number {
+  const m = world.guardCapableMask
+  if (m === 0) return -1
+  return 31 - Math.clz32(m & (-m))
+}
+
 /** ビットマスクの立っているビット数 */
 export function popCount32(x: number): number {
   x = x - ((x >>> 1) & 0x55555555)
@@ -36,26 +46,40 @@ export function maskFromSeats(seats: Iterable<Seat>): number {
   return mask
 }
 
-/** 1つの有効な役職配置（ワールド） */
+/**
+ * 1つの有効な役職配置（ワールド）。
+ *
+ * 各マスクは属性 (trait + faction) 単位で切ってあり、Hati のロジックは
+ * 役職名（'werewolf' / 'werehamster' など）を直接参照せず、属性マスクの
+ * AND / 補集合だけで判定する。属性の定義は role-attributes.ts を参照。
+ */
 export type World = {
   /** 役職配列（seat インデックス、0 番は未使用） */
   roles: SystemRole[]
   /** 役職の数値ID配列（RoleBitIndex準拠、ホットパス用） */
   roleIds: Uint8Array
-  /** 人狼のseatビットマスク */
-  wolfMask: number
-  /** 妖狐のseatビットマスク（0 = なし、複数対応） */
-  hamsterMask: number
-  /** 背徳者のseatビットマスク（0 = なし、複数対応） */
-  immoralistMask: number
-  /** 真占い師のseatビットマスク（0 = なし、複数対応） */
-  seerMask: number
-  /** 真霊媒師のseatビットマスク（0 = なし、複数対応） */
-  mediumMask: number
-  /** 猫又のseatビットマスク（0 = なし、複数対応） */
-  nekomataMask: number
-  /** 真狩人のseat（いなければ -1） */
-  bodyguardSeat: number
+  /** 狼陣営（faction='wolf'）の seat ビットマスク。勝利判定で使う */
+  wolfFactionMask: number
+  /** 狐陣営（faction='fox'）の seat ビットマスク。勝利判定で使う */
+  foxFactionMask: number
+  /** action:attack を持つ seat ビットマスク（噛みアクター） */
+  attackCapableMask: number
+  /** action:divine を持つ seat ビットマスク（占い実行者） */
+  divineCapableMask: number
+  /** action:guard を持つ seat ビットマスク（護衛実行者） */
+  guardCapableMask: number
+  /** passive:attack-immune を持つ seat ビットマスク（噛みで死なない） */
+  attackImmuneMask: number
+  /** passive:die-when-divined を持つ seat ビットマスク（占いで死ぬ） */
+  dieWhenDivinedMask: number
+  /** reactive:curse-on-executed を持つ seat ビットマスク（処刑時に道連れ） */
+  curseOnExecutedMask: number
+  /** reactive:curse-on-killed を持つ seat ビットマスク（噛み時に道連れ） */
+  curseOnKilledMask: number
+  /** reactive:follow-fox-death を持つ seat ビットマスク（狐死亡で後追い） */
+  followFoxDeathMask: number
+  /** auto-info:execution-species を持つ seat ビットマスク（霊媒結果取得） */
+  mediumshipMask: number
 }
 
 /** 探索中のシミュレーション状態 */

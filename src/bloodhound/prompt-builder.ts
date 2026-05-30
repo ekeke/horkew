@@ -47,6 +47,7 @@ const ROLE_PROMPT_FILE: Record<SystemRole, string> = {
   werewolf:    'role/werewolf.md',
   fanatic:     'role/fanatic.md',
   possessed:   'role/fanatic.md',
+  paparazzi:   'role/fanatic.md',
   werehamster: 'role/werehamster.md',
   immoralist:  'role/immoralist.md',
 }

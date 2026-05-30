@@ -19,6 +19,7 @@ import {
   type AssertStatement,
   type UnknownStatement,
   type SetupStatement,
+  type DayMarkStatement,
 } from './statement.ts'
 import * as V from './vocabulary.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
@@ -394,12 +395,30 @@ function assignDays(statements: Statement[]): Statement[] {
   let day = 1
   let inNight = false
   return statements.map(s => {
+    // spoiler 文の day は秘匿夜行動の対象夜番号で、進行 day とは別意味。
+    // 進行 day で上書きしないよう skip し、inNight 状態にも影響させない。
+    if (s.type === 'spoiler') return s
     if (s.type === 'attack' || s.type === 'peace') {
       if (!inNight) {
         day++
         inNight = true
       }
       return { ...s, day }
+    }
+    if (s.type === 'dayMark') {
+      const target = (s as DayMarkStatement).day
+      if (target < day) {
+        const fallback: UnknownStatement = { type: 'unknown', line: s.line, text: `dayMark(${target}) < current(${day})`, day }
+        return fallback
+      }
+      if (target > day + 1) {
+        const fallback: UnknownStatement = { type: 'unknown', line: s.line, text: `dayMark(${target}) skips from current(${day})`, day }
+        return fallback
+      }
+      const advanced = target > day
+      day = target
+      inNight = false
+      return { ...s, day: target, advanced } as DayMarkStatement
     }
     // follow/curse は夜イベントの一部なので inNight をリセットしない
     if (s.type !== 'follow' && s.type !== 'curse') {

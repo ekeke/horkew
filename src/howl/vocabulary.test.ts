@@ -421,6 +421,21 @@ describe('immoralist', () => {
   })
 })
 
+describe('paparazzi', () => {
+  const regex = new RegExp(`^${Vocabulary.paparazzi}$`)
+
+  it('should match paparazzi terms', () => {
+    assert.match('パパラッチ', regex, 'パパラッチ should match')
+    assert.match('paparazzi', regex, 'paparazzi should match')
+  })
+
+  it('should not match non-paparazzi terms', () => {
+    assert.doesNotMatch('占い師', regex, 'Non-paparazzi term should not match')
+    assert.doesNotMatch('パ', regex, '単独パ should not match')
+    assert.doesNotMatch('パパラ', regex, '短縮パパラ should not match')
+  })
+})
+
 
 // *********************************** Alignment
 describe('village', () => {
@@ -504,6 +519,8 @@ describe('anyRole', () => {
     assert.match('狂人', regex, '狂人 should match')
     assert.match('妖狐', regex, '妖狐 should match')
     assert.match('背徳者', regex, '背徳者 should match')
+    assert.match('パパラッチ', regex, 'パパラッチ should match')
+    assert.match('paparazzi', regex, 'paparazzi should match')
   })
 
   it('should not match non-role terms', () => {

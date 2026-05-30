@@ -11,7 +11,7 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { Possibilities } from '../retar/possibilities.ts'
 import type { World } from '../hati/types.ts'
-import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask } from '../hati/types.ts'
+import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask, getGuardSeat } from '../hati/types.ts'
 import { enumerateWorlds } from '../hati/worlds.ts'
 import { checkOutcome, applyExecution } from '../hati/simulate.ts'
 import { minimaxNightWinRate } from './winrate.ts'
@@ -54,24 +54,24 @@ export function analyzeExecutionsByWorld(
 
   const cache = new Map<number, number>()
 
-  // ワールドのスコアは (wolfMask, hamsterMask, seerMask, mediumMask, nekomataMask, bodyguardSeat)
+  // ワールドのスコアは (attackCapableMask, dieWhenDivinedMask, divineCapableMask, mediumshipMask, curseOnExecutedMask, guardSeat)
   // だけに依存する。villager/mason/fanatic/possessed/immoralist の配置違いでは同じスコアになる。
   // 同一シグネチャのワールドをまとめてキャッシュする。
   //
   // キーは 2 段の数値 Map:
-  //   key1 = wolfMask | (hamsterMask << 15)          (30bit, SMI)
-  //   key2 = seerMask + mediumMask*2^15 + nekomataMask*2^30 + (bodyguardSeat+2)*2^45  (safe integer)
+  //   key1 = attackCapableMask | (dieWhenDivinedMask << 15)          (30bit, SMI)
+  //   key2 = divineCapableMask + mediumshipMask*2^15 + curseOnExecutedMask*2^30 + (guardSeat+2)*2^45  (safe integer)
   // 文字列キー版より alloc/ハッシュコストが小さい。
   const sigCache = new Map<number, Map<number, Float64Array>>()
 
   enumerateWorlds(possibilities, setup, (world) => {
     totalWorlds++
 
-    const key1 = world.wolfMask | (world.hamsterMask << 15)
-    const key2 = world.seerMask
-      + world.mediumMask * 0x8000
-      + world.nekomataMask * 0x40000000
-      + (world.bodyguardSeat + 2) * 0x200000000000
+    const key1 = world.attackCapableMask | (world.dieWhenDivinedMask << 15)
+    const key2 = world.divineCapableMask
+      + world.mediumshipMask * 0x8000
+      + world.curseOnExecutedMask * 0x40000000
+      + (getGuardSeat(world) + 2) * 0x200000000000
     let inner = sigCache.get(key1)
     if (inner === undefined) {
       inner = new Map()
@@ -145,7 +145,7 @@ export function computeScoresForWorld(
     const target = aliveSeats[i]
     const afterExec = applyExecution(alive, target)
 
-    if ((world.nekomataMask & (1 << target)) !== 0) {
+    if ((world.curseOnExecutedMask & (1 << target)) !== 0) {
       // 猫又処刑: ランダム1人道連れ退場 → 全候補で平均
       const curseCandidates = seatsFromMask(afterExec)
       if (curseCandidates.length === 0) {
@@ -210,12 +210,13 @@ function estimateOngoingWinRate(
   aliveAfterExec: number,
   cache: Map<number, number>,
 ): number {
-  const wolves = popCount32(world.wolfMask & aliveAfterExec)
-  const foxes = popCount32(world.hamsterMask & aliveAfterExec)
-  const nekomata = popCount32(world.nekomataMask & aliveAfterExec)
-  const seerAlive = (world.seerMask & aliveAfterExec) !== 0
-  const mediumAlive = (world.mediumMask & aliveAfterExec) !== 0
-  const bodyguardAlive = world.bodyguardSeat >= 0 && hasSeat(aliveAfterExec, world.bodyguardSeat)
+  const wolves = popCount32(world.attackCapableMask & aliveAfterExec)
+  const foxes = popCount32(world.dieWhenDivinedMask & aliveAfterExec)
+  const nekomata = popCount32(world.curseOnExecutedMask & aliveAfterExec)
+  const seerAlive = (world.divineCapableMask & aliveAfterExec) !== 0
+  const mediumAlive = (world.mediumshipMask & aliveAfterExec) !== 0
+  const bodyguardSeat = getGuardSeat(world)
+  const bodyguardAlive = bodyguardSeat >= 0 && hasSeat(aliveAfterExec, bodyguardSeat)
   const aliveTotal = popCount32(aliveAfterExec)
   // grays = 役職不明プール（狼・狐・村人の混在、特殊役職を除く）
   const grays = aliveTotal - (seerAlive ? 1 : 0) - (mediumAlive ? 1 : 0) - (bodyguardAlive ? 1 : 0) - nekomata

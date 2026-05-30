@@ -1,0 +1,52 @@
+---
+title: paparazzi-false-seer
+tags: [paparazzi]
+setup:
+  werewolf: 3
+  villager: 1
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  mason: 2
+  nekomata: 1
+  fanatic: 1
+  werehamster: 1
+  immoralist: 1
+  paparazzi: 1
+---
+
+# 偽占い CO の paparazzi (Alice) と真の seer (Carol) が並んだシナリオ。
+# spoiler で Alice=パパラッチ / Carol=占い師 を pin。
+# retar は paparazzi の judgement (Alice の Bob 黒判定) を信用しない (paparazzi
+# の能力は本物だが観測者視点では発言の真偽判別不能)。一方 Carol の judgement は
+# seer 確定者からの発言なので信用 → Dave 非狼。
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy、Jack、Kate、Leo、Mia、Ned
+
+!Alice=パパラッチ
+!Carol=占い師
+
+# Day 1: 占いCO 2 件
+Alice 占いCO Bob●
+Carol 占いCO Dave○
+
+# Checkpoint 1: 両 CO 出揃った時点
+# - Alice = paparazzi 固定 (spoiler)、Carol = seer 固定 (spoiler)
+# - Alice の Bob 黒判定は retar の観測者視点では信用されない (paparazzi 発言)
+# - Carol の Dave 白判定は seer 確定者の発言なので retar が信用 → Dave 非狼
+# - 役職分類が trait/faction ベースに移行したので faction/alignment annotation でも確認
+# @expect Alice: [paparazzi]
+# @expect Carol: [seer]
+# @expect-faction Alice: wolf
+# @expect-faction Carol: village
+# @expect-alignment Alice: werewolf
+# @expect-alignment Carol: villager
+# @expect-claim Alice: seer
+# @expect-claim Carol: seer
+# @expect Dave: [!seer, !paparazzi, !werewolf, !werehamster, ...]
+# spoiler 由来は gmork スコープ外、Carol/seer 確定も Alice/seer 否定が axiomatic
+# に説明できないため出ない。Alice の villager 否定は CO 起源で出る (axiomatic)。
+# @gmork-confirm Alice/paparazzi: null
+# @gmork-deny Alice/seer: null
+# @gmork-confirm Carol/seer: null
+# @gmork-deny Alice/villager: co_implies_not_other_village_role

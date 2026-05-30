@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import type { SystemRole } from '../types/index.ts'
 import type { World } from './types.ts'
 import { RoleBitIndex } from '../retar/possibilities.ts'
+import { ATTR, RoleAttributeBits } from './role-attributes.ts'
 import { searchTsumiDirect } from './index.ts'
 import { formatTsumiResult } from './format.ts'
 
@@ -11,28 +12,46 @@ function makeWorld(assignments: Record<number, SystemRole>): World {
   const maxSeat = Math.max(...Object.keys(assignments).map(Number))
   const roles: SystemRole[] = new Array(maxSeat + 1)
   const roleIds = new Uint8Array(maxSeat + 1)
-  let wolfMask = 0
-  let hamsterMask = 0
-  let immoralistMask = 0
-  let seerMask = 0
-  let nekomataMask = 0
-  let bodyguardSeat = -1
+  let wolfFactionMask = 0
+  let foxFactionMask = 0
+  let attackCapableMask = 0
+  let divineCapableMask = 0
+  let guardCapableMask = 0
+  let attackImmuneMask = 0
+  let dieWhenDivinedMask = 0
+  let curseOnExecutedMask = 0
+  let curseOnKilledMask = 0
+  let followFoxDeathMask = 0
+  let mediumshipMask = 0
 
   for (const [seatStr, role] of Object.entries(assignments)) {
     const seat = Number(seatStr)
     roles[seat] = role
-    roleIds[seat] = RoleBitIndex[role]
-    switch (role) {
-      case 'werewolf': wolfMask |= (1 << seat); break
-      case 'werehamster': hamsterMask |= (1 << seat); break
-      case 'immoralist': immoralistMask |= (1 << seat); break
-      case 'seer': seerMask |= (1 << seat); break
-      case 'nekomata': nekomataMask |= (1 << seat); break
-      case 'bodyguard': bodyguardSeat = seat; break
-    }
+    const bitIdx = RoleBitIndex[role]
+    roleIds[seat] = bitIdx
+    const attr = RoleAttributeBits[bitIdx]
+    const bit = 1 << seat
+    if (attr & ATTR.WOLF_FACTION)                wolfFactionMask |= bit
+    if (attr & ATTR.FOX_FACTION)                 foxFactionMask |= bit
+    if (attr & ATTR.ACTION_ATTACK)               attackCapableMask |= bit
+    if (attr & ATTR.ACTION_DIVINE)               divineCapableMask |= bit
+    if (attr & ATTR.ACTION_GUARD)                guardCapableMask |= bit
+    if (attr & ATTR.PASSIVE_ATTACK_IMMUNE)       attackImmuneMask |= bit
+    if (attr & ATTR.PASSIVE_DIE_WHEN_DIVINED)    dieWhenDivinedMask |= bit
+    if (attr & ATTR.REACTIVE_CURSE_ON_EXECUTED)  curseOnExecutedMask |= bit
+    if (attr & ATTR.REACTIVE_CURSE_ON_KILLED)    curseOnKilledMask |= bit
+    if (attr & ATTR.REACTIVE_FOLLOW_FOX_DEATH)   followFoxDeathMask |= bit
+    if (attr & ATTR.AUTO_INFO_EXECUTION_SPECIES) mediumshipMask |= bit
   }
 
-  return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, mediumMask: 0, nekomataMask, bodyguardSeat }
+  return {
+    roles, roleIds,
+    wolfFactionMask, foxFactionMask,
+    attackCapableMask, divineCapableMask, guardCapableMask,
+    attackImmuneMask, dieWhenDivinedMask,
+    curseOnExecutedMask, curseOnKilledMask, followFoxDeathMask,
+    mediumshipMask,
+  }
 }
 
 describe('Hati searchTsumi', () => {

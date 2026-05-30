@@ -16,7 +16,7 @@
 import type { SystemRole, Seat } from '../types/index.ts'
 import type { Possibilities } from '../retar/possibilities.ts'
 import type { World } from '../hati/types.ts'
-import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask } from '../hati/types.ts'
+import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask, getGuardSeat } from '../hati/types.ts'
 import { enumerateWorlds } from '../hati/worlds.ts'
 import { checkOutcome, applyFollowDeaths, validBiteTargetsMask } from '../hati/simulate.ts'
 import { minimaxWinRate } from './winrate.ts'
@@ -73,7 +73,7 @@ export function analyzeAttacksByWorld(
 
       worldCounts[i]++
 
-      if ((world.hamsterMask & (1 << target)) !== 0) {
+      if ((world.dieWhenDivinedMask & (1 << target)) !== 0) {
         // 妖狐は噛まれても死なない → alive 変化なし
         const outcome = checkOutcome(world, alive)
         if (outcome === 'wolf_win') {
@@ -84,9 +84,9 @@ export function analyzeAttacksByWorld(
           wolfWinScores[i] += 1.0 - estimateOngoingAttackWinRate(world, alive, cache)
         }
         // village_win → 0
-      } else if ((world.nekomataMask & (1 << target)) !== 0) {
+      } else if ((world.curseOnExecutedMask & (1 << target)) !== 0) {
         // 猫又噛み: 猫又 + 噛んだ狼が道連れ退場（全生存狼で平均）
-        const aliveWolfSeats = seatsFromMask(world.wolfMask & alive)
+        const aliveWolfSeats = seatsFromMask(world.attackCapableMask & alive)
         // LW は validBiteTargetsMask が猫又を除外するので aliveWolfSeats.length >= 2 のはず
         if (aliveWolfSeats.length === 0) continue
         const afterNekomata = removeSeat(alive, target)
@@ -179,12 +179,13 @@ function estimateOngoingAttackWinRate(
   aliveAfterAttack: number,
   cache: Map<number, number>,
 ): number {
-  const wolves = popCount32(world.wolfMask & aliveAfterAttack)
-  const foxes = popCount32(world.hamsterMask & aliveAfterAttack)
-  const nekomata = popCount32(world.nekomataMask & aliveAfterAttack)
-  const seerAlive = (world.seerMask & aliveAfterAttack) !== 0
-  const mediumAlive = (world.mediumMask & aliveAfterAttack) !== 0
-  const bodyguardAlive = world.bodyguardSeat >= 0 && hasSeat(aliveAfterAttack, world.bodyguardSeat)
+  const wolves = popCount32(world.attackCapableMask & aliveAfterAttack)
+  const foxes = popCount32(world.dieWhenDivinedMask & aliveAfterAttack)
+  const nekomata = popCount32(world.curseOnExecutedMask & aliveAfterAttack)
+  const seerAlive = (world.divineCapableMask & aliveAfterAttack) !== 0
+  const mediumAlive = (world.mediumshipMask & aliveAfterAttack) !== 0
+  const bodyguardSeat = getGuardSeat(world)
+  const bodyguardAlive = bodyguardSeat >= 0 && hasSeat(aliveAfterAttack, bodyguardSeat)
   const aliveTotal = popCount32(aliveAfterAttack)
   const grays = aliveTotal - (seerAlive ? 1 : 0) - (mediumAlive ? 1 : 0) - (bodyguardAlive ? 1 : 0) - nekomata
 

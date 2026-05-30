@@ -19,7 +19,7 @@ import type {
   SetupStatement, JoinStatement, JoinMultiStatement,
   VoteStatement, MultiVoteStatement, RevoteStatement, GrelanStatement,
   AttackStatement, LynchStatement, SuddenDeathStatement,
-  PeaceStatement, CurseStatement, FollowStatement, ForecastStatement,
+  PeaceStatement, DayMarkStatement, CurseStatement, FollowStatement, ForecastStatement,
   OverStatement, AssertStatement, MasonStatement,
   RevealStatement, SpoilerStatement, SpeechStatement,
   VideoSourceStatement, TimestampStatement, UnknownStatement,
@@ -243,6 +243,7 @@ export function serializeStatement(stmt: Statement): string {
     case 'lynch':      return serializeLynch(stmt as LynchStatement)
     case 'suddenDeath':return serializeSuddenDeath(stmt as SuddenDeathStatement)
     case 'peace':      return '平和'
+    case 'dayMark':    return `Day ${(stmt as DayMarkStatement).day}:`
     case 'curse':      return `${(stmt as CurseStatement).target}道連れ`
     case 'follow':     return `${(stmt as FollowStatement).target}後追い`
     case 'forecast':   return serializeForecast(stmt as ForecastStatement)

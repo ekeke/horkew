@@ -1,12 +1,12 @@
 use crate::types::{SystemRole, Seat};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const ROLE_COUNT: usize = 11;
+pub const ROLE_COUNT: usize = 12;
 /// in_pending が u32 ビットマスクなので最大32席（seat 1..=31）
 pub const MAX_SEATS: usize = 32;
 
 // Composite bitmask constants
-pub const ALL_ROLES: u16 = (1u16 << ROLE_COUNT) - 1; // 0b11111111111
+pub const ALL_ROLES: u16 = (1u16 << ROLE_COUNT) - 1; // 0b111111111111
 pub const HUMAN: u16 = ALL_ROLES & !SystemRole::Werewolf.bit_const();
 pub const VILLAGE_ROLES: u16 = SystemRole::Seer.bit_const()
     | SystemRole::Medium.bit_const()
@@ -17,7 +17,8 @@ pub const LIAR: u16 = SystemRole::Werewolf.bit_const()
     | SystemRole::Possessed.bit_const()
     | SystemRole::Fanatic.bit_const()
     | SystemRole::Werehamster.bit_const()
-    | SystemRole::Immoralist.bit_const();
+    | SystemRole::Immoralist.bit_const()
+    | SystemRole::Paparazzi.bit_const();
 
 // Extend SystemRole with const fn for use in const expressions
 impl SystemRole {
@@ -38,6 +39,7 @@ impl SystemRole {
             SystemRole::Fanatic => 8,
             SystemRole::Werehamster => 9,
             SystemRole::Immoralist => 10,
+            SystemRole::Paparazzi => 11,
         }
     }
 }

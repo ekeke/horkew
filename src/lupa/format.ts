@@ -13,6 +13,7 @@ const ROLE_DISPLAY: Record<SystemRole, string> = {
   fanatic: '狂信',
   werehamster: '狐',
   immoralist: '背徳',
+  paparazzi: 'パパラッチ',
 }
 
 // 配役記法用の短縮表記（パーサーのvocabulary最短形に合わせる）
@@ -28,6 +29,7 @@ const ROLE_SETUP_DISPLAY: Record<SystemRole, string> = {
   fanatic: '信',
   werehamster: '狐',
   immoralist: '背',
+  paparazzi: 'パ',
 }
 
 const RESULT_DISPLAY = {

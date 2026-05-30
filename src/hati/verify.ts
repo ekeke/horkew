@@ -28,6 +28,7 @@ import { getEndgameStats, resetEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { VillageRetar } from '../retar/index.ts'
 import { RoleBitIndex, RoleSignatureBits, possibilityFromRoles } from '../retar/possibilities.ts'
+import { ATTR, RoleAttributeBits } from './role-attributes.ts'
 import { formatStrategy } from './format.ts'
 import type { StrategyNode, World } from './types.ts'
 import { hasSeat, removeSeat, forEachSeat, popCount32 } from './types.ts'
@@ -85,7 +86,8 @@ function verifyStrategy(
     const trueRole = world.roles[target]
     const mediumResult = getMediumResult(trueRole)
 
-    if (trueRole === 'nekomata') {
+    const targetBit = 1 << target
+    if ((world.curseOnExecutedMask & targetBit) !== 0) {
       // 猫又処刑: 各道連れ先で検証
       let allOk = true
       const failTrace: string[] = []
@@ -144,17 +146,17 @@ function verifyStrategy(
       world, alive, biteTarget, bodyguardTarget, seerTargets,
     )
 
-    // 猫又噛み: 道連れ狼の全分岐を検証
-    const isNekoBite = world.roles[biteTarget] === 'nekomata'
+    // 猫又噛み (curse-on-killed): 道連れ攻撃者の全分岐を検証
+    const isNekoBite = (world.curseOnKilledMask & (1 << biteTarget)) !== 0
       && hasSeat(alive, biteTarget)
-      && (bodyguardTarget !== biteTarget || !hasSeat(alive, world.bodyguardSeat))
-    const curseWolfMask = isNekoBite ? (world.wolfMask & baseAlive) : 0
+      && (bodyguardTarget !== biteTarget || (world.guardCapableMask & alive) === 0)
+    const curseWolfMask = isNekoBite ? (world.attackCapableMask & baseAlive) : 0
 
     const variants: { nextAlive: number, numKey: number, label: string }[] = []
     if (curseWolfMask === 0) {
       variants.push({ nextAlive: baseAlive, numKey: baseKey, label: `噛み ${biteTarget}` })
     } else {
-      const seerShift = popCount32(world.seerMask) * 2
+      const seerShift = popCount32(world.divineCapableMask) * 2
       let wolfBits = curseWolfMask
       while (wolfBits !== 0) {
         const wolfBit = wolfBits & (-wolfBits)
@@ -850,27 +852,46 @@ function buildTrueWorld(state: GameState): World {
   const maxSeat = Math.max(...state.players.map(p => p.seat))
   const roles: SystemRole[] = new Array(maxSeat + 1)
   const roleIds = new Uint8Array(maxSeat + 1)
-  let wolfMask = 0
-  let hamsterMask = 0
-  let immoralistMask = 0
-  let seerMask = 0
-  let nekomataMask = 0
-  let bodyguardSeat = -1
+  // 属性別マスクを RoleAttributeBits 経由で構築
+  let wolfFactionMask = 0
+  let foxFactionMask = 0
+  let attackCapableMask = 0
+  let divineCapableMask = 0
+  let guardCapableMask = 0
+  let attackImmuneMask = 0
+  let dieWhenDivinedMask = 0
+  let curseOnExecutedMask = 0
+  let curseOnKilledMask = 0
+  let followFoxDeathMask = 0
+  let mediumshipMask = 0
 
   for (const p of state.players) {
     roles[p.seat] = p.role
-    roleIds[p.seat] = RoleBitIndex[p.role]
-    switch (p.role) {
-      case 'werewolf': wolfMask |= (1 << p.seat); break
-      case 'werehamster': hamsterMask |= (1 << p.seat); break
-      case 'immoralist': immoralistMask |= (1 << p.seat); break
-      case 'seer': seerMask |= (1 << p.seat); break
-      case 'nekomata': nekomataMask |= (1 << p.seat); break
-      case 'bodyguard': bodyguardSeat = p.seat; break
-    }
+    const bitIdx = RoleBitIndex[p.role]
+    roleIds[p.seat] = bitIdx
+    const attr = RoleAttributeBits[bitIdx]
+    const bit = 1 << p.seat
+    if (attr & ATTR.WOLF_FACTION)                wolfFactionMask |= bit
+    if (attr & ATTR.FOX_FACTION)                 foxFactionMask |= bit
+    if (attr & ATTR.ACTION_ATTACK)               attackCapableMask |= bit
+    if (attr & ATTR.ACTION_DIVINE)               divineCapableMask |= bit
+    if (attr & ATTR.ACTION_GUARD)                guardCapableMask |= bit
+    if (attr & ATTR.PASSIVE_ATTACK_IMMUNE)       attackImmuneMask |= bit
+    if (attr & ATTR.PASSIVE_DIE_WHEN_DIVINED)    dieWhenDivinedMask |= bit
+    if (attr & ATTR.REACTIVE_CURSE_ON_EXECUTED)  curseOnExecutedMask |= bit
+    if (attr & ATTR.REACTIVE_CURSE_ON_KILLED)    curseOnKilledMask |= bit
+    if (attr & ATTR.REACTIVE_FOLLOW_FOX_DEATH)   followFoxDeathMask |= bit
+    if (attr & ATTR.AUTO_INFO_EXECUTION_SPECIES) mediumshipMask |= bit
   }
 
-  return { roles, roleIds, wolfMask, hamsterMask, immoralistMask, seerMask, mediumMask: 0, nekomataMask, bodyguardSeat }
+  return {
+    roles, roleIds,
+    wolfFactionMask, foxFactionMask,
+    attackCapableMask, divineCapableMask, guardCapableMask,
+    attackImmuneMask, dieWhenDivinedMask,
+    curseOnExecutedMask, curseOnKilledMask, followFoxDeathMask,
+    mediumshipMask,
+  }
 }
 
 // --- 偽陰性チェック（DBベース） ---

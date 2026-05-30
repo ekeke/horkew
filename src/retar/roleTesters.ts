@@ -1,4 +1,5 @@
 import type { CauseOfDeath, SeatStatus, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
+import { systemRoles } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
 
 type DeathChronicle = {
@@ -62,8 +63,6 @@ export function restoreContext(ctx: AnalyzeContext, s: ContextSnapshot): void {
   ctx.deathChronicle.sub.set(s.deathChronicleSub)
 }
 
-type RoleTester = (env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]) => boolean
-
 function getStatus(env: RoleTesterEnv, seat: Seat): SeatStatus {
   return env.vs.statuses.get(seat)!
 }
@@ -76,19 +75,23 @@ function denyRoleForOthers(env: RoleTesterEnv, context: AnalyzeContext, role: Sy
   return true
 }
 
-function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
-  const hamsters = new Set<Seat>()
+// ============================================================================
+// trait verifiers
+//
+// 各 verifier は「trait に対応する能力・性質」を検証する。
+// testRole が role に紐付く traits を見て該当 verifier を順次呼び出す。
+// 前提: selected の seat は testRole 側で既に fixRole 済み。
+// ============================================================================
+
+/** passive: attack-immune + die-when-divined (旧 testHamster 相当、狐の生存/呪殺制約) */
+function verifyHamsterPassive(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[], role: SystemRole): boolean {
   let lastHamsterDiedAt = -Infinity
   let lastHamsterDiedBy: CauseOfDeath | undefined
   let livingHamsters = 0
   let seerKilledHamsterAt = -Infinity
   for ( const seat of selected ) {
     const self = getStatus(env, seat)
-    hamsters.add(seat)
-    if ( !context.possibilities.fixRole(seat,'werehamster') ) {
-      return false
-    }
-    const status = getStatus(env, seat)
+    const status = self
     if ( status.surviving ) {
       livingHamsters++
     }
@@ -120,7 +123,7 @@ function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat
     }
   }
   for ( const seat of rest ) {
-    context.possibilities.denyRole(seat, 'werehamster')
+    context.possibilities.denyRole(seat, role)
     if ( !livingHamsters ) {
       const status = getStatus(env, seat)
       if ( status.surviving || lastHamsterDiedAt < status.diedDay! ) {
@@ -137,11 +140,12 @@ function testHamster(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat
   return true
 }
 
-function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+/** action: divine (旧 testSeer 相当、占い能力者の assertion 検証 + 狐呪殺) */
+function verifyDivineAbility(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[], role: SystemRole): boolean {
   const seers = new Set<Seat>()
   let maxSurviving = -Infinity
   const seerTargets: Map<Day, (Seat | 'unknown')[]> = new Map()
-  let unresolvedHamsterDeath: Map<number, number> = new Map()
+  const unresolvedHamsterDeath: Map<number, number> = new Map()
   if ( context.hamstersKilledBySeer.length > 0 ) {
     for ( const { day } of context.hamstersKilledBySeer ) {
       const current = unresolvedHamsterDeath.get(day) || 0
@@ -151,10 +155,6 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
 
   for ( const seat of selected ) {
     seers.add(seat)
-    if ( !context.possibilities.fixRole(seat, 'seer') ) {
-      return false
-    }
-
     const self = getStatus(env, seat)
 
     if (!self.claiming) {
@@ -252,7 +252,7 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
   for ( const seat of rest ) {
     const status = getStatus(env, seat)
     if ( !status.claiming ) {
-      if ( !context.possibilities.denyRole(seat, 'seer') ) {
+      if ( !context.possibilities.denyRole(seat, role) ) {
         return false
       }
       continue
@@ -264,17 +264,15 @@ function testSeer(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[],
     }
   }
 
-  if ( !denyRoleForOthers(env, context, 'seer', seers) ) return false
+  if ( !denyRoleForOthers(env, context, role, seers) ) return false
   return true
 }
 
-function testMedium(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+/** auto-info: execution-species (旧 testMedium 相当、霊媒結果の検証) */
+function verifyMediumshipAbility(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[], role: SystemRole): boolean {
   const mediums = new Set<Seat>()
   for ( const seat of selected ) {
     mediums.add(seat)
-    if ( !context.possibilities.fixRole(seat, 'medium') ) {
-      return false
-    }
     const self = getStatus(env, seat)
 
     for (const [, { target: targetSeat, species }] of self.assertions) {
@@ -292,8 +290,8 @@ function testMedium(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[
   }
   for ( const seat of rest ) {
     const status = getStatus(env, seat)
-    if ( !status.claiming || status.claimingRole !== 'medium' ) {
-      if (! context.possibilities.denyRole(seat, 'medium') ) {
+    if ( !status.claiming || status.claimingRole !== role ) {
+      if (! context.possibilities.denyRole(seat, role) ) {
         return false
       }
       continue
@@ -304,23 +302,21 @@ function testMedium(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[
       }
     }
   }
-  if ( !denyRoleForOthers(env, context, 'medium', mediums) ) return false
+  if ( !denyRoleForOthers(env, context, role, mediums) ) return false
   return true
 }
 
-function testBodyguard(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+/** action: guard (旧 testBodyguard 相当、護衛能力者の rest 処理のみ — assertion 検証なし) */
+function verifyGuardAbility(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[], role: SystemRole): boolean {
   const bodyguards = new Set<Seat>()
   for ( const seat of selected ) {
     bodyguards.add(seat)
-    if ( !context.possibilities.fixRole(seat, 'bodyguard') ) {
-      return false
-    }
   }
 
   for ( const seat of rest ) {
     const status = getStatus(env, seat)
-    if ( !status.claiming || status.claimingRole !== 'bodyguard' ) {
-      if (!context.possibilities.denyRole(seat, 'bodyguard')) {
+    if ( !status.claiming || status.claimingRole !== role ) {
+      if (!context.possibilities.denyRole(seat, role)) {
         return false
       }
       continue
@@ -331,17 +327,15 @@ function testBodyguard(env: RoleTesterEnv, context: AnalyzeContext, selected: Se
       }
     }
   }
-  if ( !denyRoleForOthers(env, context, 'bodyguard', bodyguards) ) return false
+  if ( !denyRoleForOthers(env, context, role, bodyguards) ) return false
   return true
 }
 
-function testMason(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+/** knowledge: know-masons (旧 testMason 相当、共有相方の固定) */
+function verifyMasonBond(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[], role: SystemRole): boolean {
   const masons = new Set<Seat>()
   for ( const seat of selected ) {
     masons.add(seat)
-    if ( ! context.possibilities.fixRole(seat, 'mason') ) {
-      return false
-    }
     const self = getStatus(env, seat)
 
     for (const [, { target: targetSeat, species }] of self.assertions) {
@@ -350,7 +344,7 @@ function testMason(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[]
         return false
       }
       else {
-        if ( ! context.possibilities.fixRole(targetSeat, 'mason') ) {
+        if ( ! context.possibilities.fixRole(targetSeat, role) ) {
           return false
         }
         masons.add(targetSeat)
@@ -359,23 +353,21 @@ function testMason(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[]
   }
   for ( const seat of rest ) {
     const status = getStatus(env, seat)
-    if ( !status.claiming || status.claimingRole !== 'mason' ) continue
+    if ( !status.claiming || status.claimingRole !== role ) continue
     if ( ! context.possibilities.markAsLiar(seat) ) {
       return false
     }
   }
-  if ( !denyRoleForOthers(env, context, 'mason', masons) ) return false
+  if ( !denyRoleForOthers(env, context, role, masons) ) return false
   return true
 }
 
-function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[]): boolean {
+/** reactive: curse-on-executed + curse-on-killed (旧 testNekomata 相当、道連れ検証) */
+function verifyNekomataCurse(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[], role: SystemRole): boolean {
   const nekomatas = new Set<Seat>()
   const possibleCursed: Seat[] = []
   for ( const seat of selected ) {
     nekomatas.add(seat)
-    if ( ! context.possibilities.fixRole(seat, 'nekomata') ) {
-      return false
-    }
     const self = getStatus(env, seat)
     if ( !self.surviving ) {
       if ( self.causeOfDeath === 'night_kill' ) {
@@ -416,8 +408,8 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
 
   for ( const seat of rest ) {
     const status = getStatus(env, seat)
-    if ( !status.claiming || status.claimingRole !== 'nekomata' ) {
-      if ( !context.possibilities.denyRole(seat, 'nekomata') ) {
+    if ( !status.claiming || status.claimingRole !== role ) {
+      if ( !context.possibilities.denyRole(seat, role) ) {
         return false
       }
       continue
@@ -428,21 +420,42 @@ function testNekomata(env: RoleTesterEnv, context: AnalyzeContext, selected: Sea
       }
     }
   }
-  if ( !denyRoleForOthers(env, context, 'nekomata', nekomatas) ) return false
+  if ( !denyRoleForOthers(env, context, role, nekomatas) ) return false
   return true
 }
 
-export const roleTesterMap: Partial<Record<SystemRole, RoleTester>> = {
-  werehamster: testHamster,
-  seer: testSeer,
-  medium: testMedium,
-  bodyguard: testBodyguard,
-  mason: testMason,
-  nekomata: testNekomata,
-}
+// ============================================================================
+// testRole: trait ベース dispatcher
+// 新役職は systemRoles の traits を埋めるだけで自動的にここから対応 verifier に分配される。
+// ============================================================================
 
 export function testRole(env: RoleTesterEnv, context: AnalyzeContext, role: SystemRole, selected: Seat[], rest: Seat[]): boolean {
-  const tester = roleTesterMap[role]
-  if (!tester) return true
-  return tester(env, context, selected, rest)
+  // 1. selected を role に固定
+  for ( const seat of selected ) {
+    if ( !context.possibilities.fixRole(seat, role) ) return false
+  }
+
+  // 2. role の traits に応じた verifier を順次呼ぶ
+  const traits = systemRoles.get(role)?.traits ?? []
+
+  if (traits.some(t => t.kind === 'passive' && (t.sub === 'attack-immune' || t.sub === 'die-when-divined'))) {
+    if (!verifyHamsterPassive(env, context, selected, rest, role)) return false
+  }
+  if (traits.some(t => t.kind === 'action' && t.sub === 'divine')) {
+    if (!verifyDivineAbility(env, context, selected, rest, role)) return false
+  }
+  if (traits.some(t => t.kind === 'auto-info' && t.sub === 'execution-species')) {
+    if (!verifyMediumshipAbility(env, context, selected, rest, role)) return false
+  }
+  if (traits.some(t => t.kind === 'action' && t.sub === 'guard')) {
+    if (!verifyGuardAbility(env, context, selected, rest, role)) return false
+  }
+  if (traits.some(t => t.kind === 'knowledge' && t.sub === 'know-masons')) {
+    if (!verifyMasonBond(env, context, selected, rest, role)) return false
+  }
+  if (traits.some(t => t.kind === 'reactive' && (t.sub === 'curse-on-executed' || t.sub === 'curse-on-killed'))) {
+    if (!verifyNekomataCurse(env, context, selected, rest, role)) return false
+  }
+
+  return true
 }

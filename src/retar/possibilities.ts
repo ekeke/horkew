@@ -4,32 +4,33 @@ export type { SystemRole } from '../types/index.ts'
 export type RolePossibility = number
 
 export const RoleSignatureBits: { [role in SystemRole]: number } = {
-  villager: 0b00000000001,
-  seer: 0b00000000010,
-  medium: 0b00000000100,
-  bodyguard: 0b00000001000,
-  mason: 0b00000010000,
-  nekomata: 0b00000100000,
-  werewolf: 0b00001000000,
-  possessed: 0b00010000000,
-  fanatic: 0b00100000000,
-  werehamster: 0b01000000000,
-  immoralist: 0b10000000000,
+  villager:    0b000000000001,
+  seer:        0b000000000010,
+  medium:      0b000000000100,
+  bodyguard:   0b000000001000,
+  mason:       0b000000010000,
+  nekomata:    0b000000100000,
+  werewolf:    0b000001000000,
+  possessed:   0b000010000000,
+  fanatic:     0b000100000000,
+  werehamster: 0b001000000000,
+  immoralist:  0b010000000000,
+  paparazzi:   0b100000000000,
 }
 
 export const RoleSignatureBitsReverseMap: Map<number, SystemRole> = new Map(
   Object.entries(RoleSignatureBits).map(([role, bit]) => [bit, role as SystemRole])
 )
 
-export const ROLE_COUNT = 11
+export const ROLE_COUNT = 12
 /** inPending が 32bit ビット演算なので最大32席（seat 1..=31） */
 export const MAX_SEATS = 32
 
-// Bit position index for each role (villager=0, seer=1, ..., immoralist=10)
+// Bit position index for each role (villager=0, seer=1, ..., paparazzi=11)
 export const RoleBitIndex: { [role in SystemRole]: number } = {
   villager: 0, seer: 1, medium: 2, bodyguard: 3, mason: 4,
   nekomata: 5, werewolf: 6, possessed: 7, fanatic: 8,
-  werehamster: 9, immoralist: 10,
+  werehamster: 9, immoralist: 10, paparazzi: 11,
 }
 
 // Extract set bit indices from a bitmask
@@ -58,6 +59,7 @@ const Liar = RoleSignatureBits['werewolf']
   | RoleSignatureBits['fanatic']
   | RoleSignatureBits['werehamster']
   | RoleSignatureBits['immoralist']
+  | RoleSignatureBits['paparazzi']
 
 export function popCount(x: number): number {
   const a = x - (x >>> 1 & 0x55555555)

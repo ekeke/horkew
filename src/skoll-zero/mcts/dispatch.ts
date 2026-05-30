@@ -7,6 +7,7 @@
 
 import type { SystemRole } from '../../types/index.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
+import { getGuardSeat } from '../../hati/types.ts'
 import type { SimState, Phase } from '../simulator/world-state.ts'
 import type { SkollZeroModule } from '../module/skoll-zero-module.ts'
 import type { HeadName } from './nn.ts'
@@ -96,21 +97,21 @@ export function dispatchForPhase(
       return { module, actorSeat: decisionSeat, actorRole: role, headName: 'execute' }
     }
     case 'night_attack': {
-      const wolfSeat = lowestSeat(world.wolfMask & state.alive)
+      const wolfSeat = lowestSeat(world.attackCapableMask & state.alive)
       if (wolfSeat < 0) return null
       const module = bundle.wolf
       if (!module) return null
       return { module, actorSeat: wolfSeat, actorRole: 'werewolf', headName: 'attack' }
     }
     case 'night_divine': {
-      const seerSeat = lowestSeat(world.seerMask & state.alive)
+      const seerSeat = lowestSeat(world.divineCapableMask & state.alive)
       if (seerSeat < 0) return null
       const module = bundle.standard
       if (!module) return null
       return { module, actorSeat: seerSeat, actorRole: 'seer', headName: 'divine' }
     }
     case 'night_guard': {
-      const bgSeat = world.bodyguardSeat
+      const bgSeat = getGuardSeat(world)
       if (bgSeat < 0 || (state.alive & (1 << bgSeat)) === 0) return null
       const module = bundle.standard
       if (!module) return null
@@ -170,12 +171,14 @@ export function dispatchForPhase(
 function trueRoleMask(state: SimState, phase: Phase): number {
   const w = state.world
   switch (phase) {
-    case 'claim_seer_true': return w.seerMask & state.alive
-    case 'claim_medium_true': return w.mediumMask & state.alive
-    case 'claim_bg_true':
-      return w.bodyguardSeat >= 0 && (state.alive & (1 << w.bodyguardSeat))
-        ? (1 << w.bodyguardSeat) : 0
-    case 'claim_nekomata_true': return w.nekomataMask & state.alive
+    case 'claim_seer_true': return w.divineCapableMask & state.alive
+    case 'claim_medium_true': return w.mediumshipMask & state.alive
+    case 'claim_bg_true': {
+      const bgSeat = getGuardSeat(w)
+      return bgSeat >= 0 && (state.alive & (1 << bgSeat))
+        ? (1 << bgSeat) : 0
+    }
+    case 'claim_nekomata_true': return w.curseOnExecutedMask & state.alive
     case 'claim_mason': {
       let mask = 0
       for (let s = 1; s < w.roleIds.length; s++) {
@@ -194,7 +197,7 @@ function fakeActorMask(state: SimState): number {
   for (let s = 1; s < w.roleIds.length; s++) {
     if (w.roleIds[s] === RoleBitIndex.fanatic) fanaticMask |= (1 << s)
   }
-  return (w.wolfMask | fanaticMask) & state.alive
+  return (w.attackCapableMask | fanaticMask) & state.alive
 }
 
 /** claim_*_true 用: 該当真役職で未 CO の最低位生存 seat (なければ -1) */

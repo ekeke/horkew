@@ -1,0 +1,55 @@
+---
+title: paparazzi-win-villager
+tags: [paparazzi]
+setup: { werewolf: 1, paparazzi: 1, seer: 1, villager: 1 }
+spoilers:
+  roles:
+    アリス: パパラッチ
+    ボブ: 人狼
+    キャロル: 占い師
+    デイブ: 村人
+---
+
+# 4 人最小シナリオで paparazzi 残存 + werewolf 全滅の終局を確認する。
+# 全 4 席を spoiler で固定するため、retar は applyFixedPositions だけで結果が
+# 決まる (paparazzi の judgement を retar が信用するかは結果に関わらない)。
+# アリスはキャロルを占って白、キャロルはボブ (werewolf) を占って黒。
+# 能力レベルでは両判定とも真だが、retar 側はそれを信用せず spoiler に頼る。
+# ボブを吊って werewolf 全滅 → 村勝条件成立 (lupa 終局検証は scope 外)。
+
+++アリス、ボブ、キャロル、デイブ
+
+# Day 1: アリス paparazzi の真占いCO キャロル○、キャロル seer の真占いCO ボブ●
+アリス 占いCO キャロル○
+キャロル 占いCO ボブ●
+
+# ボブを処刑 → werewolf 全滅 → ゲーム終了 (村勝)
+# (retar は「狼 0 + ゲーム未終了」を矛盾とみなすため終局宣言が必要)
+ボブ処刑
+村勝利
+
+# Checkpoint: 村勝利後
+# - アリス: paparazzi 固定 + 生存
+# - ボブ: werewolf 固定 + 死亡
+# - キャロル: seer 固定 + 生存
+# - デイブ: villager 固定 + 生存
+# @expect アリス: [paparazzi]
+# @expect ボブ: [werewolf]
+# @expect キャロル: [seer]
+# @expect デイブ: [villager]
+# @expect-status アリス: alive
+# @expect-status ボブ: dead
+# @expect-status キャロル: alive
+# @expect-status デイブ: alive
+# @expect-faction アリス: wolf
+# @expect-faction ボブ: wolf
+# @expect-faction キャロル: village
+# @expect-faction デイブ: village
+# @expect-claim アリス: seer
+# @expect-claim キャロル: seer
+# @expect-claim ボブ: none
+# @expect-claim デイブ: none
+# spoiler 由来は gmork スコープ外
+# @gmork-confirm アリス/paparazzi: null
+# @gmork-deny アリス/villager: co_implies_not_other_village_role
+# @gmork-deny キャロル/villager: co_implies_not_other_village_role

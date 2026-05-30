@@ -2,22 +2,27 @@ import type { Seat, SystemRole, EnumSpecies } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 import type { World, ObservationKey } from './types.ts'
 import { hasSeat, removeSeat, popCount32, seatsFromMask } from './types.ts'
-import { RoleBitIndex } from '../retar/possibilities.ts'
+import { ROLE_COUNT, RoleSignatureBitsReverseMap } from '../retar/possibilities.ts'
 
 // --- 種族判定 ---
 
-/** 数値roleId→霊媒結果のルックアップテーブル */
+/** 数値roleId→霊媒結果のルックアップテーブル（systemRoles の mediumResult から構築） */
 const MEDIUM_RESULT_TABLE: EnumSpecies[] = (() => {
-  const table: EnumSpecies[] = new Array(11).fill('human')
-  // werewolfのみwolf
-  table[RoleBitIndex.werewolf] = 'wolf'
+  const table: EnumSpecies[] = new Array(ROLE_COUNT).fill('human')
+  for (let i = 0; i < ROLE_COUNT; i++) {
+    const role = RoleSignatureBitsReverseMap.get(1 << i)
+    if (role) table[i] = systemRoles.get(role)!.mediumResult
+  }
   return table
 })()
 
-/** 数値roleId→占い結果のルックアップテーブル */
+/** 数値roleId→占い結果のルックアップテーブル（systemRoles の seerResult から構築） */
 const SEER_RESULT_TABLE: EnumSpecies[] = (() => {
-  const table: EnumSpecies[] = new Array(11).fill('human')
-  table[RoleBitIndex.werewolf] = 'wolf'
+  const table: EnumSpecies[] = new Array(ROLE_COUNT).fill('human')
+  for (let i = 0; i < ROLE_COUNT; i++) {
+    const role = RoleSignatureBitsReverseMap.get(1 << i)
+    if (role) table[i] = systemRoles.get(role)!.seerResult
+  }
   return table
 })()
 
@@ -45,19 +50,25 @@ export type GameOutcome = 'village_win' | 'wolf_win' | 'hamster_win' | 'ongoing'
 
 /**
  * 特定のワールドにおける勝利判定。
+ *
+ * 標準人狼ルールに従う:
+ * - 「人狼」=攻撃能力 (action:attack) を持つ生存者 = attackCapableMask
+ * - 「狐」=占いで死ぬ (passive:die-when-divined) 生存者 = dieWhenDivinedMask
+ *   (狐陣営の follower (背徳者) は判定で「村人扱い」、勝敗の主体ではない)
+ * - 攻撃者=0 → 村勝 (or 狐勝)
+ * - 攻撃者 ≥ 非攻撃者かつ非狐核心 → 狼勝 (or 狐勝)
  */
 export function checkOutcome(world: World, alive: number): GameOutcome {
-  const aliveWolves = popCount32(world.wolfMask & alive)
-  const hamsterAlive = (world.hamsterMask & alive) !== 0
-  // 妖狐を除いた非狼カウント
-  let nonWolfNonHamster = popCount32(alive) - aliveWolves
-  if (hamsterAlive) nonWolfNonHamster--
+  const aliveAttackers = popCount32(world.attackCapableMask & alive)
+  const aliveFoxCore = popCount32(world.dieWhenDivinedMask & alive)
+  const foxAlive = aliveFoxCore !== 0
+  const nonAttackerNonFoxCore = popCount32(alive) - aliveAttackers - aliveFoxCore
 
-  if (aliveWolves === 0) {
-    return hamsterAlive ? 'hamster_win' : 'village_win'
+  if (aliveAttackers === 0) {
+    return foxAlive ? 'hamster_win' : 'village_win'
   }
-  if (aliveWolves >= nonWolfNonHamster) {
-    return hamsterAlive ? 'hamster_win' : 'wolf_win'
+  if (aliveAttackers >= nonAttackerNonFoxCore) {
+    return foxAlive ? 'hamster_win' : 'wolf_win'
   }
   return 'ongoing'
 }
@@ -85,13 +96,16 @@ export function applyExecution(alive: number, target: Seat): number {
 
 // --- 夜シミュレーション ---
 
-const WEREHAMSTER_ID = RoleBitIndex.werehamster
-const NEKOMATA_ID = RoleBitIndex.nekomata
-
 /**
  * 1つのワールドで夜を解決する。ビットマスクベース。
  * 返値: 夜後の生存者ビットマスクと観測キー（数値パック）。
- * #7: roleIds でホットパス判定
+ *
+ * 役職参照は属性マスク経由:
+ * - 占い対象の死亡 = dieWhenDivinedMask
+ * - 噛みに免疫 = attackImmuneMask
+ * - 噛みで道連れ = curseOnKilledMask
+ * - 護衛能力 = guardCapableMask（生存している guard target が指定されているか）
+ * - 狐全滅で後追い = followFoxDeathMask
  */
 export function simulateNight(
   world: World,
@@ -102,43 +116,48 @@ export function simulateNight(
 ): { nextAlive: number, obsKey: number } {
   let nextAlive = alive
   let deathMask = 0
-  const targetRoleId = world.roleIds[wolfBiteTarget]
+  const targetBit = 1 << wolfBiteTarget
 
   // 占い呪殺チェック（各占い師が独立に実行）
   let seerIdx = 0
-  let curseBits = world.seerMask & alive  // 生存占い師
+  let curseBits = world.divineCapableMask & alive  // 生存占い師
   while (curseBits !== 0) {
     const bit = curseBits & (-curseBits)
     curseBits ^= bit
     const target = seerTargets[seerIdx++]
-    if (target !== undefined && world.roleIds[target] === WEREHAMSTER_ID && hasSeat(nextAlive, target)) {
+    if (target !== undefined
+      && (world.dieWhenDivinedMask & (1 << target)) !== 0
+      && hasSeat(nextAlive, target)) {
       nextAlive = removeSeat(nextAlive, target)
       deathMask |= (1 << target)
-      // 全狐死亡 → 背徳者後追い
-      if ((world.hamsterMask & nextAlive) === 0) {
-        const dyingImmoralists = world.immoralistMask & nextAlive
-        nextAlive &= ~dyingImmoralists
-        deathMask |= dyingImmoralists
+      // 全狐核心死亡 → followFoxDeath 持ちが後追い
+      if ((world.dieWhenDivinedMask & nextAlive) === 0) {
+        const dyingFollowers = world.followFoxDeathMask & nextAlive
+        nextAlive &= ~dyingFollowers
+        deathMask |= dyingFollowers
       }
     }
   }
 
   // 狼の噛み解決
-  if (targetRoleId === WEREHAMSTER_ID) {
-    // 妖狐は噛まれても死なない
-  } else if (bodyguardTarget === wolfBiteTarget && hasSeat(alive, world.bodyguardSeat)) {
+  // 護衛成功: bodyguardTarget が wolfBiteTarget と一致し、護衛能力者が生存している
+  const guardActive = bodyguardTarget === wolfBiteTarget
+    && (world.guardCapableMask & alive) !== 0
+  if ((world.attackImmuneMask & targetBit) !== 0) {
+    // 噛み無効（例: 妖狐）
+  } else if (guardActive) {
     // 護衛成功
-  } else if (targetRoleId === NEKOMATA_ID) {
-    // 猫又噛み: 猫又死亡（道連れ狼は呼び出し側で全狼に分岐）
+  } else if ((world.curseOnKilledMask & targetBit) !== 0) {
+    // 噛みで道連れ発動者（猫又）: 本人死亡（道連れ狼は呼び出し側で分岐）
     if (hasSeat(nextAlive, wolfBiteTarget)) {
       nextAlive = removeSeat(nextAlive, wolfBiteTarget)
-      deathMask |= (1 << wolfBiteTarget)
+      deathMask |= targetBit
     }
   } else {
     // 通常の噛み殺し
     if (hasSeat(nextAlive, wolfBiteTarget)) {
       nextAlive = removeSeat(nextAlive, wolfBiteTarget)
-      deathMask |= (1 << wolfBiteTarget)
+      deathMask |= targetBit
     }
   }
 
@@ -146,7 +165,7 @@ export function simulateNight(
   // obsKey: deathMask を上位に、各占い師の結果(2bit)を低ビットから詰める
   let seerResultBits = 0
   let resultIdx = 0
-  let resultBits = world.seerMask  // 全占い師（割り当て順序を保持）
+  let resultBits = world.divineCapableMask  // 全占い師（割り当て順序を保持）
   while (resultBits !== 0) {
     const bit = resultBits & (-resultBits)
     const seerSeat = 31 - Math.clz32(bit)
@@ -171,42 +190,36 @@ export function simulateNight(
  * 特定ワールドにおける狼の有効な噛み先を列挙。
  */
 export function validBiteTargets(world: World, alive: number): Seat[] {
-  if ((world.wolfMask & alive) === 0) return []
+  if ((world.attackCapableMask & alive) === 0) return []
   return seatsFromMask(validBiteTargetsMask(world, alive))
 }
 
 /**
- * #6: 噛み先をビットマスクで返す（配列alloc不要）
- * LW（最後の狼）は猫又を噛まない: 噛むと道連れで狼全滅し自チームも負けるため。
- * 狼が2匹以上いる場合は猫又を噛む選択肢を残す（1匹犠牲にしても残りが戦える）。
+ * 噛み先をビットマスクで返す（配列alloc不要）
+ * LW（最後の攻撃者）は curse-on-killed 持ちを噛まない: 道連れで攻撃者全滅し自陣営敗北のため。
+ * 攻撃者が2匹以上いる場合は道連れ持ちを噛む選択肢を残す（1匹犠牲にしても残りが戦える）。
+ *
+ * 噛み先候補は「攻撃能力者以外」（=元の semantic を保持。狼陣営の non-attacker
+ * (狂人/狂信者/パパラッチ) も噛み先候補に含まれる）。
  */
 export function validBiteTargetsMask(world: World, alive: number): number {
-  const aliveWolves = world.wolfMask & alive
-  if (aliveWolves === 0) return 0
-  let targets = alive & ~world.wolfMask
-  // LW（狼が1匹のみ）の場合、猫又を噛み先から除外
-  if (popCount32(aliveWolves) === 1) {
-    let scan = targets
-    while (scan !== 0) {
-      const bit = scan & (-scan)
-      scan ^= bit
-      if (world.roleIds[31 - Math.clz32(bit)] === NEKOMATA_ID) {
-        targets ^= bit
-        break
-      }
-    }
+  const aliveAttackers = world.attackCapableMask & alive
+  if (aliveAttackers === 0) return 0
+  let targets = alive & ~world.attackCapableMask
+  // LW（攻撃者が1匹のみ）の場合、curse-on-killed 持ちを除外
+  if (popCount32(aliveAttackers) === 1) {
+    targets &= ~world.curseOnKilledMask
   }
   return targets
 }
 
 /**
  * 処刑後の後追い死亡を適用する。
- * 狐が死亡している場合、背徳者が後追い死亡する。
+ * 狐核心 (die-when-divined 持ち = 妖狐) が全滅している場合、follow-fox-death 持ちが後追い。
  */
 export function applyFollowDeaths(alive: number, world: World): number {
-  // 全狐死亡 → 全背徳者が後追い
-  if (world.hamsterMask !== 0 && (world.hamsterMask & alive) === 0) {
-    return alive & ~world.immoralistMask
+  if (world.dieWhenDivinedMask !== 0 && (world.dieWhenDivinedMask & alive) === 0) {
+    return alive & ~world.followFoxDeathMask
   }
   return alive
 }
@@ -251,14 +264,12 @@ export function executionObsKeyToString(
 
 /**
  * 全ワールドで指定seatが確定村人側かチェック（枝刈り用）
- * #4: モジュールスコープ定数Set（毎回再生成しない）
+ * 「村人側」= 狼陣営にも狐陣営にも属していない (faction='village')。
  */
-const villagerRoles: Set<SystemRole> = new Set([
-  'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
-])
 export function isConfirmedVillagerInAllWorlds(worlds: World[], seat: Seat): boolean {
+  const bit = 1 << seat
   for (const w of worlds) {
-    if (!villagerRoles.has(w.roles[seat])) return false
+    if (((w.wolfFactionMask | w.foxFactionMask) & bit) !== 0) return false
   }
   return true
 }

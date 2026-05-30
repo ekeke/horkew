@@ -2,6 +2,7 @@ import type { Seat, SystemRole } from '../types/index.ts'
 import type { World } from './types.ts'
 import { RoleBitIndex, ROLE_COUNT, RoleSignatureBitsReverseMap, bitIndicesFromMask } from '../retar/possibilities.ts'
 import type { Possibilities } from '../retar/possibilities.ts'
+import { ATTR, RoleAttributeBits } from './role-attributes.ts'
 
 /**
  * Retarの可能性からすべての有効なワールド（役職配置）を逐次列挙する。
@@ -42,13 +43,17 @@ export function enumerateWorlds(
   const world: World = {
     roles: rolesArr,
     roleIds,
-    wolfMask: 0,
-    hamsterMask: 0,
-    immoralistMask: 0,
-    seerMask: 0,
-    mediumMask: 0,
-    nekomataMask: 0,
-    bodyguardSeat: -1,
+    wolfFactionMask: 0,
+    foxFactionMask: 0,
+    attackCapableMask: 0,
+    divineCapableMask: 0,
+    guardCapableMask: 0,
+    attackImmuneMask: 0,
+    dieWhenDivinedMask: 0,
+    curseOnExecutedMask: 0,
+    curseOnKilledMask: 0,
+    followFoxDeathMask: 0,
+    mediumshipMask: 0,
   }
 
   let stopped = false
@@ -77,33 +82,34 @@ export function enumerateWorlds(
       rolesArr[seat] = role
       roleIds[seat] = bitIdx
 
-      // 増分適用
-      let prevBodyguard = -2
-      switch (role) {
-        case 'werewolf': world.wolfMask |= bit; break
-        case 'werehamster': world.hamsterMask |= bit; break
-        case 'immoralist': world.immoralistMask |= bit; break
-        case 'seer': world.seerMask |= bit; break
-        case 'medium': world.mediumMask |= bit; break
-        case 'nekomata': world.nekomataMask |= bit; break
-        case 'bodyguard':
-          prevBodyguard = world.bodyguardSeat
-          world.bodyguardSeat = seat
-          break
-      }
+      // 増分適用: 属性マスクに OR 込み
+      const attr = RoleAttributeBits[bitIdx]
+      if (attr & ATTR.WOLF_FACTION)                world.wolfFactionMask |= bit
+      if (attr & ATTR.FOX_FACTION)                 world.foxFactionMask |= bit
+      if (attr & ATTR.ACTION_ATTACK)               world.attackCapableMask |= bit
+      if (attr & ATTR.ACTION_DIVINE)               world.divineCapableMask |= bit
+      if (attr & ATTR.ACTION_GUARD)                world.guardCapableMask |= bit
+      if (attr & ATTR.PASSIVE_ATTACK_IMMUNE)       world.attackImmuneMask |= bit
+      if (attr & ATTR.PASSIVE_DIE_WHEN_DIVINED)    world.dieWhenDivinedMask |= bit
+      if (attr & ATTR.REACTIVE_CURSE_ON_EXECUTED)  world.curseOnExecutedMask |= bit
+      if (attr & ATTR.REACTIVE_CURSE_ON_KILLED)    world.curseOnKilledMask |= bit
+      if (attr & ATTR.REACTIVE_FOLLOW_FOX_DEATH)   world.followFoxDeathMask |= bit
+      if (attr & ATTR.AUTO_INFO_EXECUTION_SPECIES) world.mediumshipMask |= bit
 
       backtrack(idx + 1)
 
-      // 取り消し
-      switch (role) {
-        case 'werewolf': world.wolfMask &= ~bit; break
-        case 'werehamster': world.hamsterMask &= ~bit; break
-        case 'immoralist': world.immoralistMask &= ~bit; break
-        case 'seer': world.seerMask &= ~bit; break
-        case 'medium': world.mediumMask &= ~bit; break
-        case 'nekomata': world.nekomataMask &= ~bit; break
-        case 'bodyguard': world.bodyguardSeat = prevBodyguard; break
-      }
+      // 取り消し: 各マスクから bit を外す
+      if (attr & ATTR.WOLF_FACTION)                world.wolfFactionMask &= ~bit
+      if (attr & ATTR.FOX_FACTION)                 world.foxFactionMask &= ~bit
+      if (attr & ATTR.ACTION_ATTACK)               world.attackCapableMask &= ~bit
+      if (attr & ATTR.ACTION_DIVINE)               world.divineCapableMask &= ~bit
+      if (attr & ATTR.ACTION_GUARD)                world.guardCapableMask &= ~bit
+      if (attr & ATTR.PASSIVE_ATTACK_IMMUNE)       world.attackImmuneMask &= ~bit
+      if (attr & ATTR.PASSIVE_DIE_WHEN_DIVINED)    world.dieWhenDivinedMask &= ~bit
+      if (attr & ATTR.REACTIVE_CURSE_ON_EXECUTED)  world.curseOnExecutedMask &= ~bit
+      if (attr & ATTR.REACTIVE_CURSE_ON_KILLED)    world.curseOnKilledMask &= ~bit
+      if (attr & ATTR.REACTIVE_FOLLOW_FOX_DEATH)   world.followFoxDeathMask &= ~bit
+      if (attr & ATTR.AUTO_INFO_EXECUTION_SPECIES) world.mediumshipMask &= ~bit
 
       roleCount[bitIdx]++
     }
@@ -120,13 +126,17 @@ export function cloneWorld(world: World): World {
   return {
     roles: world.roles.slice(),
     roleIds: new Uint8Array(world.roleIds),
-    wolfMask: world.wolfMask,
-    hamsterMask: world.hamsterMask,
-    immoralistMask: world.immoralistMask,
-    seerMask: world.seerMask,
-    mediumMask: world.mediumMask,
-    nekomataMask: world.nekomataMask,
-    bodyguardSeat: world.bodyguardSeat,
+    wolfFactionMask: world.wolfFactionMask,
+    foxFactionMask: world.foxFactionMask,
+    attackCapableMask: world.attackCapableMask,
+    divineCapableMask: world.divineCapableMask,
+    guardCapableMask: world.guardCapableMask,
+    attackImmuneMask: world.attackImmuneMask,
+    dieWhenDivinedMask: world.dieWhenDivinedMask,
+    curseOnExecutedMask: world.curseOnExecutedMask,
+    curseOnKilledMask: world.curseOnKilledMask,
+    followFoxDeathMask: world.followFoxDeathMask,
+    mediumshipMask: world.mediumshipMask,
   }
 }
 

@@ -165,7 +165,7 @@ async function runEvalSession(
 
 const ALL_SYSTEM_ROLES: readonly SystemRole[] = [
   'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
-  'werewolf', 'fanatic', 'werehamster', 'immoralist', 'possessed',
+  'werewolf', 'fanatic', 'werehamster', 'immoralist', 'possessed', 'paparazzi',
 ]
 
 const CLAIM_COL_KEYS: readonly ClaimedRoleKey[] = [
@@ -175,13 +175,13 @@ const CLAIM_COL_KEYS: readonly ClaimedRoleKey[] = [
 const ROLE_SHORT_LABELS: Record<SystemRole, string> = {
   villager: 'villager', seer: 'seer', medium: 'medium', bodyguard: 'bg',
   mason: 'mason', nekomata: 'neko', werewolf: 'wolf', fanatic: 'fanat',
-  werehamster: 'fox', immoralist: 'immo', possessed: 'poss',
+  werehamster: 'fox', immoralist: 'immo', possessed: 'poss', paparazzi: 'pap',
 }
 
 const CLAIM_COL_LABELS: Record<ClaimedRoleKey, string> = {
   villager: 'vill', seer: 'seer', medium: 'med', bodyguard: 'bg',
   mason: 'mason', nekomata: 'neko', werewolf: 'wolf', fanatic: 'fanat',
-  werehamster: 'fox', immoralist: 'immo', possessed: 'poss', none: 'none',
+  werehamster: 'fox', immoralist: 'immo', possessed: 'poss', paparazzi: 'pap', none: 'none',
 }
 
 /** claim matrix を 1 行 1 役職の表として整形 */

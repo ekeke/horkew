@@ -1,12 +1,13 @@
 /**
  * プレイヤー視点ユーティリティ
  *
- * 役職に応じた秘密知識を構築する。
+ * 役職の trait に応じた秘密知識を構築する。
  * ハンドラーが個別プレイヤーのコンテキストを作る際に使用。
  */
 
 import type { GameState } from './types.ts'
 import type { PlayerView } from './handlers.ts'
+import { hasTrait, isHamster } from './role-traits.ts'
 
 /**
  * 指定席のプレイヤーが持つ秘密知識を構築する
@@ -21,27 +22,26 @@ export function buildPlayerView(state: GameState, seat: number): PlayerView {
   let knownHamster: number | null = null
   let masonPartner: number | null = null
 
-  switch (player.role) {
-    case 'werewolf':
-      wolfTeammates = state.players
-        .filter(p => p.role === 'werewolf' && p.seat !== seat)
-        .map(p => p.seat)
-      break
-    case 'fanatic':
-      knownWolves = state.players
-        .filter(p => p.role === 'werewolf')
-        .map(p => p.seat)
-      break
-    case 'immoralist': {
-      const hamster = state.players.find(p => p.role === 'werehamster')
-      knownHamster = hamster?.seat ?? null
-      break
+  if (hasTrait(player.role, 'knowledge', 'know-werewolves')) {
+    // 人狼 (襲撃能力持ち) を全て知っている
+    const wolves = state.players.filter(p => hasTrait(p.role, 'action', 'attack'))
+    if (hasTrait(player.role, 'action', 'attack')) {
+      // 自身も狼: 自分を除いて wolfTeammates
+      wolfTeammates = wolves.filter(p => p.seat !== seat).map(p => p.seat)
+    } else {
+      // 自身は狼ではない (狂信者等): knownWolves
+      knownWolves = wolves.map(p => p.seat)
     }
-    case 'mason': {
-      const partner = state.players.find(p => p.role === 'mason' && p.seat !== seat)
-      masonPartner = partner?.seat ?? null
-      break
-    }
+  }
+
+  if (hasTrait(player.role, 'knowledge', 'know-foxes')) {
+    const hamster = state.players.find(p => isHamster(p.role))
+    knownHamster = hamster?.seat ?? null
+  }
+
+  if (hasTrait(player.role, 'knowledge', 'know-masons')) {
+    const partner = state.players.find(p => p.seat !== seat && hasTrait(p.role, 'knowledge', 'know-masons'))
+    masonPartner = partner?.seat ?? null
   }
 
   return { wolfTeammates, knownWolves, knownHamster, masonPartner }

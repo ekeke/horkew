@@ -1258,3 +1258,78 @@ describe('speech statement', () => {
     assert.equal(result.type, 'vote')
   })
 })
+
+describe('dayMark statement', () => {
+  test('ASCII `Day N:` form', () => {
+    const result = S.parseDayMarkStatement('Day 2:', 7)
+    assert.deepEqual(result, { type: 'dayMark', line: 7, day: 2 })
+  })
+
+  test('lowercase `day N:` accepted', () => {
+    const result = S.parseDayMarkStatement('day 5:', 1)
+    assert.deepEqual(result, { type: 'dayMark', line: 1, day: 5 })
+  })
+
+  test('mixed case `DaY N:` accepted', () => {
+    const result = S.parseDayMarkStatement('DaY 3:', 1)
+    assert.deepEqual(result, { type: 'dayMark', line: 1, day: 3 })
+  })
+
+  test('Japanese `N日目:` form', () => {
+    const result = S.parseDayMarkStatement('2日目:', 9)
+    assert.deepEqual(result, { type: 'dayMark', line: 9, day: 2 })
+  })
+
+  test('Japanese short `N日:` form', () => {
+    const result = S.parseDayMarkStatement('3日:', 1)
+    assert.deepEqual(result, { type: 'dayMark', line: 1, day: 3 })
+  })
+
+  test('full-width colon accepted', () => {
+    const result = S.parseDayMarkStatement('Day 2：', 1)
+    assert.deepEqual(result, { type: 'dayMark', line: 1, day: 2 })
+  })
+
+  test('leading and trailing whitespace tolerated', () => {
+    const result = S.parseDayMarkStatement('  Day 2:  ', 4)
+    assert.deepEqual(result, { type: 'dayMark', line: 4, day: 2 })
+  })
+
+  test('missing colon returns null', () => {
+    assert.equal(S.parseDayMarkStatement('Day 2', 1), null)
+    assert.equal(S.parseDayMarkStatement('2日目', 1), null)
+  })
+
+  test('zero day rejected (dayNumber starts at 1)', () => {
+    assert.equal(S.parseDayMarkStatement('Day 0:', 1), null)
+    assert.equal(S.parseDayMarkStatement('0日目:', 1), null)
+  })
+
+  test('Day with no number rejected', () => {
+    assert.equal(S.parseDayMarkStatement('Day:', 1), null)
+    assert.equal(S.parseDayMarkStatement('Day :', 1), null)
+  })
+
+  test('multi-digit day accepted', () => {
+    const result = S.parseDayMarkStatement('Day 12:', 1)
+    assert.deepEqual(result, { type: 'dayMark', line: 1, day: 12 })
+  })
+
+  test('integrated with parseStatement', () => {
+    const result = S.parseStatement('Day 2:', 5)
+    assert.equal(result.type, 'dayMark')
+    assert.equal((result as S.DayMarkStatement).day, 2)
+    assert.equal(result.line, 5)
+  })
+
+  test('integrated with parseStatement (Japanese)', () => {
+    const result = S.parseStatement('2日目:', 5)
+    assert.equal(result.type, 'dayMark')
+    assert.equal((result as S.DayMarkStatement).day, 2)
+  })
+
+  test('does not match arbitrary text via parseStatement', () => {
+    const result = S.parseStatement('Day is fine', 1)
+    assert.notEqual(result.type, 'dayMark')
+  })
+})

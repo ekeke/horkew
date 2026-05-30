@@ -25,6 +25,7 @@ import assert from 'node:assert/strict'
 import type { SystemRole, EnumSpecies } from '../../types/index.ts'
 import type { World } from '../../hati/types.ts'
 import { RoleBitIndex } from '../../retar/possibilities.ts'
+import { ATTR, RoleAttributeBits } from '../../hati/role-attributes.ts'
 import type { DecisionContext, TeamDecisionContext } from '../../fenrir/src/agents/agent.ts'
 import type { PlayerState } from '../../lupa/types.ts'
 import type { FenrirEvent } from '../../fenrir/src/events.ts'
@@ -151,23 +152,39 @@ function makeWorld(assignments: Record<number, SystemRole>): World {
     roles[s] = assignments[s] ?? 'villager'
     roleIds[s] = RoleBitIndex[roles[s]]
   }
-  let wolfMask = 0, hamsterMask = 0, immoralistMask = 0
-  let seerMask = 0, mediumMask = 0, nekomataMask = 0
-  let bodyguardSeat = -1
+  let wolfFactionMask = 0
+  let foxFactionMask = 0
+  let attackCapableMask = 0
+  let divineCapableMask = 0
+  let guardCapableMask = 0
+  let attackImmuneMask = 0
+  let dieWhenDivinedMask = 0
+  let curseOnExecutedMask = 0
+  let curseOnKilledMask = 0
+  let followFoxDeathMask = 0
+  let mediumshipMask = 0
   for (let s = 1; s <= SEATS; s++) {
-    switch (roles[s]) {
-      case 'werewolf': wolfMask |= (1 << s); break
-      case 'werehamster': hamsterMask |= (1 << s); break
-      case 'immoralist': immoralistMask |= (1 << s); break
-      case 'seer': seerMask |= (1 << s); break
-      case 'medium': mediumMask |= (1 << s); break
-      case 'nekomata': nekomataMask |= (1 << s); break
-      case 'bodyguard': bodyguardSeat = s; break
-    }
+    const attr = RoleAttributeBits[roleIds[s]]
+    const bit = 1 << s
+    if (attr & ATTR.WOLF_FACTION)                wolfFactionMask |= bit
+    if (attr & ATTR.FOX_FACTION)                 foxFactionMask |= bit
+    if (attr & ATTR.ACTION_ATTACK)               attackCapableMask |= bit
+    if (attr & ATTR.ACTION_DIVINE)               divineCapableMask |= bit
+    if (attr & ATTR.ACTION_GUARD)                guardCapableMask |= bit
+    if (attr & ATTR.PASSIVE_ATTACK_IMMUNE)       attackImmuneMask |= bit
+    if (attr & ATTR.PASSIVE_DIE_WHEN_DIVINED)    dieWhenDivinedMask |= bit
+    if (attr & ATTR.REACTIVE_CURSE_ON_EXECUTED)  curseOnExecutedMask |= bit
+    if (attr & ATTR.REACTIVE_CURSE_ON_KILLED)    curseOnKilledMask |= bit
+    if (attr & ATTR.REACTIVE_FOLLOW_FOX_DEATH)   followFoxDeathMask |= bit
+    if (attr & ATTR.AUTO_INFO_EXECUTION_SPECIES) mediumshipMask |= bit
   }
   return {
-    roles, roleIds, wolfMask, hamsterMask, immoralistMask,
-    seerMask, mediumMask, nekomataMask, bodyguardSeat,
+    roles, roleIds,
+    wolfFactionMask, foxFactionMask,
+    attackCapableMask, divineCapableMask, guardCapableMask,
+    attackImmuneMask, dieWhenDivinedMask,
+    curseOnExecutedMask, curseOnKilledMask, followFoxDeathMask,
+    mediumshipMask,
   }
 }
 
@@ -221,7 +238,7 @@ function buildScenario(s: ScenarioInput): {
   const viewerRole = world.roles[s.viewerSeat]
 
   const wolfSeats: number[] = []
-  for (let m = world.wolfMask; m !== 0; ) {
+  for (let m = world.attackCapableMask; m !== 0; ) {
     const bit = m & (-m)
     wolfSeats.push(31 - Math.clz32(bit))
     m ^= bit
@@ -239,8 +256,8 @@ function buildScenario(s: ScenarioInput): {
     }
   }
   let knownHamster: number | null = null
-  if (viewerRole === 'immoralist' && world.hamsterMask !== 0) {
-    const bit = world.hamsterMask & (-world.hamsterMask)
+  if (viewerRole === 'immoralist' && world.dieWhenDivinedMask !== 0) {
+    const bit = world.dieWhenDivinedMask & (-world.dieWhenDivinedMask)
     knownHamster = 31 - Math.clz32(bit)
   }
 

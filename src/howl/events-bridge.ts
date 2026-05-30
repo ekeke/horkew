@@ -12,7 +12,7 @@
  * - 襲撃の attacker (どの狼が噛んだか) は元々 public ではないので含まれない
  */
 
-import type { Statement, AssertStatement, MasonStatement, VoteStatement, MultiVoteStatement, AttackStatement, LynchStatement, RevoteStatement, OverStatement, RevealStatement, CurseStatement, FollowStatement, ForecastStatement } from './statement.ts'
+import type { Statement, AssertStatement, MasonStatement, VoteStatement, MultiVoteStatement, AttackStatement, LynchStatement, RevoteStatement, OverStatement, RevealStatement, CurseStatement, FollowStatement, ForecastStatement, DayMarkStatement } from './statement.ts'
 import type { GameEvent } from '../lupa/types.ts'
 import type { SystemRole, EnumSpecies } from '../types/index.ts'
 import type { FlexibleDictionary } from './flexibleDictionary.ts'
@@ -188,6 +188,13 @@ export function statementsToPublicEvents(
       case 'peace': {
         emit({ type: 'peace' } satisfies GameEvent)
         // satisfies 対応していない場合のフォールバック
+        break
+      }
+      case 'dayMark': {
+        // 同一 day への dayMark は engine 状態を進めないので emit しない (no-op).
+        if ((stmt as DayMarkStatement).advanced) {
+          emit({ type: 'peace' } satisfies GameEvent)
+        }
         break
       }
       case 'forecast': {

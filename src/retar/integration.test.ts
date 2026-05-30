@@ -7,7 +7,8 @@ import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from './index.ts'
 import type { AnalyzeOptions } from './index.ts'
-import type { SystemRole } from '../types/index.ts'
+import type { SystemRole, Faction } from '../types/index.ts'
+import { systemRoles } from '../types/index.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const scenariosDir = join(__dirname, 'scenarios')
@@ -29,19 +30,39 @@ const defaultOptions: AnalyzeOptions = {
 }
 
 type RoleExpectation = { roles: string[], negated: string[], partial: boolean }
+type TagExpectation = { tags: string[], negated: string[] }
 
 type Checkpoint = {
   lineNumber: number
   skip: boolean
   solve?: boolean
   roles: Map<string, RoleExpectation>
+  factions: Map<string, TagExpectation>
+  alignments: Map<string, TagExpectation>
+  claims: Map<string, string>
+  deniedRoles: Map<string, RoleExpectation>
+  statuses: Map<string, 'alive' | 'dead'>
   assumptions: Map<string, string>
 }
 
-const expectPattern = /^#\s*@expect(?:-skip)?\s+(.+)$/
-const expectSkipPattern = /^#\s*@expect-skip\s/
+// @expect / @expect-skip / @expect-faction / @expect-alignment / @expect-claim / @expect-deniedRoles / @expect-status
+const expectPattern = /^#\s*@expect(?:-(skip|faction|alignment|claim|deniedRoles|status))?\s+(.+)$/
 const assumePattern = /^#\s*@assume\s+(.+)$/
 const endAssumePattern = /^#\s*@end-assume\s*$/
+
+function makeCheckpoint(lineNumber: number): Checkpoint {
+  return {
+    lineNumber,
+    skip: false,
+    roles: new Map(),
+    factions: new Map(),
+    alignments: new Map(),
+    claims: new Map(),
+    deniedRoles: new Map(),
+    statuses: new Map(),
+    assumptions: new Map(),
+  }
+}
 
 function extractCheckpoints(rawText: string) {
   const fmMatch = rawText.match(/^(---\n[\s\S]*?\n---\n)/)
@@ -66,13 +87,12 @@ function extractCheckpoints(rawText: string) {
         }
       } else {
         if (current === null) {
-          current = { lineNumber: i, skip: false, roles: new Map(), assumptions: new Map() }
+          current = makeCheckpoint(i)
         }
         if (expectMatch) {
-          if (expectSkipPattern.test(line)) {
-            current.skip = true
-          }
-          parseDirective(current, expectMatch[1])
+          const variant = expectMatch[1] // undefined | 'skip' | 'faction' | 'alignment' | 'claim' | 'deniedRoles'
+          if (variant === 'skip') current.skip = true
+          parseExpectDirective(current, variant, expectMatch[2])
         }
         if (assumeMatch) {
           parseAssume(current, assumeMatch[1])
@@ -98,22 +118,64 @@ function extractCheckpoints(rawText: string) {
   return { frontmatter, bodyLines, checkpoints }
 }
 
-function parseDirective(checkpoint: Checkpoint, content: string) {
+function parseRoleExpectation(value: string): RoleExpectation {
+  const stripped = value.replace(/[\[\]]/g, '').trim()
+  const partial = stripped.endsWith('...')
+  const rolesStr = partial ? stripped.slice(0, -3) : stripped
+  const allRoles = rolesStr.split(',').map(r => r.trim()).filter(Boolean)
+  const roles = allRoles.filter(r => !r.startsWith('!'))
+  const negated = allRoles.filter(r => r.startsWith('!')).map(r => r.slice(1))
+  return { roles, negated, partial }
+}
+
+function parseTagExpectation(value: string): TagExpectation {
+  const stripped = value.replace(/[\[\]]/g, '').trim()
+  const allTags = stripped.split(',').map(t => t.trim()).filter(Boolean)
+  const tags = allTags.filter(t => !t.startsWith('!'))
+  const negated = allTags.filter(t => t.startsWith('!')).map(t => t.slice(1))
+  return { tags, negated }
+}
+
+function parseExpectDirective(
+  checkpoint: Checkpoint,
+  variant: string | undefined,
+  content: string,
+) {
   const colonIdx = content.indexOf(':')
   if (colonIdx < 0) return
   const key = content.slice(0, colonIdx).trim()
   const value = content.slice(colonIdx + 1).trim()
 
-  if (key === 'solve') {
-    checkpoint.solve = value === 'true'
-  } else {
-    const stripped = value.replace(/[\[\]]/g, '').trim()
-    const partial = stripped.endsWith('...')
-    const rolesStr = partial ? stripped.slice(0, -3) : stripped
-    const allRoles = rolesStr.split(',').map(r => r.trim()).filter(Boolean)
-    const roles = allRoles.filter(r => !r.startsWith('!'))
-    const negated = allRoles.filter(r => r.startsWith('!')).map(r => r.slice(1))
-    checkpoint.roles.set(key, { roles, negated, partial })
+  // @expect-skip uses the same payload as @expect; the skip flag is set by the caller.
+  // 'skip' falls through to the default expect (role) handling.
+  const effective = variant === 'skip' ? undefined : variant
+
+  switch (effective) {
+    case 'faction':
+      checkpoint.factions.set(key, parseTagExpectation(value))
+      return
+    case 'alignment':
+      checkpoint.alignments.set(key, parseTagExpectation(value))
+      return
+    case 'claim':
+      checkpoint.claims.set(key, value)
+      return
+    case 'deniedRoles':
+      checkpoint.deniedRoles.set(key, parseRoleExpectation(value))
+      return
+    case 'status':
+      if (value !== 'alive' && value !== 'dead') {
+        throw new Error(`@expect-status: value must be "alive" or "dead", got "${value}"`)
+      }
+      checkpoint.statuses.set(key, value)
+      return
+    default:
+      // @expect with key 'solve' is a special boolean directive.
+      if (key === 'solve') {
+        checkpoint.solve = value === 'true'
+        return
+      }
+      checkpoint.roles.set(key, parseRoleExpectation(value))
   }
 }
 
@@ -146,7 +208,16 @@ function runCheckpoint(
 ) {
   let options = buildOptions(meta)
   const { statements } = parse(partialText)
-  const { vs, setup, players } = buildVillageStatus(statements, meta)
+  const { vs, setup, players, assumptions: spoilerAssumptions } = buildVillageStatus(statements, meta)
+
+  // spoiler 文 (`!プレイヤー=役職`) 由来の assumptions を options に merge
+  // production .howl 表記で paparazzi 等の役職を pin できる
+  if (spoilerAssumptions.size > 0) {
+    options = {
+      ...options,
+      assumptions: new Map([...options.assumptions, ...spoilerAssumptions]),
+    }
+  }
 
   if (checkpoint.assumptions.size > 0) {
     const merged = new Map(options.assumptions)
@@ -211,6 +282,100 @@ function runCheckpoint(
         } else if (expected.length > 0) {
           assert.deepStrictEqual(actual, expected,
             `${playerName}: expected [${expected}] but got [${actual}]`)
+        }
+      })
+    }
+
+    for (const [playerName, expectation] of checkpoint.factions) {
+      test(`${playerName} factions: [${expectation.tags.join(', ')}]`, testOpts, () => {
+        const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
+        assert.ok(seat != null, `player "${playerName}" not found in game`)
+        const actualRoles = result.result.get(seat)
+        assert.ok(actualRoles, `no result for player "${playerName}" (seat ${seat})`)
+        const factionSet = new Set<Faction>()
+        for (const role of actualRoles) {
+          const def = systemRoles.get(role)
+          if (def) factionSet.add(def.faction)
+        }
+        const actual = [...factionSet].sort()
+        for (const neg of expectation.negated) {
+          assert.ok(!actual.includes(neg as Faction),
+            `${playerName} factions: expected NOT ${neg} but got [${actual}]`)
+        }
+        if (expectation.tags.length > 0) {
+          const expected = [...expectation.tags].sort()
+          assert.deepStrictEqual(actual, expected,
+            `${playerName} factions: expected [${expected}] but got [${actual}]`)
+        }
+      })
+    }
+
+    for (const [playerName, expectation] of checkpoint.alignments) {
+      test(`${playerName} alignment: [${expectation.tags.join(', ')}]`, testOpts, () => {
+        const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
+        assert.ok(seat != null, `player "${playerName}" not found in game`)
+        const actualRoles = result.result.get(seat)
+        assert.ok(actualRoles, `no result for player "${playerName}" (seat ${seat})`)
+        const alignmentSet = new Set<string>()
+        for (const role of actualRoles) {
+          const def = systemRoles.get(role)
+          if (def) alignmentSet.add(def.alignment)
+        }
+        const actual = [...alignmentSet].sort()
+        for (const neg of expectation.negated) {
+          assert.ok(!actual.includes(neg),
+            `${playerName} alignment: expected NOT ${neg} but got [${actual}]`)
+        }
+        if (expectation.tags.length > 0) {
+          const expected = [...expectation.tags].sort()
+          assert.deepStrictEqual(actual, expected,
+            `${playerName} alignment: expected [${expected}] but got [${actual}]`)
+        }
+      })
+    }
+
+    for (const [playerName, expected] of checkpoint.claims) {
+      test(`${playerName} claim: "${expected}"`, testOpts, () => {
+        const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
+        assert.ok(seat != null, `player "${playerName}" not found in game`)
+        const status = vs.statuses.get(seat)!
+        // 'none' or '' から実際の claimingRole への比較。空文字指定で「無CO」を表現できる。
+        const actual = status.claiming ? status.claimingRole : 'none'
+        const want = expected === '' ? 'none' : expected
+        assert.strictEqual(actual, want,
+          `${playerName} claim: expected "${want}" but got "${actual}"`)
+      })
+    }
+
+    for (const [playerName, expectedStatus] of checkpoint.statuses) {
+      test(`${playerName} status: ${expectedStatus}`, testOpts, () => {
+        const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
+        assert.ok(seat != null, `player "${playerName}" not found in game`)
+        const status = vs.statuses.get(seat)!
+        const actual = status.surviving ? 'alive' : 'dead'
+        assert.strictEqual(actual, expectedStatus,
+          `${playerName} status: expected "${expectedStatus}" but got "${actual}"`)
+      })
+    }
+
+    for (const [playerName, expectation] of checkpoint.deniedRoles) {
+      test(`${playerName} deniedRoles: [${expectation.roles.join(', ')}]`, testOpts, () => {
+        const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
+        assert.ok(seat != null, `player "${playerName}" not found in game`)
+        const status = vs.statuses.get(seat)!
+        const actual = [...status.deniedRoles].sort()
+        for (const neg of expectation.negated) {
+          assert.ok(!actual.includes(neg as SystemRole),
+            `${playerName} deniedRoles: expected NOT ${neg} but got [${actual}]`)
+        }
+        if (expectation.partial) {
+          const missing = expectation.roles.filter(r => !actual.includes(r as SystemRole))
+          assert.deepStrictEqual(missing, [],
+            `${playerName} deniedRoles: expected at least [${expectation.roles}] but got [${actual}], missing [${missing}]`)
+        } else if (expectation.roles.length > 0) {
+          const expected = [...expectation.roles].sort()
+          assert.deepStrictEqual(actual, expected,
+            `${playerName} deniedRoles: expected [${expected}] but got [${actual}]`)
         }
       })
     }

@@ -1,7 +1,7 @@
 import type { CauseOfDeath, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import { Possibilities, possibilityFromRoles } from './possibilities.ts'
 import { generateCombinations } from './combinatorics.ts'
-import { roleTesterMap, saveContext, restoreContext } from './roleTesters.ts'
+import { testRole as runRoleTest, saveContext, restoreContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
 import { buildRoleTestPlan, LiarRoles } from './planBuilder.ts'
 import type { RoleTest } from './planBuilder.ts'
@@ -445,10 +445,8 @@ export class VillageRetar {
   private testRole(scenario: RoleTest) {
     const { role, selected, rest } = scenario
     if (role === 'allpass') return true
-    const tester = roleTesterMap[role]
-    if (!tester) throw new Error('unknown role')
     ;(this.debugStash as Record<string, number>)[`${role}Tests`]++
-    const result = tester(this.env, this.context, selected, rest)
+    const result = runRoleTest(this.env, this.context, role, selected, rest)
     if ( result ) (this.debugStash as Record<string, number>)[`${role}TestPasses`]++
     return result
   }

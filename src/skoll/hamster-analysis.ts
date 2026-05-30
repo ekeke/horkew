@@ -19,7 +19,7 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { Possibilities } from '../retar/possibilities.ts'
 import type { World } from '../hati/types.ts'
-import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask } from '../hati/types.ts'
+import { popCount32, maskFromSeats, hasSeat, removeSeat, seatsFromMask, getGuardSeat } from '../hati/types.ts'
 import { enumerateWorlds } from '../hati/worlds.ts'
 import { checkOutcome, applyExecution } from '../hati/simulate.ts'
 import { minimaxNightHamsterRate } from './hamsterWinrate.ts'
@@ -71,11 +71,11 @@ export function analyzeHamsterVotesByWorld(
   enumerateWorlds(possibilities, setup, (world) => {
     totalWorlds++
 
-    const key1 = world.wolfMask | (world.hamsterMask << 15)
-    const key2 = world.seerMask
-      + world.mediumMask * 0x8000
-      + world.nekomataMask * 0x40000000
-      + (world.bodyguardSeat + 2) * 0x200000000000
+    const key1 = world.attackCapableMask | (world.dieWhenDivinedMask << 15)
+    const key2 = world.divineCapableMask
+      + world.mediumshipMask * 0x8000
+      + world.curseOnExecutedMask * 0x40000000
+      + (getGuardSeat(world) + 2) * 0x200000000000
     let inner = sigCache.get(key1)
     if (inner === undefined) {
       inner = new Map()
@@ -145,7 +145,7 @@ function computeHamsterScoresForWorld(
     const target = aliveSeats[i]
     const afterExec = applyExecution(alive, target)
 
-    if ((world.nekomataMask & (1 << target)) !== 0) {
+    if ((world.curseOnExecutedMask & (1 << target)) !== 0) {
       // 猫又処刑: ランダム1人道連れ
       const curseCandidates = seatsFromMask(afterExec)
       if (curseCandidates.length === 0) {
@@ -178,12 +178,13 @@ function estimateOngoingHamsterRate(
   aliveAfterExec: number,
   cache: Map<number, number>,
 ): number {
-  const wolves = popCount32(world.wolfMask & aliveAfterExec)
-  const foxes = popCount32(world.hamsterMask & aliveAfterExec)
-  const nekomata = popCount32(world.nekomataMask & aliveAfterExec)
-  const seerAlive = (world.seerMask & aliveAfterExec) !== 0
-  const mediumAlive = (world.mediumMask & aliveAfterExec) !== 0
-  const bodyguardAlive = world.bodyguardSeat >= 0 && hasSeat(aliveAfterExec, world.bodyguardSeat)
+  const wolves = popCount32(world.attackCapableMask & aliveAfterExec)
+  const foxes = popCount32(world.dieWhenDivinedMask & aliveAfterExec)
+  const nekomata = popCount32(world.curseOnExecutedMask & aliveAfterExec)
+  const seerAlive = (world.divineCapableMask & aliveAfterExec) !== 0
+  const mediumAlive = (world.mediumshipMask & aliveAfterExec) !== 0
+  const bodyguardSeat = getGuardSeat(world)
+  const bodyguardAlive = bodyguardSeat >= 0 && hasSeat(aliveAfterExec, bodyguardSeat)
   const aliveTotal = popCount32(aliveAfterExec)
   const grays = aliveTotal - (seerAlive ? 1 : 0) - (mediumAlive ? 1 : 0) - (bodyguardAlive ? 1 : 0) - nekomata
 

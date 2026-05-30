@@ -19,10 +19,11 @@ pub enum SystemRole {
     Fanatic,
     Werehamster,
     Immoralist,
+    Paparazzi,
 }
 
 impl SystemRole {
-    pub const ALL: [SystemRole; 11] = [
+    pub const ALL: [SystemRole; 12] = [
         SystemRole::Villager,
         SystemRole::Seer,
         SystemRole::Medium,
@@ -34,6 +35,7 @@ impl SystemRole {
         SystemRole::Fanatic,
         SystemRole::Werehamster,
         SystemRole::Immoralist,
+        SystemRole::Paparazzi,
     ];
 
     pub fn bit(self) -> u16 {
@@ -53,6 +55,7 @@ impl SystemRole {
             SystemRole::Fanatic => 8,
             SystemRole::Werehamster => 9,
             SystemRole::Immoralist => 10,
+            SystemRole::Paparazzi => 11,
         }
     }
 
@@ -69,7 +72,39 @@ impl SystemRole {
             8 => Some(SystemRole::Fanatic),
             9 => Some(SystemRole::Werehamster),
             10 => Some(SystemRole::Immoralist),
+            11 => Some(SystemRole::Paparazzi),
             _ => None,
+        }
+    }
+
+    /// TS systemRoles.get(role).traits 相当: 役職に紐付く trait の集合
+    pub fn traits(self) -> &'static [RoleTrait] {
+        match self {
+            SystemRole::Villager => &[],
+            SystemRole::Seer => &[RoleTrait::ActionDivine],
+            SystemRole::Medium => &[RoleTrait::AutoInfoExecutionSpecies],
+            SystemRole::Bodyguard => &[RoleTrait::ActionGuard],
+            SystemRole::Mason => &[RoleTrait::KnowledgeKnowMasons],
+            SystemRole::Nekomata => &[
+                RoleTrait::ReactiveCurseOnExecuted,
+                RoleTrait::ReactiveCurseOnKilled,
+            ],
+            SystemRole::Werewolf => &[
+                RoleTrait::KnowledgeKnowWerewolves,
+                RoleTrait::ActionAttack,
+                RoleTrait::ChannelWolfChat,
+            ],
+            SystemRole::Possessed => &[],
+            SystemRole::Fanatic => &[RoleTrait::KnowledgeKnowWerewolves],
+            SystemRole::Werehamster => &[
+                RoleTrait::PassiveAttackImmune,
+                RoleTrait::PassiveDieWhenDivined,
+            ],
+            SystemRole::Immoralist => &[
+                RoleTrait::KnowledgeKnowFoxes,
+                RoleTrait::ReactiveFollowFoxDeath,
+            ],
+            SystemRole::Paparazzi => &[RoleTrait::ActionDivine],
         }
     }
 }
@@ -88,8 +123,34 @@ impl fmt::Display for SystemRole {
             SystemRole::Fanatic => write!(f, "fanatic"),
             SystemRole::Werehamster => write!(f, "werehamster"),
             SystemRole::Immoralist => write!(f, "immoralist"),
+            SystemRole::Paparazzi => write!(f, "paparazzi"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Faction {
+    Village,
+    Wolf,
+    Fox,
+}
+
+/// TS RoleTrait 相当: { kind, sub } の組を flat な variant に展開した形
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RoleTrait {
+    PassiveAttackImmune,
+    PassiveDieWhenDivined,
+    KnowledgeKnowWerewolves,
+    KnowledgeKnowFoxes,
+    KnowledgeKnowMasons,
+    ActionDivine,
+    ActionGuard,
+    ActionAttack,
+    ReactiveCurseOnExecuted,
+    ReactiveCurseOnKilled,
+    ReactiveFollowFoxDeath,
+    AutoInfoExecutionSpecies,
+    ChannelWolfChat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -373,17 +434,18 @@ mod tests {
 
     #[test]
     fn system_role_bit_indices_are_correct() {
-        assert_eq!(SystemRole::Villager.bit(), 0b00000000001);
-        assert_eq!(SystemRole::Seer.bit(), 0b00000000010);
-        assert_eq!(SystemRole::Medium.bit(), 0b00000000100);
-        assert_eq!(SystemRole::Bodyguard.bit(), 0b00000001000);
-        assert_eq!(SystemRole::Mason.bit(), 0b00000010000);
-        assert_eq!(SystemRole::Nekomata.bit(), 0b00000100000);
-        assert_eq!(SystemRole::Werewolf.bit(), 0b00001000000);
-        assert_eq!(SystemRole::Possessed.bit(), 0b00010000000);
-        assert_eq!(SystemRole::Fanatic.bit(), 0b00100000000);
-        assert_eq!(SystemRole::Werehamster.bit(), 0b01000000000);
-        assert_eq!(SystemRole::Immoralist.bit(), 0b10000000000);
+        assert_eq!(SystemRole::Villager.bit(), 0b000000000001);
+        assert_eq!(SystemRole::Seer.bit(), 0b000000000010);
+        assert_eq!(SystemRole::Medium.bit(), 0b000000000100);
+        assert_eq!(SystemRole::Bodyguard.bit(), 0b000000001000);
+        assert_eq!(SystemRole::Mason.bit(), 0b000000010000);
+        assert_eq!(SystemRole::Nekomata.bit(), 0b000000100000);
+        assert_eq!(SystemRole::Werewolf.bit(), 0b000001000000);
+        assert_eq!(SystemRole::Possessed.bit(), 0b000010000000);
+        assert_eq!(SystemRole::Fanatic.bit(), 0b000100000000);
+        assert_eq!(SystemRole::Werehamster.bit(), 0b001000000000);
+        assert_eq!(SystemRole::Immoralist.bit(), 0b010000000000);
+        assert_eq!(SystemRole::Paparazzi.bit(), 0b100000000000);
     }
 
     #[test]
@@ -409,6 +471,6 @@ mod tests {
         for role in SystemRole::ALL {
             assert_eq!(SystemRole::from_bit_index(role.bit_index()), Some(role));
         }
-        assert_eq!(SystemRole::from_bit_index(11), None);
+        assert_eq!(SystemRole::from_bit_index(12), None);
     }
 }

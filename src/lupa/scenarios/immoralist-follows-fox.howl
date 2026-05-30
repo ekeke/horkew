@@ -1,0 +1,29 @@
+---
+title: 背徳者は狐の死亡で後追いする
+setup: { immoralist: 1, werehamster: 1, werewolf: 1, villager: 1 }
+---
+# Day 1 投票で Bob (狐) 処刑 → Alice (背徳者) 後追い死亡 (follow_kill event)。
+# 残り Carol (狼) + Dave (村) → 狼 1 vs 村 1 → 狼勝即終局。
+
+++Alice、Bob、Carol、Dave
+!Alice=背徳者
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+
+# Day 1 投票で Bob 処刑
+Alice→Bob
+Bob→Alice
+Carol→Bob
+Dave→Bob
+
+# @expect-status Alice: dead
+# @expect-status Bob: dead
+# @expect-status Carol: alive
+# @expect-status Dave: alive
+# @expect-cause Bob: execution
+# @expect-cause Alice: follow_kill
+# @expect-event execution target:Bob
+# @expect-event follow_kill target:Alice
+# @expect-result: werewolf_won
+# @expect-finished: true

@@ -1,6 +1,6 @@
 import * as V from './vocabulary.ts'
 
-export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'reveal' | 'spoiler' | 'speech' | 'videoSource' | 'timestamp' | 'unknown'
+export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'dayMark' | 'reveal' | 'spoiler' | 'speech' | 'videoSource' | 'timestamp' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf'
@@ -90,16 +90,34 @@ export type PeaceStatement = Statement & {
     type: 'peace'
 }
 
+export type DayMarkStatement = Statement & {
+    type: 'dayMark'
+    // 進行先の target day (1-indexed). assignDays が `day` を確定する.
+    day: number
+    // assignDays が「現在 day < target」で実際に day を進めたかを記録.
+    // 同一 day への dayMark (no-op) と区別するため bridge / events-bridge が参照.
+    advanced?: boolean
+}
+
 export type RevealStatement = Statement & {
     type: 'reveal'
     player: string
     role: string
 }
 
+export type SpoilerAction = 'divine' | 'guard' | 'attack'
+
 export type SpoilerStatement = Statement & {
     type: 'spoiler'
     player: string
-    role: string
+    // 役職 pin と秘匿行動はどちらか一方が入る。
+    role?: string
+    // 秘匿行動 (例: !Alice 1夜 占い Bob) の対象夜番号 (1-indexed)。
+    // Statement 基底の進行 day と同じ field 名だが、assignDays は
+    // spoiler 文を skip するため進行 day で上書きされない。
+    day?: number
+    action?: SpoilerAction
+    target?: string
 }
 
 export type SpeechStatement = Statement & {
@@ -293,6 +311,19 @@ export function parsePeaceStatement(text: string, line: number): PeaceStatement 
   return { type: 'peace', line }
 }
 
+// DayMark statement: `Day 2:` (ASCII) / `2日目:` (Japanese)
+// 進行 day を明示的に target に前進する section marker. assignDays が target を読んで day を進める.
+// 末尾のコロン (半角/全角) を必須にして seer 結果 (`1日目 Bob白`) や comment との曖昧性を回避.
+const dayMarkAsciiRegex = new RegExp(`^${V.optionalSpace}[dDｄＤ][aAａＡ][yYｙＹ]${V.whiteSpaces}(${V.dayNumber})${V.optionalSpace}[:：]${V.optionalSpace}$`)
+const dayMarkJapaneseRegex = new RegExp(`^${V.optionalSpace}(${V.dayNumber})${V.dayUnit}${V.optionalSpace}[:：]${V.optionalSpace}$`)
+export function parseDayMarkStatement(text: string, line: number): DayMarkStatement | null {
+  const ascii = dayMarkAsciiRegex.exec(text)
+  if (ascii) return { type: 'dayMark', line, day: Number(ascii[1]) }
+  const ja = dayMarkJapaneseRegex.exec(text)
+  if (ja) return { type: 'dayMark', line, day: Number(ja[1]) }
+  return null
+}
+
 export function parseRevealStatement(text: string, line: number): RevealStatement | null {
   const revealRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})${V.equal}(${V.anyRole})${V.optionalSpace}$`)
   const match = revealRegex.exec(text)
@@ -303,10 +334,34 @@ export function parseRevealStatement(text: string, line: number): RevealStatemen
 // Spoiler statement: !Alice=seer / ！アリス＝占い
 // 視点配信での正体メモ、および retar 解析時の仮定（assumption）として使われる。
 const spoilerRegex = new RegExp(`^[!！]${V.optionalSpace}(${V.possibleName})${V.optionalSpace}${V.equal}${V.optionalSpace}(${V.anyRole})${V.optionalSpace}$`)
+// Spoiler action statement: !Alice 1夜 占い Bob
+// プレイヤーの秘匿夜行動 (公開発言とは独立)。lupa engine 駆動テストで使う。
+const spoilerActionRegex = new RegExp(
+  `^[!！]${V.optionalSpace}(${V.possibleName})${V.optionalSpace}(\\d+)夜${V.optionalSpace}(占い?|護衛|襲撃|divine|guard|attack)${V.optionalSpace}(${V.possibleName})${V.optionalSpace}$`
+)
+const spoilerActionMap: Record<string, SpoilerAction> = {
+  '占い': 'divine', '占': 'divine', 'divine': 'divine',
+  '護衛': 'guard', 'guard': 'guard',
+  '襲撃': 'attack', 'attack': 'attack',
+}
 export function parseSpoilerStatement(text: string, line: number): SpoilerStatement | null {
-  const match = spoilerRegex.exec(text)
-  if (!match) return null
-  return { type: 'spoiler', line, player: match[1].trim(), role: match[2].trim() }
+  const rm = spoilerRegex.exec(text)
+  if (rm) {
+    return { type: 'spoiler', line, player: rm[1].trim(), role: rm[2].trim() }
+  }
+  const am = spoilerActionRegex.exec(text)
+  if (am) {
+    const action = spoilerActionMap[am[3].trim()]
+    if (!action) return null
+    return {
+      type: 'spoiler', line,
+      player: am[1].trim(),
+      day: Number(am[2]),
+      action,
+      target: am[4].trim(),
+    }
+  }
+  return null
 }
 
 // Speech statement: アリス > こんにちは / Alice ＞ hello
@@ -651,6 +706,7 @@ export function parseStatement (text: string, line: number): Statement {
     parseRevoteStatement,
     parseOverStatement,
     parsePeaceStatement,
+    parseDayMarkStatement,
     parseMasonStatement,
     parseForecastStatement,
     parseAssertStatement,

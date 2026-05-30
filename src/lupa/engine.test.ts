@@ -7,6 +7,7 @@ import { runGame } from './engine.ts'
 import { makeRandomHandlers } from './test-helpers.ts'
 import { formatHowl } from './format.ts'
 import { parse } from '../howl/parser.ts'
+import { checkWinCondition } from './roles.ts'
 
 function makeGameConfig(roles: Record<string, number>, seed?: number): GameConfig {
   return {
@@ -218,6 +219,79 @@ describe('lupa engine', () => {
       `night_kill が ${day2NightKills.length} 件発生した (target=${(day2NightKills[0] as { target?: number })?.target}). ` +
       `「最初の guard」しか採用されないバグの兆候。`,
     )
+  })
+
+  it('パパラッチが夜に占い能力を発動する', async () => {
+    // 14d-neko ベース + paparazzi 1 (villager を 1 減らす)
+    const roles = {
+      werewolf: 3, villager: 1, seer: 1, medium: 1, bodyguard: 1,
+      mason: 2, nekomata: 1, fanatic: 1, werehamster: 1, immoralist: 1,
+      paparazzi: 1,
+    }
+    // 50 seed 試行で 1 回でも paparazzi の divine 発動を観測できれば pass。
+    // 完全確定的な handler (paparazzi 強制 divine) の導入は別タスクで詳細設計する。
+    let paparazziDivineFound = false
+    const SEED_TRIES = 50
+    for (let seed = 0; seed < SEED_TRIES; seed++) {
+      let paparazziSeat: number | null = null
+      const handlers = makeRandomHandlers(seed)
+      const wrapped = {
+        ...handlers,
+        onSetup(seatRoles: Map<number, SystemRole>, state: any) {
+          for (const [seat, role] of seatRoles) if (role === 'paparazzi') paparazziSeat = seat
+          return handlers.onSetup?.(seatRoles, state)
+        },
+      }
+      const { state } = await runGame(makeGameConfig(roles, seed), wrapped)
+      const paparazziPlayer = state.players.find(p => p.seat === paparazziSeat)!
+      if (paparazziPlayer.divineHistory.size > 0) {
+        paparazziDivineFound = true
+        break
+      }
+    }
+    assert.ok(paparazziDivineFound, `${SEED_TRIES} seed 中にパパラッチの divine が 1 回も発行されなかった`)
+  })
+
+  it('パパラッチは狼陣営として勝利判定される (人狼過半数シナリオ)', () => {
+    // 手動で state を組む: alive = werewolf 1, paparazzi 1, villager 1
+    // 期待: wolves=1 (werewolf のみ、paparazzi は襲撃能力なし)
+    //       nonWolfCount = 2 (paparazzi + villager は人扱い)
+    //       1 >= 2 ではないので未終了
+    const state1: any = {
+      players: [
+        { seat: 1, role: 'werewolf', alive: true },
+        { seat: 2, role: 'paparazzi', alive: true },
+        { seat: 3, role: 'villager', alive: true },
+      ],
+      finished: false, result: null,
+    }
+    checkWinCondition(state1)
+    assert.equal(state1.finished, false, 'werewolf 1 + paparazzi 1 + villager 1 では未終了 (狼数 < 村数)')
+
+    // alive = werewolf 1, paparazzi 1: wolves=1, nonWolfCount=1, 1>=1 で狼勝
+    const state2: any = {
+      players: [
+        { seat: 1, role: 'werewolf', alive: true },
+        { seat: 2, role: 'paparazzi', alive: true },
+      ],
+      finished: false, result: null,
+    }
+    checkWinCondition(state2)
+    assert.equal(state2.finished, true, 'werewolf 1 + paparazzi 1 で終了')
+    assert.equal(state2.result, 'werewolf_won', 'パパラッチ生存時の狼勝利')
+
+    // werewolf 全滅 + paparazzi のみ alive: wolves=0 → 村勝 (paparazzi は襲撃役ではない)
+    const state3: any = {
+      players: [
+        { seat: 1, role: 'werewolf', alive: false },
+        { seat: 2, role: 'paparazzi', alive: true },
+        { seat: 3, role: 'villager', alive: true },
+      ],
+      finished: false, result: null,
+    }
+    checkWinCondition(state3)
+    assert.equal(state3.finished, true, 'werewolf 全滅で終了')
+    assert.equal(state3.result, 'villager_won', 'パパラッチ単独残存では村勝利 (襲撃役なし)')
   })
 
   it('全役職入りゲームがパースできる', async () => {
