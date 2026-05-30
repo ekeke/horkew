@@ -1,0 +1,34 @@
+---
+title: 占い師が夜に占いを実行し、Day 2 で結果を CO できる
+setup: { seer: 1, werewolf: 1, villager: 2 }
+---
+# Day 1 終わりの夜に Alice (seer) が Bob (人狼) を占い、Day 2 朝に CO で結果報告。
+# 秘匿行動 (!Alice 1夜 占い Bob) と公開発言 (Alice 占いCO Bob●) は別物として処理される。
+
+++Alice、Bob、Carol、Dave
+!Alice=占い師
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+!Alice 1夜 占い Bob
+
+# Day 1 投票で Dave 処刑 (Day 2 まで進める)
+Alice→Dave
+Bob→Dave
+Carol→Dave
+Dave→Alice
+
+# Day 1 終わりの夜は人狼 attack なし → Day 2: で day だけ進める (新記法)
+Day 2:
+
+# Day 2 朝: Alice の seer CO
+Alice 占いCO Bob●
+
+# Day 2 投票で Bob 処刑 (狼全滅 → 村勝 → 終局)
+Alice→Bob
+Bob→Bob
+Carol→Bob
+
+# @expect-status Alice: alive
+# @expect-event seer_claim actor:Alice
+# @expect-result: villager_won
