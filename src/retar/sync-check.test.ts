@@ -32,8 +32,8 @@ const FILE_ALIASES: Record<string, string> = {
   'role-sets': 'role_sets', // TS は kebab-case, Rust は snake_case
 }
 
-// 片方にしか存在しなくてよいファイル（WASMブリッジ、型定義など）
-const TS_ONLY_FILES = new Set(['wasm-helpers'])
+// 片方にしか存在しなくてよいファイル（WASMブリッジ、型定義、test helper など）
+const TS_ONLY_FILES = new Set(['wasm-helpers', 'expectations'])
 const RS_ONLY_FILES = new Set(['lib', 'types'])
 
 // モジュールプレフィックスファイル: TSではトップレベルexportのためファイル名をプレフィックス/サフィックスに付ける
