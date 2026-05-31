@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub mod types;
 pub mod possibilities;
+pub mod role_sets;
 pub mod combinatorics;
 pub mod solver;
 pub mod role_testers;

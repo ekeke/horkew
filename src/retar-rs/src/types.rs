@@ -77,6 +77,31 @@ impl SystemRole {
         }
     }
 
+    /// TS systemRoles.get(role).faction 相当.
+    pub fn faction(self) -> Faction {
+        match self {
+            SystemRole::Villager
+            | SystemRole::Seer
+            | SystemRole::Medium
+            | SystemRole::Bodyguard
+            | SystemRole::Mason
+            | SystemRole::Nekomata => Faction::Village,
+            SystemRole::Werewolf
+            | SystemRole::Possessed
+            | SystemRole::Fanatic
+            | SystemRole::Paparazzi => Faction::Wolf,
+            SystemRole::Werehamster | SystemRole::Immoralist => Faction::Fox,
+        }
+    }
+
+    /// TS systemRoles.get(role).seerResult 相当.
+    pub fn seer_result(self) -> EnumSpecies {
+        match self {
+            SystemRole::Werewolf => EnumSpecies::Wolf,
+            _ => EnumSpecies::Human,
+        }
+    }
+
     /// TS systemRoles.get(role).traits 相当: 役職に紐付く trait の集合
     pub fn traits(self) -> &'static [RoleTrait] {
         match self {
