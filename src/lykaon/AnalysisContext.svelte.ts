@@ -18,8 +18,6 @@ import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { statementsToPublicEvents } from '../howl/events-bridge.ts'
 import type { GameEvent } from '../lupa/index.ts'
-import { findReason, findConfirmationReason } from '../gmork/index.ts'
-import { formatReason, formatConfirmationReason } from '../gmork/format.ts'
 import { serializeVillageStatus } from '../retar/wasm-helpers.ts'
 import { stringifyStatements, type StringifiedLine } from './stringify.ts'
 import { scoreWolfPairs, type WolfPairSuggestion } from './status/wolfPairScorer.ts'
@@ -273,18 +271,10 @@ export class AnalysisContext {
   )
 
   // -----------------------------------------------------------------
-  // Gmork + 派生
+  // 解析派生
   // -----------------------------------------------------------------
 
-  gmorkResult = $state('')
   wolfPairSuggestions = $state<WolfPairSuggestion[]>([])
-
-  /**
-   * GmorkDebugPane から「エディタに読込」した時に、Retar 解析完了後に
-   * assumptions へ自動投入される {seat, role}。consumer 側はセットだけ
-   * すればよく、解析後のクリアは ctx が自動で行う。
-   */
-  pendingGmorkEntry = $state<{ seat: number, role: SystemRole } | null>(null)
 
   // -----------------------------------------------------------------
   // Cross-pane イベントバス
@@ -314,7 +304,7 @@ export class AnalysisContext {
   }
 
   /**
-   * 「外部 (InspectPane / GmorkDebugPane 等) から howl を読み込んだ」イベントを購読する。
+   * 「外部 (InspectPane 等) から howl を読み込んだ」イベントを購読する。
    * consumer (demo 等) は trial mode への遷移・動画リセット・保存抑止などの副作用を扱う。
    */
   onExternalLoad(listener: (text: string) => void): () => void {
@@ -462,13 +452,6 @@ export class AnalysisContext {
             this.analysisStats = data.stats
             if (this.assumptions.size === 0) this.baseAnalysisSeats = data.seats
 
-            // pendingGmorkEntry (GmorkDebugPane からの読込) を assumptions に投入
-            if (this.pendingGmorkEntry && this.assumptions.size === 0) {
-              const pe = this.pendingGmorkEntry
-              this.pendingGmorkEntry = null
-              this.assumptions = new Map([[pe.seat, pe.role]])
-            }
-
             if ((setup.get('werewolf' as SystemRole) ?? 0) >= 2) {
               const wolfCandidates = new Set(
                 data.seats.filter(s => s.roles.includes('werewolf' as SystemRole)).map(s => s.seat)
@@ -486,33 +469,7 @@ export class AnalysisContext {
         })
       })
 
-      // Gmork: assumptions と baseAnalysisSeats が変わるたびに再計算
-      $effect(() => {
-        this.gmorkResult = this.#computeGmork()
-      })
     })
-  }
-
-  #computeGmork(): string {
-    const vs = this.villageStatus
-    if (this.assumptions.size !== 1 || !vs) return ''
-    const [[seat, role]] = [...this.assumptions]
-    const possibilities = new Map(this.baseAnalysisSeats.map(s => [s.seat, new Set(s.roles)]))
-    const playerName = this.players.get(seat) ?? `席${seat}`
-    const roleName = systemRoles.get(role)?.name ?? role
-
-    const possibleRoles = possibilities.get(seat)
-    if (possibleRoles && possibleRoles.size === 1 && possibleRoles.has(role)) {
-      const confirmObj = findConfirmationReason(vs, this.setup, seat, role, this.players, possibilities)
-      const confirmText = confirmObj ? formatConfirmationReason(confirmObj, role) : 'わかりません'
-      return `「${playerName}」が「${roleName}」に確定した理由： ${confirmText}`
-    }
-
-    if (possibleRoles && possibleRoles.has(role)) return ''
-
-    const reasonObj = findReason(vs, this.setup, seat, role as SystemRole, possibilities, this.players)
-    const reasonText = reasonObj ? formatReason(reasonObj, role) : 'わかりません'
-    return `「${playerName}」が「${roleName}」ではありえない理由： ${reasonText}`
   }
 
   destroy(): void {

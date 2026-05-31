@@ -11,7 +11,6 @@
     HatiPane,
     StatusPane,
     InspectPane,
-    GmorkDebugPane,
     AnalysisTable,
   } from '../src/lykaon/index.ts'
   import { setVideoTimeGetter } from '../src/lykaon/editor/index.ts'
@@ -81,7 +80,6 @@
     { id: 'colorSwatch', label: 'Color Swatch' },
     { id: 'hati', label: 'Hati (詰み)' },
     { id: 'skoll', label: 'Skoll (確率)' },
-    { id: 'gmorkDebug', label: 'Gmork Debug' },
     { id: 'fenrirInspect', label: 'Fenrir Inspect' },
     { id: 'pretrainViz', label: 'Pretrain Viz' },
     { id: 'fenrirStats', label: 'Fenrir Stats' },
@@ -101,7 +99,7 @@
     sidebarOpen: boolean
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, gmorkDebug: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false, commandPlay: false }
+  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false, commandPlay: false }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: 'off', panes: { ...defaultPanes }, sidebarOpen: true }
@@ -457,7 +455,7 @@
   if (activeKey) ctx.howlText = loadText(activeKey)
   onDestroy(() => ctx.destroy())
 
-  // lykaon ペイン (InspectPane / GmorkDebugPane) から howl が読み込まれたら
+  // lykaon ペイン (InspectPane 等) から howl が読み込まれたら
   // trial モードへ遷移し、作業中ドキュメントの上書きを防ぐ。
   $effect(() => {
     const unsub = ctx.onExternalLoad((text) => {
@@ -1582,15 +1580,6 @@
       <div class="pane-header">Skoll (確率分布)</div>
       <div class="pane-body">
         <SkollPane vs={ctx.villageStatus} setup={ctx.setup} players={ctx.players} publicEvents={ctx.currentEvents} />
-      </div>
-    </section>
-    {/if}
-
-    {#if paneVisible.gmorkDebug}
-    <section class="pane">
-      <div class="pane-header">Gmork Debug</div>
-      <div class="pane-body">
-        <GmorkDebugPane {ctx} />
       </div>
     </section>
     {/if}

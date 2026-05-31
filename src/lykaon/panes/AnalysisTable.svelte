@@ -119,9 +119,6 @@
           </div>
         {/if}
       </div>
-      {#if ctx.gmorkResult}
-        <div class="gmork-results">{ctx.gmorkResult}</div>
-      {/if}
     </div>
   </div>
 {/if}
@@ -355,14 +352,6 @@
 
   .suggestion-item:hover {
     color: var(--color-text);
-  }
-
-  .gmork-results {
-    padding: 8px;
-    font-family: 'Consolas', 'Menlo', monospace;
-    font-size: 13px;
-    color: var(--color-text-muted);
-    white-space: pre-wrap;
   }
 
   .analysis-duration {

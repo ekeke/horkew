@@ -1,8 +1,8 @@
 # lykaon — howl エディタ / 解析 UI ライブラリ
 
 Horkew の `.howl` 形式ログを編集するための **CodeMirror ベース専用エディタ** に、
-役職推理 (retar) / 詰み探索 (hati) / 理由説明 (gmork) を可視化する optional な
-解析ペインを組み合わせる Svelte 5 + Vite 製の UI モジュール。
+役職推理 (retar) / 詰み探索 (hati) を可視化する optional な解析ペインを
+組み合わせる Svelte 5 + Vite 製の UI モジュール。
 
 `createAnalysisContext()` で共有 state を作り、`EditorPane` 単体でも動かせるし、
 解析サイドカーを横に並べれば編集に追随して結果が更新される。
@@ -13,8 +13,8 @@ Horkew の `.howl` 形式ログを編集するための **CodeMirror ベース�
   備えた CodeMirror 6 エディタ。これだけでスタンドアローンの `.howl` エディタとして動く。
 - **解析ペインは optional** — `StatusPane` / `AnalysisTable` / `HatiPane` を必要なだけ並べる。
   EditorPane の編集が即座に反映される。
-- **debug / 専用ツール** — `InspectPane` (fenrir/skoll の game ログ閲覧) と
-  `GmorkDebugPane` (役職否定/確定の理由デバッグ) は用途が限定的で、 default では並べないことを推奨。
+- **debug / 専用ツール** — `InspectPane` (fenrir/skoll の game ログ閲覧) は用途が限定的で、
+  default では並べないことを推奨。
 
 ## 前提
 
@@ -84,7 +84,6 @@ EditorPane で `.howl` を編集すると Web Worker 経由で Retar が走り�
 | `AnalysisTable` | 役職可能性 × 席 のテーブル + 仮説サイドバー |
 | `HatiPane` | 詰み探索結果 |
 | `InspectPane` | fenrir/skoll の game ログ閲覧 (時系列・retar スナップショット) |
-| `GmorkDebugPane` | 役職否定/確定の理由説明デバッグ |
 
 型: `SeekEvent` / `JumpEvent` / `SourceLines` / `SeatResult` / `AnalysisStats` /
 `WolfPairSuggestion` / `StringifiedLine`
@@ -101,7 +100,6 @@ EditorPane で `.howl` を編集すると Web Worker 経由で Retar が走り�
 | `hocusPocusSeats` | `Set<number>` | この席の CO を無視して解析する集合 |
 | `denyWolfGroups` | `number[][]` | 「両狼ではない」と仮定する席ペア |
 | `forceTs` | `boolean` | retar-rs を無効化して TS 版を使う (debug 用) |
-| `pendingGmorkEntry` | `{ seat, role } \| null` | GmorkDebugPane から assumptions に自動投入する初期値 |
 
 ### 派生 ($derived、読み取り専用)
 
@@ -114,7 +112,7 @@ EditorPane で `.howl` を編集すると Web Worker 経由で Retar が走り�
 ### 解析結果 ($state、worker から書き込まれる)
 
 `analysisSeats` / `baseAnalysisSeats` / `analysisError` / `analyzing` / `analysisDuration` /
-`analysisStats` / `gmorkResult` / `wolfPairSuggestions`
+`analysisStats` / `wolfPairSuggestions`
 
 ### 仮説操作メソッド
 
@@ -136,13 +134,13 @@ recommended。
 | `onSeek(listener) → unsub` / `emitSeek(ev)` | EditorPane の時刻ボタン → 動画 player への seek |
 | `onJump(listener) → unsub` / `jumpTo(ev)` | ペイン行クリック → EditorPane のカーソル移動 |
 | `onCursorChange(listener) → unsub` / `emitCursorChange(line)` | EditorPane の物理カーソル移動のみ通知 (`ctx.cursorLine = X` の単純代入では発火しない) |
-| `onExternalLoad(listener) → unsub` / `loadHowl(text)` | InspectPane / GmorkDebugPane から howl を読み込んだ通知 (consumer は trial mode 等の副作用に使う) |
+| `onExternalLoad(listener) → unsub` / `loadHowl(text)` | InspectPane 等から howl を読み込んだ通知 (consumer は trial mode 等の副作用に使う) |
 
 host (consumer) 側でこれらを購読し、自前の動画 player / editor 操作 / モード切替と接続する。
 
 ### Lifecycle
 
-- `constructor()` — `$effect.root` 内で「解析リクエスト」「gmork 計算」の `$effect` を起動
+- `constructor()` — `$effect.root` 内で「解析リクエスト」の `$effect` を起動
 - `destroy()` — root effect を破棄、 listener を全 clear
 
 必ず `onDestroy(() => ctx.destroy())` で後始末すること。
@@ -183,7 +181,7 @@ src/lykaon/
   stringify.ts               ← howl → 日本語要約
   theme.css                  ← カラートークン (Catppuccin ベース)
   panes/                     ← EditorPane / StatusPane / AnalysisTable /
-                                HatiPane / InspectPane / GmorkDebugPane
+                                HatiPane / InspectPane
   status/                    ← StatusPane / AnalysisTable の sub-component
                                 (PlayerName / SpeciesIcon / SummaryTable / 等)
   editor/                    ← CodeMirror language / completion / theme
