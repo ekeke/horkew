@@ -1,0 +1,47 @@
+---
+title: 占い師が村人を占うと白判定が出る
+setup: { seer: 1, werewolf: 1, villager: 3 }
+---
+# Alice (占) が Carol (村人) を秘匿占い → 白判定。
+# Day 2 で Alice が結果 CO (Carol○) → Bob 処刑で村勝。
+# 既存 divines.howl (黒判定) と対称な基本ケース。
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=占い師
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+!Eve=村人
+!Alice 1夜 占い Carol
+
+# Day 1 投票で Eve 処刑
+Alice→Eve
+Bob→Eve
+Carol→Eve
+Dave→Eve
+Eve→Alice
+
+# Day 1 終わりの夜は人狼 attack なし → Day 2 へ
+Day 2:
+
+# Day 2 朝: Alice の seer CO (Carol = 白)
+Alice 占いCO Carol○
+
+# Day 2 投票で Bob 処刑 → 狼全滅 → 村勝
+Alice→Bob
+Bob→Alice
+Carol→Bob
+Dave→Bob
+
+# @expect-status Alice: alive
+# @expect-status Bob: dead
+# @expect-status Carol: alive
+# @expect-status Dave: alive
+# @expect-status Eve: dead
+# @expect-cause Bob: execution
+# @expect-cause Eve: execution
+# @expect-event seer_claim actor:Alice
+# @expect-event execution target:Bob
+# @expect-event execution target:Eve
+# @expect-result: villager_won
+# @expect-finished: true
