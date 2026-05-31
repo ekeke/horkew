@@ -1,12 +1,9 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
 import { selectCombinationsFromArray } from './combinatorics.ts'
+import { liarRolesIn, poweredVillageRolesIn, hasTrait, singleRoleByTrait } from './role-sets.ts'
 
-export const LiarRoles: SystemRole[] = ['werewolf', 'werehamster', 'immoralist', 'possessed', 'fanatic']
-
-const rolesInTestPlanning
-  = ['nekomata', 'mason', 'seer', 'medium', 'bodyguard'] as const
-type RoleInTestPlanning = typeof rolesInTestPlanning[number]
+const foxRole = singleRoleByTrait('passive', 'die-when-divined')
 
 export type RoleTest = {
   role: SystemRole | 'allpass',
@@ -32,29 +29,35 @@ export function buildRoleTestPlan(
   // 露呈人外数の管理の準備
   let numLiars = 0
 
-  const claims = Object.fromEntries(rolesInTestPlanning.map(role => [role, [] as Seat[]])) as {[role in RoleInTestPlanning]: Seat[]}
-  const poseAsCount = Object.fromEntries(rolesInTestPlanning.map(role => [role, 0])) as {[role in RoleInTestPlanning]: number}
-  const minClaimDay = Object.fromEntries(rolesInTestPlanning.map(role => [role, Infinity])) as {[role in RoleInTestPlanning]: number}
+  // setup 駆動で派生. 役職追加で自動追従.
+  const planningRoles = poweredVillageRolesIn(setup)
+  const planningRolesSet = new Set<SystemRole>(planningRoles)
+  const liarRolesSet = new Set<SystemRole>(liarRolesIn(setup))
+
+  const claims = new Map<SystemRole, Seat[]>(planningRoles.map(role => [role, []]))
+  const poseAsCount = new Map<SystemRole, number>(planningRoles.map(role => [role, 0]))
+  const minClaimDay = new Map<SystemRole, number>(planningRoles.map(role => [role, Infinity]))
 
   for ( const [seat, status] of village.statuses.entries() ) {
-    if ( !rolesInTestPlanning.includes(status.claimingRole as RoleInTestPlanning) ) continue
+    const role = status.claimingRole as SystemRole
+    if ( !planningRolesSet.has(role) ) continue
     if ( status.claiming ) {
-      const role = status.claimingRole as RoleInTestPlanning
-      claims[role].push(seat)
+      claims.get(role)!.push(seat)
       const claimDay = status.claimedAt || Infinity
-      minClaimDay[role] = Math.min(minClaimDay[role], claimDay)
+      minClaimDay.set(role, Math.min(minClaimDay.get(role)!, claimDay))
     }
   }
 
   let poseAsCountTotal = 0
   for ( const [role, count] of setup.entries() ) {
-    if ( LiarRoles.includes(role) ) {
+    if ( liarRolesSet.has(role) ) {
       numLiars += count
     }
-    if ( role === 'seer' || role === 'medium' || role === 'bodyguard' || role === 'mason' || role === 'nekomata' ) {
-      if ( claims[role].length <= 0 ) continue
-      const c = Math.max(0, claims[role].length - count)
-      poseAsCount[role] = c
+    if ( planningRolesSet.has(role) ) {
+      const claimSeats = claims.get(role)!
+      if ( claimSeats.length <= 0 ) continue
+      const c = Math.max(0, claimSeats.length - count)
+      poseAsCount.set(role, c)
       poseAsCountTotal += c
     }
   }
@@ -66,24 +69,27 @@ export function buildRoleTestPlan(
   // 注意: initialPossibilities で狐候補をフィルタしない。
   // prior パスでは確定席が狐候補から除外されるが、solver の交差検証
   // (finalizer の死体数チェック等) に確定席の狐仮説が必要なケースがある。
-  if (setup.has('werehamster') && setup.get('werehamster')! > 0 ) {
+  if (setup.has(foxRole) && setup.get(foxRole)! > 0 ) {
     const hamsterTests: RoleTest[] = []
     const allSeats = Array.from(village.statuses.keys())
-    const num = setup.get('werehamster')!
+    const num = setup.get(foxRole)!
     const iter = selectCombinationsFromArray(allSeats, num, num)
     for ( const [selected, rest] of iter ) {
-      hamsterTests.push({ role: 'werehamster', selected, rest })
+      hamsterTests.push({ role: foxRole, selected, rest })
     }
     roleTests.push(hamsterTests)
   }
 
-  for ( const role of rolesInTestPlanning ) {
-    if ( 'nekomata' !== role && claims[role].length === 0 && !hasHocusPocus ) continue
-    // 処刑道連れによる猫又候補を検出
-    const hasExecutionCurse = role === 'nekomata' && Array.from(village.statuses.values()).some(
+  for ( const role of planningRoles ) {
+    const hasCurseOnExecuted = hasTrait(role, 'reactive', 'curse-on-executed')
+    const claimSeats = claims.get(role)!
+    const minDay = minClaimDay.get(role)!
+    if ( !hasCurseOnExecuted && claimSeats.length === 0 && !hasHocusPocus ) continue
+    // 処刑道連れ役職 (猫又) の候補を検出
+    const hasExecutionCurse = hasCurseOnExecuted && Array.from(village.statuses.values()).some(
       s => s.causeOfDeath === 'cursed_by_executed_nekomata'
     )
-    if (claims[role].length === 0 && multipleVictims.length === 0 && !hasExecutionCurse && !hasHocusPocus) continue
+    if (claimSeats.length === 0 && multipleVictims.length === 0 && !hasExecutionCurse && !hasHocusPocus) continue
     const testsOfRole: RoleTest[] = []
     const num = setup.get(role) || 0
     if ( !num ) continue
@@ -97,7 +103,7 @@ export function buildRoleTestPlan(
         !status.surviving
         && (status.causeOfDeath !== 'execution' || status.noCoOpportunity)
         && !status.claiming
-        && (status.diedDay == null ? Infinity : status.diedDay) < minClaimDay[role]
+        && (status.diedDay == null ? Infinity : status.diedDay) < minDay
       ) {
         unrevealedSeats.push(seat)
       }
@@ -109,16 +115,16 @@ export function buildRoleTestPlan(
         unrevealedSeats.push(hocusSeat)
       }
     }
-    if (role === 'nekomata' && multipleVictims.length > 0) {
+    if (hasCurseOnExecuted && multipleVictims.length > 0) {
       for ( const seat of multipleVictims ) {
         const status = village.statuses.get(seat)!
-        if ( (status.diedDay == null ? Infinity : status.diedDay) < minClaimDay[role] ) {
+        if ( (status.diedDay == null ? Infinity : status.diedDay) < minDay ) {
           unrevealedSeats.push(seat)
         }
       }
-      // Also consider alive non-claiming seats when no one has claimed nekomata:
-      // multiple night deaths can be explained by seer-killed werehamster without nekomata curse
-      if ( claims[role].length === 0 ) {
+      // 複数夜死の説明には道連れ役職 (猫又) CO 不在のケースもある (狐呪殺等で説明可能).
+      // この場合、 生存中の非 CO 席も道連れ役職候補として考慮する.
+      if ( claimSeats.length === 0 ) {
         for ( const [seat, status] of village.statuses.entries() ) {
           if ( status.surviving && !status.claiming ) {
             unrevealedSeats.push(seat)
@@ -126,8 +132,8 @@ export function buildRoleTestPlan(
         }
       }
     }
-    // 処刑道連れ: 処刑された猫又候補を追加
-    if (role === 'nekomata' && hasExecutionCurse) {
+    // 処刑道連れ: 処刑された道連れ役職 (猫又) 候補を追加
+    if (hasCurseOnExecuted && hasExecutionCurse) {
       for ( const [seat, status] of village.statuses.entries() ) {
         if ( status.causeOfDeath === 'execution' && !status.claiming ) {
           // この処刑で道連れが発生したか確認
@@ -139,8 +145,8 @@ export function buildRoleTestPlan(
           }
         }
       }
-      // 道連れがあっても、生存者の猫又候補も考慮（道連れが偽の可能性）
-      if ( claims[role].length === 0 ) {
+      // 道連れがあっても、生存者の道連れ役職候補も考慮（道連れが偽の可能性）
+      if ( claimSeats.length === 0 ) {
         for ( const [seat, status] of village.statuses.entries() ) {
           if ( status.surviving && !status.claiming ) {
             unrevealedSeats.push(seat)
@@ -148,10 +154,9 @@ export function buildRoleTestPlan(
         }
       }
     }
-    if (role === 'mason') {
+    if (hasTrait(role, 'knowledge', 'know-masons')) {
       // 共有の仮説生成: CO者のアサーション構造を尊重する
       // CO者が相方を指名している場合、その指名と矛盾しない仮説のみを生成
-      const claimSeats = claims[role]
       // 共有は相方未公開の場合、COしていない生存者も相方候補になる
       const aliveCandidates: Seat[] = []
       for ( const [seat, status] of village.statuses.entries() ) {
@@ -190,7 +195,7 @@ export function buildRoleTestPlan(
         }
       }
     } else {
-      const pool = [...new Set([...claims[role], ...unrevealedSeats])]
+      const pool = [...new Set([...claimSeats, ...unrevealedSeats])]
       const iter = selectCombinationsFromArray(pool, num, num)
       for ( const [selected, rest] of iter ) {
         testsOfRole.push({ role, selected, rest })

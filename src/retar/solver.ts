@@ -10,9 +10,15 @@ import {
   ROLE_COUNT,
 } from './possibilities.ts'
 import type { RolePossibility } from './possibilities.ts'
+import { singleRoleByTrait, singleRoleBySeerResult } from './role-sets.ts'
 
-const WOLF_BIT = RoleBitIndex['werewolf']
-const HAMSTER_BIT = RoleBitIndex['werehamster']
+// 「seerResult='wolf' な役職」 = werewolf 1 種. 「passive:die-when-divined を持つ役職」 = werehamster 1 種.
+const wolfRole = singleRoleBySeerResult('wolf')
+const foxRole = singleRoleByTrait('passive', 'die-when-divined')
+const WOLF_BIT = RoleBitIndex[wolfRole]
+const HAMSTER_BIT = RoleBitIndex[foxRole]
+const WOLF_SIGNATURE = RoleSignatureBits[wolfRole]
+const FOX_SIGNATURE = RoleSignatureBits[foxRole]
 
 /*
  * Solver configuration — immutable across recursion.
@@ -256,10 +262,10 @@ export function solvePossibilities(
         fixedMap.set(possibility, [])
       }
       fixedMap.get(possibility)!.push(i)
-      if (possibility === RoleSignatureBits['werewolf'] && !survivors.get(i)) {
+      if (possibility === WOLF_SIGNATURE && !survivors.get(i)) {
         fixedDiedWolves++
       }
-      if (possibility === RoleSignatureBits['werehamster'] && !survivors.get(i)) {
+      if (possibility === FOX_SIGNATURE && !survivors.get(i)) {
         fixedDiedHamsters++
       }
       continue

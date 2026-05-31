@@ -3,6 +3,18 @@ import type { Possibilities } from './possibilities.ts'
 import type { AnalyzeContext } from './roleTesters.ts'
 import { solvePossibilities } from './solver.ts'
 import { dumpFinalizePre } from './dump.ts'
+import {
+  singleRoleByTrait,
+  singleRoleBySeerResult,
+  countByTraitIn,
+  countBySeerResultIn,
+} from './role-sets.ts'
+
+// hot path で繰り返し呼ばれるため module-level 解決.
+const guardRole = singleRoleByTrait('action', 'guard')
+const foxRole = singleRoleByTrait('passive', 'die-when-divined')
+const wolfRole = singleRoleBySeerResult('wolf')
+const followFoxRole = singleRoleByTrait('reactive', 'follow-fox-death')
 
 /**
  * 死体数の検証。各日の夜死体数が仮説と整合するか確認する。
@@ -16,6 +28,7 @@ export function checkDeathCounts(
   nightKillsByDay: Map<Day, Seat[]>,
   setup: Map<SystemRole, number>,
 ): boolean {
+  const immoralists = countByTraitIn(setup, 'reactive', 'follow-fox-death')
   DAY:
   for ( const [day, killed] of nightKillsByDay.entries() ) {
     if ( vs.day <= day ) continue DAY
@@ -23,7 +36,6 @@ export function checkDeathCounts(
     let expected = 1
     if ( addCount ) expected += addCount
     const actual = killed.length
-    const immoralists = setup.get('immoralist') || 0
     if ( actual === expected ) continue DAY
     if ( expected + immoralists < actual ) {
       return false
@@ -42,8 +54,8 @@ export function checkDeathCounts(
       for ( const [seat, status] of vs.statuses.entries() ) {
         if ( !status.surviving && status.diedDay! < day ) continue
         if (
-          context.possibilities.hasRole(seat, 'bodyguard')
-          || context.possibilities.hasRole(seat, 'werehamster')
+          context.possibilities.hasRole(seat, guardRole)
+          || context.possibilities.hasRole(seat, foxRole)
         ) {
           continue DAY
         }
@@ -61,6 +73,7 @@ export function updateDeathCountConstraints(
   nightKillsByDay: Map<Day, Seat[]>,
   setup: Map<SystemRole, number>,
 ): boolean {
+  const immoralists = countByTraitIn(setup, 'reactive', 'follow-fox-death')
   DAY:
   for ( const [day, killed] of nightKillsByDay.entries() ) {
     if ( vs.day <= day ) continue DAY
@@ -68,7 +81,6 @@ export function updateDeathCountConstraints(
     let expected = 1
     if ( addCount ) expected += addCount
     const actual = killed.length
-    const immoralists = setup.get('immoralist') || 0
     if ( actual === expected ) continue DAY
     if ( expected + immoralists < actual ) {
       return false
@@ -80,7 +92,7 @@ export function updateDeathCountConstraints(
       const hamsterDiedThisNight = context.hamstersKilledBySeer.some(h => h.day === day)
       if ( hamsterDiedThisNight ) {
         for ( let i=0; i<immoralists; i++ ) {
-          context.requireOneOf.push( killed.map(seat => ({ seat, role: 'immoralist' })) )
+          context.requireOneOf.push( killed.map(seat => ({ seat, role: followFoxRole })) )
         }
         continue DAY
       }
@@ -89,8 +101,8 @@ export function updateDeathCountConstraints(
       for ( const [seat, status] of vs.statuses.entries() ) {
         if ( !status.surviving && status.diedDay! < day ) continue
         if (
-          context.possibilities.hasRole(seat, 'bodyguard')
-          || context.possibilities.hasRole(seat, 'werehamster')
+          context.possibilities.hasRole(seat, guardRole)
+          || context.possibilities.hasRole(seat, foxRole)
         ) {
           continue DAY
         }
@@ -174,9 +186,11 @@ export function finalize(
 
 
   const survivors = cachedSurvivors
-  const numSurvivingHamsters = survivors.filter(seat => context.possibilities.isActualRole(seat, 'werehamster')).length
+  const numSurvivingHamsters = survivors.filter(seat => context.possibilities.isActualRole(seat, foxRole)).length
+  const setupWolves = countBySeerResultIn(setup, 'wolf')
+  const setupFoxes = countByTraitIn(setup, 'passive', 'die-when-divined')
   const maxSurvivingWolves = Math.min(
-    setup.get('werewolf') || Infinity,
+    setupWolves || Infinity,
     Math.floor((survivors.length - numSurvivingHamsters - 0.1) / 2)
   )
 
@@ -185,7 +199,7 @@ export function finalize(
     minSurvivingWolves: 1,
     maxSurvivingWolves,
     minSurvivingHamsters: 0,
-    maxSurvivingHamsters: setup.get('werehamster') || 0,
+    maxSurvivingHamsters: setupFoxes,
   }
 
   // 村勝ちまたは狼勝ちの場合は、狼の生存数の条件を変更する
@@ -211,8 +225,8 @@ export function finalize(
     // Count surviving wolves and hamsters
     let survWolves = 0, survHamsters = 0
     for (const seat of survivors) {
-      if (context.possibilities.isActualRole(seat, 'werewolf')) survWolves++
-      if (context.possibilities.isActualRole(seat, 'werehamster')) survHamsters++
+      if (context.possibilities.isActualRole(seat, wolfRole)) survWolves++
+      if (context.possibilities.isActualRole(seat, foxRole)) survHamsters++
     }
     const checkCondition = (minW: number, maxW: number, minH: number, maxH: number) =>
       survWolves >= minW && survWolves <= maxW && survHamsters >= minH && survHamsters <= maxH
