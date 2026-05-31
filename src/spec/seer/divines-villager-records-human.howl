@@ -1,0 +1,21 @@
+---
+title: 占い師が村人を秘匿占いすると divineHistory に human が記録される
+setup: { seer: 1, werewolf: 1, villager: 1 }
+rules:
+  first-victim: none
+---
+# Alice (占) が 0夜 に Carol (村) を秘匿占い → engine が seer 能力を dispatch し、
+# Alice の divineHistory[0] に { target: Carol, result: human } を記録する。
+# Day 1 投票で Bob 処刑 → 即終局 (検証対象外、 シナリオ終了用)。
+
+++Alice、Bob、Carol
+!Alice=占い師
+!Bob=人狼
+!Carol=村人
+!Alice 0夜 占い Carol
+
+Alice→Bob
+Carol→Bob
+Bob→Alice
+
+# @expect-divine actor:Alice night:0 target:Carol result:human

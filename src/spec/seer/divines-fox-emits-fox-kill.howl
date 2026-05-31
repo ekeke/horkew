@@ -1,0 +1,21 @@
+---
+title: 占い師が妖狐を占うと fox_kill event が発火する (呪殺)
+setup: { seer: 1, werehamster: 1, werewolf: 1, villager: 1 }
+rules:
+  first-victim: none
+---
+# 0夜 に Alice (占) が Bob (狐) を占い → 呪殺 → fox_kill event。
+# Day 1 投票で Carol (狼) 処刑 → 即終局 (終局のための最小投票、 検証対象外)。
+
+++Alice、Bob、Carol、Dave
+!Alice=占い師
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+!Alice 0夜 占い Bob
+
+Alice→Carol
+Dave→Carol
+Carol→Alice
+
+# @expect-event fox_kill target:Bob

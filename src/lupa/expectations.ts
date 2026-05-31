@@ -9,6 +9,8 @@
  * - `@expect-result: <result>`
  * - `@expect-finished: true|false`
  * - `@expect-day: <n>`
+ * - `@expect-divine actor:X night:N target:Y result:human|wolf`
+ *   (秘匿占い結果が player.divineHistory に記録されているか — engine の能力 dispatch を verify)
  *
  * checkpoint 概念は無く、 ゲーム終了時の 1 回のみ検証する (retar の `@expect`
  * とは検証タイミングが異なる)。
@@ -20,11 +22,13 @@ import type { GameEvent, GameState } from './types.ts'
 export type StatusExp = { player: string, value: 'alive' | 'dead' }
 export type CauseExp = { player: string, value: string }
 export type EventExp = { name: string, params: Record<string, string> }
+export type DivineExp = { actor: string, night: number, target: string, result: 'human' | 'wolf' }
 
 export type Expectations = {
   status: StatusExp[]
   cause: CauseExp[]
   event: EventExp[]
+  divine: DivineExp[]
   survivors?: string[]
   result?: string
   finished?: boolean
@@ -38,9 +42,10 @@ const survivorsRegex = /^#\s*@expect-survivors:\s*\[(.+)\]\s*$/
 const resultRegex = /^#\s*@expect-result:\s*(\S+)\s*$/
 const finishedRegex = /^#\s*@expect-finished:\s*(true|false)\s*$/
 const dayRegex = /^#\s*@expect-day:\s*(\d+)\s*$/
+const divineRegex = /^#\s*@expect-divine\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s+result:(human|wolf)\s*$/
 
 export function extractExpectations(rawText: string): Expectations {
-  const exps: Expectations = { status: [], cause: [], event: [] }
+  const exps: Expectations = { status: [], cause: [], event: [], divine: [] }
   const lines = rawText.split('\n')
   for (const raw of lines) {
     const line = raw.trim()
@@ -58,6 +63,10 @@ export function extractExpectations(rawText: string): Expectations {
         params[kv.slice(0, idx)] = kv.slice(idx + 1)
       }
       exps.event.push({ name: m[1], params })
+    } else if ((m = divineRegex.exec(line))) {
+      exps.divine.push({
+        actor: m[1], night: Number(m[2]), target: m[3], result: m[4] as 'human' | 'wolf',
+      })
     } else if ((m = survivorsRegex.exec(line))) {
       exps.survivors = m[1].split(',').map(s => s.trim()).filter(Boolean)
     } else if ((m = resultRegex.exec(line))) {
@@ -75,6 +84,7 @@ export function hasAnyExpectations(exps: Expectations): boolean {
   return exps.status.length > 0
     || exps.cause.length > 0
     || exps.event.length > 0
+    || exps.divine.length > 0
     || exps.survivors !== undefined
     || exps.result !== undefined
     || exps.finished !== undefined
@@ -143,6 +153,20 @@ export function verifyExpectations(
     const found = events.some(ev => eventMatches(ev, e.name, e.params, players))
     assert.ok(found,
       `event ${e.name} with ${JSON.stringify(e.params)} not found in events`)
+  }
+
+  for (const d of exps.divine) {
+    const actorSeat = seatOf(d.actor)
+    const targetSeat = seatOf(d.target)
+    const player = state.players.find(p => p.seat === actorSeat)
+    assert.ok(player, `player ${d.actor} not in state`)
+    const entry = player.divineHistory.get(d.night)
+    assert.ok(entry,
+      `${d.actor}: no divine entry for night ${d.night}`)
+    assert.strictEqual(entry.target, targetSeat,
+      `${d.actor} night ${d.night}: expected target ${d.target} but got seat ${entry.target}`)
+    assert.strictEqual(entry.result, d.result,
+      `${d.actor} night ${d.night}: expected result ${d.result} but got ${entry.result}`)
   }
 
   if (exps.survivors !== undefined) {
