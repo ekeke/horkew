@@ -1,0 +1,25 @@
+---
+title: first-victim=none ルール下では Night 0 で guard が effective に働く
+setup: { bodyguard: 1, werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# 初日犠牲者ルールが none のとき engine は Night 0 で attack を resolve するが、
+# 同 night に Alice (狩) が Carol を護衛していれば襲撃は無効化され peace 発火。
+# Day 1 投票で Bob 処刑 → 即終局 (検証対象外)。
+
+++Alice、Bob、Carol、Dave
+!Alice=狩人
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+!Alice 0夜 護衛 Carol
+!Bob 0夜 襲撃 Carol
+
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Bob→Alice
+
+# @expect-event peace
+# @expect-status Carol: alive

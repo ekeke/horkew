@@ -1,0 +1,32 @@
+---
+title: 護衛先と襲撃先が一致すると襲撃が無効化され peace event が emit される
+setup: { bodyguard: 1, werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# 1夜: Alice (狩) が Carol を護衛、 Bob (狼) が Carol を襲撃 → 護衛成功で
+# Carol は死なず、 engine は peace event を emit する。
+# Day 1 で Dave 処刑 (狼を残し Night 1 まで進める)、 Day 2 で Bob 処刑 → 終局
+# (終局は検証対象外)。
+
+++Alice、Bob、Carol、Dave
+!Alice=狩人
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+!Alice 1夜 護衛 Carol
+!Bob 1夜 襲撃 Carol
+
+Alice→Dave
+Bob→Dave
+Carol→Dave
+Dave→Alice
+
+Day 2:
+
+Alice→Bob
+Carol→Bob
+Bob→Alice
+
+# @expect-event peace
+# @expect-status Carol: alive

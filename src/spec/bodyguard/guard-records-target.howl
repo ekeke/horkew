@@ -1,0 +1,30 @@
+---
+title: 狩人の秘匿護衛が guardHistory に target として記録される
+setup: { bodyguard: 1, werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# Alice (狩) が 1夜 に Carol を秘匿護衛 → engine が能力を dispatch し、
+# Alice の guardHistory[1] に Carol を記録する。
+# Day 1 で Dave 処刑 (狼を残し Night 1 まで進める)、 Day 2 で Bob 処刑 → 終局
+# (終局は検証対象外)。
+
+++Alice、Bob、Carol、Dave
+!Alice=狩人
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+!Alice 1夜 護衛 Carol
+
+Alice→Dave
+Bob→Dave
+Carol→Dave
+Dave→Alice
+
+Day 2:
+
+Alice→Bob
+Carol→Bob
+Bob→Alice
+
+# @expect-guard actor:Alice night:1 target:Carol
