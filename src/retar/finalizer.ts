@@ -1,3 +1,4 @@
+import { systemRoles } from '../types/index.ts'
 import type { VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
 import type { AnalyzeContext } from './roleTesters.ts'
@@ -114,12 +115,15 @@ export function updateDeathCountConstraints(
 }
 
 export function createDebugStash(): DebugStash {
+  const roleTests = Object.fromEntries(
+    [...systemRoles.keys()].map(r => [r, 0]),
+  ) as Record<SystemRole, number>
+  const roleTestPasses = Object.fromEntries(
+    [...systemRoles.keys()].map(r => [r, 0]),
+  ) as Record<SystemRole, number>
   return {
     finalizerRuns: 0, finalizerMiddle: 0, finalizerPasses: 0, finalizerFails: 0,
-    seerTests: 0, mediumTests: 0, bodyguardTests: 0, masonTests: 0,
-    nekomataTests: 0, werehamsterTests: 0,
-    seerTestPasses: 0, mediumTestPasses: 0, bodyguardTestPasses: 0, masonTestPasses: 0,
-    nekomataTestPasses: 0, werehamsterTestPasses: 0,
+    roleTests, roleTestPasses,
     preFinalizeTests: 0, preFinalizePasses: 0,
   }
 }
@@ -129,18 +133,8 @@ export type DebugStash = {
   finalizerMiddle: number
   finalizerPasses: number
   finalizerFails: number
-  seerTests: number
-  mediumTests: number
-  bodyguardTests: number
-  masonTests: number
-  nekomataTests: number
-  werehamsterTests: number
-  seerTestPasses: number
-  mediumTestPasses: number
-  bodyguardTestPasses: number
-  masonTestPasses: number
-  nekomataTestPasses: number
-  werehamsterTestPasses: number
+  roleTests: Record<SystemRole, number>
+  roleTestPasses: Record<SystemRole, number>
   preFinalizeTests: number
   preFinalizePasses: number
 }

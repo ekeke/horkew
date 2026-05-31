@@ -455,9 +455,9 @@ export class VillageRetar {
   private testRole(scenario: RoleTest) {
     const { role, selected, rest } = scenario
     if (role === 'allpass') return true
-    ;(this.debugStash as Record<string, number>)[`${role}Tests`]++
+    this.debugStash.roleTests[role]++
     const result = runRoleTest(this.env, this.context, role, selected, rest)
-    if ( result ) (this.debugStash as Record<string, number>)[`${role}TestPasses`]++
+    if ( result ) this.debugStash.roleTestPasses[role]++
     return result
   }
 

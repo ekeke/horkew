@@ -330,16 +330,7 @@ impl VillageRetar {
         match scenario.role {
             RoleTestRole::AllPass => true,
             RoleTestRole::Role(role) => {
-                // Update debug stash
-                match role {
-                    SystemRole::Seer => self.debug_stash.seer_tests += 1,
-                    SystemRole::Medium => self.debug_stash.medium_tests += 1,
-                    SystemRole::Bodyguard => self.debug_stash.bodyguard_tests += 1,
-                    SystemRole::Mason => self.debug_stash.mason_tests += 1,
-                    SystemRole::Nekomata => self.debug_stash.nekomata_tests += 1,
-                    SystemRole::Werehamster => self.debug_stash.werehamster_tests += 1,
-                    _ => {}
-                }
+                self.debug_stash.role_tests[role.bit_index() as usize] += 1;
 
                 let env = RoleTesterEnv {
                     vs: &self.vs,
@@ -355,15 +346,7 @@ impl VillageRetar {
                 let result = test_role(&env, ctx, role, &scenario.selected, &scenario.rest);
 
                 if result {
-                    match role {
-                        SystemRole::Seer => self.debug_stash.seer_test_passes += 1,
-                        SystemRole::Medium => self.debug_stash.medium_test_passes += 1,
-                        SystemRole::Bodyguard => self.debug_stash.bodyguard_test_passes += 1,
-                        SystemRole::Mason => self.debug_stash.mason_test_passes += 1,
-                        SystemRole::Nekomata => self.debug_stash.nekomata_test_passes += 1,
-                        SystemRole::Werehamster => self.debug_stash.werehamster_test_passes += 1,
-                        _ => {}
-                    }
+                    self.debug_stash.role_test_passes[role.bit_index() as usize] += 1;
                 }
                 result
             }

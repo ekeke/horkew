@@ -7,7 +7,7 @@ import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from './index.ts'
 import type { AnalyzeOptions, AnalyzedPossibilities } from './index.ts'
-import type { SystemRole, Seat } from '../types/index.ts'
+import type { SystemRole } from '../types/index.ts'
 import type { DebugStash } from './finalizer.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -203,8 +203,7 @@ function assertSamePossibilities(
 
 function totalWork(s: DebugStash): number {
   return s.preFinalizeTests
-    + s.seerTests + s.mediumTests + s.bodyguardTests + s.masonTests
-    + s.nekomataTests + s.werehamsterTests
+    + Object.values(s.roleTests).reduce((a, b) => a + b, 0)
     + s.finalizerRuns
 }
 

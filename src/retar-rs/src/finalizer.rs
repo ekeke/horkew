@@ -4,26 +4,33 @@ use crate::role_testers::AnalyzeContext;
 use crate::solver::solve_possibilities;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Default)]
+const ROLE_COUNT: usize = SystemRole::ALL.len();
+
+#[derive(Debug, Clone)]
 pub struct DebugStash {
     pub finalizer_runs: u32,
     pub finalizer_middle: u32,
     pub finalizer_passes: u32,
     pub finalizer_fails: u32,
-    pub seer_tests: u32,
-    pub medium_tests: u32,
-    pub bodyguard_tests: u32,
-    pub mason_tests: u32,
-    pub nekomata_tests: u32,
-    pub werehamster_tests: u32,
-    pub seer_test_passes: u32,
-    pub medium_test_passes: u32,
-    pub bodyguard_test_passes: u32,
-    pub mason_test_passes: u32,
-    pub nekomata_test_passes: u32,
-    pub werehamster_test_passes: u32,
+    pub role_tests: [u32; ROLE_COUNT],
+    pub role_test_passes: [u32; ROLE_COUNT],
     pub pre_finalize_tests: u32,
     pub pre_finalize_passes: u32,
+}
+
+impl Default for DebugStash {
+    fn default() -> Self {
+        Self {
+            finalizer_runs: 0,
+            finalizer_middle: 0,
+            finalizer_passes: 0,
+            finalizer_fails: 0,
+            role_tests: [0; ROLE_COUNT],
+            role_test_passes: [0; ROLE_COUNT],
+            pre_finalize_tests: 0,
+            pre_finalize_passes: 0,
+        }
+    }
 }
 
 pub fn create_debug_stash() -> DebugStash {

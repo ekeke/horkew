@@ -188,12 +188,8 @@ function main() {
   }
 
   const stats: Stat[] = results.map(r => {
-    const totalTests =
-      r.stash.seerTests + r.stash.mediumTests + r.stash.bodyguardTests +
-      r.stash.masonTests + r.stash.nekomataTests + r.stash.werehamsterTests
-    const totalPasses =
-      r.stash.seerTestPasses + r.stash.mediumTestPasses + r.stash.bodyguardTestPasses +
-      r.stash.masonTestPasses + r.stash.nekomataTestPasses + r.stash.werehamsterTestPasses
+    const totalTests = Object.values(r.stash.roleTests).reduce((a, b) => a + b, 0)
+    const totalPasses = Object.values(r.stash.roleTestPasses).reduce((a, b) => a + b, 0)
     return {
       name: r.name,
       label: r.label,
