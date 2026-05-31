@@ -157,6 +157,28 @@ backtrack 内で 1 役職あたり最大 11 個の属性マスク AND/OR 演算�
 
 副次効果: `reactive:follow-fox-death` trait を [src/types/index.ts](../types/index.ts) に追加し immoralist の能力を明示。retar-rs (Rust) 側も同期。
 
+### 6. 役職追加コスト削減 (trait-purge Phase 1-6, 2026-05-31)
+
+役職追加で `src/hati/puzzle.ts` の `ALL_ROLES` / `VILLAGE_ROLES` / `OUTSIDER_ROLES` を手動更新する必要があった (paparazzi 追加時の漏れ実例あり)。これを [src/retar/role-sets.ts](../retar/role-sets.ts) の `allKnownRoles()` / `allVillageRoles()` / `allLiarRoles()` 経由の `systemRoles` 派生に置換。`wolfRisk.ts` の `'werewolf' as SystemRole` literal も `singleRoleBySeerResult('wolf')` const 経由に。
+
+retar 側も `LiarRoles` / `HumanRoles` / `RoleSignatureBits` / `RoleBitIndex` / `ROLE_COUNT` / `Liar` / `VillageRoles` を `systemRoles` 派生に統一。 paparazzi 追加で `LiarRoles` / `HumanRoles` に paparazzi が抜けていたバグも構造的に解消。
+
+BEFORE / AFTER (post-paparazzi-merge → trait-purge Phase 6 完了、同一機械):
+
+| 項目 | BEFORE (post-merge) | AFTER (trait-purge) | 差 |
+|---|---|---|---|
+| Total wall | 1028049ms | 1035704ms | +0.74% (誤差範囲) |
+| 14d-neko-10k endgame entries | 604 | 604 | 同 |
+| 14d-neko-10k endgame hits | 7701 | 7701 | 同 |
+| retar TS bench | 1398ms | 1429ms | +2.2% (誤差範囲) |
+| retar WASM bench | 336ms | 329ms | −2.1% (誤差範囲) |
+
+hot path 内の trait helper 呼び出しは module-level const に固定したため、追加 overhead はほぼゼロ。`countByTraitIn(setup, ...)` のような setup 集計関数も関数 entry で 1 回キャッシュする pattern を維持。
+
+副次効果: 役職追加時に retar / hati の役職名列挙テーブルを触らなくて良くなった。 systemRoles に entry を 1 つ追加するだけで Liar / Human / VILLAGE_ROLES / OUTSIDER_ROLES / RoleSignatureBits / ROLE_COUNT がすべて自動拡張。 paparazzi 追加で踏んだ `Liar` 欠落バグ (Phase 8 で発見) は構造的に発生不可能になる。
+
+retar-rs (Rust) 側は最小スコープで同期: `role_sets.rs` を新規追加して TS の helper 群を pub fn として export、 sync-check pass。 既存 Rust 内部ロジックは literal を残置 (役職追加で手動更新が必要、 段階的 trait 化は別タスク)。
+
 ## 未実装の最適化案
 
 ### 反復深化
