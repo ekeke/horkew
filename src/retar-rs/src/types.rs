@@ -78,7 +78,7 @@ impl SystemRole {
     }
 
     /// TS systemRoles.get(role).faction 相当.
-    pub fn faction(self) -> Faction {
+    pub const fn faction(self) -> Faction {
         match self {
             SystemRole::Villager
             | SystemRole::Seer
@@ -95,7 +95,7 @@ impl SystemRole {
     }
 
     /// TS systemRoles.get(role).seerResult 相当.
-    pub fn seer_result(self) -> EnumSpecies {
+    pub const fn seer_result(self) -> EnumSpecies {
         match self {
             SystemRole::Werewolf => EnumSpecies::Wolf,
             _ => EnumSpecies::Human,
@@ -103,7 +103,7 @@ impl SystemRole {
     }
 
     /// TS systemRoles.get(role).traits 相当: 役職に紐付く trait の集合
-    pub fn traits(self) -> &'static [RoleTrait] {
+    pub const fn traits(self) -> &'static [RoleTrait] {
         match self {
             SystemRole::Villager => &[],
             SystemRole::Seer => &[RoleTrait::ActionDivine],

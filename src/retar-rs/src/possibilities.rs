@@ -1,24 +1,55 @@
-use crate::types::{SystemRole, Seat};
+use crate::types::{EnumSpecies, Faction, SystemRole, Seat};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const ROLE_COUNT: usize = 12;
+pub const ROLE_COUNT: usize = SystemRole::ALL.len();
 /// in_pending が u32 ビットマスクなので最大32席（seat 1..=31）
 pub const MAX_SEATS: usize = 32;
 
-// Composite bitmask constants
-pub const ALL_ROLES: u16 = (1u16 << ROLE_COUNT) - 1; // 0b111111111111
-pub const HUMAN: u16 = ALL_ROLES & !SystemRole::Werewolf.bit_const();
-pub const VILLAGE_ROLES: u16 = SystemRole::Seer.bit_const()
-    | SystemRole::Medium.bit_const()
-    | SystemRole::Bodyguard.bit_const()
-    | SystemRole::Mason.bit_const()
-    | SystemRole::Nekomata.bit_const();
-pub const LIAR: u16 = SystemRole::Werewolf.bit_const()
-    | SystemRole::Possessed.bit_const()
-    | SystemRole::Fanatic.bit_const()
-    | SystemRole::Werehamster.bit_const()
-    | SystemRole::Immoralist.bit_const()
-    | SystemRole::Paparazzi.bit_const();
+// Composite bitmask constants — TS possibilities.ts:35-57 と同じ派生規則.
+// systemRoles に新役職が増えると SystemRole::ALL 経由で自動追従する.
+pub const ALL_ROLES: u16 = (1u16 << ROLE_COUNT) - 1;
+pub const HUMAN: u16 = compute_human();
+pub const VILLAGE_ROLES: u16 = compute_village_roles();
+pub const LIAR: u16 = compute_liar();
+
+const fn compute_human() -> u16 {
+    let mut bits = 0u16;
+    let mut i = 0;
+    while i < SystemRole::ALL.len() {
+        let role = SystemRole::ALL[i];
+        if matches!(role.seer_result(), EnumSpecies::Human) {
+            bits |= role.bit_const();
+        }
+        i += 1;
+    }
+    bits
+}
+
+const fn compute_village_roles() -> u16 {
+    let mut bits = 0u16;
+    let mut i = 0;
+    while i < SystemRole::ALL.len() {
+        let role = SystemRole::ALL[i];
+        if matches!(role.faction(), Faction::Village) && !role.traits().is_empty() {
+            bits |= role.bit_const();
+        }
+        i += 1;
+    }
+    bits
+}
+
+const fn compute_liar() -> u16 {
+    let mut bits = 0u16;
+    let mut i = 0;
+    while i < SystemRole::ALL.len() {
+        let role = SystemRole::ALL[i];
+        if !matches!(role.faction(), Faction::Village) {
+            bits |= role.bit_const();
+        }
+        i += 1;
+    }
+    bits
+}
 
 // Extend SystemRole with const fn for use in const expressions
 impl SystemRole {
