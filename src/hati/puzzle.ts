@@ -16,19 +16,18 @@ import { findScenario, scenarioToRoles, type Scenario } from '../lupa/scenarios.
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi } from './index.ts'
+import {
+  allKnownRoles, allVillageRoles, allLiarRoles,
+  singleRoleBySeerResult, singleRoleByTrait,
+} from '../retar/role-sets.ts'
 
-const ALL_ROLES: SystemRole[] = [
-  'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
-  'possessed', 'fanatic', 'immoralist', 'werehamster', 'werewolf',
-]
+// 役職追加で systemRoles に entry を加えれば自動追従.
+const ALL_ROLES: SystemRole[] = allKnownRoles()
+const VILLAGE_ROLES: SystemRole[] = allVillageRoles()
+const OUTSIDER_ROLES: SystemRole[] = allLiarRoles()
 
-const VILLAGE_ROLES: SystemRole[] = [
-  'villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata',
-]
-
-const OUTSIDER_ROLES: SystemRole[] = [
-  'possessed', 'fanatic', 'immoralist', 'werehamster', 'werewolf',
-]
+const wolfRole = singleRoleBySeerResult('wolf')
+const nekomataRole = singleRoleByTrait('reactive', 'curse-on-executed')
 
 const MIN_PLAYERS = 9
 const MAX_PLAYERS = 14
@@ -69,7 +68,7 @@ export function generateRandomSetup(rng: Rng): Map<SystemRole, number> {
       counts.set(role, counts.get(role)! + 1)
     }
 
-    const wolves = counts.get('werewolf')!
+    const wolves = counts.get(wolfRole)!
     let village = 0
     for (const r of VILLAGE_ROLES) village += counts.get(r)!
     let outsiders = 0
@@ -79,7 +78,7 @@ export function generateRandomSetup(rng: Rng): Map<SystemRole, number> {
     if (village < 1) continue
     if ((wolves + 1) * 2 >= n) continue
     if (outsiders * 2 >= n) continue
-    if (counts.get('nekomata')! > MAX_NEKOMATA) continue
+    if (counts.get(nekomataRole)! > MAX_NEKOMATA) continue
 
     const setup = new Map<SystemRole, number>()
     for (const [role, count] of counts) {

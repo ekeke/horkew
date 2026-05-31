@@ -9,6 +9,9 @@ import { Possibilities } from '../retar/possibilities.ts'
 import { buildThreatProfile, isThreatExceeded } from './index.ts'
 import { popCount32, forEachSeat, removeSeat } from './types.ts'
 import { ATTR, possibilityHasAttribute } from './role-attributes.ts'
+import { singleRoleBySeerResult } from '../retar/role-sets.ts'
+
+const wolfRole = singleRoleBySeerResult('wolf')
 
 export type WolfRiskResult = {
   /** 襲撃成功時の詰み率 (0.0-1.0)。seat インデックス、0番未使用 */
@@ -139,18 +142,18 @@ export function evaluateWolfRisk(
                 // 占い結果適用
                 if (grayTarget !== null) {
                   if (seerResult === 0) {
-                    working.denyRole(grayTarget, 'werewolf' as SystemRole)
+                    working.denyRole(grayTarget, wolfRole)
                   } else {
-                    working.fixRole(grayTarget, 'werewolf' as SystemRole)
+                    working.fixRole(grayTarget, wolfRole)
                   }
                 }
 
                 // 霊媒結果適用
                 if (_mediumCandidate !== null && executedSeat >= 0) {
                   if (mediumResult === 0) {
-                    working.denyRole(executedSeat, 'werewolf' as SystemRole)
+                    working.denyRole(executedSeat, wolfRole)
                   } else {
-                    working.fixRole(executedSeat, 'werewolf' as SystemRole)
+                    working.fixRole(executedSeat, wolfRole)
                   }
                 }
 

@@ -97,6 +97,16 @@ export function allKnownRoles(): SystemRole[] {
   return Array.from(systemRoles.keys())
 }
 
+/** systemRoles に登録されている全 村陣営役職 (setup 非依存). 配役生成等で使う. */
+export function allVillageRoles(): SystemRole[] {
+  return allKnownRoles().filter(r => systemRoles.get(r)!.faction === 'village')
+}
+
+/** systemRoles に登録されている全 人外陣営役職 (= faction !== 'village'、 setup 非依存). */
+export function allLiarRoles(): SystemRole[] {
+  return allKnownRoles().filter(r => systemRoles.get(r)!.faction !== 'village')
+}
+
 /** setup に含まれる役職 (count > 0). */
 export function allRolesIn(setup: Map<SystemRole, number>): SystemRole[] {
   const out: SystemRole[] = []
