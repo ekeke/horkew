@@ -118,7 +118,7 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
       emit({ type: 'night_kill', target: victim.seat })
     }
   } else {
-    resolveAttacks(state, night0ActionsList, emit, rng, foxKilledInNight0)
+    resolveAttacks(state, night0ActionsList, emit, rng, foxKilledInNight0, 0)
   }
 
   if (foxKilledInNight0) {
@@ -214,7 +214,7 @@ async function runGameLoop<E = never, Ext = unknown>(
         actionsList.push({ player, action })
       }
 
-      resolveNight(state, actionsList, events, emit, rng)
+      resolveNight(state, actionsList, events, emit, rng, night)
 
       checkWin(state)
       if (state.finished) {
@@ -440,6 +440,7 @@ function resolveNight(
   _events: unknown[],
   emit: EmitFn,
   rng: Rng,
+  night: number,
 ): void {
   const name = (seat: number) => state.players.find(p => p.seat === seat)!.name
   const speciesLabel = (r: 'human' | 'wolf' | null) => r === 'human' ? '○' : r === 'wolf' ? '●' : '?'
@@ -474,7 +475,7 @@ function resolveNight(
     }
   }
 
-  resolveAttacks(state, actions, emit, rng, foxKilled.size > 0)
+  resolveAttacks(state, actions, emit, rng, foxKilled.size > 0, night)
 
   // 妖狐死亡による背徳者後追い
   if (foxKilled.size > 0) {
@@ -493,6 +494,7 @@ function resolveAttacks(
   emit: EmitFn,
   rng: Rng,
   alreadyKilled: boolean,
+  night: number,
 ): void {
   // 護衛先を取得 (複数狩人がいる場合は全 guard を集約 — 各狩人の意思決定は独立)
   const guardTargets = new Set<number>()
@@ -526,6 +528,13 @@ function resolveAttacks(
     const chosenTarget = tiedTargets.length === 1 ? tiedTargets[0] : rng.pick(tiedTargets)
     const chosenAttackers = attacksByTarget.get(chosenTarget)!
     const target = state.players.find(p => p.seat === chosenTarget)!
+
+    // 集約結果を全 attack 提案者の attackHistory に記録 (engine の最終決定を共有)
+    for (const list of attacksByTarget.values()) {
+      for (const attacker of list) {
+        attacker.attackHistory.set(night, chosenTarget)
+      }
+    }
 
     if (hasTrait(target.role, 'passive', 'attack-immune')) {
       // 襲撃免疫 (妖狐) は襲撃されても死なない

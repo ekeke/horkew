@@ -57,6 +57,8 @@ export type PlayerState = {
   divineHistory: Map<number, { target: number, result: EnumSpecies }>
   // 狩人: 護衛先
   guardHistory: Map<number, number>
+  // 人狼: その夜にチームが集約決定した襲撃 target (= 全 attack 提案者が共有)
+  attackHistory: Map<number, number>
   // 狂人: 偽占い結果
   fakeDivineHistory: Map<number, { target: number, result: EnumSpecies }>
   // 予告先（次の夜に占う対象）

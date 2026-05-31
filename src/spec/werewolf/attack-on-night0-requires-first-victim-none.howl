@@ -1,0 +1,24 @@
+---
+title: first-victim=none ルール下では Night 0 で attack action が resolve される
+setup: { werewolf: 1, villager: 3 }
+rules:
+  first-victim: none
+---
+# 初日犠牲者ルールが none のとき engine は Night 0 で attack を resolve する。
+# Alice (狼) が 0夜 に Bob を襲撃 → Bob が Day 1 朝に死亡しており
+# attackHistory[0] に Bob が記録される。
+# Day 1 投票で Dave 処刑 → 残り Alice + Carol で狼勝終局 (終局は検証対象外)。
+
+++Alice、Bob、Carol、Dave
+!Alice=人狼
+!Bob=村人
+!Carol=村人
+!Dave=村人
+!Alice 0夜 襲撃 Bob
+
+Alice→Dave
+Carol→Dave
+Dave→Alice
+
+# @expect-attack actor:Alice night:0 target:Bob
+# @expect-status Bob: dead

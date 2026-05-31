@@ -11,6 +11,8 @@
  * - `@expect-day: <n>`
  * - `@expect-divine actor:X night:N target:Y result:human|wolf`
  *   (秘匿占い結果が player.divineHistory に記録されているか — engine の能力 dispatch を verify)
+ * - `@expect-attack actor:X night:N target:Y`
+ *   (engine が集約決定した襲撃 target が actor の attackHistory に記録されているか)
  *
  * checkpoint 概念は無く、 ゲーム終了時の 1 回のみ検証する (retar の `@expect`
  * とは検証タイミングが異なる)。
@@ -23,12 +25,14 @@ export type StatusExp = { player: string, value: 'alive' | 'dead' }
 export type CauseExp = { player: string, value: string }
 export type EventExp = { name: string, params: Record<string, string> }
 export type DivineExp = { actor: string, night: number, target: string, result: 'human' | 'wolf' }
+export type AttackExp = { actor: string, night: number, target: string }
 
 export type Expectations = {
   status: StatusExp[]
   cause: CauseExp[]
   event: EventExp[]
   divine: DivineExp[]
+  attack: AttackExp[]
   survivors?: string[]
   result?: string
   finished?: boolean
@@ -43,9 +47,10 @@ const resultRegex = /^#\s*@expect-result:\s*(\S+)\s*$/
 const finishedRegex = /^#\s*@expect-finished:\s*(true|false)\s*$/
 const dayRegex = /^#\s*@expect-day:\s*(\d+)\s*$/
 const divineRegex = /^#\s*@expect-divine\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s+result:(human|wolf)\s*$/
+const attackRegex = /^#\s*@expect-attack\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s*$/
 
 export function extractExpectations(rawText: string): Expectations {
-  const exps: Expectations = { status: [], cause: [], event: [], divine: [] }
+  const exps: Expectations = { status: [], cause: [], event: [], divine: [], attack: [] }
   const lines = rawText.split('\n')
   for (const raw of lines) {
     const line = raw.trim()
@@ -67,6 +72,10 @@ export function extractExpectations(rawText: string): Expectations {
       exps.divine.push({
         actor: m[1], night: Number(m[2]), target: m[3], result: m[4] as 'human' | 'wolf',
       })
+    } else if ((m = attackRegex.exec(line))) {
+      exps.attack.push({
+        actor: m[1], night: Number(m[2]), target: m[3],
+      })
     } else if ((m = survivorsRegex.exec(line))) {
       exps.survivors = m[1].split(',').map(s => s.trim()).filter(Boolean)
     } else if ((m = resultRegex.exec(line))) {
@@ -85,6 +94,7 @@ export function hasAnyExpectations(exps: Expectations): boolean {
     || exps.cause.length > 0
     || exps.event.length > 0
     || exps.divine.length > 0
+    || exps.attack.length > 0
     || exps.survivors !== undefined
     || exps.result !== undefined
     || exps.finished !== undefined
@@ -167,6 +177,16 @@ export function verifyExpectations(
       `${d.actor} night ${d.night}: expected target ${d.target} but got seat ${entry.target}`)
     assert.strictEqual(entry.result, d.result,
       `${d.actor} night ${d.night}: expected result ${d.result} but got ${entry.result}`)
+  }
+
+  for (const a of exps.attack) {
+    const actorSeat = seatOf(a.actor)
+    const targetSeat = seatOf(a.target)
+    const player = state.players.find(p => p.seat === actorSeat)
+    assert.ok(player, `player ${a.actor} not in state`)
+    const recorded = player.attackHistory.get(a.night)
+    assert.strictEqual(recorded, targetSeat,
+      `${a.actor} night ${a.night}: expected attack target ${a.target} but got seat ${recorded}`)
   }
 
   if (exps.survivors !== undefined) {
