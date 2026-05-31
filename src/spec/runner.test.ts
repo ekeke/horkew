@@ -1,16 +1,11 @@
 /**
- * Spec suite runner.
+ * Spec suite runner — lupa engine の振る舞い仕様テスト。
  *
- * src/spec/**\/*.howl を再帰発見し、1 ファイルから lupa engine assertion
- * (`@expect-*`) と retar 推理 assertion (`@expect`, `@expect-faction` 等) を
- * 両方検査する。
+ * src/spec/**\/*.howl を再帰発見し、1 ファイルを lupa engine で駆動して最終
+ * state / events に対する `@expect-*` 系アサーションを検証する。
  *
- * - retar checkpoint loop: アノテーションが見つかった各 checkpoint で
- *   partial game に対する retar.analyze() を実行
- * - lupa final run: シナリオ全体を engine に流して最終 state / events を検証
- *
- * 同名アノテーション `@expect-status` は両方で検証される (両者の意味論が
- * 一致すべきという前提)。
+ * retar 推理アサーションはここでは扱わない (retar 自身の関心事は
+ * src/retar/scenarios/ + src/retar/integration.test.ts で完結)。
  */
 
 import { describe, test } from 'node:test'
@@ -23,7 +18,6 @@ import { runGame } from '../lupa/engine.ts'
 import { buildLupaScenario } from '../lupa/howl-adapter.ts'
 import type { GameEvent } from '../lupa/types.ts'
 import { extractExpectations, verifyExpectations, hasAnyExpectations } from '../lupa/expectations.ts'
-import { extractCheckpoints, runCheckpointTests } from '../retar/expectations.ts'
 import { loadScenariosRecursive } from './loadScenarios.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -40,22 +34,10 @@ if (scenarios.length === 0) {
 } else {
   describe('spec suite', () => {
     for (const { relPath, content } of scenarios) {
-      const { frontmatter, bodyLines, checkpoints } = extractCheckpoints(content)
       const { meta } = parse(content)
       const title = meta.title || relPath
 
       describe(`${relPath} — ${title}`, () => {
-        // retar checkpoints
-        for (let i = 0; i < checkpoints.length; i++) {
-          const cp = checkpoints[i]
-          const partialText = frontmatter + bodyLines.slice(0, cp.lineNumber).join('\n')
-          const label = checkpoints.length === 1
-            ? `retar checkpoint (line ${cp.lineNumber + 1})`
-            : `retar checkpoint ${i + 1} (line ${cp.lineNumber + 1})`
-          runCheckpointTests(partialText, meta, cp, label)
-        }
-
-        // lupa final run
         const lupaExps = extractExpectations(content)
         if (hasAnyExpectations(lupaExps)) {
           test('lupa engine runs and matches expectations', async () => {
