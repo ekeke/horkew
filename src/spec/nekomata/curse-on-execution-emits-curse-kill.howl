@@ -1,0 +1,20 @@
+---
+title: 猫又が処刑されると curse_kill event が emit される (道連れ)
+setup: { nekomata: 1, werewolf: 1, villager: 2 }
+---
+# Day 1 投票で Alice (猫又) 処刑 → engine が curse-on-executed trait を発動し、
+# 生存者から random で 1 人を道連れ → curse_kill event 発火。
+# 道連れ target は random なので個別 target は verify せず event 発火のみ確認。
+
+++Alice、Bob、Carol、Dave
+!Alice=猫又
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+
+Alice→Alice
+Bob→Alice
+Carol→Alice
+Dave→Alice
+
+# @expect-event curse_kill

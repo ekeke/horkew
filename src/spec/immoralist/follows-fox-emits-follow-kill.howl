@@ -1,0 +1,19 @@
+---
+title: 妖狐が死亡すると背徳者の follow_kill event が emit される (後追い)
+setup: { immoralist: 1, werehamster: 1, werewolf: 1, villager: 1 }
+---
+# Day 1 投票で Bob (狐) 処刑 → engine が follow-fox-death trait を発動し、
+# Alice (背徳者) を follow_kill で kill。
+
+++Alice、Bob、Carol、Dave
+!Alice=背徳者
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+
+Alice→Bob
+Bob→Alice
+Carol→Bob
+Dave→Bob
+
+# @expect-event follow_kill target:Alice

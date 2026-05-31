@@ -1,0 +1,30 @@
+---
+title: 猫又が襲撃されると猫又と襲撃した狼が両方死亡する (道連れ)
+setup: { nekomata: 1, werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# 1夜: Bob (狼) が Alice (猫又) を襲撃 → engine が curse-on-killed trait を発動し、
+# 猫又本体と襲撃した狼を両方 kill (night_kill 2 件 emit)。
+# Day 1 で Dave 処刑 (Night 1 まで進めるため)、 Day 2 投票で終局 (検証対象外)。
+
+++Alice、Bob、Carol、Dave
+!Alice=猫又
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+!Bob 1夜 襲撃 Alice
+
+Alice→Dave
+Bob→Dave
+Carol→Dave
+Dave→Alice
+
+Day 2:
+
+Carol→Carol
+
+# @expect-status Alice: dead
+# @expect-status Bob: dead
+# @expect-event night_kill target:Alice
+# @expect-event night_kill target:Bob

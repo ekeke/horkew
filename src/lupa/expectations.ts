@@ -45,7 +45,7 @@ export type Expectations = {
 
 const statusRegex = /^#\s*@expect-status\s+(\S+):\s*(alive|dead)\s*$/
 const causeRegex = /^#\s*@expect-cause\s+(\S+):\s*(\S+)\s*$/
-const eventRegex = /^#\s*@expect-event\s+(\S+)\s+(.+)$/
+const eventRegex = /^#\s*@expect-event\s+(\S+)(?:\s+(.+))?\s*$/
 const survivorsRegex = /^#\s*@expect-survivors:\s*\[(.+)\]\s*$/
 const resultRegex = /^#\s*@expect-result:\s*(\S+)\s*$/
 const finishedRegex = /^#\s*@expect-finished:\s*(true|false)\s*$/
@@ -67,10 +67,12 @@ export function extractExpectations(rawText: string): Expectations {
       exps.cause.push({ player: m[1], value: m[2] })
     } else if ((m = eventRegex.exec(line))) {
       const params: Record<string, string> = {}
-      for (const kv of m[2].split(/\s+/)) {
-        const idx = kv.indexOf(':')
-        if (idx < 0) continue
-        params[kv.slice(0, idx)] = kv.slice(idx + 1)
+      if (m[2]) {
+        for (const kv of m[2].split(/\s+/)) {
+          const idx = kv.indexOf(':')
+          if (idx < 0) continue
+          params[kv.slice(0, idx)] = kv.slice(idx + 1)
+        }
       }
       exps.event.push({ name: m[1], params })
     } else if ((m = divineRegex.exec(line))) {
