@@ -1,24 +1,16 @@
-use crate::types::{CauseOfDeath, VillageStatus, SystemRole, Seat};
+use crate::types::{CauseOfDeath, VillageStatus, SystemRole, RoleTrait, Seat};
 use crate::possibilities::Possibilities;
 use crate::combinatorics::select_combinations_from_array;
+use crate::role_sets::{
+    liar_roles_in, powered_village_roles_in, has_trait, single_role_by_trait,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const LIAR_ROLES: &[SystemRole] = &[
-    SystemRole::Werewolf,
-    SystemRole::Werehamster,
-    SystemRole::Immoralist,
-    SystemRole::Possessed,
-    SystemRole::Fanatic,
-    SystemRole::Paparazzi,
-];
-
-const ROLES_IN_TEST_PLANNING: &[SystemRole] = &[
-    SystemRole::Nekomata,
-    SystemRole::Mason,
-    SystemRole::Seer,
-    SystemRole::Medium,
-    SystemRole::Bodyguard,
-];
+/// claiming_role 文字列から SystemRole に変換する. SystemRole::ALL + Display 派生で
+/// systemRoles 拡張に自動追従.
+fn role_from_str(s: &str) -> Option<SystemRole> {
+    SystemRole::ALL.iter().copied().find(|r| r.to_string() == s)
+}
 
 #[derive(Debug, Clone)]
 pub struct RoleTest {
@@ -51,41 +43,40 @@ pub fn build_role_test_plan(
         .unwrap_or_default();
     let has_hocus_pocus = !hocus_seats.is_empty();
 
+    // setup 駆動で派生. 役職追加で自動追従.
+    let planning_roles = powered_village_roles_in(setup);
+    let planning_roles_set: BTreeSet<SystemRole> = planning_roles.iter().copied().collect();
+    let liar_roles_set: BTreeSet<SystemRole> = liar_roles_in(setup).into_iter().collect();
+    let fox_role = single_role_by_trait(RoleTrait::PassiveDieWhenDivined);
+
     let mut num_liars: u32 = 0;
 
     let mut claims: BTreeMap<SystemRole, Vec<Seat>> = BTreeMap::new();
     let mut min_claim_day: BTreeMap<SystemRole, i32> = BTreeMap::new();
-    for &role in ROLES_IN_TEST_PLANNING {
+    for &role in &planning_roles {
         claims.insert(role, Vec::new());
         min_claim_day.insert(role, i32::MAX);
     }
 
     for (&seat, status) in &village.statuses {
-        let role_str = &status.claiming_role;
-        let role = match role_str.as_str() {
-            "nekomata" => Some(SystemRole::Nekomata),
-            "mason" => Some(SystemRole::Mason),
-            "seer" => Some(SystemRole::Seer),
-            "medium" => Some(SystemRole::Medium),
-            "bodyguard" => Some(SystemRole::Bodyguard),
-            _ => None,
+        let role = match role_from_str(&status.claiming_role) {
+            Some(r) if planning_roles_set.contains(&r) => r,
+            _ => continue,
         };
-        if let Some(role) = role {
-            if status.claiming {
-                claims.entry(role).or_default().push(seat);
-                let claim_day = status.claimed_at.unwrap_or(i32::MAX);
-                let entry = min_claim_day.entry(role).or_insert(i32::MAX);
-                *entry = (*entry).min(claim_day);
-            }
+        if status.claiming {
+            claims.entry(role).or_default().push(seat);
+            let claim_day = status.claimed_at.unwrap_or(i32::MAX);
+            let entry = min_claim_day.entry(role).or_insert(i32::MAX);
+            *entry = (*entry).min(claim_day);
         }
     }
 
     let mut pose_as_count_total: u32 = 0;
     for (&role, &count) in setup {
-        if LIAR_ROLES.contains(&role) {
+        if liar_roles_set.contains(&role) {
             num_liars += count;
         }
-        if ROLES_IN_TEST_PLANNING.contains(&role) {
+        if planning_roles_set.contains(&role) {
             let claim_count = claims.get(&role).map(|v| v.len()).unwrap_or(0) as u32;
             if claim_count == 0 {
                 continue;
@@ -97,36 +88,37 @@ pub fn build_role_test_plan(
 
     let mut role_tests: Vec<Vec<RoleTest>> = Vec::new();
 
-    // Werehamster hypotheses
+    // 狐 (foxRole = die-when-divined trait) ハイポセシス
     // 注意: initialPossibilities で狐候補をフィルタしない。
     // prior パスでは確定席が狐候補から除外されるが、solver の交差検証に必要。
-    if let Some(&hamster_count) = setup.get(&SystemRole::Werehamster) {
-        if hamster_count > 0 {
+    if let Some(&fox_count) = setup.get(&fox_role) {
+        if fox_count > 0 {
             let mut all_seats: Vec<Seat> = village.statuses.keys().cloned().collect();
             all_seats.sort();
-            let mut hamster_tests = Vec::new();
+            let mut fox_tests = Vec::new();
             select_combinations_from_array(
                 &all_seats,
-                hamster_count as usize,
-                hamster_count as usize,
+                fox_count as usize,
+                fox_count as usize,
                 &mut |selected, rest| {
-                    hamster_tests.push(RoleTest {
-                        role: RoleTestRole::Role(SystemRole::Werehamster),
+                    fox_tests.push(RoleTest {
+                        role: RoleTestRole::Role(fox_role),
                         selected: selected.to_vec(),
                         rest: rest.to_vec(),
                     });
                 },
             );
-            role_tests.push(hamster_tests);
+            role_tests.push(fox_tests);
         }
     }
 
-    for &role in ROLES_IN_TEST_PLANNING {
+    for &role in &planning_roles {
+        let has_curse_on_executed = has_trait(role, RoleTrait::ReactiveCurseOnExecuted);
         let role_claims = claims.get(&role).cloned().unwrap_or_default();
-        if role != SystemRole::Nekomata && role_claims.is_empty() && !has_hocus_pocus {
+        if !has_curse_on_executed && role_claims.is_empty() && !has_hocus_pocus {
             continue;
         }
-        let has_execution_curse = role == SystemRole::Nekomata
+        let has_execution_curse = has_curse_on_executed
             && village.statuses.values().any(|s| s.cause_of_death == CauseOfDeath::CursedByExecutedNekomata);
         if role_claims.is_empty() && multiple_victims.is_empty() && !has_execution_curse && !has_hocus_pocus {
             continue;
@@ -159,7 +151,7 @@ pub fn build_role_test_plan(
             }
         }
 
-        if role == SystemRole::Nekomata && !multiple_victims.is_empty() {
+        if has_curse_on_executed && !multiple_victims.is_empty() {
             for &seat in multiple_victims {
                 let status = village.statuses.get(&seat).unwrap();
                 if status.died_day.unwrap_or(i32::MAX) < min_day {
@@ -175,8 +167,8 @@ pub fn build_role_test_plan(
             }
         }
 
-        // 処刑道連れ: 処刑された猫又候補を追加
-        if role == SystemRole::Nekomata && has_execution_curse {
+        // 処刑道連れ: 処刑された道連れ役職 (猫又) 候補を追加
+        if has_curse_on_executed && has_execution_curse {
             for (&seat, status) in &village.statuses {
                 if status.cause_of_death == CauseOfDeath::Execution && !status.claiming {
                     let has_curse_on_same_day = village.statuses.values().any(|s| {
@@ -197,8 +189,8 @@ pub fn build_role_test_plan(
             }
         }
 
-        if role == SystemRole::Mason {
-            // Mason hypothesis generation respecting partner assertions
+        if has_trait(role, RoleTrait::KnowledgeKnowMasons) {
+            // 共有 (mason) ハイポセシス生成: CO 者の相方 assertion を尊重する
             let claim_seats = &role_claims;
             let mut alive_candidates: Vec<Seat> = Vec::new();
             for (&seat, status) in &village.statuses {
