@@ -1,8 +1,18 @@
-use crate::types::{CauseOfDeath, VillageStatus, VillageResult, SystemRole, Seat, Day};
+use crate::types::{CauseOfDeath, EnumSpecies, RoleTrait, VillageStatus, VillageResult, SystemRole, Seat, Day};
 use crate::possibilities::Possibilities;
 use crate::role_testers::AnalyzeContext;
+use crate::role_sets::{
+    count_by_seer_result_in, count_by_trait_in, single_role_by_seer_result, single_role_by_trait,
+};
 use crate::solver::solve_possibilities;
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
+
+// hot path で繰り返し参照するため module-level lazy 解決. TS finalizer.ts:14-17 と同じ pattern.
+static GUARD_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::ActionGuard));
+static FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::PassiveDieWhenDivined));
+static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
+static FOLLOW_FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::ReactiveFollowFoxDeath));
 
 const ROLE_COUNT: usize = SystemRole::ALL.len();
 
@@ -61,7 +71,7 @@ pub fn check_death_counts(
             expected += add_count as i32;
         }
         let actual = killed.len() as i32;
-        let immoralists = setup.get(&SystemRole::Immoralist).copied().unwrap_or(0) as i32;
+        let immoralists = count_by_trait_in(setup, RoleTrait::ReactiveFollowFoxDeath) as i32;
         if actual == expected {
             continue;
         }
@@ -86,8 +96,8 @@ pub fn check_death_counts(
                 if !status.surviving && status.died_day.unwrap_or(0) < day {
                     continue;
                 }
-                if context.possibilities.has_role(seat, SystemRole::Bodyguard)
-                    || context.possibilities.has_role(seat, SystemRole::Werehamster)
+                if context.possibilities.has_role(seat, *GUARD_ROLE)
+                    || context.possibilities.has_role(seat, *FOX_ROLE)
                 {
                     has_protector = true;
                     break;
@@ -119,7 +129,7 @@ pub fn update_death_count_constraints(
             expected += add_count as i32;
         }
         let actual = killed.len() as i32;
-        let immoralists = setup.get(&SystemRole::Immoralist).copied().unwrap_or(0) as i32;
+        let immoralists = count_by_trait_in(setup, RoleTrait::ReactiveFollowFoxDeath) as i32;
         if actual == expected {
             continue;
         }
@@ -139,7 +149,7 @@ pub fn update_death_count_constraints(
                             .iter()
                             .map(|&seat| crate::role_testers::SeatRole {
                                 seat,
-                                role: SystemRole::Immoralist,
+                                role: *FOLLOW_FOX_ROLE,
                             })
                             .collect(),
                     );
@@ -153,8 +163,8 @@ pub fn update_death_count_constraints(
                 if !status.surviving && status.died_day.unwrap_or(0) < day {
                     continue;
                 }
-                if context.possibilities.has_role(seat, SystemRole::Bodyguard)
-                    || context.possibilities.has_role(seat, SystemRole::Werehamster)
+                if context.possibilities.has_role(seat, *GUARD_ROLE)
+                    || context.possibilities.has_role(seat, *FOX_ROLE)
                 {
                     has_protector = true;
                     break;
@@ -202,10 +212,11 @@ pub fn finalize(
     let survivors = cached_survivors;
     let num_surviving_hamsters = survivors
         .iter()
-        .filter(|&&seat| context.possibilities.is_actual_role(seat, SystemRole::Werehamster))
+        .filter(|&&seat| context.possibilities.is_actual_role(seat, *FOX_ROLE))
         .count() as u32;
 
-    let wolf_count = setup.get(&SystemRole::Werewolf).copied().unwrap_or(u32::MAX);
+    // TS finalizer.ts:184 と同じ. setup に wolf 役職が無ければ 0 が返る.
+    let wolf_count = count_by_seer_result_in(setup, EnumSpecies::Wolf);
     let raw_max = if survivors.len() as u32 > num_surviving_hamsters {
         (survivors.len() as u32 - num_surviving_hamsters - 1) / 2
     } else {
@@ -217,7 +228,7 @@ pub fn finalize(
         min_surviving_wolves: 1,
         max_surviving_wolves,
         min_surviving_hamsters: 0,
-        max_surviving_hamsters: setup.get(&SystemRole::Werehamster).copied().unwrap_or(0),
+        max_surviving_hamsters: count_by_trait_in(setup, RoleTrait::PassiveDieWhenDivined),
     };
 
     if vs.result == Some(VillageResult::WerewolfWon) {
@@ -240,10 +251,10 @@ pub fn finalize(
         let mut surv_wolves = 0u32;
         let mut surv_hamsters = 0u32;
         for &seat in survivors {
-            if context.possibilities.is_actual_role(seat, SystemRole::Werewolf) {
+            if context.possibilities.is_actual_role(seat, *WOLF_ROLE) {
                 surv_wolves += 1;
             }
-            if context.possibilities.is_actual_role(seat, SystemRole::Werehamster) {
+            if context.possibilities.is_actual_role(seat, *FOX_ROLE) {
                 surv_hamsters += 1;
             }
         }

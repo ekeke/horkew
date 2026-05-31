@@ -1,6 +1,12 @@
-use crate::types::{CauseOfDeath, RoleTrait, SeatStatus, VillageStatus, SystemRole, Seat, Day};
+use crate::types::{CauseOfDeath, EnumSpecies, RoleTrait, SeatStatus, VillageStatus, SystemRole, Seat, Day};
 use crate::possibilities::Possibilities;
+use crate::role_sets::{has_trait, single_role_by_seer_result, single_role_by_trait};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::LazyLock;
+
+// hot path で繰り返し参照するため module-level lazy 解決. TS roleTesters.ts:6-7 と同じ pattern.
+static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
+static FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::PassiveDieWhenDivined));
 
 pub struct DeathChronicle {
     pub add: Vec<i8>,
@@ -201,7 +207,12 @@ fn verify_hamster_passive(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selecte
         if living_hamsters == 0 {
             let status = get_status(env, seat);
             if status.surviving || last_hamster_died_at < status.died_day.unwrap_or(i32::MAX) {
-                ctx.possibilities.deny_role(seat, SystemRole::Immoralist);
+                // 後追い (reactive:follow-fox-death) trait を持つ役職を deny. TS roleTesters.ts:135-138 と同じ.
+                for &follow_fox in SystemRole::ALL.iter() {
+                    if has_trait(follow_fox, RoleTrait::ReactiveFollowFoxDeath) {
+                        ctx.possibilities.deny_role(seat, follow_fox);
+                    }
+                }
             }
         }
     }
@@ -285,7 +296,7 @@ fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
         // Process assertions
         for (&assertion_night, assertion) in &self_status.assertions {
             if assertion.species == Some(crate::types::EnumSpecies::Wolf) {
-                if !ctx.possibilities.fix_role(assertion.target, SystemRole::Werewolf) {
+                if !ctx.possibilities.fix_role(assertion.target, *WOLF_ROLE) {
                     return false;
                 }
                 let target_status = get_status(env, assertion.target);
@@ -297,7 +308,7 @@ fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
                         }
                     }
                 }
-            } else if ctx.possibilities.is_actual_role(assertion.target, SystemRole::Werehamster) {
+            } else if ctx.possibilities.is_actual_role(assertion.target, *FOX_ROLE) {
                 let target_status = get_status(env, assertion.target);
                 if target_status.surviving {
                     return false;
@@ -333,7 +344,7 @@ fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
             if self_status.assertions.contains_key(&night) {
                 continue;
             }
-            if ctx.possibilities.is_actual_role(forecast_target, SystemRole::Werehamster) {
+            if ctx.possibilities.is_actual_role(forecast_target, *FOX_ROLE) {
                 let target_status = get_status(env, forecast_target);
                 if target_status.surviving {
                     return false;
@@ -413,7 +424,7 @@ fn verify_mediumship_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, sele
         let self_status = get_status(env, seat);
         for (_, assertion) in &self_status.assertions {
             if assertion.species == Some(crate::types::EnumSpecies::Wolf) {
-                if !ctx.possibilities.fix_role(assertion.target, SystemRole::Werewolf) {
+                if !ctx.possibilities.fix_role(assertion.target, *WOLF_ROLE) {
                     return false;
                 }
             } else {
@@ -541,7 +552,7 @@ fn verify_nekomata_curse(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
                 } else {
                     ok = true;
                     if target_status.cause_of_death == CauseOfDeath::CursedByKilledNekomata {
-                        if !ctx.possibilities.fix_role(target_seat, SystemRole::Werewolf) {
+                        if !ctx.possibilities.fix_role(target_seat, *WOLF_ROLE) {
                             return false;
                         }
                     }
@@ -560,7 +571,7 @@ fn verify_nekomata_curse(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
                 .iter()
                 .map(|&seat| SeatRole {
                     seat,
-                    role: SystemRole::Werewolf,
+                    role: *WOLF_ROLE,
                 })
                 .collect(),
         );

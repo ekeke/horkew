@@ -1,15 +1,32 @@
-use crate::types::{CauseOfDeath, VillageStatus, VillageResult, SystemRole, Seat, Day, AnalyzeOptions};
+use crate::types::{
+    AnalyzeOptions, CauseOfDeath, Day, EnumSpecies, Faction, RoleTrait, Seat, SystemRole,
+    VillageResult, VillageStatus,
+};
 use crate::possibilities::Possibilities;
 use crate::combinatorics::generate_combinations;
 use crate::role_testers::{
     AnalyzeContext, RoleTesterEnv, DeathChronicle, SeatRole, ContextSnapshot,
     save_into, restore_context, test_role,
 };
+use crate::role_sets::{
+    has_trait, powered_village_roles_in, single_role_by_predicate, single_role_by_seer_result,
+    single_role_by_trait,
+};
 use crate::plan_builder::{build_role_test_plan, RoleTest, RoleTestRole};
 use crate::finalizer::{
     DebugStash, HamsterWinPath, update_death_count_constraints, finalize,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::LazyLock;
+
+// hot path で繰り返し参照するため module-level lazy 解決. TS index.ts:11-18 と同じ pattern.
+static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
+static FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::PassiveDieWhenDivined));
+static VILLAGER_ROLE: LazyLock<SystemRole> = LazyLock::new(|| {
+    single_role_by_predicate(|r| r.faction() == Faction::Village && r.traits().is_empty())
+});
+static NEKOMATA_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::ReactiveCurseOnExecuted));
+static IMMORALIST_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::ReactiveFollowFoxDeath));
 
 pub struct AnalyzeResult {
     pub elapsed_ms: f64,
@@ -197,11 +214,11 @@ impl VillageRetar {
         let wolf_candidates: Vec<Seat> = self
             .last_deaths
             .iter()
-            .filter(|&&seat| poss1.has_role(seat, SystemRole::Werewolf))
+            .filter(|&&seat| poss1.has_role(seat, *WOLF_ROLE))
             .cloned()
             .collect();
         if wolf_candidates.len() == 1 {
-            path1_valid = poss1.fix_role(wolf_candidates[0], SystemRole::Werewolf);
+            path1_valid = poss1.fix_role(wolf_candidates[0], *WOLF_ROLE);
         } else if wolf_candidates.is_empty() {
             path1_valid = false;
         }
@@ -217,19 +234,19 @@ impl VillageRetar {
         for &seat in &self.last_deaths {
             if poss2.is_fixed(seat) {
                 // 確定席が狼/狐なら飽和パスの前提と矛盾 → 無効
-                if poss2.has_role(seat, SystemRole::Werewolf)
-                    || poss2.has_role(seat, SystemRole::Werehamster)
+                if poss2.has_role(seat, *WOLF_ROLE)
+                    || poss2.has_role(seat, *FOX_ROLE)
                 {
                     path2_valid = false;
                     break;
                 }
                 continue;
             }
-            if !poss2.deny_role(seat, SystemRole::Werewolf) {
+            if !poss2.deny_role(seat, *WOLF_ROLE) {
                 path2_valid = false;
                 break;
             }
-            if !poss2.deny_role(seat, SystemRole::Werehamster) {
+            if !poss2.deny_role(seat, *FOX_ROLE) {
                 path2_valid = false;
                 break;
             }
@@ -395,14 +412,14 @@ impl VillageRetar {
         let ctx = self.context.as_ref().unwrap();
         let mut deny_one_of: Vec<Vec<SeatRole>> = Vec::new();
         for &(seat_a, seat_b) in &self.options.wolf_pair_denyals {
-            let a_can = ctx.possibilities.has_role(seat_a, SystemRole::Werewolf);
-            let b_can = ctx.possibilities.has_role(seat_b, SystemRole::Werewolf);
+            let a_can = ctx.possibilities.has_role(seat_a, *WOLF_ROLE);
+            let b_can = ctx.possibilities.has_role(seat_b, *WOLF_ROLE);
             if !a_can || !b_can {
                 continue;
             }
             deny_one_of.push(vec![
-                SeatRole { seat: seat_a, role: SystemRole::Werewolf },
-                SeatRole { seat: seat_b, role: SystemRole::Werewolf },
+                SeatRole { seat: seat_a, role: *WOLF_ROLE },
+                SeatRole { seat: seat_b, role: *WOLF_ROLE },
             ]);
         }
 
@@ -503,6 +520,7 @@ fn apply_hocus_pocus(vs: &mut VillageStatus, options: &AnalyzeOptions) {
 
 fn apply_fixed_positions(
     vs: &VillageStatus,
+    setup: &BTreeMap<SystemRole, u32>,
     options: &AnalyzeOptions,
     initial_possibilities: &mut Possibilities,
 ) {
@@ -516,10 +534,13 @@ fn apply_fixed_positions(
         }
     }
 
+    let villager_name = VILLAGER_ROLE.to_string();
+    let powered_village = powered_village_roles_in(setup);
+
     let mut fixed_positions: BTreeMap<Seat, SystemRole> = BTreeMap::new();
 
     for (&seat, status) in vs.statuses.iter() {
-        if status.claiming && status.claiming_role == "villager" {
+        if status.claiming && status.claiming_role == villager_name {
             initial_possibilities.mark_as_no_village_role(seat);
         }
         if status.claiming && status.claiming_role == "surrender" {
@@ -531,11 +552,13 @@ fn apply_fixed_positions(
             && !status.no_co_opportunity.unwrap_or(false)
         {
             if status.died_day.map_or(false, |d| curse_days.contains(&d)) {
-                // 道連れ発生 → 猫又の可能性を残し、他の村役職のみdeny
-                initial_possibilities.deny_role(seat, SystemRole::Seer);
-                initial_possibilities.deny_role(seat, SystemRole::Medium);
-                initial_possibilities.deny_role(seat, SystemRole::Bodyguard);
-                initial_possibilities.deny_role(seat, SystemRole::Mason);
+                // 道連れ発生 → 道連れ役職 (猫又) の可能性を残し、他の能力持ち村役職を deny
+                for &role in &powered_village {
+                    if has_trait(role, RoleTrait::ReactiveCurseOnExecuted) {
+                        continue;
+                    }
+                    initial_possibilities.deny_role(seat, role);
+                }
             } else {
                 initial_possibilities.mark_as_no_village_role(seat);
             }
@@ -552,11 +575,11 @@ fn apply_fixed_positions(
 
     // Wolf pair denial early application
     for &(seat_a, seat_b) in &options.wolf_pair_denyals {
-        if fixed_positions.get(&seat_a) == Some(&SystemRole::Werewolf) {
-            initial_possibilities.deny_role(seat_b, SystemRole::Werewolf);
+        if fixed_positions.get(&seat_a) == Some(&*WOLF_ROLE) {
+            initial_possibilities.deny_role(seat_b, *WOLF_ROLE);
         }
-        if fixed_positions.get(&seat_b) == Some(&SystemRole::Werewolf) {
-            initial_possibilities.deny_role(seat_a, SystemRole::Werewolf);
+        if fixed_positions.get(&seat_b) == Some(&*WOLF_ROLE) {
+            initial_possibilities.deny_role(seat_a, *WOLF_ROLE);
         }
     }
 
@@ -565,7 +588,7 @@ fn apply_fixed_positions(
         if !status.surviving {
             match status.cause_of_death {
                 CauseOfDeath::CursedByKilledNekomata => {
-                    fixed_positions.insert(seat, SystemRole::Werewolf);
+                    fixed_positions.insert(seat, *WOLF_ROLE);
                 }
                 CauseOfDeath::CursedByExecutedNekomata => {
                     for (&neko_seat, neko_status) in vs.statuses.iter() {
@@ -575,15 +598,15 @@ fn apply_fixed_positions(
                         if neko_status.cause_of_death == CauseOfDeath::Execution
                             && status.died_day == neko_status.died_day
                         {
-                            fixed_positions.insert(neko_seat, SystemRole::Nekomata);
+                            fixed_positions.insert(neko_seat, *NEKOMATA_ROLE);
                         }
                     }
                 }
                 CauseOfDeath::FollowExecutedHamster => {
-                    fixed_positions.insert(seat, SystemRole::Immoralist);
+                    fixed_positions.insert(seat, *IMMORALIST_ROLE);
                 }
                 CauseOfDeath::FollowKilledHamster => {
-                    fixed_positions.insert(seat, SystemRole::Immoralist);
+                    fixed_positions.insert(seat, *IMMORALIST_ROLE);
                 }
                 _ => {}
             }
@@ -601,7 +624,7 @@ fn apply_single_night_kill_rule(
 ) {
     for killed in night_kills_by_day.values() {
         if killed.len() == 1 {
-            initial_possibilities.deny_role(killed[0], SystemRole::Werewolf);
+            initial_possibilities.deny_role(killed[0], *WOLF_ROLE);
         }
     }
 }
@@ -635,7 +658,7 @@ fn init_from_scratch(
 ) -> Possibilities {
     apply_hocus_pocus(vs, options);
     let mut initial_possibilities = Possibilities::from_setup(setup);
-    apply_fixed_positions(vs, options, &mut initial_possibilities);
+    apply_fixed_positions(vs, setup, options, &mut initial_possibilities);
     apply_single_night_kill_rule(night_kills_by_day, &mut initial_possibilities);
     apply_game_end_constraints(vs, last_deaths, &mut initial_possibilities);
     initial_possibilities
@@ -697,7 +720,7 @@ fn init_from_prior(
 
     // 現在の vs から得られる制約 (新しい日に発生した CO/処刑/特殊死因/assumption/wolf_pair_denyals) を
     // prior の possibilities に追加適用する。prior が古い時点のものでも、進んだ日の制約を取りこぼさない。
-    apply_fixed_positions(vs, options, &mut initial_possibilities);
+    apply_fixed_positions(vs, setup, options, &mut initial_possibilities);
     apply_single_night_kill_rule(night_kills_by_day, &mut initial_possibilities);
     apply_game_end_constraints(vs, last_deaths, &mut initial_possibilities);
 
@@ -772,16 +795,16 @@ fn apply_game_end_constraints(
     if vs.result == Some(VillageResult::VillagerWon) {
         let wolf_candidates: Vec<Seat> = last_deaths
             .iter()
-            .filter(|&&seat| initial_possibilities.has_role(seat, SystemRole::Werewolf))
+            .filter(|&&seat| initial_possibilities.has_role(seat, *WOLF_ROLE))
             .cloned()
             .collect();
         if wolf_candidates.len() == 1 {
-            initial_possibilities.fix_role(wolf_candidates[0], SystemRole::Werewolf);
+            initial_possibilities.fix_role(wolf_candidates[0], *WOLF_ROLE);
         }
     } else if vs.result == Some(VillageResult::WerewolfWon) {
         let has_confirmed_human = last_deaths.iter().any(|&seat| {
-            let is_wolf_or_hamster = initial_possibilities.has_role(seat, SystemRole::Werewolf)
-                || initial_possibilities.has_role(seat, SystemRole::Werehamster);
+            let is_wolf_or_hamster = initial_possibilities.has_role(seat, *WOLF_ROLE)
+                || initial_possibilities.has_role(seat, *FOX_ROLE);
             !is_wolf_or_hamster
         });
         if !has_confirmed_human {
@@ -791,8 +814,8 @@ fn apply_game_end_constraints(
                 .cloned()
                 .collect();
             if unfixed.len() == 1 {
-                initial_possibilities.deny_role(unfixed[0], SystemRole::Werewolf);
-                initial_possibilities.deny_role(unfixed[0], SystemRole::Werehamster);
+                initial_possibilities.deny_role(unfixed[0], *WOLF_ROLE);
+                initial_possibilities.deny_role(unfixed[0], *FOX_ROLE);
             }
         }
     }
