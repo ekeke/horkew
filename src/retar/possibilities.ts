@@ -1,37 +1,27 @@
-import type { SystemRole, Seat } from '../types/index.ts'
+import { systemRoles, type SystemRole, type Seat } from '../types/index.ts'
 export type { SystemRole } from '../types/index.ts'
 
 export type RolePossibility = number
 
-export const RoleSignatureBits: { [role in SystemRole]: number } = {
-  villager:    0b000000000001,
-  seer:        0b000000000010,
-  medium:      0b000000000100,
-  bodyguard:   0b000000001000,
-  mason:       0b000000010000,
-  nekomata:    0b000000100000,
-  werewolf:    0b000001000000,
-  possessed:   0b000010000000,
-  fanatic:     0b000100000000,
-  werehamster: 0b001000000000,
-  immoralist:  0b010000000000,
-  paparazzi:   0b100000000000,
-}
+// systemRoles の宣言順から bit 配置を派生する.
+// 役職を増やすときは types/index.ts の systemRoles に entry を追加するだけで
+// RoleSignatureBits / RoleBitIndex / ROLE_COUNT が自動拡張される.
+// 順序を変えると WASM 側 (retar-rs) との整合が崩れるので systemRoles の insertion 順を維持すること.
+const ROLE_ORDER: SystemRole[] = Array.from(systemRoles.keys())
 
-export const RoleSignatureBitsReverseMap: Map<number, SystemRole> = new Map(
-  Object.entries(RoleSignatureBits).map(([role, bit]) => [bit, role as SystemRole])
-)
-
-export const ROLE_COUNT = 12
+export const ROLE_COUNT = ROLE_ORDER.length
 /** inPending が 32bit ビット演算なので最大32席（seat 1..=31） */
 export const MAX_SEATS = 32
 
-// Bit position index for each role (villager=0, seer=1, ..., paparazzi=11)
-export const RoleBitIndex: { [role in SystemRole]: number } = {
-  villager: 0, seer: 1, medium: 2, bodyguard: 3, mason: 4,
-  nekomata: 5, werewolf: 6, possessed: 7, fanatic: 8,
-  werehamster: 9, immoralist: 10, paparazzi: 11,
-}
+export const RoleBitIndex: { [role in SystemRole]: number } =
+  Object.fromEntries(ROLE_ORDER.map((role, idx) => [role, idx])) as { [role in SystemRole]: number }
+
+export const RoleSignatureBits: { [role in SystemRole]: number } =
+  Object.fromEntries(ROLE_ORDER.map((role, idx) => [role, 1 << idx])) as { [role in SystemRole]: number }
+
+export const RoleSignatureBitsReverseMap: Map<number, SystemRole> = new Map(
+  ROLE_ORDER.map(role => [RoleSignatureBits[role], role])
+)
 
 // Extract set bit indices from a bitmask
 export function bitIndicesFromMask(mask: number): number[] {
@@ -42,24 +32,29 @@ export function bitIndicesFromMask(mask: number): number[] {
   return result
 }
 
-const AllRoles: RolePossibility
-  = Object.values(RoleSignatureBits).reduce((acc, cur) => acc | cur, 0)
+const AllRoles: RolePossibility =
+  ROLE_ORDER.reduce((acc, role) => acc | RoleSignatureBits[role], 0)
 
-const Human = AllRoles & ~RoleSignatureBits['werewolf']
+// seerResult === 'human' な役職. werewolf 以外の全役職と等価 (現状).
+const Human: RolePossibility =
+  ROLE_ORDER
+    .filter(role => systemRoles.get(role)!.seerResult === 'human')
+    .reduce((acc, role) => acc | RoleSignatureBits[role], 0)
 
-const VillageRoles: RolePossibility
-  = RoleSignatureBits['seer']
-  | RoleSignatureBits['medium']
-  | RoleSignatureBits['bodyguard']
-  | RoleSignatureBits['mason']
-  | RoleSignatureBits['nekomata']
+// 能力を持つ村陣営役職 (seer/medium/bodyguard/mason/nekomata). villager は traits=[] で除外.
+const VillageRoles: RolePossibility =
+  ROLE_ORDER
+    .filter(role => {
+      const r = systemRoles.get(role)!
+      return r.faction === 'village' && r.traits.length > 0
+    })
+    .reduce((acc, role) => acc | RoleSignatureBits[role], 0)
 
-const Liar = RoleSignatureBits['werewolf']
-  | RoleSignatureBits['possessed']
-  | RoleSignatureBits['fanatic']
-  | RoleSignatureBits['werehamster']
-  | RoleSignatureBits['immoralist']
-  | RoleSignatureBits['paparazzi']
+// faction !== 'village' な役職 (人狼陣営 + 妖狐陣営). 旧 Liar 定義の自動派生形.
+const Liar: RolePossibility =
+  ROLE_ORDER
+    .filter(role => systemRoles.get(role)!.faction !== 'village')
+    .reduce((acc, role) => acc | RoleSignatureBits[role], 0)
 
 export function popCount(x: number): number {
   const a = x - (x >>> 1 & 0x55555555)

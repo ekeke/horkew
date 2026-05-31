@@ -32,7 +32,8 @@ const FILE_ALIASES: Record<string, string> = {
 }
 
 // 片方にしか存在しなくてよいファイル（WASMブリッジ、型定義など）
-const TS_ONLY_FILES = new Set(['wasm-helpers'])
+// TS のみで Rust に対応しないファイル. role-sets は trait-purge Phase 6 で Rust 同期予定 (一時除外).
+const TS_ONLY_FILES = new Set(['wasm-helpers', 'role-sets'])
 const RS_ONLY_FILES = new Set(['lib', 'types'])
 
 // モジュールプレフィックスファイル: TSではトップレベルexportのためファイル名をプレフィックス/サフィックスに付ける
