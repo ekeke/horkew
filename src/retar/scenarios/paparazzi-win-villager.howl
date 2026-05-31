@@ -37,10 +37,6 @@ spoilers:
 # @expect ボブ: [werewolf]
 # @expect キャロル: [seer]
 # @expect デイブ: [villager]
-# @expect-status アリス: alive
-# @expect-status ボブ: dead
-# @expect-status キャロル: alive
-# @expect-status デイブ: alive
 # @expect-faction アリス: wolf
 # @expect-faction ボブ: wolf
 # @expect-faction キャロル: village

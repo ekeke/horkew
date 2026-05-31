@@ -12,9 +12,11 @@
  * - `@expect-alignment <player>: [alignments]`
  * - `@expect-claim <player>: <role>`
  * - `@expect-deniedRoles <player>: [roles]`
- * - `@expect-status <player>: alive|dead`
  * - `@expect solve: true|false`
  * - `@assume <player>: <role>` ... `@end-assume`  checkpoint 用の前提条件
+ *
+ * 生存/死亡のアサーションは retar の興味外 (ゲーム処理の結果) なので扱わない。
+ * 必要なら lupa engine 側の `@expect-status` (src/lupa/expectations.ts) を使う。
  */
 
 import { describe, test } from 'node:test'
@@ -54,11 +56,10 @@ export type Checkpoint = {
   alignments: Map<string, TagExpectation>
   claims: Map<string, string>
   deniedRoles: Map<string, RoleExpectation>
-  statuses: Map<string, 'alive' | 'dead'>
   assumptions: Map<string, string>
 }
 
-const expectPattern = /^#\s*@expect(?:-(skip|faction|alignment|claim|deniedRoles|status))?\s+(.+)$/
+const expectPattern = /^#\s*@expect(?:-(skip|faction|alignment|claim|deniedRoles))?\s+(.+)$/
 const assumePattern = /^#\s*@assume\s+(.+)$/
 const endAssumePattern = /^#\s*@end-assume\s*$/
 
@@ -71,7 +72,6 @@ function makeCheckpoint(lineNumber: number): Checkpoint {
     alignments: new Map(),
     claims: new Map(),
     deniedRoles: new Map(),
-    statuses: new Map(),
     assumptions: new Map(),
   }
 }
@@ -174,12 +174,6 @@ function parseExpectDirective(
       return
     case 'deniedRoles':
       checkpoint.deniedRoles.set(key, parseRoleExpectation(value))
-      return
-    case 'status':
-      if (value !== 'alive' && value !== 'dead') {
-        throw new Error(`@expect-status: value must be "alive" or "dead", got "${value}"`)
-      }
-      checkpoint.statuses.set(key, value)
       return
     default:
       // @expect with key 'solve' is a special boolean directive.
@@ -358,17 +352,6 @@ export function runCheckpointTests(
         const want = expected === '' ? 'none' : expected
         assert.strictEqual(actual, want,
           `${playerName} claim: expected "${want}" but got "${actual}"`)
-      })
-    }
-
-    for (const [playerName, expectedStatus] of checkpoint.statuses) {
-      test(`${playerName} status: ${expectedStatus}`, testOpts, () => {
-        const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
-        assert.ok(seat != null, `player "${playerName}" not found in game`)
-        const status = vs.statuses.get(seat)!
-        const actual = status.surviving ? 'alive' : 'dead'
-        assert.strictEqual(actual, expectedStatus,
-          `${playerName} status: expected "${expectedStatus}" but got "${actual}"`)
       })
     }
 

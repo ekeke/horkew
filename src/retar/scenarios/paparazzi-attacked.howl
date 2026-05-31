@@ -35,8 +35,6 @@ Alice死亡
 # Checkpoint: Alice 死亡後
 # - Alice = paparazzi 固定 + 死亡 (狐との違い: attack-immune trait が無い)
 # @expect Alice: [paparazzi]
-# @expect-status Alice: dead
-# @expect-status Eve: dead
 # @expect-faction Alice: wolf
 # @expect-claim Alice: seer
 # @gmork-confirm Alice/paparazzi: null

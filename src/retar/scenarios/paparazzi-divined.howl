@@ -40,9 +40,6 @@ Carol 占いCO Dave○ Alice○
 # - Carol は真 seer 候補のまま、Alice の paparazzi 確定は spoiler 由来
 # @expect Alice: [paparazzi]
 # @expect Carol: [seer]
-# @expect-status Alice: alive
-# @expect-status Carol: alive
-# @expect-status Bob: dead
 # @expect-faction Alice: wolf
 # @expect-claim Alice: seer
 # @expect-claim Carol: seer
