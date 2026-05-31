@@ -7,13 +7,59 @@ export type EnumSpecies = 'human' | 'wolf' | null
 
 export type Faction = 'village' | 'wolf' | 'fox'
 
+/** 襲撃免疫: 人狼に噛まれても死なない (妖狐) */
+export type AttackImmuneTrait = { kind: 'passive', sub: 'attack-immune' }
+
+/** 呪殺: 占い師に占われると死ぬ (妖狐) */
+export type DieWhenDivinedTrait = { kind: 'passive', sub: 'die-when-divined' }
+
+/** 仲間の人狼を最初から知っている (人狼 / 狂信者) */
+export type KnowWerewolvesTrait = { kind: 'knowledge', sub: 'know-werewolves' }
+
+/** 仲間の妖狐を最初から知っている (背徳者) */
+export type KnowFoxesTrait = { kind: 'knowledge', sub: 'know-foxes' }
+
+/** 仲間の共有者を最初から知っている (共有者) */
+export type KnowMasonsTrait = { kind: 'knowledge', sub: 'know-masons' }
+
+/** 占い: 夜に一人を選んで人狼か否かを知る (占い師 / パパラッチ) */
+export type DivineTrait = { kind: 'action', sub: 'divine' }
+
+/** 護衛: 夜に一人を選んで人狼の襲撃から守る (狩人) */
+export type GuardTrait = { kind: 'action', sub: 'guard' }
+
+/** 襲撃: 夜に一人を選んで噛む (人狼) */
+export type AttackTrait = { kind: 'action', sub: 'attack' }
+
+/** 処刑道連れ: 処刑されると生存者一人をランダムに道連れにする (猫又) */
+export type CurseOnExecutedTrait = { kind: 'reactive', sub: 'curse-on-executed' }
+
+/** 襲撃道連れ: 人狼に襲撃されると襲撃した人狼を道連れにする (猫又) */
+export type CurseOnKilledTrait = { kind: 'reactive', sub: 'curse-on-killed' }
+
+/** 妖狐後追い: 妖狐が全滅すると後追いで死亡する (背徳者) */
+export type FollowFoxDeathTrait = { kind: 'reactive', sub: 'follow-fox-death' }
+
+/** 霊媒: 処刑された人物が人狼かどうかを知る (霊能者) */
+export type ExecutionSpeciesTrait = { kind: 'auto-info', sub: 'execution-species' }
+
+/** 狼チャット: 夜に人狼同士で会話できる (人狼) */
+export type WolfChatTrait = { kind: 'channel', sub: 'wolf-chat' }
+
 export type RoleTrait =
-  | { kind: 'passive', sub: 'attack-immune' | 'die-when-divined' }
-  | { kind: 'knowledge', sub: 'know-werewolves' | 'know-foxes' | 'know-masons' }
-  | { kind: 'action', sub: 'divine' | 'guard' | 'attack' }
-  | { kind: 'reactive', sub: 'curse-on-executed' | 'curse-on-killed' | 'follow-fox-death' }
-  | { kind: 'auto-info', sub: 'execution-species' }
-  | { kind: 'channel', sub: 'wolf-chat' }
+  | AttackImmuneTrait
+  | DieWhenDivinedTrait
+  | KnowWerewolvesTrait
+  | KnowFoxesTrait
+  | KnowMasonsTrait
+  | DivineTrait
+  | GuardTrait
+  | AttackTrait
+  | CurseOnExecutedTrait
+  | CurseOnKilledTrait
+  | FollowFoxDeathTrait
+  | ExecutionSpeciesTrait
+  | WolfChatTrait
 
 export type CauseOfDeath =
   | 'execution'
