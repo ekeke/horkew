@@ -16,10 +16,22 @@ rules:
 !Alice 0夜 護衛 Carol
 !Bob 0夜 襲撃 Carol
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Bob
 Carol→Bob
 Dave→Bob
 Bob→Alice
+
+# == engine: Day 1 ==
+# vote tally: Bob 3 / Alice 1 → execution=Bob
+# == end ==
+# == engine: Final ==
+# result: villager_won
+# survivors: Alice, Carol, Dave
+# == end ==
 
 # @expect-event peace
 # @expect-status Carol: alive

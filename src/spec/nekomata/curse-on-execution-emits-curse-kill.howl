@@ -12,9 +12,22 @@ setup: { nekomata: 1, werewolf: 1, villager: 2 }
 !Carol=村人
 !Dave=村人
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Alice
 Bob→Alice
 Carol→Alice
 Dave→Alice
+
+# == engine: Day 1 ==
+# vote tally: Alice 3 / Dave 1 → execution=Alice
+# chain (curse_kill): Dave died
+# == end ==
+# == engine: Final ==
+# result: werewolf_won
+# survivors: Bob, Carol
+# == end ==
 
 # @expect-event curse_kill

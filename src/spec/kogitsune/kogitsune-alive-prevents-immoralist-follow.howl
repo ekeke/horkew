@@ -19,6 +19,10 @@ rules:
 !Fred=村人
 !Dave 1夜 襲撃 Eve
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Bob
 Bob→Carol
 Carol→Eve
@@ -26,12 +30,27 @@ Dave→Bob
 Eve→Bob
 Fred→Bob
 
+# == engine: Day 1 ==
+# vote tally: Bob 4 / Carol 1 / Eve 1 → execution=Bob
+# == end ==
+# == engine: Night 1 ==
+# night_kill: Eve
+# == end ==
+
 Day 2:
 
 Alice→Dave
 Carol→Dave
 Dave→Alice
 Fred→Dave
+
+# == engine: Day 2 ==
+# vote tally: Dave 3 / Alice 1 → execution=Dave
+# == end ==
+# == engine: Final ==
+# result: werehamster_won
+# survivors: Alice, Carol, Fred
+# == end ==
 
 # @expect-status Bob: dead
 # @expect-status Alice: alive

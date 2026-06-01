@@ -13,9 +13,18 @@ rules:
 !Bob=村人
 !Carol=村人
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Bob
 Bob→Carol
 Carol→Alice
+
+# == engine: Final ==
+# result: draw
+# survivors: Alice, Bob, Carol
+# == end ==
 
 # @expect-result: draw
 # @expect-finished: true

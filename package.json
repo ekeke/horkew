@@ -40,6 +40,7 @@
     "eval-summary": "node --experimental-strip-types src/howl/scripts/eval-summary.ts",
     "dev": "vite",
     "gen-role-docs": "node --experimental-strip-types scripts/gen-role-docs.ts demo/public/roles.html",
+    "spec:annotate": "node --experimental-strip-types scripts/spec-annotate-cli.ts",
     "build:demo": "npm run gen-role-docs && vite build",
     "preview": "vite preview"
   },

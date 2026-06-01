@@ -11,9 +11,21 @@ rules:
 !Bob=村人
 !Carol=村人
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Bob
 Bob→Alice
 Carol→Alice
+
+# == engine: Day 1 ==
+# vote tally: Alice 2 / Bob 1 → execution=Alice
+# == end ==
+# == engine: Final ==
+# result: villager_won
+# survivors: Bob, Carol
+# == end ==
 
 # @expect-result: villager_won
 # @expect-finished: true

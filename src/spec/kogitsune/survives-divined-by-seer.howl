@@ -15,10 +15,22 @@ rules:
 !Dave=村人
 !Bob 0夜 占い Alice
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Carol
 Bob→Carol
 Carol→Alice
 Dave→Carol
+
+# == engine: Day 1 ==
+# vote tally: Carol 3 / Alice 1 → execution=Carol
+# == end ==
+# == engine: Final ==
+# result: werehamster_won
+# survivors: Alice, Bob, Dave
+# == end ==
 
 # @expect-status Alice: alive
 # @expect-divine actor:Bob night:0 target:Alice result:human

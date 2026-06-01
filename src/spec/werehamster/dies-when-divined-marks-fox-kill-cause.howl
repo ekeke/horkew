@@ -16,9 +16,21 @@ rules:
 !Dave=村人
 !Alice 0夜 占い Bob
 
+# == engine: Night 0 ==
+# fox_kill (divine curse): Bob
+# == end ==
+
 Alice→Carol
 Dave→Carol
 Carol→Alice
+
+# == engine: Day 1 ==
+# vote tally: Carol 2 / Alice 1 → execution=Carol
+# == end ==
+# == engine: Final ==
+# result: villager_won
+# survivors: Alice, Dave
+# == end ==
 
 # @expect-status Bob: dead
 # @expect-cause Bob: fox_kill

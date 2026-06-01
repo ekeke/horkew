@@ -15,10 +15,22 @@ rules:
 !Dave=村人
 !Alice 0夜 占い Bob
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Bob
 Carol→Bob
 Dave→Bob
 Bob→Alice
+
+# == engine: Day 1 ==
+# vote tally: Bob 3 / Alice 1 → execution=Bob
+# == end ==
+# == engine: Final ==
+# result: werehamster_won
+# survivors: Alice, Carol, Dave
+# == end ==
 
 # @expect-status Alice: alive
 # divineHistory[0].target が Bob であることを実行時 expectation で検証 (result は別シナリオで pin)

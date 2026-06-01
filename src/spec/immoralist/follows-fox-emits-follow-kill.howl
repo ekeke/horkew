@@ -11,9 +11,22 @@ setup: { immoralist: 1, werehamster: 1, werewolf: 1, villager: 1 }
 !Carol=人狼
 !Dave=村人
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Bob
 Bob→Alice
 Carol→Bob
 Dave→Bob
+
+# == engine: Day 1 ==
+# vote tally: Bob 3 / Alice 1 → execution=Bob
+# chain (follow_kill): Alice died
+# == end ==
+# == engine: Final ==
+# result: werewolf_won
+# survivors: Carol, Dave
+# == end ==
 
 # @expect-event follow_kill target:Alice

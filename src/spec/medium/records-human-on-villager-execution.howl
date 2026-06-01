@@ -15,15 +15,34 @@ rules:
 !Carol=村人
 !Dave=村人
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Carol
 Bob→Carol
 Dave→Carol
 Carol→Alice
+
+# == engine: Day 1 ==
+# vote tally: Carol 3 / Alice 1 → execution=Carol
+# == end ==
+# == engine: Night 1 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
 
 Day 2:
 
 Alice→Bob
 Dave→Bob
 Bob→Alice
+
+# == engine: Day 2 ==
+# vote tally: Bob 2 / Alice 1 → execution=Bob
+# == end ==
+# == engine: Final ==
+# result: villager_won
+# survivors: Alice, Dave
+# == end ==
 
 # @expect-medium actor:Alice day:1 target:Carol result:human

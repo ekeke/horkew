@@ -18,6 +18,10 @@ rules:
 !Fred=村人
 !Dave 1夜 襲撃 Eve
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Bob
 Bob→Eve
 Carol→Eve
@@ -25,12 +29,28 @@ Dave→Bob
 Eve→Bob
 Fred→Bob
 
+# == engine: Day 1 ==
+# vote tally: Bob 4 / Eve 2 → execution=Bob
+# == end ==
+# == engine: Night 1 ==
+# night_kill: Eve
+# == end ==
+
 Day 2:
 
 Alice→Carol
 Carol→Alice
 Dave→Alice
 Fred→Alice
+
+# == engine: Day 2 ==
+# vote tally: Alice 3 / Carol 1 → execution=Alice
+# chain (follow_kill): Carol died
+# == end ==
+# == engine: Final ==
+# result: werewolf_won
+# survivors: Dave, Fred
+# == end ==
 
 # @expect-status Bob: dead
 # @expect-status Alice: dead

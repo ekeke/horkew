@@ -11,8 +11,20 @@ setup: { fanatic: 1, werewolf: 1, villager: 1 }
 !Bob=人狼
 !Carol=村人
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Bob
 Carol→Bob
 Bob→Alice
+
+# == engine: Day 1 ==
+# vote tally: Bob 2 / Alice 1 → execution=Bob
+# == end ==
+# == engine: Final ==
+# result: villager_won
+# survivors: Alice, Carol
+# == end ==
 
 # @expect-view actor:Alice field:knownWolves value:[Bob]

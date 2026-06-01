@@ -12,9 +12,21 @@ rules:
 !Bob=人狼
 !Carol=村人
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Carol
 Bob→Carol
 Carol→Bob
+
+# == engine: Day 1 ==
+# vote tally: Carol 2 / Bob 1 → execution=Carol
+# == end ==
+# == engine: Final ==
+# result: werehamster_won
+# survivors: Alice, Bob
+# == end ==
 
 # @expect-result: werehamster_won
 # @expect-finished: true

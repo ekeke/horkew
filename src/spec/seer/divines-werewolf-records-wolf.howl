@@ -14,8 +14,20 @@ rules:
 !Carol=村人
 !Alice 0夜 占い Bob
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Bob
 Carol→Bob
 Bob→Alice
+
+# == engine: Day 1 ==
+# vote tally: Bob 2 / Alice 1 → execution=Bob
+# == end ==
+# == engine: Final ==
+# result: villager_won
+# survivors: Alice, Carol
+# == end ==
 
 # @expect-divine actor:Alice night:0 target:Bob result:wolf

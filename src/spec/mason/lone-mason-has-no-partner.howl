@@ -12,9 +12,21 @@ setup: { mason: 1, werewolf: 1, villager: 2 }
 !Carol=村人
 !Dave=村人
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Bob
 Carol→Bob
 Dave→Bob
 Bob→Alice
+
+# == engine: Day 1 ==
+# vote tally: Bob 3 / Alice 1 → execution=Bob
+# == end ==
+# == engine: Final ==
+# result: villager_won
+# survivors: Alice, Carol, Dave
+# == end ==
 
 # @expect-view actor:Alice field:masonPartner value:null

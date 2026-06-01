@@ -16,9 +16,21 @@ rules:
 !Dave=村人
 !Alice 0夜 襲撃 Bob
 
+# == engine: Night 0 ==
+# night_kill: Bob
+# == end ==
+
 Alice→Dave
 Carol→Dave
 Dave→Alice
+
+# == engine: Day 1 ==
+# vote tally: Dave 2 / Alice 1 → execution=Dave
+# == end ==
+# == engine: Final ==
+# result: werewolf_won
+# survivors: Alice, Carol
+# == end ==
 
 # @expect-attack actor:Alice night:0 target:Bob
 # @expect-status Bob: dead

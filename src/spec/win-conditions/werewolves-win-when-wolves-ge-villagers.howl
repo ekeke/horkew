@@ -11,9 +11,21 @@ rules:
 !Bob=村人
 !Carol=村人
 
+# == engine: Night 0 ==
+# peace (襲撃が attack-immune で無効)
+# == end ==
+
 Alice→Carol
 Bob→Carol
 Carol→Alice
+
+# == engine: Day 1 ==
+# vote tally: Carol 2 / Alice 1 → execution=Carol
+# == end ==
+# == engine: Final ==
+# result: werewolf_won
+# survivors: Alice, Bob
+# == end ==
 
 # @expect-result: werewolf_won
 # @expect-finished: true
