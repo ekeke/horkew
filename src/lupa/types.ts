@@ -59,6 +59,9 @@ export type PlayerState = {
   guardHistory: Map<number, number>
   // 人狼: その夜にチームが集約決定した襲撃 target (= 全 attack 提案者が共有)
   attackHistory: Map<number, number>
+  // 霊能者: 処刑された人物の種別 (auto-info:execution-species trait を持つ役職のみ engine が push)
+  // day → { target: 処刑された seat, result: 霊能結果の種別 }
+  mediumHistory: Map<number, { target: number, result: EnumSpecies }>
   // 狂人: 偽占い結果
   fakeDivineHistory: Map<number, { target: number, result: EnumSpecies }>
   // 予告先（次の夜に占う対象）

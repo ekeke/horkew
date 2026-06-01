@@ -1,0 +1,32 @@
+---
+title: 複数日に渡る処刑が霊能者の mediumHistory に day key で個別に記録される
+setup: { medium: 1, werewolf: 2, villager: 2 }
+rules:
+  first-victim: none
+---
+# Day 1 で Bob (狼1) 処刑 → mediumHistory[1] = { Bob, wolf }
+# Night 1 で残狼 Carol が Dave 襲撃 (Alice 生存維持のため Dave を犠牲)
+# Day 2 で Carol (狼2) 処刑 → mediumHistory[2] = { Carol, wolf } → 狼全滅で終局
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=霊能者
+!Bob=人狼
+!Carol=人狼
+!Dave=村人
+!Eve=村人
+!Carol 1夜 襲撃 Dave
+
+Alice→Bob
+Carol→Eve
+Dave→Bob
+Eve→Bob
+Bob→Alice
+
+Day 2:
+
+Alice→Carol
+Eve→Carol
+Carol→Alice
+
+# @expect-medium actor:Alice day:1 target:Bob result:wolf
+# @expect-medium actor:Alice day:2 target:Carol result:wolf

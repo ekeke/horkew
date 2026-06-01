@@ -1,0 +1,29 @@
+---
+title: 村人が処刑されると霊能者の mediumHistory に human が記録される
+setup: { medium: 1, werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# Day 1 投票で Carol (村) 処刑 → engine が auto-info:execution-species trait を
+# 発動し、 生存中の Alice (霊) の mediumHistory[1] に
+# { target: Carol, result: human } を push する。 Day 2 で Bob 処刑 → 終局
+# (Day 2 以降は検証対象外、 Day 1 dispatch のみ検査)。
+
+++Alice、Bob、Carol、Dave
+!Alice=霊能者
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+
+Alice→Carol
+Bob→Carol
+Dave→Carol
+Carol→Alice
+
+Day 2:
+
+Alice→Bob
+Dave→Bob
+Bob→Alice
+
+# @expect-medium actor:Alice day:1 target:Carol result:human

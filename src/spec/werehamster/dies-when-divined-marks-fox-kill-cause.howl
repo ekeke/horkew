@@ -1,0 +1,24 @@
+---
+title: 妖狐は占い師に占われると死亡し cause=fox_kill が記録される (die-when-divined trait)
+setup: { seer: 1, werehamster: 1, werewolf: 1, villager: 1 }
+rules:
+  first-victim: none
+---
+# 0夜 に Alice (占) が Bob (狐) を占い → engine は die-when-divined trait を
+# 検出して Bob を kill + fox_kill event を emit。
+# Day 1 投票で Carol (狼) 処刑 → 狼全滅 + 狐死亡 → villager_won。
+# 検証: Bob の最終 status:dead と死因 (events 経由) が fox_kill。
+
+++Alice、Bob、Carol、Dave
+!Alice=占い師
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+!Alice 0夜 占い Bob
+
+Alice→Carol
+Dave→Carol
+Carol→Alice
+
+# @expect-status Bob: dead
+# @expect-cause Bob: fox_kill

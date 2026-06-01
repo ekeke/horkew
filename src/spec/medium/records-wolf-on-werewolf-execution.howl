@@ -1,0 +1,18 @@
+---
+title: 人狼が処刑されると霊能者の mediumHistory に wolf が記録される
+setup: { medium: 1, werewolf: 1, villager: 1 }
+---
+# Day 1 投票で Bob (狼) 処刑 → engine が auto-info:execution-species trait を
+# 発動し、 生存中の Alice (霊) の mediumHistory[1] に
+# { target: Bob, result: wolf } を push する。 即終局 (検証対象外)。
+
+++Alice、Bob、Carol
+!Alice=霊能者
+!Bob=人狼
+!Carol=村人
+
+Alice→Bob
+Carol→Bob
+Bob→Alice
+
+# @expect-medium actor:Alice day:1 target:Bob result:wolf

@@ -16,7 +16,7 @@ import type { GameConfig, GameHandlers, GameResult, PhaseContext, VoteContext } 
 import { Rng } from './random.ts'
 import { generateRoleNames, generateRoleSeatNames, generateRandomNames } from './names.ts'
 import {
-  assignRoles, alivePlayers, getSeerResult,
+  assignRoles, alivePlayers, getSeerResult, getMediumResult,
   killPlayer, checkWinCondition,
 } from './roles.ts'
 import { forceTrueRoleCO, resolveVotes } from './engine-utils.ts'
@@ -357,8 +357,15 @@ async function runGameLoop<E = never, Ext = unknown>(
 
     // 霊能結果コメント
     const executedPlayer = players.find(p => p.seat === executedSeat!)!
-    const medResult = getSeerResult(executedPlayer.role)
+    const medResult = getMediumResult(executedPlayer.role)
     emit({ type: 'comment', text: `霊能: ${executedPlayer.name} = ${medResult === 'human' ? '○' : '●'}` })
+
+    // 霊能 auto-info: 生存中の霊能 trait 保持者に処刑種別を push
+    for (const p of alivePlayers(state)) {
+      if (hasTrait(p.role, 'auto-info', 'execution-species')) {
+        p.mediumHistory.set(day, { target: executedSeat!, result: medResult })
+      }
+    }
 
     // 猫又道連れ (処刑時の呪い)
     if (hasTrait(executedPlayer.role, 'reactive', 'curse-on-executed')) {
