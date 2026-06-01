@@ -1,4 +1,5 @@
 import { parseFrontmatter } from './frontmatter.ts'
+import { whiteSpace } from './vocabulary.ts'
 
 export type Line = {
   number: number  // 元のテキストの行番号
@@ -9,6 +10,13 @@ export interface PreprocessResult {
   meta: Record<string, any>
   lines: Line[]
 }
+
+// `配役` / `レギュ` / `レギュレーション` は CJK 始まりのため `\b` (word boundary) が
+// 立たない (JS の `\w` は ASCII のみ)。 後続が whiteSpace (半角/全角/タブ) または行末で
+// あることを look-ahead で要求し、 `配役者` のような誤マッチを防ぐ。
+const structuralLineRegex = new RegExp(
+  `^[+＋]|^(?:配役|レギュレーション|レギュ|setup)(?=${whiteSpace}|$)`
+)
 
 export function preprocess(input: string, cursorLine?: number): PreprocessResult {
   const { meta, numLines, body: content } = parseFrontmatter(input)
@@ -43,7 +51,7 @@ export function preprocess(input: string, cursorLine?: number): PreprocessResult
   // cursorLine が指定された場合、構造行（+, 配役/setup）以外をカーソル行でフィルタ
   if (cursorLine !== undefined) {
     resultLines = resultLines.filter(line => {
-      if (/^[+＋]|^(?:配役|レギュレーション|レギュ|setup)\b/.test(line.content)) return true
+      if (structuralLineRegex.test(line.content)) return true
       return line.number <= cursorLine
     })
   }

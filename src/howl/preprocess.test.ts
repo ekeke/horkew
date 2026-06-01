@@ -94,3 +94,57 @@ test('preprocess function - preserves order among multiple join lines', () => {
   assert.strictEqual(result.lines[2].content, '吊り ボブ')
   assert.strictEqual(result.lines[3].content, '噛み チャーリー')
 })
+
+// cursorLine フィルタは構造行 (join / 配役 / レギュ / レギュレーション / setup) を常に保持する。
+// 配役系の prefix は CJK 始まりのため、\b ベースの判定だと word boundary が立たず
+// 「cursor が配役行より前にあるとき配役行が落ち、bridge が default 配役を自動推定する」
+// 不具合を起こす。look-ahead で半角/全角/タブ空白または行末を許容することで保護する。
+test('preprocess - cursorLine filter preserves setup lines above cursor (各 prefix)', () => {
+  for (const prefix of ['配役', 'レギュ', 'レギュレーション', 'setup']) {
+    const setupLine = `${prefix} 村2 占1 狼1`
+    const input = [
+      '本文1',
+      '本文2',
+      setupLine,    // line 3
+      '本文3',
+    ].join('\n')
+    // cursor = 2 → 本文1 / 本文2 は残るが、setup 行 (line 3) は cursorLine フィルタを通る
+    const result = preprocess(input, 2)
+    const contents = result.lines.map(l => l.content)
+    assert.ok(contents.includes(setupLine), `${prefix} 行は cursorLine より下にあっても構造行として残るべき`)
+  }
+})
+
+test('preprocess - cursorLine filter respects full-width and tab whitespace after setup prefix', () => {
+  // 半角空白 / 全角空白 / タブ の 3 種について、setup prefix の直後にどの空白でも保護されること
+  const variants = [
+    '配役 村2 占1 狼1',
+    '配役　村2 占1 狼1',
+    '配役\t村2 占1 狼1',
+    'setup 村2 占1 狼1',
+    'setup　村2 占1 狼1',
+  ]
+  for (const setupLine of variants) {
+    const input = ['本文1', setupLine, '本文2'].join('\n')
+    const result = preprocess(input, 1)
+    const contents = result.lines.map(l => l.content)
+    assert.ok(contents.includes(setupLine), `${JSON.stringify(setupLine)} は構造行として残るべき`)
+  }
+})
+
+test('preprocess - cursorLine filter still drops non-structural lines below cursor', () => {
+  // 構造行保護のために non-structural な行までうっかり保護しないこと
+  const input = ['本文1', '本文2', '本文3'].join('\n')
+  const result = preprocess(input, 1)
+  const contents = result.lines.map(l => l.content)
+  assert.deepStrictEqual(contents, ['本文1'])
+})
+
+test('preprocess - cursorLine filter does not match prefix continuations (配役者)', () => {
+  // `配役者` のような prefix continuation を構造行と誤認しないこと
+  // (= cursorLine より下にあれば落ちる)
+  const input = ['本文1', '配役者の説明', '本文3'].join('\n')
+  const result = preprocess(input, 1)
+  const contents = result.lines.map(l => l.content)
+  assert.ok(!contents.includes('配役者の説明'), '配役者 で始まる行は構造行ではない')
+})
