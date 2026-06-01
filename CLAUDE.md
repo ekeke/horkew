@@ -15,7 +15,6 @@ Horkew is a werewolf（人狼）game analysis and AI toolkit. Game state parsing
 | **retar** | 役職推理エンジン（TypeScript）。リファレンス実装・開発のフロントライン |
 | **retar-rs** | Retar の Rust/WASM 実装。本番用。Docker ビルド → Node.js/ブラウザ両対応 |
 | **hati** | 詰み探索エンジン。AND-OR ゲーム木探索で村の必勝戦略を発見 |
-| **gmork** | 役職否定/確定の理由説明。Retar の結果を人間が読める日本語テキストに変換 |
 | **lupa** | ゲームシミュレーション。プラガブルな戦略インターフェースで完全な人狼ゲームを実行 |
 | **fenrir** | 強化学習（PPO）による AI プレイヤー。Lupa 上でゲームを回し、役職別ニューラルネットを訓練 |
 | **lykaon** | `.howl` エディタ + 解析サイドカーの Svelte 5 UI ライブラリ。`createAnalysisContext` + `EditorPane` を core に、`StatusPane` / `AnalysisTable` / `HatiPane` 等の optional ペインを並べて使う。詳細は [src/lykaon/README.md](src/lykaon/README.md) |
@@ -27,8 +26,6 @@ HOWL (parse .howl logs)     LUPA (simulate games)     FENRIR (train AI via PPO)
 VillageStatus ────────→ RETAR (solve possibilities) ← game decisions
                            ↓
                        Possibilities ────→ HATI (checkmate search)
-                           ↓
-                       GMORK (explain denials in Japanese)
 ```
 
 ### Retar 開発フロー (TS → Rust)
@@ -143,67 +140,22 @@ Hati（詰み探索）とRetar（役職推理）は機械学習パイプライ�
 - **ドキュメントは常に最新に保つ**: コードを変更したとき、関連する CLAUDE.md・TrainingPhases.md 等のドキュメントに古いファイルパス・クラス名・関数名が残っていないか確認し、同じコミットまたは直後のコミットで更新する
 - **丸数字（①②③…）の使用禁止**: 読みにくいため使わない。箇条書き番号は `1.` `2.` `3.` または `- ` を使う
 
-## Gmork (Role Reasoning Engine)
+## 役職追加ワークフロー (trait-purge 後)
 
-Gmork explains **why** a role is denied or confirmed for a player. It complements Retar (which computes **what** roles are possible).
+trait-purge リファクタ完了 (commit `bc08c0f`) により、新役職追加は以下 2 箇所のみで完結する。retar / hati 内部の役職名列挙テーブル (`Liar` / `HumanRoles` / `ALL_ROLES` / `RoleSignatureBits` 等) は `systemRoles` から自動派生されるため、手動更新不要。
 
-### Architecture
-```
-VillageStatus + setup → findReason(seat, role)              → DenialReason | null
-                      → findConfirmationReason(seat, role)  → ConfirmationReason | null
-```
+1. **TS** — [src/types/index.ts](src/types/index.ts) の `systemRoles` Map に entry を 1 つ追加。`SystemRole` リテラルユニオン、`faction`、`seerResult`、`mediumResult`、`traits[]` を埋めるだけ
+2. **Rust** — [src/retar-rs/src/types.rs](src/retar-rs/src/types.rs) で 4 箇所更新:
+   - `SystemRole::ALL` 配列 (TS の `systemRoles` 宣言順と完全一致させる)
+   - `SystemRole::traits()` の match arm
+   - `SystemRole::faction()` の match arm
+   - `SystemRole::seer_result()` の match arm
 
-Key modules in `src/gmork/`:
-- **index.ts** — Public API: `findReason`, `findConfirmationReason`, `explain`, `explainConfirmation`
-- **checkers.ts** — Denial checkers (tiered: CO constraint → Tier 0 analysis → Tier 1 direct → Tier 2 combination → Tier 3 chained)
-- **confirmers.ts** — Confirmation checkers + `deadWerewolfBounds` utility
-- **analysis.ts** — CO bust analysis (seer/medium), independent of Retar
-- **reasons.ts** — `DenialReason` / `ConfirmationReason` discriminated unions, checker input types
-- **format.ts** — Japanese text formatting for reasons
+TS / Rust の `systemRoles` 宣言順は **bit index 不変条件** のため厳守する (順序が変わると bit が動き WASM テスト失敗の原因になる)。
 
-### Key constraints
-- `findConfirmationReason` does NOT use Retar's possibilities for the target player (to avoid circular reasoning), but MAY use them for other players (e.g. `dead_werewolf_count` confirmer)
-- `cursed_by_killed_nekomata` (night bite) confirms werewolf; `cursed_by_executed_nekomata` (day execution) does NOT (random target)
+検証: `npm test` (TS) + `npm run test:rust` (Rust)。 sync-check が TS↔Rust の関数名一致を自動検証する。
 
-### Scenario-driven testing with `@gmork` annotations
-
-Gmork tests are embedded as comments in `.howl` scenario files (`src/retar/scenarios/*.howl`) and auto-discovered by `src/gmork/integration.test.ts`.
-
-#### Annotation syntax
-
-```
-# @gmork-deny PlayerName/role: reason_type
-# @gmork-deny PlayerName/role: outer_type > inner_type
-# @gmork-confirm PlayerName/role: reason_type
-```
-
-- **`@gmork-deny`** — Asserts `findReason()` returns the specified denial reason type
-- **`@gmork-confirm`** — Asserts `findConfirmationReason()` returns the specified confirmation reason type
-- **`> inner_type`** — Additionally checks `bustReason.type` inside the reason (for `seer_claim_contradicted` / `medium_claim_contradicted`)
-- **`: null`** — Asserts no reason is found (null)
-- **Empty after `:`** (e.g. `# @gmork-deny Player/role:`) — **TODO marker**: always fails, reporting whether a reason was found and what type it was. Use this when adding annotations where you don't yet know the expected reason type.
-
-#### Checkpoint behavior
-
-Annotations are grouped into checkpoints (consecutive comment blocks). Each checkpoint runs against the **partial game text up to that point** (same as `@expect`). This means the game state at the checkpoint determines what gmork can reason about.
-
-```howl
-# These run against game state at this point in the file:
-# @gmork-deny 闇さとし/seer: seer_claim_contradicted > result_contradicts_confirmed
-# @gmork-confirm 闇さとし/immoralist: follow_hamster
-
-# Game events continue below...
-サターニャ処刑
-```
-
-#### Workflow for adding annotations
-
-1. Add `# @gmork-deny Player/role:` or `# @gmork-confirm Player/role:` with empty reason
-2. Run `node --experimental-strip-types --test src/gmork/integration.test.ts`
-3. The test fails with either:
-   - `アノテーション修正可: 理由は出せたがアノテーションに理由が未記入です。実際の理由: xxx` → Copy the reason type into the annotation
-   - `理由が出せませんでした` → Gmork implementation needs to be extended
-4. Fill in the reason type and re-run
+詳細な経緯と Phase 1-11 の記録は [src/hati/Performance.md](src/hati/Performance.md) の「6. 役職追加コスト削減」「7. 役職追加コスト削減 - Rust 内部完遂」セクション参照。
 
 ## Domain Notes
 

@@ -179,6 +179,31 @@ hot path 内の trait helper 呼び出しは module-level const に固定した�
 
 retar-rs (Rust) 側は最小スコープで同期: `role_sets.rs` を新規追加して TS の helper 群を pub fn として export、 sync-check pass。 既存 Rust 内部ロジックは literal を残置 (役職追加で手動更新が必要、 段階的 trait 化は別タスク)。
 
+### 7. 役職追加コスト削減 - Rust 内部完遂 (trait-purge Phase 7-11, 2026-05-31)
+
+Phase 1-6 で残置していた retar-rs (Rust) 内部の役職名 literal を一斉に trait helper / `role_sets` 経由に置換し、Rust 側も役職追加時に手動更新不要な状態に到達。
+
+| Phase | 内容 | commit |
+|---|---|---|
+| 7 | bench / doc 整備 (Performance.md Phase 1-6 記録) | `ab09f9b` |
+| 8 | `DebugStash` を文字列キー → role-indexed Uint8Array に置換 (TS + Rust) | `6903dfc` |
+| 9 | `possibilities.rs` の bit 合成定数を `const fn` で `SystemRole::ALL` から派生 | `eb1924f` |
+| 10 | `plan_builder.rs` を `role_sets` / trait helper 経由に置換 | `0b4b39c` |
+| 11 | `finalizer.rs` / `role_testers.rs` / `village_retar.rs` の役職直参照を `LazyLock` + trait helper に | `bc08c0f` |
+
+`LazyLock<&'static [SystemRole]>` パターンで「特定 trait/faction を持つ役職集合」を 1 回だけ計算してキャッシュ。例: `LIAR_ROLES`、 `IMMORALIST_ROLES`、 `MEDIUMSHIP_ROLES`。 各 hot path はこれらの static slice を iterate するだけで、 trait 解決 overhead は起動時 1 回に集約される。
+
+BEFORE / AFTER (Phase 6 完了 → Phase 11 完了、同一機械):
+
+| 項目 | BEFORE (Phase 6) | AFTER (Phase 11) | 差 |
+|---|---|---|---|
+| retar TS bench | 1429ms | 1358ms | −5.0% (誤差範囲、 軽量化方向) |
+| retar WASM bench | 329ms | 328ms | −0.3% (横ばい) |
+| TS test | 1745 pass / 0 fail | 1745 pass / 0 fail | 同 |
+| Rust test | 47 pass / 0 fail | 47 pass / 0 fail | 同 |
+
+最終効果: 新役職追加時に **TS (`systemRoles` に entry 追加) + Rust (`SystemRole::ALL` / `traits()` / `faction()` / `seer_result()` の 4 箇所更新) だけ** で retar / hati の内部テーブル更新が一切不要になった。 役職名 literal が remain しているのは API シグネチャ (`vs.claims.get('seer')` / `denyRole(seat, 'werewolf')` 等) のみで、 これらは consumer 互換のため意図的に残置。
+
 ## 未実装の最適化案
 
 ### 反復深化
