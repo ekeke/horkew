@@ -275,9 +275,11 @@ describe('revote', () => {
 })
 
 // *********************************** Roles
+// 役職 regex は systemRoles.howlPattern が ground truth。 vocabulary.ts は
+// roleVocab(role) helper を export し、 consumer はそれ経由で取得する。
 
-describe('villager', () => {
-  const regex = new RegExp(Vocabulary.villager)
+describe('villager (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('villager'))
 
   it('should match villager terms', () => {
     assert.match('村人', regex, '村人 should match')
@@ -289,8 +291,8 @@ describe('villager', () => {
   })
 })
 
-describe('seer', () => {
-  const regex = new RegExp(Vocabulary.seer)
+describe('seer (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('seer'))
 
   it('should match seer terms', () => {
     assert.match('占い師', regex, '占い師 should match')
@@ -310,8 +312,8 @@ describe('seer', () => {
   })
 })
 
-describe('medium', () => {
-  const regex = new RegExp(Vocabulary.medium)
+describe('medium (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('medium'))
 
   it('should match medium terms', () => {
     assert.match('霊媒師', regex, '霊媒師 should match')
@@ -326,8 +328,8 @@ describe('medium', () => {
   })
 })
 
-describe('bodyguard', () => {
-  const regex = new RegExp(Vocabulary.bodyguard)
+describe('bodyguard (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('bodyguard'))
 
   it('should match bodyguard terms', () => {
     assert.match('護衛', regex, '護衛 should match')
@@ -341,8 +343,8 @@ describe('bodyguard', () => {
   })
 })
 
-describe('mason', () => {
-  const regex = new RegExp(Vocabulary.mason)
+describe('mason (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('mason'))
 
   it('should match mason terms', () => {
     assert.match('共有者', regex, '共有者 should match')
@@ -354,8 +356,8 @@ describe('mason', () => {
   })
 })
 
-describe('nekomata', () => {
-  const regex = new RegExp(Vocabulary.nekomata)
+describe('nekomata (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('nekomata'))
 
   it('should match nekomata terms', () => {
     assert.match('猫又', regex, '猫又 should match')
@@ -367,8 +369,8 @@ describe('nekomata', () => {
   })
 })
 
-describe('werewolf', () => {
-  const regex = new RegExp(Vocabulary.werewolf)
+describe('werewolf (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('werewolf'))
 
   it('should match werewolf terms', () => {
     assert.match('人狼', regex, '人狼 should match')
@@ -380,12 +382,15 @@ describe('werewolf', () => {
   })
 })
 
-describe('possessed', () => {
-  const regex = new RegExp(Vocabulary.possessed)
+describe('possessed (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('possessed'))
 
   it('should match possessed terms', () => {
     assert.match('狂人', regex, '狂人 should match')
-    assert.match('狂信者', regex, '狂信者 should match')
+    // 注: 'possessed' の howlPattern は (?:狂人?|possessed) で `狂信者` も先頭一致する。
+    // 配役 statement パーサでは fanatic を name.length DESC ソートで先に試して disambiguate。
+    // ここでは pattern 単体の振る舞いとして '狂信者' / '狂' も match することを確認。
+    assert.match('狂信者', regex, '狂信者 should match (pattern level — paparser disambiguates)')
     assert.match('狂', regex, '狂 should match')
   })
 
@@ -394,8 +399,22 @@ describe('possessed', () => {
   })
 })
 
-describe('werehamster', () => {
-  const regex = new RegExp(Vocabulary.hamster)
+describe('fanatic (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('fanatic'))
+
+  it('should match fanatic terms', () => {
+    assert.match('狂信者', regex, '狂信者 should match')
+    assert.match('狂信', regex, '狂信 should match')
+    assert.match('信', regex, '信 should match')
+  })
+
+  it('should not match non-fanatic terms', () => {
+    assert.doesNotMatch('占い師', regex, 'Non-fanatic term should not match')
+  })
+})
+
+describe('werehamster (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('werehamster'))
 
   it('should match werehamster terms', () => {
     assert.match('妖狐', regex, '妖狐 should match')
@@ -407,8 +426,8 @@ describe('werehamster', () => {
   })
 })
 
-describe('immoralist', () => {
-  const regex = new RegExp(Vocabulary.immoralist)
+describe('immoralist (roleVocab)', () => {
+  const regex = new RegExp(Vocabulary.roleVocab('immoralist'))
 
   it('should match immoralist terms', () => {
     assert.match('背徳者', regex, '背徳者 should match')
@@ -421,8 +440,8 @@ describe('immoralist', () => {
   })
 })
 
-describe('paparazzi', () => {
-  const regex = new RegExp(`^${Vocabulary.paparazzi}$`)
+describe('paparazzi (roleVocab)', () => {
+  const regex = new RegExp(`^${Vocabulary.roleVocab('paparazzi')}$`)
 
   it('should match paparazzi terms', () => {
     assert.match('パパラッチ', regex, 'パパラッチ should match')
@@ -438,29 +457,29 @@ describe('paparazzi', () => {
 
 
 // *********************************** Alignment
-describe('village', () => {
-  const regex = new RegExp(Vocabulary.villager)
+describe('village alignment', () => {
+  const regex = new RegExp(Vocabulary.village)
 
-  it('should match villager terms', () => {
+  it('should match village alignment terms', () => {
     assert.match('村人', regex, '村人 should match')
     assert.match('村', regex, '村 should match')
   })
 
-  it('should not match non-villager terms', () => {
-    assert.doesNotMatch('狼', regex, 'Non-villager term should not match')
+  it('should not match non-village terms', () => {
+    assert.doesNotMatch('狼', regex, 'Non-village term should not match')
   })
 })
 
-describe('wolf', () => {
-  const regex = new RegExp(Vocabulary.werewolf)
+describe('wolf alignment', () => {
+  const regex = new RegExp(Vocabulary.wolf)
 
-  it('should match werewolf terms', () => {
+  it('should match wolf alignment terms', () => {
     assert.match('人狼', regex, '人狼 should match')
     assert.match('狼', regex, '狼 should match')
   })
 
-  it('should not match non-werewolf terms', () => {
-    assert.doesNotMatch('村人', regex, 'Non-werewolf term should not match')
+  it('should not match non-wolf terms', () => {
+    assert.doesNotMatch('村人', regex, 'Non-wolf term should not match')
   })
 })
 

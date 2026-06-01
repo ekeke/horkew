@@ -1,4 +1,5 @@
 import * as V from './vocabulary.ts'
+import { systemRoles, type SystemRole } from '../types/index.ts'
 
 export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'dayMark' | 'reveal' | 'spoiler' | 'speech' | 'videoSource' | 'timestamp' | 'unknown'
 
@@ -463,7 +464,7 @@ export function parseOverStatement(text: string, line: number): OverStatement | 
 }
 
 export function parseMasonStatement(text: string, line: number): MasonStatement | null {
-  const masonRegex = new RegExp(`^${V.optionalSpace}${V.mason}${V.delimiter}(${V.possibleName}(?:${V.optionalSpace}${V.delimiter}${V.possibleName})*)${V.optionalSpace}$`)
+  const masonRegex = new RegExp(`^${V.optionalSpace}${V.roleVocab('mason')}${V.delimiter}(${V.possibleName}(?:${V.optionalSpace}${V.delimiter}${V.possibleName})*)${V.optionalSpace}$`)
   const match = masonRegex.exec(text)
   if (!match) return null
   const players = match[1].split(new RegExp(`(?:${V.delimiter})+?`)).map(p => p.trim()).filter(p => p.length > 0)
@@ -494,7 +495,7 @@ const historyRegex = new RegExp(historyRegexText, 'g')
 // Bodyguard-specific: claim required, raw history captured as text (allows bare target names)
 const bodyguardAssertRegex = new RegExp([
   `^${V.optionalSpace}(?<actor>${V.possibleName})${V.delimiter}${V.optionalSpace}`,
-  `(?<claim>(?:${V.denial})?(?:${V.bodyguard})${V.claim})`,
+  `(?<claim>(?:${V.denial})?(?:${V.roleVocab('bodyguard')})${V.claim})`,
   `(?:${V.optionalSpace}(?<rawHistory>.+?))?`,
   `${V.optionalSpace}$`
 ].join(''))
@@ -504,24 +505,19 @@ const guardHistoryTokenRegex = new RegExp(
   `^(?:(?<day>${V.dayNumber})${V.dayUnit})?(?:${V.optionalSpace})?(?<target>.+)$`
 )
 
-const allVillageRoles: Role[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
+// claim/assert で扱う「村側 power role」 (素村 CO で否定される対象)。
+// nonVillage は claim 解析専用 pseudo-role なのでこの list には含まれない。
+const POWER_ROLES: Role[] = ['seer', 'medium', 'bodyguard', 'mason', 'nekomata']
 
 function extractRoles(claim: string): { roles: Role[], negative: boolean } {
   const negative = new RegExp(`^${V.denial}`).test(claim)
   // 素村CO / 村人CO = deny all village power roles
-  if (new RegExp(V.plainVillager).test(claim) || new RegExp(V.villager).test(claim)) {
-    return { roles: allVillageRoles, negative: true }
+  if (new RegExp(V.plainVillager).test(claim) || new RegExp(V.roleVocab('villager')).test(claim)) {
+    return { roles: POWER_ROLES, negative: true }
   }
-  const roleMap: [RegExp, Role][] = [
-    [new RegExp(V.seer), 'seer'],
-    [new RegExp(V.medium), 'medium'],
-    [new RegExp(V.bodyguard), 'bodyguard'],
-    [new RegExp(V.mason), 'mason'],
-    [new RegExp(V.nekomata), 'nekomata'],
-  ]
   const roles: Role[] = []
-  for (const [regex, role] of roleMap) {
-    if (regex.test(claim)) roles.push(role)
+  for (const role of POWER_ROLES) {
+    if (new RegExp(V.roleVocab(role as SystemRole)).test(claim)) roles.push(role)
   }
   return { roles: roles.length > 0 ? roles : ['nonVillage'], negative }
 }
@@ -598,19 +594,16 @@ export function parseAssertStatement(text: string, line: number): AssertStatemen
 // Setup statement: 配役 村4 占1 霊1 狩1 共2 猫1 狼3 狂1 狐1 背1
 const setupRegex = new RegExp(`^${V.optionalSpace}${V.setupPrefix}${V.optionalSpace}(.+)$`)
 
-const roleMapping: [RegExp, string][] = [
-  [new RegExp(`^${V.villager}`), 'villager'],
-  [new RegExp(`^${V.seer}`), 'seer'],
-  [new RegExp(`^${V.medium}`), 'medium'],
-  [new RegExp(`^${V.bodyguard}`), 'bodyguard'],
-  [new RegExp(`^${V.mason}`), 'mason'],
-  [new RegExp(`^${V.nekomata}`), 'nekomata'],
-  [new RegExp(`^${V.werewolf}`), 'werewolf'],
-  [new RegExp(`^${V.fanatic}`), 'fanatic'],
-  [new RegExp(`^${V.possessed}`), 'possessed'],
-  [new RegExp(`^${V.werehamster}`), 'werehamster'],
-  [new RegExp(`^${V.immoralist}`), 'immoralist'],
-]
+// 配役 statement (`配役 村4 占1 ...`) で role token を先頭マッチさせる pattern 群。
+// systemRoles 全件を name.length DESC でソートして「狂信者」 を「狂人」 より先に試す
+// (longest-prefix-first で disambiguate)。 これにより新役職追加時にこの list を
+// 触らずに済む (paparazzi など pattern が systemRoles.howlPattern で auto-export)。
+const roleMapping: [RegExp, SystemRole][] = (() => {
+  const sorted = [...systemRoles.entries()].sort(
+    ([, a], [, b]) => b.name.length - a.name.length,
+  )
+  return sorted.map(([role, meta]) => [new RegExp(`^${meta.howlPattern}`), role] as [RegExp, SystemRole])
+})()
 
 const fullWidthDigits: Record<string, string> = { '０':'0','１':'1','２':'2','３':'3','４':'4','５':'5','６':'6','７':'7','８':'8','９':'9' }
 function normalizeDigits(s: string): string {

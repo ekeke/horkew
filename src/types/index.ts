@@ -89,6 +89,16 @@ export type Role = {
   seerResult: EnumSpecies
   mediumResult: EnumSpecies
   traits: RoleTrait[]
+  /**
+   * Howl パーサが入力中の役職トークンに match させる regex フラグメント。
+   * anchor (^/$) は含めない (consumer 側で文脈に応じて付与)。
+   * 必ず systemName を末尾選択肢として含める。
+   * 例: seer = '(?:占い?師?|[預予]言?者?|seer)'
+   *
+   * prefix 衝突 (例: 狂人 vs 狂信者) は src/howl/vocabulary.ts の roleVocab()
+   * 系 helper が name.length DESC ソートで解決する (長い名前を先に試す)。
+   */
+  howlPattern: string
 }
 
 export type SeatStatus = {
@@ -149,6 +159,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     description: "能力を持たない村人",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
     traits: [],
+    howlPattern: "(?:村人?|villager)",
   }],
   ["seer", {
     name: "占い師", shortName: "占", systemName: "seer",
@@ -156,6 +167,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     description: "毎晩、生存者から一人を選び人狼かどうかを知ることができる",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
     traits: [{ kind: "action", sub: "divine" }],
+    howlPattern: "(?:占い?師?|[預予]言?者?|seer)",
   }],
   ["medium", {
     name: "霊能者", shortName: "霊", systemName: "medium",
@@ -163,6 +175,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     description: "毎晩、前日に処刑された人物が人狼かどうかを知ることができる",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
     traits: [{ kind: "auto-info", sub: "execution-species" }],
+    howlPattern: "(?:霊(?:媒師?|能者?|)|medium)",
   }],
   ["bodyguard", {
     name: "狩人", shortName: "狩", systemName: "bodyguard",
@@ -170,6 +183,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     description: "毎晩、生存者から一人を選び人狼の襲撃から守ることができる",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
     traits: [{ kind: "action", sub: "guard" }],
+    howlPattern: "(?:護(?:衛)?|狩(?:り|人)?|bodyguard)",
   }],
   ["mason", {
     name: "共有者", shortName: "共", systemName: "mason",
@@ -177,6 +191,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     description: "特別な能力はないが、最初から他の共有者を知っている",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
     traits: [{ kind: "knowledge", sub: "know-masons" }],
+    howlPattern: "(?:共(?:有者?)?|mason)",
   }],
   ["nekomata", {
     name: "猫又", shortName: "猫", systemName: "nekomata",
@@ -187,6 +202,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
       { kind: "reactive", sub: "curse-on-executed" },
       { kind: "reactive", sub: "curse-on-killed" },
     ],
+    howlPattern: "(?:猫又?|nekomata)",
   }],
   ["werewolf", {
     name: "人狼", shortName: "狼", systemName: "werewolf",
@@ -198,6 +214,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
       { kind: "action", sub: "attack" },
       { kind: "channel", sub: "wolf-chat" },
     ],
+    howlPattern: "(?:人?狼|werewolf)",
   }],
   ["possessed", {
     name: "狂人", shortName: "狂", systemName: "possessed",
@@ -205,6 +222,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     description: "能力を持たない村人だが、人狼の味方をする",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
     traits: [],
+    howlPattern: "(?:狂人?|possessed)",
   }],
   ["fanatic", {
     name: "狂信者", shortName: "信", systemName: "fanatic",
@@ -212,6 +230,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     description: "能力を持たない村人だが、人狼の味方をする\n最初から人狼が誰かを知っている",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
     traits: [{ kind: "knowledge", sub: "know-werewolves" }],
+    howlPattern: "(?:狂信者?|信|fanatic)",
   }],
   ["werehamster", {
     name: "妖狐", shortName: "狐", systemName: "werehamster",
@@ -222,6 +241,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
       { kind: "passive", sub: "attack-immune" },
       { kind: "passive", sub: "die-when-divined" },
     ],
+    howlPattern: "(?:妖?狐|werehamster)",
   }],
   ["immoralist", {
     name: "背徳者", shortName: "背", systemName: "immoralist",
@@ -232,6 +252,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
       { kind: "knowledge", sub: "know-foxes" },
       { kind: "reactive", sub: "follow-fox-death" },
     ],
+    howlPattern: "(?:背(?:徳者?)?|immoralist)",
   }],
   ["paparazzi", {
     name: "パパラッチ", shortName: "パ", systemName: "paparazzi",
@@ -239,6 +260,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     description: "毎晩、生存者から一人を選び人狼かどうかを知ることができる\n人狼の味方をする",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
     traits: [{ kind: "action", sub: "divine" }],
+    howlPattern: "(?:パパラッチ|paparazzi)",
   }],
 ])
 

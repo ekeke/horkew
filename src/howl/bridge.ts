@@ -7,6 +7,7 @@ import type {
   Role,
   ResolvedRules,
 } from '../types/index.ts'
+import { systemRoles } from '../types/index.ts'
 import { resolveRules } from './ruleset.ts'
 import type {
   Statement,
@@ -69,23 +70,23 @@ const claimRoleToSystemRole: Record<string, SystemRole> = {
   nekomata: 'nekomata',
 }
 
-// spoiler/reveal 等で使う、日本語/英語の役職トークンを SystemRole に解決する。
-// vocabulary.ts の各パターン（日英両対応）を完全一致で当てていく。
-// plainVillager → villager に集約（retar の SystemRole は素村を区別しない）。
-const spoilerRoleSpecs: { systemRole: SystemRole, pattern: RegExp }[] = [
-  { systemRole: 'villager',    pattern: new RegExp(`^(?:${V.plainVillager}|${V.villager})$`) },
-  { systemRole: 'seer',        pattern: new RegExp(`^${V.seer}$`) },
-  { systemRole: 'medium',      pattern: new RegExp(`^${V.medium}$`) },
-  { systemRole: 'bodyguard',   pattern: new RegExp(`^${V.bodyguard}$`) },
-  { systemRole: 'mason',       pattern: new RegExp(`^${V.mason}$`) },
-  { systemRole: 'nekomata',    pattern: new RegExp(`^${V.nekomata}$`) },
-  { systemRole: 'werewolf',    pattern: new RegExp(`^${V.werewolf}$`) },
-  { systemRole: 'possessed',   pattern: new RegExp(`^${V.possessed}$`) },
-  { systemRole: 'fanatic',     pattern: new RegExp(`^${V.fanatic}$`) },
-  { systemRole: 'werehamster', pattern: new RegExp(`^${V.werehamster}$`) },
-  { systemRole: 'immoralist',  pattern: new RegExp(`^${V.immoralist}$`) },
-  { systemRole: 'paparazzi',   pattern: new RegExp(`^${V.paparazzi}$`) },
-]
+// spoiler/reveal 等で使う、 日本語/英語の役職トークンを SystemRole に解決する。
+// systemRoles.howlPattern (= vocabulary 由来) を完全一致で当てていく。
+// villager のみ plainVillager (素村) も同じ SystemRole 'villager' に集約 (retar の
+// SystemRole は素村を区別しない)。
+// prefix 衝突を起こす役職対 (狂人 vs 狂信者) は name.length DESC ソートで長い名前を
+// 先に試すことで disambiguate。
+const spoilerRoleSpecs: { systemRole: SystemRole, pattern: RegExp }[] = (() => {
+  const sorted = [...systemRoles.entries()].sort(
+    ([, a], [, b]) => b.name.length - a.name.length,
+  )
+  return sorted.map(([role, meta]) => {
+    const pattern = role === 'villager'
+      ? new RegExp(`^(?:${V.plainVillager}|${meta.howlPattern})$`)
+      : new RegExp(`^${meta.howlPattern}$`)
+    return { systemRole: role, pattern }
+  })
+})()
 
 function resolveSpoilerRole(raw: string): SystemRole | null {
   for (const spec of spoilerRoleSpecs) {

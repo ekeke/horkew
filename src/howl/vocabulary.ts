@@ -36,22 +36,35 @@ export const grelan   = `(?:グレラン)`
 export const none   = `(?:者?(?:なし|無し|ナシ))`
 
 // ********************************* Basic Roles
+//
+// 役職別の regex フラグメントは systemRoles.howlPattern が ground truth (src/types/index.ts)。
+// 新役職追加で本ファイルを触る必要はない (anyRole / roleVocab / spoilerRoleSpecs / roleMapping
+// 全て systemRoles から自動派生される)。
+//
+// pseudo-token (SystemRole でない解析時専用トークン) のみ standalone const として残置:
+//   - plainVillager: 素村 CO (= 村側 power role 全否定) を表現
+//   - nonVillage: 人外 CO (= 村陣営でない可能性) を表現
 
-export const villager    = `(?:村人?|villager)`
-export const seer        = `(?:占い?師?|[預予]言?者?|seer)`
-export const medium      = `(?:霊(?:媒師?|能者?|)|medium)`
-export const bodyguard   = `(?:護(?:衛)?|狩(?:り|人)?|bodyguard)`
-export const mason       = `(?:共(?:有者?)?|mason)`
-export const nekomata    = `(?:猫又?|nekomata)`
-export const werewolf    = `(?:人?狼|werewolf)`
-export const possessed   = `(?:狂人?|possessed)`
-export const fanatic     = `(?:狂信者?|信|fanatic)`
-export const werehamster = `(?:妖?狐|werehamster)`
-export const immoralist    = `(?:背(?:徳者?)?|immoralist)`
-export const paparazzi     = `(?:パパラッチ|paparazzi)`
+import { systemRoles, type SystemRole } from '../types/index.ts'
+
 export const plainVillager = `(?:素村人?|plainVillager)`
 export const nonVillage    = `(?:人外|nonVillage)`
-export const anyRole       = `(?:${plainVillager}|${villager}|${seer}|${medium}|${bodyguard}|${mason}|${nekomata}|${werewolf}|${possessed}|${fanatic}|${werehamster}|${immoralist}|${paparazzi}|${nonVillage})`
+
+/** 特定 SystemRole の Howl 入力用 regex フラグメントを返す。 anchor 無し。 */
+export function roleVocab(role: SystemRole): string {
+  const meta = systemRoles.get(role)
+  if (!meta) throw new Error(`roleVocab: unknown SystemRole '${role}'`)
+  return meta.howlPattern
+}
+
+/**
+ * 全 SystemRole + pseudo-token (plainVillager / nonVillage) を含む選択肢。
+ * spoiler / reveal / claim 解析の汎用 token として使う。
+ */
+export const anyRole: string = (() => {
+  const patterns = [...systemRoles.values()].map(r => r.howlPattern)
+  return `(?:${plainVillager}|${patterns.join('|')}|${nonVillage})`
+})()
 
 // ********************************* Alignments
 

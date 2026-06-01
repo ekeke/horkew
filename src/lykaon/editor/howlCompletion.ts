@@ -390,10 +390,10 @@ const claimingRoleToCoType: Record<string, CoType> = {
  * まずVillageStatusのCO情報を参照し、未登録なら行テキストのCOキーワードで判定する。
  */
 // CO キーワード検出用の正規表現 (Howl vocabulary の短形式も含む)
-const seerCoRe      = new RegExp(`${V.seer}CO`, 'i')
-const mediumCoRe    = new RegExp(`${V.medium}CO`, 'i')
-const bodyguardCoRe = new RegExp(`${V.bodyguard}CO`, 'i')
-const masonCoRe     = new RegExp(`${V.mason}CO`, 'i')
+const seerCoRe      = new RegExp(`${V.roleVocab('seer')}CO`, 'i')
+const mediumCoRe    = new RegExp(`${V.roleVocab('medium')}CO`, 'i')
+const bodyguardCoRe = new RegExp(`${V.roleVocab('bodyguard')}CO`, 'i')
+const masonCoRe     = new RegExp(`${V.roleVocab('mason')}CO`, 'i')
 
 function detectCoType(lineText: string, players: PlayerEntry[]): CoType {
   // VillageStatus: 行頭のプレイヤー名からCO種別を取得
@@ -423,7 +423,7 @@ function maxReportable(coType: CoType, stats: GameStats): number {
 // 現行 CO 行内で既に報告済みの結果数を数える
 // seer/medium は結果マーカー ○●白黒 の出現数、bodyguard はターゲット（日付以外のトークン）数
 function countReportedInCo(lineText: string, coType: CoType): number {
-  const coMatch = lineText.match(new RegExp(`(?:${V.seer}|${V.medium}|${V.bodyguard}|${V.mason})CO`, 'i'))
+  const coMatch = lineText.match(new RegExp(`(?:${V.roleVocab('seer')}|${V.roleVocab('medium')}|${V.roleVocab('bodyguard')}|${V.roleVocab('mason')})CO`, 'i'))
   if (!coMatch || coMatch.index === undefined) return 0
   const afterCo = lineText.slice(coMatch.index + coMatch[0].length)
   if (coType === 'seer' || coType === 'medium') {
