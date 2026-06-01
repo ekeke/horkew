@@ -1,8 +1,8 @@
-use crate::types::{CauseOfDeath, VillageStatus, SystemRole, RoleTrait, Seat};
+use crate::types::{CauseOfDeath, Faction, VillageStatus, SystemRole, RoleTrait, Seat};
 use crate::possibilities::Possibilities;
 use crate::combinatorics::select_combinations_from_array;
 use crate::role_sets::{
-    liar_roles_in, powered_village_roles_in, has_trait, single_role_by_trait,
+    all_roles_in, liar_roles_in, powered_village_roles_in, has_trait, single_role_by_trait,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -10,6 +10,15 @@ use std::collections::{BTreeMap, BTreeSet};
 /// systemRoles 拡張に自動追従.
 fn role_from_str(s: &str) -> Option<SystemRole> {
     SystemRole::ALL.iter().copied().find(|r| r.to_string() == s)
+}
+
+/// action:divine trait を持つ liar role (paparazzi 等). seer 等と同じ planning frame で扱う.
+/// 同 trait 内で互いの CO 席を pool として共有 (paparazzi は seer 騙り、 seer は paparazzi 騙り).
+fn divine_liar_roles_in(setup: &BTreeMap<SystemRole, u32>) -> Vec<SystemRole> {
+    all_roles_in(setup)
+        .into_iter()
+        .filter(|&r| r.faction() != Faction::Village && has_trait(r, RoleTrait::ActionDivine))
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -44,7 +53,9 @@ pub fn build_role_test_plan(
     let has_hocus_pocus = !hocus_seats.is_empty();
 
     // setup 駆動で派生. 役職追加で自動追従.
-    let planning_roles = powered_village_roles_in(setup);
+    // 村陣営の能力持ち + divine trait を持つ liar role (paparazzi 等) を planning 対象に.
+    let mut planning_roles = powered_village_roles_in(setup);
+    planning_roles.extend(divine_liar_roles_in(setup));
     let planning_roles_set: BTreeSet<SystemRole> = planning_roles.iter().copied().collect();
     let liar_roles_set: BTreeSet<SystemRole> = liar_roles_in(setup).into_iter().collect();
     let fox_role = single_role_by_trait(RoleTrait::PassiveDieWhenDivined);
@@ -70,6 +81,41 @@ pub fn build_role_test_plan(
             *entry = (*entry).min(claim_day);
         }
     }
+
+    // action:divine trait を共有する role 同士の CO 席を pool として共有する.
+    // 例: paparazzi の selected 候補は seer CO 席 + paparazzi CO 席 + unrevealed.
+    // paparazzi は通常 seer 騙りするため、 seer CO 席が paparazzi の真の候補となる.
+    let get_divine_claim_pool = |role: SystemRole| -> Vec<Seat> {
+        if !has_trait(role, RoleTrait::ActionDivine) {
+            return claims.get(&role).cloned().unwrap_or_default();
+        }
+        let mut set: BTreeSet<Seat> = BTreeSet::new();
+        for &other_role in &planning_roles {
+            if has_trait(other_role, RoleTrait::ActionDivine) {
+                if let Some(seats) = claims.get(&other_role) {
+                    for &s in seats {
+                        set.insert(s);
+                    }
+                }
+            }
+        }
+        set.into_iter().collect()
+    };
+
+    let get_min_claim_day = |role: SystemRole| -> i32 {
+        if !has_trait(role, RoleTrait::ActionDivine) {
+            return min_claim_day.get(&role).copied().unwrap_or(i32::MAX);
+        }
+        let mut m = i32::MAX;
+        for &other_role in &planning_roles {
+            if has_trait(other_role, RoleTrait::ActionDivine) {
+                if let Some(&d) = min_claim_day.get(&other_role) {
+                    m = m.min(d);
+                }
+            }
+        }
+        m
+    };
 
     let mut pose_as_count_total: u32 = 0;
     for (&role, &count) in setup {
@@ -114,7 +160,8 @@ pub fn build_role_test_plan(
 
     for &role in &planning_roles {
         let has_curse_on_executed = has_trait(role, RoleTrait::ReactiveCurseOnExecuted);
-        let role_claims = claims.get(&role).cloned().unwrap_or_default();
+        // divine trait 同士は CO 席を pool 共有 (seer ↔ paparazzi).
+        let role_claims = get_divine_claim_pool(role);
         if !has_curse_on_executed && role_claims.is_empty() && !has_hocus_pocus {
             continue;
         }
@@ -129,7 +176,7 @@ pub fn build_role_test_plan(
         }
 
         let mut tests_of_role: Vec<RoleTest> = Vec::new();
-        let min_day = min_claim_day.get(&role).copied().unwrap_or(i32::MAX);
+        let min_day = get_min_claim_day(role);
 
         // Unrevealed seats: died before first CO, not claiming, not executed (unless no CO opportunity)
         let mut unrevealed_seats: Vec<Seat> = Vec::new();

@@ -277,12 +277,14 @@ impl VillageRetar {
         let max_day = (self.vs.day + 1) as usize;
         let poss_len = self.initial_possibilities.possibilities.len();
         self.context = Some(AnalyzeContext {
-            hamsters_killed_by_seer: Vec::new(),
+            hamsters_killed_by_divine: Vec::new(),
             require_one_of: Vec::new(),
             death_chronicle: DeathChronicle::new(max_day),
             possibilities: self.initial_possibilities.clone_instance(),
             hamsters_max_surviving_day: i32::MAX,
-            need_seer_at_day: None,
+            need_divine_alive_at_day: None,
+            divine_alive_max_day: i32::MIN,
+            divine_targets_by_day: std::collections::BTreeMap::new(),
         });
         // Pre-allocate snapshot pool: one per recursion depth + one for try_finalize
         let pool_size = self.role_tests.len() + 1;

@@ -1,6 +1,6 @@
 use crate::types::{CauseOfDeath, EnumSpecies, RoleTrait, VillageStatus, VillageResult, SystemRole, Seat, Day};
 use crate::possibilities::Possibilities;
-use crate::role_testers::AnalyzeContext;
+use crate::role_testers::{AnalyzeContext, DivineTarget};
 use crate::role_sets::{
     count_by_seer_result_in, count_by_trait_in, single_role_by_seer_result, single_role_by_trait,
 };
@@ -47,6 +47,42 @@ pub fn create_debug_stash() -> DebugStash {
     DebugStash::default()
 }
 
+/// action:divine trait 集約による狐呪殺の説明可能性チェック (読み取り専用).
+///
+/// verify_divine_ability が個別 role ごとに溜めた divine_alive_max_day / divine_targets_by_day を
+/// 使って、 「狐死日に占い能力者のいずれかが生きていた + その日の対象集合に狐 seat (または
+/// Unknown) が含まれる」を判定する.
+///
+/// paparazzi 等の untrusted divine role がいる setup では、 seer 単独では説明できなくても
+/// paparazzi が説明する可能性があるためここで集約判定する.
+pub fn check_divine_coverage(context: &AnalyzeContext) -> bool {
+    if context.hamsters_killed_by_divine.is_empty() {
+        return true;
+    }
+
+    // 1. 占い能力者の最大生存日 >= 狐呪殺最終日
+    if let Some(need_day) = context.need_divine_alive_at_day {
+        if context.divine_alive_max_day < need_day {
+            return false;
+        }
+    }
+
+    // 2. 各狐呪殺について、 その日の divine target 集合に対象 seat (または Unknown) を含む
+    for hk in &context.hamsters_killed_by_divine {
+        let targets = match context.divine_targets_by_day.get(&hk.day) {
+            None => return false,
+            Some(t) => t,
+        };
+        if !targets.contains(&DivineTarget::Seat(hk.seat))
+            && !targets.contains(&DivineTarget::Unknown)
+        {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Hamster win path for 2-pass analysis
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HamsterWinPath {
@@ -81,7 +117,7 @@ pub fn check_death_counts(
             return false;
         } else if expected < actual && actual <= expected + immoralists {
             let hamster_died_this_night = context
-                .hamsters_killed_by_seer
+                .hamsters_killed_by_divine
                 .iter()
                 .any(|h| h.day == day);
             if hamster_died_this_night {
@@ -139,7 +175,7 @@ pub fn update_death_count_constraints(
             return false;
         } else if expected < actual && actual <= expected + immoralists {
             let hamster_died_this_night = context
-                .hamsters_killed_by_seer
+                .hamsters_killed_by_divine
                 .iter()
                 .any(|h| h.day == day);
             if hamster_died_this_night {
@@ -190,6 +226,11 @@ pub fn finalize(
     cached_surviving_map: &BTreeMap<Seat, bool>,
 ) {
     debug_stash.finalizer_runs += 1;
+    // 全 divine role の集約済み状態で狐呪殺の説明可能性を最終判定
+    if !check_divine_coverage(context) {
+        debug_stash.finalizer_fails += 1;
+        return;
+    }
     #[cfg(feature = "dump")] crate::dump::finalize_pre(&context.possibilities);
 
     // Mark night-kill victims as non-wolf

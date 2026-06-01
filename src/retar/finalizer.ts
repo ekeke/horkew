@@ -45,7 +45,7 @@ export function checkDeathCounts(
       return false
     }
     else if ( expected < actual && actual <= expected + immoralists ) {
-      const hamsterDiedThisNight = context.hamstersKilledBySeer.some(h => h.day === day)
+      const hamsterDiedThisNight = context.hamstersKilledByDivine.some(h => h.day === day)
       if ( hamsterDiedThisNight ) {
         // mut版では requireOneOf に制約を追加する。読み取り専用版では矛盾なしとして通す
         continue DAY
@@ -90,7 +90,7 @@ export function updateDeathCountConstraints(
       return false
     }
     else if ( expected < actual && actual <= expected + immoralists ) {
-      const hamsterDiedThisNight = context.hamstersKilledBySeer.some(h => h.day === day)
+      const hamsterDiedThisNight = context.hamstersKilledByDivine.some(h => h.day === day)
       if ( hamsterDiedThisNight ) {
         for ( let i=0; i<immoralists; i++ ) {
           context.requireOneOf.push( killed.map(seat => ({ seat, role: followFoxRole })) )
@@ -111,6 +111,35 @@ export function updateDeathCountConstraints(
     }
     return false
   }
+  return true
+}
+
+/**
+ * action:divine trait 集約による狐呪殺の説明可能性チェック (読み取り専用).
+ *
+ * verifyDivineAbility が個別 role ごとに溜めた divineAliveMaxDay / divineTargetsByDay を
+ * 使って、 「狐死日に占い能力者のいずれかが生きていた + その日の対象集合に狐 seat (または
+ * 'unknown') が含まれる」を判定する.
+ *
+ * paparazzi 等の untrusted divine role がいる setup では、 seer 単独では説明できなくても
+ * paparazzi が説明する可能性があるためここで集約判定する.
+ */
+export function checkDivineCoverage(context: AnalyzeContext): boolean {
+  if (context.hamstersKilledByDivine.length === 0) return true
+
+  // 1. 占い能力者の最大生存日 >= 狐呪殺最終日
+  if (context.needDivineAliveAtDay != null
+      && context.divineAliveMaxDay < context.needDivineAliveAtDay) {
+    return false
+  }
+
+  // 2. 各狐呪殺について、 その日の divine target 集合に対象 seat (または 'unknown') を含む
+  for (const { day, seat } of context.hamstersKilledByDivine) {
+    const targets = context.divineTargetsByDay.get(day)
+    if (!targets) return false
+    if (!targets.has(seat) && !targets.has('unknown')) return false
+  }
+
   return true
 }
 
@@ -150,6 +179,11 @@ export function finalize(
   cachedSurvivingMap: Map<Seat, boolean>,
 ): void {
   debugStash.finalizerRuns++
+  // 全 divine role の集約済み状態で狐呪殺の説明可能性を最終判定
+  if (!checkDivineCoverage(context)) {
+    debugStash.finalizerFails++
+    return
+  }
   dumpFinalizePre(context.possibilities)
   // ここまで処理が終わったところで、襲撃死した人物は非狼とみなす
   for ( const [seat, status] of vs.statuses.entries() ) {

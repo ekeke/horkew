@@ -13,11 +13,25 @@ type DeathChronicle = {
 
 export type AnalyzeContext = {
   possibilities: Possibilities
-  needSeerAtDay?: number
-  hamstersKilledBySeer: { day: number, seat: Seat }[]
+  needDivineAliveAtDay?: number
+  hamstersKilledByDivine: { day: number, seat: Seat }[]
   hamstersMaxSurvivingDay: number
   requireOneOf: { seat: Seat, role: SystemRole }[][]
   deathChronicle: DeathChronicle
+  /**
+   * action:divine trait を持つ全 role の selected 席集合での最大生存日。
+   * alive な席があれば Infinity. setup に複数の divine role がある場合 (seer + paparazzi 等)
+   * は trait 単位での集約値となる。 needDivineAliveAtDay >= この値 で「狐呪殺日に占い能力者
+   * が生きていたか」を集約的に判定する.
+   */
+  divineAliveMaxDay: number
+  /**
+   * action:divine trait を持つ全 role の selected 席による占いターゲットを日ごとに集約.
+   * - trusted role (faction === 'village', 例: seer): 公開アサーション / forecast の対象を add
+   * - untrusted role (faction !== 'village', 例: paparazzi): 判定を信用しないため 'unknown' を add
+   * 狐呪殺日に対象が含まれる (または 'unknown' が含まれる) ことで「呪殺の説明可能」を集約判定する.
+   */
+  divineTargetsByDay: Map<Day, Set<Seat | 'unknown'>>
 }
 
 export type RoleTesterEnv = {
@@ -36,23 +50,32 @@ export type ContextSnapshot = {
   possArr: Uint16Array
   possSetup: Uint8Array
   hamstersMaxSurvivingDay: number
-  needSeerAtDay: number | undefined
-  hamstersKilledBySeerLen: number
+  needDivineAliveAtDay: number | undefined
+  hamstersKilledByDivineLen: number
   requireOneOfLen: number
   deathChronicleAdd: Int8Array
   deathChronicleSub: Int8Array
+  divineAliveMaxDay: number
+  divineTargetsByDay: Map<Day, Set<Seat | 'unknown'>>
 }
 
 export function saveContext(ctx: AnalyzeContext): ContextSnapshot {
+  // divineTargetsByDay は shallow clone (各 Set も clone)
+  const clonedDivineTargets = new Map<Day, Set<Seat | 'unknown'>>()
+  for (const [day, set] of ctx.divineTargetsByDay) {
+    clonedDivineTargets.set(day, new Set(set))
+  }
   return {
     possArr: new Uint16Array(ctx.possibilities.possibilities),
     possSetup: new Uint8Array(ctx.possibilities.setup),
     hamstersMaxSurvivingDay: ctx.hamstersMaxSurvivingDay,
-    needSeerAtDay: ctx.needSeerAtDay,
-    hamstersKilledBySeerLen: ctx.hamstersKilledBySeer.length,
+    needDivineAliveAtDay: ctx.needDivineAliveAtDay,
+    hamstersKilledByDivineLen: ctx.hamstersKilledByDivine.length,
     requireOneOfLen: ctx.requireOneOf.length,
     deathChronicleAdd: new Int8Array(ctx.deathChronicle.add),
     deathChronicleSub: new Int8Array(ctx.deathChronicle.sub),
+    divineAliveMaxDay: ctx.divineAliveMaxDay,
+    divineTargetsByDay: clonedDivineTargets,
   }
 }
 
@@ -60,11 +83,16 @@ export function restoreContext(ctx: AnalyzeContext, s: ContextSnapshot): void {
   ctx.possibilities.possibilities.set(s.possArr)
   ctx.possibilities.setup.set(s.possSetup)
   ctx.hamstersMaxSurvivingDay = s.hamstersMaxSurvivingDay
-  ctx.needSeerAtDay = s.needSeerAtDay
-  ctx.hamstersKilledBySeer.length = s.hamstersKilledBySeerLen
+  ctx.needDivineAliveAtDay = s.needDivineAliveAtDay
+  ctx.hamstersKilledByDivine.length = s.hamstersKilledByDivineLen
   ctx.requireOneOf.length = s.requireOneOfLen
   ctx.deathChronicle.add.set(s.deathChronicleAdd)
   ctx.deathChronicle.sub.set(s.deathChronicleSub)
+  ctx.divineAliveMaxDay = s.divineAliveMaxDay
+  ctx.divineTargetsByDay.clear()
+  for (const [day, set] of s.divineTargetsByDay) {
+    ctx.divineTargetsByDay.set(day, new Set(set))
+  }
 }
 
 function getStatus(env: RoleTesterEnv, seat: Seat): SeatStatus {
@@ -92,7 +120,7 @@ function verifyHamsterPassive(env: RoleTesterEnv, context: AnalyzeContext, selec
   let lastHamsterDiedAt = -Infinity
   let lastHamsterDiedBy: CauseOfDeath | undefined
   let livingHamsters = 0
-  let seerKilledHamsterAt = -Infinity
+  let divineKilledHamsterAt = -Infinity
   for ( const seat of selected ) {
     const self = getStatus(env, seat)
     const status = self
@@ -103,9 +131,9 @@ function verifyHamsterPassive(env: RoleTesterEnv, context: AnalyzeContext, selec
       if ( status.causeOfDeath === 'night_kill' ) {
         context.deathChronicle.add[self.diedDay!] += 1
 
-        context.hamstersKilledBySeer.push({ day: status.diedDay!, seat })
-        if ( seerKilledHamsterAt < status.diedDay! ) {
-          seerKilledHamsterAt = status.diedDay!
+        context.hamstersKilledByDivine.push({ day: status.diedDay!, seat })
+        if ( divineKilledHamsterAt < status.diedDay! ) {
+          divineKilledHamsterAt = status.diedDay!
         }
       }
       if ( lastHamsterDiedAt < status.diedDay!) {
@@ -114,8 +142,8 @@ function verifyHamsterPassive(env: RoleTesterEnv, context: AnalyzeContext, selec
       }
     }
   }
-  if ( 0 <= seerKilledHamsterAt ) {
-    context.needSeerAtDay = seerKilledHamsterAt
+  if ( 0 <= divineKilledHamsterAt ) {
+    context.needDivineAliveAtDay = divineKilledHamsterAt
   }
 
   if ( env.lastHamsterMustDieAt != null ) {
@@ -149,32 +177,56 @@ function verifyHamsterPassive(env: RoleTesterEnv, context: AnalyzeContext, selec
   return true
 }
 
-/** action: divine (旧 testSeer 相当、占い能力者の assertion 検証 + 狐呪殺) */
+/** action:divine 持ち role の selected 席を context.divineTargetsByDay の指定日に追加. */
+function addDivineTarget(context: AnalyzeContext, day: Day, target: Seat | 'unknown'): void {
+  let set = context.divineTargetsByDay.get(day)
+  if (!set) {
+    set = new Set()
+    context.divineTargetsByDay.set(day, set)
+  }
+  set.add(target)
+}
+
+/**
+ * action: divine (旧 testSeer 相当、占い能力者の assertion 検証 + 狐呪殺).
+ *
+ * trusted (faction === 'village', 例: seer): 占い判定を信用し、 wolf-fix / fox 呪殺判定を実施.
+ *   さらに対象を context.divineTargetsByDay に集約する.
+ * untrusted (faction !== 'village', 例: paparazzi): 判定を信用しない. selected が active だった
+ *   夜は context.divineTargetsByDay に 'unknown' を add するに留める.
+ *
+ * 「狐死日に占い能力者が生きていた + 対象が含まれる」の集約検証は finalize の checkDivineCoverage
+ * に委譲する (複数 divine role の selected を横断するため).
+ */
 function verifyDivineAbility(env: RoleTesterEnv, context: AnalyzeContext, selected: Seat[], rest: Seat[], role: SystemRole): boolean {
   const seers = new Set<Seat>()
-  let maxSurviving = -Infinity
-  const seerTargets: Map<Day, (Seat | 'unknown')[]> = new Map()
-  const unresolvedHamsterDeath: Map<number, number> = new Map()
-  if ( context.hamstersKilledBySeer.length > 0 ) {
-    for ( const { day } of context.hamstersKilledBySeer ) {
-      const current = unresolvedHamsterDeath.get(day) || 0
-      unresolvedHamsterDeath.set(day, current + 1)
-    }
-  }
+  const isTrusted = systemRoles.get(role)!.faction === 'village'
 
   for ( const seat of selected ) {
     seers.add(seat)
     const self = getStatus(env, seat)
 
-    if (!self.claiming) {
-      for ( const [day, count] of unresolvedHamsterDeath.entries() ) {
-        if ( self.surviving || self.diedDay! >= day ) {
-          unresolvedHamsterDeath.set(day, count - 1)
-        }
-      }
+    // 集約: selected の生存日を divineAliveMaxDay に Math.max で反映
+    const selfMaxDay = self.surviving ? Infinity : self.diedDay!
+    if (context.divineAliveMaxDay < selfMaxDay) {
+      context.divineAliveMaxDay = selfMaxDay
     }
-    if (self.surviving) maxSurviving = Infinity
-    else if (maxSurviving < self.diedDay!) maxSurviving = self.diedDay!
+
+    const maxActiveDay = self.surviving ? env.vs.day - 1 : (self.causeOfDeath === 'night_kill' ? self.diedDay! : self.diedDay! - 1)
+    // seerFirstSeek === 'none' のとき、初日夜(dayCountFrom)の占いをスキップ
+    const firstSeerNight = (env.seerFirstSeek === 'none') ? env.dayCountFrom + 1 : env.dayCountFrom
+
+    if (!isTrusted) {
+      // untrusted (paparazzi 等): 判定を信用しない. active な夜全てに 'unknown' を集約.
+      for (let d = firstSeerNight; d <= maxActiveDay; d++) {
+        addDivineTarget(context, d, 'unknown')
+      }
+      continue
+    }
+
+    // ===== trusted (seer 等) =====
+    // local seerTargets: 「この role の selected 席が day d に占った先」リスト
+    const seerTargets: Map<Day, (Seat | 'unknown')[]> = new Map()
 
     // Populate seerTargets from day-keyed divination assertions (right-aligned by bridge)
     for (const [night, { target }] of self.assertions) {
@@ -187,9 +239,6 @@ function verifyDivineAbility(env: RoleTesterEnv, context: AnalyzeContext, select
       seerTargets.set(self.diedDay!, [...(seerTargets.get(self.diedDay!) || []), forecastTarget ?? 'unknown'])
     }
     // Add 'unknown' only for genuinely unreported nights beyond known assertions
-    const maxActiveDay = self.surviving ? env.vs.day - 1 : (self.causeOfDeath === 'night_kill' ? self.diedDay! : self.diedDay! - 1)
-    // seerFirstSeek === 'none' のとき、初日夜(dayCountFrom)の占いをスキップ
-    const firstSeerNight = (env.seerFirstSeek === 'none') ? env.dayCountFrom + 1 : env.dayCountFrom
     for (let d = firstSeerNight; d <= maxActiveDay; d++) {
       if (!seerTargets.has(d)) {
         const forecastTarget = self.forecasts.get(d)
@@ -239,26 +288,14 @@ function verifyDivineAbility(env: RoleTesterEnv, context: AnalyzeContext, select
         if ( !targetsOnDeathDay.includes(forecastTarget) && !targetsOnDeathDay.includes('unknown') ) return false
       }
     }
-  }
 
-  for ( const { day, seat } of context.hamstersKilledBySeer ) {
-    for ( const [seerDay, targets] of seerTargets.entries() ) {
-      for ( const target of targets ) {
-        if ( day === seerDay && seat === target ) {
-          unresolvedHamsterDeath.set(day, (unresolvedHamsterDeath.get(day) || 1) - 1)
-        }
-        else if ( day === seerDay && target === 'unknown' ) {
-          unresolvedHamsterDeath.set(day, (unresolvedHamsterDeath.get(day) || 1) - 1)
-        }
+    // 集約: trusted role の local seerTargets を context.divineTargetsByDay に push
+    for (const [d, targets] of seerTargets) {
+      for (const t of targets) {
+        addDivineTarget(context, d, t)
       }
     }
   }
-  for ( const count of unresolvedHamsterDeath.values() ) {
-    if ( count > 0 ) return false
-  }
-
-  if ( context.needSeerAtDay != null && maxSurviving < context.needSeerAtDay )
-    return false
 
   for ( const seat of rest ) {
     const status = getStatus(env, seat)
@@ -268,9 +305,19 @@ function verifyDivineAbility(env: RoleTesterEnv, context: AnalyzeContext, select
       }
       continue
     }
-    else {
+    // claim 持ちの rest 席
+    if (isTrusted) {
+      // trusted (seer): 同 role CO 席は偽者扱い (liar 役職に絞る)
       if (!context.possibilities.markAsLiar(seat)) {
         return false
+      }
+    } else {
+      // untrusted (paparazzi 等): seer 騙りなので rest 内の seer CO は真者 (seer) の可能性が残る → 触らない.
+      // ただし claimingRole が自分 (paparazzi) と同じ場合は偽 paparazzi CO として markAsLiar.
+      if (status.claimingRole === role) {
+        if (!context.possibilities.markAsLiar(seat)) {
+          return false
+        }
       }
     }
   }

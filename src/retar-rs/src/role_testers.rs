@@ -41,13 +41,29 @@ pub struct SeatRole {
     pub role: SystemRole,
 }
 
+/// 占いターゲット 1 件: 具体的 seat または不明 ('unknown').
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DivineTarget {
+    Seat(Seat),
+    Unknown,
+}
+
 pub struct AnalyzeContext {
     pub possibilities: Possibilities,
-    pub need_seer_at_day: Option<Day>,
-    pub hamsters_killed_by_seer: Vec<HamsterKill>,
+    pub need_divine_alive_at_day: Option<Day>,
+    pub hamsters_killed_by_divine: Vec<HamsterKill>,
     pub hamsters_max_surviving_day: i32,
     pub require_one_of: Vec<Vec<SeatRole>>,
     pub death_chronicle: DeathChronicle,
+    /// action:divine 持ち全 role の selected 席集合での最大生存日.
+    /// alive な席があれば i32::MAX. setup に複数 divine role がある場合 (seer + paparazzi 等)
+    /// は trait 単位の集約値. need_divine_alive_at_day と比較して「狐呪殺日に占い能力者が
+    /// 生きていたか」を集約的に判定する.
+    pub divine_alive_max_day: i32,
+    /// action:divine 持ち全 role の selected 席による占いターゲットを日ごとに集約.
+    /// - trusted role (faction = village, 例: seer): 公開アサーション / forecast の対象を add
+    /// - untrusted role (faction != village, 例: paparazzi): 判定を信用せず Unknown を add
+    pub divine_targets_by_day: BTreeMap<Day, BTreeSet<DivineTarget>>,
 }
 
 pub struct RoleTesterEnv<'a> {
@@ -64,11 +80,13 @@ pub struct ContextSnapshot {
     pub poss_arr: Vec<u16>,
     pub poss_setup: [u8; 12],
     pub hamsters_max_surviving_day: i32,
-    pub need_seer_at_day: Option<Day>,
-    pub hamsters_killed_by_seer_len: usize,
+    pub need_divine_alive_at_day: Option<Day>,
+    pub hamsters_killed_by_divine_len: usize,
     pub require_one_of_len: usize,
     pub death_chronicle_add: Vec<i8>,
     pub death_chronicle_sub: Vec<i8>,
+    pub divine_alive_max_day: i32,
+    pub divine_targets_by_day: BTreeMap<Day, BTreeSet<DivineTarget>>,
 }
 
 impl ContextSnapshot {
@@ -78,11 +96,13 @@ impl ContextSnapshot {
             poss_arr: vec![0u16; poss_len],
             poss_setup: [0u8; 12],
             hamsters_max_surviving_day: 0,
-            need_seer_at_day: None,
-            hamsters_killed_by_seer_len: 0,
+            need_divine_alive_at_day: None,
+            hamsters_killed_by_divine_len: 0,
             require_one_of_len: 0,
             death_chronicle_add: vec![0i8; chronicle_len],
             death_chronicle_sub: vec![0i8; chronicle_len],
+            divine_alive_max_day: i32::MIN,
+            divine_targets_by_day: BTreeMap::new(),
         }
     }
 }
@@ -92,35 +112,41 @@ pub fn save_context(ctx: &AnalyzeContext) -> ContextSnapshot {
         poss_arr: ctx.possibilities.possibilities.clone(),
         poss_setup: ctx.possibilities.setup,
         hamsters_max_surviving_day: ctx.hamsters_max_surviving_day,
-        need_seer_at_day: ctx.need_seer_at_day,
-        hamsters_killed_by_seer_len: ctx.hamsters_killed_by_seer.len(),
+        need_divine_alive_at_day: ctx.need_divine_alive_at_day,
+        hamsters_killed_by_divine_len: ctx.hamsters_killed_by_divine.len(),
         require_one_of_len: ctx.require_one_of.len(),
         death_chronicle_add: ctx.death_chronicle.add.clone(),
         death_chronicle_sub: ctx.death_chronicle.sub.clone(),
+        divine_alive_max_day: ctx.divine_alive_max_day,
+        divine_targets_by_day: ctx.divine_targets_by_day.clone(),
     }
 }
 
-/// Save context into a pre-allocated snapshot (zero heap allocation).
+/// Save context into a pre-allocated snapshot (zero heap allocation for primitives).
 pub fn save_into(snapshot: &mut ContextSnapshot, ctx: &AnalyzeContext) {
     snapshot.poss_arr.copy_from_slice(&ctx.possibilities.possibilities);
     snapshot.poss_setup = ctx.possibilities.setup;
     snapshot.hamsters_max_surviving_day = ctx.hamsters_max_surviving_day;
-    snapshot.need_seer_at_day = ctx.need_seer_at_day;
-    snapshot.hamsters_killed_by_seer_len = ctx.hamsters_killed_by_seer.len();
+    snapshot.need_divine_alive_at_day = ctx.need_divine_alive_at_day;
+    snapshot.hamsters_killed_by_divine_len = ctx.hamsters_killed_by_divine.len();
     snapshot.require_one_of_len = ctx.require_one_of.len();
     snapshot.death_chronicle_add.copy_from_slice(&ctx.death_chronicle.add);
     snapshot.death_chronicle_sub.copy_from_slice(&ctx.death_chronicle.sub);
+    snapshot.divine_alive_max_day = ctx.divine_alive_max_day;
+    snapshot.divine_targets_by_day = ctx.divine_targets_by_day.clone();
 }
 
 pub fn restore_context(ctx: &mut AnalyzeContext, s: &ContextSnapshot) {
     ctx.possibilities.possibilities.copy_from_slice(&s.poss_arr);
     ctx.possibilities.setup = s.poss_setup;
     ctx.hamsters_max_surviving_day = s.hamsters_max_surviving_day;
-    ctx.need_seer_at_day = s.need_seer_at_day;
-    ctx.hamsters_killed_by_seer.truncate(s.hamsters_killed_by_seer_len);
+    ctx.need_divine_alive_at_day = s.need_divine_alive_at_day;
+    ctx.hamsters_killed_by_divine.truncate(s.hamsters_killed_by_divine_len);
     ctx.require_one_of.truncate(s.require_one_of_len);
     ctx.death_chronicle.add.copy_from_slice(&s.death_chronicle_add);
     ctx.death_chronicle.sub.copy_from_slice(&s.death_chronicle_sub);
+    ctx.divine_alive_max_day = s.divine_alive_max_day;
+    ctx.divine_targets_by_day = s.divine_targets_by_day.clone();
 }
 
 fn get_status<'a>(env: &'a RoleTesterEnv, seat: Seat) -> &'a SeatStatus {
@@ -162,7 +188,7 @@ fn verify_hamster_passive(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selecte
     let mut last_hamster_died_at: i32 = i32::MIN;
     let mut last_hamster_died_by: Option<CauseOfDeath> = None;
     let mut living_hamsters = 0u32;
-    let mut seer_killed_hamster_at: i32 = i32::MIN;
+    let mut divine_killed_hamster_at: i32 = i32::MIN;
 
     for &seat in selected {
         let status = get_status(env, seat);
@@ -172,9 +198,9 @@ fn verify_hamster_passive(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selecte
             if status.cause_of_death == CauseOfDeath::NightKill {
                 let died_day = status.died_day.unwrap();
                 ctx.death_chronicle.add[died_day as usize] += 1;
-                ctx.hamsters_killed_by_seer.push(HamsterKill { day: died_day, seat });
-                if seer_killed_hamster_at < died_day {
-                    seer_killed_hamster_at = died_day;
+                ctx.hamsters_killed_by_divine.push(HamsterKill { day: died_day, seat });
+                if divine_killed_hamster_at < died_day {
+                    divine_killed_hamster_at = died_day;
                 }
             }
             let died_day = status.died_day.unwrap();
@@ -185,8 +211,8 @@ fn verify_hamster_passive(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selecte
         }
     }
 
-    if seer_killed_hamster_at >= 0 {
-        ctx.need_seer_at_day = Some(seer_killed_hamster_at);
+    if divine_killed_hamster_at >= 0 {
+        ctx.need_divine_alive_at_day = Some(divine_killed_hamster_at);
     }
 
     if let Some(must_die_at) = env.last_hamster_must_die_at {
@@ -225,35 +251,57 @@ fn verify_hamster_passive(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selecte
     true
 }
 
-/// action: divine (旧 test_seer 相当、占い能力者の assertion 検証 + 狐呪殺)
+/// action:divine 持ち role の selected 席を ctx.divine_targets_by_day の指定日に追加.
+fn add_divine_target(ctx: &mut AnalyzeContext, day: Day, target: DivineTarget) {
+    ctx.divine_targets_by_day.entry(day).or_default().insert(target);
+}
+
+/// action: divine (旧 test_seer 相当、占い能力者の assertion 検証 + 狐呪殺).
+///
+/// trusted (faction == Village, 例: seer): 占い判定を信用し、 wolf-fix / fox 呪殺判定を実施.
+///   さらに対象を ctx.divine_targets_by_day に集約する.
+/// untrusted (faction != Village, 例: paparazzi): 判定を信用しない. selected が active だった
+///   夜は ctx.divine_targets_by_day に Unknown を add するに留める.
+///
+/// 「狐死日に占い能力者が生きていた + 対象が含まれる」の集約検証は finalize の check_divine_coverage
+/// に委譲する (複数 divine role の selected を横断するため).
 fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected: &[Seat], rest: &[Seat], role: SystemRole) -> bool {
     let mut seers = BTreeSet::new();
-    let mut max_surviving: i32 = i32::MIN;
-    let mut seer_targets: BTreeMap<Day, Vec<SeerTarget>> = BTreeMap::new();
-    let mut unresolved_hamster_death: BTreeMap<Day, i32> = BTreeMap::new();
-
-    if !ctx.hamsters_killed_by_seer.is_empty() {
-        for hk in &ctx.hamsters_killed_by_seer {
-            *unresolved_hamster_death.entry(hk.day).or_insert(0) += 1;
-        }
-    }
+    let is_trusted = role.faction() == crate::types::Faction::Village;
 
     for &seat in selected {
         seers.insert(seat);
         let self_status = get_status(env, seat);
 
-        if !self_status.claiming {
-            for (&day, count) in unresolved_hamster_death.iter_mut() {
-                if self_status.surviving || self_status.died_day.unwrap_or(0) >= day {
-                    *count -= 1;
-                }
+        // 集約: selected の生存日を divine_alive_max_day に Math.max で反映
+        let self_max_day = if self_status.surviving {
+            i32::MAX
+        } else {
+            self_status.died_day.unwrap()
+        };
+        if ctx.divine_alive_max_day < self_max_day {
+            ctx.divine_alive_max_day = self_max_day;
+        }
+
+        let max_active_day = if self_status.surviving {
+            env.vs.day - 1
+        } else if self_status.cause_of_death == CauseOfDeath::NightKill {
+            self_status.died_day.unwrap()
+        } else {
+            self_status.died_day.unwrap() - 1
+        };
+
+        if !is_trusted {
+            // untrusted (paparazzi 等): 判定を信用しない. active な夜全てに Unknown を集約.
+            for d in env.day_count_from..=max_active_day {
+                add_divine_target(ctx, d, DivineTarget::Unknown);
             }
+            continue;
         }
-        if self_status.surviving {
-            max_surviving = i32::MAX;
-        } else if max_surviving < self_status.died_day.unwrap_or(0) {
-            max_surviving = self_status.died_day.unwrap_or(0);
-        }
+
+        // ===== trusted (seer 等) =====
+        // local seer_targets: この role の selected 席が day d に占った先
+        let mut seer_targets: BTreeMap<Day, Vec<SeerTarget>> = BTreeMap::new();
 
         // Populate seer_targets from assertions
         for (&night, assertion) in &self_status.assertions {
@@ -276,13 +324,6 @@ fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
             seer_targets.entry(died_day).or_default().push(target);
         }
         // Add 'unknown' for unreported nights
-        let max_active_day = if self_status.surviving {
-            env.vs.day - 1
-        } else if self_status.cause_of_death == CauseOfDeath::NightKill {
-            self_status.died_day.unwrap()
-        } else {
-            self_status.died_day.unwrap() - 1
-        };
         for d in env.day_count_from..=max_active_day {
             if !seer_targets.contains_key(&d) {
                 let target = match self_status.forecasts.get(&d) {
@@ -367,32 +408,16 @@ fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
                 }
             }
         }
-    }
 
-    // Resolve hamster deaths
-    for hk in &ctx.hamsters_killed_by_seer {
-        if let Some(targets) = seer_targets.get(&hk.day) {
-            for target in targets {
-                if (hk.day == hk.day) && match target {
-                    SeerTarget::Known(s) => *s == hk.seat,
-                    SeerTarget::Unknown => true,
-                } {
-                    if let Some(count) = unresolved_hamster_death.get_mut(&hk.day) {
-                        *count -= 1;
-                    }
-                }
+        // 集約: trusted role の local seer_targets を ctx.divine_targets_by_day に push
+        for (day, targets) in seer_targets {
+            for t in targets {
+                let dt = match t {
+                    SeerTarget::Known(s) => DivineTarget::Seat(s),
+                    SeerTarget::Unknown => DivineTarget::Unknown,
+                };
+                add_divine_target(ctx, day, dt);
             }
-        }
-    }
-    for &count in unresolved_hamster_death.values() {
-        if count > 0 {
-            return false;
-        }
-    }
-
-    if let Some(need_day) = ctx.need_seer_at_day {
-        if max_surviving < need_day {
-            return false;
         }
     }
 
@@ -402,9 +427,18 @@ fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
             if !ctx.possibilities.deny_role(seat, role) {
                 return false;
             }
-        } else {
+        } else if is_trusted {
+            // trusted (seer): 同 role CO 席は偽者扱い (liar 役職に絞る)
             if !ctx.possibilities.mark_as_liar(seat) {
                 return false;
+            }
+        } else {
+            // untrusted (paparazzi 等): seer 騙りなので rest 内の seer CO は真者の可能性が残る → 触らない.
+            // ただし claiming_role が自分と同じ場合は偽 CO として markAsLiar.
+            if status.claiming_role == role.to_string() {
+                if !ctx.possibilities.mark_as_liar(seat) {
+                    return false;
+                }
             }
         }
     }

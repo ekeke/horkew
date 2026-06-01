@@ -557,11 +557,13 @@ export class VillageRetar {
     // Initialize
     const maxDay = this.vs.day + 1
     this.context = {
-      hamstersKilledBySeer: [],
+      hamstersKilledByDivine: [],
       requireOneOf: [],
       deathChronicle: { add: new Int8Array(maxDay), sub: new Int8Array(maxDay) },
       possibilities: this.initialPossibilities.cloneInstance(),
       hamstersMaxSurvivingDay: Infinity,
+      divineAliveMaxDay: -Infinity,
+      divineTargetsByDay: new Map(),
     }
 
     this.walkRoleTests(0)

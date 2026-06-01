@@ -1,9 +1,21 @@
 import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
+import { systemRoles } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
 import { selectCombinationsFromArray } from './combinatorics.ts'
-import { liarRolesIn, poweredVillageRolesIn, hasTrait, singleRoleByTrait } from './role-sets.ts'
+import { allRolesIn, liarRolesIn, poweredVillageRolesIn, hasTrait, singleRoleByTrait } from './role-sets.ts'
 
 const foxRole = singleRoleByTrait('passive', 'die-when-divined')
+
+/**
+ * action:divine trait を持つ liar role (paparazzi 等). seer 等と同じ planning frame で扱う.
+ * 同 trait 内で互いの CO 席を pool として共有 (paparazzi は seer 騙り、 seer は paparazzi 騙り).
+ */
+function divineLiarRolesIn(setup: Map<SystemRole, number>): SystemRole[] {
+  return allRolesIn(setup).filter(role => {
+    const r = systemRoles.get(role)!
+    return r.faction !== 'village' && hasTrait(role, 'action', 'divine')
+  })
+}
 
 export type RoleTest = {
   role: SystemRole | 'allpass',
@@ -30,7 +42,8 @@ export function buildRoleTestPlan(
   let numLiars = 0
 
   // setup 駆動で派生. 役職追加で自動追従.
-  const planningRoles = poweredVillageRolesIn(setup)
+  // 村陣営の能力持ち + divine trait を持つ liar role (paparazzi 等) を planning 対象に.
+  const planningRoles = [...poweredVillageRolesIn(setup), ...divineLiarRolesIn(setup)]
   const planningRolesSet = new Set<SystemRole>(planningRoles)
   const liarRolesSet = new Set<SystemRole>(liarRolesIn(setup))
 
@@ -46,6 +59,33 @@ export function buildRoleTestPlan(
       const claimDay = status.claimedAt || Infinity
       minClaimDay.set(role, Math.min(minClaimDay.get(role)!, claimDay))
     }
+  }
+
+  /**
+   * action:divine trait を共有する role 同士の CO 席を pool として共有する.
+   * 例: paparazzi の selected 候補は seer CO 席 + paparazzi CO 席 + unrevealed.
+   * paparazzi は通常 seer 騙りするため、 seer CO 席が paparazzi の真の候補となる.
+   */
+  const getDivineClaimPool = (role: SystemRole): Seat[] => {
+    if (!hasTrait(role, 'action', 'divine')) return claims.get(role) || []
+    const pool: Seat[] = []
+    for (const otherRole of planningRoles) {
+      if (hasTrait(otherRole, 'action', 'divine')) {
+        pool.push(...(claims.get(otherRole) || []))
+      }
+    }
+    return [...new Set(pool)]
+  }
+
+  const getMinClaimDay = (role: SystemRole): number => {
+    if (!hasTrait(role, 'action', 'divine')) return minClaimDay.get(role) ?? Infinity
+    let m = Infinity
+    for (const otherRole of planningRoles) {
+      if (hasTrait(otherRole, 'action', 'divine')) {
+        m = Math.min(m, minClaimDay.get(otherRole) ?? Infinity)
+      }
+    }
+    return m
   }
 
   let poseAsCountTotal = 0
@@ -82,8 +122,9 @@ export function buildRoleTestPlan(
 
   for ( const role of planningRoles ) {
     const hasCurseOnExecuted = hasTrait(role, 'reactive', 'curse-on-executed')
-    const claimSeats = claims.get(role)!
-    const minDay = minClaimDay.get(role)!
+    // divine trait 同士は CO 席を pool 共有 (seer ↔ paparazzi).
+    const claimSeats = getDivineClaimPool(role)
+    const minDay = getMinClaimDay(role)
     if ( !hasCurseOnExecuted && claimSeats.length === 0 && !hasHocusPocus ) continue
     // 処刑道連れ役職 (猫又) の候補を検出
     const hasExecutionCurse = hasCurseOnExecuted && Array.from(village.statuses.values()).some(
