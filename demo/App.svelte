@@ -2,7 +2,6 @@
   import { onMount, onDestroy, tick } from 'svelte'
   import { parse, parseFrontmatter, buildFrontmatter, parseStatement } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
-  import { systemRoles } from '../src/types/index.ts'
   import type { SystemRole } from '../src/types/index.ts'
   import { serializeVillageStatus } from '../src/retar/wasm-helpers.ts'
   import {
@@ -1048,20 +1047,6 @@
     }),
   ]
 
-  function buildRevealText(): string {
-    const lines = ctx.analysisSeats.map(s => {
-      const name = ctx.players.get(s.seat) ?? `#${s.seat}`
-      const roleName = systemRoles.get(s.roles[0])?.name ?? s.roles[0]
-      return `${name}=${roleName}`
-    })
-    return '\n' + lines.join('\n')
-  }
-
-  function insertRevealRoles() {
-    if (!ctx.allRolesDetermined) return
-    ctx.howlText = ctx.howlText + buildRevealText()
-  }
-
   function openDenyWolfDialog() {
     denyWolfSelection = new Set()
     showDenyWolfDialog = true
@@ -1462,7 +1447,6 @@
       <div class="pane-body">
         <AnalysisTable
           {ctx}
-          onInsertRevealRoles={insertRevealRoles}
           onOpenDenyWolfDialog={openDenyWolfDialog}
           extraFooter={devMode ? devModeAnalysisFooter : undefined}
         />

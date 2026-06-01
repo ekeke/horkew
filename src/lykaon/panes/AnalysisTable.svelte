@@ -90,10 +90,10 @@
             <button class="assumption-clear" onclick={() => ctx.clearAssumptions()}>全削除</button>
           {/if}
         </div>
-        {#if onInsertRevealRoles && ctx.allRolesDetermined}
+        {#if ctx.allRolesDetermined}
           <div class="determined-banner">
             <span class="determined-label">配役確定</span>
-            <button class="determined-insert" onclick={onInsertRevealRoles}>挿入</button>
+            <button class="determined-insert" onclick={onInsertRevealRoles ?? (() => ctx.insertRevealRoles())}>挿入</button>
           </div>
         {/if}
         {#each [...ctx.assumptions] as [seat, role]}

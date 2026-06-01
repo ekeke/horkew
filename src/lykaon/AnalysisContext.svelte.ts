@@ -415,6 +415,21 @@ export class AnalysisContext {
     )
   }
 
+  /**
+   * 配役が確定 (allRolesDetermined === true) しているときに、確定役職を
+   * `Player=役職名` 行の集合として howlText の末尾に追加する。
+   * 未確定なら no-op。 AnalysisTable の挿入ボタンの default 動作。
+   */
+  insertRevealRoles(): void {
+    if (!this.allRolesDetermined) return
+    const lines = this.analysisSeats.map(s => {
+      const name = this.players.get(s.seat) ?? `#${s.seat}`
+      const roleName = systemRoles.get(s.roles[0])?.name ?? s.roles[0]
+      return `${name}=${roleName}`
+    })
+    this.howlText = this.howlText + '\n' + lines.join('\n')
+  }
+
   // -----------------------------------------------------------------
   // Lifecycle
   // -----------------------------------------------------------------
