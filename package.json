@@ -39,7 +39,8 @@
     "inspect": "node --experimental-strip-types --disable-warning=DEP0051 --disable-warning=DEP0044 src/fenrir/src/inspect.ts",
     "eval-summary": "node --experimental-strip-types src/howl/scripts/eval-summary.ts",
     "dev": "vite",
-    "build:demo": "vite build",
+    "gen-role-docs": "node --experimental-strip-types scripts/gen-role-docs.ts demo/public/roles.html",
+    "build:demo": "npm run gen-role-docs && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
