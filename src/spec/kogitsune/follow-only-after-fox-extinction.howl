@@ -1,0 +1,39 @@
+---
+title: 背徳者は狐陣営全滅 (妖狐+子狐両退場) で後追い、 妖狐単体退場時は子狐生存により後追いしない
+setup: { kogitsune: 1, werehamster: 1, immoralist: 1, werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# Day 1 投票で Bob (妖狐) を処刑 → 子狐 (Alice) は生存しているため
+# checkImmoralistFollow は aliveFoxes.length > 0 を検知し、 Carol (背徳者) は生存。
+# Night 1 で Dave (狼) が Eve (村) を襲撃。
+# Day 2 投票で Alice (子狐) を処刑 → 狐陣営全滅 → Carol (背徳者) が follow_kill。
+
+++Alice、Bob、Carol、Dave、Eve、Fred
+!Alice=子狐
+!Bob=妖狐
+!Carol=背徳者
+!Dave=人狼
+!Eve=村人
+!Fred=村人
+!Dave 1夜 襲撃 Eve
+
+Alice→Bob
+Bob→Eve
+Carol→Eve
+Dave→Bob
+Eve→Bob
+Fred→Bob
+
+Day 2:
+
+Alice→Carol
+Carol→Alice
+Dave→Alice
+Fred→Alice
+
+# @expect-status Bob: dead
+# @expect-status Alice: dead
+# @expect-status Carol: dead
+# @expect-cause Carol: follow_kill
+# @expect-event follow_kill target:Carol

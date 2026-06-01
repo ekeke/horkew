@@ -20,7 +20,7 @@ import {
   killPlayer, checkWinCondition,
 } from './roles.ts'
 import { forceTrueRoleCO, resolveVotes } from './engine-utils.ts'
-import { hasTrait, isHamster, isFoxWinCounter } from './role-traits.ts'
+import { hasTrait, isFoxWinCounter } from './role-traits.ts'
 
 const MAX_DAYS = 50
 
@@ -123,9 +123,7 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
     resolveAttacks(state, night0ActionsList, emit, rng, foxKilledInNight0, 0)
   }
 
-  if (foxKilledInNight0) {
-    checkImmoralistFollow(state, emit)
-  }
+  checkImmoralistFollow(state, emit)
 
   // ============================================================
   // メインループ
@@ -497,10 +495,8 @@ function resolveNight(
 
   resolveAttacks(state, actions, emit, rng, foxKilled.size > 0, night)
 
-  // 妖狐死亡による背徳者後追い
-  if (foxKilled.size > 0) {
-    checkImmoralistFollow(state, emit)
-  }
+  // 狐陣営全滅による背徳者後追い (襲撃死も含むため無条件呼出)
+  checkImmoralistFollow(state, emit)
 }
 
 /**
@@ -626,13 +622,13 @@ function applyClaim(
   }
 }
 
-/** 妖狐退場時の狐陣営後追いチェック */
+/** 狐陣営全滅時の後追いチェック */
 function checkImmoralistFollow(state: GameState, emit: EmitFn): void {
-  // 妖狐 (狐陣営 + 占い呪殺対象) が 1 人でも生存していれば後追いは発生しない
-  const aliveHamsters = state.players.filter(p => isHamster(p.role) && p.alive)
-  if (aliveHamsters.length > 0) return
+  // fox-win-counter 保有者 (妖狐 + 子狐) が 1 人でも生存していれば後追いは発生しない
+  const aliveFoxes = state.players.filter(p => isFoxWinCounter(p.role) && p.alive)
+  if (aliveFoxes.length > 0) return
 
-  // follow-fox-death trait 保有者 (背徳者) が後追い (子狐は後追いしない)
+  // follow-fox-death trait 保有者 (背徳者) が後追い
   const followers = state.players.filter(p => hasTrait(p.role, 'reactive', 'follow-fox-death') && p.alive)
   for (const imm of followers) {
     killPlayer(state, imm.seat)

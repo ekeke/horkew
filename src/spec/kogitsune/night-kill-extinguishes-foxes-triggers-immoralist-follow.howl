@@ -1,0 +1,39 @@
+---
+title: 妖狐処刑後の Night 襲撃で子狐が死亡し狐全滅 → 同夜に背徳者後追いが発火する
+setup: { kogitsune: 1, werehamster: 1, immoralist: 1, werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# Day 1 投票で Bob (妖狐) を処刑。 子狐 (Alice) 生存中のため Carol (背徳者) はまだ後追いしない。
+# Night 1 で Dave (狼) が Alice (子狐) を襲撃 → Alice 死亡。 これで狐陣営全滅 →
+# resolveNight 末尾の checkImmoralistFollow が無条件呼出になり、 Carol が follow_kill。
+# Day 2 で Dave (狼) を処刑 → villager_won。
+
+++Alice、Bob、Carol、Dave、Eve、Fred
+!Alice=子狐
+!Bob=妖狐
+!Carol=背徳者
+!Dave=人狼
+!Eve=村人
+!Fred=村人
+!Dave 1夜 襲撃 Alice
+
+Alice→Bob
+Bob→Carol
+Carol→Eve
+Dave→Bob
+Eve→Bob
+Fred→Bob
+
+Day 2:
+
+Dave→Eve
+Eve→Dave
+Fred→Dave
+
+# @expect-status Bob: dead
+# @expect-status Alice: dead
+# @expect-status Carol: dead
+# @expect-cause Carol: follow_kill
+# @expect-event follow_kill target:Carol
+# @expect-result: villager_won

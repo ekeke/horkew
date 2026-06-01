@@ -1,0 +1,40 @@
+---
+title: 妖狐退場時に子狐が生存していれば背徳者は後追いしない (狐陣営全滅判定)
+setup: { kogitsune: 1, werehamster: 1, immoralist: 1, werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# Day 1 投票で Bob (妖狐) を処刑。 子狐 (Alice) が生存しているため
+# aliveFoxes.length > 0 となり Carol (背徳者) は後追いしない。
+# Night 1 で Dave (狼) が Eve (村) を襲撃。
+# Day 2 投票で Dave (狼) を処刑 → 狼全滅 + 子狐 (狐陣営) 生存 → werehamster_won。
+# 終局時に Carol (背徳者) は生存している = 後追いが発火していない証拠。
+
+++Alice、Bob、Carol、Dave、Eve、Fred
+!Alice=子狐
+!Bob=妖狐
+!Carol=背徳者
+!Dave=人狼
+!Eve=村人
+!Fred=村人
+!Dave 1夜 襲撃 Eve
+
+Alice→Bob
+Bob→Carol
+Carol→Eve
+Dave→Bob
+Eve→Bob
+Fred→Bob
+
+Day 2:
+
+Alice→Dave
+Carol→Dave
+Dave→Alice
+Fred→Dave
+
+# @expect-status Bob: dead
+# @expect-status Alice: alive
+# @expect-status Carol: alive
+# @expect-status Dave: dead
+# @expect-result: werehamster_won
