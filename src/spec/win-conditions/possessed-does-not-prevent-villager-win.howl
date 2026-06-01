@@ -1,0 +1,28 @@
+---
+title: 狂人は狼陣営だが action:attack trait を持たないため狼全滅で villager_won となる
+setup: { werewolf: 1, possessed: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# 狂人は faction=wolf だが checkWinCondition の wolves 判定 (= action:attack trait)
+# には含まれず nonWolfCount 側にカウントされる。 よって狼処刑後に狂人が生存
+# していても villager_won で終局する (狼勝利は阻止できない)。
+#
+# Day 1 投票で Bob (狼) 処刑 → wolves=0 → villager_won
+# (Carol=狂人が生存しても狼勝利には繋がらない)。
+# fanatic も同じ trait 構成 (action:attack 無し) なので同等の振る舞いを共有。
+
+++Alice、Bob、Carol、Dave
+!Alice=村人
+!Bob=人狼
+!Carol=狂人
+!Dave=村人
+
+Alice→Bob
+Carol→Dave
+Dave→Bob
+Bob→Alice
+
+# @expect-result: villager_won
+# @expect-finished: true
+# @expect-status Carol: alive
