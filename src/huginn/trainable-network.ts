@@ -14,7 +14,7 @@
  * これが「desire の高い agent token に大きい vote logit を出す」を学べる根拠。
  */
 
-import { Linear, TransformerEncoder, type EncoderCache, sgdLinear, adamLinear, type AdamOpts } from './transformer.ts'
+import { Linear, LayerNorm, TransformerEncoder, type EncoderCache, sgdLinear, adamLinear, type AdamOpts } from './transformer.ts'
 import { CLS_FEATURE_DIMS, AGENT_FEATURE_DIMS } from './observation.ts'
 import { MAX_AGENTS } from './types.ts'
 

@@ -21,7 +21,6 @@ import type {
 } from '../fenrir/src/agents/agent.ts'
 import { runGame } from '../lupa/engine.ts'
 import { StrategyBaseAdapter } from '../fenrir/src/adapters/strategy-base-adapter.ts'
-import { RuleBasedAgent } from '../fenrir/src/agents/rule-based-agent.ts'
 import { buildPlayerView } from '../lupa/player-view.ts'
 import { alivePlayers } from '../lupa/roles.ts'
 import { SkollMasterAgent } from './skoll-master-agent.ts'

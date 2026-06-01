@@ -192,7 +192,6 @@ async function runQuiz() {
 
   for (let i = 0; i < NUM_QUESTIONS; i++) {
     const s = generateSample(rng)
-    const hasFox = s.foxSeats.length > 0
 
     console.log(`\n━━━ Q${i + 1}/${NUM_QUESTIONS} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
     printBoard(s, false)  // 候補リストは隠す（NNは見えない）

@@ -14,8 +14,8 @@
  * Svelte 5 コンポーネントは `subscribe(cb)` で変化を受け取り、ローカル `$state` に反映する。
  */
 
-import type { SystemRole } from '../src/types/index.ts'
-import type { GameState, GameEvent, VillageResult, LupaConfig } from '../src/lupa/types.ts'
+import type { SystemRole, VillageResult } from '../src/types/index.ts'
+import type { GameState, GameEvent, LupaConfig } from '../src/lupa/types.ts'
 import type { GameConfig } from '../src/lupa/handlers.ts'
 import { runGame } from '../src/lupa/engine.ts'
 import { formatHowl } from '../src/lupa/format.ts'
@@ -154,12 +154,13 @@ export class CommandPlayStore {
       && this.state.humanSeats.has(cmd.claim.partner)
       && cmd.claim.partner !== currentPending.mySeat
     ) {
+      const partnerSeat = cmd.claim.partner
       const partnerPlayer = this.state.gameState?.players.find(
-        p => p.seat === cmd.claim.partner,
+        p => p.seat === partnerSeat,
       )
       if (partnerPlayer?.alive) {
         this.pendingMasonMirror = {
-          partnerSeat: cmd.claim.partner,
+          partnerSeat,
           selfSeat: currentPending.mySeat,
         }
       }

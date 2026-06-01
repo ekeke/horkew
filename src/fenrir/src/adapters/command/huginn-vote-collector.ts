@@ -14,7 +14,7 @@
  *   - applyCommand / comment event push はここで行う (CommandAdapter は戻り値の Map をそのまま使う).
  */
 
-import type { GameEvent, GameState, PlayerState } from '../../../../lupa/types.ts'
+import type { GameEvent, GameState } from '../../../../lupa/types.ts'
 import type { SystemRole } from '../../../../types/index.ts'
 import type { FenrirExtEvent } from '../../events.ts'
 import type { Command, CommandAdapterExt, RetarCache } from './command-types.ts'

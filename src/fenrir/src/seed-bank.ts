@@ -53,6 +53,8 @@ type SerializedPlayerState = {
   claimedDay: number | null
   divineHistory: [number, { target: number, result: string | null }][]
   guardHistory: [number, number][]
+  attackHistory: [number, number][]
+  mediumHistory: [number, { target: number, result: string | null }][]
   fakeDivineHistory: [number, { target: number, result: string | null }][]
   forecastTarget: number | null
 }
@@ -69,6 +71,8 @@ function serializeSnapshot(snap: GameSnapshot<any>): SerializedSnapshot {
         claimedDay: p.claimedDay,
         divineHistory: [...p.divineHistory],
         guardHistory: [...p.guardHistory],
+        attackHistory: [...p.attackHistory],
+        mediumHistory: [...p.mediumHistory],
         fakeDivineHistory: [...p.fakeDivineHistory],
         forecastTarget: p.forecastTarget,
       })),
@@ -104,6 +108,8 @@ function deserializeSnapshot(data: SerializedSnapshot): GameSnapshot {
       claimedDay: p.claimedDay,
       divineHistory: new Map(p.divineHistory) as PlayerState['divineHistory'],
       guardHistory: new Map(p.guardHistory),
+      attackHistory: new Map(p.attackHistory),
+      mediumHistory: new Map(p.mediumHistory) as PlayerState['mediumHistory'],
       fakeDivineHistory: new Map(p.fakeDivineHistory) as PlayerState['fakeDivineHistory'],
       forecastTarget: p.forecastTarget,
     })),

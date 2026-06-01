@@ -200,6 +200,8 @@ function makePlayer(seat: number, role: SystemRole, opts: {
     claimedRole: null, claimedDay: null,
     divineHistory: opts.divineHistory ?? new Map(),
     guardHistory: opts.guardHistory ?? new Map(),
+    attackHistory: new Map(),
+    mediumHistory: new Map(),
     fakeDivineHistory: opts.fakeDivineHistory ?? new Map(),
     forecastTarget: null,
   }

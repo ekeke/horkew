@@ -28,6 +28,8 @@ function makePlayer(seat: number, role: SystemRole, alive = true, name?: string)
     claimedDay: null,
     divineHistory: new Map(),
     guardHistory: new Map(),
+    attackHistory: new Map(),
+    mediumHistory: new Map(),
     fakeDivineHistory: new Map(),
     forecastTarget: null,
   }

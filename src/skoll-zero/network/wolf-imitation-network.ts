@@ -32,7 +32,6 @@ const VIEWER_ORDER: ReadonlyArray<SystemRole> = CLAIM_DECISION_ROLES
 
 const SEATS = 14
 const CLAIM_DECISION_SIZE = 1 + CLAIM_DECISION_ROLES.length * CLAIM_DECISION_SEATS_PER_ROLE  // 57
-const MORNING_SIZE = SEATS * 2  // 28
 
 /**
  * 4 種 viewer 観測の bundle。caller (Module) が viewer role 別に encode して渡す。
@@ -139,7 +138,9 @@ export class WolfImitationNetwork implements MasonZeroNN {
       if (virtualViewerObs instanceof Float32Array) {
         throw new Error('WolfImitationNetwork.mixForward: claim_decision requires VirtualViewerObsBundle (4 viewer obs)')
       }
-      if (this.frozenVillageBatched) {
+      const batched = this.frozenVillageBatched
+      const forwardBatch = batched?.forwardBatch?.bind(batched)
+      if (forwardBatch) {
         // Batched 経路: 4 viewer obs を 1 forwardBatch にまとめて main GPU forward server
         // へ proxy 経由で投げる。worker 跨ぎ集約で batch ~140 まで拡大可能。
         // claim_true は global head なので state.alive / actorSeat は softmax mask に
@@ -152,7 +153,7 @@ export class WolfImitationNetwork implements MasonZeroNN {
         ]
         const fakeStates: SimState[] = obsList.map(() => state)
         const seats = obsList.map(() => wolfSeat)
-        const outputs = this.frozenVillageBatched.forwardBatch(obsList, fakeStates, seats, 'claim_true')
+        const outputs = forwardBatch(obsList, fakeStates, seats, 'claim_true')
         const policy = mixClaimDecisionFromBatched(wolfResult, outputs)
         return { policy, outcomeDist }
       }

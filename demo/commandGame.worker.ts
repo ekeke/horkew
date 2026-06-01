@@ -12,8 +12,8 @@
  * structuredClone エラーを避ける（VillageStatus クラスは安全に clone できるが不要）。
  */
 
-import type { SystemRole } from '../src/types/index.ts'
-import type { GameEvent, GameState, VillageResult, LupaConfig } from '../src/lupa/types.ts'
+import type { SystemRole, VillageResult } from '../src/types/index.ts'
+import type { GameEvent, GameState, LupaConfig } from '../src/lupa/types.ts'
 import type { GameConfig } from '../src/lupa/handlers.ts'
 import { runGame } from '../src/lupa/engine.ts'
 import { formatHowl } from '../src/lupa/format.ts'

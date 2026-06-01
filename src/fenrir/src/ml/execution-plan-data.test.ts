@@ -95,14 +95,14 @@ describe('buildEndgameLabels', () => {
   it('fox + wolf full overlap → empty (indistinguishable)', () => {
     // fox=[3,5], wolf=[3,5] → wolfOnly is empty → can't distinguish → empty
     const rng = new Rng(42)
-    const { labels, mask, wolfOnly } = buildEndgameLabels([3, 5], [3, 5], rng)
+    const { mask, wolfOnly } = buildEndgameLabels([3, 5], [3, 5], rng)
     assert.equal(wolfOnly.length, 0)
     assert.deepEqual(mask, [false, false, false, false])
   })
 
   it('fox only, no wolf → empty (no wolfOnly)', () => {
     const rng = new Rng(42)
-    const { labels, mask, wolfOnly } = buildEndgameLabels([7], [], rng)
+    const { mask, wolfOnly } = buildEndgameLabels([7], [], rng)
     assert.equal(wolfOnly.length, 0)
     assert.deepEqual(mask, [false, false, false, false])
   })

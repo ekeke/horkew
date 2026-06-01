@@ -51,7 +51,7 @@ export class WolfImitationModule extends WolfSkollZeroModule {
    * 結果、claim_decision phase が active になり、旧 claim_*_fake は自動 skip される
    * (WolfImitationNetwork に旧 'claim_fake' head が無いため、これを設定しないと throw する)。
    */
-  override requiresWolfImitationMode(): boolean {
+  requiresWolfImitationMode(): boolean {
     return true
   }
 

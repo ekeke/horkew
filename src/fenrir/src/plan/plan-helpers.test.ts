@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { PLAN_VOCAB, parsePlanSlots, parseDualPlanSlots } from './plan-vocab.ts'
+import { PLAN_VOCAB, parseDualPlanSlots } from './plan-vocab.ts'
 import { planToVote, nooseCount, ENDGAME_ALIVE_THRESHOLD, type PlanState } from './plan-helpers.ts'
 import { Rng } from '../../../lupa/random.ts'
 import type { DecisionContext } from '../agents/agent.ts'

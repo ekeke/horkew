@@ -26,8 +26,6 @@ import {
 } from '../../../skoll-zero/network/config.ts'
 import type { NetworkConfig } from './nn.ts'
 
-const SEATS = 14
-
 // ============================================================
 // KL(α‖0.5) bernoulli 公式 (pure JS で TF graph と同じ式を再現して analytical 検証)
 // ============================================================
