@@ -17,6 +17,10 @@
  *   (狩人個別の護衛 target が actor の guardHistory に記録されているか)
  * - `@expect-medium actor:X day:N target:Y result:human|wolf`
  *   (霊能 trait の自動 push が actor の mediumHistory[day] に記録されているか)
+ * - `@expect-view actor:X field:<fieldName> value:<value>`
+ *   (buildPlayerView(state, actor) で構築される PlayerView の知識フィールドを検査。
+ *    field は wolfTeammates / knownWolves / knownHamster / masonPartner のいずれか。
+ *    value は単一名 (例: Bob) / `null` / 配列 (例: [Bob,Carol] — 空 [] も可) を許容)
  *
  * checkpoint 概念は無く、 ゲーム終了時の 1 回のみ検証する (retar の `@expect`
  * とは検証タイミングが異なる)。
@@ -24,6 +28,7 @@
 
 import assert from 'node:assert'
 import type { GameEvent, GameState } from './types.ts'
+import { buildPlayerView } from './player-view.ts'
 
 export type StatusExp = { player: string, value: 'alive' | 'dead' }
 export type CauseExp = { player: string, value: string }
@@ -32,6 +37,9 @@ export type DivineExp = { actor: string, night: number, target: string, result: 
 export type AttackExp = { actor: string, night: number, target: string }
 export type GuardExp = { actor: string, night: number, target: string }
 export type MediumExp = { actor: string, day: number, target: string, result: 'human' | 'wolf' }
+export type ViewExp =
+  | { kind: 'single', actor: string, field: 'masonPartner' | 'knownHamster', expected: string | null }
+  | { kind: 'array', actor: string, field: 'wolfTeammates' | 'knownWolves', expected: string[] }
 
 export type Expectations = {
   status: StatusExp[]
@@ -41,6 +49,7 @@ export type Expectations = {
   attack: AttackExp[]
   guard: GuardExp[]
   medium: MediumExp[]
+  view: ViewExp[]
   survivors?: string[]
   result?: string
   finished?: boolean
@@ -58,9 +67,13 @@ const divineRegex = /^#\s*@expect-divine\s+actor:(\S+)\s+night:(\d+)\s+target:(\
 const attackRegex = /^#\s*@expect-attack\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s*$/
 const guardRegex = /^#\s*@expect-guard\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s*$/
 const mediumRegex = /^#\s*@expect-medium\s+actor:(\S+)\s+day:(\d+)\s+target:(\S+)\s+result:(human|wolf)\s*$/
+const viewRegex = /^#\s*@expect-view\s+actor:(\S+)\s+field:(\S+)\s+value:(.+?)\s*$/
+
+const SINGLE_FIELDS = new Set(['masonPartner', 'knownHamster'])
+const ARRAY_FIELDS = new Set(['wolfTeammates', 'knownWolves'])
 
 export function extractExpectations(rawText: string): Expectations {
-  const exps: Expectations = { status: [], cause: [], event: [], divine: [], attack: [], guard: [], medium: [] }
+  const exps: Expectations = { status: [], cause: [], event: [], divine: [], attack: [], guard: [], medium: [], view: [] }
   const lines = rawText.split('\n')
   for (const raw of lines) {
     const line = raw.trim()
@@ -96,6 +109,20 @@ export function extractExpectations(rawText: string): Expectations {
       exps.medium.push({
         actor: m[1], day: Number(m[2]), target: m[3], result: m[4] as 'human' | 'wolf',
       })
+    } else if ((m = viewRegex.exec(line))) {
+      const actor = m[1]
+      const field = m[2]
+      const rawValue = m[3]
+      if (SINGLE_FIELDS.has(field)) {
+        const expected = rawValue === 'null' ? null : rawValue
+        exps.view.push({ kind: 'single', actor, field: field as 'masonPartner' | 'knownHamster', expected })
+      } else if (ARRAY_FIELDS.has(field)) {
+        const inner = rawValue.replace(/^\[/, '').replace(/\]$/, '').trim()
+        const expected = inner === '' ? [] : inner.split(',').map(s => s.trim()).filter(Boolean)
+        exps.view.push({ kind: 'array', actor, field: field as 'wolfTeammates' | 'knownWolves', expected })
+      } else {
+        throw new Error(`@expect-view: unknown field "${field}" (expected one of: wolfTeammates, knownWolves, knownHamster, masonPartner)`)
+      }
     } else if ((m = survivorsRegex.exec(line))) {
       exps.survivors = m[1].split(',').map(s => s.trim()).filter(Boolean)
     } else if ((m = resultRegex.exec(line))) {
@@ -117,6 +144,7 @@ export function hasAnyExpectations(exps: Expectations): boolean {
     || exps.attack.length > 0
     || exps.guard.length > 0
     || exps.medium.length > 0
+    || exps.view.length > 0
     || exps.survivors !== undefined
     || exps.result !== undefined
     || exps.finished !== undefined
@@ -233,6 +261,22 @@ export function verifyExpectations(
       `${m.actor} day ${m.day}: expected target ${m.target} but got seat ${entry.target}`)
     assert.strictEqual(entry.result, m.result,
       `${m.actor} day ${m.day}: expected result ${m.result} but got ${entry.result}`)
+  }
+
+  for (const v of exps.view) {
+    const actorSeat = seatOf(v.actor)
+    const view = buildPlayerView(state, actorSeat)
+    if (v.kind === 'single') {
+      const actualSeat = view[v.field]
+      const expectedSeat = v.expected === null ? null : seatOf(v.expected)
+      assert.strictEqual(actualSeat, expectedSeat,
+        `${v.actor} view.${v.field}: expected ${v.expected} but got seat ${actualSeat}`)
+    } else {
+      const actualSeats = (view[v.field] ?? []).slice().sort((a, b) => a - b)
+      const expectedSeats = v.expected.map(seatOf).slice().sort((a, b) => a - b)
+      assert.deepStrictEqual(actualSeats, expectedSeats,
+        `${v.actor} view.${v.field}: expected [${v.expected.join(',')}] but got seats [${actualSeats.join(',')}]`)
+    }
   }
 
   if (exps.survivors !== undefined) {

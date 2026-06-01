@@ -1,0 +1,23 @@
+---
+title: 共有者 2 人の masonPartner が相互に相手 seat を指す (know-masons trait)
+setup: { mason: 2, werewolf: 1, villager: 2 }
+---
+# Day 1 投票で Carol (狼) 処刑 → 狼全滅で villager_won 終局。
+# ゲーム終了後に buildPlayerView を呼んで Alice / Bob (共有) の masonPartner が
+# 相互に指していることを検証する。
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=共有者
+!Bob=共有者
+!Carol=人狼
+!Dave=村人
+!Eve=村人
+
+Alice→Carol
+Bob→Carol
+Dave→Carol
+Eve→Carol
+Carol→Alice
+
+# @expect-view actor:Alice field:masonPartner value:Bob
+# @expect-view actor:Bob field:masonPartner value:Alice

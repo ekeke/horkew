@@ -1,0 +1,18 @@
+---
+title: 狂信者は知識として全ての人狼 seat を knownWolves に保持する (know-werewolves trait)
+setup: { fanatic: 1, werewolf: 1, villager: 1 }
+---
+# Day 1 投票で Bob (狼) 処刑 → 狼全滅で villager_won 終局。
+# Alice (狂信者) は人狼ではないが know-werewolves trait を持つため
+# buildPlayerView は knownWolves=[Bob] (生存・死亡問わず) を返す。
+
+++Alice、Bob、Carol
+!Alice=狂信者
+!Bob=人狼
+!Carol=村人
+
+Alice→Bob
+Carol→Bob
+Bob→Alice
+
+# @expect-view actor:Alice field:knownWolves value:[Bob]

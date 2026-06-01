@@ -1,0 +1,20 @@
+---
+title: 共有者が 1 人だけの setup では masonPartner が null になる (no peer)
+setup: { mason: 1, werewolf: 1, villager: 2 }
+---
+# Day 1 投票で Bob (狼) 処刑 → 狼全滅で villager_won 終局。
+# 共有者は Alice のみ。 buildPlayerView は他に know-masons trait 保持者が
+# 居ないため masonPartner=null を返す。
+
+++Alice、Bob、Carol、Dave
+!Alice=共有者
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Bob→Alice
+
+# @expect-view actor:Alice field:masonPartner value:null
