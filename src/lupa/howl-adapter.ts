@@ -13,7 +13,7 @@
 import type { SystemRole, VillageStatus } from '../types/index.ts'
 import type { SpoilerActionRecord } from '../howl/bridge.ts'
 import type { GameConfig, GameHandlers } from './handlers.ts'
-import type { DayClaim, NightAction } from './types.ts'
+import type { DayClaim, NightAction, RevoteConfig } from './types.ts'
 
 export type AdapterInput = {
   assumptions: Map<number, SystemRole>
@@ -21,6 +21,8 @@ export type AdapterInput = {
   vs: VillageStatus
   setup: Map<SystemRole, number>
   players: Map<number, string>
+  /** Howl frontmatter (meta). frontmatter.rules を engine config に反映するため optional で受ける */
+  meta?: { rules?: Record<string, unknown> }
 }
 
 export type AdapterOutput = {
@@ -29,13 +31,29 @@ export type AdapterOutput = {
 }
 
 export function buildLupaScenario(input: AdapterInput): AdapterOutput {
-  const { assumptions, spoilerActions, vs, setup } = input
+  const { assumptions, spoilerActions, vs, setup, meta } = input
 
   const config: GameConfig = {
     roles: setup,
     seed: 0,
     hasFirstGhost: false,
     nameStyle: 'seat',
+  }
+
+  // Howl frontmatter の vote.final / vote.tiebreaker を engine の revoteConfig に変換。
+  // 完全 mapping ではなく spec で必要な分のみ:
+  //   vote.final='final'  → maxRevotes=0 (revote せず即 tiebreaker)
+  //   vote.tiebreaker='draw' → tiebreaker='draw' (引き分けで終局)
+  const metaRules = meta?.rules ?? {}
+  const voteFinal = metaRules['vote.final']
+  const voteTiebreaker = metaRules['vote.tiebreaker']
+  if (voteFinal === 'final' || voteTiebreaker === 'draw') {
+    const revoteConfig: RevoteConfig = {
+      maxRevotes: voteFinal === 'final' ? 0 : 3,
+      style: 'random_tied',
+      tiebreaker: voteTiebreaker === 'draw' ? 'draw' : 'lowest_seat',
+    }
+    config.revoteConfig = revoteConfig
   }
 
   // Howl の `N夜` (SpoilerStatement.day=N) は lupa night=N に相当する慣例で扱う。

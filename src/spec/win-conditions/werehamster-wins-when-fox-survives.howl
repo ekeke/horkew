@@ -1,0 +1,20 @@
+---
+title: 狐生存中に他陣営の勝利条件が満たされると狐陣営の勝利になる
+setup: { werehamster: 1, werewolf: 1, villager: 1 }
+rules:
+  first-victim: none
+---
+# Day 1 投票で Carol (村) 処刑 → 残り Alice (狐) + Bob (狼) で wolf 1 vs village 0。
+# 通常なら狼勝条件成立だが、 妖狐が生存しているため狐陣営勝利が優先される。
+
+++Alice、Bob、Carol
+!Alice=妖狐
+!Bob=人狼
+!Carol=村人
+
+Alice→Carol
+Bob→Carol
+Carol→Bob
+
+# @expect-result: werehamster_won
+# @expect-finished: true

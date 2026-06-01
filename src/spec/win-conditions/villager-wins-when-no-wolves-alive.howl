@@ -1,0 +1,19 @@
+---
+title: 狼陣営が全滅すると村陣営の勝利になる
+setup: { werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# Day 1 投票で Alice (狼) 処刑 → wolf 0 → 村勝。
+
+++Alice、Bob、Carol
+!Alice=人狼
+!Bob=村人
+!Carol=村人
+
+Alice→Bob
+Bob→Alice
+Carol→Alice
+
+# @expect-result: villager_won
+# @expect-finished: true

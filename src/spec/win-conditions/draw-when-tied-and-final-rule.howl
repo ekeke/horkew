@@ -1,0 +1,21 @@
+---
+title: 同票投票で vote.final=final かつ vote.tiebreaker=draw のとき引き分け終局
+setup: { werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+  vote.final: final
+  vote.tiebreaker: draw
+---
+# 3 人が 1票ずつ別の player に投票 → 3-way 同票 → 即 draw (revote なし)。
+
+++Alice、Bob、Carol
+!Alice=人狼
+!Bob=村人
+!Carol=村人
+
+Alice→Bob
+Bob→Carol
+Carol→Alice
+
+# @expect-result: draw
+# @expect-finished: true

@@ -44,7 +44,7 @@ if (scenarios.length === 0) {
             const { statements } = parse(content)
             const { vs, setup, players, assumptions, spoilerActions } = buildVillageStatus(statements, meta)
             const { config, handlers } = buildLupaScenario({
-              assumptions, spoilerActions, vs, setup, players,
+              assumptions, spoilerActions, vs, setup, players, meta,
             })
             const { state, events } = await runGame(config, handlers)
             verifyExpectations(lupaExps, state, events as GameEvent[], players)
