@@ -1,5 +1,5 @@
 use crate::types::{CauseOfDeath, EnumSpecies, RoleTrait, SeatStatus, VillageStatus, SystemRole, Seat, Day};
-use crate::possibilities::Possibilities;
+use crate::possibilities::{Possibilities, ROLE_COUNT};
 use crate::role_sets::{has_trait, single_role_by_seer_result, single_role_by_trait};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -78,7 +78,7 @@ pub struct RoleTesterEnv<'a> {
 
 pub struct ContextSnapshot {
     pub poss_arr: Vec<u16>,
-    pub poss_setup: [u8; 12],
+    pub poss_setup: [u8; ROLE_COUNT],
     pub hamsters_max_surviving_day: i32,
     pub need_divine_alive_at_day: Option<Day>,
     pub hamsters_killed_by_divine_len: usize,
@@ -94,7 +94,7 @@ impl ContextSnapshot {
     pub fn new_empty(poss_len: usize, chronicle_len: usize) -> Self {
         ContextSnapshot {
             poss_arr: vec![0u16; poss_len],
-            poss_setup: [0u8; 12],
+            poss_setup: [0u8; ROLE_COUNT],
             hamsters_max_surviving_day: 0,
             need_divine_alive_at_day: None,
             hamsters_killed_by_divine_len: 0,

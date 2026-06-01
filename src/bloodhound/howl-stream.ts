@@ -18,6 +18,7 @@ import type { BloodhoundEvent } from './types.ts'
 const SPECIES_GLYPH: Record<Exclude<EnumSpecies, null>, string> = {
   human: '○',
   wolf: '●',
+  kogitsune: '子狐',
 }
 
 /**

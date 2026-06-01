@@ -1,0 +1,26 @@
+---
+title: 子狐が妖狐を占っても呪殺 (fox_kill) は発生しない (divine-imperfect は呪殺能力なし)
+setup: { kogitsune: 1, werehamster: 1, werewolf: 1, villager: 1 }
+rules:
+  first-victim: none
+---
+# Night 0 に Alice (子狐) が Bob (妖狐) を占い。
+# Bob は die-when-divined trait を持つが、 Alice の divine-imperfect は呪殺能力を
+# 持たないため、 Bob は死亡せず fox_kill event も emit されない。
+# Day 1 投票で Carol (狼) を処刑 → 狼全滅、 Bob (妖狐) + Alice (子狐) 生存 → werehamster_won。
+
+++Alice、Bob、Carol、Dave
+!Alice=子狐
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+!Alice 0夜 占い Bob
+
+Alice→Carol
+Bob→Carol
+Dave→Carol
+Carol→Bob
+
+# @expect-status Alice: alive
+# @expect-status Bob: alive
+# @expect-result: werehamster_won

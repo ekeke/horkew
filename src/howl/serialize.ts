@@ -54,7 +54,9 @@ const CO_LABEL: Record<Role, string> = {
 }
 
 function speciesGlyph(s: Species): string {
-  return s === 'isWolf' ? '●' : '○'
+  if (s === 'isWolf') return '●'
+  if (s === 'isKogitsune') return '子狐'
+  return '○'
 }
 
 function resultWord(r: GameResult): string {

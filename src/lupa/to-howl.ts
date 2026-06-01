@@ -8,7 +8,7 @@
  * デバッグ、シナリオテスト用データ、ベンチからのゲーム記録などで使用する。
  */
 
-import type { SystemRole } from '../types/index.ts'
+import type { SystemRole, EnumSpecies } from '../types/index.ts'
 import type { GameResult } from './handlers.ts'
 import type { GameEvent, PlayerState } from './types.ts'
 import type { Statement, Species, GameResult as HowlGameResult } from '../howl/statement.ts'
@@ -34,9 +34,10 @@ export type HowlExportOptions = {
   includeExpect?: boolean
 }
 
-function speciesOf(r: 'wolf' | 'human' | null): Species | null {
+function speciesOf(r: EnumSpecies): Species | null {
   if (r === 'wolf') return 'isWolf'
   if (r === 'human') return 'isHuman'
+  if (r === 'kogitsune') return 'isKogitsune'
   return null
 }
 

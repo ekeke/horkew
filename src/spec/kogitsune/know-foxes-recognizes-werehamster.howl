@@ -1,0 +1,21 @@
+---
+title: 子狐は know-foxes trait により妖狐 (visible-as-fox 持ち) の正体を知る
+setup: { kogitsune: 1, werehamster: 1, werewolf: 1, villager: 2 }
+---
+# 子狐 (Alice) は know-foxes trait を持ち、 妖狐 (Bob) を knownHamster として認識する。
+# Day 1 で適当に村人を処刑し、 view 検証のみ行う。
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=子狐
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+!Eve=村人
+
+Alice→Dave
+Bob→Dave
+Carol→Dave
+Dave→Carol
+Eve→Dave
+
+# @expect-view actor:Alice field:knownHamster value:Bob

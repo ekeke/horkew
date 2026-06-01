@@ -71,6 +71,7 @@ impl SystemRole {
             SystemRole::Werehamster => 9,
             SystemRole::Immoralist => 10,
             SystemRole::Paparazzi => 11,
+            SystemRole::Kogitsune => 12,
         }
     }
 }

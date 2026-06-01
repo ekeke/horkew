@@ -14,6 +14,7 @@ const ROLE_DISPLAY: Record<SystemRole, string> = {
   werehamster: '狐',
   immoralist: '背徳',
   paparazzi: 'パパラッチ',
+  kogitsune: '子狐',
 }
 
 // 配役記法用の短縮表記（パーサーのvocabulary最短形に合わせる）
@@ -30,6 +31,7 @@ const ROLE_SETUP_DISPLAY: Record<SystemRole, string> = {
   werehamster: '狐',
   immoralist: '背',
   paparazzi: 'パ',
+  kogitsune: '子狐',
 }
 
 const RESULT_DISPLAY = {

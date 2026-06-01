@@ -19,7 +19,7 @@ import type { FlexibleDictionary } from './flexibleDictionary.ts'
 
 export type DayEvent = { day: number, event: GameEvent }
 
-const SPECIES_MAP: Record<string, EnumSpecies> = { isHuman: 'human', isWolf: 'wolf' }
+const SPECIES_MAP: Record<string, EnumSpecies> = { isHuman: 'human', isWolf: 'wolf', isKogitsune: 'kogitsune' }
 
 const ROLE_TO_SYSTEM: Record<string, SystemRole> = {
   seer: 'seer',

@@ -9,7 +9,7 @@
  * 議論フェーズ（シグナル、指揮者、予告、防御CO）はオプション。
  */
 
-import type { SystemRole, ResolvedRules } from '../types/index.ts'
+import type { SystemRole, ResolvedRules, EnumSpecies } from '../types/index.ts'
 import { resolveRules } from '../howl/ruleset.ts'
 import type { GameState, GameEvent, GameSnapshot, NightAction, DayClaim, PlayerState } from './types.ts'
 import type { GameConfig, GameHandlers, GameResult, PhaseContext, VoteContext } from './handlers.ts'
@@ -20,7 +20,7 @@ import {
   killPlayer, checkWinCondition,
 } from './roles.ts'
 import { forceTrueRoleCO, resolveVotes } from './engine-utils.ts'
-import { hasTrait, getFaction, isHamster } from './role-traits.ts'
+import { hasTrait, isHamster, isFoxWinCounter } from './role-traits.ts'
 
 const MAX_DAYS = 50
 
@@ -84,7 +84,7 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
   const night0ActionsList: Array<{ player: PlayerState, action: NightAction }> = []
   for (const [seat, action] of night0Actions) {
     const player = players.find(p => p.seat === seat)!
-    applyNightAction(state, player, 0, action)
+    applyNightAction(state, player, 0, action, rng)
     night0ActionsList.push({ player, action })
   }
 
@@ -93,6 +93,8 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
   for (const player of players) {
     const divine = player.divineHistory.get(0)
     if (!divine) continue
+    // divine-imperfect (子狐) は呪殺能力を持たない
+    if (hasTrait(player.role, 'action', 'divine-imperfect')) continue
     const target = players.find(p => p.seat === divine.target)!
     if (hasTrait(target.role, 'passive', 'die-when-divined') && target.alive) {
       killPlayer(state, target.seat)
@@ -107,7 +109,7 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
   if (hasFirstVictim) {
     const candidates = alivePlayers(state).filter(p => {
       if (hasTrait(p.role, 'action', 'attack')) return false
-      if (isHamster(p.role)) return false
+      if (isFoxWinCounter(p.role)) return false
       if (hasTrait(p.role, 'reactive', 'curse-on-executed')) return false
       if (hasTrait(p.role, 'reactive', 'curse-on-killed')) return false
       return true
@@ -209,7 +211,7 @@ async function runGameLoop<E = never, Ext = unknown>(
       const actionsList: Array<{ player: PlayerState, action: NightAction }> = []
       for (const [seat, action] of nightActions) {
         const player = players.find(p => p.seat === seat)!
-        applyNightAction(state, player, night, action)
+        applyNightAction(state, player, night, action, rng)
         player.forecastTarget = null
         actionsList.push({ player, action })
       }
@@ -371,8 +373,8 @@ async function runGameLoop<E = never, Ext = unknown>(
     if (hasTrait(executedPlayer.role, 'reactive', 'curse-on-executed')) {
       let curseCandidates = alivePlayers(state)
       if (rules['role.nekomata.curse-target'] === 'villager') {
-        // 「村人陣営のみを呪う」設定: 襲撃可能な狼と妖狐を除外
-        curseCandidates = curseCandidates.filter(p => !hasTrait(p.role, 'action', 'attack') && !isHamster(p.role))
+        // 「村人陣営のみを呪う」設定: 襲撃可能な狼と狐陣営勝利カウント担当 (妖狐 + 子狐) を除外
+        curseCandidates = curseCandidates.filter(p => !hasTrait(p.role, 'action', 'attack') && !isFoxWinCounter(p.role))
       }
       if (curseCandidates.length > 0) {
         const curseTarget = rng.pick(curseCandidates)
@@ -420,12 +422,16 @@ function makePhaseContext<E = never, Ext = unknown>(state: GameState<Ext>, event
 
 /** 夜アクションを状態に適用（記録のみ） */
 function applyNightAction(
-  state: GameState, player: PlayerState, night: number, action: NightAction,
+  state: GameState, player: PlayerState, night: number, action: NightAction, rng: Rng,
 ): void {
   switch (action.type) {
     case 'divine': {
       const target = state.players.find(p => p.seat === action.target)!
-      const result = getSeerResult(target.role)
+      // divine-imperfect (子狐): 50% で結果不発、 結果は null
+      const isImperfect = hasTrait(player.role, 'action', 'divine-imperfect')
+      const result = isImperfect && rng.next() >= 0.5
+        ? null
+        : getSeerResult(target.role)
       player.divineHistory.set(night, { target: action.target, result })
       break
     }
@@ -450,7 +456,12 @@ function resolveNight(
   night: number,
 ): void {
   const name = (seat: number) => state.players.find(p => p.seat === seat)!.name
-  const speciesLabel = (r: 'human' | 'wolf' | null) => r === 'human' ? '○' : r === 'wolf' ? '●' : '?'
+  const speciesLabel = (r: EnumSpecies): string => {
+    if (r === 'human') return '○'
+    if (r === 'wolf') return '●'
+    if (r === 'kogitsune') return '子狐'
+    return '?'
+  }
 
   // 夜行動コメント
   for (const { player, action } of actions) {
@@ -472,8 +483,10 @@ function resolveNight(
 
   // 占い呪殺チェック
   const foxKilled = new Set<number>()
-  for (const { action } of actions) {
+  for (const { player, action } of actions) {
     if (action.type !== 'divine') continue
+    // divine-imperfect (子狐) は呪殺能力を持たない
+    if (hasTrait(player.role, 'action', 'divine-imperfect')) continue
     const target = state.players.find(p => p.seat === action.target)!
     if (hasTrait(target.role, 'passive', 'die-when-divined') && target.alive) {
       killPlayer(state, action.target)
@@ -619,8 +632,8 @@ function checkImmoralistFollow(state: GameState, emit: EmitFn): void {
   const aliveHamsters = state.players.filter(p => isHamster(p.role) && p.alive)
   if (aliveHamsters.length > 0) return
 
-  // 妖狐以外の狐陣営 (背徳者) が後追い
-  const followers = state.players.filter(p => getFaction(p.role) === 'fox' && !isHamster(p.role) && p.alive)
+  // follow-fox-death trait 保有者 (背徳者) が後追い (子狐は後追いしない)
+  const followers = state.players.filter(p => hasTrait(p.role, 'reactive', 'follow-fox-death') && p.alive)
   for (const imm of followers) {
     killPlayer(state, imm.seat)
     emit({ type: 'follow_kill', target: imm.seat })

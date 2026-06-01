@@ -1,0 +1,34 @@
+---
+title: 子狐は妖狐が退場しても follow-fox-death trait を持たないため後追いしない
+setup: { kogitsune: 1, werehamster: 1, werewolf: 1, villager: 2 }
+rules:
+  first-victim: none
+---
+# Day 1 投票で Bob (妖狐) を処刑。 背徳者は不在のため follow_kill は発生しないが、
+# 子狐 (Alice) も follow-fox-death trait を持たないため Alice は生存。
+# Day 2 で Carol (狼) を処刑し、 Alice (子狐) のみ生存 → hamster_won。
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=子狐
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+!Eve=村人
+
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Eve→Bob
+Bob→Carol
+
+Day 2:
+
+Alice→Carol
+Dave→Carol
+Eve→Carol
+Carol→Alice
+
+# @expect-status Alice: alive
+# @expect-status Bob: dead
+# @expect-status Carol: dead
+# @expect-result: werehamster_won

@@ -50,6 +50,7 @@ const ROLE_PROMPT_FILE: Record<SystemRole, string> = {
   paparazzi:   'role/fanatic.md',
   werehamster: 'role/werehamster.md',
   immoralist:  'role/immoralist.md',
+  kogitsune:   'role/werehamster.md',
 }
 
 const PHASE_PROMPT_FILE: Record<BloodhoundPhase, string> = {

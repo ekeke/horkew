@@ -60,6 +60,7 @@ const gameResultMap: Record<string, VillageResult> = {
 const speciesMap: Record<string, EnumSpecies> = {
   isHuman: 'human',
   isWolf: 'wolf',
+  isKogitsune: 'kogitsune',
 }
 
 const claimRoleToSystemRole: Record<string, SystemRole> = {

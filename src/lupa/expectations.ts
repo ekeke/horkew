@@ -33,10 +33,10 @@ import { buildPlayerView } from './player-view.ts'
 export type StatusExp = { player: string, value: 'alive' | 'dead' }
 export type CauseExp = { player: string, value: string }
 export type EventExp = { name: string, params: Record<string, string> }
-export type DivineExp = { actor: string, night: number, target: string, result: 'human' | 'wolf' }
+export type DivineExp = { actor: string, night: number, target: string, result: 'human' | 'wolf' | 'kogitsune' | 'null' }
 export type AttackExp = { actor: string, night: number, target: string }
 export type GuardExp = { actor: string, night: number, target: string }
-export type MediumExp = { actor: string, day: number, target: string, result: 'human' | 'wolf' }
+export type MediumExp = { actor: string, day: number, target: string, result: 'human' | 'wolf' | 'kogitsune' }
 export type ViewExp =
   | { kind: 'single', actor: string, field: 'masonPartner' | 'knownHamster', expected: string | null }
   | { kind: 'array', actor: string, field: 'wolfTeammates' | 'knownWolves', expected: string[] }
@@ -63,10 +63,10 @@ const survivorsRegex = /^#\s*@expect-survivors:\s*\[(.+)\]\s*$/
 const resultRegex = /^#\s*@expect-result:\s*(\S+)\s*$/
 const finishedRegex = /^#\s*@expect-finished:\s*(true|false)\s*$/
 const dayRegex = /^#\s*@expect-day:\s*(\d+)\s*$/
-const divineRegex = /^#\s*@expect-divine\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s+result:(human|wolf)\s*$/
+const divineRegex = /^#\s*@expect-divine\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s+result:(human|wolf|kogitsune|null)\s*$/
 const attackRegex = /^#\s*@expect-attack\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s*$/
 const guardRegex = /^#\s*@expect-guard\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s*$/
-const mediumRegex = /^#\s*@expect-medium\s+actor:(\S+)\s+day:(\d+)\s+target:(\S+)\s+result:(human|wolf)\s*$/
+const mediumRegex = /^#\s*@expect-medium\s+actor:(\S+)\s+day:(\d+)\s+target:(\S+)\s+result:(human|wolf|kogitsune)\s*$/
 const viewRegex = /^#\s*@expect-view\s+actor:(\S+)\s+field:(\S+)\s+value:(.+?)\s*$/
 
 const SINGLE_FIELDS = new Set(['masonPartner', 'knownHamster'])
@@ -95,7 +95,7 @@ export function extractExpectations(rawText: string): Expectations {
       exps.event.push({ name: m[1], params })
     } else if ((m = divineRegex.exec(line))) {
       exps.divine.push({
-        actor: m[1], night: Number(m[2]), target: m[3], result: m[4] as 'human' | 'wolf',
+        actor: m[1], night: Number(m[2]), target: m[3], result: m[4] as 'human' | 'wolf' | 'kogitsune' | 'null',
       })
     } else if ((m = attackRegex.exec(line))) {
       exps.attack.push({
@@ -107,7 +107,7 @@ export function extractExpectations(rawText: string): Expectations {
       })
     } else if ((m = mediumRegex.exec(line))) {
       exps.medium.push({
-        actor: m[1], day: Number(m[2]), target: m[3], result: m[4] as 'human' | 'wolf',
+        actor: m[1], day: Number(m[2]), target: m[3], result: m[4] as 'human' | 'wolf' | 'kogitsune',
       })
     } else if ((m = viewRegex.exec(line))) {
       const actor = m[1]
@@ -225,7 +225,8 @@ export function verifyExpectations(
       `${d.actor}: no divine entry for night ${d.night}`)
     assert.strictEqual(entry.target, targetSeat,
       `${d.actor} night ${d.night}: expected target ${d.target} but got seat ${entry.target}`)
-    assert.strictEqual(entry.result, d.result,
+    const expectedResult = d.result === 'null' ? null : d.result
+    assert.strictEqual(entry.result, expectedResult,
       `${d.actor} night ${d.night}: expected result ${d.result} but got ${entry.result}`)
   }
 

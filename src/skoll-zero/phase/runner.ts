@@ -176,12 +176,14 @@ const ROLE_SHORT_LABELS: Record<SystemRole, string> = {
   villager: 'villager', seer: 'seer', medium: 'medium', bodyguard: 'bg',
   mason: 'mason', nekomata: 'neko', werewolf: 'wolf', fanatic: 'fanat',
   werehamster: 'fox', immoralist: 'immo', possessed: 'poss', paparazzi: 'pap',
+  kogitsune: 'kogi',
 }
 
 const CLAIM_COL_LABELS: Record<ClaimedRoleKey, string> = {
   villager: 'vill', seer: 'seer', medium: 'med', bodyguard: 'bg',
   mason: 'mason', nekomata: 'neko', werewolf: 'wolf', fanatic: 'fanat',
-  werehamster: 'fox', immoralist: 'immo', possessed: 'poss', paparazzi: 'pap', none: 'none',
+  werehamster: 'fox', immoralist: 'immo', possessed: 'poss', paparazzi: 'pap',
+  kogitsune: 'kogi', none: 'none',
 }
 
 /** claim matrix を 1 行 1 役職の表として整形 */

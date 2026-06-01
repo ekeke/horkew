@@ -17,7 +17,12 @@ export function getFaction(role: SystemRole): Faction {
   return systemRoles.get(role)?.faction ?? 'village'
 }
 
-/** 妖狐: 狐陣営かつ占い呪殺 trait を持つ役職 (werehamster のみ) */
+/** 妖狐: 狐陣営かつ visible-as-fox trait を持つ役職 (werehamster のみ) */
 export function isHamster(role: SystemRole): boolean {
-  return getFaction(role) === 'fox' && hasTrait(role, 'passive', 'die-when-divined')
+  return getFaction(role) === 'fox' && hasTrait(role, 'passive', 'visible-as-fox')
+}
+
+/** 狐陣営勝利カウント担当 (妖狐 + 子狐) */
+export function isFoxWinCounter(role: SystemRole): boolean {
+  return getFaction(role) === 'fox' && hasTrait(role, 'passive', 'fox-win-counter')
 }

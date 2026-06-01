@@ -1,9 +1,9 @@
 export type Seat = number
 export type Day = number
 
-export type SystemRole = 'werewolf' | 'possessed' | 'fanatic' | 'werehamster' | 'immoralist' | 'villager' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata' | 'paparazzi'
+export type SystemRole = 'werewolf' | 'possessed' | 'fanatic' | 'werehamster' | 'immoralist' | 'villager' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata' | 'paparazzi' | 'kogitsune'
 
-export type EnumSpecies = 'human' | 'wolf' | null
+export type EnumSpecies = 'human' | 'wolf' | 'kogitsune' | null
 
 export type Faction = 'village' | 'wolf' | 'fox'
 
@@ -12,6 +12,12 @@ export type AttackImmuneTrait = { kind: 'passive', sub: 'attack-immune' }
 
 /** 呪殺: 占い師に占われると死ぬ (妖狐) */
 export type DieWhenDivinedTrait = { kind: 'passive', sub: 'die-when-divined' }
+
+/** 妖狐としての存在を仲間 (know-foxes 持ち) に認識される (妖狐のみ) */
+export type VisibleAsFoxTrait = { kind: 'passive', sub: 'visible-as-fox' }
+
+/** 狐陣営勝利カウント担当 (妖狐 + 子狐) */
+export type FoxWinCounterTrait = { kind: 'passive', sub: 'fox-win-counter' }
 
 /** 仲間の人狼を最初から知っている (人狼 / 狂信者) */
 export type KnowWerewolvesTrait = { kind: 'knowledge', sub: 'know-werewolves' }
@@ -24,6 +30,9 @@ export type KnowMasonsTrait = { kind: 'knowledge', sub: 'know-masons' }
 
 /** 占い: 夜に一人を選んで人狼か否かを知る (占い師 / パパラッチ) */
 export type DivineTrait = { kind: 'action', sub: 'divine' }
+
+/** 不完全占い: 夜に一人を選び 50% 確率で結果を得る、 呪殺能力なし (子狐) */
+export type DivineImperfectTrait = { kind: 'action', sub: 'divine-imperfect' }
 
 /** 護衛: 夜に一人を選んで人狼の襲撃から守る (狩人) */
 export type GuardTrait = { kind: 'action', sub: 'guard' }
@@ -49,10 +58,13 @@ export type WolfChatTrait = { kind: 'channel', sub: 'wolf-chat' }
 export type RoleTrait =
   | AttackImmuneTrait
   | DieWhenDivinedTrait
+  | VisibleAsFoxTrait
+  | FoxWinCounterTrait
   | KnowWerewolvesTrait
   | KnowFoxesTrait
   | KnowMasonsTrait
   | DivineTrait
+  | DivineImperfectTrait
   | GuardTrait
   | AttackTrait
   | CurseOnExecutedTrait
@@ -240,6 +252,8 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     traits: [
       { kind: "passive", sub: "attack-immune" },
       { kind: "passive", sub: "die-when-divined" },
+      { kind: "passive", sub: "visible-as-fox" },
+      { kind: "passive", sub: "fox-win-counter" },
     ],
     howlPattern: "(?:妖?狐|werehamster)",
   }],
@@ -261,6 +275,18 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
     traits: [{ kind: "action", sub: "divine" }],
     howlPattern: "(?:パパラッチ|paparazzi)",
+  }],
+  ["kogitsune", {
+    name: "子狐", shortName: "子狐", systemName: "kogitsune",
+    alignment: "werehamster", faction: "fox", category: "other",
+    description: "妖狐陣営。\n人狼に襲撃されると死亡する。占い師に占われても死亡しない。\n占い結果は『人間』、霊能結果は『子狐』。\n夜に一人を選んで占うことができるが、結果は50%の確率でしか得られない (呪殺能力なし)。\n最初から妖狐の正体を知っている。\n妖狐が退場しても後追いせず、自身の生存で勝利する。",
+    humanCount: 0, wolfCount: 0, seerResult: "human", mediumResult: "kogitsune",
+    traits: [
+      { kind: "knowledge", sub: "know-foxes" },
+      { kind: "passive", sub: "fox-win-counter" },
+      { kind: "action", sub: "divine-imperfect" },
+    ],
+    howlPattern: "(?:子狐|kogitsune)",
   }],
 ])
 

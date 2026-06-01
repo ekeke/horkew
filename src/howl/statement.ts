@@ -4,7 +4,7 @@ import { systemRoles, type SystemRole } from '../types/index.ts'
 export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'dayMark' | 'reveal' | 'spoiler' | 'speech' | 'videoSource' | 'timestamp' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
-export type Species = 'isHuman' | 'isWolf'
+export type Species = 'isHuman' | 'isWolf' | 'isKogitsune'
 export type Role = 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata' | 'nonVillage'
 
 // Todo: More strict for omit variations.
@@ -551,8 +551,12 @@ export function parseAssertStatement(text: string, line: number): AssertStatemen
         }
         if (new RegExp(V.guard).test(actionText)) {
           assertion.action = 'guard'
+        } else if (new RegExp(V.isKogitsune).test(actionText)) {
+          assertion.result = 'isKogitsune'
+        } else if (new RegExp(V.isWolf).test(actionText)) {
+          assertion.result = 'isWolf'
         } else {
-          assertion.result = new RegExp(V.isWolf).test(actionText) ? 'isWolf' : 'isHuman'
+          assertion.result = 'isHuman'
         }
         assertions.push(assertion)
       }
