@@ -77,7 +77,7 @@ EditorPane で `.howl` を編集すると Web Worker 経由で Retar が走り�
 
 | 名前 | 役割 |
 |---|---|
-| `createAnalysisContext()` | `AnalysisContext` インスタンスを作る factory |
+| `createAnalysisContext(options?)` | `AnalysisContext` インスタンスを作る factory |
 | `AnalysisContext` | 共有 state クラス (class 直接利用も可) |
 | `EditorPane` | `.howl` 専用 CodeMirror エディタ (core) |
 | `StatusPane` | 生存者・投票・襲撃・カミングアウト・死亡履歴の集約表示 |
@@ -85,8 +85,20 @@ EditorPane で `.howl` を編集すると Web Worker 経由で Retar が走り�
 | `HatiPane` | 詰み探索結果 |
 | `InspectPane` | fenrir/skoll の game ログ閲覧 (時系列・retar スナップショット) |
 
-型: `SeekEvent` / `JumpEvent` / `SourceLines` / `SeatResult` / `AnalysisStats` /
-`WolfPairSuggestion` / `StringifiedLine`
+型: `AnalysisContextOptions` / `HowlPreprocessor` / `SeekEvent` / `JumpEvent` /
+`SourceLines` / `SeatResult` / `AnalysisStats` / `WolfPairSuggestion` / `StringifiedLine`
+
+### createAnalysisContext のオプション
+
+```ts
+createAnalysisContext({
+  preprocess: (text) => text.replace(/^@@hello$/m, '吾輩 → ネコ'),
+})
+```
+
+| オプション | 型 | 用途 |
+|---|---|---|
+| `preprocess` | `(text: string) => string` | editor のテキストを parse 直前に変換するフック。返した文字列が howl parser への入力になる。 editor 表示自体は変えない (双方向 bind は `howlText` のまま)。マクロ展開・テンプレ注入などに使う。 例外を投げた場合は元の text にフォールバック (safeParse と同じ方針) |
 
 ## AnalysisContext API
 

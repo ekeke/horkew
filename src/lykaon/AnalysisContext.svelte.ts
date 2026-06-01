@@ -58,6 +58,23 @@ export type JumpEvent = {
 
 export type { SeatResult, AnalysisStats, WolfPairSuggestion, StringifiedLine }
 
+/**
+ * editor のテキストを parse 直前に変換するフック。
+ * 返した文字列が howl parser への入力になる。 editor 表示自体は変えない。
+ *
+ * 用途: マクロ展開、 consumer 固有のショートカット記法、テンプレ注入など。
+ * 例外を投げた場合は元の text にフォールバックする (safeParse と同じ方針)。
+ */
+export type HowlPreprocessor = (text: string) => string
+
+/**
+ * createAnalysisContext / new AnalysisContext のオプション。
+ */
+export type AnalysisContextOptions = {
+  /** editor テキスト → parse 入力 の変換フック */
+  preprocess?: HowlPreprocessor
+}
+
 const EMPTY_SOURCE_LINES: SourceLines = {
   survivor: new Map(), claimRow: new Map(), claimCell: new Map(),
   kill: new Map(), exec: new Map(), vote: new Map(),
@@ -153,6 +170,15 @@ function safeParse(text: string, cursorLine?: number): ParsedResult {
   }
 }
 
+function safePreprocess(preprocess: HowlPreprocessor | undefined, text: string): string {
+  if (!preprocess) return text
+  try {
+    return preprocess(text)
+  } catch {
+    return text
+  }
+}
+
 type Bridge = ReturnType<typeof buildVillageStatus>
 
 function safeBuildVillage(parsed: ParsedResult): Bridge | null {
@@ -184,8 +210,12 @@ export class AnalysisContext {
   // 派生 — parse → bridge → ...
   // -----------------------------------------------------------------
 
-  #fullParsed = $derived.by<ParsedResult>(() => safeParse(this.howlText))
-  #parsed = $derived.by<ParsedResult>(() => safeParse(this.howlText, this.cursorLine))
+  #preprocess: HowlPreprocessor | undefined
+
+  #parseSource = $derived.by<string>(() => safePreprocess(this.#preprocess, this.howlText))
+
+  #fullParsed = $derived.by<ParsedResult>(() => safeParse(this.#parseSource))
+  #parsed = $derived.by<ParsedResult>(() => safeParse(this.#parseSource, this.cursorLine))
   #bridge = $derived.by<Bridge | null>(() => safeBuildVillage(this.#parsed))
 
   meta = $derived(this.#parsed.meta)
@@ -393,7 +423,8 @@ export class AnalysisContext {
   #analysisEpoch = 0
   #destroyed = false
 
-  constructor() {
+  constructor(options: AnalysisContextOptions = {}) {
+    this.#preprocess = options.preprocess
     this.#cleanup = $effect.root(() => {
       // 解析リクエスト: 入力変更で発火
       $effect(() => {
@@ -500,6 +531,6 @@ export class AnalysisContext {
  * <StatusPane {ctx} />
  * ```
  */
-export function createAnalysisContext(): AnalysisContext {
-  return new AnalysisContext()
+export function createAnalysisContext(options: AnalysisContextOptions = {}): AnalysisContext {
+  return new AnalysisContext(options)
 }

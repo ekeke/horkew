@@ -29,6 +29,8 @@
 export {
   AnalysisContext,
   createAnalysisContext,
+  type AnalysisContextOptions,
+  type HowlPreprocessor,
   type SeekEvent,
   type JumpEvent,
   type SourceLines,
