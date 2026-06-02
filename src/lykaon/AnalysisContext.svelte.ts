@@ -59,6 +59,23 @@ export type JumpEvent = {
 export type { SeatResult, AnalysisStats, WolfPairSuggestion, StringifiedLine }
 
 /**
+ * AnalysisTable 等で席をグルーピングする際のカテゴリ。
+ * `broken` (possibilities=0) は overlay 扱いで `brokenSeats` の Set に別管理する。
+ *
+ * - `mainCo`: 占い系 / 霊系 (category === 'seer' | 'medium')
+ * - `supportCo`: それ以外の villager 系 CO (狩・共・猫・将来増える村役職) と、レアな非村役職 CO
+ * - `nonCoNotGray`: 非 CO + 占い判定対象になったことのある席
+ * - `nonCoGray`: 非 CO + 占い判定なし
+ */
+export type SeatCategory = 'mainCo' | 'supportCo' | 'nonCoNotGray' | 'nonCoGray'
+
+/** mainCo 判定 (= 占い / 霊 系 CO)。 systemRoles の category で動的判定し、 新役職追加に追従する。 */
+function isMainCoRole(claimingRole: string): boolean {
+  const role = systemRoles.get(claimingRole as SystemRole)
+  return role?.category === 'seer' || role?.category === 'medium'
+}
+
+/**
  * preprocess フックの戻り値型。 string を返すと従来どおり lineOffset 0 扱い (後方互換)。
  * prepend 等で行数が変わる変換は { text, lineOffset } を返すこと。
  * lineOffset = parse 入力の先頭に増えた行数 (editor 座標 → parse 座標の +オフセット)。
@@ -350,6 +367,55 @@ export class AnalysisContext {
   )
 
   // -----------------------------------------------------------------
+  // 席カテゴリ — AnalysisTable のグルーピング用
+  // -----------------------------------------------------------------
+
+  /** seer / medium 系 CO の assertions.target に含まれた席 (= 占い判定対象になった席)。 */
+  divinedSeats = $derived.by<Set<number>>(() => {
+    const result = new Set<number>()
+    const vs = this.villageStatus
+    if (!vs) return result
+    for (const status of vs.statuses.values()) {
+      if (!status.claiming) continue
+      if (!isMainCoRole(status.claimingRole)) continue
+      for (const assertion of status.assertions.values()) {
+        if (typeof assertion.target === 'number') result.add(assertion.target)
+      }
+    }
+    return result
+  })
+
+  /** 各席を 4 カテゴリに分類する。 `broken` (possibilities=0) は別管理 ([brokenSeats](#brokenSeats))。 */
+  seatCategory = $derived.by<Map<number, SeatCategory>>(() => {
+    const result = new Map<number, SeatCategory>()
+    const vs = this.villageStatus
+    if (!vs) return result
+    const divined = this.divinedSeats
+    for (const seat of this.players.keys()) {
+      const s = vs.statuses.get(seat)
+      if (s?.claiming) {
+        result.set(seat, isMainCoRole(s.claimingRole) ? 'mainCo' : 'supportCo')
+      } else {
+        result.set(seat, divined.has(seat) ? 'nonCoNotGray' : 'nonCoGray')
+      }
+    }
+    return result
+  })
+
+  /** カテゴリ → 席番号配列 (seat 番号順)。 [AnalysisTable](panes/AnalysisTable.svelte) の CO 別レイアウト用。 */
+  seatsByCategory = $derived.by<Record<SeatCategory, number[]>>(() => {
+    const result: Record<SeatCategory, number[]> = {
+      mainCo: [], supportCo: [], nonCoNotGray: [], nonCoGray: [],
+    }
+    const cat = this.seatCategory
+    for (const seat of this.players.keys()) {
+      const c = cat.get(seat)
+      if (c) result[c].push(seat)
+    }
+    return result
+  })
+
+  // -----------------------------------------------------------------
   // 解析結果 — worker から書き込まれる
   // -----------------------------------------------------------------
 
@@ -365,6 +431,11 @@ export class AnalysisContext {
     && this.players.size > 0
     && this.analysisSeats.length === this.players.size
     && this.analysisSeats.every(s => s.roles.length === 1)
+  )
+
+  /** possibilities=0 となった破綻席。 元カテゴリと重畳して、 行 highlight で示す。 */
+  brokenSeats = $derived<Set<number>>(
+    new Set(this.analysisSeats.filter(s => s.roles.length === 0).map(s => s.seat))
   )
 
   // -----------------------------------------------------------------
