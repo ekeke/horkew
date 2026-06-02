@@ -10,6 +10,7 @@
  *   - editor ↔ pane / 動画 player との通信は onSeek / onJump のイベントバスで疎結合化
  */
 
+import { tick } from 'svelte'
 import type { SystemRole, VillageStatus, CauseOfDeath } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 import type { Statement } from '../howl/statement.ts'
@@ -555,17 +556,45 @@ export class AnalysisContext {
 
   /**
    * 配役が確定 (allRolesDetermined === true) しているときに、確定役職を
-   * `Player=役職名` 行の集合として howlText の末尾に追加する。
+   * `Player=役職名` 行の集合として howlText に書き込む。
+   * 既存の reveal 行があれば、最初の reveal 行の位置で新ブロックに置換し、
+   * それ以外の reveal 行は削除する。 reveal 行が無ければ末尾に追加する。
+   * 書き込み後はエディタのカーソルをファイル末尾に強制移動する
+   * (howlText 差し替えで CodeMirror 側のカーソルが先頭にリセットされるのを防ぐ)。
+   * jumpTo は EditorPane の doc 同期 $effect が走った後に呼ぶ必要があるため tick を待つ。
    * 未確定なら no-op。 AnalysisTable の挿入ボタンの default 動作。
    */
-  insertRevealRoles(): void {
+  async insertRevealRoles(): Promise<void> {
     if (!this.allRolesDetermined) return
-    const lines = this.analysisSeats.map(s => {
+    const newLines = this.analysisSeats.map(s => {
       const name = this.players.get(s.seat) ?? `#${s.seat}`
       const roleName = systemRoles.get(s.roles[0])?.name ?? s.roles[0]
       return `${name}=${roleName}`
     })
-    this.howlText = this.howlText + '\n' + lines.join('\n')
+    const revealLineNumbers = new Set(
+      this.fullStatements
+        .filter(s => s.type === 'reveal' && s.line >= 1)
+        .map(s => s.line)
+    )
+    if (revealLineNumbers.size === 0) {
+      this.howlText = this.howlText + '\n' + newLines.join('\n')
+    } else {
+      const insertAt = Math.min(...revealLineNumbers)
+      const lines = this.howlText.split('\n')
+      const kept: string[] = []
+      for (let i = 0; i < lines.length; i++) {
+        const lineNo = i + 1
+        if (lineNo === insertAt) {
+          kept.push(...newLines)
+        } else if (!revealLineNumbers.has(lineNo)) {
+          kept.push(lines[i])
+        }
+      }
+      this.howlText = kept.join('\n')
+    }
+    const lastLine = this.howlText.split('\n').length
+    await tick()
+    this.jumpTo({ line: lastLine })
   }
 
   // -----------------------------------------------------------------

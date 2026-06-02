@@ -10,12 +10,37 @@
 
   let { ctx, onInsertRevealRoles, onOpenDenyWolfDialog, extraFooter, hideAssumptions = false, defaultViewOptions }: {
     ctx: AnalysisContext
-    onInsertRevealRoles?: () => void
+    onInsertRevealRoles?: (done: () => void) => void
     onOpenDenyWolfDialog?: () => void
     extraFooter?: Snippet
     hideAssumptions?: boolean
     defaultViewOptions?: ViewOptions
   } = $props()
+
+  // onInsertRevealRoles hook 実行中は再クリックを防ぐためボタンを disable する。
+  // consumer は受け取った done() を呼んで disable を解除する。
+  let insertRevealBusy = $state(false)
+
+  function handleInsertReveal(): void {
+    if (insertRevealBusy) return
+    if (onInsertRevealRoles) {
+      insertRevealBusy = true
+      let released = false
+      const done = (): void => {
+        if (released) return
+        released = true
+        insertRevealBusy = false
+      }
+      try {
+        onInsertRevealRoles(done)
+      } catch (e) {
+        done()
+        throw e
+      }
+    } else {
+      ctx.insertRevealRoles()
+    }
+  }
 
   type NameStatus = 'default' | 'not-village' | 'village' | 'wolf' | 'fox'
 
@@ -297,7 +322,7 @@
       {#if ctx.allRolesDetermined}
         <div class="determined-banner">
           <span class="determined-label">配役確定</span>
-          <button class="determined-insert" onclick={onInsertRevealRoles ?? (() => ctx.insertRevealRoles())}>挿入</button>
+          <button class="determined-insert" onclick={handleInsertReveal} disabled={insertRevealBusy}>挿入</button>
         </div>
       {/if}
       {#if extraFooter}

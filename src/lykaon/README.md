@@ -170,7 +170,7 @@ prepend など行数が変わる変換 (例: 解析用に setup/JOIN を K 行�
 | `clearAssumptions()` | assumptions / denyWolfGroups / hocusPocusSeats を全消去 |
 | `removeDenyWolfGroup(i)` | denyWolfGroups の i 番目を削除 |
 | `addSuggestion(suggestion)` | wolfPairSuggestions の 1 件を denyWolfGroups に昇格 |
-| `insertRevealRoles()` | 配役確定時に `Player=役職名` 行を howlText 末尾に追加 (未確定なら no-op) |
+| `insertRevealRoles()` | 配役確定時に `Player=役職名` 行を howlText に書き込む。 既存 reveal 行があれば置換、無ければ末尾追加 (未確定なら no-op) |
 
 `ctx.assumptions = new Map(...)` のような直接代入でも worker 再解析は発火するが、 メソッド経由が
 recommended。
@@ -198,7 +198,7 @@ host (consumer) 側でこれらを購読し、自前の動画 player / editor �
 ```svelte
 <AnalysisTable
   {ctx}
-  onInsertRevealRoles={() => { ... }}      <!-- 配役確定時の挿入動作を上書き (省略時は ctx.insertRevealRoles()) -->
+  onInsertRevealRoles={(done) => { ...; done() }}  <!-- 配役確定時の挿入動作を上書き。実行中は挿入ボタンが disable、 done() で解除。省略時は ctx.insertRevealRoles() -->
   onOpenDenyWolfDialog={() => { ... }}     <!-- 仮説追加ボタン (省略時は非表示) -->
   extraFooter={mySnippet}                  <!-- table 下部に追加 UI を差し込む snippet -->
   hideAssumptions={true}                   <!-- 右サイドバー (仮説 / 提案) を非表示。配役確定バナーは残る -->
@@ -206,9 +206,11 @@ host (consumer) 側でこれらを購読し、自前の動画 player / editor �
 ```
 
 配役確定時の「挿入」ボタンは `ctx.allRolesDetermined` が true になると **テーブル直下**
-に常に表示され、 default では `ctx.insertRevealRoles()` を呼んで `Player=役職名` 行を末尾
-に追加する。 format を変えたい consumer は `onInsertRevealRoles` callback を渡して上書き
-できる。 `hideAssumptions` を true にしてもこのバナーは残るので、 「サイドバーは出さない
+に常に表示され、 default では `ctx.insertRevealRoles()` を呼んで `Player=役職名` 行を書き込む
+(既存 reveal 行があれば置換、無ければ末尾追加)。 format を変えたい consumer は `onInsertRevealRoles` callback を渡して上書き
+できる。 callback は `done` 関数を引数で受け取り、 hook 実行中は挿入ボタンが disable になる。
+consumer は処理完了時に `done()` を呼んで disable を解除する (例: 保存完了後に解除)。
+`hideAssumptions` を true にしてもこのバナーは残るので、 「サイドバーは出さない
 が配役確定の挿入だけは使いたい」用途に対応する。
 
 仮説追加 (`onOpenDenyWolfDialog`) や `extraFooter` 等の debug / dialog UI は consumer 側で
