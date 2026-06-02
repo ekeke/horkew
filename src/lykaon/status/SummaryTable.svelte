@@ -149,7 +149,7 @@
               {@const assertion = timeline.get(day - 1) ?? null}
               {@const isSlideMarker = !assertion && row.slidDay != null && row.slidDay === day - 1}
               {@const isDeathMarker = !assertion && !isSlideMarker && !row.surviving && row.diedDay === day - 1}
-              <td class="data-cell" class:human={assertion?.species === 'human' && !assertion?.forecast} class:wolf={assertion?.species === 'wolf' && !assertion?.forecast} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:forecast={assertion?.forecast} class:death-marker={isDeathMarker} class:slide-marker={isSlideMarker} class:co-timing={row.claimedAt === day} class:active-hl-cell={$srcLines.claimCell.get(`${row.seat}:${day - 1}`) === $cursor}>
+              <td class="data-cell role-report-cell" class:human={assertion?.species === 'human' && !assertion?.forecast} class:wolf={assertion?.species === 'wolf' && !assertion?.forecast} class:guard={row.claimingRole === 'bodyguard' && assertion !== null} class:forecast={assertion?.forecast} class:death-marker={isDeathMarker} class:slide-marker={isSlideMarker} class:co-timing={row.claimedAt === day} class:active-hl-cell={$srcLines.claimCell.get(`${row.seat}:${day - 1}`) === $cursor}>
                 {#if assertion}{#if assertion.previousAssertions}<span class="slide-prev">{#each assertion.previousAssertions as prev}{prev.targetName}<SpeciesIcon species={prev.species} />→{/each}</span>{/if}<PlayerName dead={!survivors.has(assertion.targetSeat)} nightKill={nightKilled.has(assertion.targetSeat)} executed={executed.has(assertion.targetSeat)} claim={claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="forecast-label">(予)</span>{:else if row.claimingRole !== 'bodyguard'}<SpeciesIcon species={assertion.species} />{/if}{:else if isSlideMarker}<span class="slide-marker-label">（{systemRoles.get(row.slidToRole as SystemRole)?.shortName ?? row.slidToRole}スライド）</span>{:else if isDeathMarker}<span class="death-marker-label">（{causeOfDeathLabel(row.causeOfDeath)}死）</span>{/if}
               </td>
             {/each}
@@ -262,6 +262,10 @@
   .data-cell {
     text-align: center;
     color: var(--color-text-muted);
+  }
+
+  .role-report-cell {
+    text-align: left;
   }
 
   .data-cell.human {
