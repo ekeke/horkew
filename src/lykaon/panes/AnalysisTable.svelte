@@ -195,7 +195,7 @@
   .hocuspocus-spacer {
     border: none !important;
     background: transparent !important;
-    width: 16px;
+    width: 4px;
     padding: 0 !important;
   }
 
@@ -205,6 +205,7 @@
     color: var(--color-border);
     font-weight: 700;
     user-select: none;
+    min-width: 1em;
   }
 
   .hocuspocus-cell:hover {
