@@ -37,10 +37,10 @@
 </script>
 
 {#if ctx.analysisError}
-  <pre class="output">Error: {ctx.analysisError}</pre>
+  <pre class="output lyk-pane">Error: {ctx.analysisError}</pre>
 {/if}
 {#if ctx.analysisColumns.length > 0 && ctx.players.size > 0}
-  <div class="analysis-layout">
+  <div class="analysis-layout lyk-pane">
     <div class="analysis-table-wrap">
       <table class="analysis-table">
         <tbody>
@@ -145,7 +145,7 @@
 
   .analysis-table {
     border-collapse: collapse;
-    font-family: 'Consolas', 'Menlo', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
   }
 
@@ -238,7 +238,7 @@
 
   .assumptions-list {
     padding: 8px;
-    font-family: 'Consolas', 'Menlo', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
   }
 

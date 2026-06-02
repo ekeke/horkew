@@ -85,7 +85,7 @@ EditorPane で `.howl` を編集すると Web Worker 経由で Retar が走り�
 | `HatiPane` | 詰み探索結果 |
 | `InspectPane` | fenrir/skoll の game ログ閲覧 (時系列・retar スナップショット) |
 
-型: `AnalysisContextOptions` / `HowlPreprocessor` / `SeekEvent` / `JumpEvent` /
+型: `AnalysisContextOptions` / `HowlPreprocessor` / `PreprocessResult` / `SeekEvent` / `JumpEvent` /
 `SourceLines` / `SeatResult` / `AnalysisStats` / `WolfPairSuggestion` / `StringifiedLine`
 
 ### createAnalysisContext のオプション
@@ -98,7 +98,13 @@ createAnalysisContext({
 
 | オプション | 型 | 用途 |
 |---|---|---|
-| `preprocess` | `(text: string) => string` | editor のテキストを parse 直前に変換するフック。返した文字列が howl parser への入力になる。 editor 表示自体は変えない (双方向 bind は `howlText` のまま)。マクロ展開・テンプレ注入などに使う。 例外を投げた場合は元の text にフォールバック (safeParse と同じ方針) |
+| `preprocess` | `(text: string) => string \| PreprocessResult` | editor のテキストを parse 直前に変換するフック。返した文字列が howl parser への入力になる。 editor 表示自体は変えない (双方向 bind は `howlText` のまま)。マクロ展開・テンプレ注入などに使う。 例外を投げた場合は元の text にフォールバック (safeParse と同じ方針) |
+
+prepend など行数が変わる変換 (例: 解析用に setup/JOIN を K 行ぶん前置) を入れる場合は string ではなく
+`PreprocessResult = { text, lineOffset }` を返すこと。 `lineOffset` に前置した行数 K を入れると、
+`AnalysisContext` が cursor を parse 入力へ渡すとき +K、 statement.line / `sourceLines` を editor へ
+公開するときに -K してエディタ座標と parse 座標のズレを吸収する。 string 戻りは従来どおり `lineOffset: 0`
+扱い (後方互換)。
 
 ## AnalysisContext API
 
@@ -196,12 +202,67 @@ src/lykaon/
   analysis.worker.ts         ← Web Worker 本体 (retar 実行)
   scheduler.ts               ← worker 同期キューイング
   stringify.ts               ← howl → 日本語要約
-  theme.css                  ← カラートークン (Catppuccin ベース)
+  theme.css                  ← カラートークン (Catppuccin ベース) + reset.css の import
+  reset.css                  ← 埋め込み防御基底 (.lyk-pane 名前空間)
   panes/                     ← EditorPane / StatusPane / AnalysisTable /
                                 HatiPane / InspectPane
   status/                    ← StatusPane / AnalysisTable の sub-component
                                 (PlayerName / SpeciesIcon / SummaryTable / 等)
   editor/                    ← CodeMirror language / completion / theme
+```
+
+## 埋め込み防御 (host CSS 流入の遮断)
+
+別 host アプリ (例: mirurou) に lykaon を埋め込んだとき、 host 側のグローバル CSS
+(`* {}`, `table {}`, `button {}`, `body {}` 等のタグセレクタや、 `font-family` /
+`font-size` / `line-height` / `color` などの継承プロパティ) が Svelte scoped style
+を貫通してペイン内部の表示を壊しうる。 lykaon は CodeMirror 6 と同じ
+「名前空間ルート + 継承プロパティ明示」戦略でこれを遮断する (Shadow DOM は使わない)。
+
+### 仕組み
+
+- 各ペインの root 要素に `.lyk-pane` クラスを併記 (`.editor-pane lyk-pane` 等)。
+- [reset.css](reset.css) が `.lyk-pane` を起点に継承プロパティを明示上書きし、
+  `button` / `table` / `ul` / `pre` 等の tag リセットを適用する
+  (`:where(...):not(.cm-editor *)` で specificity 0 + CodeMirror 領域除外)。
+- [theme.css](theme.css) が `reset.css` を冒頭で `@import` するので、 consumer は
+  従来通り `import 'horkew/lykaon/theme.css'` 1 行だけで両方読まれる。
+- Typography トークン `--font-ui` / `--font-mono` を `theme.css` に追加。 配下の
+  `font-family` 直書きは廃止し、 全て token 参照へ。
+- CodeMirror autocomplete tooltip は `tooltips({ parent })` で `.editor-pane` 配下
+  に portal される (default の body 直挿しでは防御の外側になるため)。
+
+**`.lyk-pane` は lykaon 内部用クラス**。 consumer 側で host 要素に付けたり、
+独自スタイルを当てたりしないこと。
+
+### 制約
+
+- **`box-sizing` は universal に当てていない** (CodeMirror 内部レイアウト干渉の
+  リスクを避けるため)。 ペイン内に新規スタイルを足すときは
+  `box-sizing: border-box` を必要に応じて明示すること。
+- **InspectPane は `rem` 単位を多用している** ため、 host の `html { font-size }`
+  流入は完全には遮断されない。 InspectPane は debug 用途 (fenrir/skoll game ログ閲覧)
+  で埋め込み利用は想定していない。
+- **`[data-theme]` 属性は lykaon 専用**。 host が独自の `data-theme` システムを
+  持つ場合は衝突しうる (将来 `[data-lykaon-theme]` への rename を検討)。
+
+### 検証 entry
+
+`/horkew/hostile.html` (`demo/hostile.html`) で 3 カラム横並びの比較ビューが見られる:
+
+- **baseline**: 敵対 CSS なし — 期待される見た目
+- **defended**: 敵対 CSS あり + `.lyk-pane` あり — baseline と一致していれば防御 OK
+- **undefended**: 敵対 CSS あり + `.lyk-pane` を mount 後に strip — 防御を外すと
+  どこまで崩れるかを示す対照群
+
+敵対 CSS 規則 (`demo/hostile-frame.ts` 内):
+
+```css
+* { box-sizing: content-box; }
+table { border-collapse: separate; border-spacing: 4px; }
+button, input { font-family: "Comic Sans MS"; font-size: 20px; }
+body { line-height: 2.4; font-family: serif; text-align: center; color: hotpink; }
+ul, ol { list-style: square; padding-left: 40px; }
 ```
 
 ## 開発ステータス

@@ -156,7 +156,7 @@
   })
 </script>
 
-<div class="editor-pane" bind:this={editorParent}></div>
+<div class="editor-pane lyk-pane" bind:this={editorParent}></div>
 
 <style>
   .editor-pane {

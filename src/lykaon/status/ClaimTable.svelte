@@ -203,7 +203,7 @@
   table {
     border-collapse: collapse;
     font-size: 12px;
-    font-family: 'Consolas', 'Menlo', monospace;
+    font-family: var(--font-mono);
   }
 
   th, td {
@@ -259,7 +259,7 @@
     flex-wrap: wrap;
     gap: 4px 16px;
     font-size: 12px;
-    font-family: 'Consolas', 'Menlo', monospace;
+    font-family: var(--font-mono);
     color: var(--color-text);
   }
 
@@ -272,7 +272,7 @@
     flex-wrap: wrap;
     gap: 4px 8px;
     font-size: 12px;
-    font-family: 'Consolas', 'Menlo', monospace;
+    font-family: var(--font-mono);
     color: var(--color-text);
   }
 

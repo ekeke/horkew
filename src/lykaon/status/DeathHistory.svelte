@@ -59,7 +59,7 @@
   table {
     border-collapse: collapse;
     font-size: 12px;
-    font-family: 'Consolas', 'Menlo', monospace;
+    font-family: var(--font-mono);
   }
 
   th, td {

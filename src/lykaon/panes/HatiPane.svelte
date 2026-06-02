@@ -125,7 +125,7 @@
   }
 </script>
 
-<div class="hati-pane">
+<div class="hati-pane lyk-pane">
   <div class="hati-controls">
     <button
       class="hati-btn"
@@ -204,30 +204,31 @@
 </div>
 
 <style>
+  /* rem 単位を全廃 (px 固定) — host の html font-size 流入を遮断する。 */
   .hati-pane {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 8px;
     height: 100%;
     overflow: auto;
-    font-size: 0.85rem;
+    font-size: 14px;
   }
 
   .hati-controls {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 8px;
     flex-shrink: 0;
   }
 
   .hati-btn {
-    padding: 0.3rem 0.8rem;
+    padding: 5px 13px;
     border: 1px solid var(--ctp-surface1);
     border-radius: 4px;
     background: var(--ctp-surface0);
     color: var(--ctp-text);
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: 14px;
   }
 
   .hati-btn:hover:not(:disabled) {
@@ -240,27 +241,27 @@
   }
 
   .hati-stats {
-    font-size: 0.7rem;
+    font-size: 11px;
     color: var(--ctp-subtext0);
   }
 
   .hati-error {
     color: var(--ctp-red);
-    font-size: 0.85rem;
+    font-size: 14px;
   }
 
   .hati-verdict-bar {
-    padding: 0.3rem 0.6rem;
+    padding: 5px 10px;
     border-radius: 4px;
     font-weight: bold;
-    font-size: 0.9rem;
+    font-size: 15px;
     flex-shrink: 0;
   }
 
   .hati-verdict-bar {
     display: flex;
     align-items: center;
-    gap: 0.8rem;
+    gap: 13px;
   }
 
   .hati-verdict-bar.tsumi {
@@ -277,18 +278,18 @@
 
   .hati-nawa-threat {
     color: var(--ctp-subtext0);
-    font-size: 0.75rem;
+    font-size: 12px;
   }
 
   .hati-tree {
     flex: 1;
     overflow: auto;
-    padding: 0.3rem;
+    padding: 5px;
   }
 
   .hati-action {
     display: inline-flex;
-    gap: 0.4rem;
+    gap: 6px;
     align-items: center;
     flex-wrap: wrap;
   }
@@ -297,13 +298,13 @@
     font-weight: bold;
     color: var(--ctp-red);
     background: color-mix(in srgb, var(--ctp-red) 10%, transparent);
-    padding: 0.1rem 0.4rem;
+    padding: 2px 6px;
     border-radius: 3px;
   }
 
   .hati-night-act {
     color: var(--ctp-blue);
-    font-size: 0.8rem;
+    font-size: 13px;
   }
 
   .hati-win {
@@ -314,7 +315,7 @@
   .hati-branch-inline {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: 5px;
   }
 
   .hati-arrow {
@@ -322,30 +323,30 @@
   }
 
   .hati-obs {
-    font-size: 0.75rem;
+    font-size: 12px;
     color: var(--ctp-subtext0);
     background: var(--ctp-surface0);
-    padding: 0.05rem 0.35rem;
+    padding: 1px 6px;
     border-radius: 3px;
   }
 
   .hati-branches {
-    margin-top: 0.3rem;
+    margin-top: 5px;
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: 2px;
   }
 
   .hati-branch {
     border-left: 2px solid var(--ctp-surface1);
-    padding-left: 0.6rem;
+    padding-left: 10px;
   }
 
   .hati-branch-header {
-    margin-bottom: 0.15rem;
+    margin-bottom: 2px;
   }
 
   .hati-branch-body {
-    padding-left: 0.2rem;
+    padding-left: 3px;
   }
 </style>

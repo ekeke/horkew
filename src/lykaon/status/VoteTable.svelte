@@ -115,7 +115,7 @@
   table {
     border-collapse: collapse;
     font-size: 12px;
-    font-family: 'Consolas', 'Menlo', monospace;
+    font-family: var(--font-mono);
     width: 100%;
     table-layout: fixed;
   }
@@ -218,7 +218,7 @@
   .pending {
     margin-top: 6px;
     font-size: 11px;
-    font-family: 'Consolas', 'Menlo', monospace;
+    font-family: var(--font-mono);
     color: var(--color-text-muted);
   }
 

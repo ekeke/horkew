@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Horkew Hostile CSS Comparison</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #11111b; color: #cdd6f4; font-family: system-ui, sans-serif; }
+      .root { display: flex; flex-direction: column; height: 100%; }
+      .hostile-header { padding: 8px 12px; border-bottom: 1px solid #45475a; font-size: 13px; line-height: 1.4; }
+      .hostile-header h1 { margin: 0 0 4px; font-size: 14px; }
+      .hostile-header p { margin: 0; font-size: 12px; color: #a6adc8; }
+      .hostile-cols { display: flex; flex: 1 1 0; min-height: 0; }
+      .hostile-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid #45475a; }
+      .hostile-col:last-child { border-right: none; }
+      .hostile-col-label { padding: 4px 8px; font-size: 12px; background: #181825; border-bottom: 1px solid #45475a; }
+      .hostile-col-label.baseline { color: #a6e3a1; }
+      .hostile-col-label.defended { color: #89b4fa; }
+      .hostile-col-label.undefended { color: #f38ba8; }
+      .hostile-col iframe { flex: 1 1 0; border: 0; min-height: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="root">
+      <div class="hostile-header">
+        <h1>Lykaon Hostile-CSS Comparison</h1>
+        <p>左: 素の lykaon (baseline) / 中: 敵対 CSS + 防御 (defended) / 右: 敵対 CSS + 防御解除 (undefended)。 defended と baseline が一致していれば防御が効いている。</p>
+      </div>
+      <div class="hostile-cols">
+        <div class="hostile-col">
+          <div class="hostile-col-label baseline">baseline (no hostile CSS)</div>
+          <iframe src="./hostile-frame.html?mode=baseline" title="baseline"></iframe>
+        </div>
+        <div class="hostile-col">
+          <div class="hostile-col-label defended">defended (hostile CSS + .lyk-pane)</div>
+          <iframe src="./hostile-frame.html?mode=defended" title="defended"></iframe>
+        </div>
+        <div class="hostile-col">
+          <div class="hostile-col-label undefended">undefended (hostile CSS, .lyk-pane stripped)</div>
+          <iframe src="./hostile-frame.html?mode=undefended" title="undefended"></iframe>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

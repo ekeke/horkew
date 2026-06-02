@@ -117,7 +117,7 @@
 </script>
 
 {#if ctx.villageStatus && survivorInfo && voteStatus}
-  <div class="status-pane">
+  <div class="status-pane lyk-pane">
     {#if !hiddenSections.has('setup') && setupEntries.length > 0}
       <div class="setup-section">
         <span class="setup-header">配役 <span class="count">{setupTotal}</span>人</span>
@@ -142,7 +142,7 @@
 
 <style>
   .status-pane {
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: var(--font-ui);
   }
 
   .setup-section {

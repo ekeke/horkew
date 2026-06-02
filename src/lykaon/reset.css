@@ -1,0 +1,78 @@
+/*
+ * Horkew lykaon — 埋め込み防御基底
+ *
+ * theme.css の末尾から @import される。 ペイン root に `.lyk-pane` を併記する
+ * ことで、 host 側の global CSS (tag セレクタ・継承プロパティ) がペイン内部に
+ * 流入するのを遮断する。 CodeMirror 6 と同じ「名前空間ルート + 継承プロパティ
+ * 明示」戦略 (Shadow DOM は使わない)。
+ *
+ * 注意:
+ * - `.lyk-pane` は lykaon 内部用。 consumer は触らないこと。
+ * - 内部要素は CodeMirror (`.cm-editor` 配下) のみ除外。 ペイン内に新規スタイルを
+ *   足すときは `box-sizing: border-box` を明示すること (universal には当てない)。
+ */
+
+/* 継承プロパティ明示 — host body からの流入を上書きする */
+.lyk-pane {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 400;
+  font-style: normal;
+  font-variant-numeric: normal;
+  line-height: 1.4;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-transform: none;
+  text-indent: 0;
+  text-align: left;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: normal;
+  color: var(--color-text);
+  direction: ltr;
+  cursor: auto;
+}
+
+/* tag reset — :where() で specificity 0 にし、 :not(.cm-editor *) で CodeMirror 領域を除外 */
+.lyk-pane :where(button, input, select, textarea):not(.cm-editor *) {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+.lyk-pane :where(table):not(.cm-editor *) {
+  border-collapse: collapse;
+}
+
+.lyk-pane :where(ul, ol):not(.cm-editor *) {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.lyk-pane :where(p, h1, h2, h3, h4, h5, h6):not(.cm-editor *) {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.lyk-pane :where(pre, code):not(.cm-editor *) {
+  font-family: var(--font-mono);
+  font-size: inherit;
+}
+
+.lyk-pane :where(img, svg):not(.cm-editor *) {
+  vertical-align: baseline;
+}
+
+.lyk-pane :where(a):not(.cm-editor *) {
+  color: inherit;
+  text-decoration: none;
+}
+
+.lyk-pane :where(hr):not(.cm-editor *) {
+  border: 0;
+  margin: 0;
+}

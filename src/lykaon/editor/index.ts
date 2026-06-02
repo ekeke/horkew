@@ -1,5 +1,5 @@
 import { Compartment, EditorState } from '@codemirror/state'
-import { EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from '@codemirror/view'
+import { EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, tooltips } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { completionKeymap } from '@codemirror/autocomplete'
 import { howlLanguageExtension } from './howlLanguage.ts'
@@ -27,6 +27,9 @@ export function createHowlEditor(parent: HTMLElement, opts: {
   const state = EditorState.create({
     doc: opts.doc,
     extensions: [
+      // autocomplete tooltip を `.editor-pane` (= `.lyk-pane`) 配下に portal して
+      // host CSS 流入を遮断する (default は body 直下 = 防御の外側)。
+      tooltips({ parent }),
       howlLanguageExtension,
       howlThemeExtension,
       lineNumbers(),

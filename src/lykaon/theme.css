@@ -1,12 +1,17 @@
 /*
- * Horkew Demo — カラーテーマ定義
+ * Horkew lykaon — カラーテーマ定義 + 埋め込み防御基底
  *
  * Catppuccin Mocha パレットをベースにしたカラースキーマ。
  * すべてのコンポーネントはここで定義された CSS 変数を参照すること。
  * hex 値を直接ハードコードしてはならない。
  *
+ * 冒頭で reset.css を import している (host CSS 流入を遮断する `.lyk-pane`
+ * 名前空間の基底)。 トークン契約と埋め込み防御を 1 つの import 路で配布する。
+ *
  * パレットリファレンス: https://catppuccin.com/palette
  */
+
+@import './reset.css';
 
 :root {
   /* ============================================================
@@ -113,6 +118,10 @@
   --color-danger-bg:      var(--ctp-red);        /* 危険アクション背景 */
   --color-danger-text:    var(--ctp-base);       /* 危険アクション上のテキスト */
   --color-danger-badge:   #e64553;              /* 不一致バッジ（濃い赤） */
+
+  /* --- Typography --- */
+  --font-ui:   system-ui, -apple-system, sans-serif;
+  --font-mono: 'Consolas', 'Menlo', monospace;
 }
 
 /* ============================================================
@@ -170,3 +179,4 @@
   /* Danger text (light 時は白が読みやすい) */
   --color-danger-text:    #ffffff;
 }
+

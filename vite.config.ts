@@ -410,6 +410,8 @@ export default defineConfig({
         main: resolve(__dirname, 'demo/index.html'),
         overlay: resolve(__dirname, 'demo/overlay.html'),
         plain: resolve(__dirname, 'demo/plain.html'),
+        hostile: resolve(__dirname, 'demo/hostile.html'),
+        hostileFrame: resolve(__dirname, 'demo/hostile-frame.html'),
       },
     },
   },

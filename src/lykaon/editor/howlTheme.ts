@@ -5,7 +5,7 @@ export const howlThemeExtension: Extension = EditorView.theme({
   '&': {
     backgroundColor: 'var(--color-bg)',
     color: 'var(--color-editor-text)',
-    fontFamily: "'Consolas', 'Menlo', monospace",
+    fontFamily: 'var(--font-mono)',
     fontSize: '13px',
     lineHeight: '1.5',
     height: '100%',
@@ -77,7 +77,7 @@ export const howlThemeExtension: Extension = EditorView.theme({
     lineHeight: '18px',
     cursor: 'pointer',
     textAlign: 'left',
-    fontFamily: "'Consolas', 'Menlo', monospace",
+    fontFamily: 'var(--font-mono)',
   },
   '.hwg-seek:hover': {
     background: 'var(--color-accent)',
@@ -89,7 +89,7 @@ export const howlThemeExtension: Extension = EditorView.theme({
     backgroundColor: 'var(--color-surface)',
     border: '1px solid var(--color-border)',
     borderRadius: '4px',
-    fontFamily: "'Consolas', 'Menlo', monospace",
+    fontFamily: 'var(--font-mono)',
     fontSize: '13px',
   },
   '.cm-tooltip-autocomplete ul li': {
@@ -113,7 +113,7 @@ export const howlThemeExtension: Extension = EditorView.theme({
     padding: '4px 8px',
     fontSize: '12px',
     color: 'var(--color-text)',
-    fontFamily: "'Consolas', 'Menlo', monospace",
+    fontFamily: 'var(--font-mono)',
     backgroundColor: 'var(--color-surface)',
     border: '1px solid var(--color-border)',
     borderRadius: '4px',

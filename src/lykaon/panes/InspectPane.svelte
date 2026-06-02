@@ -269,7 +269,7 @@
   }
 </script>
 
-<div class="inspect">
+<div class="inspect lyk-pane">
   {#if loading}
     <div class="inspect-msg">読み込み中...</div>
   {:else if error}
@@ -768,7 +768,7 @@
   }
   .inspect-phase-model { color: var(--ctp-text); font-weight: 500; }
   .inspect-phase-iter { color: var(--ctp-yellow); }
-  .inspect-phase-sha { color: var(--ctp-overlay1); font-family: 'Consolas', 'Menlo', monospace; font-size: 0.75rem; }
+  .inspect-phase-sha { color: var(--ctp-overlay1); font-family: var(--font-mono); font-size: 0.75rem; }
   .inspect-phase-result { color: var(--ctp-subtext0); margin-left: auto; }
 
   /* --- Center: Timeline --- */
