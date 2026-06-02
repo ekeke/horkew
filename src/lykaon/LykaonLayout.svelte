@@ -69,12 +69,14 @@
     display: flex;
     flex-direction: column;
   }
-  .layout-right-top, .layout-right-bottom {
-    flex: 1 1 0;
-    min-height: 0;
-    overflow: auto;
-  }
   .layout-right-top {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     border-bottom: 1px solid var(--color-border);
+  }
+  .layout-right-bottom {
+    flex: 0 0 auto;
+    overflow-x: auto;
   }
 </style>
