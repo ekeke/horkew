@@ -40,6 +40,10 @@ export const howlThemeExtension: Extension = EditorView.theme({
   },
   '.cm-scroller': {
     overflow: 'auto',
+    scrollbarWidth: 'none', // Firefox
+  },
+  '.cm-scroller::-webkit-scrollbar': {
+    display: 'none', // Chrome / Safari / Edge
   },
 
   // Inline token marks
