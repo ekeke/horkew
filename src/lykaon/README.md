@@ -44,6 +44,33 @@ Horkew の `.howl` 形式ログを編集するための **CodeMirror ベース�
 読み込んで EditorPane + StatusPane + AnalysisTable を並べた最小構成。
 `/horkew/plain.html` から閲覧可能。
 
+## ペインをまとめて並べる: `LykaonLayout`
+
+エディタ + 解析サイドカーの「とりあえずの標準構成」を 1 行で立ち上げる結合レイアウト:
+
+```svelte
+<script lang="ts">
+  import { onDestroy } from 'svelte'
+  import { createAnalysisContext, LykaonLayout } from 'horkew/lykaon'
+  import 'horkew/lykaon/theme.css'
+
+  const ctx = createAnalysisContext()
+  onDestroy(() => ctx.destroy())
+</script>
+
+<LykaonLayout {ctx} />
+```
+
+| prop | 型 / default | 用途 |
+|---|---|---|
+| `ctx` | `AnalysisContext` | 必須 |
+| `ratio` | `[number, number]` / `[1, 2]` | 左 (エディタ) : 右 (StatusPane + AnalysisTable) の flex 比率。 main demo に合わせて 1:2 |
+| `maxEditorPx` | `number` / `400` | エディタ側の最大幅 (px)。 0 で無制限 |
+| `hideAssumptions` | `boolean` / `false` | AnalysisTable の右サイドバー (仮説 / 提案) を非表示にする (配役確定バナーは残る) |
+
+レイアウト・ペイン構成を自由に組みたい consumer は、 `LykaonLayout` を使わず個別ペインを
+直接マウントする (下記 §解析ペインを足す)。
+
 ## 解析ペインを足す
 
 ```svelte
@@ -79,6 +106,7 @@ EditorPane で `.howl` を編集すると Web Worker 経由で Retar が走り�
 |---|---|
 | `createAnalysisContext(options?)` | `AnalysisContext` インスタンスを作る factory |
 | `AnalysisContext` | 共有 state クラス (class 直接利用も可) |
+| `LykaonLayout` | エディタ + 解析サイドカーの結合レイアウト (1:2 比率がデフォルト)。 ctx を渡すだけで標準構成が立ち上がる |
 | `EditorPane` | `.howl` 専用 CodeMirror エディタ (core) |
 | `StatusPane` | 生存者・投票・襲撃・カミングアウト・死亡履歴の集約表示 |
 | `AnalysisTable` | 役職可能性 × 席 のテーブル + 仮説サイドバー |
@@ -172,12 +200,15 @@ host (consumer) 側でこれらを購読し、自前の動画 player / editor �
   onInsertRevealRoles={() => { ... }}      <!-- 配役確定時の挿入動作を上書き (省略時は ctx.insertRevealRoles()) -->
   onOpenDenyWolfDialog={() => { ... }}     <!-- 仮説追加ボタン (省略時は非表示) -->
   extraFooter={mySnippet}                  <!-- table 下部に追加 UI を差し込む snippet -->
+  hideAssumptions={true}                   <!-- 右サイドバー (仮説 / 提案) を非表示。配役確定バナーは残る -->
 />
 ```
 
-配役確定時の「挿入」ボタンは `ctx.allRolesDetermined` が true になると常に表示され、 default
-では `ctx.insertRevealRoles()` を呼んで `Player=役職名` 行を末尾に追加する。 format を変えたい
-consumer は `onInsertRevealRoles` callback を渡して上書きできる。
+配役確定時の「挿入」ボタンは `ctx.allRolesDetermined` が true になると **テーブル直下**
+に常に表示され、 default では `ctx.insertRevealRoles()` を呼んで `Player=役職名` 行を末尾
+に追加する。 format を変えたい consumer は `onInsertRevealRoles` callback を渡して上書き
+できる。 `hideAssumptions` を true にしてもこのバナーは残るので、 「サイドバーは出さない
+が配役確定の挿入だけは使いたい」用途に対応する。
 
 仮説追加 (`onOpenDenyWolfDialog`) や `extraFooter` 等の debug / dialog UI は consumer 側で
 実装する設計。 何も渡さなければ「素朴な解析テーブル + 仮説リスト + 配役確定ボタン」が表示される。

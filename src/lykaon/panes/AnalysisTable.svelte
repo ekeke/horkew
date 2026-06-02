@@ -5,11 +5,12 @@
   import type { AnalysisContext } from '../AnalysisContext.svelte.ts'
   import PlayerName from '../status/PlayerName.svelte'
 
-  let { ctx, onInsertRevealRoles, onOpenDenyWolfDialog, extraFooter }: {
+  let { ctx, onInsertRevealRoles, onOpenDenyWolfDialog, extraFooter, hideAssumptions = false }: {
     ctx: AnalysisContext
     onInsertRevealRoles?: () => void
     onOpenDenyWolfDialog?: () => void
     extraFooter?: Snippet
+    hideAssumptions?: boolean
   } = $props()
 
   type NameStatus = 'default' | 'not-village' | 'village' | 'wolf' | 'fox'
@@ -72,6 +73,12 @@
           {/each}
         </tbody>
       </table>
+      {#if ctx.allRolesDetermined}
+        <div class="determined-banner">
+          <span class="determined-label">配役確定</span>
+          <button class="determined-insert" onclick={onInsertRevealRoles ?? (() => ctx.insertRevealRoles())}>挿入</button>
+        </div>
+      {/if}
       {#if ctx.analysisDuration > 0}
         <div class="analysis-duration">retar {ctx.analysisDuration}ms{#if ctx.analysisStats} ({ctx.analysisStats.workers}w, wall {ctx.analysisStats.wallClock}ms, worker {ctx.analysisStats.minElapsed}-{ctx.analysisStats.maxElapsed}ms, {ctx.analysisStats.wasm ? 'WASM' : 'JS'}){/if}</div>
       {/if}
@@ -79,6 +86,7 @@
         {@render extraFooter()}
       {/if}
     </div>
+    {#if !hideAssumptions}
     <div class="analysis-sidebar">
       <div class="assumptions-list">
         <div class="assumptions-header">
@@ -90,12 +98,6 @@
             <button class="assumption-clear" onclick={() => ctx.clearAssumptions()}>全削除</button>
           {/if}
         </div>
-        {#if ctx.allRolesDetermined}
-          <div class="determined-banner">
-            <span class="determined-label">配役確定</span>
-            <button class="determined-insert" onclick={onInsertRevealRoles ?? (() => ctx.insertRevealRoles())}>挿入</button>
-          </div>
-        {/if}
         {#each [...ctx.assumptions] as [seat, role]}
           <div class="assumption-item">
             <span class="assumption-text">{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}は{systemRoles.get(role)?.name ?? role}である</span>
@@ -120,6 +122,7 @@
         {/if}
       </div>
     </div>
+    {/if}
   </div>
 {/if}
 
@@ -295,7 +298,7 @@
     align-items: center;
     gap: 6px;
     padding: 4px 8px;
-    margin-bottom: 4px;
+    margin: 4px 0;
     border: 1px solid var(--color-village);
     border-radius: 4px;
     background: color-mix(in srgb, var(--color-village) 12%, transparent);
