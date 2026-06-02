@@ -59,13 +59,24 @@ export type JumpEvent = {
 export type { SeatResult, AnalysisStats, WolfPairSuggestion, StringifiedLine }
 
 /**
+ * preprocess フックの戻り値型。 string を返すと従来どおり lineOffset 0 扱い (後方互換)。
+ * prepend 等で行数が変わる変換は { text, lineOffset } を返すこと。
+ * lineOffset = parse 入力の先頭に増えた行数 (editor 座標 → parse 座標の +オフセット)。
+ */
+export type PreprocessResult = { text: string, lineOffset: number }
+
+/**
  * editor のテキストを parse 直前に変換するフック。
  * 返した文字列が howl parser への入力になる。 editor 表示自体は変えない。
  *
  * 用途: マクロ展開、 consumer 固有のショートカット記法、テンプレ注入など。
  * 例外を投げた場合は元の text にフォールバックする (safeParse と同じ方針)。
+ *
+ * prepend など行数が変わる変換を入れる場合は string ではなく PreprocessResult を返し、
+ * lineOffset に前置した行数 K を入れること。 AnalysisContext は cursor と statement.line /
+ * sourceLines を K だけシフトしてエディタ座標と parse 座標のズレを吸収する。
  */
-export type HowlPreprocessor = (text: string) => string
+export type HowlPreprocessor = (text: string) => string | PreprocessResult
 
 /**
  * createAnalysisContext / new AnalysisContext のオプション。
@@ -170,12 +181,52 @@ function safeParse(text: string, cursorLine?: number): ParsedResult {
   }
 }
 
-function safePreprocess(preprocess: HowlPreprocessor | undefined, text: string): string {
-  if (!preprocess) return text
+/**
+ * preprocess フックの戻り値を PreprocessResult に正規化する。
+ * - undefined / 例外時は元の text + lineOffset 0 にフォールバック (safeParse と同じ方針)
+ * - string 戻りは lineOffset 0 に揃える (後方互換)
+ * - lineOffset は非負整数に丸める (防御)
+ */
+function normalizePreprocess(
+  preprocess: HowlPreprocessor | undefined,
+  text: string,
+): PreprocessResult {
+  if (!preprocess) return { text, lineOffset: 0 }
   try {
-    return preprocess(text)
+    const out = preprocess(text)
+    if (typeof out === 'string') return { text: out, lineOffset: 0 }
+    return { text: out.text, lineOffset: Math.max(0, Math.floor(out.lineOffset)) }
   } catch {
-    return text
+    return { text, lineOffset: 0 }
+  }
+}
+
+/**
+ * statement.line を parse 座標 → editor 座標へシフトする。
+ * offset === 0 のときは元配列をそのまま返し、コピーと reactivity churn を回避する。
+ */
+function shiftStatementLines(statements: Statement[], offset: number): Statement[] {
+  if (offset === 0) return statements
+  return statements.map(s => ({ ...s, line: s.line - offset }))
+}
+
+/**
+ * SourceLines の値 (parse 座標) を editor 座標へシフトする。
+ * offset === 0 のときは元 Map をそのまま返す。
+ */
+function shiftSourceLines(src: SourceLines, offset: number): SourceLines {
+  if (offset === 0) return src
+  const shiftNum = (m: Map<number, number>) =>
+    new Map([...m].map(([k, v]) => [k, v - offset] as const))
+  const shiftStr = (m: Map<string, number>) =>
+    new Map([...m].map(([k, v]) => [k, v - offset] as const))
+  return {
+    survivor:  shiftNum(src.survivor),
+    claimRow:  shiftNum(src.claimRow),
+    claimCell: shiftStr(src.claimCell),
+    kill:      shiftNum(src.kill),
+    exec:      shiftNum(src.exec),
+    vote:      shiftNum(src.vote),
   }
 }
 
@@ -212,19 +263,33 @@ export class AnalysisContext {
 
   #preprocess: HowlPreprocessor | undefined
 
-  #parseSource = $derived.by<string>(() => safePreprocess(this.#preprocess, this.howlText))
+  // editor 座標 ↔ parse 座標 の橋渡し。 #pre は preprocess の戻り値を正規化したもの。
+  // cursor を parse へ渡すときに +lineOffset、 statement.line / sourceLines を
+  // editor へ公開するときに -lineOffset することで両座標系のズレを吸収する。
+  #pre = $derived.by<PreprocessResult>(() => normalizePreprocess(this.#preprocess, this.howlText))
+  #parseSource = $derived.by<string>(() => this.#pre.text)
+  /** preprocess の lineOffset (= prefix 行数 K)。デバッグ用に公開。 */
+  lineOffset = $derived.by<number>(() => this.#pre.lineOffset)
 
   #fullParsed = $derived.by<ParsedResult>(() => safeParse(this.#parseSource))
-  #parsed = $derived.by<ParsedResult>(() => safeParse(this.#parseSource, this.cursorLine))
+  // cursorLine === 0 は「未確定」のセンチネルなのでシフトしない。 > 0 のときだけ +K。
+  #parsed = $derived.by<ParsedResult>(() =>
+    safeParse(
+      this.#parseSource,
+      this.cursorLine > 0 ? this.cursorLine + this.#pre.lineOffset : this.cursorLine,
+    )
+  )
   #bridge = $derived.by<Bridge | null>(() => safeBuildVillage(this.#parsed))
 
   meta = $derived(this.#parsed.meta)
-  statements = $derived(this.#parsed.statements)
-  /** cursor フィルタを掛けない全 statements。editor の syntax highlight 用。 */
-  fullStatements = $derived(this.#fullParsed.statements)
+  // 公開する statements は editor 座標 (-lineOffset)。 内部消費 (#bridge / currentEvents /
+  // buildSourceLines への入力 / parsedLines) は this.#parsed.statements を直接使い続けること。
+  statements = $derived(shiftStatementLines(this.#parsed.statements, this.#pre.lineOffset))
+  /** cursor フィルタを掛けない全 statements。editor の syntax highlight 用 (editor 座標)。 */
+  fullStatements = $derived(shiftStatementLines(this.#fullParsed.statements, this.#pre.lineOffset))
 
   parsedLines = $derived(stringifyStatements(this.#parsed.statements))
-  statementLines = $derived(this.#parsed.statements.map(s => s.line))
+  statementLines = $derived(this.#parsed.statements.map(s => s.line - this.#pre.lineOffset))
 
   villageStatus = $derived<VillageStatus | null>(this.#bridge?.vs ?? null)
   players = $derived<Map<number, string>>(this.#bridge?.players ?? new Map())
@@ -233,7 +298,9 @@ export class AnalysisContext {
   /** howl の FlexibleDictionary (editor / sourceLines 用)。bridge 未構築なら null。 */
   dict = $derived<FlexibleDictionary | null>(this.#bridge?.dict ?? null)
   sourceLines = $derived<SourceLines>(
-    this.#bridge ? buildSourceLines(this.#parsed.statements, this.#bridge.dict) : EMPTY_SOURCE_LINES
+    this.#bridge
+      ? shiftSourceLines(buildSourceLines(this.#parsed.statements, this.#bridge.dict), this.#pre.lineOffset)
+      : EMPTY_SOURCE_LINES
   )
   currentEvents = $derived<GameEvent[]>(
     this.#bridge
