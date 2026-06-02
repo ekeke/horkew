@@ -67,6 +67,7 @@ Horkew の `.howl` 形式ログを編集するための **CodeMirror ベース�
 | `ratio` | `[number, number]` / `[1, 2]` | 左 (エディタ) : 右 (StatusPane + AnalysisTable) の flex 比率。 main demo に合わせて 1:2 |
 | `maxEditorPx` | `number` / `400` | エディタ側の最大幅 (px)。 0 で無制限 |
 | `hideAssumptions` | `boolean` / `false` | AnalysisTable の右サイドバー (仮説 / 提案) を非表示にする (配役確定バナーは残る) |
+| `readonly` | `boolean` / `false` | 内蔵 EditorPane の編集ロック (EditorPane の `readonly` prop に流す) |
 
 レイアウト・ペイン構成を自由に組みたい consumer は、 `LykaonLayout` を使わず個別ペインを
 直接マウントする (下記 §解析ペインを足す)。

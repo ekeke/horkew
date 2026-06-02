@@ -18,6 +18,7 @@
     ratio = [1, 2],
     maxEditorPx = 400,
     hideAssumptions = false,
+    readonly = false,
   }: {
     ctx: AnalysisContext
     /** [左=エディタ, 右=combined] の flex 比率。 default [1, 2] は main demo に準拠 */
@@ -26,6 +27,8 @@
     maxEditorPx?: number
     /** AnalysisTable の右サイドバー (仮説 / 提案) を非表示にする */
     hideAssumptions?: boolean
+    /** EditorPane を編集ロックする (内部で EditorPane の readonly に渡る) */
+    readonly?: boolean
   } = $props()
 
   let leftFlex = $derived(ratio[0])
@@ -35,7 +38,7 @@
 
 <div class="lykaon-layout">
   <div class="layout-left" style:flex="{leftFlex}" style:max-width={editorMax}>
-    <EditorPane {ctx} />
+    <EditorPane {ctx} {readonly} />
   </div>
   <div class="layout-right" style:flex="{rightFlex}">
     <div class="layout-right-top">
