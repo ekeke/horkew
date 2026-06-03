@@ -22,7 +22,7 @@ import { lupaRunRetar } from '../retar-bridge.ts'
 import { parse } from '../../../howl/parser.ts'
 import { buildVillageStatus } from '../../../howl/bridge.ts'
 import { rolesFromPossibility } from '../../../retar/possibilities.ts'
-import { resolveRules } from '../../../howl/ruleset.ts'
+import { resolveRegulation } from '../../../howl/ruleset.ts'
 import type { TrainingConfig } from '../training.ts'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -275,7 +275,7 @@ export function loadTsumiFromDB(
           executionPlans: [],
           planIndices: null,
           tsumiTarget: null,  // tsumi masked
-          rules: resolveRules(),
+          rules: resolveRegulation(),
         }
 
         const obs = encodeObservation(ctx)
@@ -454,7 +454,7 @@ async function collectTsumiFromGame(
     enableRetar: true,
     enableTsumi: true,
     roles,
-    rules: config.rules ?? resolveRules(),
+    rules: config.rules ?? resolveRegulation(),
   })
 
   await runGame(

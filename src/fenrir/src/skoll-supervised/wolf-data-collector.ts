@@ -23,7 +23,7 @@ import { runGame } from '../../../lupa/engine.ts'
 import { fullAdapter } from '../adapters/full-adapter.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents/rule-based-agent.ts'
 import { encodeCollectiveWolfObservation, SEATS } from '../observation.ts'
-import { resolveRules } from '../../../howl/ruleset.ts'
+import { resolveRegulation } from '../../../howl/ruleset.ts'
 import { analyzeWolfVotesByWorld } from '../../../skoll/wolf-vote-analysis.ts'
 import { RetarArtifactsCache, buildPossibilities } from './skoll-utils.ts'
 
@@ -123,7 +123,7 @@ export function makeWolfSoftLabel(
 async function collectSamplesFromGame(gameId: number, options: WolfCollectorOptions): Promise<WolfSample[]> {
   const samples: WolfSample[] = []
   const roles = new Map(Object.entries(DEFAULT_ROLES) as [SystemRole, number][])
-  const rules = resolveRules()
+  const rules = resolveRegulation()
   const lupaConfig: LupaConfig = { roles, rules } as LupaConfig
   const artifactsCache = new RetarArtifactsCache()
 

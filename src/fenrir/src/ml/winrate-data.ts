@@ -5,14 +5,14 @@
  * observation + game result を収集する。
  */
 
-import type { SystemRole, ResolvedRules } from '../../../types/index.ts'
+import type { SystemRole, Regulation } from '../../../types/index.ts'
 import type { Agent, DecisionContext } from '../agents/agent.ts'
 import { runGame } from '../../../lupa/engine.ts'
 import type { RevoteConfig } from '../../../lupa/types.ts'
 import { MasonTrainingAdapter } from '../adapters/mason-training-adapter.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents/rule-based-agent.ts'
 import { encodeObservation } from '../observation.ts'
-import { resolveRules } from '../../../howl/ruleset.ts'
+import { resolveRegulation } from '../../../howl/ruleset.ts'
 
 // ============================================================
 // Types
@@ -31,7 +31,7 @@ export type WinrateDataConfig = {
   roles: Record<string, number>
   hasFirstGhost: boolean
   revoteConfig?: RevoteConfig
-  rules?: Partial<ResolvedRules>
+  rules?: Partial<Regulation>
 }
 
 // 結果 → one-hot ラベル変換
@@ -102,7 +102,7 @@ export async function collectWinrateGameData(
     seed,
     enableRetar: true,
     roles,
-    rules: config.rules ?? resolveRules(),
+    rules: config.rules ?? resolveRegulation(),
   })
 
   const result = await runGame(

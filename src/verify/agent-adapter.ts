@@ -5,7 +5,7 @@
  * Retar統合はオプション。旧エンジンとの互換性を保つ。
  */
 
-import type { SystemRole, ResolvedRules } from '../types/index.ts'
+import type { SystemRole, Regulation } from '../types/index.ts'
 import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../lupa/types.ts'
 import type {
   DecisionContext, TeamDecisionContext,
@@ -42,7 +42,7 @@ export type AgentAdapterConfig = {
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   seed?: number
   roles: Map<SystemRole, number>
-  rules?: Partial<ResolvedRules>
+  rules?: Partial<Regulation>
 }
 
 export function agentAdapter(adapterConfig: AgentAdapterConfig): GameHandlers<FenrirExtEvent> {

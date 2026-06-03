@@ -9,8 +9,8 @@
  * 議論フェーズ（シグナル、指揮者、予告、防御CO）はオプション。
  */
 
-import type { SystemRole, ResolvedRules, EnumSpecies } from '../types/index.ts'
-import { resolveRules } from '../howl/ruleset.ts'
+import type { SystemRole, Regulation, EnumSpecies } from '../types/index.ts'
+import { resolveRegulation } from '../howl/ruleset.ts'
 import type { GameState, GameEvent, GameSnapshot, NightAction, DayClaim, PlayerState } from './types.ts'
 import type { GameConfig, GameHandlers, GameResult, PhaseContext, VoteContext } from './handlers.ts'
 import { Rng } from './random.ts'
@@ -29,7 +29,7 @@ const MAX_DAYS = 50
 // ============================================================
 
 export async function runGame<E = never, Ext = unknown>(config: GameConfig, handlers: GameHandlers<E, Ext>): Promise<GameResult<E, Ext>> {
-  const rules = resolveRules(config.rules)
+  const rules = resolveRegulation(config.rules)
   const rng = new Rng(config.seed)
   const totalPlayers = Array.from(config.roles.values()).reduce((a, b) => a + b, 0)
 
@@ -182,7 +182,7 @@ export async function resumeGame<E = never, Ext = unknown>(snapshot: GameSnapsho
   const state = structuredClone(snapshot.state)
   const events: (GameEvent | E)[] = [...snapshot.events]
   const rng = Rng.fromState(snapshot.rngState)
-  const rules = resolveRules(snapshot.config.rules)
+  const rules = resolveRegulation(snapshot.config.rules)
   const config = snapshot.config
 
   const emit = (event: GameEvent | E) => {
@@ -218,7 +218,7 @@ async function runGameLoop<E = never, Ext = unknown>(
   events: (GameEvent | E)[],
   emit: (event: GameEvent | E) => void,
   rng: Rng,
-  rules: ResolvedRules,
+  rules: Regulation,
   handlers: GameHandlers<E, Ext>,
   config: GameConfig,
   startDay: number,
@@ -473,7 +473,7 @@ async function runGameLoop<E = never, Ext = unknown>(
 // 内部ヘルパー
 // ============================================================
 
-function makePhaseContext<E = never, Ext = unknown>(state: GameState<Ext>, events: (GameEvent | E)[], rules: ResolvedRules): PhaseContext<E, Ext> {
+function makePhaseContext<E = never, Ext = unknown>(state: GameState<Ext>, events: (GameEvent | E)[], rules: Regulation): PhaseContext<E, Ext> {
   return {
     day: state.day,
     state,
@@ -517,7 +517,7 @@ function resolveNight(
   emit: EmitFn,
   rng: Rng,
   night: number,
-  rules: ResolvedRules,
+  rules: Regulation,
 ): void {
   const name = (seat: number) => state.players.find(p => p.seat === seat)!.name
   const speciesLabel = (r: EnumSpecies): string => {
@@ -713,7 +713,7 @@ function processPendingNightKills(state: GameState, emit: EmitFn): void {
 }
 
 /** 狐陣営全滅時の後追いチェック */
-function checkImmoralistFollow(state: GameState, emit: EmitFn, rules: ResolvedRules): void {
+function checkImmoralistFollow(state: GameState, emit: EmitFn, rules: Regulation): void {
   // fox-win-counter 保有者 (妖狐 + 子狐) が 1 人でも生存していれば後追いは発生しない
   const aliveFoxes = state.players.filter(p => isFoxWinCounter(p.role) && p.alive)
   if (aliveFoxes.length > 0) return

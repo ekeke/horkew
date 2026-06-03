@@ -19,7 +19,7 @@ import type {
   DecisionContext, TeamDecisionContext, ExecutionPlan,
 } from '../src/fenrir/src/agents/agent.ts'
 import type { GameState, PlayerState, GameEvent } from '../src/lupa/types.ts'
-import { resolveRules } from '../src/howl/ruleset.ts'
+import { resolveRegulation } from '../src/howl/ruleset.ts'
 import { Rng } from '../src/lupa/random.ts'
 import {
   encodeObservation, encodeCollectiveMasonObservation, encodeCollectiveWolfObservation,
@@ -178,7 +178,7 @@ function buildIndividualContext(
     executionPlans: [] as ExecutionPlan[],
     planIndices: null,
     tsumiTarget: null,
-    rules: resolveRules(),
+    rules: resolveRegulation(),
   }
 }
 
@@ -238,7 +238,7 @@ function buildTeamContext(
     executionPlans: [] as ExecutionPlan[],
     planIndices: null,
     tsumiTarget: null,
-    rules: resolveRules(),
+    rules: resolveRegulation(),
     teamSeats,
     teamPlayers,
     currentActorSeat: viewerSeat,

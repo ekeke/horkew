@@ -13,7 +13,7 @@ import type { SystemRole } from '../types/index.ts'
 import { runGame } from '../lupa/engine.ts'
 import { fullAdapter } from '../fenrir/src/adapters/full-adapter.ts'
 import { WolfTeamRuleAgent, MasonTeamRuleAgent } from '../fenrir/src/agents/rule-based-agent.ts'
-import { resolveRules } from '../howl/ruleset.ts'
+import { resolveRegulation } from '../howl/ruleset.ts'
 import { SkollMasterAgent } from './skoll-master-agent.ts'
 
 const SETUP_14D_NEKO: Map<SystemRole, number> = new Map([
@@ -31,7 +31,7 @@ test('SkollMasterAgent: 1 ゲーム crash なく完走', async () => {
     seed: 42,
     enableRetar: true,
     roles: SETUP_14D_NEKO,
-    rules: resolveRules(),
+    rules: resolveRegulation(),
   })
 
   const result = await runGame(
@@ -59,7 +59,7 @@ test('SkollMasterAgent: 複数 seed で安定して完走', async () => {
       seed,
       enableRetar: true,
       roles: SETUP_14D_NEKO,
-      rules: resolveRules(),
+      rules: resolveRegulation(),
     })
 
     const result = await runGame(

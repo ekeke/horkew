@@ -242,7 +242,7 @@ type PhaseContext<E = never, Ext = unknown> = {
   state: Readonly<GameState<Ext>>
   events: readonly (GameEvent | E)[]
   alivePlayers: number[]              // 生存者の seat 一覧
-  rules: ResolvedRules
+  rules: Regulation
 }
 
 type VoteContext<E = never, Ext = unknown> = PhaseContext<E, Ext> & {

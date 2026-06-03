@@ -5,7 +5,7 @@
  * 全ての意思決定をハンドラーコールバック経由で外部に委譲する。
  */
 
-import type { SystemRole, ResolvedRules } from '../types/index.ts'
+import type { SystemRole, Regulation } from '../types/index.ts'
 import type { GameState, GameEvent, GameSnapshot, NightAction, DayClaim, RevoteConfig } from './types.ts'
 
 // ============================================================
@@ -23,7 +23,7 @@ export type GameConfig = {
   seed?: number
   hasFirstGhost?: boolean
   revoteConfig?: RevoteConfig
-  rules?: Partial<ResolvedRules>
+  rules?: Partial<Regulation>
   /** スナップショットを取得する Day 一覧（Seed Bank 用） */
   captureSnapshotDays?: number[]
   /** プレイヤー名の形式 (default: 'role') */
@@ -40,7 +40,7 @@ export type PhaseContext<E = never, Ext = unknown> = {
   state: Readonly<GameState<Ext>>
   events: readonly (GameEvent | E)[]
   alivePlayers: number[]
-  rules: ResolvedRules
+  rules: Regulation
 }
 
 /** 投票フェーズコンテキスト */

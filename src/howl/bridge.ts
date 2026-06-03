@@ -5,10 +5,10 @@ import type {
   SeatStatus,
   VillageResult,
   Role,
-  ResolvedRules,
+  Regulation,
 } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
-import { resolveRules } from './ruleset.ts'
+import { resolveRegulation } from './ruleset.ts'
 import type {
   Statement,
   JoinStatement,
@@ -109,7 +109,7 @@ export type BridgeResult = {
   players: Map<number, string>
   shortNames: Map<number, string>
   dict: FlexibleDictionary
-  rules: ResolvedRules
+  rules: Regulation
   assumptions: Map<number, SystemRole>
   spoilerActions: SpoilerActionRecord[]
 }
@@ -131,7 +131,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   let claimCounter = 0
   let pendingGrelan = false
   let voteOrderCounter = 0
-  const rules = resolveRules(meta?.rules)
+  const rules = resolveRegulation(meta?.rules)
   const voteFinalRule = rules['vote.final']
   let revoteTargets = new Set<number>()
   let hasMultiVote = false

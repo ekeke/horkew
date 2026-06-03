@@ -1,4 +1,4 @@
-import type { SystemRole, EnumSpecies, ResolvedRules } from '../types/index.ts'
+import type { SystemRole, EnumSpecies, Regulation } from '../types/index.ts'
 import type { Agent, TeamAgent, AgentBase, TeamDecisionContext } from '../fenrir/src/agents/agent.ts'
 
 export type LupaConfig = {
@@ -34,7 +34,7 @@ export type LupaConfig = {
   /** 非同期共有者チームエージェント */
   asyncMasonTeamAgent?: AgentBase<TeamDecisionContext>
   /** オプションルール（未指定分はるる鯛14D猫デフォルト） */
-  rules?: Partial<ResolvedRules>
+  rules?: Partial<Regulation>
 }
 
 export type RevoteConfig = {

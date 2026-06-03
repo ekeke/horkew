@@ -7,7 +7,7 @@
  */
 
 import type { SystemRole } from '../../types/index.ts'
-import { resolveRules } from '../../howl/ruleset.ts'
+import { resolveRegulation } from '../../howl/ruleset.ts'
 import type { LupaConfig, GameState, GameEvent } from '../../lupa/types.ts'
 import { formatHowl } from '../../lupa/format.ts'
 import { parse } from '../../howl/parser.ts'
@@ -72,7 +72,7 @@ export const DEFAULT_RETAR_OPTIONS: AnalyzeOptions = {
 
 /** LupaConfig のルールから Retar AnalyzeOptions を構築 */
 function buildRetarOptions(config: LupaConfig): AnalyzeOptions {
-  const rules = resolveRules(config.rules)
+  const rules = resolveRegulation(config.rules)
   const hasFirstGhost = config.hasFirstGhost ?? rules['general.first-victim'] !== 'none'
   const seerFirstSeek = rules['role.seer.first-seek']
   // dayCountFrom は Retar 内部の占い行動開始夜。omitFirstDay は表示問題であり Retar に影響しない。

@@ -23,7 +23,7 @@ import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents
 import { AgentBase } from '../agents/agent.ts'
 import type { TeamAgent, TeamDecisionContext } from '../agents/agent.ts'
 import { encodeCollectiveMasonObservation, SEATS } from '../observation.ts'
-import { resolveRules } from '../../../howl/ruleset.ts'
+import { resolveRegulation } from '../../../howl/ruleset.ts'
 import { createMasonBrainNetwork } from '../training.ts'
 import { loadCheckpoint } from '../ml/checkpoint.ts'
 import { analyzeExecutionsByWorld } from '../../../skoll/world-analysis.ts'
@@ -193,7 +193,7 @@ async function runVariantGames(
   network: AnyNetwork | null,
 ): Promise<VariantStats> {
   const roles = new Map(Object.entries(DEFAULT_ROLES) as [SystemRole, number][])
-  const rules = resolveRules()
+  const rules = resolveRegulation()
   const lupaConfig: LupaConfig = { roles, rules } as LupaConfig
 
   const stats: VariantStats = {

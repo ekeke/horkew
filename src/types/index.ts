@@ -290,7 +290,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
   }],
 ])
 
-export type ResolvedRules = {
+export type Regulation = {
   'general.omitFirstDay': boolean
   'vote.style': 'free' | 'ordered' | 'concurrent'
   'vote.final': 'revote' | 'final'

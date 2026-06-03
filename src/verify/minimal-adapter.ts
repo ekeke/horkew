@@ -6,7 +6,7 @@
  * Retar計算はオプション（enableRetar時のみ）。
  */
 
-import type { SystemRole, ResolvedRules } from '../types/index.ts'
+import type { SystemRole, Regulation } from '../types/index.ts'
 import type { GameState, GameEvent, NightAction, DayClaim, PlayerState } from '../lupa/types.ts'
 import type { DecisionContext, TeamDecisionContext, Agent, TeamAgent, WolfNightAction } from '../fenrir/src/agents/agent.ts'
 import type { GameHandlers, PhaseContext, PlayerView, GameTiming } from '../lupa/handlers.ts'
@@ -38,7 +38,7 @@ export type MinimalAdapterConfig = {
   /** enableRetar時に必要 */
   roles?: Map<SystemRole, number>
   /** enableRetar時に必要 */
-  rules?: Partial<ResolvedRules>
+  rules?: Partial<Regulation>
 }
 
 export function minimalAdapter(config: MinimalAdapterConfig): GameHandlers {

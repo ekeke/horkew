@@ -113,7 +113,7 @@ export type TrainingConfig = {
   /** 再投票設定 */
   revoteConfig?: RevoteConfig
   /** オプションルール */
-  rules?: Partial<import('../../types/index.ts').ResolvedRules>
+  rules?: Partial<import('../../types/index.ts').Regulation>
   /** ゲーム生成の並列ワーカー数（0で直列、未指定でauto） */
   numWorkers?: number
   /** Phase 1でMLにする役職（未指定時は偶数seat） */

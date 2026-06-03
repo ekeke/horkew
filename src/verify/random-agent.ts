@@ -1,4 +1,4 @@
-import type { EnumSpecies, ResolvedRules } from '../types/index.ts'
+import type { EnumSpecies, Regulation } from '../types/index.ts'
 import type { GameState, PlayerState, NightAction, DayClaim } from '../lupa/types.ts'
 import type { Signal, CommunicationAction } from '../fenrir/src/communication.ts'
 import type { Proposal, LeadershipResponse } from '../fenrir/src/leadership.ts'
@@ -277,7 +277,7 @@ function getFollowRate(role: string): number {
 // 夜アクション（内部）
 // ============================================================
 
-function decideSeerNight(state: GameState, seer: PlayerState, night: number, rng: Rng, rules: ResolvedRules): NightAction {
+function decideSeerNight(state: GameState, seer: PlayerState, night: number, rng: Rng, rules: Regulation): NightAction {
   // 初日占いルール
   if (night === 0) {
     const firstSeek = rules['role.seer.first-seek']
@@ -306,7 +306,7 @@ function decideSeerNight(state: GameState, seer: PlayerState, night: number, rng
   return { type: 'divine', target: rng.pick(candidates).seat }
 }
 
-function decideBodyguardNight(state: GameState, guard: PlayerState, rng: Rng, rules: ResolvedRules): NightAction {
+function decideBodyguardNight(state: GameState, guard: PlayerState, rng: Rng, rules: Regulation): NightAction {
   const all = alivePlayersExcept(state, guard.seat)
   let candidates = all
 

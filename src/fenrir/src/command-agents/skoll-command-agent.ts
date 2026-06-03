@@ -16,7 +16,7 @@ import type { SystemRole } from '../../../types/index.ts'
 import type { GameState, NightAction, PlayerState, GameEvent } from '../../../lupa/types.ts'
 import { Rng } from '../../../lupa/random.ts'
 import { alivePlayers } from '../../../lupa/roles.ts'
-import { resolveRules } from '../../../howl/ruleset.ts'
+import { resolveRegulation } from '../../../howl/ruleset.ts'
 import { SkollMasterAgent, type SkollMasterOptions } from '../../../skoll/skoll-master-agent.ts'
 import { analyzeFromEventsDetailed } from '../retar-bridge.ts'
 import type { DecisionContext } from '../agents/agent.ts'
@@ -1285,7 +1285,7 @@ export class SkollCommandAgent implements CommandAgent {
       executionPlans: [],
       planIndices: null,
       tsumiTarget: null,
-      rules: resolveRules(),
+      rules: resolveRegulation(),
     }
   }
 }

@@ -17,7 +17,7 @@ import { runGame } from '../../../lupa/engine.ts'
 import { fullAdapter } from '../adapters/full-adapter.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents/rule-based-agent.ts'
 import { encodeObservation } from '../observation.ts'
-import { resolveRules } from '../../../howl/ruleset.ts'
+import { resolveRegulation } from '../../../howl/ruleset.ts'
 import { analyzeFanaticVotesByWorld } from '../../../skoll/fanatic-analysis.ts'
 import { RetarArtifactsCache, buildPossibilities } from './skoll-utils.ts'
 import { makeWolfSoftLabel } from './wolf-data-collector.ts'
@@ -71,7 +71,7 @@ export const DEFAULT_FANATIC_COLLECTOR_OPTIONS: FanaticCollectorOptions = {
 async function collectSamplesFromGame(gameId: number, options: FanaticCollectorOptions): Promise<FanaticSample[]> {
   const samples: FanaticSample[] = []
   const roles = new Map(Object.entries(DEFAULT_ROLES) as [SystemRole, number][])
-  const rules = resolveRules()
+  const rules = resolveRegulation()
   const lupaConfig: LupaConfig = { roles, rules } as LupaConfig
   const artifactsCache = new RetarArtifactsCache()
 

@@ -8,7 +8,7 @@
 import type { DecisionContext, ExecutionPlan } from '../agents/agent.ts'
 import type { SystemRole } from '../../../types/index.ts'
 import type { GameEvent } from '../../../lupa/types.ts'
-import { resolveRules } from '../../../howl/ruleset.ts'
+import { resolveRegulation } from '../../../howl/ruleset.ts'
 import { Rng } from '../../../lupa/random.ts'
 import { encodeObservation, SEATS, CO_ROLES } from '../observation.ts'
 import { maskVote } from '../action.ts'
@@ -180,7 +180,7 @@ function buildSyntheticContext(params: {
     executionPlans: [params.plan],
     planIndices: null,
     tsumiTarget: params.tsumiTarget ?? null,
-    rules: resolveRules(),
+    rules: resolveRegulation(),
   }
 }
 

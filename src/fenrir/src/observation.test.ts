@@ -6,7 +6,7 @@ import { OBSERVATION_SIZE, SEATS, NUM_ROLES, encodeObservation, tokenize,
   encodeFanaticObservation, type VillageNNOutput } from './observation.ts'
 import type { DecisionContext } from './agents/agent.ts'
 import { Rng } from '../../lupa/random.ts'
-import { resolveRules } from '../../howl/ruleset.ts'
+import { resolveRegulation } from '../../howl/ruleset.ts'
 
 // セクションサイズ定数（observation.ts内部と一致すること）
 const GLOBAL_SIZE = 19
@@ -54,7 +54,7 @@ function makeCtx(overrides: Partial<DecisionContext> = {}): DecisionContext {
     executionPlans: [],
     planIndices: null,
     tsumiTarget: null,
-    rules: resolveRules(),
+    rules: resolveRegulation(),
     ...overrides,
   }
 }

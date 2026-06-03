@@ -5,7 +5,7 @@
  * 意思決定の型定義（DecisionContext, ExecutionPlan 等）もここに集約。
  */
 
-import type { SystemRole, ResolvedRules } from '../../../types/index.ts'
+import type { SystemRole, Regulation } from '../../../types/index.ts'
 import type { GameState, PlayerState, NightAction, DayClaim } from '../../../lupa/types.ts'
 import type { SignalRecord, CommunicationAction } from '../communication.ts'
 import type { Proposal, LeadershipResponse } from '../leadership.ts'
@@ -58,7 +58,7 @@ export type DecisionContext = {
   /** 詰み探索: 今日処刑すべき席 (詰みなし or 探索失敗時は null) */
   tsumiTarget: number | null
   /** ゲームルール */
-  rules: ResolvedRules
+  rules: Regulation
 }
 
 // ============================================================

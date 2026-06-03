@@ -13,7 +13,7 @@ import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents
 import { encodeObservation, SEATS, NUM_ROLES, ROLE_INDEX } from '../observation.ts'
 import { PLAN_VOCAB } from '../plan/plan-vocab.ts'
 import { terminalReward, DEFAULT_REWARD_CONFIG } from '../reward.ts'
-import { resolveRules } from '../../../howl/ruleset.ts'
+import { resolveRegulation } from '../../../howl/ruleset.ts'
 import type { TrainingConfig } from '../training.ts'
 
 export type PretrainSample = {
@@ -131,7 +131,7 @@ export async function collectGameData(
     seed,
     enableRetar: true,
     roles,
-    rules: config.rules ?? resolveRules(),
+    rules: config.rules ?? resolveRegulation(),
   })
 
   const result = await runGame(

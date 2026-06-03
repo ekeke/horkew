@@ -2,7 +2,7 @@
  * Adapter 共通型定義
  */
 
-import type { SystemRole, ResolvedRules } from '../../../types/index.ts'
+import type { SystemRole, Regulation } from '../../../types/index.ts'
 import type { Agent, TeamAgent } from '../agents/agent.ts'
 import type { CollectedObservation } from '../observation.ts'
 
@@ -31,7 +31,7 @@ export type StrategyBaseAdapterConfig = {
   /** enableRetar時に必要 */
   roles?: Map<SystemRole, number>
   /** enableRetar時に必要 */
-  rules?: Partial<ResolvedRules>
+  rules?: Partial<Regulation>
   /** 全プレイヤーの observation をキャプチャ（inspect 用） */
   captureObservations?: boolean
 }
@@ -58,5 +58,5 @@ export type FullAdapterConfig = {
   onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
   seed?: number
   roles: Map<SystemRole, number>
-  rules?: Partial<ResolvedRules>
+  rules?: Partial<Regulation>
 }

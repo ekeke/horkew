@@ -22,7 +22,7 @@ import type { Agent, DecisionContext } from '../../fenrir/src/agents/agent.ts'
 import { runGame } from '../../lupa/engine.ts'
 import { fullAdapter } from '../../fenrir/src/adapters/full-adapter.ts'
 import { SkollMasterAgent } from '../../skoll/skoll-master-agent.ts'
-import { resolveRules } from '../../howl/ruleset.ts'
+import { resolveRegulation } from '../../howl/ruleset.ts'
 import { loadNetworkFromCheckpoint } from '../../fenrir/src/ml/checkpoint.ts'
 import { MasonZeroNetwork } from '../network/mason-zero.ts'
 import { MasonRoleAgent } from '../selfplay/mason-zero-agent.ts'
@@ -152,7 +152,7 @@ async function runSingleGame(
     seed,
     enableRetar: true,
     roles,
-    rules: resolveRules(),
+    rules: resolveRegulation(),
   }) as GameHandlers<FenrirExtEvent, unknown>
 
   const result = await runGame(

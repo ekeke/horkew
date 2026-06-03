@@ -28,7 +28,7 @@ import { runGame } from '../../../lupa/engine.ts'
 import { fullAdapter } from '../adapters/full-adapter.ts'
 import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../agents/rule-based-agent.ts'
 import { encodeCollectiveMasonObservation, SEATS } from '../observation.ts'
-import { resolveRules } from '../../../howl/ruleset.ts'
+import { resolveRegulation } from '../../../howl/ruleset.ts'
 import { analyzeExecutionsByWorld } from '../../../skoll/world-analysis.ts'
 import { RetarArtifactsCache, buildPossibilities } from './skoll-utils.ts'
 
@@ -134,7 +134,7 @@ export function makeSoftLabel(
 async function collectSamplesFromGame(gameId: number, options: CollectorOptions): Promise<SkollSample[]> {
   const samples: SkollSample[] = []
   const roles = new Map(Object.entries(DEFAULT_ROLES) as [SystemRole, number][])
-  const rules = resolveRules()
+  const rules = resolveRegulation()
   const lupaConfig: LupaConfig = { roles, rules } as LupaConfig
   const artifactsCache = new RetarArtifactsCache()
 

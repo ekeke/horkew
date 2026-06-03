@@ -10,7 +10,7 @@
  * - 両者は完全に独立 (真役職が嘘 CO を出すシナリオが書ける)
  */
 
-import type { SystemRole, VillageStatus, ResolvedRules } from '../types/index.ts'
+import type { SystemRole, VillageStatus, Regulation } from '../types/index.ts'
 import type { SpoilerActionRecord } from '../howl/bridge.ts'
 import type { GameConfig, GameHandlers } from './handlers.ts'
 import type { DayClaim, NightAction, RevoteConfig } from './types.ts'
@@ -40,7 +40,7 @@ export function buildLupaScenario(input: AdapterInput): AdapterOutput {
     seed: 0,
     hasFirstGhost: false,
     nameStyle: 'seat',
-    rules: metaRules as Partial<ResolvedRules>,
+    rules: metaRules as Partial<Regulation>,
   }
 
   // Howl frontmatter の vote.final / vote.tiebreaker を engine の revoteConfig に変換。

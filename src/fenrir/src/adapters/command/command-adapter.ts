@@ -10,7 +10,7 @@
  * - designate_execution 時は全員強制投票（R7）
  */
 
-import type { SystemRole, ResolvedRules } from '../../../../types/index.ts'
+import type { SystemRole, Regulation } from '../../../../types/index.ts'
 import type {
   GameState, GameEvent, NightAction, DayClaim, PlayerState,
 } from '../../../../lupa/types.ts'
@@ -66,8 +66,8 @@ export type CommandAdapterConfig = {
   defaultAgent: CommandAgent
   /** 役職分布（Retar 実行に必要） */
   roles: Map<SystemRole, number>
-  /** lupa ResolvedRules partial */
-  rules?: Partial<ResolvedRules>
+  /** lupa Regulation partial */
+  rules?: Partial<Regulation>
   /** シャッフル・ランダム投票・エラーフォールバック用 */
   seed?: number
   /** Retar 呼び出しを無効化（デバッグ用） */

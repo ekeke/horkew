@@ -1,4 +1,4 @@
-import type { ResolvedRules } from '../types/index.ts'
+import type { Regulation } from '../types/index.ts'
 
 type RuleBase = {
   description: string,
@@ -124,13 +124,13 @@ export const Rules: { [key: string]: Rule } = {
   },
 }
 
-const defaultRules: ResolvedRules = Object.fromEntries(
+const defaultRegulation: Regulation = Object.fromEntries(
   Object.entries(Rules).map(([key, rule]) => [key, rule.default])
-) as unknown as ResolvedRules
+) as unknown as Regulation
 
-export function resolveRules(raw?: Record<string, any>): ResolvedRules {
-  if (!raw) return defaultRules
-  const result = { ...defaultRules }
+export function resolveRegulation(raw?: Record<string, any>): Regulation {
+  if (!raw) return defaultRegulation
+  const result = { ...defaultRegulation }
   for (const [key, value] of Object.entries(raw)) {
     if (key in Rules && value !== undefined) {
       (result as any)[key] = value
