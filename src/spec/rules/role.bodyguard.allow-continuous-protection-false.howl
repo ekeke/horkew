@@ -1,0 +1,52 @@
+---
+title: role.bodyguard.allow-continuous-protection=false で連続ガードは reject、 襲撃は通る
+setup: { bodyguard: 1, werewolf: 1, villager: 3 }
+rules:
+  role.bodyguard.allow-continuous-protection: false
+  general.first-victim: none
+---
+# Alice (狩) が Night 0 と Night 1 で連続して Carol を護衛 → 連続ガード不可、
+# Night 1 のガードは reject (guardHistory[1] に entry なし) → Carol 襲撃成立 → Carol 死亡。
+# Day 3 で Bob 処刑 → villager_won (狩生存だが Carol 失った)
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=狩人
+!Bob=人狼
+!Carol=村人
+!Dave=村人
+!Eve=村人
+!Alice 0夜 護衛 Carol
+!Alice 1夜 護衛 Carol
+!Bob 1夜 襲撃 Carol
+
+# == engine: Night 0 (state.day=1) ==
+# peace
+# == end ==
+
+Alice→Dave
+Bob→Dave
+Carol→Dave
+Eve→Dave
+Dave→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# Dave 4 / Alice 1 → execution=Dave
+# == end ==
+# == engine: Night 1 (state.day=3) ==
+# 連続ガード reject → Bob 襲撃 Carol 成立 → night_kill Carol
+# == end ==
+
+Day 2:
+
+Alice→Bob
+Eve→Bob
+Bob→Alice
+
+# == engine: Day 3 (state.day=3) ==
+# Bob 2 / Alice 1 → execution=Bob → villager_won
+# == end ==
+
+# @expect-result: villager_won
+# @expect-finished: true
+# @expect-status Carol: dead
+# @expect-cause Carol: night_kill

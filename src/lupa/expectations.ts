@@ -11,6 +11,9 @@
  * - `@expect-day: <n>`
  * - `@expect-divine actor:X night:N target:Y result:human|wolf`
  *   (秘匿占い結果が player.divineHistory に記録されているか — engine の能力 dispatch を verify)
+ * - `@expect-no-divine actor:X night:N`
+ *   (actor X の divineHistory に night N の entry が存在しないことを verify。
+ *    role.seer.first-seek=none / no-wolf 等で占いが reject された状況を assert する用)
  * - `@expect-attack actor:X night:N target:Y`
  *   (engine が集約決定した襲撃 target が actor の attackHistory に記録されているか)
  * - `@expect-guard actor:X night:N target:Y`
@@ -34,6 +37,7 @@ export type StatusExp = { player: string, value: 'alive' | 'dead' }
 export type CauseExp = { player: string, value: string }
 export type EventExp = { name: string, params: Record<string, string> }
 export type DivineExp = { actor: string, night: number, target: string, result: 'human' | 'wolf' | 'kogitsune' | 'null' }
+export type NoDivineExp = { actor: string, night: number }
 export type AttackExp = { actor: string, night: number, target: string }
 export type GuardExp = { actor: string, night: number, target: string }
 export type MediumExp = { actor: string, day: number, target: string, result: 'human' | 'wolf' | 'kogitsune' }
@@ -46,6 +50,7 @@ export type Expectations = {
   cause: CauseExp[]
   event: EventExp[]
   divine: DivineExp[]
+  noDivine: NoDivineExp[]
   attack: AttackExp[]
   guard: GuardExp[]
   medium: MediumExp[]
@@ -64,6 +69,7 @@ const resultRegex = /^#\s*@expect-result:\s*(\S+)\s*$/
 const finishedRegex = /^#\s*@expect-finished:\s*(true|false)\s*$/
 const dayRegex = /^#\s*@expect-day:\s*(\d+)\s*$/
 const divineRegex = /^#\s*@expect-divine\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s+result:(human|wolf|kogitsune|null)\s*$/
+const noDivineRegex = /^#\s*@expect-no-divine\s+actor:(\S+)\s+night:(\d+)\s*$/
 const attackRegex = /^#\s*@expect-attack\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s*$/
 const guardRegex = /^#\s*@expect-guard\s+actor:(\S+)\s+night:(\d+)\s+target:(\S+)\s*$/
 const mediumRegex = /^#\s*@expect-medium\s+actor:(\S+)\s+day:(\d+)\s+target:(\S+)\s+result:(human|wolf|kogitsune)\s*$/
@@ -73,7 +79,7 @@ const SINGLE_FIELDS = new Set(['masonPartner', 'knownHamster'])
 const ARRAY_FIELDS = new Set(['wolfTeammates', 'knownWolves'])
 
 export function extractExpectations(rawText: string): Expectations {
-  const exps: Expectations = { status: [], cause: [], event: [], divine: [], attack: [], guard: [], medium: [], view: [] }
+  const exps: Expectations = { status: [], cause: [], event: [], divine: [], noDivine: [], attack: [], guard: [], medium: [], view: [] }
   const lines = rawText.split('\n')
   for (const raw of lines) {
     const line = raw.trim()
@@ -97,6 +103,8 @@ export function extractExpectations(rawText: string): Expectations {
       exps.divine.push({
         actor: m[1], night: Number(m[2]), target: m[3], result: m[4] as 'human' | 'wolf' | 'kogitsune' | 'null',
       })
+    } else if ((m = noDivineRegex.exec(line))) {
+      exps.noDivine.push({ actor: m[1], night: Number(m[2]) })
     } else if ((m = attackRegex.exec(line))) {
       exps.attack.push({
         actor: m[1], night: Number(m[2]), target: m[3],
@@ -141,6 +149,7 @@ export function hasAnyExpectations(exps: Expectations): boolean {
     || exps.cause.length > 0
     || exps.event.length > 0
     || exps.divine.length > 0
+    || exps.noDivine.length > 0
     || exps.attack.length > 0
     || exps.guard.length > 0
     || exps.medium.length > 0
@@ -228,6 +237,15 @@ export function verifyExpectations(
     const expectedResult = d.result === 'null' ? null : d.result
     assert.strictEqual(entry.result, expectedResult,
       `${d.actor} night ${d.night}: expected result ${d.result} but got ${entry.result}`)
+  }
+
+  for (const nd of exps.noDivine) {
+    const actorSeat = seatOf(nd.actor)
+    const player = state.players.find(p => p.seat === actorSeat)
+    assert.ok(player, `player ${nd.actor} not in state`)
+    const entry = player.divineHistory.get(nd.night)
+    assert.strictEqual(entry, undefined,
+      `${nd.actor}: expected no divine entry for night ${nd.night} but got ${JSON.stringify(entry)}`)
   }
 
   for (const a of exps.attack) {

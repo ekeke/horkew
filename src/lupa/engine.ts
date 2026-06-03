@@ -87,9 +87,24 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
 
   // 夜行動を適用 (resolveAttacks に渡す actionsList も同時に構築)
   // 内部 night index は 0 固定 (state.day=dayOffset の夜 = 初夜)。
+  // role.seer.first-seek で「占い divine action」 が制限される:
+  //   none    → 占い完全不可 (action 無視)
+  //   no-wolf → wolf or 妖狐 を target にした divine は reject (人間は OK)
+  //   all     → 制限なし (default)
+  const firstSeek = rules['role.seer.first-seek']
   const night0ActionsList: Array<{ player: PlayerState, action: NightAction }> = []
   for (const [seat, action] of night0Actions) {
     const player = players.find(p => p.seat === seat)!
+    if (action.type === 'divine' && hasTrait(player.role, 'action', 'divine')) {
+      if (firstSeek === 'none') continue
+      if (firstSeek === 'no-wolf') {
+        const target = players.find(p => p.seat === action.target)
+        if (target && (
+          hasTrait(target.role, 'action', 'attack')           // wolf
+          || hasTrait(target.role, 'passive', 'die-when-divined')  // 妖狐
+        )) continue
+      }
+    }
     applyNightAction(state, player, 0, action, rng)
     night0ActionsList.push({ player, action })
   }
@@ -217,9 +232,16 @@ async function runGameLoop<E = never, Ext = unknown>(
       const nightCtx = makePhaseContext(state, events, rules)
       const nightActions = await handlers.onNight(nightCtx)
 
+      // 連続ガード禁止: role.bodyguard.allow-continuous-protection=false のとき
+      // guard action の target が前夜の guardHistory と同じなら reject (記録せず、 ガード効果なし)。
+      const allowContinuous = rules['role.bodyguard.allow-continuous-protection']
       const actionsList: Array<{ player: PlayerState, action: NightAction }> = []
       for (const [seat, action] of nightActions) {
         const player = players.find(p => p.seat === seat)!
+        if (action.type === 'guard' && allowContinuous === false) {
+          const prev = player.guardHistory.get(night - 1)
+          if (prev !== undefined && prev === action.target) continue
+        }
         applyNightAction(state, player, night, action, rng)
         player.forecastTarget = null
         actionsList.push({ player, action })

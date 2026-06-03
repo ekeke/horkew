@@ -1,0 +1,37 @@
+---
+title: role.seer.first-seek=none で初夜占い不可、 divineHistory に entry 残らず狐生存
+setup: { seer: 1, werewolf: 1, werehamster: 1, villager: 2 }
+rules:
+  role.seer.first-seek: none
+  general.first-victim: none
+---
+# Alice (seer) が初夜に Carol (妖狐) を占う action を発行 → engine が none で無効化。
+# divineHistory[0] に entry なし、 fox_kill 発動しない、 Carol 生存。
+# Day 2 で Bob (wolf) 処刑 → wolf 0、 ただし狐生存 → werehamster_won
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=占い師
+!Bob=人狼
+!Carol=妖狐
+!Dave=村人
+!Eve=村人
+!Alice 0夜 占い Carol
+
+# == engine: Night 0 (state.day=1) ==
+# 占い不可 (first-seek=none)、 divineHistory[0] 空
+# == end ==
+
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Eve→Bob
+Bob→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# Bob 処刑 → wolf 0、 狐生存 → werehamster_won
+# == end ==
+
+# @expect-result: werehamster_won
+# @expect-finished: true
+# @expect-status Carol: alive
+# @expect-no-divine actor:Alice night:0

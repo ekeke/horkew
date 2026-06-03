@@ -1,0 +1,37 @@
+---
+title: role.seer.first-seek=all (default) で初夜占いに制限なく、 狐を占うと fox_kill 発動
+setup: { seer: 1, werewolf: 1, werehamster: 1, villager: 2 }
+rules:
+  role.seer.first-seek: all
+  general.first-victim: none
+---
+# Alice (seer) が初夜に Carol (妖狐) を占う → fox_kill 発動 → Carol 死亡
+# Day 2 で Bob (wolf) 処刑 → wolf 0、 狐死亡 → villager_won
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=占い師
+!Bob=人狼
+!Carol=妖狐
+!Dave=村人
+!Eve=村人
+!Alice 0夜 占い Carol
+
+# == engine: Night 0 (state.day=1) ==
+# fox_kill: Carol (妖狐) が seer 占いで呪殺
+# == end ==
+
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Eve→Bob
+Bob→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# Bob 4 / Alice 1 → execution=Bob → wolf 0 + 狐死亡 → villager_won
+# == end ==
+
+# @expect-result: villager_won
+# @expect-finished: true
+# @expect-event fox_kill
+# @expect-status Carol: dead
+# @expect-divine actor:Alice night:0 target:Carol result:human
