@@ -1,0 +1,31 @@
+---
+title: role.nekomata.curse-target=all-survivors (default) で処刑時の道連れは全生存者対象
+setup: { nekomata: 1, werewolf: 1, werehamster: 1, villager: 1 }
+rules:
+  role.nekomata.curse-target: all-survivors
+  general.first-victim: none
+---
+# Day 2 で Alice (猫又) 処刑 → curse 発火 → 残 3 人 (Bob/Carol/Dave) から
+# rng で 1 人退場 (target は seed 依存だが何かが必ず発火する)。
+
+++Alice、Bob、Carol、Dave
+!Alice=猫又
+!Bob=人狼
+!Carol=妖狐
+!Dave=村人
+
+# == engine: Night 0 (state.day=1) ==
+# peace
+# == end ==
+
+Alice→Alice
+Bob→Alice
+Carol→Alice
+Dave→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# Alice 4 票で execution → curse_kill (target は random)
+# == end ==
+
+# @expect-event curse_kill
+# @expect-status Alice: dead

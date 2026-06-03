@@ -1,0 +1,32 @@
+---
+title: role.immoralist.reveal-following=true (default) で妖狐処刑は execution event そのまま公開
+setup: { immoralist: 1, werehamster: 1, werewolf: 1, villager: 2 }
+rules:
+  role.immoralist.reveal-following: true
+  general.first-victim: none
+---
+# Day 2 で Bob (妖狐) 処刑 → execution event がそのまま emit され、 cause=execution。
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=背徳者
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+!Eve=村人
+
+# == engine: Night 0 (state.day=1) ==
+# peace
+# == end ==
+
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Eve→Bob
+Bob→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# Bob 4 / Alice 1 → execution=Bob (event emit、 cause=execution)
+# == end ==
+
+# @expect-status Bob: dead
+# @expect-cause Bob: execution

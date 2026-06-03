@@ -1,0 +1,37 @@
+---
+title: role.immoralist.reveal-following=false で妖狐の死は翌朝 night_kill として隠蔽公開
+setup: { immoralist: 1, werehamster: 1, werewolf: 1, villager: 2 }
+rules:
+  role.immoralist.reveal-following: false
+  general.first-victim: none
+---
+# Day 2 で Bob (妖狐) 処刑 → engine 内部は即時死亡だが、 公開 event は execution でなく
+# 翌朝 Day 3 朝に night_kill として emit される。 cause=night_kill。
+# retar 推論で「妖狐が処刑された」 ことが分からないようにする隠蔽ルール。
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=背徳者
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+!Eve=村人
+
+# == engine: Night 0 (state.day=1) ==
+# peace
+# == end ==
+
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Eve→Bob
+Bob→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# Bob 4 / Alice 1 → engine 内部処刑 (state dead) だが execution event は suppress
+# == end ==
+# == engine: Day 3 (state.day=3) morning ==
+# pending → night_kill: Bob を翌朝公開
+# == end ==
+
+# @expect-status Bob: dead
+# @expect-cause Bob: night_kill

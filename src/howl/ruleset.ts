@@ -113,13 +113,13 @@ export const Rules: { [key: string]: Rule } = {
 
   "role.immoralist.reveal-following": {
     type: "boolean",
-    description: "Whether the immoralist reveals the role of the lynched werehamster.",
+    description: "Whether the death of a werehamster (execution / fox_kill) is publicly revealed as-is. When false, all werehamster deaths are suppressed and re-emitted as a night_kill the next morning, hiding the original cause from retar reasoning.",
     default: true,
   },
 
   "phase.lastwill": {
     type: "boolean",
-    description: "Whether executed players get a last-will phase to CO before death takes effect.",
+    description: "Whether executed players get a last-will phase to CO before death takes effect. Affects retar reasoning (when false, silently-dying executed players may still have hidden roles — cannot be eliminated from possibilities). lupa engine consults handlers.onLastWill; howl-adapter currently does not wire one, so this rule has no observable effect via spec/runner — covered in retar-side tests.",
     default: true,
   },
 }

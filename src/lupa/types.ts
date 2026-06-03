@@ -86,6 +86,13 @@ export type GameState<Ext = unknown> = {
   commander: number | null
   /** 共有CO時のpartner記録: seat → partnerSeat */
   masonPartners?: Map<number, number>
+  /**
+   * 翌朝発動の遅延死亡 (= night_kill 扱い) を予約する seat 配列。
+   * role.nekomata.curse-immediately=false や role.immoralist.follow-immediately=false
+   * のような「次の朝に効果」 ルールで利用。 次の day iteration の夜フェーズ後に処理されて空に戻る。
+   * 外部から手動で state を構築するテスト互換のため optional。 engine は遅延初期化する。
+   */
+  pendingNightKills?: number[]
   /** Consumer定義の拡張データ。Lupaは中身に触らない。structuredCloneで自動複製される。 */
   ext: Ext
 }

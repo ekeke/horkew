@@ -1,0 +1,37 @@
+---
+title: role.immoralist.follow-immediately=false で背徳者の後追いは翌朝発動 (= night_kill 扱い)
+setup: { immoralist: 1, werehamster: 1, werewolf: 1, villager: 2 }
+rules:
+  role.immoralist.follow-immediately: false
+  general.first-victim: none
+---
+# Day 2 で Bob (妖狐) 処刑 → 狐陣営全滅 → Alice (背徳者) を pending、 Day 2 内では死なない。
+# Night 1 を経て Day 3 朝に Alice が night_kill として死亡。
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=背徳者
+!Bob=妖狐
+!Carol=人狼
+!Dave=村人
+!Eve=村人
+
+# == engine: Night 0 (state.day=1) ==
+# peace
+# == end ==
+
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Eve→Bob
+Bob→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# Bob 4 / Alice 1 → execution=Bob → Alice pending (Day 2 内死亡せず)
+# == end ==
+# == engine: Night 1 (state.day=3) ==
+# peace + pending follow 発動 → night_kill: Alice
+# == end ==
+
+# @expect-status Bob: dead
+# @expect-status Alice: dead
+# @expect-cause Alice: night_kill

@@ -1,0 +1,35 @@
+---
+title: role.nekomata.curse-target=villager で処刑時の道連れは村人陣営のみ対象
+setup: { nekomata: 1, werewolf: 1, werehamster: 1, villager: 1 }
+rules:
+  role.nekomata.curse-target: villager
+  general.first-victim: none
+---
+# Day 2 で Alice (猫又) 処刑 → curse 発火 → 候補は villager のみ (Bob=狼, Carol=狐 除外)。
+# Dave (= villager) のみ候補 → 確定的に Dave が curse_kill される。
+
+++Alice、Bob、Carol、Dave
+!Alice=猫又
+!Bob=人狼
+!Carol=妖狐
+!Dave=村人
+
+# == engine: Night 0 (state.day=1) ==
+# peace
+# == end ==
+
+Alice→Alice
+Bob→Alice
+Carol→Alice
+Dave→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# Alice 4 票で execution → curse_kill target:Dave (villager のみ候補)
+# == end ==
+
+# @expect-event curse_kill target:Dave
+# @expect-status Alice: dead
+# @expect-status Dave: dead
+# @expect-status Bob: alive
+# @expect-status Carol: alive
+# @expect-cause Dave: curse_kill

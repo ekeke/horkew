@@ -63,6 +63,7 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
     executionHistory: new Map(),
     commander: null,
     masonPartners: new Map(),
+    pendingNightKills: [],
     ext: undefined as unknown as Ext,
   }
 
@@ -110,6 +111,9 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
   }
 
   // 占い呪殺チェック (初夜 = night 0)
+  // role.immoralist.reveal-following=false なら fox_kill event を suppress し、
+  // 翌朝 (= Day 2 朝、 メインループ突入直前) に night_kill として公開する。
+  const revealFollowing = rules['role.immoralist.reveal-following'] !== false
   let foxKilledInNight0 = false
   for (const player of players) {
     const divine = player.divineHistory.get(0)
@@ -119,7 +123,11 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
     const target = players.find(p => p.seat === divine.target)!
     if (hasTrait(target.role, 'passive', 'die-when-divined') && target.alive) {
       killPlayer(state, target.seat)
-      emit({ type: 'fox_kill', target: target.seat })
+      if (revealFollowing) {
+        emit({ type: 'fox_kill', target: target.seat })
+      } else {
+        (state.pendingNightKills ??= []).push(target.seat)
+      }
       foxKilledInNight0 = true
     }
   }
@@ -144,7 +152,10 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
     resolveAttacks(state, night0ActionsList, emit, rng, foxKilledInNight0, 0)
   }
 
-  checkImmoralistFollow(state, emit)
+  checkImmoralistFollow(state, emit, rules)
+
+  // Night 0 由来の pending kill (reveal-following=false の fox 呪殺等) を翌朝 (= Day 2 朝) に公開
+  processPendingNightKills(state, emit)
 
   // ============================================================
   // メインループ
@@ -247,7 +258,10 @@ async function runGameLoop<E = never, Ext = unknown>(
         actionsList.push({ player, action })
       }
 
-      resolveNight(state, actionsList, events, emit, rng, night)
+      resolveNight(state, actionsList, events, emit, rng, night, rules)
+
+      // 翌朝発動の pending kill を朝に処理 (night_kill として emit)
+      processPendingNightKills(state, emit)
 
       checkWin(state)
       if (state.finished) {
@@ -387,7 +401,14 @@ async function runGameLoop<E = never, Ext = unknown>(
 
     // ==== 処刑 + 後処理 ====
     killPlayer(state, executedSeat!)
-    emit({ type: 'execution', target: executedSeat! })
+    // role.immoralist.reveal-following=false で妖狐処刑のとき、
+    // execution event を suppress し、 翌朝 night_kill として公開する。
+    const executedRole = players.find(p => p.seat === executedSeat!)!.role
+    if (rules['role.immoralist.reveal-following'] === false && hasTrait(executedRole, 'passive', 'die-when-divined')) {
+      (state.pendingNightKills ??= []).push(executedSeat!)
+    } else {
+      emit({ type: 'execution', target: executedSeat! })
+    }
     lastExecutedSeat = executedSeat!
     // executionHistory / mediumHistory の key は議論 1-based (= state.day - dayOffset = day - dayOffset)。
     // omitFirstDay=true (dayOffset=0) なら state.day と一致。 default (dayOffset=1) なら state.day - 1。
@@ -415,13 +436,18 @@ async function runGameLoop<E = never, Ext = unknown>(
       }
       if (curseCandidates.length > 0) {
         const curseTarget = rng.pick(curseCandidates)
-        killPlayer(state, curseTarget.seat)
-        emit({ type: 'curse_kill', target: curseTarget.seat })
+        if (rules['role.nekomata.curse-immediately'] === false) {
+          // 翌朝発動: pending に積み、 次の day iteration の夜フェーズ後に night_kill として処理
+          (state.pendingNightKills ??= []).push(curseTarget.seat)
+        } else {
+          killPlayer(state, curseTarget.seat)
+          emit({ type: 'curse_kill', target: curseTarget.seat })
+        }
       }
     }
 
     // 背徳者後追い
-    checkImmoralistFollow(state, emit)
+    checkImmoralistFollow(state, emit, rules)
 
     // 勝利判定
     checkWin(state)
@@ -491,6 +517,7 @@ function resolveNight(
   emit: EmitFn,
   rng: Rng,
   night: number,
+  rules: ResolvedRules,
 ): void {
   const name = (seat: number) => state.players.find(p => p.seat === seat)!.name
   const speciesLabel = (r: EnumSpecies): string => {
@@ -519,6 +546,8 @@ function resolveNight(
   }
 
   // 占い呪殺チェック
+  // role.immoralist.reveal-following=false なら fox_kill event を suppress、 翌朝 night_kill 扱い。
+  const revealFollowing = rules['role.immoralist.reveal-following'] !== false
   const foxKilled = new Set<number>()
   for (const { player, action } of actions) {
     if (action.type !== 'divine') continue
@@ -528,14 +557,18 @@ function resolveNight(
     if (hasTrait(target.role, 'passive', 'die-when-divined') && target.alive) {
       killPlayer(state, action.target)
       foxKilled.add(action.target)
-      emit({ type: 'fox_kill', target: action.target })
+      if (revealFollowing) {
+        emit({ type: 'fox_kill', target: action.target })
+      } else {
+        (state.pendingNightKills ??= []).push(action.target)
+      }
     }
   }
 
   resolveAttacks(state, actions, emit, rng, foxKilled.size > 0, night)
 
   // 狐陣営全滅による背徳者後追い (襲撃死も含むため無条件呼出)
-  checkImmoralistFollow(state, emit)
+  checkImmoralistFollow(state, emit, rules)
 }
 
 /**
@@ -661,17 +694,41 @@ function applyClaim(
   }
 }
 
+/**
+ * 翌朝発動の遅延死亡を処理する。
+ * - state.pendingNightKills に積まれた seat を取り出し、 alive なら killPlayer、 常に night_kill を emit。
+ * - 既に dead な seat (= reveal-following=false 由来で execution / fox_kill suppress 済み) でも emit する。
+ */
+function processPendingNightKills(state: GameState, emit: EmitFn): void {
+  if (!state.pendingNightKills || state.pendingNightKills.length === 0) return
+  const pending = state.pendingNightKills
+  state.pendingNightKills = []
+  for (const seat of pending) {
+    const target = state.players.find(p => p.seat === seat)
+    if (target && target.alive) {
+      killPlayer(state, seat)
+    }
+    emit({ type: 'night_kill', target: seat })
+  }
+}
+
 /** 狐陣営全滅時の後追いチェック */
-function checkImmoralistFollow(state: GameState, emit: EmitFn): void {
+function checkImmoralistFollow(state: GameState, emit: EmitFn, rules: ResolvedRules): void {
   // fox-win-counter 保有者 (妖狐 + 子狐) が 1 人でも生存していれば後追いは発生しない
   const aliveFoxes = state.players.filter(p => isFoxWinCounter(p.role) && p.alive)
   if (aliveFoxes.length > 0) return
 
   // follow-fox-death trait 保有者 (背徳者) が後追い
+  // role.immoralist.follow-immediately=false なら翌朝発動 (= night_kill 扱い)
+  const followImmediately = rules['role.immoralist.follow-immediately'] !== false
   const followers = state.players.filter(p => hasTrait(p.role, 'reactive', 'follow-fox-death') && p.alive)
   for (const imm of followers) {
-    killPlayer(state, imm.seat)
-    emit({ type: 'follow_kill', target: imm.seat })
+    if (followImmediately) {
+      killPlayer(state, imm.seat)
+      emit({ type: 'follow_kill', target: imm.seat })
+    } else {
+      (state.pendingNightKills ??= []).push(imm.seat)
+    }
   }
 }
 

@@ -1,0 +1,38 @@
+---
+title: role.nekomata.curse-immediately=false で道連れは翌朝発動 (= night_kill 扱い)
+setup: { nekomata: 1, werewolf: 1, werehamster: 1, villager: 2 }
+rules:
+  role.nekomata.curse-immediately: false
+  role.nekomata.curse-target: villager
+  general.first-victim: none
+---
+# Day 2 で Alice (猫又) 処刑 → curse 対象 (= villager の Dave か Eve) を pending、
+# Day 2 内では誰も death しない (勝利判定もスキップ可能、 vill 2 残)。
+# Night 1 を経て翌朝 Day 3 朝に curse 対象が night_kill として emit され死亡。
+
+++Alice、Bob、Carol、Dave、Eve
+!Alice=猫又
+!Bob=人狼
+!Carol=妖狐
+!Dave=村人
+!Eve=村人
+
+# == engine: Night 0 (state.day=1) ==
+# peace
+# == end ==
+
+Alice→Alice
+Bob→Alice
+Carol→Alice
+Dave→Alice
+Eve→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# Alice execution → curse 対象を pending (Day 2 内では death せず)
+# == end ==
+# == engine: Night 1 (state.day=3) ==
+# peace + pending curse 発動 → night_kill (target は Dave か Eve のいずれか)
+# == end ==
+
+# @expect-event night_kill
+# @expect-status Alice: dead
