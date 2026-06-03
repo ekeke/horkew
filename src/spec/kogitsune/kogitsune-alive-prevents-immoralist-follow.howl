@@ -2,7 +2,7 @@
 title: 妖狐退場時に子狐が生存していれば背徳者は後追いしない (狐陣営全滅判定)
 setup: { kogitsune: 1, werehamster: 1, immoralist: 1, werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Day 1 投票で Bob (妖狐) を処刑。 子狐 (Alice) が生存しているため
 # aliveFoxes.length > 0 となり Carol (背徳者) は後追いしない。

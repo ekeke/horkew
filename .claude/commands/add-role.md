@@ -104,7 +104,7 @@ medium の `auto-info:execution-species` を追加した時のパターン (本�
 title: <平易な日本語で目的>
 setup: { <役職>: 1, werewolf: 1, villager: N }
 rules:
-  first-victim: none  # 必要に応じて
+  general.first-victim: none  # 必要に応じて
 ---
 # コメントで目的説明
 # 即時終局シナリオで最小化

@@ -1,8 +1,8 @@
 ---
-title: first-victim=none ルール下では Night 0 で guard が effective に働く
+title: general.first-victim=none ルール下では Night 0 で guard が effective に働く
 setup: { bodyguard: 1, werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # 初日犠牲者ルールが none のとき engine は Night 0 で attack を resolve するが、
 # 同 night に Alice (狩) が Carol を護衛していれば襲撃は無効化され peace 発火。

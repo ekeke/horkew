@@ -2,7 +2,7 @@
 title: 妖狐処刑後の Night 襲撃で子狐が死亡し狐全滅 → 同夜に背徳者後追いが発火する
 setup: { kogitsune: 1, werehamster: 1, immoralist: 1, werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Day 1 投票で Bob (妖狐) を処刑。 子狐 (Alice) 生存中のため Carol (背徳者) はまだ後追いしない。
 # Night 1 で Dave (狼) が Alice (子狐) を襲撃 → Alice 死亡。 これで狐陣営全滅 →

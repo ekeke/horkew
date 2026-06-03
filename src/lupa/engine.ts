@@ -49,9 +49,14 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
       : generateRoleNames(assignedRoles)
   const players = assignRoles(config.roles, names, shuffledIndices)
 
+  // general.omitFirstDay=false (default, 一般的): 初夜=state.day 1, 犠牲者発見後=state.day 2 で議論。
+  // general.omitFirstDay=true: 初夜=state.day 0, 犠牲者発見後=state.day 1 で議論 (初日を省く慣習)。
+  // 内部 night index は 0-based (spoilerActions.day と一致)、 state.day だけ +dayOffset させる。
+  const dayOffset = rules['general.omitFirstDay'] ? 0 : 1
+
   const state: GameState<Ext> = {
     players,
-    day: 0,
+    day: dayOffset,
     phase: 'night',
     finished: false,
     result: null,
@@ -67,7 +72,7 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
     handlers.onEvent?.(event)
   }
 
-  const hasFirstVictim = config.hasFirstGhost ?? rules['first-victim'] !== 'none'
+  const hasFirstVictim = config.hasFirstGhost ?? rules['general.first-victim'] !== 'none'
 
   // onSetup: 役職割当を通知
   const seatRoles = new Map(players.map(p => [p.seat, p.role]))
@@ -81,6 +86,7 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
   const night0Actions = await handlers.onNight(night0Ctx)
 
   // 夜行動を適用 (resolveAttacks に渡す actionsList も同時に構築)
+  // 内部 night index は 0 固定 (state.day=dayOffset の夜 = 初夜)。
   const night0ActionsList: Array<{ player: PlayerState, action: NightAction }> = []
   for (const [seat, action] of night0Actions) {
     const player = players.find(p => p.seat === seat)!
@@ -88,7 +94,7 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
     night0ActionsList.push({ player, action })
   }
 
-  // 占い呪殺チェック (Night 0)
+  // 占い呪殺チェック (初夜 = night 0)
   let foxKilledInNight0 = false
   for (const player of players) {
     const divine = player.divineHistory.get(0)
@@ -103,7 +109,7 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
     }
   }
 
-  // 初日犠牲者: first-victim ルールで分岐
+  // 初日犠牲者: general.first-victim ルールで分岐
   // - 'random' (hasFirstVictim === true): 既存の random pick (狼以外/狐以外/猫又以外から)
   // - 'none' (hasFirstVictim === false): handler の attack action を resolveAttacks で解決
   if (hasFirstVictim) {
@@ -130,7 +136,7 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
   // ============================================================
 
   const snapshots = config.captureSnapshotDays ? new Map<number, GameSnapshot<E, Ext>>() : undefined
-  await runGameLoop(state, events, emit, rng, rules, handlers, config, 1, null, snapshots, seatRoles)
+  await runGameLoop(state, events, emit, rng, rules, handlers, config, 1 + dayOffset, null, false, dayOffset, snapshots, seatRoles)
 
   // 役職公開
   for (const player of players) {
@@ -161,10 +167,12 @@ export async function resumeGame<E = never, Ext = unknown>(snapshot: GameSnapsho
   // onSetup: 役職割当を通知（戦略初期化用）
   if (handlers.onSetup) await handlers.onSetup(snapshot.seatRoles, state)
 
-  const lastExecutedSeat = state.executionHistory.get(state.day) ?? null
+  const dayOffset = rules['general.omitFirstDay'] ? 0 : 1
+  // executionHistory / mediumHistory の key は議論 1-based (= state.day - dayOffset)。
+  const lastExecutedSeat = state.executionHistory.get(state.day - dayOffset) ?? null
   const startDay = state.day + 1
 
-  await runGameLoop(state, events, emit, rng, rules, handlers, config, startDay, lastExecutedSeat)
+  await runGameLoop(state, events, emit, rng, rules, handlers, config, startDay, lastExecutedSeat, true, dayOffset)
 
   // 役職公開
   for (const player of state.players) {
@@ -189,6 +197,8 @@ async function runGameLoop<E = never, Ext = unknown>(
   config: GameConfig,
   startDay: number,
   lastExecutedSeat: number | null,
+  runNightOnFirstIteration: boolean,
+  dayOffset: number,
   snapshots?: Map<number, GameSnapshot<E, Ext>>,
   seatRoles?: Map<number, SystemRole>,
 ): Promise<void> {
@@ -198,10 +208,11 @@ async function runGameLoop<E = never, Ext = unknown>(
   for (let day = startDay; day <= MAX_DAYS && !state.finished; day++) {
     state.day = day
 
-    // ==== 夜フェーズ (day 2+、またはresumeの初日) ====
-    if (day > 1) {
+    // ==== 夜フェーズ (2 周目以降、 または resume で再開した最初の Day) ====
+    if (day > startDay || runNightOnFirstIteration) {
       state.phase = 'night'
-      const night = day - 1
+      // night index は 0-based (spoilerActions.day と一致)。 state.day=dayOffset の夜=Night 0。
+      const night = day - 1 - dayOffset
 
       const nightCtx = makePhaseContext(state, events, rules)
       const nightActions = await handlers.onNight(nightCtx)
@@ -353,7 +364,10 @@ async function runGameLoop<E = never, Ext = unknown>(
     killPlayer(state, executedSeat!)
     emit({ type: 'execution', target: executedSeat! })
     lastExecutedSeat = executedSeat!
-    state.executionHistory.set(day, executedSeat!)
+    // executionHistory / mediumHistory の key は議論 1-based (= state.day - dayOffset = day - dayOffset)。
+    // omitFirstDay=true (dayOffset=0) なら state.day と一致。 default (dayOffset=1) なら state.day - 1。
+    const discussionKey = day - dayOffset
+    state.executionHistory.set(discussionKey, executedSeat!)
 
     // 霊能結果コメント
     const executedPlayer = players.find(p => p.seat === executedSeat!)!
@@ -363,7 +377,7 @@ async function runGameLoop<E = never, Ext = unknown>(
     // 霊能 auto-info: 生存中の霊能 trait 保持者に処刑種別を push
     for (const p of alivePlayers(state)) {
       if (hasTrait(p.role, 'auto-info', 'execution-species')) {
-        p.mediumHistory.set(day, { target: executedSeat!, result: medResult })
+        p.mediumHistory.set(discussionKey, { target: executedSeat!, result: medResult })
       }
     }
 
@@ -465,7 +479,7 @@ function resolveNight(
   for (const { player, action } of actions) {
     switch (action.type) {
       case 'divine': {
-        const result = player.divineHistory.get(state.day - 1)
+        const result = player.divineHistory.get(night)
         const resultStr = result ? speciesLabel(result.result) : ''
         emit({ type: 'comment', text: `占い: ${name(player.seat)} → ${name(action.target)} ${resultStr}` })
         break
@@ -501,7 +515,7 @@ function resolveNight(
 
 /**
  * guard 集約 + 襲撃集約 + 死亡判定 + peace emit。
- * Night N≥1 の resolveNight() と Night 0 (`first-victim: 'none'` 時) の両方から呼ばれる。
+ * Night N≥1 の resolveNight() と Night 0 (`general.first-victim: 'none'` 時) の両方から呼ばれる。
  * 占い呪殺は呼び出し側で処理済みなので、その分は alreadyKilled で渡す。
  */
 function resolveAttacks(

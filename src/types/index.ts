@@ -291,11 +291,11 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
 ])
 
 export type ResolvedRules = {
-  'general.countFirstDay': boolean
+  'general.omitFirstDay': boolean
   'vote.style': 'free' | 'ordered' | 'concurrent'
   'vote.final': 'revote' | 'final'
   'vote.tiebreaker': 'random' | 'no-lynch' | 'draw'
-  'first-victim': 'none' | 'random' | 'first-vote'
+  'general.first-victim': 'none' | 'random' | 'first-vote'
   'role.seer.first-seek': 'none' | 'no-wolf' | 'all'
   'role.bodyguard.allow-continuous-protection': boolean
   'role.nekomata.curse-target': 'all-survivors' | 'villager'

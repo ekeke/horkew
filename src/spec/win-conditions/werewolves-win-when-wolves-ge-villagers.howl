@@ -2,7 +2,7 @@
 title: 狼陣営の数が村陣営以上になると狼陣営の勝利になる
 setup: { werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Day 1 投票で Carol (村) 処刑 → wolf 1 vs village 1 → 狼勝。
 

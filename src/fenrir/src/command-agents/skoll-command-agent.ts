@@ -277,7 +277,7 @@ export class SkollCommandAgent implements CommandAgent {
     if (player.role === 'bodyguard' && state.day === 0) {
       const noActionCmd = legal.find(c => c.type === 'no_action')
       if (noActionCmd) {
-        return { cmd: noActionCmd, log: '(night)[bodyguard] D0 no-guard (first-victim random)' }
+        return { cmd: noActionCmd, log: '(night)[bodyguard] D0 no-guard (general.first-victim random)' }
       }
     }
 

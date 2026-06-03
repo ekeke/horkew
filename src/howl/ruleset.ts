@@ -23,10 +23,10 @@ type NumericRule = RuleBase & {
 type Rule = BooleanRule | ChoiceRule | NumericRule
 
 export const Rules: { [key: string]: Rule } = {
-  "general.countFirstDay": {
+  "general.omitFirstDay": {
     type: "boolean",
-    description: "Count the first day of the game story (the day before the day first vote has taken) as day 1.",
-    default: true,
+    description: "Omit the first day of the game story; the first night becomes Night 0, the first discussion becomes Day 1. When false (default), the first night is Night 1 and the first discussion is Day 2.",
+    default: false,
   },
 
   "vote.style": {
@@ -61,7 +61,7 @@ export const Rules: { [key: string]: Rule } = {
     default: "draw",
   },
 
-  "first-victim": {
+  "general.first-victim": {
     type: "choice",
     description: "The first victim of the game.",
     choices: [

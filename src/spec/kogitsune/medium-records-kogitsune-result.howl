@@ -2,7 +2,7 @@
 title: 子狐が処刑されると霊能師は mediumResult='kogitsune' を記録する
 setup: { kogitsune: 1, medium: 1, werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Day 1 投票で Alice (子狐) を処刑。 engine が auto-info:execution-species trait を発動し、
 # 霊能者 Bob の mediumHistory[1] に { target: Alice, result: 'kogitsune' } を記録。

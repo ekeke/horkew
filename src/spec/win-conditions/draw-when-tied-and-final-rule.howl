@@ -2,7 +2,7 @@
 title: 同票投票で vote.final=final かつ vote.tiebreaker=draw のとき引き分け終局
 setup: { werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
   vote.final: final
   vote.tiebreaker: draw
 ---

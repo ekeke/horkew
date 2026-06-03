@@ -54,9 +54,13 @@ export function makeRandomHandlers(seed?: number): GameHandlers {
     onDayClaims(ctx) {
       const state = ctx.state as GameState
       const claims = new Map<number, DayClaim>()
+      // executionHistory の key は議論 1-based (state.day - dayOffset)。前回 execution = discussionKey - 1。
+      const dayOffset = ctx.rules['general.omitFirstDay'] ? 0 : 1
+      const prevExecKey = (ctx.day - dayOffset) - 1
+      const lastExecuted = state.executionHistory.get(prevExecKey) ?? null
       // forceTrueRoleCO は対象外役職に対し { type: 'none' } を返すので、生存者全員に呼んで良い
       for (const player of alivePlayers(state)) {
-        claims.set(player.seat, forceTrueRoleCO(state, player, ctx.day, state.executionHistory.get(ctx.day - 1) ?? null))
+        claims.set(player.seat, forceTrueRoleCO(state, player, ctx.day, lastExecuted))
       }
       return claims
     },

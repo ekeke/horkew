@@ -2,7 +2,7 @@
 title: 狂人は狼陣営だが action:attack trait を持たないため狼全滅で villager_won となる
 setup: { werewolf: 1, possessed: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # 狂人は faction=wolf だが checkWinCondition の wolves 判定 (= action:attack trait)
 # には含まれず nonWolfCount 側にカウントされる。 よって狼処刑後に狂人が生存

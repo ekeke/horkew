@@ -2,7 +2,7 @@
 title: 護衛先と襲撃先が一致すると襲撃が無効化され peace event が emit される
 setup: { bodyguard: 1, werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # 1夜: Alice (狩) が Carol を護衛、 Bob (狼) が Carol を襲撃 → 護衛成功で
 # Carol は死なず、 engine は peace event を emit する。

@@ -15,7 +15,7 @@ const SAMPLE_SPEC = `---
 title: test scenario
 setup: { kogitsune: 1, werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # comment line
 

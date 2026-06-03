@@ -73,9 +73,9 @@ export const DEFAULT_RETAR_OPTIONS: AnalyzeOptions = {
 /** LupaConfig のルールから Retar AnalyzeOptions を構築 */
 function buildRetarOptions(config: LupaConfig): AnalyzeOptions {
   const rules = resolveRules(config.rules)
-  const hasFirstGhost = config.hasFirstGhost ?? rules['first-victim'] !== 'none'
+  const hasFirstGhost = config.hasFirstGhost ?? rules['general.first-victim'] !== 'none'
   const seerFirstSeek = rules['role.seer.first-seek']
-  // dayCountFrom は Retar 内部の占い行動開始夜。countFirstDay は表示問題であり Retar に影響しない。
+  // dayCountFrom は Retar 内部の占い行動開始夜。omitFirstDay は表示問題であり Retar に影響しない。
   // hasFirstGhost が true なら night 0 から行動するので dayCountFrom=1 は正しいまま。
   return {
     ...DEFAULT_RETAR_OPTIONS,

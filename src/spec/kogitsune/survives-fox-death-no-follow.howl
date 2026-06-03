@@ -2,7 +2,7 @@
 title: 子狐は妖狐が退場しても follow-fox-death trait を持たないため後追いしない
 setup: { kogitsune: 1, werehamster: 1, werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Day 1 投票で Bob (妖狐) を処刑。 背徳者は不在のため follow_kill は発生しないが、
 # 子狐 (Alice) も follow-fox-death trait を持たないため Alice は生存。

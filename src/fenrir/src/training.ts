@@ -108,7 +108,7 @@ export type TrainingConfig = {
   learningRate: number
   /** Retar論理推論を有効化 */
   enableRetar: boolean
-  /** 初日犠牲者あり (rules['first-victim'] で代替可) */
+  /** 初日犠牲者あり (rules['general.first-victim'] で代替可) */
   hasFirstGhost: boolean
   /** 再投票設定 */
   revoteConfig?: RevoteConfig

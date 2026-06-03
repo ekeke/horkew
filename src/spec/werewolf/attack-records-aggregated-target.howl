@@ -2,7 +2,7 @@
 title: 人狼の襲撃が attackHistory に集約 target として記録される
 setup: { werewolf: 1, villager: 3 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Alice (狼) が 1夜 に Bob を秘匿襲撃 → engine が集約決定し、
 # Alice の attackHistory[1] に Bob (集約 target) を記録する。

@@ -2,7 +2,7 @@
 title: 妖狐は人狼に襲撃されても死なない (attack-immune trait)
 setup: { werehamster: 1, werewolf: 1, villager: 3 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Day 1 投票で Dave (村) 処刑 (Day 1 終了時点で wolf=1 vs nonWolf=2 → 継続)。
 # Night 1 で Carol (狼) が Bob (妖狐) を襲撃 → engine は attack-immune trait を

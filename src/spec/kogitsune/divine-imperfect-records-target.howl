@@ -2,7 +2,7 @@
 title: 子狐の不完全占い (divine-imperfect) は target を divineHistory に記録する (result は 50% で human または null)
 setup: { kogitsune: 1, werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Night 0 に Alice (子狐) が Bob (狼) を占い。 divine-imperfect trait のため
 # 50% で result が null になる (rng 依存)。 seed=0 で結果は決定論的だが、

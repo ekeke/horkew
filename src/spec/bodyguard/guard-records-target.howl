@@ -2,7 +2,7 @@
 title: 狩人の秘匿護衛が guardHistory に target として記録される
 setup: { bodyguard: 1, werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Alice (狩) が 1夜 に Carol を秘匿護衛 → engine が能力を dispatch し、
 # Alice の guardHistory[1] に Carol を記録する。

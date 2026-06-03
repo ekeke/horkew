@@ -2,7 +2,7 @@
 title: パパラッチも seer と同じ divine 能力を発動して divineHistory に結果記録
 setup: { paparazzi: 1, werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # パパラッチは action:divine trait を持つ (狼陣営の占い能力者)。
 # 0夜 に Alice (パパラッチ) が Bob (狼) を秘匿占い → divineHistory[0] に

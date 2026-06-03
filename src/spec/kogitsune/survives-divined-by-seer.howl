@@ -2,7 +2,7 @@
 title: 子狐は占い師に占われても死亡しない (die-when-divined trait を持たない)
 setup: { kogitsune: 1, seer: 1, werewolf: 1, villager: 1 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Night 0 に Bob (占) が Alice (子狐) を占い。
 # 子狐は die-when-divined trait を持たないため fox_kill は発生しない。

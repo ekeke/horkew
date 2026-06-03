@@ -10,7 +10,7 @@
  * - 両者は完全に独立 (真役職が嘘 CO を出すシナリオが書ける)
  */
 
-import type { SystemRole, VillageStatus } from '../types/index.ts'
+import type { SystemRole, VillageStatus, ResolvedRules } from '../types/index.ts'
 import type { SpoilerActionRecord } from '../howl/bridge.ts'
 import type { GameConfig, GameHandlers } from './handlers.ts'
 import type { DayClaim, NightAction, RevoteConfig } from './types.ts'
@@ -33,18 +33,20 @@ export type AdapterOutput = {
 export function buildLupaScenario(input: AdapterInput): AdapterOutput {
   const { assumptions, spoilerActions, vs, setup, meta } = input
 
+  const metaRules = meta?.rules ?? {}
+
   const config: GameConfig = {
     roles: setup,
     seed: 0,
     hasFirstGhost: false,
     nameStyle: 'seat',
+    rules: metaRules as Partial<ResolvedRules>,
   }
 
   // Howl frontmatter の vote.final / vote.tiebreaker を engine の revoteConfig に変換。
   // 完全 mapping ではなく spec で必要な分のみ:
   //   vote.final='final'  → maxRevotes=0 (revote せず即 tiebreaker)
   //   vote.tiebreaker='draw' → tiebreaker='draw' (引き分けで終局)
-  const metaRules = meta?.rules ?? {}
   const voteFinal = metaRules['vote.final']
   const voteTiebreaker = metaRules['vote.tiebreaker']
   if (voteFinal === 'final' || voteTiebreaker === 'draw') {
@@ -56,15 +58,22 @@ export function buildLupaScenario(input: AdapterInput): AdapterOutput {
     config.revoteConfig = revoteConfig
   }
 
-  // Howl の `N夜` (SpoilerStatement.day=N) は lupa night=N に相当する慣例で扱う。
-  // - day=0 = 初夜 (lupa night 0、ctx.day=0)
-  // - day=1 = Day 1 終わりの夜 (lupa night 1、ctx.day=2)
-  // - day=N (N>=1) = Day N 終わりの夜 (lupa night N、ctx.day=N+1)
-  // 初夜 attack は ruleset `first-victim: 'none'` のときだけ engine が resolve する。
-  // default の `first-victim: 'random'` のときは初夜の死者は random で決まり、
-  // 0夜 襲撃の spoiler 指定は engine に無視される。
+  // Howl の `N夜` (SpoilerStatement.day=N) は engine 内部 night index=N (0-based) に対応。
+  // engine の ctx.day は「表示 Day」 (default で 初夜=1、 議論=2…)。
+  // omitFirstDay=true (dayOffset=0) なら 初夜 ctx.day=0、 議論=1, 2, 3…
+  // omitFirstDay=false (dayOffset=1, default) なら 初夜 ctx.day=1、 議論=2, 3, 4…
+  // 内部 night index は「初夜=0、 N回目議論の前夜=N-1」。 spoiler.day = 内部 night index。
+  const omitFirstDay = metaRules['general.omitFirstDay']
+  const dayOffset = omitFirstDay === true ? 0 : 1
+  // 初夜 attack は ruleset `general.first-victim: 'none'` のときだけ engine が resolve する。
   function ctxDayToActionDay(ctxDay: number): number {
-    return ctxDay === 0 ? 0 : ctxDay - 1
+    if (ctxDay === dayOffset) return 0
+    return ctxDay - dayOffset - 1
+  }
+  // howl 由来の vs.voteHistory / status.claimedAt 等は議論 1-based を期待。
+  // ctx.day (表示 Day) を議論 1-based key へ変換。
+  function ctxDayToDiscussionKey(ctxDay: number): number {
+    return ctxDay - dayOffset
   }
 
   const handlers: GameHandlers = {
@@ -90,7 +99,7 @@ export function buildLupaScenario(input: AdapterInput): AdapterOutput {
     },
 
     onDayClaims(ctx) {
-      const day = ctx.day
+      const day = ctxDayToDiscussionKey(ctx.day)
       const claims = new Map<number, DayClaim>()
       for (const [seat, status] of vs.statuses) {
         if (!status.claiming) continue
@@ -129,7 +138,7 @@ export function buildLupaScenario(input: AdapterInput): AdapterOutput {
 
     onVote(ctx) {
       const votes = new Map<number, number>()
-      const dayVotes = vs.voteHistory.get(ctx.day) ?? []
+      const dayVotes = vs.voteHistory.get(ctxDayToDiscussionKey(ctx.day)) ?? []
       for (const v of dayVotes) {
         // 生存者かつ candidates 制約があれば内側
         if (ctx.candidates !== null && !ctx.candidates.includes(v.target)) continue

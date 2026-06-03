@@ -2,7 +2,7 @@
 title: 子狐は人狼に襲撃されると死亡する (attack-immune trait を持たない)
 setup: { kogitsune: 1, werewolf: 1, villager: 3 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Day 1 投票で Dave (村) 処刑、 続いて Night 1 で Carol (狼) が Alice (子狐) を襲撃。
 # 子狐は attack-immune を持たないため死亡、 cause=night_kill。

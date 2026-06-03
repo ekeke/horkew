@@ -2,7 +2,7 @@
 title: 子狐単独生存で werehamster_won (fox-win-counter trait による狐陣営勝利)
 setup: { kogitsune: 1, werewolf: 1, villager: 3 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Day 1 投票で Dave (村) を処刑、 Day 2 で Carol (狼) を処刑 → 狼全滅。
 # Alice (子狐) は生存しているため fox-win-counter trait により werehamster_won。

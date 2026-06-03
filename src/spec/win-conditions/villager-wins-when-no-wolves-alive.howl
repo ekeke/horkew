@@ -2,7 +2,7 @@
 title: 狼陣営が全滅すると村陣営の勝利になる
 setup: { werewolf: 1, villager: 2 }
 rules:
-  first-victim: none
+  general.first-victim: none
 ---
 # Day 1 投票で Alice (狼) 処刑 → wolf 0 → 村勝。
 

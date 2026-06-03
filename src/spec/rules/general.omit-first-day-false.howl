@@ -1,0 +1,31 @@
+---
+title: general.omitFirstDay=false (default) のとき初夜=state.day 1, 最初の投票日=state.day 2
+setup: { werewolf: 1, villager: 2 }
+rules:
+  general.omitFirstDay: false
+  general.first-victim: none
+---
+# omitFirstDay=false (default): 初夜=state.day 1 (Night 0)、 最初の議論=state.day 2 (Day 2)。
+# 「ゲーム開始日が Day 1」 「犠牲者発見が Day 2」 という人狼ゲームの一般的な慣習に対応。
+# 3 人村で state.day=2 に wolf を処刑して即終局し、 最終 state.day=2 を検証する。
+
+++Alice、Bob、Carol
+!Alice=人狼
+!Bob=村人
+!Carol=村人
+
+# == engine: Night 0 (state.day=1) ==
+# peace (general.first-victim=none かつ襲撃なし)
+# == end ==
+
+Alice→Bob
+Bob→Alice
+Carol→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# vote tally: Alice 2 / Bob 1 → execution=Alice → villager_won
+# == end ==
+
+# @expect-result: villager_won
+# @expect-finished: true
+# @expect-day: 2
