@@ -44,16 +44,21 @@ export function buildLupaScenario(input: AdapterInput): AdapterOutput {
   }
 
   // Howl frontmatter の vote.final / vote.tiebreaker を engine の revoteConfig に変換。
-  // 完全 mapping ではなく spec で必要な分のみ:
   //   vote.final='final'  → maxRevotes=0 (revote せず即 tiebreaker)
-  //   vote.tiebreaker='draw' → tiebreaker='draw' (引き分けで終局)
+  //   vote.tiebreaker     → 'draw' | 'random' | 'no-lynch' を engine にそのまま渡す
+  //     (未指定または不明値は engine 内部 default の 'lowest_seat')
   const voteFinal = metaRules['vote.final']
   const voteTiebreaker = metaRules['vote.tiebreaker']
-  if (voteFinal === 'final' || voteTiebreaker === 'draw') {
+  const mappedTiebreaker: RevoteConfig['tiebreaker'] | null =
+    voteTiebreaker === 'draw' ? 'draw'
+    : voteTiebreaker === 'random' ? 'random'
+    : voteTiebreaker === 'no-lynch' ? 'no-lynch'
+    : null
+  if (voteFinal === 'final' || mappedTiebreaker !== null) {
     const revoteConfig: RevoteConfig = {
       maxRevotes: voteFinal === 'final' ? 0 : 3,
       style: 'random_tied',
-      tiebreaker: voteTiebreaker === 'draw' ? 'draw' : 'lowest_seat',
+      tiebreaker: mappedTiebreaker ?? 'lowest_seat',
     }
     config.revoteConfig = revoteConfig
   }

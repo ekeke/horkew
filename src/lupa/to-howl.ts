@@ -144,6 +144,10 @@ function eventToLines(
     case 'fox_kill':
       // 占い呪殺の死亡は朝に公開される。howl では通常の夜死と同様に attack 文で表現する。
       return [serializeStatement(makeAttack([name(ev.target)]))]
+
+    case 'no_lynch':
+      // 同票で誰も処刑されないケース。 howl には専用記法がないのでコメントで残す。
+      return [commentLine(`縄なし (tied: ${ev.tied.map(name).join(', ')})`)]
   }
 }
 

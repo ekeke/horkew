@@ -42,8 +42,14 @@ export type RevoteConfig = {
   maxRevotes: number
   /** 再投票方式: 'random_tied' = 候補者限定ランダム(現行), 'full_revote' = 全員で完全やり直し */
   style: 'random_tied' | 'full_revote'
-  /** 決着つかない場合: 'lowest_seat' = 最小seat処刑(現行), 'draw' = 引き分け終了 */
-  tiebreaker: 'lowest_seat' | 'draw'
+  /**
+   * 決着つかない場合の最終決定方式:
+   * - 'lowest_seat' = 最小 seat 処刑 (engine 内部 default)
+   * - 'draw' = 引き分け終局
+   * - 'random' = tied 候補から rng で 1 人 pick (vote.tiebreaker=random)
+   * - 'no-lynch' = 誰も処刑せず次の Night へ進む (vote.tiebreaker=no-lynch)
+   */
+  tiebreaker: 'lowest_seat' | 'draw' | 'random' | 'no-lynch'
 }
 
 export type PlayerState = {
@@ -117,6 +123,7 @@ export type GameEvent =
   | { type: 'follow_kill', target: number }
   | { type: 'vote', voter: number, target: number }
   | { type: 'revote', targets: number[] }
+  | { type: 'no_lynch', tied: number[] }
   | { type: 'grelan' }
   | { type: 'execution', target: number }
   | { type: 'comment', text: string }

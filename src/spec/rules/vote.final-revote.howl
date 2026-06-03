@@ -1,0 +1,29 @@
+---
+title: vote.final=revote (default) のとき同票で revote event が emit される
+setup: { werewolf: 1, villager: 2 }
+rules:
+  vote.final: revote
+  general.first-victim: none
+---
+# 3 人村で 3-way 同票 → revote → engine が random_tied で決着 → 終局。
+# vote.final=revote のとき revote event が少なくとも 1 回 emit されることを観察。
+
+++Alice、Bob、Carol
+!Alice=人狼
+!Bob=村人
+!Carol=村人
+
+# == engine: Night 0 (state.day=1) ==
+# peace (general.first-victim=none かつ襲撃なし)
+# == end ==
+
+Alice→Bob
+Bob→Carol
+Carol→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# vote tally: Alice 1 / Bob 1 / Carol 1 → 3-way 同票 → revote → 決着
+# == end ==
+
+# @expect-event revote
+# @expect-finished: true

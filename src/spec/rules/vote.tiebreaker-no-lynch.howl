@@ -1,0 +1,49 @@
+---
+title: vote.tiebreaker=no-lynch のとき同票で誰も処刑されず次の Night に進む
+setup: { werewolf: 1, villager: 3 }
+rules:
+  vote.final: final
+  vote.tiebreaker: no-lynch
+  general.first-victim: none
+---
+# 4 人村で Day 2 に 4-way 同票 → no-lynch (誰も処刑なし) → Night 2 で
+# wolf (Alice) が Carol を襲撃 → Day 3 で wolf 処刑 → 終局。
+# 観察: execution event は Day 3 で 1 回のみ (Day 2 では起きない)、 最終 villager_won。
+
+++Alice、Bob、Carol、Dave
+!Alice=人狼
+!Bob=村人
+!Carol=村人
+!Dave=村人
+!Alice 1夜 襲撃 Carol
+
+# == engine: Night 0 (state.day=1) ==
+# peace
+# == end ==
+
+Alice→Bob
+Bob→Carol
+Carol→Dave
+Dave→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# 4-way 同票 → no-lynch (誰も処刑なし)
+# == end ==
+# == engine: Night 2 (state.day=3) ==
+# wolf Alice が Carol 襲撃
+# == end ==
+
+Day 2:
+
+Alice→Bob
+Bob→Alice
+Dave→Alice
+
+# == engine: Day 3 (state.day=3) ==
+# Alice 2 / Bob 1 → execution=Alice → villager_won
+# == end ==
+
+# @expect-result: villager_won
+# @expect-finished: true
+# @expect-status Carol: dead
+# @expect-cause Carol: night_kill

@@ -1,0 +1,35 @@
+---
+title: vote.tiebreaker=random のとき同票で random pick の 1 人が処刑される
+setup: { werewolf: 1, villager: 2 }
+rules:
+  vote.final: final
+  vote.tiebreaker: random
+  general.first-victim: none
+---
+# vote.tiebreaker=random + vote.final=final で 3-way 同票 → engine が rng で
+# 同票候補の中から 1 人 pick → 処刑 → 終局。
+# seed=0 固定なので決定的に決まる。 観察点: execution event が emit され、 finished=true。
+
+++Alice、Bob、Carol
+!Alice=人狼
+!Bob=村人
+!Carol=村人
+
+# == engine: Night 0 (state.day=1) ==
+# peace
+# == end ==
+
+Alice→Bob
+Bob→Carol
+Carol→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# 3-way 同票 → random pick で 1 人処刑 → 終局
+# random で Bob か Carol (= villager) が pick されると 1v1 で werewolves_won。
+# Alice (= wolf) が pick されると villager_won で、 lowest_seat fallback と区別がつかない。
+# random 実装の挙動を観察するため、 werewolves_won を期待値として置く。
+# == end ==
+
+# @expect-event execution
+# @expect-finished: true
+# @expect-result: werewolf_won

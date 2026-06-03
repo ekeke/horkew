@@ -31,7 +31,7 @@ export const Rules: { [key: string]: Rule } = {
 
   "vote.style": {
     type: "choice",
-    description: "The style of voting to use.",
+    description: "The style of voting to use. 'ordered' fixes the voting order so the last voter is determined; 'free' / 'concurrent' leave it open. Reserved for future retar reasoning (e.g. 'last voter = wolf' counter-pruning). Currently not enforced by lupa engine — all three behave identically.",
     choices: [
       "free",
       "ordered",

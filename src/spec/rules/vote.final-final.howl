@@ -1,0 +1,30 @@
+---
+title: vote.final=final のとき同票で revote なしで即 tiebreaker (draw)
+setup: { werewolf: 1, villager: 2 }
+rules:
+  vote.final: final
+  vote.tiebreaker: draw
+  general.first-victim: none
+---
+# 3 人村で 3-way 同票 → revote 0 回 (maxRevotes=0) → 即 tiebreaker (draw) で終局。
+# vote.final=revote (default) との対比シナリオ。
+
+++Alice、Bob、Carol
+!Alice=人狼
+!Bob=村人
+!Carol=村人
+
+# == engine: Night 0 (state.day=1) ==
+# peace (general.first-victim=none かつ襲撃なし)
+# == end ==
+
+Alice→Bob
+Bob→Carol
+Carol→Alice
+
+# == engine: Day 2 (state.day=2) ==
+# vote tally: Alice 1 / Bob 1 / Carol 1 → 3-way 同票 → 即 draw (revote なし)
+# == end ==
+
+# @expect-result: draw
+# @expect-finished: true

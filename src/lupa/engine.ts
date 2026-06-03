@@ -301,7 +301,7 @@ async function runGameLoop<E = never, Ext = unknown>(
         }
         revoteCount++
         if (revoteCount > maxRevotes) {
-          executedSeat = handleTiebreak(state, result.tied, revoteTiebreaker, emit)
+          executedSeat = handleTiebreak(state, result.tied, revoteTiebreaker, emit, rng)
           break
         }
         emit({ type: 'revote', targets: result.tied })
@@ -339,7 +339,7 @@ async function runGameLoop<E = never, Ext = unknown>(
 
       revoteCount++
       if (revoteCount > maxRevotes) {
-        executedSeat = handleTiebreak(state, result.tied, revoteTiebreaker, emit)
+        executedSeat = handleTiebreak(state, result.tied, revoteTiebreaker, emit, rng)
         break
       }
 
@@ -349,6 +349,9 @@ async function runGameLoop<E = never, Ext = unknown>(
 
     // 引き分けの場合
     if (state.finished) break
+
+    // no-lynch (tiebreaker='no-lynch') の場合は処刑系処理を全部スキップして次の Day iteration へ
+    if (executedSeat === null) continue
 
     // ==== 遺言フェーズ（処刑前CO） ====
     if (rules['phase.lastwill'] && handlers.onLastWill) {
@@ -676,7 +679,7 @@ function forceTrueRoleCOPass(
 
 /** タイブレーク処理 */
 function handleTiebreak(
-  state: GameState, tied: number[], tiebreaker: string, emit: EmitFn,
+  state: GameState, tied: number[], tiebreaker: string, emit: EmitFn, rng: Rng,
 ): number | null {
   if (tiebreaker === 'draw') {
     state.finished = true
@@ -684,6 +687,15 @@ function handleTiebreak(
     emit({ type: 'game_over', result: 'draw' })
     return null
   }
-  // lowest_seat
+  if (tiebreaker === 'random') {
+    // tied 候補から rng で 1 人 pick
+    return tied[Math.floor(rng.next() * tied.length)]
+  }
+  if (tiebreaker === 'no-lynch') {
+    // 誰も処刑せず次の Night へ。 ゲーム継続。
+    emit({ type: 'no_lynch', tied })
+    return null
+  }
+  // lowest_seat (default)
   return tied[0]
 }
