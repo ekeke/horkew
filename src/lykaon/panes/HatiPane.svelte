@@ -2,6 +2,7 @@
   import type { TsumiResult, StrategyNode, RunRetar } from '../../hati/index.ts'
   import { searchTsumi, searchTsumiStrategy } from '../../hati/index.ts'
   import type { AnalyzeOptions } from '../../retar/index.ts'
+  import { defaultAnalyzeRegulation } from '../../retar/defaults.ts'
   import wasmInit, { analyze } from '../../retar-rs/pkg-web/retar.js'
   // @ts-ignore — Vite ?url import
   import wasmUrl from '../../retar-rs/pkg/retar_bg.wasm?url'
@@ -55,13 +56,13 @@
       pendingTimer = null
       try {
         const options: AnalyzeOptions = {
+          regulation: defaultAnalyzeRegulation,
           seerClaimingDueDate: 2,
           mediumClaimingDueDate: 2,
           bodyguardClaimingDueDate: 99,
           masonClaimingDueDate: 2,
           nekomataClaimingDueDate: 99,
           dayCountFrom: 1,
-          hasFirstGhost: false,
           assumptions: new Map(),
           wolfPairDenyals: [],
           hocusPocus: new Map(),
