@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
-  import { parse, parseFrontmatter, buildFrontmatter, parseStatement } from '../src/howl/index.ts'
+  import { parse, parseFrontmatter, buildFrontmatter, parseStatement, buildVideoSegments as buildHowlVideoSegments, buildDayLineMap } from '../src/howl/index.ts'
   import { buildVillageStatus } from '../src/howl/bridge.ts'
   import type { SystemRole } from '../src/types/index.ts'
   import { serializeVillageStatus } from '../src/retar/wasm-helpers.ts'
@@ -531,32 +531,13 @@
     return { type: '', id: '' }
   }
 
-  function buildDayLineMap(statements: any[]): Map<number, number> {
-    const map = new Map<number, number>()
-    for (const s of statements) {
-      if (s.day !== undefined && !map.has(s.day)) {
-        map.set(s.day, s.line)
-      }
-    }
-    return map
-  }
-
-  // Build video segments: each @URL starts a new segment with its own timestamps
+  // platform 判定 (YouTube/niconico) は demo 側責務。horkew/howl の buildHowlVideoSegments が
+  // 返す platform 非依存のセグメントを videoId/videoType で拡張する。
   function buildVideoSegments(statements: any[]): typeof videoSegments {
-    const segments: typeof videoSegments = []
-    let current: typeof videoSegments[number] | null = null
-    for (const s of statements) {
-      if (s.type === 'videoSource') {
-        const parsed = parseVideoUrl(s.url)
-        current = { videoId: parsed.id, videoType: parsed.type, url: s.url, line: s.line, timestamps: [] }
-        segments.push(current)
-      } else if (current) {
-        if (s.type === 'timestamp') current.timestamps.push({ line: s.line, seconds: s.seconds })
-        else if (s.timestamp !== undefined) current.timestamps.push({ line: s.line, seconds: s.timestamp })
-      }
-    }
-    for (const seg of segments) seg.timestamps.sort((a, b) => a.seconds - b.seconds)
-    return segments
+    return buildHowlVideoSegments(statements).map(seg => {
+      const parsed = parseVideoUrl(seg.url)
+      return { ...seg, videoId: parsed.id, videoType: parsed.type }
+    })
   }
 
   function formatSeconds(s: number): string {
