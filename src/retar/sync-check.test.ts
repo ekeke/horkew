@@ -33,7 +33,7 @@ const FILE_ALIASES: Record<string, string> = {
 }
 
 // 片方にしか存在しなくてよいファイル（WASMブリッジ、型定義、test helper など）
-const TS_ONLY_FILES = new Set(['wasm-helpers', 'expectations'])
+const TS_ONLY_FILES = new Set(['wasm-helpers', 'expectations', 'defaults'])
 const RS_ONLY_FILES = new Set(['lib', 'types'])
 
 // モジュールプレフィックスファイル: TSではトップレベルexportのためファイル名をプレフィックス/サフィックスに付ける

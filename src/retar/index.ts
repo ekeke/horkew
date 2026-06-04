@@ -1,4 +1,4 @@
-import type { CauseOfDeath, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
+import type { CauseOfDeath, VillageStatus, SystemRole, Seat, Day, Regulation } from '../types/index.ts'
 import { Possibilities, possibilityFromRoles } from './possibilities.ts'
 import { generateCombinations } from './combinatorics.ts'
 import { testRole as runRoleTest, saveContext, restoreContext } from './roleTesters.ts'
@@ -45,11 +45,10 @@ export type AnalyzeOptions = {
   masonClaimingDueDate: number
   nekomataClaimingDueDate: number
 
-  // regulation options
+  // ゲーム規定 (Regulation): hasFirstGhost / seerFirstSeek はここから導出する。
+  regulation: Regulation
+  // 占い行動の起点夜 (retar 固有、 ruleset の omitFirstDay とは独立)
   dayCountFrom: number
-  hasFirstGhost: boolean
-  /** 占い師の初日占いルール */
-  seerFirstSeek?: 'none' | 'no-wolf' | 'all'
 
   // ユーザーが仮定した役職
   assumptions: Map<Seat, SystemRole>
@@ -151,7 +150,7 @@ export class VillageRetar {
       lastHamsterMustDieAt: this.lastHamsterMustDieAt,
       lastHamsterMustDiedBy: this.lastHamsterMustDiedBy,
       dayCountFrom: this.options.dayCountFrom,
-      seerFirstSeek: this.options.seerFirstSeek,
+      seerFirstSeek: this.options.regulation['role.seer.first-seek'],
     }
 
     // Compute strides for flat-index batch splitting
@@ -363,7 +362,8 @@ export class VillageRetar {
 
   // 夜死体数のカウント。複数死体の日のseat一覧を返す
   private buildNightKillMap(village: VillageStatus): Seat[] {
-    const firstKill = this.options.dayCountFrom - (this.options.hasFirstGhost ? 1 : 0)
+    const hasFirstGhost = this.options.regulation['general.first-victim'] !== 'none'
+    const firstKill = this.options.dayCountFrom - (hasFirstGhost ? 1 : 0)
     for ( let d = firstKill; d<this.vs.day; d++) {
       this.nightKillsByDay.set(d, [])
     }

@@ -11,6 +11,7 @@ import { parse } from '../../howl/parser.ts'
 import { buildVillageStatus } from '../../howl/bridge.ts'
 import { VillageRetar } from '../../retar/index.ts'
 import type { AnalyzeOptions } from '../../retar/index.ts'
+import { defaultAnalyzeRegulation, firstGhostAnalyzeRegulation } from '../../retar/defaults.ts'
 
 export type RetarWorkerRequest = {
   howl: string
@@ -24,13 +25,13 @@ export type RetarWorkerResponse =
   | { type: 'error', message: string }
 
 const DEFAULT_OPTIONS: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 99,
   mediumClaimingDueDate: 99,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 99,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),
@@ -51,7 +52,7 @@ parentPort!.on('message', (req: RetarWorkerRequest) => {
     const { vs, setup } = buildVillageStatus(statements, meta)
     const options: AnalyzeOptions = {
       ...DEFAULT_OPTIONS,
-      hasFirstGhost: req.hasFirstGhost,
+      regulation: req.hasFirstGhost ? firstGhostAnalyzeRegulation : defaultAnalyzeRegulation,
       batches: req.batches,
       batch: req.batch,
     }

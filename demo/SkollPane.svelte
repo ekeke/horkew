@@ -2,6 +2,7 @@
   import type { VillageStatus, SystemRole } from '../src/types/index.ts'
   import type { AnalyzeOptions } from '../src/retar/index.ts'
   import { VillageRetar } from '../src/retar/index.ts'
+  import { defaultAnalyzeRegulation } from '../src/retar/defaults.ts'
   import { Possibilities, RoleBitIndex, possibilityFromRoles } from '../src/retar/possibilities.ts'
   import { computeRoleProbabilities, getRoleProbability } from '../src/skoll/index.ts'
   import type { RoleProbabilities } from '../src/skoll/index.ts'
@@ -89,13 +90,13 @@
       try {
         const t0 = performance.now()
         const options: AnalyzeOptions = {
+          regulation: defaultAnalyzeRegulation,
           seerClaimingDueDate: 2,
           mediumClaimingDueDate: 2,
           bodyguardClaimingDueDate: 99,
           masonClaimingDueDate: 2,
           nekomataClaimingDueDate: 99,
           dayCountFrom: 1,
-          hasFirstGhost: false,
           assumptions: new Map(),
           wolfPairDenyals: [],
           hocusPocus: new Map(),
@@ -153,13 +154,13 @@
       try {
         const t0 = performance.now()
         const options: AnalyzeOptions = {
+          regulation: defaultAnalyzeRegulation,
           seerClaimingDueDate: 2,
           mediumClaimingDueDate: 2,
           bodyguardClaimingDueDate: 99,
           masonClaimingDueDate: 2,
           nekomataClaimingDueDate: 99,
           dayCountFrom: 1,
-          hasFirstGhost: false,
           assumptions: new Map(),
           wolfPairDenyals: [],
           hocusPocus: new Map(),
@@ -263,13 +264,13 @@
       try {
         const t0 = performance.now()
         const options: AnalyzeOptions = {
+          regulation: defaultAnalyzeRegulation,
           seerClaimingDueDate: 2,
           mediumClaimingDueDate: 2,
           bodyguardClaimingDueDate: 99,
           masonClaimingDueDate: 2,
           nekomataClaimingDueDate: 99,
           dayCountFrom: 1,
-          hasFirstGhost: false,
           assumptions: new Map(),
           wolfPairDenyals: [],
           hocusPocus: new Map(),

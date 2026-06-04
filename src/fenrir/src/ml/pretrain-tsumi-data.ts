@@ -27,18 +27,19 @@ import type { TrainingConfig } from '../training.ts'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AnalyzeOptions } from '../../../retar/index.ts'
+import { firstGhostAnalyzeRegulation } from '../../../retar/defaults.ts'
 
 const NUM_FORWARD_TOKENS = 8
 const NUM_ENDGAME_TOKENS = 4
 
 const DB_ANALYZE_OPTIONS: AnalyzeOptions = {
+  regulation: firstGhostAnalyzeRegulation,
   seerClaimingDueDate: 2,
   mediumClaimingDueDate: 2,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 2,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: true,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),

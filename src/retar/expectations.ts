@@ -25,17 +25,19 @@ import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from './index.ts'
 import type { AnalyzeOptions } from './index.ts'
+import { defaultAnalyzeRegulation } from './defaults.ts'
+import { resolveRegulation } from '../howl/ruleset.ts'
 import type { SystemRole, Faction } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 
 export const defaultAnalyzeOptions: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 2,
   mediumClaimingDueDate: 2,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 2,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),
@@ -194,8 +196,12 @@ function parseAssume(checkpoint: Checkpoint, content: string) {
 }
 
 export function buildAnalyzeOptions(meta: Record<string, any>): AnalyzeOptions {
+  // meta.rules があれば retar default に上乗せして regulation を解決する。
+  // meta.options で regulation が明示指定されていれば最終的にそちらが優先される (spread 順)。
+  const regulation = meta?.rules ? resolveRegulation(meta.rules) : defaultAnalyzeRegulation
   return {
     ...defaultAnalyzeOptions,
+    regulation,
     ...(meta.options || {}),
     assumptions: meta.options?.assumptions
       ? new Map(Object.entries(meta.options.assumptions))

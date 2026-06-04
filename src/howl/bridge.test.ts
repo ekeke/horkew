@@ -3,6 +3,7 @@ import assert from 'node:assert'
 import { parse } from './parser.ts'
 import { buildVillageStatus } from './bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
+import { defaultAnalyzeRegulation } from '../retar/defaults.ts'
 
 describe('bridge: curse statement', () => {
   test('curse after execution sets cursed_by_executed_nekomata', () => {
@@ -231,13 +232,13 @@ setup:
     assert.strictEqual(vs.statuses.get(satoshiSeat)!.causeOfDeath, 'follow_killed_hamster')
 
     const options = {
+      regulation: defaultAnalyzeRegulation,
       seerClaimingDueDate: 2,
       mediumClaimingDueDate: 2,
       bodyguardClaimingDueDate: 99,
       masonClaimingDueDate: 2,
       nekomataClaimingDueDate: 99,
       dayCountFrom: 1,
-      hasFirstGhost: false,
       assumptions: new Map(),
       wolfPairDenyals: [],
       hocusPocus: new Map(),
@@ -302,13 +303,13 @@ setup:
     const { vs, setup, players } = buildVillageStatus(statements, meta)
 
     const options = {
+      regulation: defaultAnalyzeRegulation,
       seerClaimingDueDate: 2,
       mediumClaimingDueDate: 2,
       bodyguardClaimingDueDate: 99,
       masonClaimingDueDate: 2,
       nekomataClaimingDueDate: 99,
       dayCountFrom: 1,
-      hasFirstGhost: false,
       assumptions: new Map(),
       wolfPairDenyals: [],
       hocusPocus: new Map(),
@@ -812,10 +813,11 @@ setup: { seer: 1, werewolf: 1, villager: 3 }
     const { statements, meta } = parse(howl)
     const { vs, setup, assumptions } = buildVillageStatus(statements, meta)
     const retar = new VillageRetar(vs, setup, {
+      regulation: defaultAnalyzeRegulation,
       seerClaimingDueDate: 99, mediumClaimingDueDate: 99,
       bodyguardClaimingDueDate: 99, masonClaimingDueDate: 99,
       nekomataClaimingDueDate: 99,
-      dayCountFrom: 1, hasFirstGhost: false,
+      dayCountFrom: 1,
       assumptions, wolfPairDenyals: [], hocusPocus: new Map(),
       id: 0, batches: 1, batch: 0,
     })

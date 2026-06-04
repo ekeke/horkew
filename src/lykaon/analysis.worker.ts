@@ -2,6 +2,7 @@ import wasmInit, { analyze } from '../retar-rs/pkg-web/retar.js'
 // @ts-ignore — Vite ?url import
 import wasmUrl from '../retar-rs/pkg/retar_bg.wasm?url'
 import { VillageRetar } from '../retar/index.ts'
+import { defaultAnalyzeRegulation } from '../retar/defaults.ts'
 import type { SystemRole } from '../types/index.ts'
 
 export type RetarRequest = {
@@ -102,13 +103,13 @@ function handleAnalysis(msg: any) {
     vs.multiVoteDays = new Set(vs.multiVoteDays ?? [])
 
     const options = {
+      regulation: defaultAnalyzeRegulation,
       seerClaimingDueDate: 2,
       mediumClaimingDueDate: 2,
       bodyguardClaimingDueDate: 99,
       masonClaimingDueDate: 2,
       nekomataClaimingDueDate: 99,
       dayCountFrom: 1,
-      hasFirstGhost: false,
       assumptions: new Map<number, SystemRole>(msg.assumptions ?? []),
       wolfPairDenyals: msg.wolfPairDenyals ?? [],
       hocusPocus: new Map<number, boolean>((msg.hocusPocus ?? []).map((s: number) => [s, true])),

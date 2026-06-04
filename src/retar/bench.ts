@@ -5,6 +5,7 @@ import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from './index.ts'
 import type { AnalyzeOptions } from './index.ts'
+import { defaultAnalyzeRegulation } from './defaults.ts'
 import type { DebugStash } from './finalizer.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -14,13 +15,13 @@ const WARMUP = 3
 const ITERATIONS = 20
 
 const defaultOptions: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 2,
   mediumClaimingDueDate: 2,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 2,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),

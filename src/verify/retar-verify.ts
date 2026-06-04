@@ -33,6 +33,7 @@ import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions, AnalyzeResult } from '../retar/index.ts'
+import { defaultAnalyzeRegulation, firstGhostAnalyzeRegulation } from '../retar/defaults.ts'
 import { serializeVillageStatus, serializeOptions, parseWasmResult } from '../retar/wasm-helpers.ts'
 import { buildAssumptions } from '../fenrir/src/retar-bridge.ts'
 import { enableDump, disableDump, resetDump, getDump } from '../retar/dump.ts'
@@ -47,13 +48,13 @@ try {
 }
 
 const lupaOptions: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 99,
   mediumClaimingDueDate: 99,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 99,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),
@@ -161,7 +162,7 @@ function verifyCheckpoint(
   }
 
   const options = config.hasFirstGhost
-    ? { ...lupaOptions, hasFirstGhost: true }
+    ? { ...lupaOptions, regulation: firstGhostAnalyzeRegulation }
     : lupaOptions
   const retar = new VillageRetar(vs, setup, options)
   const t0 = performance.now()
@@ -258,7 +259,7 @@ function verifyPriorCheckpoint(
   }
 
   const options = config.hasFirstGhost
-    ? { ...lupaOptions, hasFirstGhost: true }
+    ? { ...lupaOptions, regulation: firstGhostAnalyzeRegulation }
     : lupaOptions
 
   // ベースRetarを実行してprior（analyze結果）を取得
@@ -346,7 +347,7 @@ function verifyCompatCheckpoint(
   const { vs, setup } = buildVillageStatus(statements, meta)
 
   const options = config.hasFirstGhost
-    ? { ...lupaOptions, hasFirstGhost: true }
+    ? { ...lupaOptions, regulation: firstGhostAnalyzeRegulation }
     : lupaOptions
 
   // JS版
@@ -519,7 +520,7 @@ function verifyTightnessCheckpoint(
   }
 
   const options = config.hasFirstGhost
-    ? { ...lupaOptions, hasFirstGhost: true }
+    ? { ...lupaOptions, regulation: firstGhostAnalyzeRegulation }
     : lupaOptions
 
   // ベースRetarを実行して可能性集合を取得
@@ -601,7 +602,7 @@ function verifyPriorEquivCheckpoint(
   }
 
   const options = config.hasFirstGhost
-    ? { ...lupaOptions, hasFirstGhost: true }
+    ? { ...lupaOptions, regulation: firstGhostAnalyzeRegulation }
     : lupaOptions
 
   // ベースRetarを実行してpriorを取得
@@ -852,13 +853,13 @@ function verifyHowlFile(filePath: string): void {
   }
 
   const defaultFileOptions: AnalyzeOptions = {
+    regulation: defaultAnalyzeRegulation,
     seerClaimingDueDate: 2,
     mediumClaimingDueDate: 2,
     bodyguardClaimingDueDate: 99,
     masonClaimingDueDate: 2,
     nekomataClaimingDueDate: 99,
     dayCountFrom: 1,
-    hasFirstGhost: false,
     assumptions: new Map(),
     wolfPairDenyals: [],
     hocusPocus: new Map(),

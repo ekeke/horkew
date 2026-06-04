@@ -14,6 +14,7 @@ import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
 import type { AnalyzeOptions, AnalyzeResult } from '../retar/index.ts'
+import { firstGhostAnalyzeRegulation } from '../retar/defaults.ts'
 import { Possibilities, possibilityFromRoles } from '../retar/possibilities.ts'
 import { evaluateWolfRisk } from './wolfRisk.ts'
 
@@ -25,13 +26,13 @@ const ROLES = new Map<SystemRole, number>([
 ])
 
 const ANALYZE_OPTIONS: AnalyzeOptions = {
+  regulation: firstGhostAnalyzeRegulation,
   seerClaimingDueDate: 2,
   mediumClaimingDueDate: 2,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 2,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: true,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),

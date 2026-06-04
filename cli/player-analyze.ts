@@ -17,6 +17,7 @@ import { parse } from '../src/howl/parser.ts'
 import { buildVillageStatus } from '../src/howl/bridge.ts'
 import { VillageRetar } from '../src/retar/index.ts'
 import type { AnalyzeOptions } from '../src/retar/index.ts'
+import { defaultAnalyzeRegulation } from '../src/retar/defaults.ts'
 import { ROLE_COUNT, RoleBitIndex } from '../src/retar/possibilities.ts'
 import { computeRoleProbabilities } from '../src/skoll/index.ts'
 import { analyzeExecutionsByWorld } from '../src/skoll/world-analysis.ts'
@@ -108,13 +109,13 @@ function readAndTruncate(filePath: string, untilLine: number | null): string {
 }
 
 const defaultOptions: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 2,
   mediumClaimingDueDate: 2,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 2,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),

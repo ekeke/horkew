@@ -26,6 +26,7 @@ import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from './index.ts'
 import { getEndgameStats, resetEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
+import { defaultAnalyzeRegulation, firstGhostAnalyzeRegulation } from '../retar/defaults.ts'
 import { VillageRetar } from '../retar/index.ts'
 import { RoleBitIndex, RoleSignatureBits, possibilityFromRoles } from '../retar/possibilities.ts'
 import { ATTR, RoleAttributeBits } from './role-attributes.ts'
@@ -38,13 +39,13 @@ import {
 } from './simulate.ts'
 
 const ANALYZE_OPTIONS: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 2,
   mediumClaimingDueDate: 2,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 2,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),
@@ -487,7 +488,7 @@ async function runVerify(args: Args): Promise<void> {
         try {
           const { meta, statements } = parse(truncated)
           const { vs, setup } = buildVillageStatus(statements, meta)
-          const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+          const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, regulation: firstGhostAnalyzeRegulation } : ANALYZE_OPTIONS
           tsumiResult = searchTsumi(vs, setup, opts)
           strategy = null
           if (tsumiResult.isTsumi && !args.noStrategy) {
@@ -541,7 +542,7 @@ async function runVerify(args: Args): Promise<void> {
             try {
               const { meta, statements } = parse(prevCp.truncated)
               const { vs, setup } = buildVillageStatus(statements, meta)
-              const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+              const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, regulation: firstGhostAnalyzeRegulation } : ANALYZE_OPTIONS
               const deepResult = searchTsumi(vs, setup, opts)
               if (deepResult.isTsumi) {
                 const deepSr = searchTsumiStrategy(deepResult, { maxDepth: prevCp.aliveCount })
@@ -587,7 +588,7 @@ async function runVerify(args: Args): Promise<void> {
             try {
               const { meta, statements } = parse(truncated)
               const { vs, setup } = buildVillageStatus(statements, meta)
-              const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+              const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, regulation: firstGhostAnalyzeRegulation } : ANALYZE_OPTIONS
               const noPruneResult = searchTsumi(vs, setup, opts)
               if (noPruneResult.isTsumi) {
                 const noPruneSr = searchTsumiStrategy(noPruneResult, { maxDepth: 5, disableHamsterPruning: true })
@@ -716,7 +717,7 @@ async function runVerify(args: Args): Promise<void> {
           try {
             const { meta, statements } = parse(truncated)
             const { vs, setup } = buildVillageStatus(statements, meta)
-            const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+            const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, regulation: firstGhostAnalyzeRegulation } : ANALYZE_OPTIONS
             const retar = new VillageRetar(vs, setup, opts)
             const retarResult = retar.analyze()
             const poss = new Uint16Array(setup.values().reduce((a, b) => a + b, 0) + 1)

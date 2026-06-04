@@ -7,6 +7,7 @@
 
 import type { SystemRole } from '../types/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
+import { defaultAnalyzeRegulation } from '../retar/defaults.ts'
 import type { GameConfig, GameHandlers } from '../lupa/handlers.ts'
 import { runGame } from '../lupa/engine.ts'
 import { makeRandomHandlers } from '../lupa/test-helpers.ts'
@@ -35,13 +36,13 @@ const MAX_NEKOMATA = 1
 const SETUP_GENERATION_ATTEMPTS = 1000
 
 const DEFAULT_ANALYZE_OPTIONS: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 2,
   mediumClaimingDueDate: 2,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 2,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),

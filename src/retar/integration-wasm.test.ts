@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { parse } from '../howl/parser.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import type { AnalyzeOptions } from './index.ts'
+import { defaultAnalyzeRegulation } from './defaults.ts'
 import type { SystemRole, Seat } from '../types/index.ts'
 // @ts-ignore
 import { analyze as wasmAnalyze } from '../retar-rs/pkg/retar.js'
@@ -14,13 +15,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const scenariosDir = join(__dirname, 'scenarios')
 
 const defaultOptions: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 2,
   mediumClaimingDueDate: 2,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 2,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),
@@ -158,8 +159,12 @@ function serializeVillageStatus(vs: any): any {
 }
 
 function serializeOptions(options: AnalyzeOptions): any {
+  // regulation は Rust 側が知らない型なので除外。 hasFirstGhost を JSON に詰めて互換性を保つ。
+  const { regulation, ...rest } = options
+  const hasFirstGhost = regulation['general.first-victim'] !== 'none'
   return {
-    ...options,
+    ...rest,
+    hasFirstGhost,
     assumptions: Object.fromEntries(options.assumptions),
     hocusPocus: Object.fromEntries(options.hocusPocus),
   }

@@ -14,6 +14,7 @@ import { parse } from '../../howl/parser.ts'
 import { buildVillageStatus } from '../../howl/bridge.ts'
 import { VillageRetar } from '../../retar/index.ts'
 import type { AnalyzeOptions } from '../../retar/index.ts'
+import { defaultAnalyzeRegulation } from '../../retar/defaults.ts'
 import { serializeVillageStatus, serializeOptions, parseWasmResult, resultToPossibilities } from '../../retar/wasm-helpers.ts'
 import { Possibilities, RoleBitIndex, possibilityFromRoles } from '../../retar/possibilities.ts'
 import { searchTsumi, searchTsumiStrategy } from '../../hati/index.ts'
@@ -55,13 +56,13 @@ export const useWasm = wasmAnalyze !== null
 // ============================================================
 
 export const DEFAULT_RETAR_OPTIONS: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 99,
   mediumClaimingDueDate: 99,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 99,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),
@@ -72,15 +73,18 @@ export const DEFAULT_RETAR_OPTIONS: AnalyzeOptions = {
 
 /** LupaConfig のルールから Retar AnalyzeOptions を構築 */
 function buildRetarOptions(config: LupaConfig): AnalyzeOptions {
-  const rules = resolveRegulation(config.rules)
-  const hasFirstGhost = config.hasFirstGhost ?? rules['general.first-victim'] !== 'none'
-  const seerFirstSeek = rules['role.seer.first-seek']
-  // dayCountFrom は Retar 内部の占い行動開始夜。omitFirstDay は表示問題であり Retar に影響しない。
+  // config.hasFirstGhost が明示指定されていれば first-victim を上書きして Regulation に反映する。
+  // dayCountFrom は Retar 内部の占い行動開始夜で、 omitFirstDay は表示問題であり Retar に影響しない。
   // hasFirstGhost が true なら night 0 から行動するので dayCountFrom=1 は正しいまま。
+  const baseRules = config.hasFirstGhost === true
+    ? { ...config.rules, 'general.first-victim': 'random' as const }
+    : config.hasFirstGhost === false
+      ? { ...config.rules, 'general.first-victim': 'none' as const }
+      : config.rules
+  const regulation = resolveRegulation(baseRules)
   return {
     ...DEFAULT_RETAR_OPTIONS,
-    hasFirstGhost,
-    seerFirstSeek,
+    regulation,
   }
 }
 

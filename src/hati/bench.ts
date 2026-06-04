@@ -13,15 +13,16 @@ import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from './index.ts'
 import { resetEndgameStats, getEndgameStats } from './search.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
+import { defaultAnalyzeRegulation, firstGhostAnalyzeRegulation } from '../retar/defaults.ts'
 
 const ANALYZE_OPTIONS: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 2,
   mediumClaimingDueDate: 2,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 2,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),
@@ -89,7 +90,7 @@ async function benchConfig(cfg: Config) {
       try {
         const { meta, statements } = parse(truncated)
         const { vs, setup } = buildVillageStatus(statements, meta)
-        const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+        const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, regulation: firstGhostAnalyzeRegulation } : ANALYZE_OPTIONS
         const r = searchTsumi(vs, setup, opts)
         let searchElapsed = 0
         let nodesVisited = 0

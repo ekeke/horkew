@@ -12,6 +12,7 @@ import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../fenrir
 import { RandomAgent } from '../verify/random-agent.ts'
 import { findScenario, scenarios } from './scenarios.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
+import { defaultAnalyzeRegulation } from '../retar/defaults.ts'
 
 import type { AgentAdapterConfig } from '../verify/agent-adapter.ts'
 
@@ -132,13 +133,13 @@ function parseArgs(args: string[]): CliOptions {
 }
 
 const ANALYZE_OPTIONS: AnalyzeOptions = {
+  regulation: defaultAnalyzeRegulation,
   seerClaimingDueDate: 2,
   mediumClaimingDueDate: 2,
   bodyguardClaimingDueDate: 99,
   masonClaimingDueDate: 2,
   nekomataClaimingDueDate: 99,
   dayCountFrom: 1,
-  hasFirstGhost: false,
   assumptions: new Map(),
   wolfPairDenyals: [],
   hocusPocus: new Map(),

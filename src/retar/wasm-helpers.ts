@@ -56,9 +56,13 @@ export function serializeVillageStatus(vs: any): any {
 }
 
 export function serializeOptions(options: AnalyzeOptions, setup?: Map<SystemRole, number>): any {
-  const { seerFirstSeek: _unused, ...rest } = options
+  // regulation は Rust 側が知らない型なので除外。 hasFirstGhost のみ JSON に詰めて互換性を保つ。
+  // (seerFirstSeek は元々 Rust 側で未使用、 regulation から導出されるため不要)
+  const { regulation, ...rest } = options
+  const hasFirstGhost = regulation['general.first-victim'] !== 'none'
   const result: any = {
     ...rest,
+    hasFirstGhost,
     assumptions: Object.fromEntries(options.assumptions),
     hocusPocus: Object.fromEntries(options.hocusPocus),
   }
