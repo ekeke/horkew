@@ -624,7 +624,7 @@ async function runVerify(args: Args): Promise<void> {
             try {
               const { meta: m2, statements: s2 } = parse(truncated)
               const { vs: vs2, setup: setup2 } = buildVillageStatus(s2, m2)
-              const opts2 = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+              const opts2 = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, regulation: firstGhostAnalyzeRegulation } : ANALYZE_OPTIONS
               const deepResult = searchTsumi(vs2, setup2, opts2)
               if (deepResult.isTsumi) {
                 deepCheckFound++
@@ -1010,7 +1010,7 @@ async function runFalseNegativeFromDb(args: Args): Promise<void> {
       try {
         const { meta, statements } = parse(truncated)
         const { vs, setup } = buildVillageStatus(statements, meta)
-        const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, hasFirstGhost: true } : ANALYZE_OPTIONS
+        const opts = cfg.hasFirstGhost ? { ...ANALYZE_OPTIONS, regulation: firstGhostAnalyzeRegulation } : ANALYZE_OPTIONS
 
         let alive = 0
         for (const [seat, status] of vs.statuses) {
