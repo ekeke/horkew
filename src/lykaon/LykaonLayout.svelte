@@ -11,6 +11,7 @@
   import EditorPane from './panes/EditorPane.svelte'
   import StatusPane from './panes/StatusPane.svelte'
   import AnalysisTable from './panes/AnalysisTable.svelte'
+  import type { Snippet } from 'svelte'
   import type { AnalysisContext } from './AnalysisContext.svelte.ts'
 
   let {
@@ -19,6 +20,7 @@
     maxEditorPx = 400,
     hideAssumptions = false,
     readonly = false,
+    editorTop,
   }: {
     ctx: AnalysisContext
     /** [左=エディタ, 右=combined] の flex 比率。 default [1, 2] は main demo に準拠 */
@@ -29,6 +31,8 @@
     hideAssumptions?: boolean
     /** EditorPane を編集ロックする (内部で EditorPane の readonly に渡る) */
     readonly?: boolean
+    /** エディタペインの上に差し込む任意コンテンツ (動画プレイヤー等)。consumer が snippet で渡す */
+    editorTop?: Snippet
   } = $props()
 
   let leftFlex = $derived(ratio[0])
@@ -38,7 +42,12 @@
 
 <div class="lykaon-layout">
   <div class="layout-left" style:flex="{leftFlex}" style:max-width={editorMax}>
-    <EditorPane {ctx} {readonly} />
+    {#if editorTop}
+      <div class="layout-editor-top">{@render editorTop()}</div>
+    {/if}
+    <div class="layout-editor">
+      <EditorPane {ctx} {readonly} />
+    </div>
   </div>
   <div class="layout-right" style:flex="{rightFlex}">
     <div class="layout-right-top">
@@ -63,7 +72,16 @@
     overflow: hidden;
   }
   .layout-left {
+    display: flex;
+    flex-direction: column;
     border-right: 1px solid var(--color-border);
+  }
+  .layout-editor-top {
+    flex: 0 0 auto;
+  }
+  .layout-editor {
+    flex: 1;
+    min-height: 0;
   }
   .layout-right {
     display: flex;
