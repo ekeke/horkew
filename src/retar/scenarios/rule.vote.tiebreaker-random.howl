@@ -1,0 +1,41 @@
+---
+title: rule.vote.tiebreaker = random (理想 + todo skip)
+tags: [ruleset, vote.tiebreaker]
+setup:
+  werewolf: 1
+  seer: 1
+  villager: 3
+rules:
+  vote.tiebreaker: random
+  vote.final: final
+  general.first-victim: none
+---
+
+# vote.tiebreaker=random のとき: 同票時にランダムで処刑対象を選ぶ。
+# default (draw) は同票で処刑なし。 random は強制処刑。
+#
+# retar 観点: random 解釈下で処刑された seat の役職は「同票候補のうちランダム選出」 で
+# 情報量が低下。 default (draw) なら同票発生で「誰も処刑されない」 = 同票 seat 群の
+# 役職分布を制約できるが、 random では処刑された seat = 同票内のランダム 1 名なので
+# 処刑された seat 単独の役職推理にしか使えない (= 同票分布の情報が消える)。
+#
+# retar 実装ステータス: 未対応 (grep ヒット無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve
+
+# Day 1: 多数決処刑 (tiebreaker 発火しない構成、 ルール存在のみ pin)
+Alice→Bob
+Carol→Bob
+Bob→Alice
+Dave→Alice
+Eve→Bob
+
+Bob 処刑
+
+# Day 1 終了時点 (理想)
+# - vote.tiebreaker=random ルール下でも、 多数決処刑なら tiebreaker 発火しない
+# - 本 scenario では random 効果が観測できない (同票なし)
+# - 真の random 効果を見せるには「2-2 同票 + 投票分布をリセットする random 選出」
+#   が必要、 将来 retar 実装時に scenario 再構築
+# @expect-skip Bob: [werewolf, seer, villager]

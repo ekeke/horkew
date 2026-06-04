@@ -1,0 +1,49 @@
+---
+title: rule.role.nekomata.curse-target = villager (理想 + todo skip)
+tags: [ruleset, role.nekomata.curse-target]
+setup:
+  werewolf: 1
+  seer: 1
+  medium: 1
+  nekomata: 1
+  villager: 3
+rules:
+  role.nekomata.curse-target: villager
+  general.first-victim: none
+---
+
+# nekomata.curse-target=villager のとき: 猫又が wolf に襲撃された際、 道連れ対象が
+# villager 限定 (default の all-survivors は全生存者対象)。
+#
+# retar 観点: wolf が nekomata を襲撃した翌朝、 道連れ死者が出る = その死者は
+# villager (curse-target=villager 制約)。 wolf や役職持ちは道連れ対象から外れる。
+#
+# - default (all-survivors): wolf 襲撃 nekomata の翌朝、 道連れ死者は任意の生存者
+# - villager: wolf 襲撃 nekomata の翌朝、 道連れ死者 = 役職持ちでない確定
+#
+# retar 実装ステータス: 未対応 (grep ヒット無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace
+
+# Day 1: 何もせず投票で Grace 処刑 (Day 進行のため)
+Alice→Grace
+Bob→Grace
+Carol→Grace
+Dave→Grace
+Eve→Grace
+Frank→Grace
+Grace→Alice
+
+Grace 処刑
+
+# Day 2 朝: 2 件死亡 (wolf 襲撃 nekomata + 道連れ村人)
+# Bob = 襲撃された nekomata、 Carol = 道連れ村人 (curse-target=villager 制約下)
+Bob 死亡
+Carol 死亡
+
+# Day 2 終了時点 (理想)
+# - curse-target=villager 解釈で Carol = villager 確定 (道連れ対象は villager 限定)
+# - Bob = nekomata 確定 (連動死亡パターン)
+# @expect-skip Carol: [villager]
+# @expect Bob: [nekomata]

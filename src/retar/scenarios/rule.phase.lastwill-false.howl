@@ -1,0 +1,47 @@
+---
+title: rule.phase.lastwill = false (理想 + todo skip、 retar 未対応)
+tags: [ruleset, phase.lastwill]
+setup:
+  werewolf: 1
+  seer: 1
+  villager: 3
+rules:
+  phase.lastwill: false
+  general.first-victim: none
+---
+
+# phase.lastwill=false のとき: 処刑された seat は遺言 CO の機会無しに死亡。
+# 通常 (lastwill=true) は処刑直前に最後の CO ができるため、 retar は「処刑されて
+# 役職 CO していない seat = 役職持ちでない」 と推論できる。 lastwill=false ではこの
+# 排除を発動してはならない (= 黙って死んだ seat にも役職保有可能性を残す)。
+#
+# 参考: tasks/handoff-ruleset-followups.md Task B
+# > lastwill なしだと、 黙って死んだからと言って村役職ではないと判断するのは早計と
+# > 考えるべきです。
+#
+# retar 実装ステータス: 未対応 (grep ヒット無し、 phase.lastwill 参照無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve
+
+# Day 1: 占い CO 1 件のみ、 Bob 処刑
+Alice 占いCO Bob●
+
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Eve→Bob
+Bob→Alice
+
+Bob 処刑
+
+# Bob 処刑後 (理想)
+# - lastwill=false により Bob は CO 機会無しで死亡 → 役職保有可能性を排除しない
+# - 5 人村 seer:1 で Bob = seer の可能性も残るべき (default lastwill=true なら Bob ≠ seer)
+# - Alice 占いCO Bob● の Alice 真 seer 仮説下では Bob = wolf (黒判定)、
+#   Alice 騙り仮説下では Bob = seer or villager (= 黙って死んだ seer もあり得る)
+# @expect-skip Bob: [werewolf, seer, villager]
+# @expect Alice: [werewolf, seer, villager]
+# @expect Carol: [werewolf, seer, villager]
+# @expect Dave: [werewolf, seer, villager]
+# @expect Eve: [werewolf, seer, villager]

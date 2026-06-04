@@ -1,0 +1,44 @@
+---
+title: rule.role.seer.first-seek = no-wolf (pin, retar 実装済)
+tags: [ruleset, role.seer.first-seek]
+setup:
+  werewolf: 1
+  seer: 1
+  villager: 3
+rules:
+  role.seer.first-seek: no-wolf
+  general.first-victim: none
+---
+
+# role.seer.first-seek=no-wolf のとき: seer は初夜に wolf を引かない (engine は no-wolf
+# 違反の占い action を reject、 divineHistory に entry が残らない)。
+#
+# retar 実装: src/retar/roleTesters.ts:250
+#   if (env.seerFirstSeek === 'no-wolf' && assertionNight === dayCountFrom && species === 'wolf')
+#     return false  // この seer 仮説は破綻
+#
+# 単独 CO だと seerClaimingDueDate 推論が dominant で no-wolf 効果が見えない (Alice 単独 CO
+# → 真 seer 確定が出る)。 そこで 2 CO 構図にして、 初夜 wolf 黒判定を出した CO seat と
+# そうでない CO seat の差を retar 出力で見える化する。
+
+++Alice、Bob、Carol、Dave、Eve
+
+# Day 1: 2 件の占い CO
+# - Alice は初夜 Bob 黒判定 (no-wolf 違反の主張 → 真 seer なら破綻)
+# - Carol は初夜 Dave 白判定 (no-wolf 違反なし)
+Alice 占いCO Bob●
+Carol 占いCO Dave○
+
+# Day 1 終了時点
+# - first-seek=no-wolf により Alice の seer 仮説は破綻 → Alice ∉ seer
+# - 5 人村 seer:1 で 2 CO のうち Alice 排除 → Carol = 真 seer 確定
+# - Carol 真 seer の Dave○ 判定 → Dave 非 wolf 確定 (Dave = villager)
+# - 5 人村 wolf:1 で Carol=seer 確定 + Dave=村 確定 → 残り 3 人 (Alice, Bob, Eve) の中で
+#   wolf 1。 Alice は Carol の seer 確定下では Alice=偽 seer = wolf or villager だが、
+#   Alice の Bob 黒判定が Carol の Dave 白判定と整合するには Alice が wolf 騙りで
+#   Bob=村人を黒と偽った構図のみ成立 → Alice=werewolf 確定、 Bob=villager、 Eve=villager
+# @expect Alice: [werewolf]
+# @expect Bob: [villager]
+# @expect Carol: [seer]
+# @expect Dave: [villager]
+# @expect Eve: [villager]

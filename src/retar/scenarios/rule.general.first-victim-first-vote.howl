@@ -1,0 +1,37 @@
+---
+title: rule.general.first-victim = first-vote (理想 + todo skip)
+tags: [ruleset, general.first-victim]
+setup:
+  werewolf: 1
+  seer: 1
+  villager: 3
+rules:
+  general.first-victim: first-vote
+  general.omitFirstDay: false
+---
+
+# general.first-victim=first-vote のとき: 初日犠牲者 = 初日投票最多者で固定。
+# default (random) は初日犠牲者がランダム、 none は初日犠牲者なし。
+#
+# retar 観点: 初日犠牲者 = 初日投票で最も多く投票された seat と一致するはず。
+# 観測された初日犠牲者と投票分布の最多者が一致しない場合は contradiction。
+# 一致する場合は「犠牲者の役職」 が「投票発言で多く名指しされた seat」 と紐付けられ、
+# 推理の出発点が default (=random、 何でも起こりうる) より絞られる。
+#
+# retar 実装ステータス: 未対応 (general.first-victim 自体は実装あり、 ただし first-vote
+# 解釈用の「投票最多者 = 犠牲者」 一致確認は roleTesters 等に分岐無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve
+
+# Day 1 (omitFirstDay=false で state.day=2 = 初日議論)
+# 初日犠牲者 = first-vote で初日投票最多者 → ここでは Alice が最多被票で Alice 死亡
+# (engine がどう「初日投票」 を集計するかは別 spec の責務、 ここは retar 解釈用の minimal scenario)
+Alice 死亡
+
+# Day 1 終了時点 (理想)
+# - first-victim=first-vote 解釈で Alice = 初日投票最多被票 seat
+# - retar は Alice の役職と「投票発言で名指しされた seat」 を整合チェックすべき
+# - 本 scenario は最小構成、 投票発言なし → Alice の役職候補は default のまま (全候補)
+# - 将来 retar 実装時に投票発言付き scenario で再構築
+# @expect-skip Alice: [werewolf, seer, villager]

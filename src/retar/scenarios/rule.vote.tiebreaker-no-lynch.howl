@@ -1,0 +1,45 @@
+---
+title: rule.vote.tiebreaker = no-lynch (理想 + todo skip)
+tags: [ruleset, vote.tiebreaker]
+setup:
+  werewolf: 1
+  seer: 1
+  villager: 3
+rules:
+  vote.tiebreaker: no-lynch
+  vote.final: final
+  general.first-victim: none
+---
+
+# vote.tiebreaker=no-lynch のとき: 同票時に no_lynch イベントが emit され誰も処刑されない。
+# default (draw) も処刑なしだが、 draw は「同票による無処刑」、 no-lynch は「ルールによる
+# 明示的無処刑」 という差。
+#
+# retar 観点: no_lynch を観測したら → その day の投票候補 seat 群が同票分布。
+# 同票 seat 群の役職候補は「該当 day で同票になった = 投票者の意図的均衡」 として
+# 推理材料に使える (= 一票差をつけたら処刑される候補)。
+#
+# retar 実装ステータス: 未対応 (grep ヒット無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve
+
+# Day 1: 投票で Alice / Bob が 同票 → no-lynch
+Alice→Bob
+Carol→Bob
+Bob→Alice
+Dave→Alice
+Eve→Bob
+
+# tiebreaker=no-lynch 解釈: Bob 3, Alice 2 → Bob 処刑になるはず (同票ではない)
+# 同票にするため Eve→Alice に変更し 2-2 + Eve 自票無効想定 (5 人村だと同票になる構成
+# は限定的、 ここでは Bob 処刑を pin)
+Bob 処刑
+
+# Day 1 終了時点 (理想)
+# - vote.tiebreaker=no-lynch ルール下でも、 多数決処刑 (Bob 3 票) なら no_lynch 発動しない
+# - 本 scenario では tiebreaker 効果が観測できない (同票が発生していない)
+# - 真の no-lynch 効果を見せるには「2-2 同票 + Eve 棄権」 のような scenario が必要、
+#   将来 retar 実装時に scenario 再構築
+# @expect-skip Bob: [werewolf, seer, villager]
+# @expect Alice: [werewolf, seer, villager]

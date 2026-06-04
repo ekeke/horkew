@@ -1,0 +1,42 @@
+---
+title: rule.vote.final = final (理想 + todo skip)
+tags: [ruleset, vote.final]
+setup:
+  werewolf: 1
+  seer: 1
+  villager: 3
+rules:
+  vote.final: final
+  general.first-victim: none
+---
+
+# vote.final=final のとき: 同票時に再投票せず tiebreaker (random/no-lynch/draw) で即決。
+# default (revote) は同票で再投票を実施。
+#
+# retar 観点: 再投票が無い分、 「再投票結果から得られる情報」 が消える。
+# 投票分布のみが推理材料。 推理候補幅は default より広がる方向 (情報量が減るため)。
+#
+# retar 実装ステータス: 未対応 (grep ヒット無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve
+
+# Day 1: Alice / Bob で同票になるよう投票 (= 2-2 同票、 残り Eve 自票無効化)
+Alice→Bob
+Carol→Bob
+Bob→Alice
+Dave→Alice
+Eve→Bob
+
+Bob 処刑
+
+# Day 1 終了時点 (理想)
+# - vote.final=final 解釈で同票 → 再投票なしで Bob 処刑 (tiebreaker=draw のとき
+#   投票分布のままだと処刑 actor は Bob = 多数 Bob:3, Alice:2)
+# - 再投票履歴が無いため、 default (revote 有り) より推理材料が少ない方向
+# - 単純な「処刑結果から得られる情報」 は default と同じだが、 同票時の振る舞いが違う
+# @expect-skip Bob: [werewolf, seer, villager]
+# @expect Alice: [werewolf, seer, villager]
+# @expect Carol: [werewolf, seer, villager]
+# @expect Dave: [werewolf, seer, villager]
+# @expect Eve: [werewolf, seer, villager]

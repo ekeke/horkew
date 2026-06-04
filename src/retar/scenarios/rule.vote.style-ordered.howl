@@ -1,0 +1,42 @@
+---
+title: rule.vote.style = ordered (理想 + todo skip)
+tags: [ruleset, vote.style]
+setup:
+  werewolf: 1
+  seer: 1
+  villager: 3
+rules:
+  vote.style: ordered
+  general.first-victim: none
+---
+
+# vote.style=ordered のとき: 投票順序が固定 → 「最終投票者」 が確定する。
+# default (free) は投票順自由、 最終投票者の概念が定まらない。
+#
+# retar 観点 (handoff-ruleset-followups.md Task C):
+# > 一応 free と concurrent は、 retar で最終投票者が狼と仮定した場合に、
+# > 翌日に続けば一手勝ちのパターンを可能性から除外できるという意味があるんだけど、
+# > retar でもまだ実装されてません。
+#
+# ordered のとき、 最終投票者 = wolf 仮定 → 翌日に続くなら wolf は一手勝ちパターンを
+# 取れるはず → 取らなかったので矛盾 (= 最終投票者の wolf 候補が消える方向)。
+#
+# retar 実装ステータス: 未対応 (grep ヒット無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve
+
+# Day 1: 投票順序固定 (vote.style=ordered) で Eve が最終投票者
+Alice→Bob
+Bob→Alice
+Carol→Bob
+Dave→Bob
+Eve→Bob
+
+Bob 処刑
+
+# Day 1 終了時点 (理想)
+# - ordered 解釈で Eve = 最終投票者
+# - 翌日に続く (Day 2 開始)、 Eve = wolf 仮定なら一手勝ち取れたはず → 取らなかった
+# - retar は Eve の wolf 候補を排除すべき (= Eve ≠ werewolf)
+# @expect-skip Eve: [seer, villager]

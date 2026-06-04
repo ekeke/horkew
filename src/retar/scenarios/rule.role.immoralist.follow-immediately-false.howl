@@ -1,0 +1,54 @@
+---
+title: rule.role.immoralist.follow-immediately = false (理想 + todo skip)
+tags: [ruleset, role.immoralist.follow-immediately]
+setup:
+  werewolf: 1
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  werehamster: 1
+  immoralist: 1
+  villager: 3
+rules:
+  role.immoralist.follow-immediately: false
+  role.immoralist.reveal-following: true
+  general.first-victim: none
+---
+
+# immoralist.follow-immediately=false のとき: 狐陣営 (werehamster) 全滅後、
+# immoralist は翌朝に後追い死亡 (default true は即時死亡)。
+#
+# retar 観点: 後追い死亡の発生 day がズレる。
+# - default (=true): 処刑日に 2 件死亡 (処刑 + 即時後追い) → 同日 2 件パターンから
+#   後追い者を immoralist 確定
+# - false: 処刑日に処刑のみ、 翌朝に「後追い」 イベント → 翌朝死者 = immoralist 確定、
+#   ただし「翌朝の追加死者」 が wolf 襲撃ではなく後追いであることを retar が区別すべき
+#
+# retar 実装ステータス: 未対応 (grep ヒット無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy
+
+# Day 1: Bob (実際 werehamster) を処刑、 follow-immediately=false なので
+#         immoralist (Carol と仮定) は Day 2 朝に後追い死亡
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Eve→Bob
+Frank→Bob
+Grace→Bob
+Hank→Bob
+Ivy→Bob
+Bob→Alice
+
+Bob 処刑
+
+# Day 2 朝: Carol 死亡 (Night 1 wolf 襲撃 1 件 + immoralist 後追い 1 件 = 2 件死亡)
+# ここでは Carol = immoralist と仮定するため Carol を 後追い 表記で記述
+Carol 後追い
+
+# Day 2 終了時点 (理想)
+# - Carol = immoralist 確定 (Day 2 朝の後追い死)
+# - default (immediately=true) なら Carol は Day 1 で死亡しているはずなので、 false 解釈
+#   下で Day 2 朝死亡を後追いと識別する必要がある
+# @expect-skip Carol: [immoralist]

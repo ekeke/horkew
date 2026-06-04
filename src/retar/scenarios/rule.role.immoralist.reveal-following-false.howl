@@ -1,0 +1,53 @@
+---
+title: rule.role.immoralist.reveal-following = false (理想 + todo skip、 最重要)
+tags: [ruleset, role.immoralist.reveal-following]
+setup:
+  werewolf: 1
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  werehamster: 1
+  immoralist: 1
+  villager: 3
+rules:
+  role.immoralist.reveal-following: false
+  general.first-victim: none
+---
+
+# immoralist.reveal-following=false のとき: werehamster の execute / fox_kill 死亡が
+# 公開時に night_kill に偽装される (lupa engine 側で death event を suppress + 翌朝 emit)。
+#
+# retar 観点 (最重要影響): 「夜死亡 seat = wolf に襲撃された」 という単純推論が破綻する。
+# 夜死亡 seat の正体候補が広がり、 werehamster の可能性も残す必要がある。
+#
+# - default (=true): 処刑死亡が「Bob 処刑 + 翌朝の追加死者なし」 として観測される
+# - false: 処刑死亡が翌朝 night_kill として偽装、 「夜死亡 = 襲撃」 と思い込むと
+#   被噛 seat 候補が wolf に絞れない (= werehamster だったかもしれない)
+#
+# retar 実装ステータス: 未対応 (grep ヒット無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy
+
+# Day 1: 投票で Ivy 処刑 (Day 進行のため、 推理上は無関係)
+Alice→Ivy
+Bob→Ivy
+Carol→Ivy
+Dave→Ivy
+Eve→Ivy
+Frank→Ivy
+Grace→Ivy
+Hank→Ivy
+Ivy→Alice
+
+Ivy 処刑
+
+# Day 2 朝: Bob 死亡 (lupa engine reveal-following=false で偽装された night_kill)
+# 実際は Day 2 で werehamster Bob が処刑されたが、 reveal-following=false により
+# Day 2 翌朝の night_kill として emit される構造を retar 入力で模倣
+Bob 死亡
+
+# Day 2 終了時点 (理想)
+# - reveal-following=false 解釈では Bob の死因は「襲撃」 でなく「偽装処刑された werehamster」 の可能性も残る
+# - retar は Bob の possibilities に werehamster を含めるべき (default 解釈なら werehamster 除外)
+# @expect-skip Bob: [werewolf, werehamster, seer, medium, bodyguard, immoralist, villager]

@@ -1,0 +1,49 @@
+---
+title: rule.role.nekomata.curse-immediately = false (理想 + todo skip)
+tags: [ruleset, role.nekomata.curse-immediately]
+setup:
+  werewolf: 1
+  seer: 1
+  medium: 1
+  nekomata: 1
+  villager: 3
+rules:
+  role.nekomata.curse-immediately: false
+  general.first-victim: none
+---
+
+# nekomata.curse-immediately=false のとき: 猫又の道連れ発動が処刑日翌朝にズレる
+# (default=true は処刑時即時)。
+#
+# retar 観点: 道連れ死者が観測される day が違うので、 「処刑日翌朝の追加死者」 を
+# 「襲撃」 と単純解釈すると誤り → 道連れの可能性も残す必要がある。
+#
+# - default (=true): Day N で「Bob 処刑 + Alice 道連れ即死」 → Alice = 投票者 → Bob 猫又
+# - false: Day N で「Bob 処刑」、 Day N+1 朝に「Alice 死亡」 → 一見襲撃に見えるが
+#   実は道連れ。 retar は両者の区別を curse-immediately ルールから推論すべき
+#
+# retar 実装ステータス: 未対応 (grep ヒット無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace
+
+# Day 1: Bob (実は nekomata) を処刑
+Alice→Bob
+Carol→Bob
+Dave→Bob
+Eve→Bob
+Frank→Bob
+Grace→Bob
+Bob→Alice
+
+Bob 処刑
+
+# Day 2 朝: Alice 死亡 (curse-immediately=false 解釈で道連れ発動)
+Alice 死亡
+
+# Day 2 終了時点 (理想)
+# - curse-immediately=false 解釈下では、 Alice の死は道連れ (Bob nekomata)
+# - 単純 retar は Alice を wolf 襲撃と解釈 → 役職持ち候補が狭まる
+# - 理想は Alice の死因として「道連れ」 を含めた候補保持
+# @expect-skip Bob: [nekomata]
+# @expect Alice: [werewolf, seer, medium, villager]

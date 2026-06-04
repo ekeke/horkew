@@ -1,0 +1,41 @@
+---
+title: rule.role.bodyguard.allow-continuous-protection = false (理想 + todo skip)
+tags: [ruleset, role.bodyguard.allow-continuous-protection]
+setup:
+  werewolf: 1
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  villager: 3
+rules:
+  role.bodyguard.allow-continuous-protection: false
+  general.first-victim: none
+---
+
+# bodyguard 連続護衛禁止のとき: 2 夜以上連続して同じ seat を護衛したと CO すると
+# bodyguard 仮説が破綻 → retar は当該 seat を bodyguard 候補から排除すべき。
+#
+# retar 実装ステータス: 未対応 (grep ヒット無し)。
+# 理想 + @expect-skip todo。
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace
+
+# Day 1: 投票で Grace 処刑 (Day 進行のため、 推理上は無関係)
+Alice→Grace
+Bob→Grace
+Carol→Grace
+Dave→Grace
+Eve→Grace
+Frank→Grace
+Grace→Alice
+
+Grace 処刑
+
+# Day 2: Alice が 狩りCO + Night 1, Night 2 とも Bob 護衛 (連続違反主張)
+Alice 狩りCO Bob護衛 Bob護衛
+
+# Day 2 終了時点 (理想)
+# - 連続護衛禁止により Alice の bodyguard 仮説は破綻
+# - Alice は bodyguard 候補から排除されるべき
+# - 7 人村なので残候補は werewolf, seer, medium, villager
+# @expect-skip Alice: [werewolf, seer, medium, villager]
