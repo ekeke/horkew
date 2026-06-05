@@ -21,6 +21,7 @@
     hideAssumptions = false,
     readonly = false,
     editorTop,
+    editorBottom,
   }: {
     ctx: AnalysisContext
     /** [左=エディタ, 右=combined] の flex 比率。 default [1, 2] は main demo に準拠 */
@@ -33,6 +34,8 @@
     readonly?: boolean
     /** エディタペインの上に差し込む任意コンテンツ (動画プレイヤー等)。consumer が snippet で渡す */
     editorTop?: Snippet
+    /** エディタペインの下に差し込む任意コンテンツ。consumer が snippet で渡す */
+    editorBottom?: Snippet
   } = $props()
 
   let leftFlex = $derived(ratio[0])
@@ -48,6 +51,9 @@
     <div class="layout-editor">
       <EditorPane {ctx} {readonly} />
     </div>
+    {#if editorBottom}
+      <div class="layout-editor-bottom">{@render editorBottom()}</div>
+    {/if}
   </div>
   <div class="layout-right" style:flex="{rightFlex}">
     <div class="layout-right-top">
@@ -82,6 +88,9 @@
   .layout-editor {
     flex: 1;
     min-height: 0;
+  }
+  .layout-editor-bottom {
+    flex: 0 0 auto;
   }
   .layout-right {
     display: flex;
