@@ -6,7 +6,7 @@
   import PlayerName from '../status/PlayerName.svelte'
 
   type Grouping = 'seat' | 'co' | 'survival'
-  type ViewOptions = { columns: 1 | 2 | 3, grouping: Grouping }
+  type ViewOptions = { columns: 1 | 2 | 3 | 4, grouping: Grouping }
 
   let { ctx, onInsertRevealRoles, onOpenDenyWolfDialog, extraFooter, hideAssumptions = false, defaultViewOptions }: {
     ctx: AnalysisContext
@@ -75,7 +75,7 @@
       if (raw) {
         const p = JSON.parse(raw)
         if (
-          (p.columns === 1 || p.columns === 2 || p.columns === 3)
+          (p.columns === 1 || p.columns === 2 || p.columns === 3 || p.columns === 4)
           && (p.grouping === 'seat' || p.grouping === 'co' || p.grouping === 'survival')
         ) return { columns: p.columns, grouping: p.grouping }
       }
@@ -90,8 +90,11 @@
   })
 
   function cycleColumns(): void {
-    const next = viewOptions.columns === 1 ? 2 : viewOptions.columns === 2 ? 3 : 1
-    viewOptions = { ...viewOptions, columns: next as 1 | 2 | 3 }
+    const next = viewOptions.columns === 1 ? 2
+      : viewOptions.columns === 2 ? 3
+      : viewOptions.columns === 3 ? 4
+      : 1
+    viewOptions = { ...viewOptions, columns: next as 1 | 2 | 3 | 4 }
   }
 
   function cycleGrouping(): void {
@@ -197,6 +200,8 @@
 
     // 分割なしを起点に、 2,3,...,R 分割を順に試す。
     // 各段で前段より閾値以上削減できれば採用、 ダメなら前段で確定。
+    // ただし sub-table 数 < R で実効列数が R に届いていない段階では
+    // 「列が余っている」状態なので閾値を緩めて改善あれば採用 (1 行でも) する。
     let bestColumns = distributeSubTables(subTables, R)
     let bestMax = maxRowsOf(bestColumns)
     for (let k = 2; k <= R && k <= largest.seats.length; k++) {
@@ -208,7 +213,11 @@
       ]
       const cols = distributeSubTables(splitSeq, R)
       const max = maxRowsOf(cols)
-      if (max + CO_SPLIT_THRESHOLD <= bestMax) {
+      const effective = Math.min(R, splitSeq.length)
+      const prevEffective = Math.min(R, splitSeq.length - 1)
+      const expandingCols = effective > prevEffective
+      const accept = expandingCols ? max < bestMax : max + CO_SPLIT_THRESHOLD <= bestMax
+      if (accept) {
         bestColumns = cols
         bestMax = max
       } else {
