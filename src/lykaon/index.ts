@@ -47,4 +47,5 @@ export { default as VerticalStatusPane } from './panes/VerticalStatusPane.svelte
 export { default as HatiPane } from './panes/HatiPane.svelte'
 export { default as InspectPane } from './panes/InspectPane.svelte'
 export { default as AnalysisTable } from './panes/AnalysisTable.svelte'
+export { default as VerticalDensePane } from './panes/VerticalDensePane.svelte'
 export { default as LykaonLayout } from './LykaonLayout.svelte'

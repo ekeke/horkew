@@ -12,6 +12,7 @@
     VerticalStatusPane,
     InspectPane,
     AnalysisTable,
+    VerticalDensePane,
   } from '../src/lykaon/index.ts'
   import { setVideoTimeGetter } from '../src/lykaon/editor/index.ts'
   import { EditorView } from '@codemirror/view'
@@ -76,6 +77,7 @@
     { id: 'combined', label: 'Combined' },
     { id: 'status', label: 'Status' },
     { id: 'verticalStatus', label: 'Vertical Status' },
+    { id: 'verticalDense', label: 'Vertical Dense' },
     { id: 'analyzerInput', label: 'Analyzer Input' },
     { id: 'analysis', label: 'Analysis' },
     { id: 'colorSwatch', label: 'Color Swatch' },
@@ -100,7 +102,7 @@
     sidebarOpen: boolean
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, verticalStatus: false, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false, commandPlay: false }
+  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, verticalStatus: false, verticalDense: false, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false, commandPlay: false }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: 'off', panes: { ...defaultPanes }, sidebarOpen: true }
@@ -1428,6 +1430,21 @@
     </section>
   {/snippet}
 
+  {#snippet verticalDensePaneSnippet()}
+    <section class="pane">
+      <div class="pane-header">Vertical Dense</div>
+      <div class="pane-body">
+        <div class="vertical-dense-frame">
+          <VerticalDensePane
+            {ctx}
+            onOpenDenyWolfDialog={openDenyWolfDialog}
+            extraFooter={devMode ? devModeAnalysisFooter : undefined}
+          />
+        </div>
+      </div>
+    </section>
+  {/snippet}
+
   {#snippet devModeAnalysisFooter()}
     <div class="analysis-dev-bar">
       <label class="dev-toggle" title="WASM を無効化して TypeScript 版 Retar を強制使用（デバッグ用）">
@@ -1526,6 +1543,10 @@
 
     {#if paneVisible.verticalStatus}
     {@render verticalStatusPaneSnippet()}
+    {/if}
+
+    {#if paneVisible.verticalDense}
+    {@render verticalDensePaneSnippet()}
     {/if}
 
     {#if paneVisible.analyzerInput}
@@ -2972,6 +2993,14 @@
     border: 1px dashed var(--color-border);
     border-radius: 4px;
     overflow: hidden;
+    box-sizing: content-box;
+  }
+
+  .vertical-dense-frame {
+    width: 320px;
+    border: 1px dashed var(--color-border);
+    border-radius: 4px;
+    overflow: auto;
     box-sizing: content-box;
   }
 </style>
