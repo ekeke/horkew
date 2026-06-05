@@ -459,7 +459,7 @@
 
   .analysis-table td {
     text-align: center;
-    padding: 2px 4px;
+    padding: 0;
     border: 1px solid var(--color-border);
   }
 
