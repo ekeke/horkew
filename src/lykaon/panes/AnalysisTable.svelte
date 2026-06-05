@@ -159,55 +159,143 @@
     return defs
   })()
 
+  // 分割を採用するために要求する最低削減行数 (削減 ≥ この値なら分割を進める)
+  const CO_SPLIT_THRESHOLD = 2
+
   function buildCoColumns(): Column[] {
     const vs = ctx.villageStatus
     if (!vs) return []
     const divined = ctx.divinedSeats
     const allSeats = [...ctx.players.keys()]
 
-    // 各 sub def に該当する席を集める
-    const subsByMain: Record<CoMainGroup, SubTable[]> = { main: [], support: [], nonCo: [] }
+    // sub-table 列を作る (CO_SUB_DEFS 順、 mainGroup は表示順序にのみ反映)。
+    // CO 順 (claimOrder)、非CO は seat 順にフォールバック。
+    const subTables: SubTable[] = []
     for (const def of CO_SUB_DEFS) {
-      const seats: number[] = []
+      const matched: { seat: number, order: number }[] = []
       for (const seat of allSeats) {
         const s = vs.statuses.get(seat)
-        if (def.matches(s?.claimingRole, !!s?.claiming, divined.has(seat))) seats.push(seat)
+        if (def.matches(s?.claimingRole, !!s?.claiming, divined.has(seat))) {
+          matched.push({ seat, order: s?.claimOrder ?? seat })
+        }
       }
-      if (seats.length > 0) subsByMain[def.mainGroup].push({ title: def.title, seats })
+      if (matched.length > 0) {
+        matched.sort((a, b) => a.order - b.order)
+        subTables.push({ title: def.title, seats: matched.map(m => m.seat) })
+      }
     }
+    if (subTables.length === 0) return []
 
-    const order: CoMainGroup[] = ['main', 'support', 'nonCo']
-    const nonEmpty = order.filter(m => subsByMain[m].length > 0)
-    if (nonEmpty.length === 0) return []
+    const R = viewOptions.columns
 
-    const sizeOf = (m: CoMainGroup): number =>
-      subsByMain[m].reduce((acc, st) => acc + st.seats.length, 0)
-
-    const requested = viewOptions.columns
-    const effective = Math.min(requested, nonEmpty.length)
-
-    if (effective === 1) {
-      return [{ subTables: nonEmpty.flatMap(m => subsByMain[m]) }]
+    // 最大 sub-table を見つける (同サイズなら先頭優先)
+    let largestIdx = 0
+    for (let i = 1; i < subTables.length; i++) {
+      if (subTables[i].seats.length > subTables[largestIdx].seats.length) largestIdx = i
     }
-    if (effective === nonEmpty.length) {
-      return nonEmpty.map(m => ({ subTables: subsByMain[m] }))
-    }
-    // effective === 2 && nonEmpty.length === 3
-    // パターンA: [m0+m1 | m2]、 パターンB: [m0 | m1+m2] のうち高さバランス良い方
-    const [a, b, c] = nonEmpty
-    const sa = sizeOf(a), sb = sizeOf(b), sc = sizeOf(c)
-    const diffA = Math.abs((sa + sb) - sc)
-    const diffB = Math.abs(sa - (sb + sc))
-    if (diffA <= diffB) {
-      return [
-        { subTables: [...subsByMain[a], ...subsByMain[b]] },
-        { subTables: subsByMain[c] },
+    const largest = subTables[largestIdx]
+
+    // 分割なしを起点に、 2,3,...,R 分割を順に試す。
+    // 各段で前段より閾値以上削減できれば採用、 ダメなら前段で確定。
+    let bestColumns = distributeSubTables(subTables, R)
+    let bestMax = maxRowsOf(bestColumns)
+    for (let k = 2; k <= R && k <= largest.seats.length; k++) {
+      const parts = splitSeatsEvenly(largest.seats, k)
+      const splitSeq: SubTable[] = [
+        ...subTables.slice(0, largestIdx),
+        ...parts.map(seats => ({ title: largest.title, seats })),
+        ...subTables.slice(largestIdx + 1),
       ]
+      const cols = distributeSubTables(splitSeq, R)
+      const max = maxRowsOf(cols)
+      if (max + CO_SPLIT_THRESHOLD <= bestMax) {
+        bestColumns = cols
+        bestMax = max
+      } else {
+        break
+      }
     }
-    return [
-      { subTables: subsByMain[a] },
-      { subTables: [...subsByMain[b], ...subsByMain[c]] },
-    ]
+    return bestColumns
+  }
+
+  /** 列の行数 = Σ(1 (title) + seats.length) */
+  function columnRows(col: Column): number {
+    let rows = 0
+    for (const st of col.subTables) rows += 1 + st.seats.length
+    return rows
+  }
+
+  function maxRowsOf(cols: Column[]): number {
+    let max = 0
+    for (const c of cols) {
+      const r = columnRows(c)
+      if (r > max) max = r
+    }
+    return max
+  }
+
+  /** seats を k 個のチャンクに均等分割 ([3,3,4] のように後ろが大きめになる) */
+  function splitSeatsEvenly(seats: number[], k: number): number[][] {
+    const out: number[][] = []
+    const len = seats.length
+    for (let i = 0; i < k; i++) {
+      const start = Math.floor((i * len) / k)
+      const end = Math.floor(((i + 1) * len) / k)
+      out.push(seats.slice(start, end))
+    }
+    return out
+  }
+
+  /**
+   * sub-table 群を順序維持のまま R 個の連続チャンクに分け、
+   * 最大列行数 (= maxRowsOf) が最小になる分け方を返す。
+   * 全パターン C(N-1, R-1) を試行 (sub-table 数は 10 個程度までで全列挙可能)。
+   */
+  function distributeSubTables(sts: SubTable[], R: number): Column[] {
+    if (sts.length === 0) return []
+    if (R <= 1) return [{ subTables: sts }]
+    const cols = Math.min(R, sts.length)
+    if (cols === sts.length) return sts.map(s => ({ subTables: [s] }))
+
+    const N = sts.length
+    const rowsOf = (s: SubTable): number => 1 + s.seats.length
+    const stRows: number[] = sts.map(rowsOf)
+
+    let bestMax = Infinity
+    let bestSplits: number[] = []
+
+    const splits: number[] = []
+    function recurse(start: number, depth: number): void {
+      if (depth === cols - 1) {
+        const allSplits = [...splits, N]
+        let s = 0, max = 0
+        for (let i = 0; i < cols; i++) {
+          let chunk = 0
+          for (let j = s; j < allSplits[i]; j++) chunk += stRows[j]
+          if (chunk > max) max = chunk
+          s = allSplits[i]
+        }
+        if (max < bestMax) {
+          bestMax = max
+          bestSplits = allSplits
+        }
+        return
+      }
+      for (let i = start; i <= N - (cols - 1 - depth); i++) {
+        splits.push(i)
+        recurse(i + 1, depth + 1)
+        splits.pop()
+      }
+    }
+    recurse(1, 0)
+
+    const result: Column[] = []
+    let s = 0
+    for (const end of bestSplits) {
+      result.push({ subTables: sts.slice(s, end) })
+      s = end
+    }
+    return result
   }
 
   function buildSurvivalColumns(): Column[] {
