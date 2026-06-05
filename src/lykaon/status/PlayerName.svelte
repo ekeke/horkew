@@ -60,6 +60,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <span
+  class="player-name-root"
   class:clickable
   class:highlighted
   onclick={clickable ? handleClick : undefined}
@@ -68,6 +69,11 @@
 >{@render inner()}</span>
 
 <style>
+  .player-name-root {
+    display: inline-block;
+    white-space: nowrap;
+  }
+
   .clickable {
     cursor: pointer;
     border-radius: 2px;

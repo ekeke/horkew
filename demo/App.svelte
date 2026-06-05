@@ -9,6 +9,7 @@
     EditorPane,
     HatiPane,
     StatusPane,
+    VerticalStatusPane,
     InspectPane,
     AnalysisTable,
   } from '../src/lykaon/index.ts'
@@ -74,6 +75,7 @@
     { id: 'parsed', label: 'Parsed' },
     { id: 'combined', label: 'Combined' },
     { id: 'status', label: 'Status' },
+    { id: 'verticalStatus', label: 'Vertical Status' },
     { id: 'analyzerInput', label: 'Analyzer Input' },
     { id: 'analysis', label: 'Analysis' },
     { id: 'colorSwatch', label: 'Color Swatch' },
@@ -98,7 +100,7 @@
     sidebarOpen: boolean
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false, commandPlay: false }
+  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, verticalStatus: false, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false, commandPlay: false }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: 'off', panes: { ...defaultPanes }, sidebarOpen: true }
@@ -1413,6 +1415,19 @@
     </section>
   {/snippet}
 
+  {#snippet verticalStatusPaneSnippet()}
+    <section class="pane">
+      <div class="pane-header">Vertical Status</div>
+      <div class="pane-body">
+        {#if ctx.villageStatus}
+          <div class="vertical-status-frame">
+            <VerticalStatusPane {ctx} />
+          </div>
+        {/if}
+      </div>
+    </section>
+  {/snippet}
+
   {#snippet devModeAnalysisFooter()}
     <div class="analysis-dev-bar">
       <label class="dev-toggle" title="WASM を無効化して TypeScript 版 Retar を強制使用（デバッグ用）">
@@ -1507,6 +1522,10 @@
 
     {#if paneVisible.status}
     {@render statusPane()}
+    {/if}
+
+    {#if paneVisible.verticalStatus}
+    {@render verticalStatusPaneSnippet()}
     {/if}
 
     {#if paneVisible.analyzerInput}
@@ -2945,5 +2964,14 @@
 
   .trial-new {
     margin-left: 24px;
+  }
+
+  .vertical-status-frame {
+    width: 320px;
+    height: 720px;
+    border: 1px dashed var(--color-border);
+    border-radius: 4px;
+    overflow: hidden;
+    box-sizing: content-box;
   }
 </style>

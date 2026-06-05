@@ -110,6 +110,7 @@ EditorPane で `.howl` を編集すると Web Worker 経由で Retar が走り�
 | `LykaonLayout` | エディタ + 解析サイドカーの結合レイアウト (1:2 比率がデフォルト)。 ctx を渡すだけで標準構成が立ち上がる |
 | `EditorPane` | `.howl` 専用 CodeMirror エディタ (core) |
 | `StatusPane` | 生存者・投票・襲撃・カミングアウト・死亡履歴の集約表示 |
+| `VerticalStatusPane` | 狭幅カラム用の縦長 StatusPane。 タブで集約/投票を切り替え、 役職セクションごとにリスト表示 |
 | `AnalysisTable` | 役職可能性 × 席 のテーブル + 仮説サイドバー |
 | `HatiPane` | 詰み探索結果 |
 | `InspectPane` | fenrir/skoll の game ログ閲覧 (時系列・retar スナップショット) |

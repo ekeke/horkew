@@ -43,6 +43,7 @@ export {
 
 export { default as EditorPane } from './panes/EditorPane.svelte'
 export { default as StatusPane } from './panes/StatusPane.svelte'
+export { default as VerticalStatusPane } from './panes/VerticalStatusPane.svelte'
 export { default as HatiPane } from './panes/HatiPane.svelte'
 export { default as InspectPane } from './panes/InspectPane.svelte'
 export { default as AnalysisTable } from './panes/AnalysisTable.svelte'
