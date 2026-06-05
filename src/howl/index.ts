@@ -58,6 +58,7 @@ export type {
 export { systemRoles } from '../types/index.ts'
 export { buildVillageStatus } from './bridge.ts'
 export type { BridgeResult } from './bridge.ts'
+export { renamePlayer } from './rename.ts'
 export { buildVideoSegments } from './videoSegments.ts'
 export type { VideoSegment, VideoTimestamp } from './videoSegments.ts'
 export { buildDayLineMap } from './dayLineMap.ts'
