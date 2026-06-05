@@ -99,7 +99,7 @@
       .map(([night, assertion]) => ({ day: night + 1, assertion, isBodyguard }))
   }
 
-  type SubTable = { tag: string, seats: number[], roles: SystemRole[], compact: boolean, possibilities: boolean }
+  type SubTable = { tag: string, seats: number[], roles: SystemRole[], possibilities: boolean, primaryRole?: SystemRole }
 
   type CoMainGroup = 'main' | 'support' | 'nonCo'
   type CoSubDef = {
@@ -179,14 +179,14 @@
       }
       if (matched.length > 0) {
         matched.sort((a, b) => a.order - b.order)
-        const compact = def.primaryRole !== undefined && COMPACT_PRIMARY_ROLES.has(def.primaryRole)
-        const possibilities = def.mainGroup === 'nonCo'
+        const isCompactPrimary = def.primaryRole !== undefined && COMPACT_PRIMARY_ROLES.has(def.primaryRole)
+        const possibilities = def.mainGroup === 'nonCo' || isCompactPrimary
         subTables.push({
           tag: def.tag,
           seats: matched.map(m => m.seat),
           roles: rolesForDef(def),
-          compact,
           possibilities,
+          primaryRole: def.primaryRole,
         })
       }
     }
@@ -206,23 +206,11 @@
         <div class="va-sub-table">
           <div class="va-sub-tag">{st.tag}</div>
           <div class="va-sub-body">
-          {#if st.compact}
-            <div class="va-compact-line">
-              {#each st.seats as seat, i}
-                {#if i > 0}<span class="va-compact-sep">,</span>{/if}
-                <PlayerName
-                  dead={ctx.deadSeats.has(seat)}
-                  nightKill={ctx.nightKilledSeats.has(seat)}
-                  executed={ctx.executedSeats.has(seat)}
-                  claim={ctx.claimShortNames.get(seat)}
-                  seat={seat}
-                >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>
-              {/each}
-            </div>
-          {:else if st.possibilities}
+          {#if st.possibilities}
             <div class="va-poss-line">
               {#each st.seats as seat}
                 {@const possibilities = possibilitiesFor(seat)}
+                {@const fixedToPrimary = st.primaryRole !== undefined && possibilities.length === 1 && possibilities[0].role === st.primaryRole}
                 <span class="va-poss-item">
                   <PlayerName
                     dead={ctx.deadSeats.has(seat)}
@@ -230,7 +218,7 @@
                     executed={ctx.executedSeats.has(seat)}
                     claim={ctx.claimShortNames.get(seat)}
                     seat={seat}
-                  >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName><span class="va-poss-colon">:</span>{#each possibilities as { role, dim }, i}{#if i > 0}<span class="va-poss-slash">/</span>{/if}<span class:va-poss-dim={dim}>{roleToShort(role)}</span>{/each}
+                  >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>{#if !fixedToPrimary}{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(seat) === role}<span class="va-poss-cell" class:role-possible={!assumed && !dim} class:role-impossible={!assumed && dim} class:role-assumed={assumed} onclick={() => ctx.toggleAssumption(seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{/if}
                 </span>
               {/each}
             </div>
@@ -381,20 +369,6 @@
     min-width: 0;
   }
 
-  .va-compact-line {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0 4px;
-    padding: 1px 0;
-    font-family: var(--font-mono);
-    font-size: 12px;
-  }
-
-  .va-compact-sep {
-    color: var(--color-text-faint);
-  }
-
   .va-poss-line {
     display: flex;
     flex-wrap: wrap;
@@ -403,18 +377,26 @@
   }
 
   .va-poss-item {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     font-family: var(--font-mono);
     font-size: 12px;
     white-space: nowrap;
   }
 
-  .va-poss-colon, .va-poss-slash {
-    color: var(--color-text-faint);
+  .va-poss-cell {
+    display: inline-block;
+    padding: 0 4px;
+    border: 1px solid var(--color-border);
+    min-width: 1.4em;
+    text-align: center;
+    cursor: pointer;
   }
 
-  .va-poss-dim {
-    opacity: 0.35;
+  .va-poss-cell:hover {
+    outline: 1px solid var(--color-accent);
+    outline-offset: -1px;
   }
 
   .va-table {
