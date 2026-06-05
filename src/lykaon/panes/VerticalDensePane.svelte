@@ -99,7 +99,7 @@
       .map(([night, assertion]) => ({ day: night + 1, assertion, isBodyguard }))
   }
 
-  type SubTable = { tag: string, seats: number[], roles: SystemRole[], possibilities: boolean, primaryRole?: SystemRole }
+  type SubTable = { tag: string, seats: number[], roles: SystemRole[], setGrouping: boolean, primaryRole?: SystemRole }
 
   type CoMainGroup = 'main' | 'support' | 'nonCo'
   type CoSubDef = {
@@ -151,12 +151,55 @@
     })
   }
 
-  /** seat の表示可能性: base (アサンプション無し) で残った役職。 アサンプションで消えたものは dim */
-  function possibilitiesFor(seat: number): { role: SystemRole, dim: boolean }[] {
+  function basePossibilitiesFor(seat: number): SystemRole[] {
+    return baseMap.get(seat) ?? []
+  }
+
+  function hasCorePossibility(seat: number): boolean {
+    for (const role of basePossibilitiesFor(seat)) {
+      const r = systemRoles.get(role)
+      if (!r) continue
+      if (r.alignment === 'werewolf' || r.alignment === 'werehamster') return true
+    }
+    return false
+  }
+
+  function hasNonVillagerPossibility(seat: number): boolean {
+    for (const role of basePossibilitiesFor(seat)) {
+      const r = systemRoles.get(role)
+      if (!r) continue
+      if (r.alignment !== 'villager') return true
+    }
+    return false
+  }
+
+  function possibilitiesSetKey(seat: number): string {
+    return [...basePossibilitiesFor(seat)].sort().join(',')
+  }
+
+  /** 村/灰 の seat ソート (alive → 人外本体 → 人外 → set 同一性 → seat) */
+  function compareNonCoSeats(a: number, b: number): number {
+    const aliveA = ctx.deadSeats.has(a) ? 1 : 0
+    const aliveB = ctx.deadSeats.has(b) ? 1 : 0
+    if (aliveA !== aliveB) return aliveA - aliveB
+    const coreA = hasCorePossibility(a) ? 0 : 1
+    const coreB = hasCorePossibility(b) ? 0 : 1
+    if (coreA !== coreB) return coreA - coreB
+    const nvA = hasNonVillagerPossibility(a) ? 0 : 1
+    const nvB = hasNonVillagerPossibility(b) ? 0 : 1
+    if (nvA !== nvB) return nvA - nvB
+    const kA = possibilitiesSetKey(a)
+    const kB = possibilitiesSetKey(b)
+    if (kA !== kB) return kA < kB ? -1 : 1
+    return a - b
+  }
+
+  /** seat の表示可能性: sourceRoles から base (アサンプション無し) で残った役職。 アサンプションで消えたものは dim */
+  function possibilitiesFor(seat: number, sourceRoles: SystemRole[]): { role: SystemRole, dim: boolean }[] {
     const base = baseMap.get(seat) ?? []
     const cur = currentMap.get(seat) ?? []
     const out: { role: SystemRole, dim: boolean }[] = []
-    for (const role of ctx.analysisColumns) {
+    for (const role of sourceRoles) {
       if (!base.includes(role)) continue
       out.push({ role, dim: !cur.includes(role) })
     }
@@ -178,14 +221,18 @@
         }
       }
       if (matched.length > 0) {
-        matched.sort((a, b) => a.order - b.order)
-        const isCompactPrimary = def.primaryRole !== undefined && COMPACT_PRIMARY_ROLES.has(def.primaryRole)
-        const possibilities = def.mainGroup === 'nonCo' || isCompactPrimary
+        let seats: number[]
+        if (def.mainGroup === 'nonCo') {
+          seats = matched.map(m => m.seat).sort(compareNonCoSeats)
+        } else {
+          matched.sort((a, b) => a.order - b.order)
+          seats = matched.map(m => m.seat)
+        }
         subTables.push({
           tag: def.tag,
-          seats: matched.map(m => m.seat),
+          seats,
           roles: rolesForDef(def),
-          possibilities,
+          setGrouping: def.mainGroup === 'nonCo',
           primaryRole: def.primaryRole,
         })
       }
@@ -206,68 +253,25 @@
         <div class="va-sub-table">
           <div class="va-sub-tag">{st.tag}</div>
           <div class="va-sub-body">
-          {#if st.possibilities}
-            <div class="va-poss-line">
-              {#each st.seats as seat}
-                {@const possibilities = possibilitiesFor(seat)}
-                {@const fixedToPrimary = st.primaryRole !== undefined && possibilities.length === 1 && possibilities[0].role === st.primaryRole}
-                <span class="va-poss-item">
+          <div class="va-poss-line">
+            {#each st.seats as seat, idx}
+              {@const possibilities = possibilitiesFor(seat, st.roles)}
+              {@const fixedToPrimary = st.primaryRole !== undefined && possibilities.length === 1 && possibilities[0].role === st.primaryRole}
+              {@const results = buildResultsFor(seat)}
+              {@const isNewGroup = idx > 0 && (!st.setGrouping || possibilitiesSetKey(seat) !== possibilitiesSetKey(st.seats[idx - 1]))}
+              {#if isNewGroup}<span class="va-group-break" aria-hidden="true"></span>{/if}
+              <span class="va-poss-item">
+                <span class="va-poss-row">
                   <PlayerName
                     dead={ctx.deadSeats.has(seat)}
                     nightKill={ctx.nightKilledSeats.has(seat)}
                     executed={ctx.executedSeats.has(seat)}
-                    claim={ctx.claimShortNames.get(seat)}
                     seat={seat}
                   >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>{#if !fixedToPrimary}{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(seat) === role}<span class="va-poss-cell" class:role-possible={!assumed && !dim} class:role-impossible={!assumed && dim} class:role-assumed={assumed} onclick={() => ctx.toggleAssumption(seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{/if}
-                </span>
-              {/each}
-            </div>
-          {:else}
-          <table class="va-table">
-            <tbody>
-              {#each st.seats as seat}
-                {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
-                <tr class:dead-row={ctx.deadSeats.has(seat)} class:seat-broken={ctx.brokenSeats.has(seat)}>
-                  <td class="va-name-col {cls.status}" class:role-fixed={cls.fixed}>
-                    <PlayerName
-                      dead={ctx.deadSeats.has(seat)}
-                      nightKill={ctx.nightKilledSeats.has(seat)}
-                      executed={ctx.executedSeats.has(seat)}
-                      claim={ctx.claimShortNames.get(seat)}
-                    >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>
-                  </td>
-                  {#each st.roles as role}
-                    <td
-                      class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{ctx.assumptions.get(seat) === role ? ' role-assumed' : ''}"
-                      onclick={() => ctx.toggleAssumption(seat, role)}
-                    >{roleToShort(role)}</td>
-                  {/each}
-                </tr>
-                {@const results = buildResultsFor(seat)}
-                {#if results.length > 0}
-                  <tr class="va-results-row">
-                    <td class="va-results" colspan={1 + st.roles.length}>
-                      {#each results as { day, assertion, isBodyguard }, i}
-                        {#if assertion}
-                          {#if i > 0}<span class="va-arrow">→</span>{/if}
-                          <span
-                            class="va-result"
-                            class:human={assertion.species === 'human' && !assertion.forecast}
-                            class:wolf={assertion.species === 'wolf' && !assertion.forecast}
-                            class:guard={isBodyguard}
-                            class:forecast={assertion.forecast}
-                          >
-                            <PlayerName dead={ctx.deadSeats.has(assertion.targetSeat)} nightKill={ctx.nightKilledSeats.has(assertion.targetSeat)} executed={ctx.executedSeats.has(assertion.targetSeat)} claim={ctx.claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{ctx.playerShortNames.get(assertion.targetSeat) ?? assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="va-forecast-label">(予)</span>{:else if !isBodyguard}<SpeciesIcon species={assertion.species} />{/if}
-                          </span>
-                        {/if}
-                      {/each}
-                    </td>
-                  </tr>
-                {/if}
-              {/each}
-            </tbody>
-          </table>
-          {/if}
+                </span>{#if results.length > 0}<span class="va-poss-results">{#each results as { day, assertion, isBodyguard }, ri}{#if assertion}{#if ri > 0}<span class="va-arrow">→</span>{/if}<span class="va-result" class:human={assertion.species === 'human' && !assertion.forecast} class:wolf={assertion.species === 'wolf' && !assertion.forecast} class:guard={isBodyguard} class:forecast={assertion.forecast}><PlayerName dead={ctx.deadSeats.has(assertion.targetSeat)} nightKill={ctx.nightKilledSeats.has(assertion.targetSeat)} executed={ctx.executedSeats.has(assertion.targetSeat)} claim={ctx.claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{ctx.playerShortNames.get(assertion.targetSeat) ?? assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="va-forecast-label">(予)</span>{:else if !isBodyguard}<SpeciesIcon species={assertion.species} />{/if}</span>{/if}{/each}</span>{/if}
+              </span>
+            {/each}
+          </div>
           </div>
         </div>
       {/each}
@@ -342,7 +346,7 @@
   .va-tables {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 0;
     min-width: 0;
   }
 
@@ -377,21 +381,41 @@
   }
 
   .va-poss-item {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
+    display: inline-block;
+    vertical-align: top;
     font-family: var(--font-mono);
     font-size: 12px;
+  }
+
+  .va-poss-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
     white-space: nowrap;
+  }
+
+  .va-poss-cell + .va-poss-cell {
+    margin-left: -1px;
+  }
+
+  .va-poss-results {
+    display: block;
+    padding-left: 8px;
   }
 
   .va-poss-cell {
     display: inline-block;
-    padding: 0 4px;
+    padding: 0;
     border: 1px solid var(--color-border);
     min-width: 1.4em;
     text-align: center;
     cursor: pointer;
+  }
+
+  .va-group-break {
+    flex-basis: 100%;
+    width: 0;
+    height: 0;
   }
 
   .va-poss-cell:hover {
@@ -408,7 +432,7 @@
   .va-table td {
     text-align: center;
     padding: 0;
-    border: 1px solid var(--color-border);
+    border: none;
   }
 
   .va-table td:not(.va-name-col) {
