@@ -267,7 +267,7 @@
                     nightKill={ctx.nightKilledSeats.has(seat)}
                     executed={ctx.executedSeats.has(seat)}
                     seat={seat}
-                  >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>{#if !fixedToPrimary}{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(seat) === role}<span class="va-poss-cell" class:role-possible={!assumed && !dim} class:role-impossible={!assumed && dim} class:role-assumed={assumed} onclick={() => ctx.toggleAssumption(seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{/if}
+                  >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>{#if fixedToPrimary}<span class="va-poss-cell role-confirmed">{roleToShort(st.primaryRole!)}</span>{:else}{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(seat) === role}<span class="va-poss-cell" class:role-possible={!assumed && !dim} class:role-impossible={!assumed && dim} class:role-assumed={assumed} onclick={() => ctx.toggleAssumption(seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{/if}
                 </span>{#if results.length > 0}<span class="va-poss-results">{#each results as { day, assertion, isBodyguard }, ri}{#if assertion}{#if ri > 0}<span class="va-arrow">→</span>{/if}<span class="va-result" class:human={assertion.species === 'human' && !assertion.forecast} class:wolf={assertion.species === 'wolf' && !assertion.forecast} class:guard={isBodyguard} class:forecast={assertion.forecast}><PlayerName dead={ctx.deadSeats.has(assertion.targetSeat)} nightKill={ctx.nightKilledSeats.has(assertion.targetSeat)} executed={ctx.executedSeats.has(assertion.targetSeat)} claim={ctx.claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{ctx.playerShortNames.get(assertion.targetSeat) ?? assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="va-forecast-label">(予)</span>{:else if !isBodyguard}<SpeciesIcon species={assertion.species} />{/if}</span>{/if}{/each}</span>{/if}
               </span>
             {/each}
@@ -480,6 +480,13 @@
     background: var(--color-accent);
     color: var(--color-bg);
     font-weight: 600;
+  }
+
+  .role-confirmed {
+    background: var(--color-village);
+    color: var(--color-bg);
+    font-weight: 700;
+    cursor: default;
   }
 
   .va-results-row td {
