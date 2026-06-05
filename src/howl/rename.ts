@@ -53,13 +53,14 @@ function resolveName(dict: FlexibleDictionary, name: string): string {
 }
 
 // Statement 内の player フィールドを置換する。変更があった場合は新しい Statement を、
-// 無ければ null を返す。 join statement の aliases / shortName は歴史的な別表記として保持し、
-// name フィールドのみを置換対象とする。
+// 無ければ null を返す。 join statement の aliases / shortName は既定では歴史的な別表記として
+// 保持するが、 `clearAliases: true` を指定すると name が置換されたタイミングで両方とも消去する。
 function renameInStatement(
   stmt: Statement,
   dict: FlexibleDictionary,
   canonical: string,
   newName: string,
+  options: { clearAliases: boolean },
 ): Statement | null {
   let changed = false
   const sub = (name: string): string => {
@@ -74,7 +75,11 @@ function renameInStatement(
   switch (stmt.type) {
     case 'join': {
       const s = stmt as JoinStatement
-      const next: JoinStatement = { ...s, name: sub(s.name) }
+      const renamed = sub(s.name)
+      const renamedThisJoin = renamed !== s.name
+      const next: JoinStatement = options.clearAliases && renamedThisJoin
+        ? { type: 'join', line: s.line, name: renamed, aliases: [] }
+        : { ...s, name: renamed }
       result = next
       break
     }
@@ -189,6 +194,14 @@ function renameInStatement(
 // 行内末尾の inline timestamp (` @MM:SS`) を切り出す。
 const INLINE_TIMESTAMP_REGEX = /\s[@＠](\d{1,2}(?::\d{2}){1,2})[\s　]*$/
 
+export type RenamePlayerOptions = {
+  /**
+   * `true` のとき、対象 join statement の `aliases` / `shortName` を消去して `name` のみ残す。
+   * 既定 (`false`) では aliases / shortName を歴史的な別表記として保持する。
+   */
+  clearAliases?: boolean
+}
+
 /**
  * Howl テキスト内のプレイヤー名を一括リネームする。
  *
@@ -196,9 +209,16 @@ const INLINE_TIMESTAMP_REGEX = /\s[@＠](\d{1,2}(?::\d{2}){1,2})[\s　]*$/
  * - リネーム対象のプレイヤーが関わる statement のみ再 serialize される (canonical form)。
  * - 関係ない行 / コメント / 空行 / unknown statement / frontmatter は原文のまま保存される。
  * - inline `@MM:SS` annotation は再 serialize 行でも末尾に保持される。
- * - join statement の `aliases` / `shortName` は歴史的な別表記として保持し、`name` のみ置換する。
+ * - join statement の `aliases` / `shortName` は既定では歴史的な別表記として保持する。
+ *   `options.clearAliases` が true のとき、name を置換した join の aliases / shortName は消去される。
  */
-export function renamePlayer(howlText: string, oldName: string, newName: string): string {
+export function renamePlayer(
+  howlText: string,
+  oldName: string,
+  newName: string,
+  options: RenamePlayerOptions = {},
+): string {
+  const clearAliases = options.clearAliases ?? false
   const { body, numLines } = parseFrontmatter(howlText)
   const headerEnd = howlText.length - body.length
   const header = howlText.slice(0, headerEnd)
@@ -227,7 +247,7 @@ export function renamePlayer(howlText: string, oldName: string, newName: string)
       continue
     }
 
-    const renamed = renameInStatement(stmt, dict, canonical, newName)
+    const renamed = renameInStatement(stmt, dict, canonical, newName, { clearAliases })
     if (renamed === null) {
       outLines.push(rawLine)
       continue

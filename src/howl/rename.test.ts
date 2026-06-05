@@ -137,7 +137,7 @@ describe('renamePlayer', () => {
     assert.match(lines[0], /チャーリー/)
   })
 
-  test('join の aliases / shortName は保持される', () => {
+  test('join の aliases / shortName は既定で保持される', () => {
     const input = [
       '+ アリス(あ) あり ア',
       '+ ボブ',
@@ -149,6 +149,20 @@ describe('renamePlayer', () => {
     assert.match(lines[0], /Alice/)
     assert.match(lines[0], /あり/)
     assert.match(lines[0], /ア/)
+  })
+
+  test('clearAliases: true で対象 join の aliases / shortName が消去される', () => {
+    const input = [
+      '+ アリス(あ) あり ア',
+      '+ ボブ(ぼ) bob',
+      'アリス→ボブ',
+    ].join('\n')
+    const out = renamePlayer(input, 'アリス', 'Alice', { clearAliases: true })
+    const lines = out.split('\n')
+    // 対象 join: aliases / shortName が消えて name のみ残る
+    assert.strictEqual(lines[0], '+ Alice')
+    // 非対象 join (ボブ) には触らない
+    assert.strictEqual(lines[1], '+ ボブ(ぼ) bob')
   })
 
   test('unknown statement は触らない', () => {
