@@ -135,8 +135,14 @@
     vertical-align: baseline;
   }
 
+  /* 視覚エフェクト用に名前テキストを多重複製しているため、選択コピーで
+     名前が重複しないよう、 sizer をカノニカルな選択対象として残し、
+     絶対配置の strips は user-select と pointer-events から除外する。
+     sizer は visibility: hidden ではなく color: transparent にする
+     (前者は一部ブラウザで選択範囲から除外され、 strips を user-select:none
+     にすると結果ゼロコピーになるため)。 */
   .sizer {
-    visibility: hidden;
+    color: transparent;
     white-space: nowrap;
   }
 
@@ -145,6 +151,8 @@
     inset: 0;
     white-space: nowrap;
     color: inherit;
+    user-select: none;
+    pointer-events: none;
   }
 
   .executed {
@@ -154,7 +162,7 @@
   }
 
   .exec-sizer {
-    visibility: hidden;
+    color: transparent;
     white-space: nowrap;
   }
 
@@ -163,6 +171,8 @@
     position: absolute;
     inset: 0;
     white-space: nowrap;
+    user-select: none;
+    pointer-events: none;
   }
 
   /* Excite skin: dissolve effect (sharp top → blurred bottom) */
