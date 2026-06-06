@@ -83,10 +83,14 @@
     white-space: nowrap;
   }
 
-  .status-village { background: var(--color-village-bg); }
-  .status-wolf { background: var(--color-wolf-bg); }
-  .status-fox { background: var(--color-fox-bg); }
-  .status-not-village { background: var(--color-unknown-team-bg); }
+  /* 村陣営の可能性がゼロ (確実に人外) のとき、名前の文字色を赤系で警告。
+     背景色は密度ペインで邪魔になるため使わない。村陣営可能性が残る状態
+     (village / default) は通常テキスト色のまま。 */
+  .status-wolf,
+  .status-fox,
+  .status-not-village {
+    color: var(--color-wolf);
+  }
 
   .broken-badge {
     display: inline-block;
