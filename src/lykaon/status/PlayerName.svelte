@@ -97,7 +97,7 @@
   .status-wolf .dead,
   .status-fox .dead,
   .status-not-village .dead {
-    color: color-mix(in srgb, var(--color-wolf) 40%, var(--color-text-faint));
+    color: color-mix(in srgb, var(--color-wolf) 20%, var(--color-text-faint));
   }
 
   .clickable {
