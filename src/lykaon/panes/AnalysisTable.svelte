@@ -543,7 +543,7 @@
     text-align: left !important;
     white-space: nowrap;
     padding-right: 12px !important;
-    font-weight: 500;
+    font-weight: 700;
   }
 
   .role-possible,
@@ -617,8 +617,6 @@
     background: var(--color-accent);
     color: var(--color-bg);
   }
-
-  .analysis-name-col { font-weight: 700; }
 
   .analysis-sidebar {
     flex: 1;

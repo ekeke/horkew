@@ -436,6 +436,12 @@
     white-space: nowrap;
   }
 
+  /* 名前は両ペイン共通で bold 固定。PlayerName 自体は他テーブル (Vote/Claim/Summary
+     等) でも使われるため、グローバル変更を避けて VerticalDense scope 内だけで適用。 */
+  .va-poss-row :global(.player-name-root) {
+    font-weight: 700;
+  }
+
   .va-poss-cell + .va-poss-cell {
     margin-left: -1px;
   }
