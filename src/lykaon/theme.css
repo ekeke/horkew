@@ -92,8 +92,11 @@
   --color-unknown-team-bg:#4a3a78;              /* 陣営不明 背景（マウブ） */
 
   /* --- Domain: 判定結果 --- */
-  --color-human-result:   var(--ctp-green);      /* ○ 白判定 */
-  --color-wolf-result:    var(--ctp-red);        /* ● 黒判定 */
+  /* 陣営色 (--color-village=緑 / --color-wolf=赤) と意味が衝突しないよう、
+     白/黒判定はグレースケールで表現する。○ は控えめ、● はフルコントラスト。
+     さらに表示側で ● に font-weight: 700 を当て「重い墨」感で識別する。 */
+  --color-human-result:   var(--color-text-muted); /* ○ 白判定 */
+  --color-wolf-result:    var(--color-text);       /* ● 黒判定 */
 
   /* --- Domain: エディタ（名前解決） --- */
   --color-editor-text:       var(--ctp-subtext1); /* エディタ通常テキスト（やや控えめ） */

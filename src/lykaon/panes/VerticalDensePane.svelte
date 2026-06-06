@@ -582,16 +582,32 @@
     align-items: baseline;
   }
 
+  /* SpeciesIcon (○/●) は baseline 整列だと SVG 中心が周囲文字より上に
+     見えるので、 cross-axis センターに置き直す。
+     non-flex (Status pane 等) では align-self は無視されるので副作用なし。 */
+  .va-result :global(.species-icon-wrap) {
+    align-self: center;
+  }
+
   .va-result.human {
     color: var(--color-human-result);
   }
 
   .va-result.wolf {
     color: var(--color-wolf-result);
+    font-weight: 700;
   }
 
   .va-result.guard {
     color: var(--color-link);
+  }
+
+  /* 結果セル内の対象プレイヤー名は、行頭の主体プレイヤー名 (.va-poss-row の
+     bold 700 名前) と紛らわしいので、 1px ダウン + italic で
+     「この結果の宛先」であることを視覚的に示す。 */
+  .va-result :global(.player-name-root) {
+    font-size: 11px;
+    font-style: italic;
   }
 
   .va-result.forecast {

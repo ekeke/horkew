@@ -385,10 +385,22 @@
 
   .day-line.wolf, .role-cell.wolf {
     color: var(--color-wolf-result);
+    font-weight: 700;
   }
 
   .day-line.guard, .role-cell.guard {
     color: var(--color-link);
+  }
+
+  /* 結果セル内の対象プレイヤー名は、列ヘッダの主体名や
+     噛/吊行の名前と紛らわしいので、 1px ダウン + italic で
+     「この結果の宛先」であることを視覚的に示す。 */
+  .role-cell.human :global(.player-name-root),
+  .role-cell.wolf :global(.player-name-root),
+  .role-cell.guard :global(.player-name-root),
+  .role-cell.forecast :global(.player-name-root) {
+    font-size: 12px;
+    font-style: italic;
   }
 
   .day-line.forecast, .role-cell.forecast {

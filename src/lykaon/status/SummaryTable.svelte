@@ -251,10 +251,19 @@
 
   .data-cell.wolf {
     color: var(--color-wolf-result);
+    font-weight: 700;
   }
 
   .data-cell.guard {
     color: var(--color-link);
+  }
+
+  /* 結果セル内の対象プレイヤー名は、行の左端 (主体プレイヤー名) や
+     他テーブルの名前と紛らわしいので、 1px ダウン + italic で
+     「この結果の宛先」であることを視覚的に示す。 */
+  .role-report-cell :global(.player-name-root) {
+    font-size: 11px;
+    font-style: italic;
   }
 
   .data-cell.forecast {
