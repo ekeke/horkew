@@ -114,8 +114,10 @@
     margin-left: 1px;
   }
 
+  /* 退場済みは透明度ではなく文字色で表現。透明度だと bold が知覚的に
+     痩せて見える錯覚を引き起こすため、color トーンダウンに切り替える。 */
   .dead {
-    opacity: var(--opacity-dead-player);
+    color: var(--color-text-faint);
   }
 
   .night-kill {
