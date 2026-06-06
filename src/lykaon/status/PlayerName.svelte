@@ -4,14 +4,13 @@
   import { getContext } from 'svelte'
   import type { NameStatus } from './playerStatus.ts'
 
-  let { dead, nightKill = false, executed = false, claim, seat, status = 'default', broken = false, showClaim = true, children }: {
+  let { dead, nightKill = false, executed = false, claim, seat, status = 'default', showClaim = true, children }: {
     dead: boolean
     nightKill?: boolean
     executed?: boolean
     claim?: string
     seat?: number
     status?: NameStatus
-    broken?: boolean
     showClaim?: boolean
     children: Snippet
   } = $props()
@@ -75,7 +74,7 @@
   onclick={clickable ? handleClick : undefined}
   onmouseenter={handleMouseEnter}
   onmouseleave={handleMouseLeave}
->{#if broken}<span class="broken-badge" title="推理矛盾">!</span>{/if}{@render inner()}</span>
+>{@render inner()}</span>
 
 <style>
   .player-name-root {
@@ -90,19 +89,6 @@
   .status-fox,
   .status-not-village {
     color: var(--color-wolf);
-  }
-
-  .broken-badge {
-    display: inline-block;
-    background: var(--color-wolf);
-    color: var(--color-bg);
-    font-weight: 900;
-    font-family: var(--font-mono);
-    font-size: 0.85em;
-    padding: 0 4px;
-    border-radius: 2px;
-    margin-right: 3px;
-    line-height: 1.2;
   }
 
   .clickable {

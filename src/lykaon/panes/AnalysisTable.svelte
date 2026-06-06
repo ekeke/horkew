@@ -336,7 +336,6 @@
         claim={ctx.claimShortNames.get(seat)}
         showClaim={viewOptions.grouping !== 'co'}
         status={status}
-        broken={ctx.brokenSeats.has(seat)}
       >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>
     </td>
     {#each ctx.analysisColumns as role}
