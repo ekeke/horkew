@@ -4,6 +4,7 @@
   import type { SystemRole } from '../../types/index.ts'
   import type { AnalysisContext } from '../AnalysisContext.svelte.ts'
   import PlayerName from '../status/PlayerName.svelte'
+  import { classifyPlayer } from '../status/playerStatus.ts'
 
   type Grouping = 'seat' | 'co' | 'survival'
   type ViewOptions = { columns: 1 | 2 | 3 | 4, grouping: Grouping }
@@ -42,28 +43,12 @@
     }
   }
 
-  type NameStatus = 'default' | 'not-village' | 'village' | 'wolf' | 'fox'
-
   function roleToShort(role: SystemRole): string {
     return systemRoles.get(role)?.shortName ?? role
   }
 
-  function classifyPlayer(roles: SystemRole[]): { status: NameStatus, fixed: boolean, label: string } {
-    if (roles.length === 0) return { status: 'default', fixed: false, label: '?' }
-    const fixed = roles.length === 1
-    const label = fixed ? (systemRoles.get(roles[0])?.shortName ?? '?') : '?'
-    const alignments = new Set(roles.map(r => systemRoles.get(r)!.alignment))
-    if (alignments.size === 1) {
-      const a = [...alignments][0]
-      if (a === 'villager') return { status: 'village', fixed, label }
-      if (a === 'werewolf') return { status: 'wolf', fixed, label }
-      if (a === 'werehamster') return { status: 'fox', fixed, label }
-    }
-    if (!alignments.has('villager')) return { status: 'not-village', fixed: false, label }
-    return { status: 'default', fixed: false, label }
-  }
-
   let currentMap = $derived(new Map(ctx.analysisSeats.map(s => [s.seat, s.roles])))
+  let baseMap = $derived(new Map(ctx.baseAnalysisSeats.map(s => [s.seat, s.roles])))
 
   // ---- View options (列数 / 分類) -----------------------------------
   const STORAGE_KEY = 'lykaon.analysisTable.viewOptions'
@@ -108,9 +93,6 @@
   function groupingLabel(g: Grouping): string {
     return g === 'seat' ? '席順' : g === 'co' ? 'CO別' : '生存'
   }
-
-  /** 縦割り分割で 2 列目以降に置く placeholder タイトル (高さ揃え用の nbsp)。 */
-  const TITLE_PLACEHOLDER = ' '
 
   // ---- グルーピング --------------------------------------------------
   function chunkVertical<T>(items: T[], n: number): T[][] {
@@ -189,19 +171,25 @@
     }
     if (subTables.length === 0) return []
 
-    const R = viewOptions.columns
+    return optimizeColumns(subTables, viewOptions.columns)
+  }
 
-    // 最大 sub-table を見つける (同サイズなら先頭優先)
+  /**
+   * sub-table 列を R 列に分配する共通最適化 (CO 別 / 生存別 で共有)。
+   *
+   * 分割なしを起点に、 最大 sub-table を 2,3,...,R 分割した case を順に試す。
+   * - 各段で前段より閾値以上削減できれば採用、 ダメなら前段で確定
+   * - ただし sub-table 数 < R で実効列数が R に届いていない段階では
+   *   「列が余っている」状態なので閾値を緩めて改善あれば採用 (1 行でも) する
+   */
+  function optimizeColumns(subTables: SubTable[], R: number): Column[] {
+    if (subTables.length === 0) return []
     let largestIdx = 0
     for (let i = 1; i < subTables.length; i++) {
       if (subTables[i].seats.length > subTables[largestIdx].seats.length) largestIdx = i
     }
     const largest = subTables[largestIdx]
 
-    // 分割なしを起点に、 2,3,...,R 分割を順に試す。
-    // 各段で前段より閾値以上削減できれば採用、 ダメなら前段で確定。
-    // ただし sub-table 数 < R で実効列数が R に届いていない段階では
-    // 「列が余っている」状態なので閾値を緩めて改善あれば採用 (1 行でも) する。
     let bestColumns = distributeSubTables(subTables, R)
     let bestMax = maxRowsOf(bestColumns)
     for (let k = 2; k <= R && k <= largest.seats.length; k++) {
@@ -314,41 +302,10 @@
       if (ctx.deadSeats.has(seat)) dead.push(seat)
       else alive.push(seat)
     }
-    const groups: { title: string, seats: number[] }[] = []
-    if (alive.length > 0) groups.push({ title: '生存', seats: alive })
-    if (dead.length > 0) groups.push({ title: '退場', seats: dead })
-    if (groups.length === 0) return []
-
-    const requested = viewOptions.columns
-
-    // 全員生存 (or 全員退場) で 1 グループしかない時は、 列数で縦割り
-    if (groups.length === 1) {
-      const g = groups[0]
-      return chunkVertical(g.seats, requested).map((s, i) => ({
-        subTables: [{ title: i === 0 ? g.title : TITLE_PLACEHOLDER, seats: s }],
-      }))
-    }
-
-    // groups.length === 2
-    if (requested === 1) {
-      return [{ subTables: groups.map(g => ({ title: g.title, seats: g.seats })) }]
-    }
-    if (requested === 2) {
-      return groups.map(g => ({ subTables: [{ title: g.title, seats: g.seats }] }))
-    }
-    // requested === 3: 多い方を 2 列に縦割り、 少ない方は 1 列
-    const biggerIdx = groups[0].seats.length >= groups[1].seats.length ? 0 : 1
-    const smallerIdx = 1 - biggerIdx
-    const chunks = chunkVertical(groups[biggerIdx].seats, 2)
-    const cols: Column[] = chunks.map((s, i) => ({
-      subTables: [{ title: i === 0 ? groups[biggerIdx].title : TITLE_PLACEHOLDER, seats: s }],
-    }))
-    const smaller = groups[smallerIdx]
-    const smallerCol: Column = { subTables: [{ title: smaller.title, seats: smaller.seats }] }
-    // 生存 → 退場 の順を維持: biggerIdx === 0 (生存が多い) → smaller を末尾、 そうでなければ先頭
-    if (biggerIdx === 0) cols.push(smallerCol)
-    else cols.unshift(smallerCol)
-    return cols
+    const subTables: SubTable[] = []
+    if (alive.length > 0) subTables.push({ title: '生存', seats: alive })
+    if (dead.length > 0) subTables.push({ title: '退場', seats: dead })
+    return optimizeColumns(subTables, viewOptions.columns)
   }
 
   let columns = $derived.by<Column[]>(() => {
@@ -366,26 +323,44 @@
 </script>
 
 {#snippet seatRow(seat: number)}
-  {@const cls = classifyPlayer(currentMap.get(seat) ?? [])}
-  <tr class:dead-row={ctx.deadSeats.has(seat)} class:seat-broken={ctx.brokenSeats.has(seat)}>
-    <td class="analysis-name-col {cls.status}" class:role-fixed={cls.fixed}>
-      <span class="analysis-label">{cls.label}</span>
+  {@const status = classifyPlayer(currentMap.get(seat) ?? [])}
+  {@const base = baseMap.get(seat) ?? []}
+  {@const current = currentMap.get(seat) ?? []}
+  {@const confirmedRole = base.length === 1 ? base[0] : undefined}
+  <tr class:dead-row={ctx.deadSeats.has(seat)}>
+    <td class="analysis-name-col">
       <PlayerName
         dead={ctx.deadSeats.has(seat)}
         nightKill={ctx.nightKilledSeats.has(seat)}
         executed={ctx.executedSeats.has(seat)}
         claim={ctx.claimShortNames.get(seat)}
+        showClaim={viewOptions.grouping !== 'co'}
+        status={status}
+        broken={ctx.brokenSeats.has(seat)}
       >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>
     </td>
     {#each ctx.analysisColumns as role}
+      {@const assumed = ctx.assumptions.get(seat) === role}
+      {@const currentPossible = current.includes(role)}
+      {@const basePossible = base.includes(role)}
+      {@const confirmed = !assumed && confirmedRole === role}
+      {@const confirmedAlign = confirmed ? systemRoles.get(role)?.alignment : undefined}
       <td
-        class="{(currentMap.get(seat) ?? []).includes(role) ? 'role-possible' : 'role-impossible'}{ctx.assumptions.get(seat) === role ? ' role-assumed' : ''}"
+        class:role-possible={!assumed && !confirmed && currentPossible}
+        class:role-dim={!assumed && !confirmed && !currentPossible && basePossible}
+        class:role-impossible={!assumed && !currentPossible && !basePossible}
+        class:role-assumed={assumed}
+        class:role-confirmed={confirmed}
+        class:confirmed-village={confirmed && confirmedAlign === 'villager'}
+        class:confirmed-wolf={confirmed && confirmedAlign === 'werewolf'}
+        class:confirmed-fox={confirmed && confirmedAlign === 'werehamster'}
         onclick={() => ctx.toggleAssumption(seat, role)}
       >{roleToShort(role)}</td>
     {/each}
     <td class="hocuspocus-spacer"></td>
     <td
-      class="hocuspocus-cell{ctx.hocusPocusSeats.has(seat) ? ' hocuspocus-on' : ''}"
+      class="hocuspocus-cell"
+      class:hocuspocus-on={ctx.hocusPocusSeats.has(seat)}
       title="HocusPocus: この席のCOを無視して解析"
       onclick={() => ctx.toggleHocusPocus(seat)}
     >?</td>
@@ -544,7 +519,8 @@
 
   .sub-table-title {
     font-size: 11px;
-    color: var(--color-text-faint);
+    font-weight: 700;
+    color: var(--color-text-muted);
     padding: 2px 4px;
   }
 
@@ -564,10 +540,6 @@
     min-width: 1.6em;
   }
 
-  tr.seat-broken td.analysis-name-col {
-    background: color-mix(in srgb, var(--color-wolf) 22%, transparent);
-  }
-
   .analysis-name-col {
     text-align: left !important;
     white-space: nowrap;
@@ -576,11 +548,13 @@
   }
 
   .role-possible,
+  .role-dim,
   .role-impossible {
     cursor: pointer;
   }
 
   .role-possible:hover,
+  .role-dim:hover,
   .role-impossible:hover {
     outline: 1px solid var(--color-accent);
     outline-offset: -1px;
@@ -589,6 +563,11 @@
   .role-possible {
     background: var(--color-surface-hover);
     color: var(--color-text);
+  }
+
+  .role-dim {
+    background: var(--color-bg-sunken);
+    color: var(--color-text-faint);
   }
 
   .role-impossible {
@@ -600,6 +579,18 @@
     background: var(--color-accent);
     color: var(--color-bg);
     font-weight: 600;
+  }
+
+  .role-confirmed {
+    color: var(--color-bg);
+    font-weight: 700;
+  }
+
+  .role-confirmed.confirmed-village { background: var(--color-village); }
+  .role-confirmed.confirmed-wolf { background: var(--color-wolf); }
+  .role-confirmed.confirmed-fox { background: var(--color-fox); }
+  .role-confirmed:not(.confirmed-village):not(.confirmed-wolf):not(.confirmed-fox) {
+    background: var(--color-unknown-team);
   }
 
   .hocuspocus-spacer {
@@ -628,19 +619,7 @@
     color: var(--color-bg);
   }
 
-  .analysis-label {
-    display: inline-block;
-    width: 1.8em;
-    text-align: center;
-    opacity: 0.6;
-    font-size: 0.85em;
-  }
-
   .analysis-name-col { font-weight: 700; }
-  .analysis-name-col.village { background: var(--color-village-bg); }
-  .analysis-name-col.wolf { background: var(--color-wolf-bg); }
-  .analysis-name-col.fox { background: var(--color-fox-bg); }
-  .analysis-name-col.not-village { background: var(--color-unknown-team-bg); }
 
   .analysis-sidebar {
     flex: 1;

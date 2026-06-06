@@ -2,13 +2,17 @@
   import type { Snippet } from 'svelte'
   import type { Writable } from 'svelte/store'
   import { getContext } from 'svelte'
+  import type { NameStatus } from './playerStatus.ts'
 
-  let { dead, nightKill = false, executed = false, claim, seat, children }: {
+  let { dead, nightKill = false, executed = false, claim, seat, status = 'default', broken = false, showClaim = true, children }: {
     dead: boolean
     nightKill?: boolean
     executed?: boolean
     claim?: string
     seat?: number
+    status?: NameStatus
+    broken?: boolean
+    showClaim?: boolean
     children: Snippet
   } = $props()
 
@@ -21,6 +25,7 @@
     if (seat == null || !shortNamesStore) return undefined
     return $shortNamesStore!.get(seat)
   })
+  let effectiveClaim = $derived(showClaim ? claim : undefined)
 
   function handleClick() {
     if (seat != null && onplayerclick) onplayerclick(seat)
@@ -40,20 +45,20 @@
 {#snippet inner()}
   {#if nightKill}
     <span class="night-kill" class:dead>
-      <span class="sizer">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="strip s0">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="strip s1">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="strip s2">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="strip s3">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="sizer">{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
+      <span class="strip s0">{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
+      <span class="strip s1">{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
+      <span class="strip s2">{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
+      <span class="strip s3">{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
     </span>
   {:else if executed}
     <span class="executed" class:dead>
-      <span class="exec-sizer">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="exec-sharp">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
-      <span class="exec-blur">{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+      <span class="exec-sizer">{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
+      <span class="exec-sharp">{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
+      <span class="exec-blur">{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
     </span>
   {:else}
-    <span class="pn" class:dead={dead}>{@render nameText()}{#if claim}<span class="claim">({claim})</span>{/if}</span>
+    <span class="pn" class:dead={dead}>{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
   {/if}
 {/snippet}
 
@@ -63,15 +68,37 @@
   class="player-name-root"
   class:clickable
   class:highlighted
+  class:status-village={status === 'village'}
+  class:status-wolf={status === 'wolf'}
+  class:status-fox={status === 'fox'}
+  class:status-not-village={status === 'not-village'}
   onclick={clickable ? handleClick : undefined}
   onmouseenter={handleMouseEnter}
   onmouseleave={handleMouseLeave}
->{@render inner()}</span>
+>{#if broken}<span class="broken-badge" title="推理矛盾">!</span>{/if}{@render inner()}</span>
 
 <style>
   .player-name-root {
     display: inline-block;
     white-space: nowrap;
+  }
+
+  .status-village { background: var(--color-village-bg); }
+  .status-wolf { background: var(--color-wolf-bg); }
+  .status-fox { background: var(--color-fox-bg); }
+  .status-not-village { background: var(--color-unknown-team-bg); }
+
+  .broken-badge {
+    display: inline-block;
+    background: var(--color-wolf);
+    color: var(--color-bg);
+    font-weight: 900;
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    padding: 0 4px;
+    border-radius: 2px;
+    margin-right: 3px;
+    line-height: 1.2;
   }
 
   .clickable {

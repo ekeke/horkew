@@ -8,6 +8,7 @@
   import { buildMasonClusters } from '../status/masonClusters.ts'
   import PlayerName from '../status/PlayerName.svelte'
   import SpeciesIcon from '../status/SpeciesIcon.svelte'
+  import { classifyPlayer } from '../status/playerStatus.ts'
 
   let { ctx, onInsertRevealRoles, onOpenDenyWolfDialog, extraFooter, hideAssumptions = false }: {
     ctx: AnalysisContext
@@ -40,29 +41,17 @@
     }
   }
 
-  type NameStatus = 'default' | 'not-village' | 'village' | 'wolf' | 'fox'
-
   function roleToShort(role: SystemRole): string {
     return systemRoles.get(role)?.shortName ?? role
   }
 
-  function classifyPlayer(roles: SystemRole[]): { status: NameStatus, fixed: boolean, label: string } {
-    if (roles.length === 0) return { status: 'default', fixed: false, label: '?' }
-    const fixed = roles.length === 1
-    const label = fixed ? (systemRoles.get(roles[0])?.shortName ?? '?') : '?'
-    const alignments = new Set(roles.map(r => systemRoles.get(r)!.alignment))
-    if (alignments.size === 1) {
-      const a = [...alignments][0]
-      if (a === 'villager') return { status: 'village', fixed, label }
-      if (a === 'werewolf') return { status: 'wolf', fixed, label }
-      if (a === 'werehamster') return { status: 'fox', fixed, label }
-    }
-    if (!alignments.has('villager')) return { status: 'not-village', fixed: false, label }
-    return { status: 'default', fixed: false, label }
-  }
-
   let currentMap = $derived(new Map(ctx.analysisSeats.map(s => [s.seat, s.roles])))
   let baseMap = $derived(new Map(ctx.baseAnalysisSeats.map(s => [s.seat, s.roles])))
+
+  /** broken 検出時 (全 seat に提示) または既に hocuspocus on の seat は、トグルを露出する */
+  function shouldShowHocuspocus(seat: number): boolean {
+    return ctx.brokenSeats.size > 0 || ctx.hocusPocusSeats.has(seat)
+  }
 
   function buildCurrentClaimRow(seat: number): ClaimRow | null {
     const vs = ctx.villageStatus
@@ -281,7 +270,9 @@
                   {#if mi > 0}<span class="va-mason-link">-</span>{/if}
                   {@const isClaiming = claimingSeats.has(member.seat)}
                   {@const possibilities = isClaiming ? possibilitiesFor(member.seat, st.roles) : []}
-                  {@const fixedToPrimary = possibilities.length === 1 && possibilities[0].role === 'mason'}
+                  {@const memberStatus = classifyPlayer(currentMap.get(member.seat) ?? [])}
+                  {@const memberBase = basePossibilitiesFor(member.seat)}
+                  {@const memberConfirmedRole = memberBase.length === 1 ? memberBase[0] : undefined}
                   <span class="va-poss-item">
                     <span class="va-poss-row">
                       <PlayerName
@@ -289,7 +280,9 @@
                         nightKill={ctx.nightKilledSeats.has(member.seat)}
                         executed={ctx.executedSeats.has(member.seat)}
                         seat={member.seat}
-                      >{ctx.playerShortNames.get(member.seat) ?? ctx.players.get(member.seat) ?? `#${member.seat}`}</PlayerName>{#if isClaiming}{#if fixedToPrimary}<span class="va-poss-cell role-confirmed">{roleToShort('mason')}</span>{:else}{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(member.seat) === role}<span class="va-poss-cell" class:role-possible={!assumed && !dim} class:role-impossible={!assumed && dim} class:role-assumed={assumed} onclick={() => ctx.toggleAssumption(member.seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{/if}{/if}
+                        status={memberStatus}
+                        broken={ctx.brokenSeats.has(member.seat)}
+                      >{ctx.playerShortNames.get(member.seat) ?? ctx.players.get(member.seat) ?? `#${member.seat}`}</PlayerName>{#if isClaiming}{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(member.seat) === role}{@const confirmed = !assumed && memberConfirmedRole === role}{@const confirmedAlign = confirmed ? systemRoles.get(role)?.alignment : undefined}<span class="va-poss-cell" class:role-possible={!assumed && !confirmed && !dim} class:role-dim={!assumed && !confirmed && dim} class:role-assumed={assumed} class:role-confirmed={confirmed} class:confirmed-village={confirmed && confirmedAlign === 'villager'} class:confirmed-wolf={confirmed && confirmedAlign === 'werewolf'} class:confirmed-fox={confirmed && confirmedAlign === 'werehamster'} onclick={() => ctx.toggleAssumption(member.seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{/if}{#if shouldShowHocuspocus(member.seat)}<span class="va-hocuspocus-cell" class:hocuspocus-on={ctx.hocusPocusSeats.has(member.seat)} title="HocusPocus: この席のCOを無視して解析" onclick={() => ctx.toggleHocusPocus(member.seat)} role="button" tabindex="0">?</span>{/if}
                     </span>
                   </span>
                 {/each}
@@ -302,8 +295,10 @@
             <div class="va-poss-line">
               {#each st.seats as seat, idx}
                 {@const possibilities = possibilitiesFor(seat, st.roles)}
-                {@const fixedToPrimary = st.primaryRole !== undefined && possibilities.length === 1 && possibilities[0].role === st.primaryRole}
                 {@const results = buildResultsFor(seat)}
+                {@const seatStatus = classifyPlayer(currentMap.get(seat) ?? [])}
+                {@const seatBase = basePossibilitiesFor(seat)}
+                {@const seatConfirmedRole = seatBase.length === 1 ? seatBase[0] : undefined}
                 {@const isNewGroup = idx > 0 && (!st.setGrouping || possibilitiesSetKey(seat) !== possibilitiesSetKey(st.seats[idx - 1]))}
                 {#if isNewGroup}<span class="va-group-break" aria-hidden="true"></span>{/if}
                 <span class="va-poss-item">
@@ -313,7 +308,9 @@
                       nightKill={ctx.nightKilledSeats.has(seat)}
                       executed={ctx.executedSeats.has(seat)}
                       seat={seat}
-                    >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>{#if fixedToPrimary}<span class="va-poss-cell role-confirmed">{roleToShort(st.primaryRole!)}</span>{:else}{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(seat) === role}<span class="va-poss-cell" class:role-possible={!assumed && !dim} class:role-impossible={!assumed && dim} class:role-assumed={assumed} onclick={() => ctx.toggleAssumption(seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{/if}
+                      status={seatStatus}
+                      broken={ctx.brokenSeats.has(seat)}
+                    >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(seat) === role}{@const confirmed = !assumed && seatConfirmedRole === role}{@const confirmedAlign = confirmed ? systemRoles.get(role)?.alignment : undefined}<span class="va-poss-cell" class:role-possible={!assumed && !confirmed && !dim} class:role-dim={!assumed && !confirmed && dim} class:role-assumed={assumed} class:role-confirmed={confirmed} class:confirmed-village={confirmed && confirmedAlign === 'villager'} class:confirmed-wolf={confirmed && confirmedAlign === 'werewolf'} class:confirmed-fox={confirmed && confirmedAlign === 'werehamster'} onclick={() => ctx.toggleAssumption(seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{#if shouldShowHocuspocus(seat)}<span class="va-hocuspocus-cell" class:hocuspocus-on={ctx.hocusPocusSeats.has(seat)} title="HocusPocus: この席のCOを無視して解析" onclick={() => ctx.toggleHocusPocus(seat)} role="button" tabindex="0">?</span>{/if}
                   </span>{#if results.length > 0}<span class="va-poss-results">{#each results as { day, assertion, isBodyguard }, ri}{#if assertion}{#if ri > 0}<span class="va-arrow">→</span>{/if}<span class="va-result" class:human={assertion.species === 'human' && !assertion.forecast} class:wolf={assertion.species === 'wolf' && !assertion.forecast} class:guard={isBodyguard} class:forecast={assertion.forecast}><PlayerName dead={ctx.deadSeats.has(assertion.targetSeat)} nightKill={ctx.nightKilledSeats.has(assertion.targetSeat)} executed={ctx.executedSeats.has(assertion.targetSeat)} claim={ctx.claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{ctx.playerShortNames.get(assertion.targetSeat) ?? assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="va-forecast-label">(予)</span>{:else if !isBodyguard}<SpeciesIcon species={assertion.species} />{/if}</span>{/if}{/each}</span>{/if}
                 </span>
               {/each}
@@ -497,29 +494,13 @@
     min-width: 1.6em;
   }
 
-  tr.seat-broken td.va-name-col {
-    background: color-mix(in srgb, var(--color-wolf) 22%, transparent);
-  }
-
-  .va-name-col {
-    text-align: left !important;
-    white-space: nowrap;
-    padding-right: 8px !important;
-    font-weight: 700;
-  }
-
-  .va-name-col.village { background: var(--color-village-bg); }
-  .va-name-col.wolf { background: var(--color-wolf-bg); }
-  .va-name-col.fox { background: var(--color-fox-bg); }
-  .va-name-col.not-village { background: var(--color-unknown-team-bg); }
-
   .role-possible,
-  .role-impossible {
+  .role-dim {
     cursor: pointer;
   }
 
   .role-possible:hover,
-  .role-impossible:hover {
+  .role-dim:hover {
     outline: 1px solid var(--color-accent);
     outline-offset: -1px;
   }
@@ -529,9 +510,9 @@
     color: var(--color-text);
   }
 
-  .role-impossible {
+  .role-dim {
     background: var(--color-bg-sunken);
-    color: var(--color-border);
+    color: var(--color-text-faint);
   }
 
   .role-assumed {
@@ -541,10 +522,43 @@
   }
 
   .role-confirmed {
-    background: var(--color-village);
     color: var(--color-bg);
     font-weight: 700;
-    cursor: default;
+    cursor: pointer;
+  }
+
+  .role-confirmed.confirmed-village { background: var(--color-village); }
+  .role-confirmed.confirmed-wolf { background: var(--color-wolf); }
+  .role-confirmed.confirmed-fox { background: var(--color-fox); }
+  .role-confirmed:not(.confirmed-village):not(.confirmed-wolf):not(.confirmed-fox) {
+    background: var(--color-unknown-team);
+  }
+
+  .va-hocuspocus-cell {
+    display: inline-block;
+    background: var(--color-bg-sunken);
+    color: var(--color-border);
+    font-weight: 700;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid var(--color-border);
+    min-width: 1.2em;
+    text-align: center;
+    margin-left: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.2;
+    padding: 0 2px;
+  }
+
+  .va-hocuspocus-cell:hover {
+    outline: 1px solid var(--color-accent);
+    outline-offset: -1px;
+  }
+
+  .va-hocuspocus-cell.hocuspocus-on {
+    background: var(--color-accent);
+    color: var(--color-bg);
   }
 
   .va-results-row td {
