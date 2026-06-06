@@ -91,6 +91,15 @@
     color: var(--color-wolf);
   }
 
+  /* 退場済み + 人外確定: dead の text-faint が赤を打ち消すのを防ぐため、
+     status × dead の組み合わせは暗赤に明示。赤情報を維持しつつトーンダウン
+     感を出す。 */
+  .status-wolf .dead,
+  .status-fox .dead,
+  .status-not-village .dead {
+    color: color-mix(in srgb, var(--color-wolf) 60%, var(--color-text-faint));
+  }
+
   .clickable {
     cursor: pointer;
     border-radius: 2px;
