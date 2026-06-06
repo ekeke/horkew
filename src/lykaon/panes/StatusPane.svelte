@@ -86,6 +86,14 @@
     ctx.villageStatus ? extractClaimGroups(ctx.villageStatus, ctx.players) : []
   )
   let survivors = $derived(new Set(survivorInfo?.survivors.map(s => s.seat) ?? []))
+  let deadPlayers = $derived.by(() => {
+    const map = new Map<number, string>()
+    if (!ctx.villageStatus) return map
+    for (const [seat, status] of ctx.villageStatus.statuses) {
+      if (!status.surviving) map.set(seat, ctx.players.get(seat) ?? `#${seat}`)
+    }
+    return map
+  })
 
   const nightKillCauses: Set<CauseOfDeath> = new Set([
     'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
@@ -129,7 +137,7 @@
     {#if !hiddenSections.has('survivor')}
       <SurvivorSection info={survivorInfo} {setupMismatch} day={ctx.villageStatus.day} />
     {/if}
-    <SummaryTable days={deathHistory} groups={claimGroups} maxDay={ctx.villageStatus.day} players={ctx.players} {survivors} {nightKilled} {executed} {claimShortNames} compact={hiddenSections.size > 0} hiddenSections={summaryHidden} />
+    <SummaryTable days={deathHistory} groups={claimGroups} maxDay={ctx.villageStatus.day} players={ctx.players} {survivors} {nightKilled} {executed} {claimShortNames} masonCapacity={ctx.setup.get('mason') ?? 0} {deadPlayers} compact={hiddenSections.size > 0} hiddenSections={summaryHidden} />
     {#if !hiddenSections.has('vote')}
       <VoteTable status={voteStatus} />
     {/if}

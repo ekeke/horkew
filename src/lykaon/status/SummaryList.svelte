@@ -4,12 +4,13 @@
   import type { Writable } from 'svelte/store'
   import { getContext } from 'svelte'
   import { causeOfDeathLabel, buildAssertionTimeline } from './extract.ts'
+  import { buildMasonClusters } from './masonClusters.ts'
   import { systemRoles } from '../../types/index.ts'
   import type { SystemRole } from '../../types/index.ts'
   import PlayerName from './PlayerName.svelte'
   import SpeciesIcon from './SpeciesIcon.svelte'
 
-  let { days, groups, maxDay, players, survivors, nightKilled, executed, claimShortNames = new Map() }: {
+  let { days, groups, maxDay, players, survivors, nightKilled, executed, claimShortNames = new Map(), masonCapacity = 0, deadPlayers = new Map() }: {
     days: DayDeaths[]
     groups: ClaimGroup[]
     maxDay: number
@@ -18,6 +19,8 @@
     nightKilled: Set<number>
     executed: Set<number>
     claimShortNames?: Map<number, string>
+    masonCapacity?: number
+    deadPlayers?: Map<number, string>
   } = $props()
 
   const srcLines = getContext<Writable<SourceLines>>('sourceLines')
@@ -79,33 +82,7 @@
     })
   }
 
-  function buildMasonDisplay(group: ClaimGroup): { seat: number, name: string, dead: boolean }[][] {
-    const parent = new Map<number, number>()
-    function find(x: number): number {
-      if (!parent.has(x)) parent.set(x, x)
-      if (parent.get(x) !== x) parent.set(x, find(parent.get(x)!))
-      return parent.get(x)!
-    }
-    function union(a: number, b: number) { parent.set(find(a), find(b)) }
-
-    for (const row of group.rows) {
-      parent.set(row.seat, row.seat)
-      for (const [targetSeat] of row.assertions) {
-        if (group.rows.some(r => r.seat === targetSeat)) union(row.seat, targetSeat)
-      }
-    }
-
-    const clusters = new Map<number, ClaimGroup['rows']>()
-    for (const row of group.rows) {
-      const root = find(row.seat)
-      if (!clusters.has(root)) clusters.set(root, [])
-      clusters.get(root)!.push(row)
-    }
-
-    return [...clusters.values()].map(rows =>
-      rows.sort((a, b) => a.seat - b.seat).map(r => ({ seat: r.seat, name: r.name, dead: !r.surviving }))
-    )
-  }
+  let masonClusters = $derived(buildMasonClusters(masonGroup, masonCapacity, deadPlayers).clusters)
 
   let hasContent = $derived(
     killExecDays.length > 0 || groups.length > 0
@@ -245,11 +222,14 @@
       <div class="sect-header role-header">{masonGroup.roleShortName}</div>
       <div class="sect-body">
         <div class="extra-line" class:active-hl-row={masonGroup.rows.some(r => $srcLines.claimRow.get(r.seat) === $cursor)}>
-          {#each buildMasonDisplay(masonGroup) as cluster, ci}
+          {#each masonClusters as cluster, ci}
             {#if ci > 0}<span class="cluster-sep"> / </span>{/if}
-            {#each cluster as member, i}
+            {#each cluster.members as member, i}
               {#if i > 0}<span class="mason-sep">-</span>{/if}
               <PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} seat={member.seat}>{member.name}</PlayerName>
+            {/each}
+            {#each Array.from({ length: Math.max(0, masonCapacity - cluster.members.length) }) as _empty}
+              <span class="mason-sep">-</span><span class="mason-empty-slot">?</span>
             {/each}
           {/each}
         </div>
@@ -465,6 +445,10 @@
   }
 
   .mason-sep, .cluster-sep {
+    color: var(--color-text-faint);
+  }
+
+  .mason-empty-slot {
     color: var(--color-text-faint);
   }
 

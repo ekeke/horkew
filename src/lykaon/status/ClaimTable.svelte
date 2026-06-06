@@ -1,10 +1,11 @@
 <script lang="ts">
   import type { ClaimGroup } from './extract.ts'
   import { buildAssertionTimeline } from './extract.ts'
+  import { buildMasonClusters } from './masonClusters.ts'
   import PlayerName from './PlayerName.svelte'
   import SpeciesIcon from './SpeciesIcon.svelte'
 
-  let { groups, maxDay, players, survivors, nightKilled, executed, claimShortNames = new Map() }: {
+  let { groups, maxDay, players, survivors, nightKilled, executed, claimShortNames = new Map(), masonCapacity = 0, deadPlayers = new Map() }: {
     groups: ClaimGroup[]
     maxDay: number
     players: Map<number, string>
@@ -12,6 +13,8 @@
     nightKilled: Set<number>
     executed: Set<number>
     claimShortNames?: Map<number, string>
+    masonCapacity?: number
+    deadPlayers?: Map<number, string>
   } = $props()
 
   const tableRoles = new Set(['seer', 'medium', 'bodyguard'])
@@ -40,42 +43,7 @@
   )
 
 
-  /**
-   * Build mason pairs/groups from assertions.
-   * Each mason's assertions map contains partner seats.
-   * We use union-find to group connected masons.
-   */
-  function buildMasonGroups(group: ClaimGroup): { members: { seat: number, name: string, dead: boolean }[] }[] {
-    const parent = new Map<number, number>()
-    function find(x: number): number {
-      if (!parent.has(x)) parent.set(x, x)
-      if (parent.get(x) !== x) parent.set(x, find(parent.get(x)!))
-      return parent.get(x)!
-    }
-    function union(a: number, b: number) {
-      parent.set(find(a), find(b))
-    }
-
-    for (const row of group.rows) {
-      parent.set(row.seat, row.seat)
-      for (const [targetSeat] of row.assertions) {
-        if (group.rows.some(r => r.seat === targetSeat)) {
-          union(row.seat, targetSeat)
-        }
-      }
-    }
-
-    const clusters = new Map<number, ClaimGroup['rows']>()
-    for (const row of group.rows) {
-      const root = find(row.seat)
-      if (!clusters.has(root)) clusters.set(root, [])
-      clusters.get(root)!.push(row)
-    }
-
-    return [...clusters.values()].map(rows => ({
-      members: rows.sort((a, b) => a.seat - b.seat).map(r => ({ seat: r.seat, name: r.name, dead: !r.surviving })),
-    }))
-  }
+  let masonClusters = $derived(buildMasonClusters(masonGroup, masonCapacity, deadPlayers).clusters)
 </script>
 
 <div class="section">
@@ -128,8 +96,8 @@
           <div class="group group-inline">
             <span class="inline-role-label">{masonGroup.roleShortName}</span>
             <div class="mason-groups">
-              {#each buildMasonGroups(masonGroup) as cluster}
-                <span class="mason-cluster">{#each cluster.members as member, i}{#if i > 0}<span class="mason-sep"> - </span>{/if}<PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} claim={claimShortNames.get(member.seat)} seat={member.seat}>{member.name}</PlayerName>{/each}</span>
+              {#each masonClusters as cluster}
+                <span class="mason-cluster">{#each cluster.members as member, i}{#if i > 0}<span class="mason-sep"> - </span>{/if}<PlayerName dead={member.dead} nightKill={nightKilled.has(member.seat)} executed={executed.has(member.seat)} claim={claimShortNames.get(member.seat)} seat={member.seat}>{member.name}</PlayerName>{/each}{#each Array.from({ length: Math.max(0, masonCapacity - cluster.members.length) }) as _empty}<span class="mason-sep"> - </span><span class="mason-empty-slot">?</span>{/each}</span>
               {/each}
             </div>
           </div>
@@ -264,6 +232,10 @@
   }
 
   .mason-sep {
+    color: var(--color-text-faint);
+  }
+
+  .mason-empty-slot {
     color: var(--color-text-faint);
   }
 

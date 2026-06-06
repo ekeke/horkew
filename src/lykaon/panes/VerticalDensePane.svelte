@@ -4,7 +4,8 @@
   import type { SystemRole } from '../../types/index.ts'
   import type { AnalysisContext } from '../AnalysisContext.svelte.ts'
   import type { ClaimRow, DayAssertion } from '../status/extract.ts'
-  import { buildAssertionTimeline } from '../status/extract.ts'
+  import { buildAssertionTimeline, extractClaimGroups } from '../status/extract.ts'
+  import { buildMasonClusters } from '../status/masonClusters.ts'
   import PlayerName from '../status/PlayerName.svelte'
   import SpeciesIcon from '../status/SpeciesIcon.svelte'
 
@@ -241,6 +242,24 @@
   }
 
   let subTables = $derived(buildCoSubTables())
+
+  let masonCapacity = $derived(ctx.setup.get('mason') ?? 0)
+  let deadPlayerNames = $derived.by(() => {
+    const map = new Map<number, string>()
+    const vs = ctx.villageStatus
+    if (!vs) return map
+    for (const [seat, status] of vs.statuses) {
+      if (!status.surviving) map.set(seat, ctx.players.get(seat) ?? `#${seat}`)
+    }
+    return map
+  })
+  let masonClustersData = $derived.by(() => {
+    const vs = ctx.villageStatus
+    if (!vs) return []
+    const groups = extractClaimGroups(vs, ctx.players)
+    const masonGroup = groups.find(g => g.role === 'mason')
+    return buildMasonClusters(masonGroup, masonCapacity, deadPlayerNames).clusters
+  })
 </script>
 
 {#if ctx.analysisError}
@@ -253,25 +272,53 @@
         <div class="va-sub-table">
           <div class="va-sub-tag">{st.tag}</div>
           <div class="va-sub-body">
-          <div class="va-poss-line">
-            {#each st.seats as seat, idx}
-              {@const possibilities = possibilitiesFor(seat, st.roles)}
-              {@const fixedToPrimary = st.primaryRole !== undefined && possibilities.length === 1 && possibilities[0].role === st.primaryRole}
-              {@const results = buildResultsFor(seat)}
-              {@const isNewGroup = idx > 0 && (!st.setGrouping || possibilitiesSetKey(seat) !== possibilitiesSetKey(st.seats[idx - 1]))}
-              {#if isNewGroup}<span class="va-group-break" aria-hidden="true"></span>{/if}
-              <span class="va-poss-item">
-                <span class="va-poss-row">
-                  <PlayerName
-                    dead={ctx.deadSeats.has(seat)}
-                    nightKill={ctx.nightKilledSeats.has(seat)}
-                    executed={ctx.executedSeats.has(seat)}
-                    seat={seat}
-                  >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>{#if fixedToPrimary}<span class="va-poss-cell role-confirmed">{roleToShort(st.primaryRole!)}</span>{:else}{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(seat) === role}<span class="va-poss-cell" class:role-possible={!assumed && !dim} class:role-impossible={!assumed && dim} class:role-assumed={assumed} onclick={() => ctx.toggleAssumption(seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{/if}
-                </span>{#if results.length > 0}<span class="va-poss-results">{#each results as { day, assertion, isBodyguard }, ri}{#if assertion}{#if ri > 0}<span class="va-arrow">→</span>{/if}<span class="va-result" class:human={assertion.species === 'human' && !assertion.forecast} class:wolf={assertion.species === 'wolf' && !assertion.forecast} class:guard={isBodyguard} class:forecast={assertion.forecast}><PlayerName dead={ctx.deadSeats.has(assertion.targetSeat)} nightKill={ctx.nightKilledSeats.has(assertion.targetSeat)} executed={ctx.executedSeats.has(assertion.targetSeat)} claim={ctx.claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{ctx.playerShortNames.get(assertion.targetSeat) ?? assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="va-forecast-label">(予)</span>{:else if !isBodyguard}<SpeciesIcon species={assertion.species} />{/if}</span>{/if}{/each}</span>{/if}
-              </span>
-            {/each}
-          </div>
+          {#if st.primaryRole === 'mason'}
+            {@const claimingSeats = new Set(st.seats)}
+            <div class="va-poss-line">
+              {#each masonClustersData as cluster, ci}
+                {#if ci > 0}<span class="va-mason-cluster-sep"> / </span>{/if}
+                {#each cluster.members as member, mi}
+                  {#if mi > 0}<span class="va-mason-link">-</span>{/if}
+                  {@const isClaiming = claimingSeats.has(member.seat)}
+                  {@const possibilities = isClaiming ? possibilitiesFor(member.seat, st.roles) : []}
+                  {@const fixedToPrimary = possibilities.length === 1 && possibilities[0].role === 'mason'}
+                  <span class="va-poss-item">
+                    <span class="va-poss-row">
+                      <PlayerName
+                        dead={ctx.deadSeats.has(member.seat)}
+                        nightKill={ctx.nightKilledSeats.has(member.seat)}
+                        executed={ctx.executedSeats.has(member.seat)}
+                        seat={member.seat}
+                      >{ctx.playerShortNames.get(member.seat) ?? ctx.players.get(member.seat) ?? `#${member.seat}`}</PlayerName>{#if isClaiming}{#if fixedToPrimary}<span class="va-poss-cell role-confirmed">{roleToShort('mason')}</span>{:else}{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(member.seat) === role}<span class="va-poss-cell" class:role-possible={!assumed && !dim} class:role-impossible={!assumed && dim} class:role-assumed={assumed} onclick={() => ctx.toggleAssumption(member.seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{/if}{/if}
+                    </span>
+                  </span>
+                {/each}
+                {#each Array.from({ length: Math.max(0, masonCapacity - cluster.members.length) }) as _empty}
+                  <span class="va-mason-link">-</span><span class="va-mason-empty">?</span>
+                {/each}
+              {/each}
+            </div>
+          {:else}
+            <div class="va-poss-line">
+              {#each st.seats as seat, idx}
+                {@const possibilities = possibilitiesFor(seat, st.roles)}
+                {@const fixedToPrimary = st.primaryRole !== undefined && possibilities.length === 1 && possibilities[0].role === st.primaryRole}
+                {@const results = buildResultsFor(seat)}
+                {@const isNewGroup = idx > 0 && (!st.setGrouping || possibilitiesSetKey(seat) !== possibilitiesSetKey(st.seats[idx - 1]))}
+                {#if isNewGroup}<span class="va-group-break" aria-hidden="true"></span>{/if}
+                <span class="va-poss-item">
+                  <span class="va-poss-row">
+                    <PlayerName
+                      dead={ctx.deadSeats.has(seat)}
+                      nightKill={ctx.nightKilledSeats.has(seat)}
+                      executed={ctx.executedSeats.has(seat)}
+                      seat={seat}
+                    >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>{#if fixedToPrimary}<span class="va-poss-cell role-confirmed">{roleToShort(st.primaryRole!)}</span>{:else}{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(seat) === role}<span class="va-poss-cell" class:role-possible={!assumed && !dim} class:role-impossible={!assumed && dim} class:role-assumed={assumed} onclick={() => ctx.toggleAssumption(seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{/if}
+                  </span>{#if results.length > 0}<span class="va-poss-results">{#each results as { day, assertion, isBodyguard }, ri}{#if assertion}{#if ri > 0}<span class="va-arrow">→</span>{/if}<span class="va-result" class:human={assertion.species === 'human' && !assertion.forecast} class:wolf={assertion.species === 'wolf' && !assertion.forecast} class:guard={isBodyguard} class:forecast={assertion.forecast}><PlayerName dead={ctx.deadSeats.has(assertion.targetSeat)} nightKill={ctx.nightKilledSeats.has(assertion.targetSeat)} executed={ctx.executedSeats.has(assertion.targetSeat)} claim={ctx.claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{ctx.playerShortNames.get(assertion.targetSeat) ?? assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="va-forecast-label">(予)</span>{:else if !isBodyguard}<SpeciesIcon species={assertion.species} />{/if}</span>{/if}{/each}</span>{/if}
+                </span>
+              {/each}
+            </div>
+          {/if}
           </div>
         </div>
       {/each}
@@ -416,6 +463,17 @@
     flex-basis: 100%;
     width: 0;
     height: 0;
+  }
+
+  .va-mason-link,
+  .va-mason-cluster-sep,
+  .va-mason-empty {
+    display: inline-block;
+    color: var(--color-text-faint);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    vertical-align: top;
+    padding: 0 2px;
   }
 
   .va-poss-cell:hover {

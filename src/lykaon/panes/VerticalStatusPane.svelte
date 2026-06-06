@@ -84,6 +84,14 @@
     ctx.villageStatus ? extractClaimGroups(ctx.villageStatus, ctx.players) : []
   )
   let survivors = $derived(new Set(survivorInfo?.survivors.map(s => s.seat) ?? []))
+  let deadPlayers = $derived.by(() => {
+    const map = new Map<number, string>()
+    if (!ctx.villageStatus) return map
+    for (const [seat, status] of ctx.villageStatus.statuses) {
+      if (!status.surviving) map.set(seat, ctx.players.get(seat) ?? `#${seat}`)
+    }
+    return map
+  })
 
   const nightKillCauses: Set<CauseOfDeath> = new Set([
     'night_kill', 'follow_killed_hamster', 'cursed_by_killed_nekomata',
@@ -160,7 +168,7 @@
           {/if}
         </div>
         <div class="scroll-area">
-          <SummaryList days={deathHistory} groups={claimGroups} maxDay={ctx.villageStatus.day} players={ctx.players} {survivors} {nightKilled} {executed} {claimShortNames} />
+          <SummaryList days={deathHistory} groups={claimGroups} maxDay={ctx.villageStatus.day} players={ctx.players} {survivors} {nightKilled} {executed} {claimShortNames} masonCapacity={ctx.setup.get('mason') ?? 0} {deadPlayers} />
         </div>
       {:else}
         <div class="scroll-area">
