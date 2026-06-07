@@ -9,9 +9,11 @@ import {
   extractVoteStatus,
   computeVerdicts,
   buildAssertionTimeline,
+  buildExecutionRows,
+  buildNightKillRows,
   causeOfDeathLabel,
 } from './extract.ts'
-import type { VoteStatus, VoteRow } from './extract.ts'
+import type { DayDeaths, VoteStatus, VoteRow } from './extract.ts'
 
 function setup(howl: string) {
   const { statements, meta } = parse(howl)
@@ -119,6 +121,149 @@ describe('extractDeathHistory', () => {
     assert.ok(cursed)
     assert.strictEqual(cursed!.causeOfDeath, 'cursed_by_executed_nekomata')
     assert.strictEqual(day1.nightKills.length, 0)
+  })
+})
+
+describe('buildExecutionRows / buildNightKillRows', () => {
+  // Pure-function tests against hand-crafted DayDeaths fixtures.
+  // 死亡履歴の整形は Dense ペインの「吊」「噛」表示の入口なので、
+  // 同日複数死体・処刑なし日・平和日を直接データで再現してチェックする。
+
+  function entry(seat: number, name: string, cause: 'execution' | 'night_kill' = 'execution') {
+    return { seat, name, causeOfDeath: cause as 'execution' | 'night_kill' }
+  }
+
+  test('empty history → empty rows for both', () => {
+    const rows: DayDeaths[] = []
+    assert.deepStrictEqual(buildExecutionRows(rows), [])
+    assert.deepStrictEqual(buildNightKillRows(rows), [])
+  })
+
+  test('day-1-only history excludes Day 1 from kill rows', () => {
+    // Day 1 は噛み発見が原理上存在しないため、 buildNightKillRows は Day 1 を除外する
+    const rows: DayDeaths[] = [
+      { day: 1, executions: [entry(1, 'アリス')], nightKills: [] },
+    ]
+    const execRows = buildExecutionRows(rows)
+    const killRows = buildNightKillRows(rows)
+    assert.strictEqual(execRows.length, 1)
+    assert.strictEqual(execRows[0].day, 1)
+    assert.strictEqual(execRows[0].entries.length, 1)
+    assert.strictEqual(killRows.length, 0)
+  })
+
+  test('same-day multiple executions kept in one row (e.g. lynch + curse)', () => {
+    // 道連れ等で同日に複数死体になるケース。同じ row.entries に並ぶ
+    const rows: DayDeaths[] = [
+      {
+        day: 1,
+        executions: [entry(1, 'アリス'), entry(2, 'ボブ', 'execution')],
+        nightKills: [],
+      },
+    ]
+    const execRows = buildExecutionRows(rows)
+    assert.strictEqual(execRows.length, 1)
+    assert.strictEqual(execRows[0].entries.length, 2)
+    assert.strictEqual(execRows[0].entries[0].name, 'アリス')
+    assert.strictEqual(execRows[0].entries[1].name, 'ボブ')
+  })
+
+  test('same-day multiple night kills kept in one row (連噛み)', () => {
+    const rows: DayDeaths[] = [
+      { day: 1, executions: [entry(1, 'アリス')], nightKills: [] },
+      {
+        day: 2,
+        executions: [],
+        nightKills: [entry(2, 'ボブ', 'night_kill'), entry(3, 'チャーリー', 'night_kill')],
+      },
+    ]
+    const killRows = buildNightKillRows(rows)
+    assert.strictEqual(killRows.length, 1)
+    assert.strictEqual(killRows[0].day, 2)
+    assert.strictEqual(killRows[0].entries.length, 2)
+  })
+
+  test('exec-only day yields empty kill row (= "平和")', () => {
+    // Day 2 で処刑だけあって噛みなし。 nightKills が空配列の行が出る (表示側で「平和」になる)
+    const rows: DayDeaths[] = [
+      { day: 1, executions: [entry(1, 'アリス')], nightKills: [] },
+      { day: 2, executions: [entry(2, 'ボブ')], nightKills: [] },
+    ]
+    const killRows = buildNightKillRows(rows)
+    assert.strictEqual(killRows.length, 1)
+    assert.strictEqual(killRows[0].day, 2)
+    assert.strictEqual(killRows[0].entries.length, 0)
+  })
+
+  test('kill-only day yields empty exec row (= "処刑なし")', () => {
+    // Day 2 で噛みだけあって処刑なし。 executions が空配列の行が出る (表示側で「処刑なし」になる)
+    const rows: DayDeaths[] = [
+      { day: 1, executions: [entry(1, 'アリス')], nightKills: [] },
+      { day: 2, executions: [], nightKills: [entry(2, 'ボブ', 'night_kill')] },
+    ]
+    const execRows = buildExecutionRows(rows)
+    assert.strictEqual(execRows.length, 2)
+    assert.strictEqual(execRows[0].entries.length, 1)
+    assert.strictEqual(execRows[1].day, 2)
+    assert.strictEqual(execRows[1].entries.length, 0)
+  })
+
+  test('multi-day rows preserve chronological order', () => {
+    const rows: DayDeaths[] = [
+      { day: 1, executions: [entry(1, 'アリス')], nightKills: [] },
+      { day: 2, executions: [entry(2, 'ボブ')], nightKills: [entry(3, 'チャーリー', 'night_kill')] },
+      { day: 3, executions: [entry(4, 'デイブ')], nightKills: [entry(5, 'エミリー', 'night_kill')] },
+    ]
+    const execRows = buildExecutionRows(rows)
+    assert.deepStrictEqual(execRows.map(r => r.day), [1, 2, 3])
+    const killRows = buildNightKillRows(rows)
+    assert.deepStrictEqual(killRows.map(r => r.day), [2, 3])
+  })
+})
+
+describe('extractDeathHistory + buildExecutionRows / buildNightKillRows (integration)', () => {
+  test('連噛み (multi-target attack) は同日 entries に並ぶ', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー、フランク、ジョージ
+
+吊り アリス
+
+噛み ボブ、チャーリー`)
+    const history = extractDeathHistory(vs, players)
+    const killRows = buildNightKillRows(history)
+    const day2 = killRows.find(r => r.day === 2)!
+    assert.ok(day2, 'Day 2 の噛み行が存在')
+    assert.strictEqual(day2.entries.length, 2, '連噛みの 2 名が同一 entries に並ぶ')
+    const names = day2.entries.map(e => e.name).sort()
+    assert.deepStrictEqual(names, ['チャーリー', 'ボブ'].sort())
+  })
+
+  test('道連れは同日 executions として並ぶ', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
+
+吊り アリス
+道連れ ボブ`)
+    const history = extractDeathHistory(vs, players)
+    const execRows = buildExecutionRows(history)
+    const day1 = execRows.find(r => r.day === 1)!
+    assert.ok(day1)
+    assert.strictEqual(day1.entries.length, 2, '吊り + 道連れの 2 名が同日 entries に並ぶ')
+  })
+
+  test('平和の日は kill row が空 entries (= 表示「平和」相当)', () => {
+    // Day 1: 吊り、 Day 1 夜は平和、 Day 2: 吊り
+    // → Day 2 の killRow は entries が空 (= 平和)
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
+
+吊り アリス
+
+平和
+
+吊り ボブ`)
+    const history = extractDeathHistory(vs, players)
+    const killRows = buildNightKillRows(history)
+    const day2 = killRows.find(r => r.day === 2)
+    assert.ok(day2, 'Day 2 (Day 1 夜の結果) が killRows に存在')
+    assert.strictEqual(day2!.entries.length, 0, '平和なので entries は空')
   })
 })
 
