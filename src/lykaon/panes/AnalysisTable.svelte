@@ -9,11 +9,12 @@
   type Grouping = 'seat' | 'co' | 'survival'
   type ViewOptions = { columns: 1 | 2 | 3 | 4, grouping: Grouping }
 
-  let { ctx, onInsertRevealRoles, onOpenDenyWolfDialog, extraFooter, hideAssumptions = false, defaultViewOptions }: {
+  let { ctx, onInsertRevealRoles, onOpenDenyWolfDialog, extraFooter, determinedBanner, hideAssumptions = false, defaultViewOptions }: {
     ctx: AnalysisContext
     onInsertRevealRoles?: (done: () => void) => void
     onOpenDenyWolfDialog?: () => void
     extraFooter?: Snippet
+    determinedBanner?: Snippet<[{ insert: () => void, busy: boolean }]>
     hideAssumptions?: boolean
     defaultViewOptions?: ViewOptions
   } = $props()
@@ -391,10 +392,14 @@
         {/each}
       </div>
       {#if ctx.allRolesDetermined}
-        <div class="determined-banner">
-          <span class="determined-label">配役確定</span>
-          <button class="determined-insert" onclick={handleInsertReveal} disabled={insertRevealBusy}>挿入</button>
-        </div>
+        {#if determinedBanner}
+          {@render determinedBanner({ insert: handleInsertReveal, busy: insertRevealBusy })}
+        {:else}
+          <div class="determined-banner">
+            <span class="determined-label">配役確定</span>
+            <button class="determined-insert" onclick={handleInsertReveal} disabled={insertRevealBusy}>挿入</button>
+          </div>
+        {/if}
       {/if}
       {#if extraFooter}
         {@render extraFooter()}
