@@ -1435,11 +1435,7 @@
       <div class="pane-header">Vertical Dense</div>
       <div class="pane-body">
         <div class="vertical-dense-frame">
-          <VerticalDensePane
-            {ctx}
-            onOpenDenyWolfDialog={openDenyWolfDialog}
-            extraFooter={devMode ? devModeAnalysisFooter : undefined}
-          />
+          <VerticalDensePane {ctx} />
         </div>
       </div>
     </section>

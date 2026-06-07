@@ -3,17 +3,16 @@
   import { systemRoles } from '../../types/index.ts'
   import type { SystemRole } from '../../types/index.ts'
   import type { AnalysisContext } from '../AnalysisContext.svelte.ts'
-  import type { ClaimRow, DayAssertion } from '../status/extract.ts'
-  import { buildAssertionTimeline, extractClaimGroups } from '../status/extract.ts'
+  import type { ClaimRow, DayAssertion, DeathEntry } from '../status/extract.ts'
+  import { buildAssertionTimeline, extractClaimGroups, extractDeathHistory } from '../status/extract.ts'
   import { buildMasonClusters } from '../status/masonClusters.ts'
   import PlayerName from '../status/PlayerName.svelte'
   import SpeciesIcon from '../status/SpeciesIcon.svelte'
   import { classifyPlayer } from '../status/playerStatus.ts'
 
-  let { ctx, onInsertRevealRoles, onOpenDenyWolfDialog, extraFooter, hideAssumptions = false }: {
+  let { ctx, onInsertRevealRoles, extraFooter, hideAssumptions = false }: {
     ctx: AnalysisContext
     onInsertRevealRoles?: (done: () => void) => void
-    onOpenDenyWolfDialog?: () => void
     extraFooter?: Snippet
     hideAssumptions?: boolean
   } = $props()
@@ -249,6 +248,22 @@
     const masonGroup = groups.find(g => g.role === 'mason')
     return buildMasonClusters(masonGroup, masonCapacity, deadPlayerNames).clusters
   })
+
+  let deathSequence = $derived.by(() => {
+    const vs = ctx.villageStatus
+    const executed: DeathEntry[] = []
+    const killed: DeathEntry[] = []
+    if (!vs) return { executed, killed }
+    for (const day of extractDeathHistory(vs, ctx.players)) {
+      executed.push(...day.executions)
+      killed.push(...day.nightKills)
+    }
+    return { executed, killed }
+  })
+
+  let hasAssumptionState = $derived(
+    ctx.assumptions.size > 0 || ctx.denyWolfGroups.length > 0 || ctx.hocusPocusSeats.size > 0
+  )
 </script>
 
 {#if ctx.analysisError}
@@ -309,7 +324,7 @@
                       seat={seat}
                       status={seatStatus}
                     >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>{#each possibilities as { role, dim }}{@const assumed = ctx.assumptions.get(seat) === role}{@const confirmed = !assumed && seatConfirmedRole === role}{@const confirmedAlign = confirmed ? systemRoles.get(role)?.alignment : undefined}<span class="va-poss-cell" class:role-possible={!assumed && !confirmed && !dim} class:role-dim={!assumed && !confirmed && dim} class:role-assumed={assumed} class:role-confirmed={confirmed} class:confirmed-village={confirmed && confirmedAlign === 'villager'} class:confirmed-wolf={confirmed && confirmedAlign === 'werewolf'} class:confirmed-fox={confirmed && confirmedAlign === 'werehamster'} onclick={() => ctx.toggleAssumption(seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{#if shouldShowHocuspocus(seat)}<span class="va-hocuspocus-cell" class:hocuspocus-on={ctx.hocusPocusSeats.has(seat)} title="HocusPocus: この席のCOを無視して解析" onclick={() => ctx.toggleHocusPocus(seat)} role="button" tabindex="0">?</span>{/if}
-                  </span>{#if results.length > 0}<span class="va-poss-results">{#each results as { day, assertion, isBodyguard }, ri}{#if assertion}{#if ri > 0}<span class="va-arrow">→</span>{/if}<span class="va-result" class:human={assertion.species === 'human' && !assertion.forecast} class:wolf={assertion.species === 'wolf' && !assertion.forecast} class:guard={isBodyguard} class:forecast={assertion.forecast}><PlayerName dead={ctx.deadSeats.has(assertion.targetSeat)} nightKill={ctx.nightKilledSeats.has(assertion.targetSeat)} executed={ctx.executedSeats.has(assertion.targetSeat)} claim={ctx.claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat}>{ctx.playerShortNames.get(assertion.targetSeat) ?? assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="va-forecast-label">(予)</span>{:else if !isBodyguard}<SpeciesIcon species={assertion.species} />{/if}</span>{/if}{/each}</span>{/if}
+                  </span>{#if results.length > 0}<span class="va-poss-results">{#each results as { day, assertion, isBodyguard }, ri}{#if assertion}{#if ri > 0}<span class="va-arrow">→</span>{/if}<span class="va-result" class:dead={ctx.deadSeats.has(assertion.targetSeat)} class:human={assertion.species === 'human' && !assertion.forecast} class:wolf={assertion.species === 'wolf' && !assertion.forecast} class:guard={isBodyguard} class:forecast={assertion.forecast}><PlayerName dead={ctx.deadSeats.has(assertion.targetSeat)} nightKill={ctx.nightKilledSeats.has(assertion.targetSeat)} executed={ctx.executedSeats.has(assertion.targetSeat)} claim={ctx.claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat} outline={assertion.species === 'wolf' && !assertion.forecast}>{ctx.playerShortNames.get(assertion.targetSeat) ?? assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="va-forecast-label">(予)</span>{:else if !isBodyguard}<SpeciesIcon species={assertion.species} />{/if}</span>{/if}{/each}</span>{/if}
                 </span>
               {/each}
             </div>
@@ -318,6 +333,36 @@
         </div>
       {/each}
     </div>
+    {#if deathSequence.executed.length > 0 || deathSequence.killed.length > 0}
+      <div class="va-deaths">
+        {#if deathSequence.executed.length > 0}
+          <div class="va-sub-table">
+            <div class="va-sub-tag exec">吊</div>
+            <div class="va-sub-body">
+              <div class="va-death-seq">
+                {#each deathSequence.executed as entry, i}
+                  {#if i > 0}<span class="va-arrow">→</span>{/if}
+                  <PlayerName dead executed seat={entry.seat} claim={ctx.claimShortNames.get(entry.seat)}>{ctx.playerShortNames.get(entry.seat) ?? entry.name}</PlayerName>
+                {/each}
+              </div>
+            </div>
+          </div>
+        {/if}
+        {#if deathSequence.killed.length > 0}
+          <div class="va-sub-table">
+            <div class="va-sub-tag kill">噛</div>
+            <div class="va-sub-body">
+              <div class="va-death-seq">
+                {#each deathSequence.killed as entry, i}
+                  {#if i > 0}<span class="va-arrow">→</span>{/if}
+                  <PlayerName dead nightKill seat={entry.seat} claim={ctx.claimShortNames.get(entry.seat)}>{ctx.playerShortNames.get(entry.seat) ?? entry.name}</PlayerName>
+                {/each}
+              </div>
+            </div>
+          </div>
+        {/if}
+      </div>
+    {/if}
     {#if ctx.allRolesDetermined}
       <div class="determined-banner">
         <span class="determined-label">配役確定</span>
@@ -327,44 +372,9 @@
     {#if extraFooter}
       {@render extraFooter()}
     {/if}
-    {#if ctx.analysisDuration > 0}
+    {#if !hideAssumptions && hasAssumptionState}
       <div class="va-footer">
-        <span class="va-duration">retar {ctx.analysisDuration}ms</span>
-      </div>
-    {/if}
-    {#if !hideAssumptions && (ctx.assumptions.size > 0 || ctx.denyWolfGroups.length > 0 || ctx.wolfPairSuggestions.length > 0)}
-      <div class="va-assumptions">
-        <div class="va-assumptions-header">
-          仮説
-          {#if onOpenDenyWolfDialog && (ctx.setup.get('werewolf') ?? 0) >= 2}
-            <button class="va-assumption-btn" onclick={onOpenDenyWolfDialog}>追加</button>
-          {/if}
-          {#if ctx.assumptions.size > 0 || ctx.denyWolfGroups.length > 0 || ctx.hocusPocusSeats.size > 0}
-            <button class="va-assumption-btn" onclick={() => ctx.clearAssumptions()}>全削除</button>
-          {/if}
-        </div>
-        {#each [...ctx.assumptions] as [seat, role]}
-          <div class="va-assumption-item">
-            <span>{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}は{systemRoles.get(role)?.name ?? role}である</span>
-            <button class="va-assumption-x" onclick={() => ctx.toggleAssumption(seat, role)}>&times;</button>
-          </div>
-        {/each}
-        {#each ctx.denyWolfGroups as group, i}
-          <div class="va-assumption-item">
-            <span class="deny-wolf">{group.map(s => ctx.playerShortNames.get(s) ?? ctx.players.get(s) ?? `#${s}`).join(' と ')} は両狼でない</span>
-            <button class="va-assumption-x" onclick={() => ctx.removeDenyWolfGroup(i)}>&times;</button>
-          </div>
-        {/each}
-        {#if ctx.wolfPairSuggestions.length > 0}
-          <div class="va-suggestions">
-            <div class="va-suggestions-label">提案</div>
-            {#each ctx.wolfPairSuggestions as suggestion}
-              <button class="va-suggestion" onclick={() => ctx.addSuggestion(suggestion)}>
-                「{ctx.playerShortNames.get(suggestion.seatA) ?? ctx.players.get(suggestion.seatA) ?? `#${suggestion.seatA}`}と{ctx.playerShortNames.get(suggestion.seatB) ?? ctx.players.get(suggestion.seatB) ?? `#${suggestion.seatB}`}の両狼はない」
-              </button>
-            {/each}
-          </div>
-        {/if}
+        <button class="va-assumption-btn" onclick={() => ctx.clearAssumptions()}>仮説全削除</button>
       </div>
     {/if}
   </div>
@@ -589,13 +599,31 @@
     align-self: center;
   }
 
-  .va-result.human {
-    color: var(--color-human-result);
+  /* 明暗 = 生存軸専用に再編。
+     - 生存時の標準色は --color-text。
+     - 退場時は --color-text-faint (名前は PlayerName.pn.dead で自動追従、
+       SpeciesIcon は currentColor で追従)。
+     判定結果が ● (人狼結果) のときは .va-result.wolf に背景塗りを当て、
+     名前 + アイコン全体を反転表示でくり抜く。
+     - 生存 + ● : 背景 = --color-text (フル反転)
+     - 退場 + ● : 背景 = --color-text-overlay (overlay0、 中間色まで暗く
+       落として dim 感を強める。 文字色 --color-bg とのコントラストは
+       小フォントでギリギリ確保) */
+  .va-result {
+    color: var(--color-text);
+  }
+
+  .va-result.dead {
+    color: var(--color-text-faint);
   }
 
   .va-result.wolf {
-    color: var(--color-wolf-result);
-    font-weight: 700;
+    background: var(--color-text);
+    color: var(--color-bg);
+  }
+
+  .va-result.dead.wolf {
+    background: var(--color-text-overlay);
   }
 
   .va-result.guard {
@@ -680,25 +708,6 @@
     border-color: var(--color-text-muted);
   }
 
-  .va-duration {
-    margin-left: auto;
-    font-size: 10px;
-    color: var(--color-text-faint);
-  }
-
-  .va-assumptions {
-    margin-top: 4px;
-    padding: 4px 6px;
-    border-top: 1px solid var(--color-border);
-    font-family: var(--font-mono);
-    font-size: 12px;
-  }
-
-  .va-assumptions-header {
-    color: var(--color-text-muted);
-    margin-bottom: 2px;
-  }
-
   .va-assumption-btn {
     background: none;
     border: 1px solid var(--color-text-faint);
@@ -707,7 +716,6 @@
     cursor: pointer;
     font-size: 11px;
     padding: 1px 6px;
-    margin-left: 4px;
   }
 
   .va-assumption-btn:hover {
@@ -715,57 +723,28 @@
     border-color: var(--color-text-muted);
   }
 
-  .va-assumption-item {
+  .va-deaths {
     display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+    margin-top: 2px;
+  }
+
+  .va-sub-tag.exec { color: var(--color-wolf); }
+  .va-sub-tag.kill { color: var(--color-role); }
+
+  .va-death-seq {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 4px;
+    gap: 0 2px;
     padding: 1px 0;
-    color: var(--color-text);
-  }
-
-  .va-assumption-x {
-    background: none;
-    border: none;
-    color: var(--color-text-faint);
-    cursor: pointer;
-    font-size: 14px;
-    padding: 0 4px;
-    line-height: 1;
-  }
-
-  .va-assumption-x:hover {
-    color: var(--color-text);
-  }
-
-  .deny-wolf {
-    color: var(--color-wolf);
-  }
-
-  .va-suggestions {
-    margin-top: 4px;
-    padding-top: 4px;
-    border-top: 1px solid var(--color-border);
-  }
-
-  .va-suggestions-label {
-    font-size: 11px;
-    color: var(--color-text-faint);
-    margin-bottom: 2px;
-  }
-
-  .va-suggestion {
-    display: block;
-    background: none;
-    border: none;
-    color: var(--color-text-muted);
+    font-family: var(--font-mono);
     font-size: 12px;
-    font-family: inherit;
-    padding: 1px 0;
-    cursor: pointer;
-    text-align: left;
   }
 
-  .va-suggestion:hover {
-    color: var(--color-text);
+  .va-death-seq :global(.player-name-root) {
+    font-weight: 700;
   }
 </style>
