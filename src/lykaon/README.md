@@ -68,6 +68,7 @@ Horkew の `.howl` 形式ログを編集するための **CodeMirror ベース�
 | `maxEditorPx` | `number` / `400` | エディタ側の最大幅 (px)。 0 で無制限 |
 | `hideAssumptions` | `boolean` / `false` | AnalysisTable の右サイドバー (仮説 / 提案) を非表示にする (配役確定バナーは残る) |
 | `readonly` | `boolean` / `false` | 内蔵 EditorPane の編集ロック (EditorPane の `readonly` prop に流す) |
+| `extraViewOptions` | `Snippet` / `undefined` | AnalysisTable の表示コントロール群 (列 / 分類ボタン) の直後に差し込む snippet。 そのまま AnalysisTable の同名 prop に渡る |
 
 レイアウト・ペイン構成を自由に組みたい consumer は、 `LykaonLayout` を使わず個別ペインを
 直接マウントする (下記 §解析ペインを足す)。

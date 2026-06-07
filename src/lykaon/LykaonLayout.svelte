@@ -22,6 +22,7 @@
     readonly = false,
     editorTop,
     editorBottom,
+    extraViewOptions,
   }: {
     ctx: AnalysisContext
     /** [左=エディタ, 右=combined] の flex 比率。 default [1, 2] は main demo に準拠 */
@@ -36,6 +37,8 @@
     editorTop?: Snippet
     /** エディタペインの下に差し込む任意コンテンツ。consumer が snippet で渡す */
     editorBottom?: Snippet
+    /** AnalysisTable の表示コントロール群 (列 / 分類ボタン) の後ろに差し込む snippet。 そのまま AnalysisTable の extraViewOptions に渡る */
+    extraViewOptions?: Snippet
   } = $props()
 
   let leftFlex = $derived(ratio[0])
@@ -60,7 +63,7 @@
       <StatusPane {ctx} />
     </div>
     <div class="layout-right-bottom">
-      <AnalysisTable {ctx} {hideAssumptions} />
+      <AnalysisTable {ctx} {hideAssumptions} {extraViewOptions} />
     </div>
   </div>
 </div>
