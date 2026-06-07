@@ -202,6 +202,7 @@ host (consumer) 側でこれらを購読し、自前の動画 player / editor �
   onInsertRevealRoles={(done) => { ...; done() }}  <!-- 配役確定時の挿入動作を上書き。実行中は挿入ボタンが disable、 done() で解除。省略時は ctx.insertRevealRoles() -->
   onOpenDenyWolfDialog={() => { ... }}     <!-- 仮説追加ボタン (省略時は非表示) -->
   extraFooter={mySnippet}                  <!-- table 下部に追加 UI を差し込む snippet -->
+  extraViewOptions={myViewOptionsSnippet}  <!-- analysis-footer 内、「列」「分類」ボタンの直後 (retar duration の前) に差し込む snippet。 consumer 固有のトグル等を表示コントロール群に追加するのに使う -->
   determinedBanner={myBannerSnippet}       <!-- 配役確定バナーの UI 全体を差し替える snippet ({ insert, busy } を受け取る) -->
   hideAssumptions={true}                   <!-- 右サイドバー (仮説 / 提案) を非表示。配役確定バナーは残る -->
 />

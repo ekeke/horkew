@@ -9,11 +9,12 @@
   type Grouping = 'seat' | 'co' | 'survival'
   type ViewOptions = { columns: 1 | 2 | 3 | 4, grouping: Grouping }
 
-  let { ctx, onInsertRevealRoles, onOpenDenyWolfDialog, extraFooter, determinedBanner, hideAssumptions = false, defaultViewOptions }: {
+  let { ctx, onInsertRevealRoles, onOpenDenyWolfDialog, extraFooter, extraViewOptions, determinedBanner, hideAssumptions = false, defaultViewOptions }: {
     ctx: AnalysisContext
     onInsertRevealRoles?: (done: () => void) => void
     onOpenDenyWolfDialog?: () => void
     extraFooter?: Snippet
+    extraViewOptions?: Snippet
     determinedBanner?: Snippet<[{ insert: () => void, busy: boolean }]>
     hideAssumptions?: boolean
     defaultViewOptions?: ViewOptions
@@ -407,6 +408,9 @@
       <div class="analysis-footer">
         <button class="view-option" onclick={cycleColumns} title="列数を切り替え">列: {viewOptions.columns}</button>
         <button class="view-option" onclick={cycleGrouping} title="分類方法を切り替え">分類: {groupingLabel(viewOptions.grouping)}</button>
+        {#if extraViewOptions}
+          {@render extraViewOptions()}
+        {/if}
         {#if ctx.analysisDuration > 0}
           <span class="analysis-duration">retar {ctx.analysisDuration}ms{#if ctx.analysisStats} ({ctx.analysisStats.workers}w, wall {ctx.analysisStats.wallClock}ms, worker {ctx.analysisStats.minElapsed}-{ctx.analysisStats.maxElapsed}ms, {ctx.analysisStats.wasm ? 'WASM' : 'JS'}){/if}</span>
         {/if}
