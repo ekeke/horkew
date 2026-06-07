@@ -4,7 +4,7 @@
   import { getContext } from 'svelte'
   import type { NameStatus } from './playerStatus.ts'
 
-  let { dead, nightKill = false, executed = false, claim, seat, status = 'default', showClaim = true, children }: {
+  let { dead, nightKill = false, executed = false, claim, seat, status = 'default', showClaim = true, outline = false, children }: {
     dead: boolean
     nightKill?: boolean
     executed?: boolean
@@ -12,6 +12,7 @@
     seat?: number
     status?: NameStatus
     showClaim?: boolean
+    outline?: boolean
     children: Snippet
   } = $props()
 
@@ -57,7 +58,7 @@
       <span class="exec-blur">{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
     </span>
   {:else}
-    <span class="pn" class:dead={dead}>{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
+    <span class="pn" class:dead={dead} class:outline={outline}>{@render nameText()}{#if effectiveClaim}<span class="claim">({effectiveClaim})</span>{/if}</span>
   {/if}
 {/snippet}
 
@@ -127,6 +128,20 @@
      痩せて見える錯覚を引き起こすため、color トーンダウンに切り替える。 */
   .dead {
     color: var(--color-text-faint);
+  }
+
+  /* 中抜き表示 (判定結果が ● のときなど)。 背景塗りは親要素 (.va-result.wolf
+     等) 側で行う前提。 ここでは文字を --color-bg (= 背景色) でくり抜くだけ。
+     specificity (.pn.outline = 0,2,0) が .dead (0,1,0) より高いので、
+     outline モードでは dead の color オーバーライドより優先される。 */
+  .pn.outline {
+    color: var(--color-bg);
+  }
+
+  /* CO 役職 (.claim) はインバート対象外。 親の background はそのまま
+     見せた上で、 .claim 元来の var(--color-co) を再宣言して文字色を戻す。 */
+  .pn.outline .claim {
+    color: var(--color-co);
   }
 
   .night-kill {

@@ -606,9 +606,9 @@
      判定結果が ● (人狼結果) のときは .va-result.wolf に背景塗りを当て、
      名前 + アイコン全体を反転表示でくり抜く。
      - 生存 + ● : 背景 = --color-text (フル反転)
-     - 退場 + ● : 背景 = --color-text-overlay (overlay0、 中間色まで暗く
-       落として dim 感を強める。 文字色 --color-bg とのコントラストは
-       小フォントでギリギリ確保) */
+     - 退場 + ● : 背景 = --color-text-muted (subtext0、 一段ダウンで dim 感
+       を出しつつ、 Light / Dark 両モードで文字色 --color-bg との
+       コントラストを AA 以上で確保) */
   .va-result {
     color: var(--color-text);
   }
@@ -623,7 +623,7 @@
   }
 
   .va-result.dead.wolf {
-    background: var(--color-text-overlay);
+    background: var(--color-text-muted);
   }
 
   .va-result.guard {
