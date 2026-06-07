@@ -116,8 +116,6 @@
     border-collapse: collapse;
     font-size: 12px;
     font-family: var(--font-mono);
-    width: 100%;
-    table-layout: fixed;
   }
 
   th, td {
@@ -130,19 +128,7 @@
     color: var(--color-text-muted);
     font-weight: 500;
     font-size: 10px;
-    text-align: center;
-  }
-
-  .verdict-col {
-    width: 80px;
-  }
-
-  .name-col {
-    width: 56px;
-  }
-
-  .count-col {
-    width: 32px;
+    text-align: left;
   }
 
   .verdict-cell {
