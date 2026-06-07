@@ -21,6 +21,12 @@ export type DayDeaths = {
   nightKills: DeathEntry[]
 }
 
+/** 1 日分の死亡表示行。 entries が空配列のときは「処刑なし」/「平和」を意味する */
+export type DayDeathRow = {
+  day: number
+  entries: DeathEntry[]
+}
+
 export type ClaimRow = {
   seat: number
   name: string
@@ -152,6 +158,25 @@ export function extractDeathHistory(vs: VillageStatus, players: Map<number, stri
     .sort(([a], [b]) => a - b)
     .filter(([, { executions, nightKills }]) => executions.length > 0 || nightKills.length > 0)
     .map(([day, { executions, nightKills }]) => ({ day, executions, nightKills }))
+}
+
+/**
+ * 死亡履歴を「処刑列」の表示用行に変換する。
+ * 何かしらのイベントがあった日（処刑 or 噛み）を 1 行ずつ生成し、
+ * その日に処刑が無かった場合は entries が空配列の行を返す（表示側で `(処刑なし)` 扱い）。
+ */
+export function buildExecutionRows(history: DayDeaths[]): DayDeathRow[] {
+  return history.map(d => ({ day: d.day, entries: d.executions }))
+}
+
+/**
+ * 死亡履歴を「噛み列」の表示用行に変換する。
+ * Day 1 は噛み発見が原理上存在しないためスキップ。
+ * 何かしらのイベントがあった Day 2 以降の日について、噛みが無い場合は entries が空配列
+ * （表示側で `(平和)` 扱い）。
+ */
+export function buildNightKillRows(history: DayDeaths[]): DayDeathRow[] {
+  return history.filter(d => d.day >= 2).map(d => ({ day: d.day, entries: d.nightKills }))
 }
 
 export function extractClaimGroups(vs: VillageStatus, players: Map<number, string>): ClaimGroup[] {

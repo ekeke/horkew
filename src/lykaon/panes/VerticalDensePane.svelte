@@ -3,8 +3,8 @@
   import { systemRoles } from '../../types/index.ts'
   import type { SystemRole } from '../../types/index.ts'
   import type { AnalysisContext } from '../AnalysisContext.svelte.ts'
-  import type { ClaimRow, DayAssertion, DeathEntry } from '../status/extract.ts'
-  import { buildAssertionTimeline, extractClaimGroups, extractDeathHistory } from '../status/extract.ts'
+  import type { ClaimRow, DayAssertion } from '../status/extract.ts'
+  import { buildAssertionTimeline, buildExecutionRows, buildNightKillRows, extractClaimGroups, extractDeathHistory } from '../status/extract.ts'
   import { buildMasonClusters } from '../status/masonClusters.ts'
   import PlayerName from '../status/PlayerName.svelte'
   import SpeciesIcon from '../status/SpeciesIcon.svelte'
@@ -252,14 +252,12 @@
 
   let deathSequence = $derived.by(() => {
     const vs = ctx.villageStatus
-    const executed: DeathEntry[] = []
-    const killed: DeathEntry[] = []
-    if (!vs) return { executed, killed }
-    for (const day of extractDeathHistory(vs, ctx.players)) {
-      executed.push(...day.executions)
-      killed.push(...day.nightKills)
+    if (!vs) return { executionRows: [], killRows: [] }
+    const history = extractDeathHistory(vs, ctx.players)
+    return {
+      executionRows: buildExecutionRows(history),
+      killRows: buildNightKillRows(history),
     }
-    return { executed, killed }
   })
 
   let hasAssumptionState = $derived(
@@ -334,29 +332,43 @@
         </div>
       {/each}
     </div>
-    {#if deathSequence.executed.length > 0 || deathSequence.killed.length > 0}
+    {#if deathSequence.executionRows.length > 0 || deathSequence.killRows.length > 0}
       <div class="va-deaths">
-        {#if deathSequence.executed.length > 0}
+        {#if deathSequence.executionRows.length > 0}
           <div class="va-sub-table">
             <div class="va-sub-tag exec">吊</div>
             <div class="va-sub-body">
               <div class="va-death-seq">
-                {#each deathSequence.executed as entry, i}
-                  {#if i > 0}<span class="va-arrow">→</span>{/if}
-                  <PlayerName dead executed seat={entry.seat} claim={ctx.claimShortNames.get(entry.seat)}>{ctx.playerShortNames.get(entry.seat) ?? entry.name}</PlayerName>
+                {#each deathSequence.executionRows as row, di}
+                  {#if di > 0}<span class="va-arrow">→</span>{/if}
+                  {#if row.entries.length === 0}
+                    <span class="va-empty-day">(処刑なし)</span>
+                  {:else}
+                    {#each row.entries as entry, ei}
+                      {#if ei > 0}<span class="va-coexist">、</span>{/if}
+                      <PlayerName dead executed seat={entry.seat} claim={ctx.claimShortNames.get(entry.seat)}>{ctx.playerShortNames.get(entry.seat) ?? entry.name}</PlayerName>
+                    {/each}
+                  {/if}
                 {/each}
               </div>
             </div>
           </div>
         {/if}
-        {#if deathSequence.killed.length > 0}
+        {#if deathSequence.killRows.length > 0}
           <div class="va-sub-table">
             <div class="va-sub-tag kill">噛</div>
             <div class="va-sub-body">
               <div class="va-death-seq">
-                {#each deathSequence.killed as entry, i}
-                  {#if i > 0}<span class="va-arrow">→</span>{/if}
-                  <PlayerName dead nightKill seat={entry.seat} claim={ctx.claimShortNames.get(entry.seat)}>{ctx.playerShortNames.get(entry.seat) ?? entry.name}</PlayerName>
+                {#each deathSequence.killRows as row, di}
+                  {#if di > 0}<span class="va-arrow">→</span>{/if}
+                  {#if row.entries.length === 0}
+                    <span class="va-empty-day">(平和)</span>
+                  {:else}
+                    {#each row.entries as entry, ei}
+                      {#if ei > 0}<span class="va-coexist">、</span>{/if}
+                      <PlayerName dead nightKill seat={entry.seat} claim={ctx.claimShortNames.get(entry.seat)}>{ctx.playerShortNames.get(entry.seat) ?? entry.name}</PlayerName>
+                    {/each}
+                  {/if}
                 {/each}
               </div>
             </div>
@@ -751,5 +763,18 @@
 
   .va-death-seq :global(.player-name-root) {
     font-weight: 700;
+  }
+
+  /* 同日内の複数死亡を区切る読点。 翌日への遷移を表す → と意味的に区別する */
+  .va-coexist {
+    color: var(--color-text-muted);
+    margin: 0 1px;
+  }
+
+  /* 噛みなし (平和) / 処刑なし の日を示す軽量ラベル。 名前枠と並んで違和感のない
+     ミュート色 + italic で示す */
+  .va-empty-day {
+    color: var(--color-text-faint);
+    font-style: italic;
   }
 </style>
