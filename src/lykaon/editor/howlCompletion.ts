@@ -766,22 +766,32 @@ const howlCompletionSource: CompletionSource = (context) => {
     }
   }
 
-  // テキストマッチフィルタ
-  const filtered: Completion[] = []
+  // テキストマッチフィルタ (先頭一致を優先、substring は後段)
+  const prefixMatches: Completion[] = []
+  const substringMatches: Completion[] = []
   for (const c of candidates) {
-    const match = useRomaji
-      ? c.romaji.split('\0').some(r => r.startsWith(inputLower))
-      : c.label.startsWith(input)
-    if (match) {
-      filtered.push({
-        label: c.label,
-        apply: c.terminal ? c.label : c.label + ' ',
-        detail: c.categoryLabel,
-        type: c.type,
-        info: c.info,
-      })
+    let matchKind: 'prefix' | 'substring' | null = null
+    if (useRomaji) {
+      for (const r of c.romaji.split('\0')) {
+        if (r.startsWith(inputLower)) { matchKind = 'prefix'; break }
+        if (matchKind === null && r.includes(inputLower)) matchKind = 'substring'
+      }
+    } else {
+      if (c.label.startsWith(input)) matchKind = 'prefix'
+      else if (c.label.includes(input)) matchKind = 'substring'
     }
+    if (matchKind === null) continue
+    const completion: Completion = {
+      label: c.label,
+      apply: c.terminal ? c.label : c.label + ' ',
+      detail: c.categoryLabel,
+      type: c.type,
+      info: c.info,
+    }
+    if (matchKind === 'prefix') prefixMatches.push(completion)
+    else substringMatches.push(completion)
   }
+  const filtered = [...prefixMatches, ...substringMatches]
 
   if (filtered.length === 0) return null
 
