@@ -1,0 +1,64 @@
+---
+title: peace-after-fox-cursed — 死亡 seat の bodyguard 候補排除 (regression)
+tags: [bodyguard, werehamster, peace]
+setup:
+  villager: 5
+  seer: 1
+  bodyguard: 1
+  werewolf: 2
+  werehamster: 1
+rules:
+  general.first-victim: none
+---
+
+# 妖狐が呪殺された翌夜以降の peace night は、
+# 狼の襲撃先が妖狐 (襲撃免疫) で説明できない → 狩人による護衛成功が唯一の説明。
+# 従って peace night 時点で alive でない seat は bodyguard 候補から排除されるべき。
+#
+# シナリオ:
+# - Day 2 夜: 真占い Alice が Bob (狐) を占って呪殺 + 狼が Ivy を襲撃 (2 死)
+# - Day 3 夜: 平和 (狐は前夜に呪殺済 → 狩人 alive 必須)
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Henry、Ivy、Jack
+
+!Alice=占い師
+!Bob=妖狐
+
+# Day 1 朝 (= Day 0 night 占い結果): Eve ○
+Alice 占いCO Eve ○
+
+# Day 1 vote → Frank 処刑
+Frank 処刑
+# Day 1 night → Grace 襲撃死
+Grace 死亡
+
+# Day 2 朝 (= Day 1 night 占い結果): Carol ○ 追加
+Alice 占いCO Eve ○ Carol ○
+
+# Day 2 vote → Henry 処刑
+Henry 処刑
+# Day 2 night → Bob curse-kill + Ivy 襲撃死 (狐 curse で expected=2)
+Bob 死亡
+Ivy 死亡
+
+# Day 3 朝 (= Day 2 night 占い結果): Bob ○ 追加 (狐を白判定 = 呪殺の根拠)
+Alice 占いCO Eve ○ Carol ○ Bob ○
+
+# Day 3 vote → Jack 処刑
+Jack 処刑
+# Day 3 night → 平和 (狐死亡済 → 狩人による護衛成功でのみ説明可能)
+平和
+
+# === Expectations ===
+# Day 3 夜時点で alive: Alice (seer), Carol, Dave, Eve (+狼 2 名)
+# Day 3 夜以前に死亡: Frank, Grace, Henry, Bob, Ivy, Jack
+#
+# Alice は spoiler で seer 確定、 Bob は werehamster 確定。
+#
+# @expect Alice: [seer]
+# @expect Bob: [werehamster]
+# @expect Frank: [!bodyguard, ...]
+# @expect Grace: [!bodyguard, ...]
+# @expect Henry: [!bodyguard, ...]
+# @expect Ivy: [!bodyguard, ...]
+# @expect Jack: [!bodyguard, ...]

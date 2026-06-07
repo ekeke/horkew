@@ -372,6 +372,13 @@ export class VillageRetar {
     for ( let d = firstKill; d<this.vs.day; d++) {
       this.nightKillsByDay.set(d, [])
     }
+    // bridge が peace 文を kills に空エントリで登録している day を取り込み.
+    // vs.day < d (= 「平和」 で day が増えた後の最終 peace day) のケースをカバー.
+    for ( const [d, seats] of village.kills.entries() ) {
+      if ( seats.length === 0 && !this.nightKillsByDay.has(d) ) {
+        this.nightKillsByDay.set(d, [])
+      }
+    }
     for ( const [seat, status] of village.statuses.entries() ) {
       if ( status.surviving ) continue
       if ( status.causeOfDeath === 'night_kill' || status.causeOfDeath === 'cursed_by_killed_nekomata' ) {

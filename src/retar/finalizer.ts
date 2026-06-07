@@ -1,5 +1,5 @@
 import { systemRoles } from '../types/index.ts'
-import type { VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
+import type { VillageStatus, SystemRole, Seat, Day, SeatStatus } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
 import type { AnalyzeContext } from './roleTesters.ts'
 import { solvePossibilities } from './solver.ts'
@@ -16,6 +16,19 @@ const guardRole = singleRoleByTrait('action', 'guard')
 const foxRole = singleRoleByTrait('passive', 'die-when-divined')
 const wolfRole = singleRoleBySeerResult('wolf')
 const followFoxRole = singleRoleByTrait('reactive', 'follow-fox-death')
+
+/**
+ * seat が夜 `day` の時点で行動可能 (alive) かどうか.
+ * 夜 D の causeOfDeath === 'night_kill' は「その夜に襲撃で死亡」 = その夜の行動は可能, とみなす
+ * (verifyDivineAbility の seer maxActiveDay と同じ流儀).
+ * execution は昼の処刑なので diedDay === D でも夜 D は alive ではない.
+ */
+function isAliveAtNight(status: SeatStatus, day: Day): boolean {
+  if (status.surviving) return true
+  if (status.diedDay! > day) return true
+  if (status.diedDay! === day && status.causeOfDeath === 'night_kill') return true
+  return false
+}
 
 /**
  * 死体数の検証。各日の夜死体数が仮説と整合するか確認する。
@@ -52,8 +65,12 @@ export function checkDeathCounts(
       }
     }
     if ( actual < expected ) {
+      // peace night (actual < expected) を成立させる説明:
+      //   (A) 夜 day に alive な妖狐がいる (狼襲撃先 = 妖狐 → 襲撃免疫で死体なし)
+      //   (B) 夜 day に alive な狩人がいる (護衛成功)
+      // 「狐 or 狩人」 を possibilities で見るだけでなく、 夜 day 時点で alive な seat に絞る.
       for ( const [seat, status] of vs.statuses.entries() ) {
-        if ( !status.surviving && status.diedDay! < day ) continue
+        if ( !isAliveAtNight(status, day) ) continue
         if (
           context.possibilities.hasRole(seat, guardRole)
           || context.possibilities.hasRole(seat, foxRole)
@@ -99,15 +116,34 @@ export function updateDeathCountConstraints(
       }
     }
     if ( actual < expected ) {
+      // peace night (actual < expected) を成立させる説明:
+      //   (A) 夜 day に alive な妖狐がいる (狼襲撃先 = 妖狐 → 襲撃免疫で死体なし)
+      //   (B) 夜 day に alive な狩人がいる (護衛成功)
+      // どちらの可能性も無ければ世界棄却. 片方しか可能性が無い場合は, もう片方の根拠を生むため
+      // 夜 day に alive でない seat から該当 role を deny する.
+      let aliveFoxExists = false
+      let aliveGuardExists = false
       for ( const [seat, status] of vs.statuses.entries() ) {
-        if ( !status.surviving && status.diedDay! < day ) continue
-        if (
-          context.possibilities.hasRole(seat, guardRole)
-          || context.possibilities.hasRole(seat, foxRole)
-        ) {
-          continue DAY
+        if ( !isAliveAtNight(status, day) ) continue
+        if ( context.possibilities.hasRole(seat, foxRole) ) aliveFoxExists = true
+        if ( context.possibilities.hasRole(seat, guardRole) ) aliveGuardExists = true
+      }
+      if ( !aliveFoxExists && !aliveGuardExists ) return false
+      if ( !aliveFoxExists ) {
+        // 説明は (B) のみ → 夜 day に alive でない seat の guardRole を deny
+        for ( const [seat, status] of vs.statuses.entries() ) {
+          if ( isAliveAtNight(status, day) ) continue
+          if ( !context.possibilities.denyRole(seat, guardRole) ) return false
         }
       }
+      if ( !aliveGuardExists ) {
+        // 説明は (A) のみ → 夜 day に alive でない seat の foxRole を deny
+        for ( const [seat, status] of vs.statuses.entries() ) {
+          if ( isAliveAtNight(status, day) ) continue
+          if ( !context.possibilities.denyRole(seat, foxRole) ) return false
+        }
+      }
+      continue DAY
     }
     return false
   }

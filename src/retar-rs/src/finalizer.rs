@@ -1,4 +1,4 @@
-use crate::types::{CauseOfDeath, EnumSpecies, RoleTrait, VillageStatus, VillageResult, SystemRole, Seat, Day};
+use crate::types::{CauseOfDeath, EnumSpecies, RoleTrait, SeatStatus, VillageStatus, VillageResult, SystemRole, Seat, Day};
 use crate::possibilities::Possibilities;
 use crate::role_testers::{AnalyzeContext, DivineTarget};
 use crate::role_sets::{
@@ -13,6 +13,24 @@ static GUARD_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(
 static FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::PassiveDieWhenDivined));
 static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
 static FOLLOW_FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::ReactiveFollowFoxDeath));
+
+/// seat が夜 `day` の時点で行動可能 (alive) かどうか.
+/// 夜 D の cause_of_death = NightKill は「その夜に襲撃で死亡」 = その夜の行動は可能, とみなす
+/// (verify_divine_ability の seer max_active_day と同じ流儀).
+/// Execution は昼の処刑なので died_day == D でも夜 D は alive ではない.
+fn is_alive_at_night(status: &SeatStatus, day: Day) -> bool {
+    if status.surviving {
+        return true;
+    }
+    let died = status.died_day.unwrap_or(0);
+    if died > day {
+        return true;
+    }
+    if died == day && status.cause_of_death == CauseOfDeath::NightKill {
+        return true;
+    }
+    false
+}
 
 const ROLE_COUNT: usize = SystemRole::ALL.len();
 
@@ -127,9 +145,12 @@ pub fn check_death_counts(
             }
         }
         if actual < expected {
+            // peace night (actual < expected) を成立させる説明:
+            //   (A) 夜 day に alive な妖狐がいる (狼襲撃先 = 妖狐 → 襲撃免疫で死体なし)
+            //   (B) 夜 day に alive な狩人がいる (護衛成功)
             let mut has_protector = false;
             for (&seat, status) in &vs.statuses {
-                if !status.surviving && status.died_day.unwrap_or(0) < day {
+                if !is_alive_at_night(status, day) {
                     continue;
                 }
                 if context.possibilities.has_role(seat, *GUARD_ROLE)
@@ -194,21 +215,56 @@ pub fn update_death_count_constraints(
             }
         }
         if actual < expected {
-            let mut has_protector = false;
+            // peace night (actual < expected) を成立させる説明:
+            //   (A) 夜 day に alive な妖狐がいる (狼襲撃先 = 妖狐 → 襲撃免疫で死体なし)
+            //   (B) 夜 day に alive な狩人がいる (護衛成功)
+            // どちらの可能性も無ければ世界棄却. 片方しか可能性が無い場合は, もう片方の根拠を生むため
+            // 夜 day に alive でない seat から該当 role を deny する.
+            let mut alive_fox_exists = false;
+            let mut alive_guard_exists = false;
             for (&seat, status) in &vs.statuses {
-                if !status.surviving && status.died_day.unwrap_or(0) < day {
+                if !is_alive_at_night(status, day) {
                     continue;
                 }
-                if context.possibilities.has_role(seat, *GUARD_ROLE)
-                    || context.possibilities.has_role(seat, *FOX_ROLE)
-                {
-                    has_protector = true;
-                    break;
+                if context.possibilities.has_role(seat, *FOX_ROLE) {
+                    alive_fox_exists = true;
+                }
+                if context.possibilities.has_role(seat, *GUARD_ROLE) {
+                    alive_guard_exists = true;
                 }
             }
-            if has_protector {
-                continue;
+            if !alive_fox_exists && !alive_guard_exists {
+                return false;
             }
+            if !alive_fox_exists {
+                // 説明は (B) のみ → 夜 day に alive でない seat の GUARD_ROLE を deny
+                let dead_seats: Vec<Seat> = vs
+                    .statuses
+                    .iter()
+                    .filter(|(_, status)| !is_alive_at_night(status, day))
+                    .map(|(&seat, _)| seat)
+                    .collect();
+                for seat in dead_seats {
+                    if !context.possibilities.deny_role(seat, *GUARD_ROLE) {
+                        return false;
+                    }
+                }
+            }
+            if !alive_guard_exists {
+                // 説明は (A) のみ → 夜 day に alive でない seat の FOX_ROLE を deny
+                let dead_seats: Vec<Seat> = vs
+                    .statuses
+                    .iter()
+                    .filter(|(_, status)| !is_alive_at_night(status, day))
+                    .map(|(&seat, _)| seat)
+                    .collect();
+                for seat in dead_seats {
+                    if !context.possibilities.deny_role(seat, *FOX_ROLE) {
+                        return false;
+                    }
+                }
+            }
+            continue;
         }
         return false;
     }

@@ -92,6 +92,13 @@ impl VillageRetar {
         for d in first_kill..vs.day {
             night_kills_by_day.insert(d, Vec::new());
         }
+        // bridge が peace 文を vs.kills に空エントリで登録している day を取り込み.
+        // vs.day < d (= 「平和」 で day が増えた後の最終 peace day) のケースをカバー.
+        for (&d, seats) in &vs.kills {
+            if seats.is_empty() && !night_kills_by_day.contains_key(&d) {
+                night_kills_by_day.insert(d, Vec::new());
+            }
+        }
         for (&seat, status) in &vs.statuses {
             if status.surviving {
                 continue;

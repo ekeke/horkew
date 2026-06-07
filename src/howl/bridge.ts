@@ -258,6 +258,10 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         voteOrderCounter = 0
         revoteTargets = new Set()
         hasMultiVote = false
+        // peace night を kills に空配列で登録 (attack と同じ day-1 規約).
+        // これにより retar 側で「Day N の actual=0 = peace night」 を正しく検出できる.
+        const peaceDay = day - 1
+        if (!kills.has(peaceDay)) kills.set(peaceDay, [])
         break
       }
 
