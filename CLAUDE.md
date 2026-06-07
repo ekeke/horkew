@@ -36,6 +36,7 @@ Rust版（retar-rs）が実運用ターゲット、TypeScript版（retar）が�
 2. **TSテストをパス** — `npm test` でリグレッションなしを確認
 3. **Rustへ一行単位で移植** — TS版の差分を `src/retar-rs/` に対応するRustコードとして忠実に転写
 4. **Rustテストをパス** — `npm run test:rust` で正しさを検証
+5. **WASM 配布成果物を更新** — Rust ソースに変更が入ったら `npm run build:wasm` で `pkg/` と `pkg-web/` を再生成し、 同一コミットで commit する。 lykaon / mirurou など WASM 経路の consumer は配布 wasm を bundle するため、 ソースだけ更新して配布物を放置すると古いバイナリのまま動作する
 
 TS版とRust版はファイル構成・関数名を一致させる。TS版で設計・検証を済ませてからRustに移すことで、型システムの違いによるバグを最小化し、差分比較を容易にする。
 
@@ -153,7 +154,9 @@ trait-purge リファクタ完了 (commit `bc08c0f`) により、新役職追加
 
 TS / Rust の `systemRoles` 宣言順は **bit index 不変条件** のため厳守する (順序が変わると bit が動き WASM テスト失敗の原因になる)。
 
-検証: `npm test` (TS) + `npm run test:rust` (Rust)。 sync-check が TS↔Rust の関数名一致を自動検証する。
+検証 & 配布:
+- `npm test` (TS) + `npm run test:rust` (Rust)。 sync-check が TS↔Rust の関数名一致を自動検証する
+- `npm run build:wasm` で `pkg/` と `pkg-web/` を**必ず再生成**し、 同一コミットで commit する。 これを怠ると mirurou など WASM 経路で「`unknown variant <new-role>` setup parse error」が発生し解析が走らない (新 variant は WASM 内 serde で deserialize されるため、 Rust ソースだけ更新しても配布 wasm が古ければ弾かれる)
 
 詳細な経緯と Phase 1-11 の記録は [src/hati/Performance.md](src/hati/Performance.md) の「6. 役職追加コスト削減」「7. 役職追加コスト削減 - Rust 内部完遂」セクション参照。
 
