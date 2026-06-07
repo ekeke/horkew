@@ -10,10 +10,11 @@
   import SpeciesIcon from '../status/SpeciesIcon.svelte'
   import { classifyPlayer } from '../status/playerStatus.ts'
 
-  let { ctx, onInsertRevealRoles, extraFooter, hideAssumptions = false }: {
+  let { ctx, onInsertRevealRoles, extraFooter, determinedBanner, hideAssumptions = false }: {
     ctx: AnalysisContext
     onInsertRevealRoles?: (done: () => void) => void
     extraFooter?: Snippet
+    determinedBanner?: Snippet<[{ insert: () => void, busy: boolean }]>
     hideAssumptions?: boolean
   } = $props()
 
@@ -364,10 +365,14 @@
       </div>
     {/if}
     {#if ctx.allRolesDetermined}
-      <div class="determined-banner">
-        <span class="determined-label">配役確定</span>
-        <button class="determined-insert" onclick={handleInsertReveal} disabled={insertRevealBusy}>挿入</button>
-      </div>
+      {#if determinedBanner}
+        {@render determinedBanner({ insert: handleInsertReveal, busy: insertRevealBusy })}
+      {:else}
+        <div class="determined-banner">
+          <span class="determined-label">配役確定</span>
+          <button class="determined-insert" onclick={handleInsertReveal} disabled={insertRevealBusy}>挿入</button>
+        </div>
+      {/if}
     {/if}
     {#if extraFooter}
       {@render extraFooter()}
