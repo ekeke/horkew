@@ -73,7 +73,17 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
     handlers.onEvent?.(event)
   }
 
-  const hasFirstVictim = config.hasFirstGhost ?? rules['general.first-victim'] !== 'none'
+  // config.hasFirstGhost は legacy boolean override。 true なら 'random'、 false なら 'none' 強制。
+  // 新規 'villager-only' は rules 経由でのみ指定可能。
+  const firstVictimMode: 'none' | 'villager-only' | 'random'
+    = config.hasFirstGhost === true ? 'random'
+    : config.hasFirstGhost === false ? 'none'
+    : rules['general.first-victim']
+
+  // 'villager-only' は素村人 (villager role) seat が setup に必須
+  if (firstVictimMode === 'villager-only' && !players.some(p => p.role === 'villager')) {
+    throw new Error("general.first-victim='villager-only' requires at least one villager seat in the setup.")
+  }
 
   // onSetup: 役職割当を通知
   const seatRoles = new Map(players.map(p => [p.seat, p.role]))
@@ -133,23 +143,26 @@ export async function runGame<E = never, Ext = unknown>(config: GameConfig, hand
   }
 
   // 初日犠牲者: general.first-victim ルールで分岐
-  // - 'random' (hasFirstVictim === true): 既存の random pick (狼以外/狐以外/猫又以外から)
-  // - 'none' (hasFirstVictim === false): handler の attack action を resolveAttacks で解決
-  if (hasFirstVictim) {
-    const candidates = alivePlayers(state).filter(p => {
-      if (hasTrait(p.role, 'action', 'attack')) return false
-      if (isFoxWinCounter(p.role)) return false
-      if (hasTrait(p.role, 'reactive', 'curse-on-executed')) return false
-      if (hasTrait(p.role, 'reactive', 'curse-on-killed')) return false
-      return true
-    })
+  // - 'none': handler の attack action を resolveAttacks で解決 (狼が通常襲撃可能)
+  // - 'villager-only': 素村人 seat からのみランダム選択 (役職持ちは絶対選ばれない)
+  // - 'random': 狼/狐系/猫又系を除く seat からランダム選択 (村人陣営の役職持ちも「役職欠け」として失われ得る)
+  if (firstVictimMode === 'none') {
+    resolveAttacks(state, night0ActionsList, emit, rng, foxKilledInNight0, 0)
+  } else {
+    const candidates = firstVictimMode === 'villager-only'
+      ? alivePlayers(state).filter(p => p.role === 'villager')
+      : alivePlayers(state).filter(p => {
+          if (hasTrait(p.role, 'action', 'attack')) return false
+          if (isFoxWinCounter(p.role)) return false
+          if (hasTrait(p.role, 'reactive', 'curse-on-executed')) return false
+          if (hasTrait(p.role, 'reactive', 'curse-on-killed')) return false
+          return true
+        })
     if (candidates.length > 0) {
       const victim = rng.pick(candidates)
       killPlayer(state, victim.seat)
       emit({ type: 'night_kill', target: victim.seat })
     }
-  } else {
-    resolveAttacks(state, night0ActionsList, emit, rng, foxKilledInNight0, 0)
   }
 
   checkImmoralistFollow(state, emit, rules)

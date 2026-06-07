@@ -1,0 +1,40 @@
+---
+title: rule.general.first-victim = villager-only (理想 + todo skip)
+tags: [ruleset, general.first-victim]
+setup:
+  werewolf: 1
+  seer: 1
+  villager: 3
+rules:
+  general.first-victim: villager-only
+  general.omitFirstDay: false
+---
+
+# general.first-victim=villager-only のとき: 初日犠牲者は素村人 (villager role) seat
+# からのみランダム選択。 lupa engine 側で候補絞り込み実装あり
+# (src/lupa/engine.ts の firstVictimMode === 'villager-only' 分岐)。
+#
+# retar 推論ステータス: 未対応 (B 方針)。
+#   wasm-helpers.ts で hasFirstGhost=true として WASM に渡されるため、
+#   retar 側では「初日犠牲者 seat の role = villager 確定」 という追加制約は
+#   かけていない。 推論結果は 'random' 指定時と同等になる。
+#   将来 retar 推論強化を入れる場合は wasm bridge と Rust 側に firstVictimMode を
+#   伝える必要がある (TS↔Rust 両側修正)。
+# 本 scenario は parser accept の pin + 将来の理想形 (@expect-skip) を残す目的。
+
+++Alice、Bob、Carol、Dave、Eve
+
+# Day 0 夜: villager-only モードで engine が villager seat から Alice を選んで殺害
+# (engine がどう「素村人」 を選ぶかは lupa 側の責務、 ここは retar 解釈用の minimal scenario)
+Alice 死亡
+
+# Day 1 終了時点 (理想)
+# - villager-only 解釈で Alice の役職は villager 確定
+# - 他 seat は role 全候補のまま
+# - 本 scenario は最小構成、 投票発言なし
+# - 将来 retar 実装時に @expect として復帰
+# @expect-skip Alice: [villager]
+# @expect-skip Bob: [werewolf, seer, villager]
+# @expect-skip Carol: [werewolf, seer, villager]
+# @expect-skip Dave: [werewolf, seer, villager]
+# @expect-skip Eve: [werewolf, seer, villager]

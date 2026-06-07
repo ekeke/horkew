@@ -38,12 +38,12 @@ describe('buildAnalyzeOptions: meta.rules → regulation の伝達', () => {
   })
 
   test('meta.options.regulation を指定すると meta.rules より優先される', () => {
-    const customRegulation = resolveRegulation({ 'general.first-victim': 'first-vote' })
+    const customRegulation = resolveRegulation({ 'general.first-victim': 'villager-only' })
     const options = buildAnalyzeOptions({
       rules: { 'general.first-victim': 'random' },
       options: { regulation: customRegulation },
     })
-    assert.strictEqual(options.regulation['general.first-victim'], 'first-vote')
+    assert.strictEqual(options.regulation['general.first-victim'], 'villager-only')
   })
 
   test('meta.options で部分的に上書きしても retar 固有フィールドは保たれる', () => {

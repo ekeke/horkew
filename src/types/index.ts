@@ -295,7 +295,7 @@ export type Regulation = {
   'vote.style': 'free' | 'ordered' | 'concurrent'
   'vote.final': 'revote' | 'final'
   'vote.tiebreaker': 'random' | 'no-lynch' | 'draw'
-  'general.first-victim': 'none' | 'random' | 'first-vote'
+  'general.first-victim': 'none' | 'villager-only' | 'random'
   'role.seer.first-seek': 'none' | 'no-wolf' | 'all'
   'role.bodyguard.allow-continuous-protection': boolean
   'role.nekomata.curse-target': 'all-survivors' | 'villager'

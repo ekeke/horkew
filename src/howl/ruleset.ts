@@ -63,11 +63,11 @@ export const Rules: { [key: string]: Rule } = {
 
   "general.first-victim": {
     type: "choice",
-    description: "The first victim of the game.",
+    description: "How the first night victim is chosen. 'none' = no first victim, handler's attack action is resolved (wolf may kill normally on Night 0). 'villager-only' = randomly chosen from plain villager seats only; setups without any villager role error out. 'random' = randomly chosen from all seats except attack / fox-counter / curse-on-killed roles, so role-bearing village seats may be lost (= '役職欠け').",
     choices: [
       "none",
+      "villager-only",
       "random",
-      "first-vote",
     ],
     default: "random",
   },
