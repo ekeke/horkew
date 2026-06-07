@@ -320,14 +320,19 @@ fn default_vote_final_rule() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyzeOptions {
+    /// Deprecated: 未使用。 plan_builder は実 CO 日 (min_claim_day) を使用するため、 この閾値は読み出されない。 将来削除予定。
     #[serde(rename = "seerClaimingDueDate")]
     pub seer_claiming_due_date: Day,
+    /// Deprecated: 未使用。 seer_claiming_due_date と同じ理由。
     #[serde(rename = "mediumClaimingDueDate")]
     pub medium_claiming_due_date: Day,
+    /// Deprecated: 未使用。 seer_claiming_due_date と同じ理由。
     #[serde(rename = "bodyguardClaimingDueDate")]
     pub bodyguard_claiming_due_date: Day,
+    /// Deprecated: 未使用。 seer_claiming_due_date と同じ理由。
     #[serde(rename = "masonClaimingDueDate")]
     pub mason_claiming_due_date: Day,
+    /// Deprecated: 未使用。 seer_claiming_due_date と同じ理由。
     #[serde(rename = "nekomataClaimingDueDate")]
     pub nekomata_claiming_due_date: Day,
     #[serde(rename = "dayCountFrom")]

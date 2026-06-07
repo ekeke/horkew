@@ -39,10 +39,15 @@ export type AnalyzeResult = {
  * 現在の村の状態を解析し、各プレイヤーに可能な役職を割り当てる
  */
 export type AnalyzeOptions = {
+  /** @deprecated 未使用。 planBuilder は実 CO 日 (minClaimDay) を使用するため、 この閾値は読み出されない。 将来削除予定 */
   seerClaimingDueDate: number
+  /** @deprecated 未使用。 [[seerClaimingDueDate]] と同じ理由 */
   mediumClaimingDueDate: number
+  /** @deprecated 未使用。 [[seerClaimingDueDate]] と同じ理由 */
   bodyguardClaimingDueDate: number
+  /** @deprecated 未使用。 [[seerClaimingDueDate]] と同じ理由 */
   masonClaimingDueDate: number
+  /** @deprecated 未使用。 [[seerClaimingDueDate]] と同じ理由 */
   nekomataClaimingDueDate: number
 
   // ゲーム規定 (Regulation): hasFirstGhost / seerFirstSeek はここから導出する。

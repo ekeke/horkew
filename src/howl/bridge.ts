@@ -412,18 +412,26 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           const seat = resolveSeat(playerName)
           if (seat === null) continue
           const status = statuses.get(seat)!
-          status.claiming = true
-          status.claimingRole = 'mason'
-          status.claimedAt = day
-          status.claimOrder = ++claimCounter
-          status.actions = new Map()
-          status.assertions = new Map()
+          const alreadyMason = status.claiming && status.claimingRole === 'mason'
+          if (!alreadyMason) {
+            status.claiming = true
+            status.claimingRole = 'mason'
+            status.claimedAt = day
+            status.claimOrder = ++claimCounter
+            status.actions = new Map()
+            status.assertions = new Map()
+          }
           let masonKey = -1
+          while (status.assertions.has(masonKey)) masonKey--
+          const existingPartners = new Set<number>()
+          for (const { target } of status.assertions.values()) existingPartners.add(target)
           for (const otherName of s.players) {
             if (otherName === playerName) continue
             const otherSeat = resolveSeat(otherName)
             if (otherSeat === null) continue
+            if (existingPartners.has(otherSeat)) continue
             status.assertions.set(masonKey--, { target: otherSeat, species: 'human' })
+            existingPartners.add(otherSeat)
           }
         }
         break
