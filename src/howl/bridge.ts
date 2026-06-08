@@ -96,6 +96,51 @@ function resolveSpoilerRole(raw: string): SystemRole | null {
   return null
 }
 
+/**
+ * spoiler 右辺の集合 alias (人外 / 狼陣営 / 狐陣営 / 村陣営) を解決する。
+ * 単一役職 pin (resolveSpoilerRole) との曖昧を避けるため、 必ず陣営付きキー
+ * (`...陣営`) または英語キーに match した場合のみ alias と判定する。
+ * 戻り値は「許可する faction の集合」。 hostile = wolf + fox。
+ */
+type FactionAlias = 'village' | 'wolf' | 'fox' | 'hostile'
+const factionAliasSpecs: { alias: FactionAlias, pattern: RegExp }[] = [
+  { alias: 'village', pattern: new RegExp(`^${V.factionAliasVillage}$`) },
+  { alias: 'wolf',    pattern: new RegExp(`^${V.factionAliasWolf}$`) },
+  { alias: 'fox',     pattern: new RegExp(`^${V.factionAliasFox}$`) },
+  { alias: 'hostile', pattern: new RegExp(`^${V.factionAliasHostile}$`) },
+]
+
+function resolveFactionAlias(raw: string): FactionAlias | null {
+  for (const spec of factionAliasSpecs) {
+    if (spec.pattern.test(raw)) return spec.alias
+  }
+  return null
+}
+
+/**
+ * faction alias に対応する「許可する faction の集合」。
+ * 補集合 (= deny される faction) は systemRoles から派生する。
+ */
+const ALIAS_ALLOWED_FACTIONS: Record<FactionAlias, Set<'village' | 'wolf' | 'fox'>> = {
+  village: new Set(['village']),
+  wolf:    new Set(['wolf']),
+  fox:     new Set(['fox']),
+  hostile: new Set(['wolf', 'fox']),
+}
+
+/**
+ * faction alias から deny すべき SystemRole 集合を計算する。
+ * systemRoles の各役職について「許可された faction に属さないもの」を deny する。
+ */
+function deniedRolesForAlias(alias: FactionAlias): SystemRole[] {
+  const allowed = ALIAS_ALLOWED_FACTIONS[alias]
+  const denied: SystemRole[] = []
+  for (const [role, meta] of systemRoles) {
+    if (!allowed.has(meta.faction)) denied.push(role)
+  }
+  return denied
+}
+
 export type SpoilerActionRecord = {
   day: number
   by: number
@@ -112,6 +157,12 @@ export type BridgeResult = {
   rules: Regulation
   assumptions: Map<number, SystemRole>
   spoilerActions: SpoilerActionRecord[]
+  /**
+   * spoiler faction alias (`!Alice=人外` 等) 由来で deny された SystemRole を席ごとに記録。
+   * 同じ deny は seat.deniedRoles 経由でも retar に流れるが、 UI 上で
+   * 「CO 由来 deny」と「spoiler 由来 deny」を区別表示するための副インデックス。
+   */
+  spoilerDeniedRoles: Map<number, Set<SystemRole>>
 }
 
 export function buildVillageStatus(statements: Statement[], meta?: Record<string, any>): BridgeResult {
@@ -611,11 +662,48 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     }
   }
 
-  // spoiler 文を集約して assumptions / spoilerActions を構築する。
-  // 役職 pin (role あり) → assumptions、秘匿行動 (action あり) → spoilerActions に分離。
+  // spoiler 文を集約して assumptions / spoilerActions / spoilerDeniedRoles を構築する。
+  // 役職 pin (role が SystemRole) → assumptions、 集合 alias (role が faction alias) →
+  // spoilerDeniedRoles と seat.deniedRoles、 秘匿行動 (action あり) → spoilerActions に分離。
   // 同一プレイヤーに対して異なる役職の spoiler が存在する場合はエラー（同じ役職の重複は許容）。
   const assumptions = new Map<number, SystemRole>()
+  const spoilerDeniedRoles = new Map<number, Set<SystemRole>>()
   const spoilerActions: SpoilerActionRecord[] = []
+
+  function applyAliasDeny(seat: number, alias: FactionAlias, line: number): void {
+    if (assumptions.has(seat)) {
+      const name = players.get(seat) ?? `#${seat}`
+      throw new Error(`spoiler: ${name} に対する矛盾する仮定 (${assumptions.get(seat)} vs ${alias} alias) (line ${line})`)
+    }
+    const denied = deniedRolesForAlias(alias)
+    const seatStatus = statuses.get(seat)
+    if (!seatStatus) return
+    let set = spoilerDeniedRoles.get(seat)
+    if (!set) {
+      set = new Set<SystemRole>()
+      spoilerDeniedRoles.set(seat, set)
+    }
+    for (const role of denied) {
+      if (!set.has(role)) {
+        set.add(role)
+        seatStatus.deniedRoles.push(role)
+      }
+    }
+  }
+
+  function applyPinAssumption(seat: number, role: SystemRole, line: number): void {
+    if (spoilerDeniedRoles.has(seat)) {
+      const name = players.get(seat) ?? `#${seat}`
+      throw new Error(`spoiler: ${name} に対する矛盾する仮定 (alias vs ${role}) (line ${line})`)
+    }
+    const existing = assumptions.get(seat)
+    if (existing !== undefined && existing !== role) {
+      const name = players.get(seat) ?? `#${seat}`
+      throw new Error(`spoiler: ${name} に対する矛盾する仮定 (${existing} vs ${role}) (line ${line})`)
+    }
+    assumptions.set(seat, role)
+  }
+
   for (const stmt of statements) {
     if (stmt.type !== 'spoiler') continue
     const s = stmt as SpoilerStatement
@@ -624,16 +712,16 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       throw new Error(`spoiler: 未知のプレイヤー "${s.player}" (line ${s.line})`)
     }
     if (s.role !== undefined) {
+      const alias = resolveFactionAlias(s.role)
+      if (alias !== null) {
+        applyAliasDeny(seat, alias, s.line)
+        continue
+      }
       const role = resolveSpoilerRole(s.role)
       if (role === null) {
         throw new Error(`spoiler: 役職名を解決できません "${s.role}" (line ${s.line})`)
       }
-      const existing = assumptions.get(seat)
-      if (existing !== undefined && existing !== role) {
-        const name = players.get(seat) ?? s.player
-        throw new Error(`spoiler: ${name} に対する矛盾する仮定 (${existing} vs ${role}) (line ${s.line})`)
-      }
-      assumptions.set(seat, role)
+      applyPinAssumption(seat, role, s.line)
     } else if (s.action !== undefined && s.day !== undefined && s.target !== undefined) {
       const target = resolveSeat(s.target)
       if (target === null) {
@@ -659,17 +747,19 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       if (seat === null) {
         throw new Error(`spoilers.roles: 未知のプレイヤー "${playerName}"`)
       }
-      const role = resolveSpoilerRole(String(roleRaw))
+      const raw = String(roleRaw)
+      const alias = resolveFactionAlias(raw)
+      if (alias !== null) {
+        applyAliasDeny(seat, alias, 0)
+        continue
+      }
+      const role = resolveSpoilerRole(raw)
       if (role === null) {
         throw new Error(`spoilers.roles: 役職名を解決できません "${roleRaw}" (player: ${playerName})`)
       }
-      const existing = assumptions.get(seat)
-      if (existing !== undefined && existing !== role) {
-        throw new Error(`spoilers.roles: ${playerName} に対する矛盾する仮定 (${existing} vs ${role})`)
-      }
-      assumptions.set(seat, role)
+      applyPinAssumption(seat, role, 0)
     }
   }
 
-  return { vs, setup, players, shortNames, dict, rules, assumptions, spoilerActions }
+  return { vs, setup, players, shortNames, dict, rules, assumptions, spoilerActions, spoilerDeniedRoles }
 }

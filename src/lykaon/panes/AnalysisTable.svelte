@@ -76,6 +76,17 @@
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(viewOptions)) } catch { /* ignore */ }
   })
 
+  // spoiler 反映トグルの永続化。 ctx.spoilerEnabled を localStorage と双方向同期。
+  // 初回マウント時に保存値を ctx に書き戻し、 以降はトグル変更で localStorage に保存する。
+  const SPOILER_STORAGE_KEY = 'lykaon.analysisTable.spoilerEnabled'
+  try {
+    const raw = localStorage.getItem(SPOILER_STORAGE_KEY)
+    if (raw !== null) ctx.spoilerEnabled = raw === 'true'
+  } catch { /* ignore */ }
+  $effect(() => {
+    try { localStorage.setItem(SPOILER_STORAGE_KEY, String(ctx.spoilerEnabled)) } catch { /* ignore */ }
+  })
+
   function cycleColumns(): void {
     const next = viewOptions.columns === 1 ? 2
       : viewOptions.columns === 2 ? 3
@@ -341,16 +352,20 @@
       >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>
     </td>
     {#each ctx.analysisColumns as role}
-      {@const assumed = ctx.assumptions.get(seat) === role}
+      {@const assumed = ctx.mergedAssumptions.get(seat) === role}
+      {@const assumedBySpoiler = assumed && ctx.spoilerAssumptions.has(seat)}
       {@const currentPossible = current.includes(role)}
       {@const basePossible = base.includes(role)}
+      {@const impossibleBySpoiler = !assumed && !basePossible && (ctx.spoilerDeniedRoles.get(seat)?.has(role) ?? false)}
       {@const confirmed = !assumed && confirmedRole === role}
       {@const confirmedAlign = confirmed ? systemRoles.get(role)?.alignment : undefined}
       <td
         class:role-possible={!assumed && !confirmed && currentPossible}
         class:role-dim={!assumed && !confirmed && !currentPossible && basePossible}
         class:role-impossible={!assumed && !currentPossible && !basePossible}
+        class:role-impossible-spoiler={impossibleBySpoiler}
         class:role-assumed={assumed}
+        class:role-assumed-spoiler={assumedBySpoiler}
         class:role-confirmed={confirmed}
         class:confirmed-village={confirmed && confirmedAlign === 'villager'}
         class:confirmed-wolf={confirmed && confirmedAlign === 'werewolf'}
@@ -408,6 +423,14 @@
       <div class="analysis-footer">
         <button class="view-option" onclick={cycleColumns} title="列数を切り替え">列: {viewOptions.columns}</button>
         <button class="view-option" onclick={cycleGrouping} title="分類方法を切り替え">分類: {groupingLabel(viewOptions.grouping)}</button>
+        {#if ctx.hasSpoilers}
+          <button
+            class="view-option"
+            class:view-option-off={!ctx.spoilerEnabled}
+            onclick={() => ctx.spoilerEnabled = !ctx.spoilerEnabled}
+            title=".howl の spoiler 行を retar 解析に反映するかどうか"
+          >spoiler: {ctx.spoilerEnabled ? '反映' : '無視'}</button>
+        {/if}
         {#if extraViewOptions}
           {@render extraViewOptions()}
         {/if}
@@ -503,6 +526,12 @@
     border-color: var(--color-text-muted);
   }
 
+  .view-option.view-option-off {
+    background: var(--color-bg-sunken);
+    color: var(--color-text-muted);
+    text-decoration: line-through;
+  }
+
   .analysis-tables {
     display: grid;
     grid-template-columns: repeat(var(--cols, 1), auto);
@@ -583,10 +612,21 @@
     color: var(--color-border);
   }
 
+  .role-impossible.role-impossible-spoiler {
+    background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-sunken));
+    color: color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+  }
+
   .role-assumed {
     background: var(--color-accent);
     color: var(--color-bg);
     font-weight: 600;
+  }
+
+  .role-assumed.role-assumed-spoiler {
+    background: var(--color-text-faint);
+    color: var(--color-bg);
+    cursor: not-allowed;
   }
 
   .role-confirmed {

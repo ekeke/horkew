@@ -332,9 +332,10 @@ export function parseRevealStatement(text: string, line: number): RevealStatemen
   return { type: 'reveal', line, player: match[1].trim(), role: match[2].trim() }
 }
 
-// Spoiler statement: !Alice=seer / ！アリス＝占い
+// Spoiler statement: !Alice=seer / ！アリス＝占い / !Alice=狼陣営
 // 視点配信での正体メモ、および retar 解析時の仮定（assumption）として使われる。
-const spoilerRegex = new RegExp(`^[!！]${V.optionalSpace}(${V.possibleName})${V.optionalSpace}${V.equal}${V.optionalSpace}(${V.anyRole})${V.optionalSpace}$`)
+// 右辺は単一役職 (assumption pin) または faction alias (役職集合 deny) のいずれか。
+const spoilerRegex = new RegExp(`^[!！]${V.optionalSpace}(${V.possibleName})${V.optionalSpace}${V.equal}${V.optionalSpace}(${V.anyRole}|${V.anyFactionAlias})${V.optionalSpace}$`)
 // Spoiler action statement: !Alice 1夜 占い Bob
 // プレイヤーの秘匿夜行動 (公開発言とは独立)。lupa engine 駆動テストで使う。
 const spoilerActionRegex = new RegExp(

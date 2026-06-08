@@ -11,7 +11,7 @@
  */
 
 import { tick } from 'svelte'
-import type { SystemRole, VillageStatus, CauseOfDeath } from '../types/index.ts'
+import type { SystemRole, SeatStatus, VillageStatus, CauseOfDeath } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 import type { Statement } from '../howl/statement.ts'
 import type { FlexibleDictionary } from '../howl/flexibleDictionary.ts'
@@ -23,6 +23,7 @@ import { serializeVillageStatus } from '../retar/wasm-helpers.ts'
 import { stringifyStatements, type StringifiedLine } from './stringify.ts'
 import { scoreWolfPairs, type WolfPairSuggestion } from './status/wolfPairScorer.ts'
 import { requestAnalysis, type SeatResult, type AnalysisStats } from './runAnalysis.ts'
+import { mergeAssumptions } from './assumptions-merge.ts'
 
 // =====================================================================
 // 共通型定義
@@ -270,10 +271,21 @@ export class AnalysisContext {
 
   howlText = $state('')
   cursorLine = $state(0)
+  /**
+   * UI 由来 assumption (席を手動クリックでセット)。
+   * spoiler 由来 ([spoilerAssumptions](#spoilerAssumptions)) とは別に保持し、
+   * retar への入力と UI 表示には [mergedAssumptions](#mergedAssumptions) を参照する。
+   */
   assumptions = $state<Map<number, SystemRole>>(new Map())
   hocusPocusSeats = $state<Set<number>>(new Set())
   denyWolfGroups = $state<number[][]>([])
   forceTs = $state(false)
+  /**
+   * .howl の spoiler 行を retar 解析に反映するか。 false にすると spoiler 由来の
+   * assumption / faction deny は全て無効化され、 公開情報のみで解析される。
+   * UI トグル ([AnalysisTable](panes/AnalysisTable.svelte) footer) で操作。
+   */
+  spoilerEnabled = $state(true)
 
   // -----------------------------------------------------------------
   // 派生 — parse → bridge → ...
@@ -309,7 +321,28 @@ export class AnalysisContext {
   parsedLines = $derived(stringifyStatements(this.#parsed.statements))
   statementLines = $derived(this.#parsed.statements.map(s => s.line - this.#pre.lineOffset))
 
-  villageStatus = $derived<VillageStatus | null>(this.#bridge?.vs ?? null)
+  villageStatus = $derived.by<VillageStatus | null>(() => {
+    const vs = this.#bridge?.vs
+    if (!vs) return null
+    if (this.spoilerEnabled) return vs
+    const spoilerDeny = this.#bridge?.spoilerDeniedRoles
+    if (!spoilerDeny || spoilerDeny.size === 0) return vs
+    // spoiler 無視: 各 SeatStatus.deniedRoles から spoiler 由来分を除外した shallow copy。
+    // 他の VS フィールドは worker への JSON シリアライズで読まれるだけなので参照共有でよい。
+    const newStatuses = new Map<number, SeatStatus>()
+    for (const [seat, status] of vs.statuses) {
+      const denySet = spoilerDeny.get(seat)
+      if (!denySet || denySet.size === 0) {
+        newStatuses.set(seat, status)
+      } else {
+        newStatuses.set(seat, {
+          ...status,
+          deniedRoles: status.deniedRoles.filter(r => !denySet.has(r)),
+        })
+      }
+    }
+    return { ...vs, statuses: newStatuses }
+  })
   players = $derived<Map<number, string>>(this.#bridge?.players ?? new Map())
   playerShortNames = $derived<Map<number, string>>(this.#bridge?.shortNames ?? new Map())
   setup = $derived<Map<SystemRole, number>>(this.#bridge?.setup ?? new Map())
@@ -330,6 +363,51 @@ export class AnalysisContext {
     const roleOrder = [...systemRoles.keys()] as SystemRole[]
     return roleOrder.filter(r => this.setup.has(r))
   })
+
+  /**
+   * .howl の spoiler 行 (`!Alice=seer` / frontmatter `spoilers.roles`) から派生する assumption。
+   * 「実 spoiler」 (= .howl に書かれた値、 トグル状態に依存しない)。 UI でボタン表示
+   * の有無を判定するときに参照する。 解析・表示に効くのは [spoilerAssumptions](#spoilerAssumptions)。
+   */
+  rawSpoilerAssumptions = $derived<Map<number, SystemRole>>(this.#bridge?.assumptions ?? new Map())
+
+  /**
+   * spoiler faction alias 由来の deny。 「実値」 (トグル状態に依存しない)。
+   * UI でボタン表示判定に使う。 解析・表示に効くのは [spoilerDeniedRoles](#spoilerDeniedRoles)。
+   */
+  rawSpoilerDeniedRoles = $derived<Map<number, Set<SystemRole>>>(this.#bridge?.spoilerDeniedRoles ?? new Map())
+
+  /**
+   * spoiler 行から派生する assumption (= 解析・UI で実効的に使われる値)。
+   * spoilerEnabled が false なら空 Map になる。 bridge が解析済みなので read-only。
+   * UI からは toggle できない (toggleAssumption がガード)。
+   */
+  spoilerAssumptions = $derived<Map<number, SystemRole>>(
+    this.spoilerEnabled ? this.rawSpoilerAssumptions : new Map()
+  )
+
+  /**
+   * spoiler 由来と UI 由来の assumption をマージしたもの。 衝突時は spoiler 優先。
+   * retar worker への入力と UI 表示の両方で参照する。
+   */
+  mergedAssumptions = $derived<Map<number, SystemRole>>(
+    mergeAssumptions(this.spoilerAssumptions, this.assumptions)
+  )
+
+  /**
+   * spoiler faction alias 由来で deny された SystemRole 集合 (= 実効値)。
+   * spoilerEnabled が false なら空 Map。 retar 側へは [villageStatus](#villageStatus) の
+   * SeatStatus.deniedRoles 経由で渡るので worker payload は触らず、 UI 上で
+   * 「spoiler 由来で消えたセル」を色違い表示するためにのみ使う。
+   */
+  spoilerDeniedRoles = $derived<Map<number, Set<SystemRole>>>(
+    this.spoilerEnabled ? this.rawSpoilerDeniedRoles : new Map()
+  )
+
+  /** .howl 内に spoiler 行があるか (= UI トグルボタンを表示すべきか)。 */
+  hasSpoilers = $derived<boolean>(
+    this.rawSpoilerAssumptions.size > 0 || this.rawSpoilerDeniedRoles.size > 0
+  )
 
   // -----------------------------------------------------------------
   // 死亡カテゴリ・確定状態の派生
@@ -514,8 +592,10 @@ export class AnalysisContext {
   /**
    * 席 × 役職 の役職仮定をトグルする。既に同じ仮定があれば解除、なければ設定。
    * 別役職の仮定があれば上書き (1 席につき 1 仮定)。
+   * spoiler 由来 assumption がある席は no-op (.howl テキスト側で消す必要がある)。
    */
   toggleAssumption(seat: number, role: SystemRole): void {
+    if (this.spoilerAssumptions.has(seat)) return
     const next = new Map(this.assumptions)
     if (next.get(seat) === role) next.delete(seat)
     else next.set(seat, role)
@@ -634,7 +714,7 @@ export class AnalysisContext {
         }
 
         const players = this.players
-        const assumptions = this.assumptions
+        const mergedAssumptions = this.mergedAssumptions
         const hocusPocusSeats = this.hocusPocusSeats
         const denyWolfGroups = this.denyWolfGroups
         const forceTs = this.forceTs
@@ -643,7 +723,7 @@ export class AnalysisContext {
           vsJson: JSON.stringify(serializeVillageStatus(vs)),
           setupJson: JSON.stringify(Object.fromEntries(setup)),
           players: [...players],
-          assumptions: [...assumptions],
+          assumptions: [...mergedAssumptions],
           wolfPairDenyals: denyWolfGroups.map(g => [g[0], g[1]] as [number, number]),
           hocusPocus: [...hocusPocusSeats],
           forceTs,

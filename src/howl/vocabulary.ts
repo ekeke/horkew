@@ -73,6 +73,22 @@ export const wolf    = `(?:人?狼)(?:陣営)?` // Wolf (or werewolf) alignment
 export const hamster = `(?:妖?狐)(?:陣営)?` // Hamster (or werehamster) alignment
 export const anyAlignment = `(?:${village}|${wolf}|${hamster})` // Any alignment (village, wolf, or hamster)
 
+// ********************************* Spoiler faction aliases
+//
+// `!Alice=狼陣営` のような spoiler 右辺で「役職集合」を表現するための alias。
+// 単独の「狼」「狐」「村」は role pin (werewolf 等) と曖昧なため、
+// 陣営付き (`...陣営`) または英語キーに限定する。
+//   - factionAliasHostile: 人外 (= wolf + fox faction)
+//   - factionAliasWolf:    狼陣営
+//   - factionAliasFox:     狐陣営
+//   - factionAliasVillage: 村陣営
+
+export const factionAliasVillage = `(?:村陣営|village)`
+export const factionAliasWolf    = `(?:狼陣営|wolf)`
+export const factionAliasFox     = `(?:狐陣営|妖狐陣営|fox)`
+export const factionAliasHostile = `(?:人外|hostile)`
+export const anyFactionAlias     = `(?:${factionAliasVillage}|${factionAliasWolf}|${factionAliasFox}|${factionAliasHostile})`
+
 // ********************************* Races
 
 export const isHuman = `[白◯○〇]`

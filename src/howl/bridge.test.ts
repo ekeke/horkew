@@ -4,6 +4,7 @@ import { parse } from './parser.ts'
 import { buildVillageStatus } from './bridge.ts'
 import { VillageRetar } from '../retar/index.ts'
 import { defaultAnalyzeRegulation } from '../retar/defaults.ts'
+import type { SystemRole } from '../types/index.ts'
 
 describe('bridge: curse statement', () => {
   test('curse after execution sets cursed_by_executed_nekomata', () => {
@@ -833,6 +834,159 @@ setup: { seer: 1, werewolf: 1, villager: 3 }
       const pos = result.result.get(seat)!
       assert.ok(!pos.has('seer'), `seat ${seat} should not have seer possibility`)
     }
+  })
+})
+
+describe('bridge: spoiler faction alias', () => {
+  // systemRoles の faction 分布 (テスト時点で固定):
+  //   village: villager, seer, medium, bodyguard, mason, nekomata
+  //   wolf:    werewolf, possessed, fanatic, paparazzi
+  //   fox:     werehamster, immoralist, kogitsune
+  const VILLAGE_ROLES = new Set(['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata'])
+  const WOLF_ROLES    = new Set(['werewolf', 'possessed', 'fanatic', 'paparazzi'])
+  const FOX_ROLES     = new Set(['werehamster', 'immoralist', 'kogitsune'])
+
+  const seatOf = (players: Map<number, string>, name: string): number =>
+    [...players.entries()].find(([, x]) => x === name)![0]
+
+  test('!Alice=人外 → 村陣営の全役職を spoilerDeniedRoles に積む', () => {
+    const howl = `+アリス
++ボブ
+!アリス=人外`
+    const { statements, meta } = parse(howl)
+    const { spoilerDeniedRoles, vs, players, assumptions } = buildVillageStatus(statements, meta)
+    const aliceSeat = seatOf(players, 'アリス')
+
+    assert.strictEqual(assumptions.has(aliceSeat), false, 'alias は assumption pin に入らない')
+    const denied = spoilerDeniedRoles.get(aliceSeat)!
+    assert.ok(denied, 'spoilerDeniedRoles にエントリが作られる')
+    for (const role of VILLAGE_ROLES) {
+      assert.ok(denied.has(role as SystemRole), `${role} は人外 alias で deny される`)
+    }
+    for (const role of [...WOLF_ROLES, ...FOX_ROLES]) {
+      assert.ok(!denied.has(role as SystemRole), `${role} は人外 alias では deny されない`)
+    }
+    // seat.deniedRoles にも反映 (retar が消化する経路)
+    const aliceStatus = vs.statuses.get(aliceSeat)!
+    for (const role of VILLAGE_ROLES) {
+      assert.ok(aliceStatus.deniedRoles.includes(role as SystemRole), `seat.deniedRoles に ${role} が含まれる`)
+    }
+  })
+
+  test('!Alice=狼陣営 → village + fox faction を deny', () => {
+    const howl = `+アリス
++ボブ
+!アリス=狼陣営`
+    const { statements, meta } = parse(howl)
+    const { spoilerDeniedRoles, players } = buildVillageStatus(statements, meta)
+    const aliceSeat = seatOf(players, 'アリス')
+    const denied = spoilerDeniedRoles.get(aliceSeat)!
+    for (const role of [...VILLAGE_ROLES, ...FOX_ROLES]) {
+      assert.ok(denied.has(role as SystemRole), `${role} は狼陣営 alias で deny`)
+    }
+    for (const role of WOLF_ROLES) {
+      assert.ok(!denied.has(role as SystemRole), `${role} は狼陣営では deny されない`)
+    }
+  })
+
+  test('!Alice=狐陣営 → village + wolf faction を deny', () => {
+    const howl = `+アリス
++ボブ
+!アリス=狐陣営`
+    const { statements, meta } = parse(howl)
+    const { spoilerDeniedRoles, players } = buildVillageStatus(statements, meta)
+    const aliceSeat = seatOf(players, 'アリス')
+    const denied = spoilerDeniedRoles.get(aliceSeat)!
+    for (const role of [...VILLAGE_ROLES, ...WOLF_ROLES]) {
+      assert.ok(denied.has(role as SystemRole), `${role} は狐陣営 alias で deny`)
+    }
+    for (const role of FOX_ROLES) {
+      assert.ok(!denied.has(role as SystemRole), `${role} は狐陣営では deny されない`)
+    }
+  })
+
+  test('!Alice=村陣営 → wolf + fox faction を deny', () => {
+    const howl = `+アリス
++ボブ
+!アリス=村陣営`
+    const { statements, meta } = parse(howl)
+    const { spoilerDeniedRoles, players } = buildVillageStatus(statements, meta)
+    const aliceSeat = seatOf(players, 'アリス')
+    const denied = spoilerDeniedRoles.get(aliceSeat)!
+    for (const role of [...WOLF_ROLES, ...FOX_ROLES]) {
+      assert.ok(denied.has(role as SystemRole), `${role} は村陣営 alias で deny`)
+    }
+    for (const role of VILLAGE_ROLES) {
+      assert.ok(!denied.has(role as SystemRole), `${role} は村陣営では deny されない`)
+    }
+  })
+
+  test('英語キーワード (wolf / fox / village / hostile) も受け付ける', () => {
+    const howl = `+アリス
++ボブ
++キャロル
++デイブ
+!アリス=wolf
+!ボブ=fox
+!キャロル=village
+!デイブ=hostile`
+    const { statements, meta } = parse(howl)
+    const { spoilerDeniedRoles, players } = buildVillageStatus(statements, meta)
+    assert.ok(spoilerDeniedRoles.get(seatOf(players, 'アリス'))!.has('werehamster' as SystemRole), 'wolf alias で werehamster は許容')
+    // ↑ wolf alias は fox を deny するので werehamster (fox) は denied に含まれる
+    assert.ok(spoilerDeniedRoles.get(seatOf(players, 'ボブ'))!.has('werewolf' as SystemRole), 'fox alias で werewolf は denied')
+    assert.ok(spoilerDeniedRoles.get(seatOf(players, 'キャロル'))!.has('werewolf' as SystemRole), 'village alias で werewolf は denied')
+    assert.ok(spoilerDeniedRoles.get(seatOf(players, 'デイブ'))!.has('seer' as SystemRole), 'hostile alias で seer は denied')
+  })
+
+  test('alias 重複 (人外 + 狼陣営) は冗長扱いで OK (狭い方の制約が効く)', () => {
+    const howl = `+アリス
++ボブ
+!アリス=人外
+!アリス=狼陣営`
+    const { statements, meta } = parse(howl)
+    const { spoilerDeniedRoles, players } = buildVillageStatus(statements, meta)
+    const denied = spoilerDeniedRoles.get(seatOf(players, 'アリス'))!
+    // 人外 = village deny、 狼陣営 = village + fox deny。 union = village + fox deny。
+    // 残るのは wolf faction のみ。
+    for (const role of [...VILLAGE_ROLES, ...FOX_ROLES]) {
+      assert.ok(denied.has(role as SystemRole), `${role} は重複 alias で deny`)
+    }
+    for (const role of WOLF_ROLES) {
+      assert.ok(!denied.has(role as SystemRole), `${role} は両 alias で許容`)
+    }
+  })
+
+  test('pin role + alias の混在は throw する', () => {
+    const howl = `+アリス
++ボブ
+!アリス=seer
+!アリス=人外`
+    const { statements, meta } = parse(howl)
+    assert.throws(() => buildVillageStatus(statements, meta), /矛盾する仮定/)
+  })
+
+  test('alias + pin role の混在 (逆順) も throw する', () => {
+    const howl = `+アリス
++ボブ
+!アリス=人外
+!アリス=seer`
+    const { statements, meta } = parse(howl)
+    assert.throws(() => buildVillageStatus(statements, meta), /矛盾する仮定/)
+  })
+
+  test('frontmatter spoilers.roles でも alias が使える', () => {
+    const howl = `---
+spoilers:
+  roles:
+    アリス: 人外
+---
++アリス
++ボブ`
+    const { statements, meta } = parse(howl)
+    const { spoilerDeniedRoles, players } = buildVillageStatus(statements, meta)
+    const denied = spoilerDeniedRoles.get(seatOf(players, 'アリス'))!
+    assert.ok(denied.has('seer' as SystemRole), 'frontmatter alias でも village role が deny される')
   })
 })
 
