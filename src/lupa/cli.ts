@@ -4,11 +4,11 @@ import type { LupaConfig, GameEvent } from './types.ts'
 import type { GameConfig } from './handlers.ts'
 import { runGame } from './engine.ts'
 import { agentAdapter } from '../verify/agent-adapter.ts'
+import type { Agent } from '../verify/agent-adapter.ts'
 import { formatHowl } from './format.ts'
 import { parse } from '../howl/index.ts'
 import { buildVillageStatus } from '../howl/bridge.ts'
 import { searchTsumi, searchTsumiStrategy } from '../hati/index.ts'
-import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../fenrir/src/agents/rule-based-agent.ts'
 import { RandomAgent } from '../verify/random-agent.ts'
 import { findScenario, scenarios } from './scenarios.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
@@ -30,7 +30,6 @@ function parseArgs(args: string[]): CliOptions {
   let seed: number | undefined
   let tsumi = false
   let stats = false
-  let heuristic = false
   let hasFirstGhost = false
   let games = 1
   let revoteConfig: import('./types.ts').RevoteConfig | undefined
@@ -42,7 +41,6 @@ function parseArgs(args: string[]): CliOptions {
     if (arg === '--use-random-names') { continue }
     if (arg === '--tsumi') { tsumi = true; continue }
     if (arg === '--stats') { stats = true; continue }
-    if (arg === '--heuristic') { heuristic = true; continue }
     if (arg === '--random-roles' && i + 1 < args.length) {
       const roleNames = args[++i].split(',')
       for (const rn of roleNames) {
@@ -93,11 +91,10 @@ function parseArgs(args: string[]): CliOptions {
   if (roles.size === 0) {
     console.error('使用法: node --experimental-strip-types src/lupa/cli.ts <role:count>... [options]')
     console.error('例: node --experimental-strip-types src/lupa/cli.ts werewolf:1 villager:4 seer:1 mason:2 --tsumi --games 100')
-    console.error('    node --experimental-strip-types src/lupa/cli.ts werewolf:3 villager:2 seer:1 medium:1 bodyguard:1 mason:2 nekomata:1 fanatic:1 werehamster:1 immoralist:1 --heuristic --stats --games 1000 --first-ghost --revote-draw')
+    console.error('    node --experimental-strip-types src/lupa/cli.ts werewolf:3 villager:2 seer:1 medium:1 bodyguard:1 mason:2 nekomata:1 fanatic:1 werehamster:1 immoralist:1 --stats --games 1000 --first-ghost --revote-draw')
     process.exit(1)
   }
 
-  const totalPlayers = Array.from(roles.values()).reduce((a, b) => a + b, 0)
   const gameConfig: GameConfig = { roles, seed, hasFirstGhost, revoteConfig }
   const lupaConfig: LupaConfig = { roles, seed, hasFirstGhost, revoteConfig }
 
@@ -107,23 +104,15 @@ function parseArgs(args: string[]): CliOptions {
     roles,
   }
 
-  if (heuristic) {
-    const h = new RuleBasedAgent()
-    const agents = new Map<number, import('../fenrir/src/agents/agent.ts').Agent>()
-    for (let s = 1; s <= totalPlayers; s++) agents.set(s, h)
+  if (randomRoles.length > 0) {
+    const randomRoleSet = new Set(randomRoles)
+    const r = new RandomAgent()
+    const agents = new Map<number, Agent>()
     adapterConfig.agents = agents
-    adapterConfig.defaultAgent = h
-    adapterConfig.wolfTeamAgent = new WolfTeamRuleAgent()
-    adapterConfig.masonTeamAgent = new MasonTeamRuleAgent()
-
-    if (randomRoles.length > 0) {
-      const randomRoleSet = new Set(randomRoles)
-      const r = new RandomAgent()
-      adapterConfig.onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
-        for (const [seat, role] of seatRoles) {
-          if (randomRoleSet.has(role)) {
-            agents.set(seat, r)
-          }
+    adapterConfig.onRolesAssigned = (seatRoles: Map<number, SystemRole>) => {
+      for (const [seat, role] of seatRoles) {
+        if (randomRoleSet.has(role)) {
+          agents.set(seat, r)
         }
       }
     }
