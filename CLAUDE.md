@@ -171,7 +171,13 @@ The notation and vocabulary support dual Japanese/ASCII syntax:
 
 ## Development Stage
 
-このプロジェクトは現在**ブートストラップ段階**。GitHub のワークフロー（PR、Issues、CI など）は使用していない。リモートリポジトリへの push も不要。worktree を作る場合は**ローカルの `main` ブランチ**をベースにすること。
+このプロジェクトはブートストラップ段階を抜け、**コンシューマ向け整備段階**に入った。GitHub Actions は以下が稼働している:
+
+- [.github/workflows/ci.yml](.github/workflows/ci.yml) — push (main) / PR (main) で `typecheck` / TS `test` / Rust `cargo test` を並列実行
+- [.github/workflows/deploy.yml](.github/workflows/deploy.yml) — main push 時に GitHub Pages へデモをデプロイ
+- [.github/workflows/deploy-partykit.yml](.github/workflows/deploy-partykit.yml) — `party/` 変更時に PartyKit relay をデプロイ
+
+ただし日常開発は引き続きローカル `main` 中心 (下記「ブランチ運用」参照)。 PR トリガーはコンシューマ向けに開けてあるが、 マスター自身は普段 PR を作らない。
 
 ### ブランチ運用
 
