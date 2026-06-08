@@ -269,10 +269,10 @@ function serializeSetup(stmt: SetupStatement): string {
 }
 
 function serializeJoin(stmt: JoinStatement): string {
-  const parts: string[] = [stmt.name]
-  if (stmt.shortName) parts.push(`(${stmt.shortName})`)
-  parts.push(...stmt.aliases)
-  return `+ ${parts.join(' ')}`
+  // shortName は name と空白で離すと parser 側の splitTokens が別 token として扱い
+  // alias に落ちてしまうため、必ず name に連結する (例: `+ Alice(Al) Aliceちゃん`)。
+  const head = stmt.shortName ? `${stmt.name}(${stmt.shortName})` : stmt.name
+  return `+ ${[head, ...stmt.aliases].join(' ')}`
 }
 
 function serializeJoinMulti(stmt: JoinMultiStatement): string {

@@ -61,6 +61,22 @@ describe('roundtrip: join', () => {
   test('Japanese name', () => {
     assertRoundtrip(F.makeJoin('アリス'))
   })
+
+  test('with shortName (ASCII)', () => {
+    assertRoundtrip(F.makeJoin('Alice', { shortName: 'Al' }))
+  })
+
+  test('with shortName (Japanese)', () => {
+    assertRoundtrip(F.makeJoin('アリス', { shortName: 'アリ' }))
+  })
+
+  test('with aliases only', () => {
+    assertRoundtrip(F.makeJoin('Alice', { aliases: ['Aliceちゃん', 'アリス'] }))
+  })
+
+  test('with shortName and aliases', () => {
+    assertRoundtrip(F.makeJoin('Alice', { shortName: 'Al', aliases: ['Aliceちゃん'] }))
+  })
 })
 
 describe('roundtrip: vote', () => {
