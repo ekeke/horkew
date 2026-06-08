@@ -1,12 +1,25 @@
-use crate::types::{SystemRole, Seat};
+use crate::types::{RoleTrait, SystemRole, Seat};
 use crate::possibilities::{
     Possibilities, ROLE_COUNT, pop_count, bit_indices_from_mask,
     combination_with_replacement_bit,
 };
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 const WOLF_BIT: usize = SystemRole::Werewolf.bit_index_const() as usize;
-const HAMSTER_BIT: usize = SystemRole::Werehamster.bit_index_const() as usize;
+
+// 狐陣営勝利の生存カウント対象 = passive:fox-win-counter trait を持つ全役職 (妖狐 + 子狐).
+// die-when-divined (= 妖狐のみ) で数えると子狐生存だけで勝った世界線が拾えない.
+static HAMSTER_BITS: LazyLock<Vec<usize>> = LazyLock::new(|| {
+    SystemRole::ALL
+        .iter()
+        .filter(|r| r.traits().contains(&RoleTrait::PassiveFoxWinCounter))
+        .map(|r| r.bit_index() as usize)
+        .collect()
+});
+static FOX_SIGNATURES: LazyLock<Vec<u16>> = LazyLock::new(|| {
+    HAMSTER_BITS.iter().map(|&bit| 1u16 << bit).collect()
+});
 
 /// Item in the solver's work list.
 #[derive(Debug, Clone)]
@@ -257,12 +270,16 @@ fn backtrack_for_role_assignment(
                 }
                 path.push((seats.clone(), *v));
                 if ok {
+                    let added_hamsters: u32 = HAMSTER_BITS
+                        .iter()
+                        .map(|&b| v[b] as u32)
+                        .sum();
                     let res = backtrack_for_role_assignment(
                         config,
                         role_count,
                         index + 1,
                         selected_wolves + v[WOLF_BIT] as u32,
-                        selected_hamsters + v[HAMSTER_BIT] as u32,
+                        selected_hamsters + added_hamsters,
                         path,
                         all,
                     );
@@ -333,8 +350,8 @@ pub fn solve_possibilities(
             {
                 fixed_died_wolves += 1;
             }
-            if possibility == SystemRole::Werehamster.bit()
-                && !survivors.get(&seat).copied().unwrap_or(false)
+            if !survivors.get(&seat).copied().unwrap_or(false)
+                && FOX_SIGNATURES.contains(&possibility)
             {
                 fixed_died_hamsters += 1;
             }

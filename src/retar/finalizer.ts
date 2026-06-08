@@ -9,6 +9,7 @@ import {
   singleRoleBySeerResult,
   countByTraitIn,
   countBySeerResultIn,
+  rolesWithTraitIn,
 } from './role-sets.ts'
 
 // hot path で繰り返し呼ばれるため module-level 解決.
@@ -253,12 +254,23 @@ export function finalize(
 
 
   const survivors = cachedSurvivors
-  const numSurvivingHamsters = survivors.filter(seat => context.possibilities.isActualRole(seat, foxRole)).length
+  // 狐陣営勝利の生存カウントは passive:fox-win-counter trait を持つ全役職 (妖狐 + 子狐) を対象にする.
+  // die-when-divined (= 妖狐のみ) で数えると子狐生存だけで勝った世界線が拾えない.
+  const hamsterWinRoles = rolesWithTraitIn(setup, 'passive', 'fox-win-counter')
+  const setupFoxes = countByTraitIn(setup, 'passive', 'fox-win-counter')
+  // 飽和ライン (maxSurvivingWolves) 算出時の hamster 数は候補ベース (hasRole) で setup 枠キャップ.
+  // 確定数 (isActualRole) で数えると planBuilder が妖狐しか枝刈り固定しないので子狐は未確定の
+  // まま 0 計上され、 「妖狐+子狐 両生存 + 狼 2 + 人間 2 = 飽和」 のような解を取り逃す.
+  const possibleSurvivingHamsters = Math.min(
+    setupFoxes,
+    survivors.filter(seat =>
+      hamsterWinRoles.some(r => context.possibilities.hasRole(seat, r))
+    ).length
+  )
   const setupWolves = countBySeerResultIn(setup, 'wolf')
-  const setupFoxes = countByTraitIn(setup, 'passive', 'die-when-divined')
   const maxSurvivingWolves = Math.min(
     setupWolves || Infinity,
-    Math.floor((survivors.length - numSurvivingHamsters - 0.1) / 2)
+    Math.floor((survivors.length - possibleSurvivingHamsters - 0.1) / 2)
   )
 
   const survivingMap = cachedSurvivingMap
@@ -293,7 +305,7 @@ export function finalize(
     let survWolves = 0, survHamsters = 0
     for (const seat of survivors) {
       if (context.possibilities.isActualRole(seat, wolfRole)) survWolves++
-      if (context.possibilities.isActualRole(seat, foxRole)) survHamsters++
+      if (hamsterWinRoles.some(r => context.possibilities.isActualRole(seat, r))) survHamsters++
     }
     const checkCondition = (minW: number, maxW: number, minH: number, maxH: number) =>
       survWolves >= minW && survWolves <= maxW && survHamsters >= minH && survHamsters <= maxH

@@ -10,15 +10,20 @@ import {
   ROLE_COUNT,
 } from './possibilities.ts'
 import type { RolePossibility } from './possibilities.ts'
-import { singleRoleByTrait, singleRoleBySeerResult } from './role-sets.ts'
+import { singleRoleBySeerResult } from './role-sets.ts'
+import { systemRoles } from '../types/index.ts'
 
-// 「seerResult='wolf' な役職」 = werewolf 1 種. 「passive:die-when-divined を持つ役職」 = werehamster 1 種.
+// 「seerResult='wolf' な役職」 = werewolf 1 種.
 const wolfRole = singleRoleBySeerResult('wolf')
-const foxRole = singleRoleByTrait('passive', 'die-when-divined')
 const WOLF_BIT = RoleBitIndex[wolfRole]
-const HAMSTER_BIT = RoleBitIndex[foxRole]
 const WOLF_SIGNATURE = RoleSignatureBits[wolfRole]
-const FOX_SIGNATURE = RoleSignatureBits[foxRole]
+
+// 狐陣営勝利の生存カウント対象 = passive:fox-win-counter trait を持つ全役職 (妖狐 + 子狐 + 将来追加).
+// passive:die-when-divined (= 妖狐のみ) で数えると子狐生存パスが棄却される.
+const HAMSTER_BITS: number[] = Array.from(systemRoles.entries())
+  .filter(([, meta]) => meta.traits.some(t => t.kind === 'passive' && t.sub === 'fox-win-counter'))
+  .map(([role]) => RoleBitIndex[role])
+const FOX_SIGNATURES: number[] = HAMSTER_BITS.map(bit => 1 << bit)
 
 /*
  * Solver configuration — immutable across recursion.
@@ -207,12 +212,14 @@ function backtrackForRoleAssignment(
     }
     path.push([seats, new Uint8Array(v)])
     if (ok) {
+      let addedHamsters = 0
+      for (const bit of HAMSTER_BITS) addedHamsters += v[bit]
       const res = backtrackForRoleAssignment(
         config,
         roleCount,
         index + 1,
         selectedWolves + v[WOLF_BIT],
-        selectedHamsters + v[HAMSTER_BIT],
+        selectedHamsters + addedHamsters,
         path,
         all,
       )
@@ -265,7 +272,7 @@ export function solvePossibilities(
       if (possibility === WOLF_SIGNATURE && !survivors.get(i)) {
         fixedDiedWolves++
       }
-      if (possibility === FOX_SIGNATURE && !survivors.get(i)) {
+      if (!survivors.get(i) && FOX_SIGNATURES.includes(possibility)) {
         fixedDiedHamsters++
       }
       continue

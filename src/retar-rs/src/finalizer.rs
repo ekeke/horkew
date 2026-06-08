@@ -2,7 +2,8 @@ use crate::types::{CauseOfDeath, EnumSpecies, RoleTrait, SeatStatus, VillageStat
 use crate::possibilities::Possibilities;
 use crate::role_testers::{AnalyzeContext, DivineTarget};
 use crate::role_sets::{
-    count_by_seer_result_in, count_by_trait_in, single_role_by_seer_result, single_role_by_trait,
+    count_by_seer_result_in, count_by_trait_in, roles_with_trait_in,
+    single_role_by_seer_result, single_role_by_trait,
 };
 use crate::solver::solve_possibilities;
 use std::collections::BTreeMap;
@@ -310,15 +311,28 @@ pub fn finalize(
     debug_stash.finalizer_middle += 1;
 
     let survivors = cached_survivors;
-    let num_surviving_hamsters = survivors
-        .iter()
-        .filter(|&&seat| context.possibilities.is_actual_role(seat, *FOX_ROLE))
-        .count() as u32;
+    // 狐陣営勝利の生存カウントは passive:fox-win-counter trait を持つ全役職 (妖狐 + 子狐) を対象にする.
+    // die-when-divined (= 妖狐のみ) で数えると子狐生存だけで勝った世界線が拾えない.
+    let hamster_win_roles = roles_with_trait_in(setup, RoleTrait::PassiveFoxWinCounter);
+    let setup_foxes = count_by_trait_in(setup, RoleTrait::PassiveFoxWinCounter);
+    // 飽和ライン (max_surviving_wolves) 算出時の hamster 数は候補ベース (has_role) で setup 枠キャップ.
+    // 確定数 (is_actual_role) で数えると plan_builder が妖狐しか枝刈り固定しないので子狐は未確定の
+    // まま 0 計上され、 「妖狐+子狐 両生存 + 狼 2 + 人間 2 = 飽和」 のような解を取り逃す.
+    let possible_surviving_hamsters = setup_foxes.min(
+        survivors
+            .iter()
+            .filter(|&&seat| {
+                hamster_win_roles
+                    .iter()
+                    .any(|&r| context.possibilities.has_role(seat, r))
+            })
+            .count() as u32,
+    );
 
-    // TS finalizer.ts:184 と同じ. setup に wolf 役職が無ければ 0 が返る.
+    // TS finalizer.ts と同じ. setup に wolf 役職が無ければ 0 が返る.
     let wolf_count = count_by_seer_result_in(setup, EnumSpecies::Wolf);
-    let raw_max = if survivors.len() as u32 > num_surviving_hamsters {
-        (survivors.len() as u32 - num_surviving_hamsters - 1) / 2
+    let raw_max = if survivors.len() as u32 > possible_surviving_hamsters {
+        (survivors.len() as u32 - possible_surviving_hamsters - 1) / 2
     } else {
         0
     };
@@ -328,7 +342,7 @@ pub fn finalize(
         min_surviving_wolves: 1,
         max_surviving_wolves,
         min_surviving_hamsters: 0,
-        max_surviving_hamsters: count_by_trait_in(setup, RoleTrait::PassiveDieWhenDivined),
+        max_surviving_hamsters: setup_foxes,
     };
 
     if vs.result == Some(VillageResult::WerewolfWon) {
@@ -354,7 +368,10 @@ pub fn finalize(
             if context.possibilities.is_actual_role(seat, *WOLF_ROLE) {
                 surv_wolves += 1;
             }
-            if context.possibilities.is_actual_role(seat, *FOX_ROLE) {
+            if hamster_win_roles
+                .iter()
+                .any(|&r| context.possibilities.is_actual_role(seat, r))
+            {
                 surv_hamsters += 1;
             }
         }
