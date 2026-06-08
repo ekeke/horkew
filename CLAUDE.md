@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Horkew is a werewolf（人狼）game analysis and AI toolkit. Game state parsing, logical deduction, checkmate search, explainable reasoning, game simulation, and reinforcement learning — all in one TypeScript monorepo (with an optional Rust/WASM solver).
+Horkew is a werewolf（人狼）game analysis toolkit. Game state parsing, logical deduction, checkmate search, explainable reasoning, and game simulation — all in one TypeScript monorepo (with an optional Rust/WASM solver).
+
+機械学習関連 (fenrir / skoll-zero / huginn / bloodhound) は `pre-ml-purge` タグの時点で本リポジトリから削除済み。 ML は別リポジトリで書き直す予定。
 
 ### Modules (`src/`)
 
@@ -15,17 +17,20 @@ Horkew is a werewolf（人狼）game analysis and AI toolkit. Game state parsing
 | **retar** | 役職推理エンジン（TypeScript）。リファレンス実装・開発のフロントライン |
 | **retar-rs** | Retar の Rust/WASM 実装。本番用。Docker ビルド → Node.js/ブラウザ両対応 |
 | **hati** | 詰み探索エンジン。AND-OR ゲーム木探索で村の必勝戦略を発見 |
-| **lupa** | ゲームシミュレーション。プラガブルな戦略インターフェースで完全な人狼ゲームを実行 |
-| **fenrir** | 強化学習（PPO）による AI プレイヤー。Lupa 上でゲームを回し、役職別ニューラルネットを訓練 |
+| **lupa** | ゲームシミュレーション。プラガブルな GameHandlers インターフェースで完全な人狼ゲームを実行 |
+| **skoll** | 役職確率推定。 enumerateWorlds をベースに per-X win rate / wolf vote 分析等を計算 |
+| **verify** | retar / lupa 検証用の RandomAgent + agent-adapter |
+| **spec** | lupa engine 振る舞いユニットテスト suite |
 | **lykaon** | `.howl` エディタ + 解析サイドカーの Svelte 5 UI ライブラリ。`createAnalysisContext` + `EditorPane` を core に、`StatusPane` / `AnalysisTable` / `HatiPane` 等の optional ペインを並べて使う。詳細は [src/lykaon/README.md](src/lykaon/README.md) |
 
 ### Data Flow
 ```
-HOWL (parse .howl logs)     LUPA (simulate games)     FENRIR (train AI via PPO)
-  ↓                            ↓                          ↓
-VillageStatus ────────→ RETAR (solve possibilities) ← game decisions
+HOWL (parse .howl logs)     LUPA (simulate games with RandomAgent)
+  ↓                            ↓
+VillageStatus ────────→ RETAR (solve possibilities)
                            ↓
                        Possibilities ────→ HATI (checkmate search)
+                                       └→ SKOLL (probability / vote analysis)
 ```
 
 ### Retar 開発フロー (TS → Rust)
@@ -119,13 +124,12 @@ The pipeline connection: Howl parser output → (mapped to events) → VillageSt
 
 ## Performance (Hati / Retar)
 
-Hati（詰み探索）とRetar（役職推理）は機械学習パイプラインに組み込む前提のため、**パフォーマンスが最優先**。以下を厳守:
+Hati（詰み探索）とRetar（役職推理）は将来的に外部の機械学習パイプラインに組み込まれる前提のため、**パフォーマンスが最優先**。以下を厳守:
 
 - **GC圧を最小化**: 不要なオブジェクト生成を避ける。ホットパスでの配列・オブジェクトの一時生成禁止。ビットマスク・Uint8Array・数値ハッシュで代替。
 - **メモリ確保は遅延**: 大量データ（ワールド列挙など）は逐次処理（コールバック/ストリーミング）を基本とし、配列への一括収集は必要な場合のみ。
 - **永続キャッシュ禁止**: モジュールスコープのMap等でゲームをまたいでデータを保持しない。メモ化は探索単位のスコープに限定。
 - **枝刈りを先に**: 重い計算（ワールド列挙、探索）の前に安価なチェック（縄数、パリティ）で早期棄却。
-- **ベンチマーク必須**: `src/hati/bench.ts` でBEFORE/AFTERを計測し `src/hati/Performance.md` に記録。`src/hati/verify.ts` で正しさを検証。
 
 ## Coding Conventions
 
@@ -209,11 +213,3 @@ rmdir .committing
 ## Constraints
 
 - ユーザーはPythonが嫌い。Pythonは使わない。
-- **学習系クライアントは必ず fenrir の学習カリキュラムフレームワーク (orchestrate) に乗せる**。
-  - 対象: TF.js で NN を学習する全てのスクリプト (pretrain, fine-tune, self-play, 消費プロジェクトの学習 CLI 含む — skoll / skoll-zero / huginn など fenrir 外でも同じ)
-  - 独立 CLI (`node --experimental-strip-types path/to/script.ts`) として学習ループを書くのは禁止
-  - 理由:
-    - **Resume 粒度**: orchestrate は iter/epoch 粒度の checkpoint + 再開を提供する。独自 CLI だと中断時のやり直しコストが大きい
-    - **OOM リスク**: orchestrate のエントリポイント (`npm run train:orchestrate`) が `TF_FORCE_GPU_ALLOW_GROWTH=true` を自動設定する。直接 `node` を呼ぶとこの保護が効かず GPU VRAM 全取りで OOM になり得る
-    - **UI/進捗の統一性**: `train-status.json` / `train-progress.json` / `train-history.jsonl` / eval_log.jsonl の道標が全ラン横断で揃う。`/fenrir-onboard` で即座に状況把握できる
-  - 新規学習フェーズを足す場合は `src/fenrir/src/orchestrate.ts` と `phase-runner.ts` にフェーズを追加し、`CurriculumName` の型に乗せる

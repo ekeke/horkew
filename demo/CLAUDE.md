@@ -35,7 +35,7 @@ demo/
 ├── FileSidebar.svelte     # ファイル一覧サイドバー
 ├── HelpPanel.svelte       # ヘルプパネル
 ├── ColorSwatchPane.svelte # 色見本（devMode 用）
-├── SkollPane / PretrainPane / StatsPane / CommandPlayPane / NicoPlayer / YouTubePlayer  # demo 固有
+├── NicoPlayer / YouTubePlayer  # demo 固有 (動画埋め込み)
 ├── status/                # Overlay 専用の status 部品群 (lykaon 化前の旧版を温存)
 └── (lykaon 由来の EditorPane / StatusPane / HatiPane / AnalysisTable は src/lykaon から import)
 ```
@@ -50,7 +50,7 @@ demo/
 
 ### lykaon との関係
 
-demo は `src/lykaon/` を consume する薄い shell。 エディタ・StatusPane・AnalysisTable・HatiPane などの解析 UI は lykaon に集約されており、 demo はそれらに動画 player・FileSidebar・Skoll/Pretrain/Stats/CommandPlay 等の demo 固有機能をかぶせるだけ。 新規 UI 機能を足すときは「lykaon に入れるべきか demo に入れるべきか」を最初に判断する (mirurou など外部 consumer で再利用したいなら lykaon)。
+demo は `src/lykaon/` を consume する薄い shell。 エディタ・StatusPane・AnalysisTable・HatiPane などの解析 UI は lykaon に集約されており、 demo はそれらに動画 player・FileSidebar 等の demo 固有機能をかぶせるだけ。 新規 UI 機能を足すときは「lykaon に入れるべきか demo に入れるべきか」を最初に判断する (mirurou など外部 consumer で再利用したいなら lykaon)。
 
 ## スタイリングルール
 

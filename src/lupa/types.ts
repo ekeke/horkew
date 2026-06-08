@@ -1,5 +1,4 @@
 import type { SystemRole, EnumSpecies, Regulation } from '../types/index.ts'
-import type { Agent, TeamAgent, AgentBase, TeamDecisionContext } from '../fenrir/src/agents/agent.ts'
 
 export type LupaConfig = {
   roles: Map<SystemRole, number>
@@ -7,32 +6,10 @@ export type LupaConfig = {
   verify?: boolean
   useRandomNames?: boolean
   hasFirstGhost?: boolean
-  /** プレイヤーごとのエージェント（未指定はdefaultAgent、それも未指定ならRandomAgent） */
-  agents?: Map<number, Agent>
-  /** agentsに未登録のseatに使うエージェント */
-  defaultAgent?: Agent
-  /** 役職割り当て後のコールバック（seat→roleマップを受け取り、agentsを動的に設定できる） */
-  onRolesAssigned?: (seatRoles: Map<number, SystemRole>) => void
-  /** 狼チームエージェント */
-  wolfTeamAgent?: TeamAgent
-  /** 共有者チームエージェント */
-  masonTeamAgent?: TeamAgent
-  /** Retar論理推論（デフォルトON、falseで無効化） */
-  enableRetar?: boolean
-  /** カスタムRetar実行関数（並列版等を注入する場合） */
-  retarFn?: (events: GameEvent[], state: GameState, config: LupaConfig) => Promise<Map<number, Set<SystemRole>>>
   /** 再投票設定 (未指定時はデフォルト: 候補者限定ランダム、3回、最小seat処刑) */
   revoteConfig?: RevoteConfig
   /** 投票確定後のCO許可 = 遺言 (デフォルト: false) */
   allowPostVoteCO?: boolean
-  /** 非同期エージェント (runGameAsync専用、対話型CLI等) */
-  asyncAgents?: Map<number, AgentBase>
-  /** asyncAgentsに未登録のseatに使う非同期エージェント */
-  defaultAsyncAgent?: AgentBase
-  /** 非同期狼チームエージェント */
-  asyncWolfTeamAgent?: AgentBase<TeamDecisionContext>
-  /** 非同期共有者チームエージェント */
-  asyncMasonTeamAgent?: AgentBase<TeamDecisionContext>
   /** オプションルール（未指定分はるる鯛14D猫デフォルト） */
   rules?: Partial<Regulation>
 }

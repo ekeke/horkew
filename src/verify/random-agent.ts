@@ -1,34 +1,24 @@
 import type { EnumSpecies, Regulation } from '../types/index.ts'
 import type { GameState, PlayerState, NightAction, DayClaim } from '../lupa/types.ts'
-import type { Signal, CommunicationAction } from '../fenrir/src/communication.ts'
-import type { Proposal, LeadershipResponse } from '../fenrir/src/leadership.ts'
-import type { Agent, DecisionContext, TeamAgent, TeamDecisionContext, WolfNightAction } from '../fenrir/src/agents/agent.ts'
-import { alivePlayers, alivePlayersExcept, getMediumResult, isWerewolfAligned } from '../lupa/roles.ts'
-import { forceTrueRoleCO, isVillagePowerRole, isDefensiveCONeeded } from '../fenrir/src/agents/rule-based-agent.ts'
+import type {
+  Agent, DecisionContext, TeamAgent, TeamDecisionContext, WolfNightAction,
+} from './agent-adapter.ts'
+import { alivePlayers, alivePlayersExcept, getMediumResult } from '../lupa/roles.ts'
 import type { Rng } from '../lupa/random.ts'
 
 const CO_PROBABILITY = 0.4
-const FORECAST_PROBABILITY = 0.3
 
 export class RandomAgent implements Agent {
-  // ============================================================
-  // 夜アクション
-  // ============================================================
-
   decideNightAction(ctx: DecisionContext): NightAction {
     const { gameState: state, myPlayer: player, day, rng, rules } = ctx
     const night = ctx.phase === 'night' ? day - 1 : day
     switch (player.role) {
-      case 'seer':      return decideSeerNight(state, player, night, rng, rules)
+      case 'seer':       return decideSeerNight(state, player, night, rng, rules)
       case 'bodyguard':  return decideBodyguardNight(state, player, rng, rules)
       case 'werewolf':   return decideWerewolfNight(state, player, rng)
       default:           return { type: 'none' }
     }
   }
-
-  // ============================================================
-  // 昼CO
-  // ============================================================
 
   decideDayClaim(ctx: DecisionContext): DayClaim {
     const { gameState: state, myPlayer: player, day, lastExecutedSeat, rng } = ctx
@@ -58,43 +48,9 @@ export class RandomAgent implements Agent {
     }
   }
 
-  // ============================================================
-  // 予告
-  // ============================================================
-
-  decideForecast(ctx: DecisionContext): DayClaim {
-    const { gameState: state, myPlayer: player, rng } = ctx
-    if (player.claimedRole !== 'seer') return { type: 'none' }
-    if (rng.next() >= FORECAST_PROBABILITY) return { type: 'none' }
-
-    const all = alivePlayersExcept(state, player.seat)
-    if (all.length === 0) return { type: 'none' }
-
-    const history = player.role === 'seer' ? player.divineHistory : player.fakeDivineHistory
-    const divined = new Set(Array.from(history.values()).map(d => d.target))
-    const undivined = all.filter(p => !divined.has(p.seat))
-    const candidates = undivined.length > 0 ? undivined : all
-
-    return { type: 'forecast', target: rng.pick(candidates).seat }
-  }
-
-  // ============================================================
-  // 投票
-  // ============================================================
-
   decideVote(ctx: DecisionContext): number {
-    const { gameState: state, myPlayer: voter, rng, proposals } = ctx
+    const { gameState: state, myPlayer: voter, rng } = ctx
     const candidates = alivePlayersExcept(state, voter.seat)
-
-    // 指揮者の処刑指示がある場合、陣営に応じた確率で従う
-    const executeOrder = proposals.find(p => p.type === 'execute_order')
-    if (executeOrder) {
-      const target = candidates.find(p => p.seat === executeOrder.target)
-      if (target) {
-        const followRate = getFollowRate(voter.role)
-        if (rng.next() < followRate) return target.seat
-      }
-    }
 
     switch (voter.role) {
       case 'werewolf':
@@ -105,171 +61,6 @@ export class RandomAgent implements Agent {
       default:
         return decideDefaultVote(state, candidates, rng)
     }
-  }
-
-  // ============================================================
-  // コミュニケーション
-  // ============================================================
-
-  decideCommunication(ctx: DecisionContext): CommunicationAction {
-    const { gameState: state, myPlayer: player, rng, signals, day } = ctx
-    const others = alivePlayersExcept(state, player.seat)
-    const noAction: CommunicationAction = { signal: { type: 'no_signal' }, proposals: [] }
-
-    // === propose head: 処刑提案 ===
-    const proposals: number[] = []
-
-    // 黒出し先を処刑提案
-    const blackTargets = collectBlackTargets(state)
-    const aliveBlacks = others.filter(p => blackTargets.has(p.seat))
-    if (aliveBlacks.length > 0 && rng.next() < 0.6) {
-      for (const p of aliveBlacks) proposals.push(p.seat)
-    }
-
-    // 霊能ローラー: 霊能CO者が2人以上いたら全員提案
-    const mediumClaimers = others.filter(p => p.claimedRole === 'medium')
-    if (mediumClaimers.length >= 2 && rng.next() < 0.5) {
-      for (const p of mediumClaimers) {
-        if (!proposals.includes(p.seat)) proposals.push(p.seat)
-      }
-    }
-
-    // === comm head: シグナル ===
-
-    // PP判定: 狼陣営が生存者の過半数
-    if (player.role === 'werewolf') {
-      const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf').length
-      const aliveTotal = alivePlayers(state).length
-      const aliveFoxes = alivePlayers(state).filter(p => p.role === 'werehamster').length
-      if (aliveWolves >= aliveTotal - aliveWolves - aliveFoxes && rng.next() < 0.8) {
-        return { signal: { type: 'werewolf_co' }, proposals }
-      }
-    }
-
-    // LWCO: 最後の狼 & day > 3
-    if (player.role === 'werewolf' && day > 3) {
-      const aliveWolves = alivePlayers(state).filter(p => p.role === 'werewolf')
-      if (aliveWolves.length === 1 && aliveWolves[0].seat === player.seat && rng.next() < 0.1) {
-        return { signal: { type: 'werewolf_co' }, proposals }
-      }
-    }
-
-    // demand_wolf_co: 村陣営 & day > 3
-    if (!isWerewolfAligned(player.role) && player.role !== 'werehamster' && player.role !== 'immoralist' && day > 3) {
-      if (rng.next() < 0.1) {
-        return { signal: { type: 'demand_wolf_co' }, proposals }
-      }
-    }
-
-    // 後半ラウンド: 既存シグナルに反応 (agree/disagree with target)
-    if (signals.length > 0 && rng.next() < 0.3) {
-      const targetSignal = rng.pick(signals)
-      const signal: Signal = rng.next() < 0.6
-        ? { type: 'agree', target: targetSignal.sender }
-        : { type: 'disagree', target: targetSignal.sender }
-      return { signal, proposals }
-    }
-
-    // 狼陣営: ランダムsuspicionか沈黙
-    if (isWerewolfAligned(player.role)) {
-      if (rng.next() < 0.3) {
-        const candidates = others.filter(p => p.role !== 'werewolf')
-        if (candidates.length > 0) {
-          return { signal: { type: 'suspicion', target: rng.pick(candidates).seat }, proposals }
-        }
-      }
-      return { ...noAction, proposals }
-    }
-
-    // accuse_wolf: 黒出し先を狼告発
-    if (aliveBlacks.length > 0 && rng.next() < 0.15) {
-      return { signal: { type: 'accuse_wolf', target: rng.pick(aliveBlacks).seat }, proposals }
-    }
-
-    // accuse_fox: 狼CO後のLWCO支援
-    const wolfCOExists = state.players.some(p => p.alive && p.claimedRole === 'werewolf')
-    if (wolfCOExists && rng.next() < 0.2 && others.length > 0) {
-      return { signal: { type: 'accuse_fox', target: rng.pick(others).seat }, proposals }
-    }
-
-    // vote_intent: 投票先を事前宣言
-    if (rng.next() < 0.15 && others.length > 0) {
-      return { signal: { type: 'vote_intent', target: rng.pick(others).seat }, proposals }
-    }
-
-    // 占いCO者を信用するシグナル
-    const seerClaimers = others.filter(p => p.claimedRole === 'seer')
-    if (seerClaimers.length === 1 && rng.next() < 0.3) {
-      return { signal: { type: 'trust', target: seerClaimers[0].seat }, proposals }
-    }
-
-    return { ...noAction, proposals }
-  }
-
-  // ============================================================
-  // 指揮者提案
-  // ============================================================
-
-  decideProposal(ctx: DecisionContext): Proposal | null {
-    const { gameState: state, myPlayer: player, rng } = ctx
-    if (ctx.commander !== player.seat) return null
-
-    // 黒出し先がいれば処刑指示
-    const blackTargets = collectBlackTargets(state)
-    const aliveBlacks = alivePlayersExcept(state, player.seat)
-      .filter(p => blackTargets.has(p.seat))
-    if (aliveBlacks.length > 0) {
-      return { type: 'execute_order', target: rng.pick(aliveBlacks).seat }
-    }
-
-    // CO者の中で怪しい人を処刑指示
-    const suspicious = alivePlayersExcept(state, player.seat)
-      .filter(p => p.claimedRole !== null)
-    if (suspicious.length > 0 && rng.next() < 0.4) {
-      return { type: 'execute_order', target: rng.pick(suspicious).seat }
-    }
-
-    return null
-  }
-
-  // ============================================================
-  // 指揮者への対応
-  // ============================================================
-
-  decideLeadershipResponse(ctx: DecisionContext, _proposal: Proposal): LeadershipResponse {
-    const { myPlayer: player, rng } = ctx
-    const followRate = getFollowRate(player.role)
-    if (rng.next() < followRate) return 'follow'
-    return 'defy'
-  }
-
-  decideDefensiveClaim(ctx: DecisionContext): DayClaim {
-    if (ctx.myPlayer.claimedRole !== null) return { type: 'none' }
-
-    // 村能力者: 処刑対象なら必ずCO
-    if (isVillagePowerRole(ctx.myRole) && isDefensiveCONeeded(ctx)) {
-      return forceTrueRoleCO(ctx.gameState, ctx.myPlayer, ctx.day, ctx.lastExecutedSeat)
-    }
-
-    return { type: 'none' }
-  }
-}
-
-// ============================================================
-// 指揮者追従率
-// ============================================================
-
-function getFollowRate(role: string): number {
-  switch (role) {
-    case 'werewolf':
-    case 'possessed':
-    case 'fanatic':
-      return 0.3
-    case 'werehamster':
-    case 'immoralist':
-      return 0.5
-    default:
-      return 0.8
   }
 }
 
@@ -282,8 +73,6 @@ function decideSeerNight(state: GameState, seer: PlayerState, night: number, rng
   if (night === 0) {
     const firstSeek = rules['role.seer.first-seek']
     if (firstSeek === 'none') return { type: 'none' }
-    // 'no-wolf' と 'all' はここでは区別不要（結果は getSeerResult で決まる）
-    // ただし 'no-wolf' の場合、狼を選ばないようにフィルタ
     if (firstSeek === 'no-wolf') {
       const all = alivePlayersExcept(state, seer.seat).filter(p => p.role !== 'werewolf')
       if (all.length === 0) return { type: 'none' }
@@ -661,12 +450,10 @@ export class WolfTeamRandomAgent implements TeamAgent {
       target = rng.pick(candidates).seat
     }
 
-    // 襲撃者: 猫又対策 — 猫又COがいれば処刑されにくい狼を選ぶ（＝最もCOしている狼）
-    // 単純にはランダム、猫又がいそうなら最小seatを避ける
+    // 襲撃者: 猫又対策 — 猫又COがいれば処刑されにくい狼を選ぶ
     const nekoExists = state.players.some(p => p.alive && p.claimedRole === 'nekomata')
     let attacker: number
     if (nekoExists && aliveWolves.length > 1) {
-      // 猫又道連れリスク: 一番消えても影響が少ない狼を選ぶ (CO無し優先)
       const nonCO = aliveWolves.filter(p => p.claimedRole === null)
       attacker = nonCO.length > 0 ? rng.pick(nonCO).seat : rng.pick(aliveWolves).seat
     } else {
@@ -677,37 +464,11 @@ export class WolfTeamRandomAgent implements TeamAgent {
   }
 
   decideDayClaim(ctx: TeamDecisionContext): DayClaim {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideDayClaim(actorCtx)
-  }
-
-  decideForecast(ctx: TeamDecisionContext): DayClaim {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideForecast(actorCtx)
+    return this.individual.decideDayClaim(this.buildActorCtx(ctx))
   }
 
   decideVote(ctx: TeamDecisionContext): number {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideVote(actorCtx)
-  }
-
-  decideCommunication(ctx: TeamDecisionContext): CommunicationAction {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideCommunication(actorCtx)
-  }
-
-  decideProposal(ctx: TeamDecisionContext): Proposal | null {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideProposal(actorCtx)
-  }
-
-  decideLeadershipResponse(ctx: TeamDecisionContext, proposal: Proposal): LeadershipResponse {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideLeadershipResponse(actorCtx, proposal)
-  }
-
-  decideDefensiveClaim(ctx: TeamDecisionContext): DayClaim {
-    return this.individual.decideDefensiveClaim(this.buildActorCtx(ctx))
+    return this.individual.decideVote(this.buildActorCtx(ctx))
   }
 
   private buildActorCtx(ctx: TeamDecisionContext): DecisionContext {
@@ -724,7 +485,7 @@ export class WolfTeamRandomAgent implements TeamAgent {
 }
 
 // ============================================================
-// 共有者チームヒューリスティック
+// 共有者チームランダム
 // ============================================================
 
 export class MasonTeamRandomAgent implements TeamAgent {
@@ -735,37 +496,11 @@ export class MasonTeamRandomAgent implements TeamAgent {
   }
 
   decideDayClaim(ctx: TeamDecisionContext): DayClaim {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideDayClaim(actorCtx)
-  }
-
-  decideForecast(ctx: TeamDecisionContext): DayClaim {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideForecast(actorCtx)
+    return this.individual.decideDayClaim(this.buildActorCtx(ctx))
   }
 
   decideVote(ctx: TeamDecisionContext): number {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideVote(actorCtx)
-  }
-
-  decideCommunication(ctx: TeamDecisionContext): CommunicationAction {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideCommunication(actorCtx)
-  }
-
-  decideProposal(ctx: TeamDecisionContext): Proposal | null {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideProposal(actorCtx)
-  }
-
-  decideLeadershipResponse(ctx: TeamDecisionContext, proposal: Proposal): LeadershipResponse {
-    const actorCtx = this.buildActorCtx(ctx)
-    return this.individual.decideLeadershipResponse(actorCtx, proposal)
-  }
-
-  decideDefensiveClaim(ctx: TeamDecisionContext): DayClaim {
-    return this.individual.decideDefensiveClaim(this.buildActorCtx(ctx))
+    return this.individual.decideVote(this.buildActorCtx(ctx))
   }
 
   private buildActorCtx(ctx: TeamDecisionContext): DecisionContext {
@@ -781,4 +516,3 @@ export class MasonTeamRandomAgent implements TeamAgent {
     }
   }
 }
-

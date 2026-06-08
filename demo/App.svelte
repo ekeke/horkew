@@ -22,16 +22,11 @@
   import YouTubePlayer from './YouTubePlayer.svelte'
   import NicoPlayer from './NicoPlayer.svelte'
   import ColorSwatchPane from './ColorSwatchPane.svelte'
-  import SkollPane from './SkollPane.svelte'
-  import PretrainPane from './PretrainPane.svelte'
-  import StatsPane from './StatsPane.svelte'
-  import CommandPlayPane from './CommandPlayPane.svelte'
   import FileSidebar from './FileSidebar.svelte'
-  import { commandPlayStore } from './commandPlayStore.ts'
   import '../src/lykaon/theme.css'
   import { runGame } from '../src/lupa/engine.ts'
   import { agentAdapter } from '../src/verify/agent-adapter.ts'
-  import { RuleBasedAgent, WolfTeamRuleAgent, MasonTeamRuleAgent } from '../src/fenrir/src/agents/rule-based-agent.ts'
+  import { RandomAgent, WolfTeamRandomAgent, MasonTeamRandomAgent } from '../src/verify/random-agent.ts'
   import { formatHowl } from '../src/lupa/format.ts'
   import { onOpenHelp, onStartTrial, TUTORIAL_TEXT } from './help.ts'
 
@@ -82,16 +77,12 @@
     { id: 'analysis', label: 'Analysis' },
     { id: 'colorSwatch', label: 'Color Swatch' },
     { id: 'hati', label: 'Hati (詰み)' },
-    { id: 'skoll', label: 'Skoll (確率)' },
-    { id: 'fenrirInspect', label: 'Fenrir Inspect' },
-    { id: 'pretrainViz', label: 'Pretrain Viz' },
-    { id: 'fenrirStats', label: 'Fenrir Stats' },
-    { id: 'commandPlay', label: 'Command Play' },
+    { id: 'inspect', label: 'Inspect' },
   ] as const
 
   type PaneId = typeof paneEntries[number]['id']
-  type DebugLayout = 'off' | 'debug' | 'fenrir'
-  const debugRotation: DebugLayout[] = ['off', 'debug', 'fenrir']
+  type DebugLayout = 'off' | 'debug'
+  const debugRotation: DebugLayout[] = ['off', 'debug']
 
   interface Settings {
     active: string
@@ -102,7 +93,7 @@
     sidebarOpen: boolean
   }
 
-  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, verticalStatus: false, verticalDense: false, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, skoll: false, fenrirInspect: false, pretrainViz: false, fenrirStats: false, commandPlay: false }
+  const defaultPanes: Record<PaneId, boolean> = { input: true, rawStatements: true, parsed: true, combined: true, status: true, verticalStatus: false, verticalDense: false, analyzerInput: true, analysis: true, colorSwatch: true, hati: true, inspect: false }
 
   function loadSettings(): Settings {
     const defaults: Settings = { active: '', skin: 'flat', devMode: false, debug: 'off', panes: { ...defaultPanes }, sidebarOpen: true }
@@ -737,10 +728,9 @@
     ])
     const seed = Date.now()
     const handlers = agentAdapter({
-      defaultAgent: new RuleBasedAgent(),
-      wolfTeamAgent: new WolfTeamRuleAgent(),
-      masonTeamAgent: new MasonTeamRuleAgent(),
-      enableRetar: false,
+      defaultAgent: new RandomAgent(),
+      wolfTeamAgent: new WolfTeamRandomAgent(),
+      masonTeamAgent: new MasonTeamRandomAgent(),
       seed,
       roles,
     })
@@ -904,44 +894,6 @@
       run()
       tick().then(scrollRawToCursor)
     })
-  })
-
-  // ============================================================
-  // Command Play 連動: ゲーム進行を formatHowl でエディタに書き出し
-  // ============================================================
-  let cmdPlayRunning = $state(false)
-  let cmdPlayEditorText = $state('')
-  let cmdPlayWasRunning = false  // running 立ち上がり検出用
-
-  onMount(() => {
-    const unsub = commandPlayStore.subscribe(s => {
-      cmdPlayRunning = s.running
-      cmdPlayEditorText = s.editorText
-    })
-    return unsub
-  })
-
-  // running 立ち上がりで trial モードへ（保存ドキュメントを守る）
-  // running 立ち下がりでも trial のまま（結果を読める状態を保つ）
-  $effect(() => {
-    if (cmdPlayRunning && !cmdPlayWasRunning) {
-      // 保存ドキュメントを壊さないために即 trial モードへ
-      if (!trialMode) {
-        trialMode = true
-        resetVideoState()
-        ctx.howlText = cmdPlayEditorText || ''
-        showHelp = false
-      }
-    }
-    cmdPlayWasRunning = cmdPlayRunning
-  })
-
-  // 実行中 editorText 変化 → ctx.howlText に書き込み (lykaon EditorPane が doc へ反映)
-  $effect(() => {
-    if (!cmdPlayRunning) return
-    if (!cmdPlayEditorText) return
-    if (ctx.howlText === cmdPlayEditorText) return
-    ctx.howlText = cmdPlayEditorText
   })
 
   // demo 固有 CodeMirror Extension (gzip ペースト + auto-timestamp)。
@@ -1260,9 +1212,8 @@
     <button
       class="header-btn debug-btn"
       class:debug-on={debugMode === 'debug'}
-      class:debug-fenrir={debugMode === 'fenrir'}
       onclick={() => { debugMode = debugRotation[(debugRotation.indexOf(debugMode) + 1) % debugRotation.length]; updateSettings({ debug: debugMode }) }}
-    >{{ off: 'DEBUG OFF', debug: 'DEBUG', fenrir: 'FENRIR' }[debugMode]}</button>
+    >{{ off: 'DEBUG OFF', debug: 'DEBUG' }[debugMode]}</button>
     {/if}
 
     <button
@@ -1387,7 +1338,7 @@
           <div class="input-editor">
             <EditorPane
               {ctx}
-              readonly={cmdPlayRunning || videoSyncActive || isActivePendingDelete}
+              readonly={videoSyncActive || isActivePendingDelete}
               extraExtensions={demoEditorExtensions}
             />
           </div>
@@ -1576,71 +1527,14 @@
     </section>
     {/if}
 
-    {#if paneVisible.skoll}
+    {#if paneVisible.inspect}
     <section class="pane">
-      <div class="pane-header">Skoll (確率分布)</div>
-      <div class="pane-body">
-        <SkollPane vs={ctx.villageStatus} setup={ctx.setup} players={ctx.players} publicEvents={ctx.currentEvents} />
-      </div>
-    </section>
-    {/if}
-
-    {#if paneVisible.fenrirInspect}
-    <section class="pane">
-      <div class="pane-header">Fenrir Inspect</div>
+      <div class="pane-header">Inspect</div>
       <div class="pane-body">
         <InspectPane {ctx} />
       </div>
     </section>
     {/if}
-
-    {#if paneVisible.pretrainViz}
-    <section class="pane">
-      <div class="pane-header">Pretrain Viz</div>
-      <div class="pane-body">
-        <PretrainPane />
-      </div>
-    </section>
-    {/if}
-
-    {#if paneVisible.fenrirStats}
-    <section class="pane">
-      <div class="pane-header">Fenrir Stats</div>
-      <div class="pane-body">
-        <StatsPane />
-      </div>
-    </section>
-    {/if}
-
-    {#if paneVisible.commandPlay}
-    <section class="pane">
-      <div class="pane-header">Command Play</div>
-      <div class="pane-body">
-        <CommandPlayPane />
-      </div>
-    </section>
-    {/if}
-  </div>
-  {:else if debugMode === 'fenrir'}
-  <div class="panes panes-fenrir">
-    <div class="fenrir-left">
-      {@render inputPane()}
-    </div>
-    <div class="fenrir-center">
-      <div class="prod-right-top">
-        {@render statusPane()}
-      </div>
-      <div class="prod-right-bottom">
-        {@render analysisPane()}
-      </div>
-    </div>
-    <div class="fenrir-right">
-      <section class="pane">
-        <div class="pane-body">
-          <InspectPane {ctx} />
-        </div>
-      </section>
-    </div>
   </div>
   {:else}
   <div class="panes panes-prod" class:has-video={!!videoId}>
@@ -2308,18 +2202,6 @@
     border-color: var(--ctp-maroon);
   }
 
-  .debug-btn.debug-fenrir {
-    opacity: 1;
-    background: var(--ctp-mauve);
-    color: var(--color-bg);
-    border-color: var(--ctp-mauve);
-  }
-
-  .debug-btn.debug-fenrir:hover {
-    background: var(--ctp-lavender);
-    border-color: var(--ctp-lavender);
-  }
-
   .pane-menu-wrap {
     position: relative;
   }
@@ -2366,47 +2248,6 @@
 
   .panes-prod {
     display: flex;
-  }
-
-  .panes-fenrir {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .panes-fenrir .pane-header {
-    display: none;
-  }
-
-  .fenrir-left {
-    display: flex;
-    flex: 1;
-    max-width: 400px;
-    min-width: 0;
-    border-right: 1px solid var(--color-border);
-  }
-
-  .fenrir-left .input-editor {
-    background: var(--ctp-mantle);
-  }
-
-  .fenrir-center {
-    display: flex;
-    flex-direction: column;
-    flex: 2;
-    min-width: 0;
-    background: var(--color-bg-elevated);
-    border-right: 1px solid var(--color-border);
-  }
-
-  .fenrir-right {
-    display: flex;
-    flex: 2;
-    min-width: 0;
-  }
-
-  .fenrir-right .pane {
-    border-right: none;
   }
 
   .prod-left {
