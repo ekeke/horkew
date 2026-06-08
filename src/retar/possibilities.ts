@@ -41,6 +41,12 @@ const Human: RolePossibility =
     .filter(role => systemRoles.get(role)!.seerResult === 'human')
     .reduce((acc, role) => acc | RoleSignatureBits[role], 0)
 
+// mediumResult === 'human' な役職. werewolf と kogitsune (= mediumResult: 'kogitsune') を除く.
+const MediumHuman: RolePossibility =
+  ROLE_ORDER
+    .filter(role => systemRoles.get(role)!.mediumResult === 'human')
+    .reduce((acc, role) => acc | RoleSignatureBits[role], 0)
+
 // 能力を持つ村陣営役職 (seer/medium/bodyguard/mason/nekomata). villager は traits=[] で除外.
 const VillageRoles: RolePossibility =
   ROLE_ORDER
@@ -394,6 +400,12 @@ export class Possibilities {
 
   markAsHuman(seat: number): boolean {
     this.possibilities[seat] &= Human
+    return this.possibilities[seat] !== 0
+  }
+
+  // 霊媒 ○ 結果用. mediumResult: human な役職 (= werewolf と kogitsune を除く) に絞る.
+  markAsMediumHuman(seat: number): boolean {
+    this.possibilities[seat] &= MediumHuman
     return this.possibilities[seat] !== 0
   }
 

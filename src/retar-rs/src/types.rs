@@ -106,6 +106,14 @@ impl SystemRole {
         }
     }
 
+    pub const fn medium_result(self) -> EnumSpecies {
+        match self {
+            SystemRole::Werewolf => EnumSpecies::Wolf,
+            SystemRole::Kogitsune => EnumSpecies::Kogitsune,
+            _ => EnumSpecies::Human,
+        }
+    }
+
     /// TS systemRoles.get(role).traits 相当: 役職に紐付く trait の集合
     pub const fn traits(self) -> &'static [RoleTrait] {
         match self {

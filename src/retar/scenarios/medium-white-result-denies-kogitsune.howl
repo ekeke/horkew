@@ -144,8 +144,8 @@ rules:
 狐勝 @19:11
 
 # @assume 神代美耶子: medium
-# @expect-skip 高遠玲子: [!kogitsune]
-# @expect-skip 一樹守: [!kogitsune]
-# @expect-skip 牧野慶: [!kogitsune]
-# @expect-skip 竹内多聞: [!kogitsune]
+# @expect 高遠玲子: [!kogitsune]
+# @expect 一樹守: [!kogitsune]
+# @expect 牧野慶: [!kogitsune]
+# @expect 竹内多聞: [!kogitsune]
 # @end-assume

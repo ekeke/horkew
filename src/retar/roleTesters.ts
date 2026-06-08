@@ -340,7 +340,9 @@ function verifyMediumshipAbility(env: RoleTesterEnv, context: AnalyzeContext, se
         }
       }
       else {
-        if ( ! context.possibilities.markAsHuman(targetSeat) ) {
+        // 霊媒結果 ○ は mediumResult: 'human' 集合 (werewolf と kogitsune 以外) に絞る.
+        // 占い ○ の markAsHuman (seerResult: 'human') と違って kogitsune は除外される.
+        if ( ! context.possibilities.markAsMediumHuman(targetSeat) ) {
           return false
         }
       }

@@ -9,6 +9,7 @@ pub const MAX_SEATS: usize = 32;
 // systemRoles に新役職が増えると SystemRole::ALL 経由で自動追従する.
 pub const ALL_ROLES: u16 = (1u16 << ROLE_COUNT) - 1;
 pub const HUMAN: u16 = compute_human();
+pub const MEDIUM_HUMAN: u16 = compute_medium_human();
 pub const VILLAGE_ROLES: u16 = compute_village_roles();
 pub const LIAR: u16 = compute_liar();
 
@@ -18,6 +19,20 @@ const fn compute_human() -> u16 {
     while i < SystemRole::ALL.len() {
         let role = SystemRole::ALL[i];
         if matches!(role.seer_result(), EnumSpecies::Human) {
+            bits |= role.bit_const();
+        }
+        i += 1;
+    }
+    bits
+}
+
+// mediumResult === 'human' な役職. werewolf と kogitsune (= mediumResult: 'kogitsune') を除く.
+const fn compute_medium_human() -> u16 {
+    let mut bits = 0u16;
+    let mut i = 0;
+    while i < SystemRole::ALL.len() {
+        let role = SystemRole::ALL[i];
+        if matches!(role.medium_result(), EnumSpecies::Human) {
             bits |= role.bit_const();
         }
         i += 1;
@@ -366,6 +381,13 @@ impl Possibilities {
     pub fn mark_as_not_liar(&mut self, seat: Seat) -> bool {
         let seat_idx = seat as usize;
         self.possibilities[seat_idx] &= !LIAR;
+        self.possibilities[seat_idx] != 0
+    }
+
+    // 霊媒 ○ 結果用. mediumResult: human な役職 (= werewolf と kogitsune を除く) に絞る.
+    pub fn mark_as_medium_human(&mut self, seat: Seat) -> bool {
+        let seat_idx = seat as usize;
+        self.possibilities[seat_idx] &= MEDIUM_HUMAN;
         self.possibilities[seat_idx] != 0
     }
 

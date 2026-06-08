@@ -37,10 +37,13 @@ type Checkpoint = {
   skip: boolean
   solve?: boolean
   roles: Map<string, RoleExpectation>
+  assumptions: Map<string, string>
 }
 
 const expectPattern = /^#\s*@expect(?:-skip)?\s+(.+)$/
 const expectSkipPattern = /^#\s*@expect-skip\s/
+const assumePattern = /^#\s*@assume\s+(.+)$/
+const endAssumePattern = /^#\s*@end-assume\s*$/
 
 function extractCheckpoints(rawText: string) {
   const fmMatch = rawText.match(/^(---\n[\s\S]*?\n---\n)/)
@@ -53,16 +56,34 @@ function extractCheckpoints(rawText: string) {
 
   for (let i = 0; i < bodyLines.length; i++) {
     const line = bodyLines[i].trim()
-    const m = expectPattern.exec(line)
+    const expectMatch = expectPattern.exec(line)
+    const assumeMatch = assumePattern.exec(line)
+    const isEndAssume = endAssumePattern.test(line)
 
-    if (m) {
+    if (expectMatch || assumeMatch || isEndAssume) {
+      if (isEndAssume) {
+        if (current !== null) {
+          checkpoints.push(current)
+          current = null
+        }
+        continue
+      }
       if (current === null) {
-        current = { lineNumber: i, skip: false, roles: new Map() }
+        current = { lineNumber: i, skip: false, roles: new Map(), assumptions: new Map() }
       }
-      if (expectSkipPattern.test(line)) {
-        current.skip = true
+      if (expectMatch) {
+        if (expectSkipPattern.test(line)) {
+          current.skip = true
+        }
+        parseDirective(current, expectMatch[1])
       }
-      parseDirective(current, m[1])
+      if (assumeMatch) {
+        const content = assumeMatch[1]
+        const colonIdx = content.indexOf(':')
+        if (colonIdx >= 0) {
+          current.assumptions.set(content.slice(0, colonIdx).trim(), content.slice(colonIdx + 1).trim())
+        }
+      }
     } else {
       if (current !== null) {
         checkpoints.push(current)
@@ -208,6 +229,19 @@ function runCheckpoint(
       ...options,
       assumptions: new Map([...options.assumptions, ...spoilerAssumptions]),
     }
+  }
+
+  // @assume <Player>: <role> 構文を options.assumptions に merge (TS integration と同じ).
+  if (checkpoint.assumptions.size > 0) {
+    const merged = new Map(options.assumptions)
+    for (const [playerName, role] of checkpoint.assumptions) {
+      const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
+      if (seat == null) {
+        throw new Error(`@assume: player "${playerName}" not found in game`)
+      }
+      merged.set(seat, role as SystemRole)
+    }
+    options = { ...options, assumptions: merged }
   }
 
   const { result: wasmResult, error } = analyzeViaWasm(vs, setup, options)

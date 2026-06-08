@@ -462,7 +462,9 @@ fn verify_mediumship_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, sele
                     return false;
                 }
             } else {
-                if !ctx.possibilities.mark_as_human(assertion.target) {
+                // 霊媒結果 ○ は mediumResult: 'human' 集合 (werewolf と kogitsune 以外) に絞る.
+                // 占い ○ の mark_as_human (seerResult: 'human') と違って kogitsune は除外される.
+                if !ctx.possibilities.mark_as_medium_human(assertion.target) {
                     return false;
                 }
             }
