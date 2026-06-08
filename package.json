@@ -28,6 +28,8 @@
     "bench:retar:wasm": "node --experimental-strip-types src/retar/bench-wasm.ts",
     "puzzle": "node --experimental-strip-types src/hati/puzzle-cli.ts",
     "lupa": "node --experimental-strip-types src/lupa/cli.ts",
+    "verify:retar": "node --experimental-strip-types src/verify/retar-verify.ts",
+    "verify:hati": "node --experimental-strip-types src/hati/verify.ts",
     "eval-summary": "node --experimental-strip-types src/howl/scripts/eval-summary.ts",
     "dev": "vite",
     "gen-role-docs": "node --experimental-strip-types scripts/gen-role-docs.ts demo/public/roles.html",
