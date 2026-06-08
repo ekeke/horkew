@@ -119,8 +119,11 @@ export function updateDeathCountConstraints(
       // peace night (actual < expected) を成立させる説明:
       //   (A) 夜 day に alive な妖狐がいる (狼襲撃先 = 妖狐 → 襲撃免疫で死体なし)
       //   (B) 夜 day に alive な狩人がいる (護衛成功)
-      // どちらの可能性も無ければ世界棄却. 片方しか可能性が無い場合は, もう片方の根拠を生むため
-      // 夜 day に alive でない seat から該当 role を deny する.
+      // どちらの可能性も無ければ世界棄却. 片方しか可能性が無い場合, かつ setup の該当 role が
+      // 1 体しかいない場合に限り, 「その 1 体は alive 側にいる」 と確定するので, 夜 day に
+      // alive でない seat から該当 role を deny する. setup に 2 体以上いる場合は片方が
+      // 死んでいても他方が alive なら peace を説明できるため deny できない (例: 狐 2 体構成で
+      // 片方が呪殺後、 もう片方が襲撃先になる).
       let aliveFoxExists = false
       let aliveGuardExists = false
       for ( const [seat, status] of vs.statuses.entries() ) {
@@ -129,15 +132,15 @@ export function updateDeathCountConstraints(
         if ( context.possibilities.hasRole(seat, guardRole) ) aliveGuardExists = true
       }
       if ( !aliveFoxExists && !aliveGuardExists ) return false
-      if ( !aliveFoxExists ) {
-        // 説明は (B) のみ → 夜 day に alive でない seat の guardRole を deny
+      if ( !aliveFoxExists && (setup.get(guardRole) ?? 0) === 1 ) {
+        // 説明は (B) のみ + 狩人は 1 体 → 夜 day に alive でない seat の guardRole を deny
         for ( const [seat, status] of vs.statuses.entries() ) {
           if ( isAliveAtNight(status, day) ) continue
           if ( !context.possibilities.denyRole(seat, guardRole) ) return false
         }
       }
-      if ( !aliveGuardExists ) {
-        // 説明は (A) のみ → 夜 day に alive でない seat の foxRole を deny
+      if ( !aliveGuardExists && (setup.get(foxRole) ?? 0) === 1 ) {
+        // 説明は (A) のみ + 狐は 1 体 → 夜 day に alive でない seat の foxRole を deny
         for ( const [seat, status] of vs.statuses.entries() ) {
           if ( isAliveAtNight(status, day) ) continue
           if ( !context.possibilities.denyRole(seat, foxRole) ) return false
