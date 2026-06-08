@@ -5,7 +5,7 @@
  * 局面（昼の投票直前）を puzzle として抽出する。
  */
 
-import type { SystemRole } from '../types/index.ts'
+import { systemRoles, type SystemRole } from '../types/index.ts'
 import type { AnalyzeOptions } from '../retar/index.ts'
 import { defaultAnalyzeRegulation } from '../retar/defaults.ts'
 import type { GameConfig, GameHandlers } from '../lupa/handlers.ts'
@@ -23,9 +23,11 @@ import {
 } from '../retar/role-sets.ts'
 
 // 役職追加で systemRoles に entry を加えれば自動追従.
-const ALL_ROLES: SystemRole[] = allKnownRoles()
-const VILLAGE_ROLES: SystemRole[] = allVillageRoles()
-const OUTSIDER_ROLES: SystemRole[] = allLiarRoles()
+// lupa engine 非対応役職 (lupaSupported=false) は ランダム配役の対象から除外する.
+const lupaSupported = (r: SystemRole) => systemRoles.get(r)!.lupaSupported !== false
+const ALL_ROLES: SystemRole[] = allKnownRoles().filter(lupaSupported)
+const VILLAGE_ROLES: SystemRole[] = allVillageRoles().filter(lupaSupported)
+const OUTSIDER_ROLES: SystemRole[] = allLiarRoles().filter(lupaSupported)
 
 const wolfRole = singleRoleBySeerResult('wolf')
 const nekomataRole = singleRoleByTrait('reactive', 'curse-on-executed')

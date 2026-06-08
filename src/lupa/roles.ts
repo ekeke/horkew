@@ -10,6 +10,9 @@ export function assignRoles(
 ): PlayerState[] {
   const roles: SystemRole[] = []
   for (const [role, count] of roleConfig) {
+    if (count > 0 && systemRoles.get(role)?.lupaSupported === false) {
+      throw new Error(`役職 "${role}" は lupa engine 非対応です`)
+    }
     for (let i = 0; i < count; i++) roles.push(role)
   }
 

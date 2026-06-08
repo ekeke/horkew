@@ -21,10 +21,11 @@ pub enum SystemRole {
     Immoralist,
     Paparazzi,
     Kogitsune,
+    Contractor,
 }
 
 impl SystemRole {
-    pub const ALL: [SystemRole; 13] = [
+    pub const ALL: [SystemRole; 14] = [
         SystemRole::Villager,
         SystemRole::Seer,
         SystemRole::Medium,
@@ -38,6 +39,7 @@ impl SystemRole {
         SystemRole::Immoralist,
         SystemRole::Paparazzi,
         SystemRole::Kogitsune,
+        SystemRole::Contractor,
     ];
 
     pub fn bit(self) -> u16 {
@@ -59,6 +61,7 @@ impl SystemRole {
             SystemRole::Immoralist => 10,
             SystemRole::Paparazzi => 11,
             SystemRole::Kogitsune => 12,
+            SystemRole::Contractor => 13,
         }
     }
 
@@ -77,6 +80,7 @@ impl SystemRole {
             10 => Some(SystemRole::Immoralist),
             11 => Some(SystemRole::Paparazzi),
             12 => Some(SystemRole::Kogitsune),
+            13 => Some(SystemRole::Contractor),
             _ => None,
         }
     }
@@ -89,7 +93,8 @@ impl SystemRole {
             | SystemRole::Medium
             | SystemRole::Bodyguard
             | SystemRole::Mason
-            | SystemRole::Nekomata => Faction::Village,
+            | SystemRole::Nekomata
+            | SystemRole::Contractor => Faction::Village,
             SystemRole::Werewolf
             | SystemRole::Possessed
             | SystemRole::Fanatic
@@ -149,6 +154,17 @@ impl SystemRole {
                 RoleTrait::PassiveFoxWinCounter,
                 RoleTrait::ActionDivineImperfect,
             ],
+            SystemRole::Contractor => &[RoleTrait::PassivePairRequired],
+        }
+    }
+
+    /// TS systemRoles.get(role).lupaSupported 相当.
+    /// false の場合、 lupa engine 側で setup を拒否する。
+    /// 未指定 (TS の undefined) は true 扱い。
+    pub const fn lupa_supported(self) -> bool {
+        match self {
+            SystemRole::Contractor => false,
+            _ => true,
         }
     }
 }
@@ -169,6 +185,7 @@ impl fmt::Display for SystemRole {
             SystemRole::Immoralist => write!(f, "immoralist"),
             SystemRole::Paparazzi => write!(f, "paparazzi"),
             SystemRole::Kogitsune => write!(f, "kogitsune"),
+            SystemRole::Contractor => write!(f, "contractor"),
         }
     }
 }
@@ -187,6 +204,7 @@ pub enum RoleTrait {
     PassiveDieWhenDivined,
     PassiveVisibleAsFox,
     PassiveFoxWinCounter,
+    PassivePairRequired,
     KnowledgeKnowWerewolves,
     KnowledgeKnowFoxes,
     KnowledgeKnowMasons,
@@ -501,6 +519,7 @@ mod tests {
         assert_eq!(SystemRole::Immoralist.bit(), 0b0010000000000);
         assert_eq!(SystemRole::Paparazzi.bit(), 0b0100000000000);
         assert_eq!(SystemRole::Kogitsune.bit(), 0b1000000000000);
+        assert_eq!(SystemRole::Contractor.bit(), 0b10000000000000);
     }
 
     #[test]
@@ -526,6 +545,6 @@ mod tests {
         for role in SystemRole::ALL {
             assert_eq!(SystemRole::from_bit_index(role.bit_index()), Some(role));
         }
-        assert_eq!(SystemRole::from_bit_index(13), None);
+        assert_eq!(SystemRole::from_bit_index(14), None);
     }
 }

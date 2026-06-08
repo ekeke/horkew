@@ -1,7 +1,7 @@
 export type Seat = number
 export type Day = number
 
-export type SystemRole = 'werewolf' | 'possessed' | 'fanatic' | 'werehamster' | 'immoralist' | 'villager' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata' | 'paparazzi' | 'kogitsune'
+export type SystemRole = 'werewolf' | 'possessed' | 'fanatic' | 'werehamster' | 'immoralist' | 'villager' | 'seer' | 'medium' | 'bodyguard' | 'mason' | 'nekomata' | 'paparazzi' | 'kogitsune' | 'contractor'
 
 export type EnumSpecies = 'human' | 'wolf' | 'kogitsune' | null
 
@@ -55,6 +55,14 @@ export type ExecutionSpeciesTrait = { kind: 'auto-info', sub: 'execution-species
 /** 狼チャット: 夜に人狼同士で会話できる (人狼) */
 export type WolfChatTrait = { kind: 'channel', sub: 'wolf-chat' }
 
+/**
+ * ペア参加: 必ず 2 人組で参加する必要がある (契約者).
+ * 現状は systemRoles 派生 helper で「素朴な村人 (villager) と区別する」 ためのマーカー。
+ * 将来「ペア生存判定」「初日犠牲者強制」等のフル engine 統合時にこの trait を dispatch 点とする。
+ * lupa engine は契約者を非対応 (lupaSupported=false) として弾くため、 現状 dispatch されない。
+ */
+export type PairRequiredTrait = { kind: 'passive', sub: 'pair-required' }
+
 export type RoleTrait =
   | AttackImmuneTrait
   | DieWhenDivinedTrait
@@ -72,6 +80,7 @@ export type RoleTrait =
   | FollowFoxDeathTrait
   | ExecutionSpeciesTrait
   | WolfChatTrait
+  | PairRequiredTrait
 
 export type CauseOfDeath =
   | 'execution'
@@ -111,6 +120,14 @@ export type Role = {
    * 系 helper が name.length DESC ソートで解決する (長い名前を先に試す)。
    */
   howlPattern: string
+  /**
+   * lupa engine がこの役職をシミュレーション対象とするか。
+   * false の場合、 lupa の assignRoles() が setup を拒否する。
+   * 未指定 (undefined) は true 扱い。
+   * howl parser / retar / hati は systemRoles 派生で動くため、
+   * このフラグに関わらず利用可能。
+   */
+  lupaSupported?: boolean
 }
 
 export type SeatStatus = {
@@ -287,6 +304,15 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
       { kind: "action", sub: "divine-imperfect" },
     ],
     howlPattern: "(?:子狐|kogitsune)",
+  }],
+  ["contractor", {
+    name: "契約者", shortName: "契", systemName: "contractor",
+    alignment: "villager", faction: "village", category: "other",
+    description: "必ず二人組で参加する特殊な村人。\n参加者全員が、誰と誰が契約者かを知っている。\n契約者の一人は必ず初日犠牲者となり、残った一人が「神代の血」「宇理炎」「焔薙」の能力を得る。\n(現バージョンでは能力は未実装 — howl / retar まで対応、 lupa engine 非対応)",
+    humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
+    traits: [{ kind: "passive", sub: "pair-required" }],
+    howlPattern: "(?:契約者?|contractor)",
+    lupaSupported: false,
   }],
 ])
 
