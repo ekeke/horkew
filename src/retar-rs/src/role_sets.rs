@@ -98,6 +98,17 @@ pub fn roles_by_seer_result_in(
         .collect()
 }
 
+/// trait を持つ役職を systemRoles から全て返す (setup 非依存).
+/// roles_with_trait_in の setup フィルタ無し版. fixed_positions の確定先など、
+/// setup に存在しなくても systemRoles レベルで意味のある役職を取り出す場面で使う.
+pub fn roles_by_trait(t: RoleTrait) -> Vec<SystemRole> {
+    SystemRole::ALL
+        .iter()
+        .copied()
+        .filter(|&r| has_trait(r, t))
+        .collect()
+}
+
 /// trait を持つ役職を systemRoles から 1 つだけ返す (setup 非依存). 0 件 or 複数件で panic.
 pub fn single_role_by_trait(t: RoleTrait) -> SystemRole {
     let matched: Vec<SystemRole> = SystemRole::ALL

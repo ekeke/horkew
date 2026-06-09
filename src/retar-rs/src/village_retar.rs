@@ -9,8 +9,8 @@ use crate::role_testers::{
     save_into, restore_context, test_role,
 };
 use crate::role_sets::{
-    has_trait, powered_village_roles_in, single_role_by_predicate, single_role_by_seer_result,
-    single_role_by_trait,
+    has_trait, powered_village_roles_in, roles_by_trait, single_role_by_predicate,
+    single_role_by_seer_result, single_role_by_trait,
 };
 use crate::plan_builder::{build_role_test_plan, RoleTest, RoleTestRole};
 use crate::finalizer::{
@@ -25,8 +25,11 @@ static FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(Ro
 static VILLAGER_ROLE: LazyLock<SystemRole> = LazyLock::new(|| {
     single_role_by_predicate(|r| r.faction() == Faction::Village && r.traits().is_empty())
 });
-static NEKOMATA_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::ReactiveCurseOnExecuted));
-static IMMORALIST_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::ReactiveFollowFoxDeath));
+// fixed_positions の確定先として使う集合. systemRoles 全体から取るので setup 非依存.
+// 将来 同 trait を持つ役職が複数になったら、 fixed_positions に「集合のどれか」 を表現する
+// 仕組みが必要 (現状は 1 役職前提で [0] を使う).
+static NEKOMATA_ROLES: LazyLock<Vec<SystemRole>> = LazyLock::new(|| roles_by_trait(RoleTrait::ReactiveCurseOnExecuted));
+static IMMORALIST_ROLES: LazyLock<Vec<SystemRole>> = LazyLock::new(|| roles_by_trait(RoleTrait::ReactiveFollowFoxDeath));
 
 pub struct AnalyzeResult {
     pub elapsed_ms: f64,
@@ -607,15 +610,15 @@ fn apply_fixed_positions(
                         if neko_status.cause_of_death == CauseOfDeath::Execution
                             && status.died_day == neko_status.died_day
                         {
-                            fixed_positions.insert(neko_seat, *NEKOMATA_ROLE);
+                            fixed_positions.insert(neko_seat, NEKOMATA_ROLES[0]);
                         }
                     }
                 }
                 CauseOfDeath::FollowExecutedHamster => {
-                    fixed_positions.insert(seat, *IMMORALIST_ROLE);
+                    fixed_positions.insert(seat, IMMORALIST_ROLES[0]);
                 }
                 CauseOfDeath::FollowKilledHamster => {
-                    fixed_positions.insert(seat, *IMMORALIST_ROLE);
+                    fixed_positions.insert(seat, IMMORALIST_ROLES[0]);
                 }
                 _ => {}
             }

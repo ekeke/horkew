@@ -4,7 +4,7 @@ import { generateCombinations } from './combinatorics.ts'
 import { testRole as runRoleTest, saveContext, restoreContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
 import { buildRoleTestPlan } from './planBuilder.ts'
-import { humanRolesIn, liarRolesIn, poweredVillageRolesIn, hasTrait, singleRoleByTrait, singleRoleBySeerResult, singleRoleByPredicate } from './role-sets.ts'
+import { humanRolesIn, liarRolesIn, poweredVillageRolesIn, hasTrait, singleRoleByTrait, singleRoleBySeerResult, singleRoleByPredicate, rolesByTrait } from './role-sets.ts'
 import { systemRoles } from '../types/index.ts'
 
 // 単一役職 const (役職追加時に他役職が新規に該当しなければ自動追従).
@@ -14,8 +14,11 @@ const villagerRole = singleRoleByPredicate(r => {
   const x = systemRoles.get(r)!
   return x.faction === 'village' && x.traits.length === 0
 })
-const nekomataRole = singleRoleByTrait('reactive', 'curse-on-executed')
-const immoralistRole = singleRoleByTrait('reactive', 'follow-fox-death')
+// fixedPositions の確定先として使う集合. systemRoles 全体から取るので setup 非依存.
+// 将来 同 trait を持つ役職が複数になったら、 fixedPositions に「集合のどれか」 を表現する
+// 仕組みが必要 (現状は 1 役職前提で [0] を使う).
+const nekomataRoles = rolesByTrait('reactive', 'curse-on-executed')
+const immoralistRoles = rolesByTrait('reactive', 'follow-fox-death')
 import type { RoleTest } from './planBuilder.ts'
 import { finalize as runFinalize, updateDeathCountConstraints, createDebugStash } from './finalizer.ts'
 import type { DebugStash } from './finalizer.ts'
@@ -347,15 +350,15 @@ export class VillageRetar {
           for ( const [nekoSeat, nekoStatus] of village.statuses.entries() ) {
             if ( nekoStatus.surviving ) continue
             if ( nekoStatus.causeOfDeath === 'execution' && status.diedDay === nekoStatus.diedDay ) {
-              fixedPositions.set(nekoSeat, nekomataRole)
+              fixedPositions.set(nekoSeat, nekomataRoles[0])
             }
           }
         }
         else if ( status.causeOfDeath === 'follow_executed_hamster') {
-          fixedPositions.set(seat, immoralistRole)
+          fixedPositions.set(seat, immoralistRoles[0])
         }
         else if ( status.causeOfDeath === 'follow_killed_hamster' ) {
-          fixedPositions.set(seat, immoralistRole)
+          fixedPositions.set(seat, immoralistRoles[0])
         }
       }
     }
