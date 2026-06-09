@@ -195,17 +195,31 @@ describe('buildExecutionRows / buildNightKillRows', () => {
     assert.strictEqual(killRows[0].entries.length, 0)
   })
 
-  test('kill-only day yields empty exec row (= "処刑なし")', () => {
-    // Day 2 で噛みだけあって処刑なし。 executions が空配列の行が出る (表示側で「処刑なし」になる)
+  test('末尾の kill-only 日は exec 行から trim される (= 処刑未実行の進行中状態を非表示)', () => {
+    // Day 2 で噛みだけあって処刑なし (= 最新日に襲撃発見はあるが処刑はまだ)。
+    // 末尾の空 exec 行は「処刑なし」ではなく「未実行」を意味するため trim する。
     const rows: DayDeaths[] = [
       { day: 1, executions: [entry(1, 'アリス')], nightKills: [] },
       { day: 2, executions: [], nightKills: [entry(2, 'ボブ', 'night_kill')] },
     ]
     const execRows = buildExecutionRows(rows)
-    assert.strictEqual(execRows.length, 2)
+    assert.strictEqual(execRows.length, 1, '末尾の空 exec 行が trim されて 1 行のみ残る')
+    assert.strictEqual(execRows[0].day, 1)
     assert.strictEqual(execRows[0].entries.length, 1)
+  })
+
+  test('中間日の空 exec 行は trim されず保持される', () => {
+    // 理論上の中間空 (日 2 が exec 無し、 日 3 で exec 復活) は履歴情報として残す。
+    // trim は末尾連続空のみが対象。
+    const rows: DayDeaths[] = [
+      { day: 1, executions: [entry(1, 'アリス')], nightKills: [] },
+      { day: 2, executions: [], nightKills: [entry(2, 'ボブ', 'night_kill')] },
+      { day: 3, executions: [entry(3, 'チャーリー')], nightKills: [] },
+    ]
+    const execRows = buildExecutionRows(rows)
+    assert.strictEqual(execRows.length, 3)
     assert.strictEqual(execRows[1].day, 2)
-    assert.strictEqual(execRows[1].entries.length, 0)
+    assert.strictEqual(execRows[1].entries.length, 0, '中間の空エントリは保持')
   })
 
   test('multi-day rows preserve chronological order', () => {

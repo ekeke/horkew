@@ -164,9 +164,18 @@ export function extractDeathHistory(vs: VillageStatus, players: Map<number, stri
  * 死亡履歴を「処刑列」の表示用行に変換する。
  * 何かしらのイベントがあった日（処刑 or 噛み）を 1 行ずつ生成し、
  * その日に処刑が無かった場合は entries が空配列の行を返す（表示側で `(処刑なし)` 扱い）。
+ *
+ * ただし末尾の空行は trim する。 これは「最新日に襲撃が発見されたが処刑はまだ
+ * 実行されていない」という進行中状態が `(処刑なし)` として誤って残るのを防ぐため。
+ * 真に処刑が無かった過去日 (中間に挟まる空) は通常発生しないが、 もし発生した場合は
+ * 履歴として残す価値があるので trim 対象外。
  */
 export function buildExecutionRows(history: DayDeaths[]): DayDeathRow[] {
-  return history.map(d => ({ day: d.day, entries: d.executions }))
+  const rows = history.map(d => ({ day: d.day, entries: d.executions }))
+  while (rows.length > 0 && rows[rows.length - 1].entries.length === 0) {
+    rows.pop()
+  }
+  return rows
 }
 
 /**

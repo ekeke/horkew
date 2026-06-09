@@ -118,8 +118,10 @@
     text-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 70%, transparent);
   }
 
+  /* CO 短縮名サフィックスは「直前のプレイヤー名と同じ色」になるよう、
+     明示的な色指定を持たず親 .pn の color を継承する。
+     これにより dead / outline / status-* など全状態で名前と一体感が出る。 */
   .claim {
-    color: var(--color-co);
     font-size: 0.85em;
     margin-left: 1px;
   }
@@ -133,15 +135,11 @@
   /* 中抜き表示 (判定結果が ● のときなど)。 背景塗りは親要素 (.va-result.wolf
      等) 側で行う前提。 ここでは文字を --color-bg (= 背景色) でくり抜くだけ。
      specificity (.pn.outline = 0,2,0) が .dead (0,1,0) より高いので、
-     outline モードでは dead の color オーバーライドより優先される。 */
+     outline モードでは dead の color オーバーライドより優先される。
+     .claim も color 指定を持たないので、 そのまま --color-bg を継承して
+     名前と一緒にくり抜かれる。 */
   .pn.outline {
     color: var(--color-bg);
-  }
-
-  /* CO 役職 (.claim) はインバート対象外。 親の background はそのまま
-     見せた上で、 .claim 元来の var(--color-co) を再宣言して文字色を戻す。 */
-  .pn.outline .claim {
-    color: var(--color-co);
   }
 
   .night-kill {

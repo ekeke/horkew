@@ -263,6 +263,10 @@
   let hasAssumptionState = $derived(
     ctx.assumptions.size > 0 || ctx.denyWolfGroups.length > 0 || ctx.hocusPocusSeats.size > 0
   )
+
+  let currentDay = $derived(ctx.villageStatus?.day ?? 0)
+  let totalPlayers = $derived(ctx.players.size)
+  let alivePlayers = $derived(ctx.players.size - ctx.deadSeats.size)
 </script>
 
 {#if ctx.analysisError}
@@ -270,6 +274,12 @@
 {/if}
 {#if ctx.analysisColumns.length > 0 && ctx.players.size > 0}
   <div class="vertical-analysis-pane lyk-pane">
+    {#if ctx.villageStatus}
+      <div class="va-meta">
+        <span class="va-meta-day">{currentDay}日目</span>
+        <span class="va-meta-survivors">生存 {alivePlayers}/{totalPlayers}</span>
+      </div>
+    {/if}
     <div class="va-tables">
       {#each subTables as st}
         <div class="va-sub-table">
@@ -323,7 +333,7 @@
                       seat={seat}
                       status={seatStatus}
                     >{ctx.playerShortNames.get(seat) ?? ctx.players.get(seat) ?? `#${seat}`}</PlayerName>{#each possibilities as { role, dim }}{@const assumed = ctx.mergedAssumptions.get(seat) === role}{@const assumedBySpoiler = assumed && ctx.spoilerAssumptions.has(seat)}{@const confirmed = !assumed && seatConfirmedRole === role}{@const confirmedAlign = confirmed ? systemRoles.get(role)?.alignment : undefined}<span class="va-poss-cell" class:role-possible={!assumed && !confirmed && !dim} class:role-dim={!assumed && !confirmed && dim} class:role-assumed={assumed} class:role-assumed-spoiler={assumedBySpoiler} class:role-confirmed={confirmed} class:confirmed-village={confirmed && confirmedAlign === 'villager'} class:confirmed-wolf={confirmed && confirmedAlign === 'werewolf'} class:confirmed-fox={confirmed && confirmedAlign === 'werehamster'} onclick={() => ctx.toggleAssumption(seat, role)} role="button" tabindex="0">{roleToShort(role)}</span>{/each}{#if shouldShowHocuspocus(seat)}<span class="va-hocuspocus-cell" class:hocuspocus-on={ctx.hocusPocusSeats.has(seat)} title="HocusPocus: この席のCOを無視して解析" onclick={() => ctx.toggleHocusPocus(seat)} role="button" tabindex="0">?</span>{/if}
-                  </span>{#if results.length > 0}<span class="va-poss-results">{#each results as { day, assertion, isBodyguard }, ri}{#if assertion}{#if ri > 0}<span class="va-arrow">→</span>{/if}<span class="va-result" class:dead={ctx.deadSeats.has(assertion.targetSeat)} class:human={assertion.species === 'human' && !assertion.forecast} class:wolf={assertion.species === 'wolf' && !assertion.forecast} class:guard={isBodyguard} class:forecast={assertion.forecast}><PlayerName dead={ctx.deadSeats.has(assertion.targetSeat)} nightKill={ctx.nightKilledSeats.has(assertion.targetSeat)} executed={ctx.executedSeats.has(assertion.targetSeat)} claim={ctx.claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat} outline={assertion.species === 'wolf' && !assertion.forecast}>{ctx.playerShortNames.get(assertion.targetSeat) ?? assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="va-forecast-label">(予)</span>{:else if !isBodyguard}<SpeciesIcon species={assertion.species} />{/if}</span>{/if}{/each}</span>{/if}
+                  </span>{#if results.length > 0}<span class="va-poss-results">{#each results as { day, assertion, isBodyguard }, ri}{#if assertion}{#if ri > 0}<span class="va-arrow">→</span>{/if}<span class="va-result" class:dead={ctx.deadSeats.has(assertion.targetSeat)} class:human={assertion.species === 'human' && !assertion.forecast} class:wolf={assertion.species === 'wolf' && !assertion.forecast} class:guard={isBodyguard} class:forecast={assertion.forecast}><PlayerName dead={ctx.deadSeats.has(assertion.targetSeat)} nightKill={ctx.nightKilledSeats.has(assertion.targetSeat)} executed={ctx.executedSeats.has(assertion.targetSeat)} claim={ctx.claimShortNames.get(assertion.targetSeat)} seat={assertion.targetSeat} outline={assertion.species === 'wolf' && !assertion.forecast && !ctx.deadSeats.has(assertion.targetSeat)}>{ctx.playerShortNames.get(assertion.targetSeat) ?? assertion.targetName}</PlayerName>{#if assertion.forecast}<span class="va-forecast-label">(予)</span>{:else if !isBodyguard}<SpeciesIcon species={assertion.species} />{/if}</span>{/if}{/each}</span>{/if}
                 </span>
               {/each}
             </div>
@@ -410,6 +420,21 @@
     flex-direction: column;
     padding: 2px;
     box-sizing: border-box;
+  }
+
+  .va-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 1px 2px 3px;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+
+  .va-meta-day {
+    color: var(--color-text);
+    font-weight: 700;
   }
 
   .va-tables {
@@ -628,16 +653,26 @@
        SpeciesIcon は currentColor で追従)。
      判定結果が ● (人狼結果) のときは .va-result.wolf に背景塗りを当て、
      名前 + アイコン全体を反転表示でくり抜く。
+     - 生存 + ○ : 1px ボーダーで囲って「アクティブな白判定」を示す
      - 生存 + ● : 背景 = --color-text (フル反転)
-     - 退場 + ● : 背景 = --color-text-muted (subtext0、 一段ダウンで dim 感
-       を出しつつ、 Light / Dark 両モードで文字色 --color-bg との
-       コントラストを AA 以上で確保) */
+     - 退場 + ○ : ボーダーなし。 dead の退場色 (faint) のみ
+     - 退場 + ● : 背景なし。 dead の退場色 (faint) で名前 + ● をそのまま描画
+     反転と退場を二重に重ねると、 生存 ○ / 退場 ○ / 生存 ● / 退場 ● の
+     4 状態の区別が付きにくくなるため、 退場側は反転をやめて
+     「退場済み = 背景・ボーダーなし + 文字 faint」 で統一する。
+     ボーダーは全 va-result に transparent でデフォルト付与し、 生存白だけ
+     可視化することで box サイズを 4 状態間で揃えてレイアウトずれを防ぐ。 */
   .va-result {
     color: var(--color-text);
+    border: 1px solid transparent;
   }
 
   .va-result.dead {
     color: var(--color-text-faint);
+  }
+
+  .va-result.human:not(.dead) {
+    border-color: var(--color-text);
   }
 
   .va-result.wolf {
@@ -646,7 +681,8 @@
   }
 
   .va-result.dead.wolf {
-    background: var(--color-text-muted);
+    background: none;
+    color: var(--color-text-faint);
   }
 
   .va-result.guard {
