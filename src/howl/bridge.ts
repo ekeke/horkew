@@ -18,6 +18,7 @@ import type {
   AttackStatement,
   LynchStatement,
   SuddenDeathStatement,
+  CorpseFoundStatement,
   CurseStatement,
   FollowStatement,
   ForecastStatement,
@@ -385,6 +386,24 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           currentKills.push(targetSeat)
           kills.set(deathDay, currentKills)
         }
+        break
+      }
+
+      case 'corpseFound': {
+        // 契約者の宝刀「焔薙」による強制退場。 夜時間の出来事として kills に登録し、
+        // retar へは sudden_death と同じ「制約無し離脱」として渡す
+        // (護衛貫通・狐免疫貫通の能力なので、 単独夜死推論等から除外される必要がある)。
+        const s = stmt as CorpseFoundStatement
+        lastDeathEvent = 'night_kill'
+        const targetSeat = resolveSeat(s.target)
+        if (targetSeat === null) break
+        const status = statuses.get(targetSeat)!
+        status.surviving = false
+        status.causeOfDeath = 'sudden_death'
+        status.diedDay = day - 1
+        const currentKills = kills.get(day - 1) || []
+        currentKills.push(targetSeat)
+        kills.set(day - 1, currentKills)
         break
       }
 

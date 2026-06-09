@@ -453,6 +453,67 @@ describe('suddenDeath statement', () => {
   })
 })
 
+describe('corpseFound statement (焔薙退場)', () => {
+  test('forward order with で', () => {
+    assert.deepEqual(S.parseCorpseFoundStatement('Alice 死体で発見', 1), {
+      type: 'corpseFound', line: 1, target: 'Alice',
+    })
+  })
+
+  test('forward order without で (短縮形)', () => {
+    assert.deepEqual(S.parseCorpseFoundStatement('Alice 死体発見', 1), {
+      type: 'corpseFound', line: 1, target: 'Alice',
+    })
+  })
+
+  test('forward order without delimiter', () => {
+    assert.deepEqual(S.parseCorpseFoundStatement('太郎死体で発見', 1), {
+      type: 'corpseFound', line: 1, target: '太郎',
+    })
+  })
+
+  test('reverse order with で', () => {
+    assert.deepEqual(S.parseCorpseFoundStatement('死体で発見 Alice', 1), {
+      type: 'corpseFound', line: 1, target: 'Alice',
+    })
+  })
+
+  test('reverse order without で', () => {
+    assert.deepEqual(S.parseCorpseFoundStatement('死体発見 太郎', 1), {
+      type: 'corpseFound', line: 1, target: '太郎',
+    })
+  })
+
+  test('surrounding full-width whitespace', () => {
+    assert.deepEqual(S.parseCorpseFoundStatement('　　太郎 死体で発見　', 1), {
+      type: 'corpseFound', line: 1, target: '太郎',
+    })
+  })
+
+  test('missing player name returns null', () => {
+    assert.equal(S.parseCorpseFoundStatement('死体で発見', 1), null)
+  })
+
+  test('empty string returns null', () => {
+    assert.equal(S.parseCorpseFoundStatement('', 1), null)
+  })
+
+  test('plain 発見 alone is not accepted', () => {
+    assert.equal(S.parseCorpseFoundStatement('Alice 発見', 1), null)
+  })
+
+  test('parseStatement routes 死体で発見 to corpseFound, not attack', () => {
+    // attack vocab には「死亡」が含まれるが、「死体で発見」は別 token として識別される
+    const result = S.parseStatement('Alice 死体で発見', 1)
+    assert.equal(result.type, 'corpseFound')
+  })
+
+  test('parseStatement routes reverse 死体発見 to corpseFound', () => {
+    const result = S.parseStatement('死体発見 Alice', 1)
+    assert.equal(result.type, 'corpseFound')
+  })
+})
+
 describe('revote statement', () => {
   test('valid revote statement', () => {
     const result = S.parseRevoteStatement('再投票　　John, Bob, Charlie', 1)

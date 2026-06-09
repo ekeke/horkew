@@ -26,6 +26,10 @@ export const equal  = `(?:=|＝)`
 export const attack = `(?:襲撃|噛み?|死亡)`
 export const lynch  = `(?:吊り?|処刑)`
 export const suddenDeath = `(?:突然死|suddenDeath)`
+// 契約者 (contractor) の宝刀「焔薙」による強制退場。 公開された退場として
+// 生存者は焔薙退場だと知る。 retar には sudden_death と同じ「制約無し離脱」
+// として渡す (bridge.ts で causeOfDeath = 'sudden_death' にマップ)。
+export const corpseFound = `(?:死体で?発見)`
 export const revote = `(?:再投票|\-\-+|==+|ーー+|＝＝+)`
 export const guard  = `(?:護衛?|ガード)`
 export const peace  = `(?:平和)`

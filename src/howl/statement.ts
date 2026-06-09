@@ -1,7 +1,7 @@
 import * as V from './vocabulary.ts'
 import { systemRoles, type SystemRole } from '../types/index.ts'
 
-export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'dayMark' | 'reveal' | 'spoiler' | 'speech' | 'videoSource' | 'timestamp' | 'unknown'
+export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'corpseFound' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'dayMark' | 'reveal' | 'spoiler' | 'speech' | 'videoSource' | 'timestamp' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf' | 'isKogitsune'
@@ -64,6 +64,14 @@ export type SuddenDeathStatement = Statement & {
     type: 'suddenDeath'
     target: string
     reason: string
+}
+
+// 契約者の宝刀「焔薙」による強制退場。 howl 上は `Alice 死体で発見` / `Alice 死体発見`
+// / `死体で発見 Alice` / `死体発見 Alice` の 4 通り。 retar からは sudden_death と同じ
+// 「制約無し離脱」として扱う (bridge が causeOfDeath を sudden_death にマップ)。
+export type CorpseFoundStatement = Statement & {
+    type: 'corpseFound'
+    target: string
 }
 
 export type RevoteStatement = Statement & {
@@ -397,6 +405,16 @@ export function parseLynchStatement(text: string, line: number): LynchStatement 
   return { type: 'lynch', line, target: reverseMatch[1].trim() }
 }
 
+export function parseCorpseFoundStatement(text: string, line: number): CorpseFoundStatement | null {
+  const forwardRegex = new RegExp(`^${V.optionalSpace}${V.corpseFound}(?:${V.delimiter})?${V.optionalSpace}(${V.possibleName})${V.optionalSpace}$`)
+  const fm = forwardRegex.exec(text)
+  if (fm) return { type: 'corpseFound', line, target: fm[1].trim() }
+  const reverseRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})(?:${V.delimiter})?${V.optionalSpace}${V.corpseFound}${V.optionalSpace}$`)
+  const rm = reverseRegex.exec(text)
+  if (!rm) return null
+  return { type: 'corpseFound', line, target: rm[1].trim() }
+}
+
 export function parseSuddenDeathStatement(text: string, line: number): SuddenDeathStatement | null {
   const suddenDeathRegex = new RegExp(`^${V.optionalSpace}(${V.possibleName})${V.optionalSpace}${V.suddenDeath}(?:[（(]([^）)\\n]*)[）)])?${V.optionalSpace}$`)
   const match = suddenDeathRegex.exec(text)
@@ -696,6 +714,7 @@ export function parseStatement (text: string, line: number): Statement {
     parseVoteStatement,
     parseMultiVoteStatement,
     parseSuddenDeathStatement,
+    parseCorpseFoundStatement,
     parseAttackStatement,
     parseGrelanStatement,
     parseLynchStatement,

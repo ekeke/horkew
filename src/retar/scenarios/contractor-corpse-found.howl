@@ -1,0 +1,49 @@
+---
+title: contractor-corpse-found
+tags: [contractor]
+setup:
+  villager: 1
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  contractor: 2
+  werewolf: 2
+  fanatic: 1
+  werehamster: 1
+  immoralist: 1
+---
+
+# 契約者 (contractor) + 宝刀「焔薙」による強制退場 (corpse_found) の howl/retar 統合シナリオ。
+#
+# 仕様 (能力は lupa engine 非対応、 howl / retar 上での観測のみテスト):
+# - 契約者は必ず 2 人組で参加し、 参加者全員が誰と誰かを知っている (= 公開情報)
+# - 一人は必ず初日犠牲 (今シナリオでは Bob が night_kill)
+# - 残った Alice は宝刀「焔薙」で誰か一人を強制退場できる (= 「死体で発見」)
+#   護衛・狐免疫を貫通するが、 retar 観点では sudden_death と同じく
+#   「制約無しの離脱」として扱う (bridge.ts で causeOfDeath='sudden_death' にマップ)
+
+++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy、Jack、Kate
+
+# 契約者ペアは公開情報。 「契」短縮形が spoiler で解決できることも兼ねて確認。
+!Alice=契
+!Bob=契約者
+
+# Day 1 夜: 契約者 Bob が初日犠牲
+Bob 死亡
+
+# Checkpoint 1: 契約者ペアが確定し、 他席からは contractor 候補が除外されている
+# @expect Alice: [contractor]
+# @expect Bob: [contractor]
+# @expect Carol: [!contractor, ...]
+# @expect Dave: [!contractor, ...]
+
+# Day 2 夜: Alice が焔薙発動、 Carol を強制退場
+# (両語順 + 「死体発見」短縮 を別シナリオで個別に統合テストする)
+Carol 死体で発見
+
+# Checkpoint 2: 焔薙退場後も契約者ペアは確定したまま。 Carol は sudden_death 扱いで
+# 通常の単独夜死推論 (= 被害者は wolf でない) から除外されるため、 役職集合に
+# wolf 系も残る (= 制約無し離脱)。 候補が広いので contractor の除外のみ assert する。
+# @expect Alice: [contractor]
+# @expect Bob: [contractor]
+# @expect Carol: [!contractor, ...]

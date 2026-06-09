@@ -311,7 +311,7 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
     description: "必ず二人組で参加する特殊な村人。\n参加者全員が、誰と誰が契約者かを知っている。\n契約者の一人は必ず初日犠牲者となり、残った一人が「神代の血」「宇理炎」「焔薙」の能力を得る。\n(現バージョンでは能力は未実装 — howl / retar まで対応、 lupa engine 非対応)",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
     traits: [{ kind: "passive", sub: "pair-required" }],
-    howlPattern: "(?:契約者?|contractor)",
+    howlPattern: "(?:契約?者?|contractor)",
     lupaSupported: false,
   }],
 ])

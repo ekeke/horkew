@@ -228,6 +228,11 @@ pub enum CauseOfDeath {
     FollowKilledHamster,
     CursedByExecutedNekomata,
     CursedByKilledNekomata,
+    // 突然死 (回線断・試合放棄) と契約者の宝刀「焔薙」による強制退場 (corpse_found) は、
+    // 公開的な状況は異なるが retar 観点ではどちらも「制約無しの離脱」として等価。
+    // 既存の match arm はいずれも `_` フォールスルー or `==` 比較で sudden_death を
+    // 自然に除外する設計のため、 variant 追加だけで TS の振る舞いと一致する。
+    SuddenDeath,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
