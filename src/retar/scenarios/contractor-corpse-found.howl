@@ -24,9 +24,11 @@ setup:
 
 ++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy、Jack、Kate
 
-# 契約者ペアは公開情報。 「契」短縮形が spoiler で解決できることも兼ねて確認。
-!Alice=契
-!Bob=契約者
+# 契約者ペアは公式アナウンス (GM 公示) で全員に公開される。
+# spoiler (`!Alice=...`) は視点配信の秘匿メモであり、 村の公式情報とは
+# 性質が違うため、 ここでは ※ 公示マーカーで宣言する (記号 / ラベル / 全角 ASCII
+# どれでも受ける)。
+※ Alice、Bob 契約者
 
 # Day 1 夜: 契約者 Bob が初日犠牲
 Bob 死亡

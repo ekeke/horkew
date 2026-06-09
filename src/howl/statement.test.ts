@@ -514,6 +514,99 @@ describe('corpseFound statement (焔薙退場)', () => {
   })
 })
 
+describe('announce statement (GM 公示)', () => {
+  test('※ + 単独プレイヤー + 役職', () => {
+    assert.deepEqual(S.parseAnnounceStatement('※ Alice 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice'], role: '契約者',
+    })
+  })
+
+  test('※ + ペア (全角読点区切り) + 役職', () => {
+    assert.deepEqual(S.parseAnnounceStatement('※ Alice、Bob 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice', 'Bob'], role: '契約者',
+    })
+  })
+
+  test('※ + 3 名 + 役職', () => {
+    assert.deepEqual(S.parseAnnounceStatement('※ Alice、Bob、Carol 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice', 'Bob', 'Carol'], role: '契約者',
+    })
+  })
+
+  test('* (ASCII アスタリスク) も同等', () => {
+    assert.deepEqual(S.parseAnnounceStatement('* Alice 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice'], role: '契約者',
+    })
+  })
+
+  test('＊ (全角アスタリスク) も同等', () => {
+    assert.deepEqual(S.parseAnnounceStatement('＊ Alice 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice'], role: '契約者',
+    })
+  })
+
+  test('GM: ラベル形式', () => {
+    assert.deepEqual(S.parseAnnounceStatement('GM: Alice 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice'], role: '契約者',
+    })
+  })
+
+  test('GM： 全角コロンも同等', () => {
+    assert.deepEqual(S.parseAnnounceStatement('GM: Alice 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice'], role: '契約者',
+    })
+    assert.deepEqual(S.parseAnnounceStatement('GM： Alice 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice'], role: '契約者',
+    })
+  })
+
+  test('システム: ラベル形式', () => {
+    assert.deepEqual(S.parseAnnounceStatement('システム: Alice 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice'], role: '契約者',
+    })
+  })
+
+  test('アナウンス: ラベル形式', () => {
+    assert.deepEqual(S.parseAnnounceStatement('アナウンス: Alice、Bob 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice', 'Bob'], role: '契約者',
+    })
+  })
+
+  test('「契」 1 字短縮形も受ける', () => {
+    assert.deepEqual(S.parseAnnounceStatement('※ Alice、Bob 契', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['Alice', 'Bob'], role: '契',
+    })
+  })
+
+  test('日本語プレイヤー名', () => {
+    assert.deepEqual(S.parseAnnounceStatement('※ 美耶子、亜矢子 契約者', 1), {
+      type: 'announce', line: 1, kind: 'rolePin', targets: ['美耶子', '亜矢子'], role: '契約者',
+    })
+  })
+
+  test('marker のみ (中身なし) は null', () => {
+    assert.equal(S.parseAnnounceStatement('※', 1), null)
+  })
+
+  test('役職トークン無しは null', () => {
+    assert.equal(S.parseAnnounceStatement('※ Alice', 1), null)
+  })
+
+  test('未知の役職トークンは null', () => {
+    assert.equal(S.parseAnnounceStatement('※ Alice なんとか', 1), null)
+  })
+
+  test('parseStatement routes ※ to announce', () => {
+    const result = S.parseStatement('※ Alice 契約者', 1)
+    assert.equal(result.type, 'announce')
+  })
+
+  test('parseStatement routes GM: to announce', () => {
+    const result = S.parseStatement('GM: Alice、Bob 契約者', 1)
+    assert.equal(result.type, 'announce')
+  })
+})
+
 describe('revote statement', () => {
   test('valid revote statement', () => {
     const result = S.parseRevoteStatement('再投票　　John, Bob, Charlie', 1)

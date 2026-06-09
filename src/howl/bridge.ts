@@ -19,6 +19,7 @@ import type {
   LynchStatement,
   SuddenDeathStatement,
   CorpseFoundStatement,
+  AnnounceStatement,
   CurseStatement,
   FollowStatement,
   ForecastStatement,
@@ -614,6 +615,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
 
       case 'reveal':
       case 'spoiler':
+      case 'announce':
       case 'videoSource':
       case 'timestamp':
       case 'unknown':
@@ -749,6 +751,28 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
       spoilerActions.push({ day: s.day, by: seat, action: s.action, target })
     } else {
       throw new Error(`spoiler: 形式不正 (role も action も無い) (line ${s.line})`)
+    }
+  }
+
+  // 公式アナウンス (`※ Alice、Bob 契約者` 等) を assumptions に集約する。
+  // spoiler は「視点配信メモ = 観戦者向けの秘匿情報」 であるのに対し、 announce は
+  // 「進行中に村全員が共有する公式情報」 という性質差があるが、 retar への影響
+  // (= 該当 seat の役職確定) は同じなので applyPinAssumption を再利用する。
+  // 出所による UI 区別が必要になったら sub-index (公示由来 Map) を追加する。
+  for (const stmt of statements) {
+    if (stmt.type !== 'announce') continue
+    const a = stmt as AnnounceStatement
+    if (a.kind !== 'rolePin') continue
+    const role = resolveSpoilerRole(a.role)
+    if (role === null) {
+      throw new Error(`announce: 役職名を解決できません "${a.role}" (line ${a.line})`)
+    }
+    for (const playerName of a.targets) {
+      const seat = resolveSeat(playerName)
+      if (seat === null) {
+        throw new Error(`announce: 未知のプレイヤー "${playerName}" (line ${a.line})`)
+      }
+      applyPinAssumption(seat, role, a.line)
     }
   }
 
