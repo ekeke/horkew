@@ -12,7 +12,6 @@ use std::sync::LazyLock;
 // hot path で繰り返し参照するため module-level lazy 解決. TS finalizer.ts:14-17 と同じ pattern.
 static FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::PassiveDieWhenDivined));
 static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
-static FOLLOW_FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::ReactiveFollowFoxDeath));
 
 /// seat が夜 `day` の時点で行動可能 (alive) かどうか.
 /// 夜 D の cause_of_death = NightKill は「その夜に襲撃で死亡」 = その夜の行動は可能, とみなす
@@ -179,6 +178,7 @@ pub fn update_death_count_constraints(
 ) -> bool {
     let guard_roles = roles_with_trait_in(setup, RoleTrait::ActionGuard);
     let guard_count = count_by_trait_in(setup, RoleTrait::ActionGuard);
+    let follow_fox_roles = roles_with_trait_in(setup, RoleTrait::ReactiveFollowFoxDeath);
     for (&day, killed) in night_kills_by_day {
         if vs.day <= day {
             continue;
@@ -207,9 +207,10 @@ pub fn update_death_count_constraints(
                     context.require_one_of.push(
                         killed
                             .iter()
-                            .map(|&seat| crate::role_testers::SeatRole {
-                                seat,
-                                role: *FOLLOW_FOX_ROLE,
+                            .flat_map(|&seat| {
+                                follow_fox_roles.iter().map(move |&role| {
+                                    crate::role_testers::SeatRole { seat, role }
+                                })
                             })
                             .collect(),
                     );

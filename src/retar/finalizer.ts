@@ -15,7 +15,6 @@ import {
 // hot path で繰り返し呼ばれるため module-level 解決.
 const foxRole = singleRoleByTrait('passive', 'die-when-divined')
 const wolfRole = singleRoleBySeerResult('wolf')
-const followFoxRole = singleRoleByTrait('reactive', 'follow-fox-death')
 
 /**
  * seat が夜 `day` の時点で行動可能 (alive) かどうか.
@@ -95,6 +94,7 @@ export function updateDeathCountConstraints(
   const immoralists = countByTraitIn(setup, 'reactive', 'follow-fox-death')
   const guardRoles = rolesWithTraitIn(setup, 'action', 'guard')
   const guardCount = countByTraitIn(setup, 'action', 'guard')
+  const followFoxRoles = rolesWithTraitIn(setup, 'reactive', 'follow-fox-death')
   DAY:
   for ( const [day, killed] of nightKillsByDay.entries() ) {
     if ( vs.day <= day ) continue DAY
@@ -113,7 +113,9 @@ export function updateDeathCountConstraints(
       const hamsterDiedThisNight = context.hamstersKilledByDivine.some(h => h.day === day)
       if ( hamsterDiedThisNight ) {
         for ( let i=0; i<immoralists; i++ ) {
-          context.requireOneOf.push( killed.map(seat => ({ seat, role: followFoxRole })) )
+          context.requireOneOf.push(
+            killed.flatMap(seat => followFoxRoles.map(role => ({ seat, role })))
+          )
         }
         continue DAY
       }
