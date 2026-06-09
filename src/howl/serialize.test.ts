@@ -223,3 +223,125 @@ describe('roundtrip: assert (result only)', () => {
     assertRoundtrip(F.makeMediumResult('Alice', 'Bob', 'isWolf'))
   })
 })
+
+// ----------------------------------------------------------------------
+// 全 25 StatementType のラウンドトリップ網羅
+// (rename 経路で statement type ごとに serialize→parse が壊れないことを保証)
+// ----------------------------------------------------------------------
+
+describe('roundtrip: joinMulti', () => {
+  test('multiple players', () => {
+    assertRoundtrip(F.makeJoinMulti(['Alice', 'Bob', 'Carol']))
+  })
+  test('Japanese names', () => {
+    assertRoundtrip(F.makeJoinMulti(['アリス', 'ボブ', 'チャーリー']))
+  })
+})
+
+describe('roundtrip: multiVote', () => {
+  test('single voter', () => {
+    assertRoundtrip(F.makeMultiVote(['Alice'], 'Bob'))
+  })
+  test('multiple voters', () => {
+    assertRoundtrip(F.makeMultiVote(['Alice', 'Carol'], 'Bob'))
+  })
+})
+
+describe('roundtrip: attack (additional)', () => {
+  test('multiple targets', () => {
+    assertRoundtrip(F.makeAttack(['Alice', 'Bob']))
+  })
+})
+
+describe('roundtrip: suddenDeath', () => {
+  test('with reason', () => {
+    assertRoundtrip(F.makeSuddenDeath('Alice', '回線落ち'))
+  })
+  test('without reason', () => {
+    assertRoundtrip(F.makeSuddenDeath('Alice', ''))
+  })
+})
+
+describe('roundtrip: corpseFound', () => {
+  test('Japanese name (死体発見)', () => {
+    const stmt = { type: 'corpseFound' as const, line: 0, target: 'アリス' }
+    assertRoundtrip(stmt)
+  })
+  test('ASCII name', () => {
+    const stmt = { type: 'corpseFound' as const, line: 0, target: 'Alice' }
+    assertRoundtrip(stmt)
+  })
+})
+
+describe('roundtrip: revote', () => {
+  test('no targets', () => {
+    assertRoundtrip(F.makeRevote([]))
+  })
+  test('with targets', () => {
+    assertRoundtrip(F.makeRevote(['Alice', 'Bob']))
+  })
+})
+
+describe('roundtrip: mason', () => {
+  test('two masons', () => {
+    assertRoundtrip(F.makeMason(['Alice', 'Bob']))
+  })
+})
+
+describe('roundtrip: dayMark', () => {
+  test('Day 1', () => {
+    const stmt = { type: 'dayMark' as const, line: 0, day: 1 }
+    assertRoundtrip(stmt)
+  })
+  test('Day 5', () => {
+    const stmt = { type: 'dayMark' as const, line: 0, day: 5 }
+    assertRoundtrip(stmt)
+  })
+})
+
+describe('roundtrip: speech', () => {
+  test('ASCII actor + ASCII text', () => {
+    const stmt = { type: 'speech' as const, line: 0, actor: 'Alice', text: 'hello' }
+    assertRoundtrip(stmt)
+  })
+  test('Japanese actor + Japanese text', () => {
+    const stmt = { type: 'speech' as const, line: 0, actor: 'アリス', text: 'こんにちは' }
+    assertRoundtrip(stmt)
+  })
+})
+
+describe('roundtrip: spoiler (role pin)', () => {
+  test('Japanese player + Japanese role', () => {
+    assertRoundtrip(F.makeSpoiler('アリス', '占い'))
+  })
+  test('ASCII player + English role', () => {
+    assertRoundtrip(F.makeSpoiler('Alice', 'seer'))
+  })
+  test('faction alias (狼陣営)', () => {
+    assertRoundtrip(F.makeSpoiler('アリス', '狼陣営'))
+  })
+})
+
+describe('roundtrip: spoiler (action)', () => {
+  test('divine action', () => {
+    const stmt = {
+      type: 'spoiler' as const, line: 0,
+      player: 'アリス', day: 1, action: 'divine' as const, target: 'ボブ',
+    }
+    assertRoundtrip(stmt)
+  })
+  test('guard action', () => {
+    const stmt = {
+      type: 'spoiler' as const, line: 0,
+      player: 'アリス', day: 2, action: 'guard' as const, target: 'ボブ',
+    }
+    assertRoundtrip(stmt)
+  })
+  test('attack action', () => {
+    const stmt = {
+      type: 'spoiler' as const, line: 0,
+      player: 'アリス', day: 3, action: 'attack' as const, target: 'ボブ',
+    }
+    assertRoundtrip(stmt)
+  })
+})

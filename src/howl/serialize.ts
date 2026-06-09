@@ -18,7 +18,7 @@ import type {
   Statement,
   SetupStatement, JoinStatement, JoinMultiStatement,
   VoteStatement, MultiVoteStatement, RevoteStatement, GrelanStatement,
-  AttackStatement, LynchStatement, SuddenDeathStatement,
+  AttackStatement, LynchStatement, SuddenDeathStatement, CorpseFoundStatement,
   PeaceStatement, DayMarkStatement, CurseStatement, FollowStatement, ForecastStatement,
   OverStatement, AssertStatement, MasonStatement,
   RevealStatement, SpoilerStatement, SpeechStatement,
@@ -257,6 +257,7 @@ export function serializeStatement(stmt: Statement): string {
     case 'speech':     return serializeSpeech(stmt as SpeechStatement)
     case 'videoSource':return (stmt as VideoSourceStatement).url
     case 'timestamp':  return `@${(stmt as TimestampStatement).raw}`
+    case 'corpseFound':return `${(stmt as CorpseFoundStatement).target} 死体発見`
     case 'unknown':    return (stmt as UnknownStatement).text
   }
 }
@@ -276,7 +277,8 @@ function serializeJoin(stmt: JoinStatement): string {
 }
 
 function serializeJoinMulti(stmt: JoinMultiStatement): string {
-  return `+ ${stmt.players.join(', ')}`
+  // `+` 1 個は parseJoin に hit する。 joinMulti 形式は `++` プレフィックスを要求。
+  return `++ ${stmt.players.join(', ')}`
 }
 
 function serializeVote(stmt: VoteStatement): string {
@@ -288,12 +290,18 @@ function serializeMultiVote(stmt: MultiVoteStatement): string {
 }
 
 function serializeRevote(stmt: RevoteStatement): string {
-  const suffix = stmt.targets.length > 0 ? `  # 再投票候補: ${stmt.targets.join(', ')}` : ''
+  // parser 受理形は `ーーー Alice, Bob` (delimiter で targets を列挙)。
+  // 旧実装は `# 再投票候補:` コメントを付与していたが parser が `#` をコメントとして
+  // 扱わず token に取り込んで targets が汚染されていた。
+  const suffix = stmt.targets.length > 0 ? ` ${stmt.targets.join(', ')}` : ''
   return `ーーー${suffix}`
 }
 
 function serializeAttack(stmt: AttackStatement): string {
-  return `${stmt.target.join('、')}噛み`
+  // 単一 target は後方形式 (`Alice噛み`)。 複数 target は parser が後方形式を受理
+  // しないため前方形式 (`襲撃 Alice、Bob`) に切り替える。
+  if (stmt.target.length <= 1) return `${stmt.target.join('、')}噛み`
+  return `襲撃 ${stmt.target.join('、')}`
 }
 
 function serializeLynch(stmt: LynchStatement): string {
@@ -301,7 +309,10 @@ function serializeLynch(stmt: LynchStatement): string {
 }
 
 function serializeSuddenDeath(stmt: SuddenDeathStatement): string {
-  return `${stmt.target} 突然死 (${stmt.reason})`
+  // parser は `突然死` と `(reason)` の間に空白を許容しない。
+  // reason 空のときは括弧自体を出力しない (`Alice 突然死`)。
+  if (stmt.reason.length === 0) return `${stmt.target} 突然死`
+  return `${stmt.target} 突然死(${stmt.reason})`
 }
 
 function serializeForecast(stmt: ForecastStatement): string {
@@ -316,8 +327,20 @@ function serializeReveal(stmt: RevealStatement): string {
   return `${stmt.player}=${stmt.role}`
 }
 
+// spoiler action 漢字マップ ([src/howl/statement.ts](./statement.ts) の spoilerActionMap の逆引き)。
+const SPOILER_ACTION_GLYPH: Record<string, string> = {
+  divine: '占い',
+  guard: '護衛',
+  attack: '襲撃',
+}
+
 function serializeSpoiler(stmt: SpoilerStatement): string {
-  return `>!${stmt.player} ${stmt.role}!<`
+  // action 形式 (例: `!Alice 1夜 占い Bob`) は role を持たず day/action/target を持つ。
+  if (stmt.action !== undefined && stmt.target !== undefined && stmt.day !== undefined) {
+    return `!${stmt.player} ${stmt.day}夜 ${SPOILER_ACTION_GLYPH[stmt.action]} ${stmt.target}`
+  }
+  // role pin 形式 (例: `!Alice=占い`)。 parser 受理形に揃える。
+  return `!${stmt.player}=${stmt.role}`
 }
 
 function serializeSpeech(stmt: SpeechStatement): string {

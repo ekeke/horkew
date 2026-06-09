@@ -7,6 +7,7 @@ import type {
   JoinStatement, JoinMultiStatement,
   VoteStatement, MultiVoteStatement, RevoteStatement,
   AttackStatement, LynchStatement, SuddenDeathStatement,
+  CorpseFoundStatement,
   AssertStatement, MasonStatement,
   RevealStatement, SpoilerStatement, SpeechStatement,
   CurseStatement, FollowStatement, ForecastStatement,
@@ -119,6 +120,12 @@ function renameInStatement(
       result = next
       break
     }
+    case 'corpseFound': {
+      const s = stmt as CorpseFoundStatement
+      const next: CorpseFoundStatement = { ...s, target: sub(s.target) }
+      result = next
+      break
+    }
     case 'revote': {
       const s = stmt as RevoteStatement
       const next: RevoteStatement = { ...s, targets: s.targets.map(sub) }
@@ -211,6 +218,16 @@ export type RenamePlayerOptions = {
  * - inline `@MM:SS` annotation は再 serialize 行でも末尾に保持される。
  * - join statement の `aliases` / `shortName` は既定では歴史的な別表記として保持する。
  *   `options.clearAliases` が true のとき、name を置換した join の aliases / shortName は消去される。
+ *
+ * 設計契約 (不変条件):
+ * - **行単位 preservation**: リネーム対象 player を参照しない行は原文を完全保持する。
+ *   この性質は `rename.test.ts` の `renamePlayer preservation` 群が回帰ガード。
+ * - **フィールド単位 canonical 化**: リネーム対象 player を参照する行は当該 statement type
+ *   の canonical form に再シリアライズされる。元の表記揺れ (空白・矢印形式・順序・
+ *   `吊り` vs `処刑` 等の語選択) は失われる。これは設計通り。
+ * - **ラウンドトリップ性**: 再シリアライズ結果は必ず `parseStatement` で受理可能で
+ *   なければならない。 `serialize.test.ts` の roundtrip 群がこの不変条件を全 statement type
+ *   について保証する。 ここを破ると「rename 経由で行が unknown 化する」 バグになる。
  */
 export function renamePlayer(
   howlText: string,
