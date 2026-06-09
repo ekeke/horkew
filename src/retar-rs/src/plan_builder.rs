@@ -2,7 +2,7 @@ use crate::types::{CauseOfDeath, Faction, VillageStatus, SystemRole, RoleTrait, 
 use crate::possibilities::Possibilities;
 use crate::combinatorics::select_combinations_from_array;
 use crate::role_sets::{
-    all_roles_in, liar_roles_in, powered_village_roles_in, has_trait, single_role_by_trait,
+    all_roles_in, liar_roles_in, powered_village_roles_in, has_trait, roles_with_trait_in,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -58,7 +58,7 @@ pub fn build_role_test_plan(
     planning_roles.extend(divine_liar_roles_in(setup));
     let planning_roles_set: BTreeSet<SystemRole> = planning_roles.iter().copied().collect();
     let liar_roles_set: BTreeSet<SystemRole> = liar_roles_in(setup).into_iter().collect();
-    let fox_role = single_role_by_trait(RoleTrait::PassiveDieWhenDivined);
+    let fox_roles = roles_with_trait_in(setup, RoleTrait::PassiveDieWhenDivined);
 
     let mut num_liars: u32 = 0;
 
@@ -134,28 +134,30 @@ pub fn build_role_test_plan(
 
     let mut role_tests: Vec<Vec<RoleTest>> = Vec::new();
 
-    // 狐 (foxRole = die-when-divined trait) ハイポセシス
+    // 狐 (die-when-divined trait) ハイポセシス
     // 注意: initialPossibilities で狐候補をフィルタしない。
     // prior パスでは確定席が狐候補から除外されるが、solver の交差検証に必要。
-    if let Some(&fox_count) = setup.get(&fox_role) {
-        if fox_count > 0 {
-            let mut all_seats: Vec<Seat> = village.statuses.keys().cloned().collect();
-            all_seats.sort();
-            let mut fox_tests = Vec::new();
-            select_combinations_from_array(
-                &all_seats,
-                fox_count as usize,
-                fox_count as usize,
-                &mut |selected, rest| {
-                    fox_tests.push(RoleTest {
-                        role: RoleTestRole::Role(fox_role),
-                        selected: selected.to_vec(),
-                        rest: rest.to_vec(),
-                    });
-                },
-            );
-            role_tests.push(fox_tests);
+    for &fox in &fox_roles {
+        let fox_count = setup.get(&fox).copied().unwrap_or(0);
+        if fox_count == 0 {
+            continue;
         }
+        let mut all_seats: Vec<Seat> = village.statuses.keys().cloned().collect();
+        all_seats.sort();
+        let mut fox_tests = Vec::new();
+        select_combinations_from_array(
+            &all_seats,
+            fox_count as usize,
+            fox_count as usize,
+            &mut |selected, rest| {
+                fox_tests.push(RoleTest {
+                    role: RoleTestRole::Role(fox),
+                    selected: selected.to_vec(),
+                    rest: rest.to_vec(),
+                });
+            },
+        );
+        role_tests.push(fox_tests);
     }
 
     for &role in &planning_roles {

@@ -9,7 +9,7 @@ import { systemRoles } from '../types/index.ts'
 
 // 単一役職 const (役職追加時に他役職が新規に該当しなければ自動追従).
 const wolfRole = singleRoleBySeerResult('wolf')
-const foxRole = singleRoleByTrait('passive', 'die-when-divined')
+const foxRoles = rolesByTrait('passive', 'die-when-divined')
 const villagerRole = singleRoleByPredicate(r => {
   const x = systemRoles.get(r)!
   return x.faction === 'village' && x.traits.length === 0
@@ -435,7 +435,7 @@ export class VillageRetar {
       // 固定席も含めて人間（非狼・非狐）が既にいれば制約は満たされている
       const hasConfirmedHuman = this.lastDeaths.some(seat => {
         const isWolfOrHamster = this.initialPossibilities.hasRole(seat, wolfRole)
-          || this.initialPossibilities.hasRole(seat, foxRole)
+          || foxRoles.some(r => this.initialPossibilities.hasRole(seat, r))
         // 固定席が人間 or 狼/狐の可能性がない席がある → 制約充足
         return !isWolfOrHamster
       })
@@ -444,7 +444,9 @@ export class VillageRetar {
         const unfixed = this.lastDeaths.filter(seat => !this.initialPossibilities.isFixed(seat))
         if (unfixed.length === 1) {
           this.initialPossibilities.denyRole(unfixed[0], wolfRole)
-          this.initialPossibilities.denyRole(unfixed[0], foxRole)
+          for ( const r of foxRoles ) {
+            this.initialPossibilities.denyRole(unfixed[0], r)
+          }
         }
       }
     }
@@ -537,14 +539,17 @@ export class VillageRetar {
     for (const seat of this.lastDeaths) {
       if (poss2.isFixed(seat)) {
         // 確定席が狼/狐なら飽和パスの前提と矛盾 → 無効
-        if (poss2.hasRole(seat, wolfRole) || poss2.hasRole(seat, foxRole)) {
+        if (poss2.hasRole(seat, wolfRole) || foxRoles.some(r => poss2.hasRole(seat, r))) {
           path2Valid = false
           break
         }
         continue
       }
       if (!poss2.denyRole(seat, wolfRole)) { path2Valid = false; break }
-      if (!poss2.denyRole(seat, foxRole)) { path2Valid = false; break }
+      for ( const r of foxRoles ) {
+        if (!poss2.denyRole(seat, r)) { path2Valid = false; break }
+      }
+      if (!path2Valid) break
     }
     if (path2Valid) {
       this.initialPossibilities = poss2

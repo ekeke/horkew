@@ -1,10 +1,10 @@
 import type { CauseOfDeath, SeatStatus, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
-import { singleRoleByTrait, singleRoleBySeerResult, allKnownRoles, hasTrait } from './role-sets.ts'
+import { rolesByTrait, singleRoleBySeerResult, allKnownRoles, hasTrait } from './role-sets.ts'
 
 const wolfRole = singleRoleBySeerResult('wolf')
-const foxRole = singleRoleByTrait('passive', 'die-when-divined')
+const foxRoles = rolesByTrait('passive', 'die-when-divined')
 
 type DeathChronicle = {
   add: Int8Array
@@ -264,7 +264,7 @@ function verifyDivineAbility(env: RoleTesterEnv, context: AnalyzeContext, select
         }
       }
       // 占い呪殺対象判定: passive:die-when-divined trait を持つ役職 (現状は werehamster 1 種).
-      else if ( context.possibilities.isActualRole(targetSeat, foxRole) ) {
+      else if ( foxRoles.some(r => context.possibilities.isActualRole(targetSeat, r)) ) {
         const targetStatus = getStatus(env, targetSeat)
         if ( targetStatus.surviving ) return false
         // 占い師がN夜に狐を占った場合、狐はN夜に呪殺される。死亡日が異なれば矛盾。
@@ -280,7 +280,7 @@ function verifyDivineAbility(env: RoleTesterEnv, context: AnalyzeContext, select
     for (const [night, forecastTarget] of self.forecasts) {
       if (night < env.dayCountFrom || night > maxActiveDay) continue
       if (self.assertions.has(night)) continue
-      if ( context.possibilities.isActualRole(forecastTarget, foxRole) ) {
+      if ( foxRoles.some(r => context.possibilities.isActualRole(forecastTarget, r)) ) {
         const targetStatus = getStatus(env, forecastTarget)
         if ( targetStatus.surviving ) return false
         if ( targetStatus.diedDay !== night ) return false

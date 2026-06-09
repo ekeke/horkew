@@ -10,7 +10,7 @@ use crate::role_testers::{
 };
 use crate::role_sets::{
     has_trait, powered_village_roles_in, roles_by_trait, single_role_by_predicate,
-    single_role_by_seer_result, single_role_by_trait,
+    single_role_by_seer_result,
 };
 use crate::plan_builder::{build_role_test_plan, RoleTest, RoleTestRole};
 use crate::finalizer::{
@@ -21,7 +21,7 @@ use std::sync::LazyLock;
 
 // hot path で繰り返し参照するため module-level lazy 解決. TS index.ts:11-18 と同じ pattern.
 static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
-static FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::PassiveDieWhenDivined));
+static FOX_ROLES: LazyLock<Vec<SystemRole>> = LazyLock::new(|| roles_by_trait(RoleTrait::PassiveDieWhenDivined));
 static VILLAGER_ROLE: LazyLock<SystemRole> = LazyLock::new(|| {
     single_role_by_predicate(|r| r.faction() == Faction::Village && r.traits().is_empty())
 });
@@ -245,7 +245,7 @@ impl VillageRetar {
             if poss2.is_fixed(seat) {
                 // 確定席が狼/狐なら飽和パスの前提と矛盾 → 無効
                 if poss2.has_role(seat, *WOLF_ROLE)
-                    || poss2.has_role(seat, *FOX_ROLE)
+                    || FOX_ROLES.iter().any(|&r| poss2.has_role(seat, r))
                 {
                     path2_valid = false;
                     break;
@@ -256,7 +256,14 @@ impl VillageRetar {
                 path2_valid = false;
                 break;
             }
-            if !poss2.deny_role(seat, *FOX_ROLE) {
+            let mut fox_denied = true;
+            for &r in &*FOX_ROLES {
+                if !poss2.deny_role(seat, r) {
+                    fox_denied = false;
+                    break;
+                }
+            }
+            if !fox_denied {
                 path2_valid = false;
                 break;
             }
@@ -816,7 +823,7 @@ fn apply_game_end_constraints(
     } else if vs.result == Some(VillageResult::WerewolfWon) {
         let has_confirmed_human = last_deaths.iter().any(|&seat| {
             let is_wolf_or_hamster = initial_possibilities.has_role(seat, *WOLF_ROLE)
-                || initial_possibilities.has_role(seat, *FOX_ROLE);
+                || FOX_ROLES.iter().any(|&r| initial_possibilities.has_role(seat, r));
             !is_wolf_or_hamster
         });
         if !has_confirmed_human {
@@ -827,7 +834,9 @@ fn apply_game_end_constraints(
                 .collect();
             if unfixed.len() == 1 {
                 initial_possibilities.deny_role(unfixed[0], *WOLF_ROLE);
-                initial_possibilities.deny_role(unfixed[0], *FOX_ROLE);
+                for &r in &*FOX_ROLES {
+                    initial_possibilities.deny_role(unfixed[0], r);
+                }
             }
         }
     }

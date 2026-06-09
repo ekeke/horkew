@@ -2,9 +2,7 @@ import type { VillageStatus, SystemRole, Seat } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
 import { selectCombinationsFromArray } from './combinatorics.ts'
-import { allRolesIn, liarRolesIn, poweredVillageRolesIn, hasTrait, singleRoleByTrait } from './role-sets.ts'
-
-const foxRole = singleRoleByTrait('passive', 'die-when-divined')
+import { allRolesIn, liarRolesIn, poweredVillageRolesIn, hasTrait, rolesWithTraitIn } from './role-sets.ts'
 
 /**
  * action:divine trait を持つ liar role (paparazzi 等). seer 等と同じ planning frame で扱う.
@@ -109,13 +107,15 @@ export function buildRoleTestPlan(
   // 注意: initialPossibilities で狐候補をフィルタしない。
   // prior パスでは確定席が狐候補から除外されるが、solver の交差検証
   // (finalizer の死体数チェック等) に確定席の狐仮説が必要なケースがある。
-  if (setup.has(foxRole) && setup.get(foxRole)! > 0 ) {
+  const foxRoles = rolesWithTraitIn(setup, 'passive', 'die-when-divined')
+  for ( const fox of foxRoles ) {
+    const count = setup.get(fox)!
+    if ( count <= 0 ) continue
     const hamsterTests: RoleTest[] = []
     const allSeats = Array.from(village.statuses.keys())
-    const num = setup.get(foxRole)!
-    const iter = selectCombinationsFromArray(allSeats, num, num)
+    const iter = selectCombinationsFromArray(allSeats, count, count)
     for ( const [selected, rest] of iter ) {
-      hamsterTests.push({ role: foxRole, selected, rest })
+      hamsterTests.push({ role: fox, selected, rest })
     }
     roleTests.push(hamsterTests)
   }

@@ -3,14 +3,13 @@ use crate::possibilities::Possibilities;
 use crate::role_testers::{AnalyzeContext, DivineTarget};
 use crate::role_sets::{
     count_by_seer_result_in, count_by_trait_in, roles_with_trait_in,
-    single_role_by_seer_result, single_role_by_trait,
+    single_role_by_seer_result,
 };
 use crate::solver::solve_possibilities;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 // hot path で繰り返し参照するため module-level lazy 解決. TS finalizer.ts:14-17 と同じ pattern.
-static FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::PassiveDieWhenDivined));
 static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
 
 /// seat が夜 `day` の時点で行動可能 (alive) かどうか.
@@ -115,6 +114,7 @@ pub fn check_death_counts(
     setup: &BTreeMap<SystemRole, u32>,
 ) -> bool {
     let guard_roles = roles_with_trait_in(setup, RoleTrait::ActionGuard);
+    let fox_roles = roles_with_trait_in(setup, RoleTrait::PassiveDieWhenDivined);
     for (&day, killed) in night_kills_by_day {
         if vs.day <= day {
             continue;
@@ -154,7 +154,7 @@ pub fn check_death_counts(
                     continue;
                 }
                 if guard_roles.iter().any(|&r| context.possibilities.has_role(seat, r))
-                    || context.possibilities.has_role(seat, *FOX_ROLE)
+                    || fox_roles.iter().any(|&r| context.possibilities.has_role(seat, r))
                 {
                     has_protector = true;
                     break;
@@ -179,6 +179,8 @@ pub fn update_death_count_constraints(
     let guard_roles = roles_with_trait_in(setup, RoleTrait::ActionGuard);
     let guard_count = count_by_trait_in(setup, RoleTrait::ActionGuard);
     let follow_fox_roles = roles_with_trait_in(setup, RoleTrait::ReactiveFollowFoxDeath);
+    let fox_roles = roles_with_trait_in(setup, RoleTrait::PassiveDieWhenDivined);
+    let fox_count = count_by_trait_in(setup, RoleTrait::PassiveDieWhenDivined);
     for (&day, killed) in night_kills_by_day {
         if vs.day <= day {
             continue;
@@ -233,7 +235,7 @@ pub fn update_death_count_constraints(
                 if !is_alive_at_night(status, day) {
                     continue;
                 }
-                if context.possibilities.has_role(seat, *FOX_ROLE) {
+                if fox_roles.iter().any(|&r| context.possibilities.has_role(seat, r)) {
                     alive_fox_exists = true;
                 }
                 if guard_roles.iter().any(|&r| context.possibilities.has_role(seat, r)) {
@@ -259,8 +261,8 @@ pub fn update_death_count_constraints(
                     }
                 }
             }
-            if !alive_guard_exists && setup.get(&*FOX_ROLE).copied().unwrap_or(0) == 1 {
-                // 説明は (A) のみ + 狐は 1 体 → 夜 day に alive でない seat の FOX_ROLE を deny
+            if !alive_guard_exists && fox_count == 1 {
+                // 説明は (A) のみ + 狐は 1 体 → 夜 day に alive でない seat の fox 役職を deny
                 let dead_seats: Vec<Seat> = vs
                     .statuses
                     .iter()
@@ -268,8 +270,10 @@ pub fn update_death_count_constraints(
                     .map(|(&seat, _)| seat)
                     .collect();
                 for seat in dead_seats {
-                    if !context.possibilities.deny_role(seat, *FOX_ROLE) {
-                        return false;
+                    for &r in &fox_roles {
+                        if !context.possibilities.deny_role(seat, r) {
+                            return false;
+                        }
                     }
                 }
             }

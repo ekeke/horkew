@@ -1,12 +1,12 @@
 use crate::types::{CauseOfDeath, EnumSpecies, RoleTrait, SeatStatus, VillageStatus, SystemRole, Seat, Day};
 use crate::possibilities::{Possibilities, ROLE_COUNT};
-use crate::role_sets::{has_trait, single_role_by_seer_result, single_role_by_trait};
+use crate::role_sets::{has_trait, roles_by_trait, single_role_by_seer_result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 // hot path で繰り返し参照するため module-level lazy 解決. TS roleTesters.ts:6-7 と同じ pattern.
 static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
-static FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::PassiveDieWhenDivined));
+static FOX_ROLES: LazyLock<Vec<SystemRole>> = LazyLock::new(|| roles_by_trait(RoleTrait::PassiveDieWhenDivined));
 
 pub struct DeathChronicle {
     pub add: Vec<i8>,
@@ -349,7 +349,7 @@ fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
                         }
                     }
                 }
-            } else if ctx.possibilities.is_actual_role(assertion.target, *FOX_ROLE) {
+            } else if FOX_ROLES.iter().any(|&r| ctx.possibilities.is_actual_role(assertion.target, r)) {
                 let target_status = get_status(env, assertion.target);
                 if target_status.surviving {
                     return false;
@@ -385,7 +385,7 @@ fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
             if self_status.assertions.contains_key(&night) {
                 continue;
             }
-            if ctx.possibilities.is_actual_role(forecast_target, *FOX_ROLE) {
+            if FOX_ROLES.iter().any(|&r| ctx.possibilities.is_actual_role(forecast_target, r)) {
                 let target_status = get_status(env, forecast_target);
                 if target_status.surviving {
                     return false;
