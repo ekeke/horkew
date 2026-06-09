@@ -13,7 +13,6 @@ import {
 } from './role-sets.ts'
 
 // hot path で繰り返し呼ばれるため module-level 解決.
-const guardRole = singleRoleByTrait('action', 'guard')
 const foxRole = singleRoleByTrait('passive', 'die-when-divined')
 const wolfRole = singleRoleBySeerResult('wolf')
 const followFoxRole = singleRoleByTrait('reactive', 'follow-fox-death')
@@ -44,6 +43,7 @@ export function checkDeathCounts(
   setup: Map<SystemRole, number>,
 ): boolean {
   const immoralists = countByTraitIn(setup, 'reactive', 'follow-fox-death')
+  const guardRoles = rolesWithTraitIn(setup, 'action', 'guard')
   DAY:
   for ( const [day, killed] of nightKillsByDay.entries() ) {
     if ( vs.day <= day ) continue DAY
@@ -73,7 +73,7 @@ export function checkDeathCounts(
       for ( const [seat, status] of vs.statuses.entries() ) {
         if ( !isAliveAtNight(status, day) ) continue
         if (
-          context.possibilities.hasRole(seat, guardRole)
+          guardRoles.some(r => context.possibilities.hasRole(seat, r))
           || context.possibilities.hasRole(seat, foxRole)
         ) {
           continue DAY
@@ -93,6 +93,8 @@ export function updateDeathCountConstraints(
   setup: Map<SystemRole, number>,
 ): boolean {
   const immoralists = countByTraitIn(setup, 'reactive', 'follow-fox-death')
+  const guardRoles = rolesWithTraitIn(setup, 'action', 'guard')
+  const guardCount = countByTraitIn(setup, 'action', 'guard')
   DAY:
   for ( const [day, killed] of nightKillsByDay.entries() ) {
     if ( vs.day <= day ) continue DAY
@@ -130,14 +132,16 @@ export function updateDeathCountConstraints(
       for ( const [seat, status] of vs.statuses.entries() ) {
         if ( !isAliveAtNight(status, day) ) continue
         if ( context.possibilities.hasRole(seat, foxRole) ) aliveFoxExists = true
-        if ( context.possibilities.hasRole(seat, guardRole) ) aliveGuardExists = true
+        if ( guardRoles.some(r => context.possibilities.hasRole(seat, r)) ) aliveGuardExists = true
       }
       if ( !aliveFoxExists && !aliveGuardExists ) return false
-      if ( !aliveFoxExists && (setup.get(guardRole) ?? 0) === 1 ) {
-        // 説明は (B) のみ + 狩人は 1 体 → 夜 day に alive でない seat の guardRole を deny
+      if ( !aliveFoxExists && guardCount === 1 ) {
+        // 説明は (B) のみ + 狩人は 1 体 → 夜 day に alive でない seat の guard 役職を deny
         for ( const [seat, status] of vs.statuses.entries() ) {
           if ( isAliveAtNight(status, day) ) continue
-          if ( !context.possibilities.denyRole(seat, guardRole) ) return false
+          for ( const r of guardRoles ) {
+            if ( !context.possibilities.denyRole(seat, r) ) return false
+          }
         }
       }
       if ( !aliveGuardExists && (setup.get(foxRole) ?? 0) === 1 ) {
