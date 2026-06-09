@@ -37,7 +37,6 @@ export function buildRoleTestPlan(
   hocusPocus?: Map<Seat, boolean>,
 ): BuildPlanResult {
   const hocusSeats: Seat[] = hocusPocus ? [...hocusPocus.keys()] : []
-  const hasHocusPocus = hocusSeats.length > 0
   // 露呈人外数の管理の準備
   let numLiars = 0
 
@@ -125,12 +124,15 @@ export function buildRoleTestPlan(
     // divine trait 同士は CO 席を pool 共有 (seer ↔ paparazzi).
     const claimSeats = getDivineClaimPool(role)
     const minDay = getMinClaimDay(role)
-    if ( !hasCurseOnExecuted && claimSeats.length === 0 && !hasHocusPocus ) continue
+    // HocusPocus は「CO 在り役職への潜伏候補追加」に絞る (= 早期 skip 条件は HocusPocus と独立).
+    // CO ゼロ役職に HocusPocus 在りで plan を強制生成すると、 contractor 確定 assumption 等と
+    // 矛盾する無駄 plan を全 depth で並べてしまい、 結果として全 world fail で盤面が破綻する.
+    if ( !hasCurseOnExecuted && claimSeats.length === 0 ) continue
     // 処刑道連れ役職 (猫又) の候補を検出
     const hasExecutionCurse = hasCurseOnExecuted && Array.from(village.statuses.values()).some(
       s => s.causeOfDeath === 'cursed_by_executed_nekomata'
     )
-    if (claimSeats.length === 0 && multipleVictims.length === 0 && !hasExecutionCurse && !hasHocusPocus) continue
+    if (claimSeats.length === 0 && multipleVictims.length === 0 && !hasExecutionCurse) continue
     const testsOfRole: RoleTest[] = []
     const num = setup.get(role) || 0
     if ( !num ) continue

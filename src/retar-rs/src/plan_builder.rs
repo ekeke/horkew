@@ -50,7 +50,6 @@ pub fn build_role_test_plan(
     let hocus_seats: Vec<Seat> = hocus_pocus
         .map(|m| m.keys().cloned().collect())
         .unwrap_or_default();
-    let has_hocus_pocus = !hocus_seats.is_empty();
 
     // setup 駆動で派生. 役職追加で自動追従.
     // 村陣営の能力持ち + divine trait を持つ liar role (paparazzi 等) を planning 対象に.
@@ -162,12 +161,15 @@ pub fn build_role_test_plan(
         let has_curse_on_executed = has_trait(role, RoleTrait::ReactiveCurseOnExecuted);
         // divine trait 同士は CO 席を pool 共有 (seer ↔ paparazzi).
         let role_claims = get_divine_claim_pool(role);
-        if !has_curse_on_executed && role_claims.is_empty() && !has_hocus_pocus {
+        // HocusPocus は「CO 在り役職への潜伏候補追加」に絞る (= 早期 skip 条件は HocusPocus と独立).
+        // CO ゼロ役職に HocusPocus 在りで plan を強制生成すると、 contractor 確定 assumption 等と
+        // 矛盾する無駄 plan を全 depth で並べてしまい、 結果として全 world fail で盤面が破綻する.
+        if !has_curse_on_executed && role_claims.is_empty() {
             continue;
         }
         let has_execution_curse = has_curse_on_executed
             && village.statuses.values().any(|s| s.cause_of_death == CauseOfDeath::CursedByExecutedNekomata);
-        if role_claims.is_empty() && multiple_victims.is_empty() && !has_execution_curse && !has_hocus_pocus {
+        if role_claims.is_empty() && multiple_victims.is_empty() && !has_execution_curse {
             continue;
         }
         let num = setup.get(&role).copied().unwrap_or(0);

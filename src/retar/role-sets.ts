@@ -138,13 +138,18 @@ export function humanRolesIn(setup: Map<SystemRole, number>): SystemRole[] {
 }
 
 /**
- * setup に含まれる「能力を持つ村陣営役職」(faction=village かつ traits を持つ).
+ * setup に含まれる「能力を持つ村陣営役職」(faction=village かつ非 passive trait を持つ).
  * 旧 planBuilder.ts の `rolesInTestPlanning` を setup フィルタ + systemRoles 派生にしたもの.
  * 例: seer / medium / bodyguard / mason / nekomata. villager (traits=[]) は除外.
+ *
+ * 非 passive trait = action / auto-info / knowledge / reactive / channel。
+ * passive のみの trait (例: contractor の pair-required) は setup 制約であって
+ * 役職テスト対象の能力ではないため、 planning 対象から除外する。
  */
 export function poweredVillageRolesIn(setup: Map<SystemRole, number>): SystemRole[] {
   return allRolesIn(setup).filter(role => {
     const r = systemRoles.get(role)!
-    return r.faction === 'village' && r.traits.length > 0
+    if (r.faction !== 'village') return false
+    return r.traits.some(t => t.kind !== 'passive')
   })
 }

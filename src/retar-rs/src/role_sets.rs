@@ -65,12 +65,16 @@ pub fn human_roles_in(setup: &BTreeMap<SystemRole, u32>) -> Vec<SystemRole> {
         .collect()
 }
 
-/// setup に含まれる「能力を持つ村陣営役職」(faction=village かつ traits を持つ).
+/// setup に含まれる「能力を持つ村陣営役職」(faction=village かつ非 passive trait を持つ).
 /// 旧 plan_builder.rs の ROLES_IN_TEST_PLANNING を setup フィルタ + 派生にしたもの.
+///
+/// 非 passive trait = action / auto-info / knowledge / reactive / channel.
+/// passive のみの trait (例: contractor の pair-required) は setup 制約であって
+/// 役職テスト対象の能力ではないため planning 対象から除外する.
 pub fn powered_village_roles_in(setup: &BTreeMap<SystemRole, u32>) -> Vec<SystemRole> {
     all_roles_in(setup)
         .into_iter()
-        .filter(|r| r.faction() == Faction::Village && !r.traits().is_empty())
+        .filter(|r| r.faction() == Faction::Village && r.traits().iter().any(|t| !t.is_passive()))
         .collect()
 }
 
