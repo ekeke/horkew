@@ -35,12 +35,14 @@
     "gen-role-docs": "node --experimental-strip-types scripts/gen-role-docs.ts demo/public/roles.html",
     "spec:annotate": "node --experimental-strip-types scripts/spec-annotate-cli.ts",
     "build:demo": "npm run gen-role-docs && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.14.0",
+    "husky": "^9.1.7",
     "svelte": "^5.54.0",
     "ts-morph": "^28.0.0",
     "typescript": "~5.7.3",

@@ -43,6 +43,8 @@ Rust版（retar-rs）が実運用ターゲット、TypeScript版（retar）が�
 4. **Rustテストをパス** — `npm run test:rust` で正しさを検証
 5. **WASM 配布成果物を更新** — Rust ソースに変更が入ったら `npm run build:wasm` で `pkg/` と `pkg-web/` を再生成し、 同一コミットで commit する。 lykaon / mirurou など WASM 経路の consumer は配布 wasm を bundle するため、 ソースだけ更新して配布物を放置すると古いバイナリのまま動作する
 
+   この同期忘れを構造的に防ぐため、 husky 経由の commit-msg hook (`.husky/commit-msg`) が「Rust ソース (`src/retar-rs/src/*.rs`, `Cargo.{toml,lock}`) と配布 wasm (`src/retar-rs/pkg/`, `src/retar-rs/pkg-web/`) のどちらか一方だけが staged」 な commit を拒否する。 hook は `npm install` の `prepare` script (`husky`) で自動有効化される。 緊急回避として commit メッセージに `[wasm-skip]` タグを含めると bypass できる (例: 配布 wasm を後追い commit するフォローアップ等)
+
 TS版とRust版はファイル構成・関数名を一致させる。TS版で設計・検証を済ませてからRustに移すことで、型システムの違いによるバグを最小化し、差分比較を容易にする。
 
 ### TS↔Rust 同一性規約

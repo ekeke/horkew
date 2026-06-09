@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+# retar-rs ソースと配布 wasm の同期を強制する hook.
+#
+# Rust ソース (src/retar-rs/src/*.rs, Cargo.{toml,lock}) と
+# 配布 wasm (src/retar-rs/pkg/, src/retar-rs/pkg-web/) の
+# どちらか一方だけが staged な commit を拒否する.
+#
+# 緊急回避: commit メッセージに [wasm-skip] を含めると bypass できる.
+
+COMMIT_MSG_FILE="$1"
+
+if grep -qF '[wasm-skip]' "$COMMIT_MSG_FILE"; then
+  exit 0
+fi
+
+STAGED=$(git diff --cached --name-only)
+
+HAS_RUST=$(printf '%s\n' "$STAGED" | grep -E '^src/retar-rs/(src/.*\.rs|Cargo\.(toml|lock))$' || true)
+HAS_WASM=$(printf '%s\n' "$STAGED" | grep -E '^src/retar-rs/pkg(-web)?/' || true)
+
+if [ -n "$HAS_RUST" ] && [ -z "$HAS_WASM" ]; then
+  echo "ERROR: retar-rs ソースは変更されているが配布 wasm (pkg/, pkg-web/) が更新されていません." >&2
+  echo "  npm run build:wasm を走らせて pkg/, pkg-web/ を同一コミットに含めてください." >&2
+  echo "  緊急回避: commit メッセージに [wasm-skip] を含めると bypass できます." >&2
+  exit 1
+fi
+
+if [ -n "$HAS_WASM" ] && [ -z "$HAS_RUST" ]; then
+  echo "ERROR: 配布 wasm (pkg/, pkg-web/) は変更されているが retar-rs ソースが含まれていません." >&2
+  echo "  対応する Rust ソース変更を同一コミットに含めてください." >&2
+  echo "  緊急回避: commit メッセージに [wasm-skip] を含めると bypass できます." >&2
+  exit 1
+fi
+
+exit 0
