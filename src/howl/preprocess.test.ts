@@ -148,3 +148,52 @@ test('preprocess - cursorLine filter does not match prefix continuations (配役
   const contents = result.lines.map(l => l.content)
   assert.ok(!contents.includes('配役者の説明'), '配役者 で始まる行は構造行ではない')
 })
+
+// 行末コメント: 空白 + `#` 以降を行末まで除去する。
+// 行頭 `#` (フルラインコメント) とは別経路で処理し、 `#1` のような空白なしハッシュ
+// トークンと衝突しないようにする。
+test('preprocess - strips trailing # comment after half-width space', () => {
+  const input = 'アリス→ボブ # アリスの初手投票'
+  const result = preprocess(input)
+  assert.deepStrictEqual(result.lines, [{ number: 1, content: 'アリス→ボブ' }])
+})
+
+test('preprocess - strips trailing # comment after full-width space', () => {
+  const input = 'アリス→ボブ　# 全角空白で区切ったコメント'
+  const result = preprocess(input)
+  assert.deepStrictEqual(result.lines, [{ number: 1, content: 'アリス→ボブ' }])
+})
+
+test('preprocess - strips trailing # comment after tab', () => {
+  const input = 'アリス→ボブ\t# tab で区切ったコメント'
+  const result = preprocess(input)
+  assert.deepStrictEqual(result.lines, [{ number: 1, content: 'アリス→ボブ' }])
+})
+
+test('preprocess - does NOT strip # without leading whitespace', () => {
+  // 空白なしの `#` はコメントではない (ハッシュタグ的トークンとの衝突を防ぐ)。
+  // parser 側で unknown になるかどうかは別の話で、 preprocess はそのまま渡す。
+  const input = 'アリス→ボブ#メモ'
+  const result = preprocess(input)
+  assert.deepStrictEqual(result.lines, [{ number: 1, content: 'アリス→ボブ#メモ' }])
+})
+
+test('preprocess - strips first # onwards even with multiple # in line', () => {
+  // 1 個目の `[ws]#` 以降は全て comment (内部の `#` も含む)
+  const input = 'アリス→ボブ # コメント # 内部の#も込み'
+  const result = preprocess(input)
+  assert.deepStrictEqual(result.lines, [{ number: 1, content: 'アリス→ボブ' }])
+})
+
+test('preprocess - trailing-only # (without comment body) is stripped', () => {
+  const input = 'アリス→ボブ #'
+  const result = preprocess(input)
+  assert.deepStrictEqual(result.lines, [{ number: 1, content: 'アリス→ボブ' }])
+})
+
+test('preprocess - line consisting only of whitespace + # is dropped', () => {
+  // 結果が空文字になる行は drop されて lines に入らない
+  const input = ['アリス→ボブ', '   # インデント付きコメント', 'チャーリー→デイブ'].join('\n')
+  const result = preprocess(input)
+  assert.deepStrictEqual(result.lines.map(l => l.content), ['アリス→ボブ', 'チャーリー→デイブ'])
+})

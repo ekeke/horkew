@@ -96,6 +96,11 @@ import { Decoration, type DecorationSet, EditorView, GutterMarker, gutter } from
 import type { StatementType } from '../../howl/statement.ts'
 import * as V from '../../howl/vocabulary.ts'
 
+// 行末コメント検出: 空白 (半角 / 全角 / タブ) + `#` から行末まで。
+// preprocess.ts の trailingCommentRegex と同じ仕様を保つこと (片方だけ広がると
+// エディタ表示と parser 解釈が乖離する)。
+const trailingCommentRe = new RegExp(`[${V.whiteSpaceClass}]#.*$`)
+
 // ---- Public API ----
 
 export type StatementInfo = { type: StatementType, line: number, timestamp?: { seconds: number, raw: string } }
@@ -264,13 +269,24 @@ function buildDecorations(
     builder.push({ from: 0, to: fmEnd, deco: markDeco.meta })
   }
 
-  // Layer 0: コメント行 (パーサーが除去する行)
+  // Layer 0: コメント行 (パーサーが除去する行) + 行末コメント (`[ws]# ...`)
+  // trailing comment 開始位置 (line 内 offset) を後段の inline token 装飾でも参照するため、
+  // 行番号 → offset で記録する。
+  const trailingCommentStart = new Map<number, number>()
   for (let i = 1; i <= doc.lines; i++) {
     const line = doc.line(i)
     if (line.from < fmEnd) continue
     const trimmed = line.text.trimStart()
     if (trimmed.startsWith('#')) {
       builder.push({ from: line.from, to: line.to, deco: markDeco.comment })
+      continue
+    }
+    // 行末コメント: 空白 + `#` 以降を comment 色付け (行頭コメントとは別経路)
+    const m = trailingCommentRe.exec(line.text)
+    if (m) {
+      const from = line.from + m.index
+      builder.push({ from, to: line.to, deco: markDeco.comment })
+      trailingCommentStart.set(i, from)
     }
   }
 
@@ -303,32 +319,44 @@ function buildDecorations(
     }
 
     // Layer 2: 行内トークン装飾
+    // 行末コメント領域内のマッチは comment 色で塗り潰し済みなので、 inline token
+    // (矢印 / 役職 / CO 等) を上書きしないように commentStart 以降は除外する。
     const lineText = line.text
     const base = line.from
+    const commentStart = trailingCommentStart.get(stmt.line)
+    const inComment = commentStart !== undefined
+      ? (f: number) => f >= commentStart
+      : (_f: number) => false
 
     // 全statement共通: 矢印
     for (const [f, t] of findMatches(rightArrowRe, lineText, base)) {
+      if (inComment(f)) continue
       builder.push({ from: f, to: t, deco: markDeco.arrow })
     }
     for (const [f, t] of findMatches(leftArrowRe, lineText, base)) {
+      if (inComment(f)) continue
       builder.push({ from: f, to: t, deco: markDeco.arrow })
     }
 
     // 全statement共通: 種族マーカー
     for (const [f, t] of findMatches(humanRe, lineText, base)) {
+      if (inComment(f)) continue
       builder.push({ from: f, to: t, deco: markDeco.human })
     }
     for (const [f, t] of findMatches(wolfRe, lineText, base)) {
+      if (inComment(f)) continue
       builder.push({ from: f, to: t, deco: markDeco.wolf })
     }
 
     // assert: CO キーワード + 役職名 (プレイヤー名と重なる範囲は除外)
     if (stmt.type === 'assert') {
       for (const [f, t] of findMatches(coRe, lineText, base)) {
+        if (inComment(f)) continue
         builder.push({ from: f, to: t, deco: markDeco.co })
       }
       const nameRanges = playerNameRanges.get(stmt.line)
       for (const [f, t] of findMatches(roleRe, lineText, base)) {
+        if (inComment(f)) continue
         if (nameRanges && nameRanges.some(([nf, nt]) => f < nt && t > nf)) continue
         builder.push({ from: f, to: t, deco: markDeco.role })
       }
@@ -338,6 +366,7 @@ function buildDecorations(
     if (stmt.type === 'reveal') {
       const nameRanges = playerNameRanges.get(stmt.line)
       for (const [f, t] of findMatches(roleRe, lineText, base)) {
+        if (inComment(f)) continue
         if (nameRanges && nameRanges.some(([nf, nt]) => f < nt && t > nf)) continue
         builder.push({ from: f, to: t, deco: markDeco.role })
       }
