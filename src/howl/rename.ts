@@ -2,6 +2,7 @@ import { parseFrontmatter } from './frontmatter.ts'
 import { FlexibleDictionary } from './flexibleDictionary.ts'
 import { parseStatement } from './statement.ts'
 import { serializeStatement } from './serialize.ts'
+import { stripTrailingHashComment, splitTrailingHashComment } from './preprocess.ts'
 import type {
   Statement,
   JoinStatement, JoinMultiStatement,
@@ -30,7 +31,7 @@ function buildDictFromBody(bodyLines: string[]): FlexibleDictionary {
   const dict = new FlexibleDictionary()
   let seatNumber = 0
   for (let i = 0; i < bodyLines.length; i++) {
-    const trimmed = bodyLines[i].trim()
+    const trimmed = stripTrailingHashComment(bodyLines[i]).trim()
     if (trimmed.length === 0 || trimmed.startsWith('#')) continue
     const stmt = parseStatement(trimmed, i + 1)
     if (stmt.type === 'join') {
@@ -247,7 +248,10 @@ export function renamePlayer(
   const outLines: string[] = []
   for (let i = 0; i < bodyLines.length; i++) {
     const rawLine = bodyLines[i]
-    const trimmed = rawLine.trim()
+    // 行末コメント (`[ws]# ...`) を先に分離。 parse には body だけ渡し、
+    // 結果文字列の末尾に comment をそのまま付け戻して保持する。
+    const { body: noComment, comment: commentSuffix } = splitTrailingHashComment(rawLine)
+    const trimmed = noComment.trim()
     if (trimmed.length === 0 || trimmed.startsWith('#')) {
       outLines.push(rawLine)
       continue
@@ -270,7 +274,7 @@ export function renamePlayer(
       continue
     }
 
-    outLines.push(serializeStatement(renamed) + tsSuffix)
+    outLines.push(serializeStatement(renamed) + tsSuffix + commentSuffix)
   }
 
   return header + outLines.join('\n')
