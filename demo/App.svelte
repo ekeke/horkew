@@ -13,6 +13,7 @@
     InspectPane,
     AnalysisTable,
     VerticalDensePane,
+    AnalysisErrorBanner,
   } from '../src/lykaon/index.ts'
   import { setVideoTimeGetter } from '../src/lykaon/editor/index.ts'
   import { EditorView } from '@codemirror/view'
@@ -1335,6 +1336,7 @@
       <div class="pane-header">Input</div>
       <div class="pane-body pane-body-input">
         {#if activeKey || trialMode}
+          <AnalysisErrorBanner {ctx} />
           <div class="input-editor">
             <EditorPane
               {ctx}
