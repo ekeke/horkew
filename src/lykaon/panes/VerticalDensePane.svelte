@@ -20,6 +20,17 @@
 
   let insertRevealBusy = $state(false)
 
+  // spoiler 反映トグルの永続化。 AnalysisTable と同じキーで同期するので、
+  // 両ペインを並べた構成でも単独構成でも同じ localStorage 値を共有する。
+  const SPOILER_STORAGE_KEY = 'lykaon.analysisTable.spoilerEnabled'
+  try {
+    const raw = localStorage.getItem(SPOILER_STORAGE_KEY)
+    if (raw !== null) ctx.spoilerEnabled = raw === 'true'
+  } catch { /* ignore */ }
+  $effect(() => {
+    try { localStorage.setItem(SPOILER_STORAGE_KEY, String(ctx.spoilerEnabled)) } catch { /* ignore */ }
+  })
+
   function handleInsertReveal(): void {
     if (insertRevealBusy) return
     if (onInsertRevealRoles) {
@@ -274,10 +285,20 @@
 {/if}
 {#if ctx.analysisColumns.length > 0 && ctx.players.size > 0}
   <div class="vertical-analysis-pane lyk-pane">
-    {#if ctx.villageStatus}
+    {#if ctx.villageStatus || ctx.hasSpoilers}
       <div class="va-meta">
-        <span class="va-meta-day">{currentDay}日目</span>
-        <span class="va-meta-survivors">生存 {alivePlayers}/{totalPlayers}</span>
+        {#if ctx.villageStatus}
+          <span class="va-meta-day">{currentDay}日目</span>
+          <span class="va-meta-survivors">生存 {alivePlayers}/{totalPlayers}</span>
+        {/if}
+        {#if ctx.hasSpoilers}
+          <button
+            class="view-option va-meta-spoiler"
+            class:view-option-off={!ctx.spoilerEnabled}
+            onclick={() => ctx.spoilerEnabled = !ctx.spoilerEnabled}
+            title=".howl の spoiler 行を retar 解析に反映するかどうか"
+          >spoiler: {ctx.spoilerEnabled ? '反映' : '無視'}</button>
+        {/if}
       </div>
     {/if}
     <div class="va-tables">
@@ -765,6 +786,15 @@
   .view-option:hover {
     color: var(--color-text);
     border-color: var(--color-text-muted);
+  }
+
+  .view-option.view-option-off {
+    background: var(--color-bg-sunken);
+    color: var(--color-text-muted);
+  }
+
+  .va-meta-spoiler {
+    margin-left: auto;
   }
 
   .va-assumption-btn {

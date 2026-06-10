@@ -529,7 +529,6 @@
   .view-option.view-option-off {
     background: var(--color-bg-sunken);
     color: var(--color-text-muted);
-    text-decoration: line-through;
   }
 
   .analysis-tables {
