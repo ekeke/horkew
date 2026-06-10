@@ -1,12 +1,23 @@
-use crate::types::{RoleTrait, SystemRole, Seat};
+use crate::types::{EnumSpecies, RoleTrait, SystemRole, Seat};
 use crate::possibilities::{
     Possibilities, ROLE_COUNT, pop_count, bit_indices_from_mask,
     combination_with_replacement_bit,
 };
+use crate::role_sets::roles_by_seer_result;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-const WOLF_BIT: usize = SystemRole::Werewolf.bit_index_const() as usize;
+// 「seerResult='wolf' な役職」 全集合 (現状は werewolf 1 種、 将来複数化に対応).
+// HAMSTER_BITS / FOX_SIGNATURES と同パターン.
+static WOLF_BITS: LazyLock<Vec<usize>> = LazyLock::new(|| {
+    roles_by_seer_result(EnumSpecies::Wolf)
+        .iter()
+        .map(|r| r.bit_index() as usize)
+        .collect()
+});
+static WOLF_SIGNATURES: LazyLock<Vec<u16>> = LazyLock::new(|| {
+    WOLF_BITS.iter().map(|&bit| 1u16 << bit).collect()
+});
 
 // 狐陣営勝利の生存カウント対象 = passive:fox-win-counter trait を持つ全役職 (妖狐 + 子狐).
 // die-when-divined (= 妖狐のみ) で数えると子狐生存だけで勝った世界線が拾えない.
@@ -274,11 +285,15 @@ fn backtrack_for_role_assignment(
                         .iter()
                         .map(|&b| v[b] as u32)
                         .sum();
+                    let added_wolves: u32 = WOLF_BITS
+                        .iter()
+                        .map(|&b| v[b] as u32)
+                        .sum();
                     let res = backtrack_for_role_assignment(
                         config,
                         role_count,
                         index + 1,
-                        selected_wolves + v[WOLF_BIT] as u32,
+                        selected_wolves + added_wolves,
                         selected_hamsters + added_hamsters,
                         path,
                         all,
@@ -345,7 +360,7 @@ pub fn solve_possibilities(
         let seat = i as Seat;
         if count == 1 {
             fixed_map.entry(possibility).or_default().push(seat);
-            if possibility == SystemRole::Werewolf.bit()
+            if WOLF_SIGNATURES.contains(&possibility)
                 && !survivors.get(&seat).copied().unwrap_or(false)
             {
                 fixed_died_wolves += 1;

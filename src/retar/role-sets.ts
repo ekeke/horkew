@@ -38,6 +38,15 @@ export function rolesBySeerResultIn(
 }
 
 /**
+ * trait predicate を満たす役職を systemRoles から全て返す (setup 非依存).
+ * rolesWithTraitIn の setup フィルタ無し版. fixedPositions の確定先など、
+ * setup に存在しなくても systemRoles レベルで意味のある役職を取り出す場面で使う.
+ */
+export function rolesByTrait(kind: RoleTrait['kind'], sub: RoleTrait['sub']): SystemRole[] {
+  return allKnownRoles().filter(r => hasTrait(r, kind, sub))
+}
+
+/**
  * trait predicate を満たす役職を systemRoles から 1 つだけ返す (setup 非依存).
  * 0 件 or 複数件で throw (= 設計上 1 件しか無い前提のロジック箇所で使う).
  * 例: passive:die-when-divined → werehamster.
@@ -48,6 +57,14 @@ export function singleRoleByTrait(kind: RoleTrait['kind'], sub: RoleTrait['sub']
     throw new Error(`singleRoleByTrait(${kind}:${sub}) expected exactly 1 role, got ${matched.length}: ${matched.join(',')}`)
   }
   return matched[0]
+}
+
+/**
+ * seerResult が指定種別の役職を systemRoles から全て返す (setup 非依存).
+ * rolesBySeerResultIn の setup フィルタ無し版.
+ */
+export function rolesBySeerResult(result: EnumSpecies): SystemRole[] {
+  return allKnownRoles().filter(r => systemRoles.get(r)!.seerResult === result)
 }
 
 /**

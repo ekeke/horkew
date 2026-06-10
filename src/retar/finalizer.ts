@@ -5,18 +5,14 @@ import type { AnalyzeContext } from './roleTesters.ts'
 import { solvePossibilities } from './solver.ts'
 import { dumpFinalizePre } from './dump.ts'
 import {
-  singleRoleByTrait,
-  singleRoleBySeerResult,
+  rolesBySeerResult,
   countByTraitIn,
   countBySeerResultIn,
   rolesWithTraitIn,
 } from './role-sets.ts'
 
 // hot path で繰り返し呼ばれるため module-level 解決.
-const guardRole = singleRoleByTrait('action', 'guard')
-const foxRole = singleRoleByTrait('passive', 'die-when-divined')
-const wolfRole = singleRoleBySeerResult('wolf')
-const followFoxRole = singleRoleByTrait('reactive', 'follow-fox-death')
+const wolfRoles = rolesBySeerResult('wolf')
 
 /**
  * seat が夜 `day` の時点で行動可能 (alive) かどうか.
@@ -44,6 +40,8 @@ export function checkDeathCounts(
   setup: Map<SystemRole, number>,
 ): boolean {
   const immoralists = countByTraitIn(setup, 'reactive', 'follow-fox-death')
+  const guardRoles = rolesWithTraitIn(setup, 'action', 'guard')
+  const foxRoles = rolesWithTraitIn(setup, 'passive', 'die-when-divined')
   DAY:
   for ( const [day, killed] of nightKillsByDay.entries() ) {
     if ( vs.day <= day ) continue DAY
@@ -73,8 +71,8 @@ export function checkDeathCounts(
       for ( const [seat, status] of vs.statuses.entries() ) {
         if ( !isAliveAtNight(status, day) ) continue
         if (
-          context.possibilities.hasRole(seat, guardRole)
-          || context.possibilities.hasRole(seat, foxRole)
+          guardRoles.some(r => context.possibilities.hasRole(seat, r))
+          || foxRoles.some(r => context.possibilities.hasRole(seat, r))
         ) {
           continue DAY
         }
@@ -93,6 +91,11 @@ export function updateDeathCountConstraints(
   setup: Map<SystemRole, number>,
 ): boolean {
   const immoralists = countByTraitIn(setup, 'reactive', 'follow-fox-death')
+  const guardRoles = rolesWithTraitIn(setup, 'action', 'guard')
+  const guardCount = countByTraitIn(setup, 'action', 'guard')
+  const followFoxRoles = rolesWithTraitIn(setup, 'reactive', 'follow-fox-death')
+  const foxRoles = rolesWithTraitIn(setup, 'passive', 'die-when-divined')
+  const foxCount = countByTraitIn(setup, 'passive', 'die-when-divined')
   DAY:
   for ( const [day, killed] of nightKillsByDay.entries() ) {
     if ( vs.day <= day ) continue DAY
@@ -111,7 +114,9 @@ export function updateDeathCountConstraints(
       const hamsterDiedThisNight = context.hamstersKilledByDivine.some(h => h.day === day)
       if ( hamsterDiedThisNight ) {
         for ( let i=0; i<immoralists; i++ ) {
-          context.requireOneOf.push( killed.map(seat => ({ seat, role: followFoxRole })) )
+          context.requireOneOf.push(
+            killed.flatMap(seat => followFoxRoles.map(role => ({ seat, role })))
+          )
         }
         continue DAY
       }
@@ -129,22 +134,26 @@ export function updateDeathCountConstraints(
       let aliveGuardExists = false
       for ( const [seat, status] of vs.statuses.entries() ) {
         if ( !isAliveAtNight(status, day) ) continue
-        if ( context.possibilities.hasRole(seat, foxRole) ) aliveFoxExists = true
-        if ( context.possibilities.hasRole(seat, guardRole) ) aliveGuardExists = true
+        if ( foxRoles.some(r => context.possibilities.hasRole(seat, r)) ) aliveFoxExists = true
+        if ( guardRoles.some(r => context.possibilities.hasRole(seat, r)) ) aliveGuardExists = true
       }
       if ( !aliveFoxExists && !aliveGuardExists ) return false
-      if ( !aliveFoxExists && (setup.get(guardRole) ?? 0) === 1 ) {
-        // 説明は (B) のみ + 狩人は 1 体 → 夜 day に alive でない seat の guardRole を deny
+      if ( !aliveFoxExists && guardCount === 1 ) {
+        // 説明は (B) のみ + 狩人は 1 体 → 夜 day に alive でない seat の guard 役職を deny
         for ( const [seat, status] of vs.statuses.entries() ) {
           if ( isAliveAtNight(status, day) ) continue
-          if ( !context.possibilities.denyRole(seat, guardRole) ) return false
+          for ( const r of guardRoles ) {
+            if ( !context.possibilities.denyRole(seat, r) ) return false
+          }
         }
       }
-      if ( !aliveGuardExists && (setup.get(foxRole) ?? 0) === 1 ) {
-        // 説明は (A) のみ + 狐は 1 体 → 夜 day に alive でない seat の foxRole を deny
+      if ( !aliveGuardExists && foxCount === 1 ) {
+        // 説明は (A) のみ + 狐は 1 体 → 夜 day に alive でない seat の fox 役職を deny
         for ( const [seat, status] of vs.statuses.entries() ) {
           if ( isAliveAtNight(status, day) ) continue
-          if ( !context.possibilities.denyRole(seat, foxRole) ) return false
+          for ( const r of foxRoles ) {
+            if ( !context.possibilities.denyRole(seat, r) ) return false
+          }
         }
       }
       continue DAY
@@ -304,7 +313,7 @@ export function finalize(
     // Count surviving wolves and hamsters
     let survWolves = 0, survHamsters = 0
     for (const seat of survivors) {
-      if (context.possibilities.isActualRole(seat, wolfRole)) survWolves++
+      if (wolfRoles.some(r => context.possibilities.isActualRole(seat, r))) survWolves++
       if (hamsterWinRoles.some(r => context.possibilities.isActualRole(seat, r))) survHamsters++
     }
     const checkCondition = (minW: number, maxW: number, minH: number, maxH: number) =>

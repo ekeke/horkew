@@ -4,18 +4,21 @@ import { generateCombinations } from './combinatorics.ts'
 import { testRole as runRoleTest, saveContext, restoreContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
 import { buildRoleTestPlan } from './planBuilder.ts'
-import { humanRolesIn, liarRolesIn, poweredVillageRolesIn, hasTrait, singleRoleByTrait, singleRoleBySeerResult, singleRoleByPredicate } from './role-sets.ts'
+import { humanRolesIn, liarRolesIn, poweredVillageRolesIn, hasTrait, singleRoleByPredicate, rolesByTrait, rolesBySeerResult } from './role-sets.ts'
 import { systemRoles } from '../types/index.ts'
 
 // 単一役職 const (役職追加時に他役職が新規に該当しなければ自動追従).
-const wolfRole = singleRoleBySeerResult('wolf')
-const foxRole = singleRoleByTrait('passive', 'die-when-divined')
+const wolfRoles = rolesBySeerResult('wolf')
+const foxRoles = rolesByTrait('passive', 'die-when-divined')
 const villagerRole = singleRoleByPredicate(r => {
   const x = systemRoles.get(r)!
   return x.faction === 'village' && x.traits.length === 0
 })
-const nekomataRole = singleRoleByTrait('reactive', 'curse-on-executed')
-const immoralistRole = singleRoleByTrait('reactive', 'follow-fox-death')
+// fixedPositions の確定先として使う集合. systemRoles 全体から取るので setup 非依存.
+// 将来 同 trait を持つ役職が複数になったら、 fixedPositions に「集合のどれか」 を表現する
+// 仕組みが必要 (現状は 1 役職前提で [0] を使う).
+const nekomataRoles = rolesByTrait('reactive', 'curse-on-executed')
+const immoralistRoles = rolesByTrait('reactive', 'follow-fox-death')
 import type { RoleTest } from './planBuilder.ts'
 import { finalize as runFinalize, updateDeathCountConstraints, createDebugStash } from './finalizer.ts'
 import type { DebugStash } from './finalizer.ts'
@@ -180,7 +183,7 @@ export class VillageRetar {
     // 単独の夜死体は狼襲撃によるものなので、被害者は人狼ではない
     for ( const [, killed] of this.nightKillsByDay ) {
       if ( killed.length === 1 ) {
-        this.initialPossibilities.denyRole(killed[0], wolfRole)
+        for ( const r of wolfRoles ) this.initialPossibilities.denyRole(killed[0], r)
       }
     }
 
@@ -244,7 +247,7 @@ export class VillageRetar {
     // 単独の夜死体は狼襲撃によるものなので、被害者は人狼ではない
     for ( const [, killed] of this.nightKillsByDay ) {
       if ( killed.length === 1 ) {
-        this.initialPossibilities.denyRole(killed[0], wolfRole)
+        for ( const r of wolfRoles ) this.initialPossibilities.denyRole(killed[0], r)
       }
     }
 
@@ -329,11 +332,11 @@ export class VillageRetar {
 
     // 狼ペア否定の早期適用: 片方がwerewolf確定なら他方からdeny
     for ( const [seatA, seatB] of this.options.wolfPairDenyals ) {
-      if ( fixedPositions.get(seatA) === wolfRole ) {
-        this.initialPossibilities.denyRole(seatB, wolfRole)
+      if ( fixedPositions.get(seatA) === wolfRoles[0] ) {
+        for ( const r of wolfRoles ) this.initialPossibilities.denyRole(seatB, r)
       }
-      if ( fixedPositions.get(seatB) === wolfRole ) {
-        this.initialPossibilities.denyRole(seatA, wolfRole)
+      if ( fixedPositions.get(seatB) === wolfRoles[0] ) {
+        for ( const r of wolfRoles ) this.initialPossibilities.denyRole(seatA, r)
       }
     }
 
@@ -341,21 +344,21 @@ export class VillageRetar {
     for ( const [seat, status] of village.statuses.entries() ) {
       if ( !status.surviving ) {
         if ( status.causeOfDeath === 'cursed_by_killed_nekomata' ) {
-          fixedPositions.set(seat, wolfRole)
+          fixedPositions.set(seat, wolfRoles[0])
         }
         else if ( status.causeOfDeath === 'cursed_by_executed_nekomata' ) {
           for ( const [nekoSeat, nekoStatus] of village.statuses.entries() ) {
             if ( nekoStatus.surviving ) continue
             if ( nekoStatus.causeOfDeath === 'execution' && status.diedDay === nekoStatus.diedDay ) {
-              fixedPositions.set(nekoSeat, nekomataRole)
+              fixedPositions.set(nekoSeat, nekomataRoles[0])
             }
           }
         }
         else if ( status.causeOfDeath === 'follow_executed_hamster') {
-          fixedPositions.set(seat, immoralistRole)
+          fixedPositions.set(seat, immoralistRoles[0])
         }
         else if ( status.causeOfDeath === 'follow_killed_hamster' ) {
-          fixedPositions.set(seat, immoralistRole)
+          fixedPositions.set(seat, immoralistRoles[0])
         }
       }
     }
@@ -422,17 +425,17 @@ export class VillageRetar {
     if (this.vs.result === 'villager_won') {
       // 村勝利: 最終死者に狼が1以上含まれる
       // 狼候補が1席のみなら確定できる
-      const wolfCandidates = this.lastDeaths.filter(seat => this.initialPossibilities.hasRole(seat, wolfRole))
+      const wolfCandidates = this.lastDeaths.filter(seat => wolfRoles.some(r => this.initialPossibilities.hasRole(seat, r)))
       if (wolfCandidates.length === 1) {
-        this.initialPossibilities.fixRole(wolfCandidates[0], wolfRole)
+        this.initialPossibilities.fixRole(wolfCandidates[0], wolfRoles[0])
       }
     }
     else if (this.vs.result === 'werewolf_won') {
       // 狼勝利: 飽和のトリガーとして非狼・非狐が最低1人含まれる
       // 固定席も含めて人間（非狼・非狐）が既にいれば制約は満たされている
       const hasConfirmedHuman = this.lastDeaths.some(seat => {
-        const isWolfOrHamster = this.initialPossibilities.hasRole(seat, wolfRole)
-          || this.initialPossibilities.hasRole(seat, foxRole)
+        const isWolfOrHamster = wolfRoles.some(r => this.initialPossibilities.hasRole(seat, r))
+          || foxRoles.some(r => this.initialPossibilities.hasRole(seat, r))
         // 固定席が人間 or 狼/狐の可能性がない席がある → 制約充足
         return !isWolfOrHamster
       })
@@ -440,8 +443,12 @@ export class VillageRetar {
         // 全員が狼/狐になりうる → 狼/狐候補が1席のみならその席は人間
         const unfixed = this.lastDeaths.filter(seat => !this.initialPossibilities.isFixed(seat))
         if (unfixed.length === 1) {
-          this.initialPossibilities.denyRole(unfixed[0], wolfRole)
-          this.initialPossibilities.denyRole(unfixed[0], foxRole)
+          for ( const r of wolfRoles ) {
+            this.initialPossibilities.denyRole(unfixed[0], r)
+          }
+          for ( const r of foxRoles ) {
+            this.initialPossibilities.denyRole(unfixed[0], r)
+          }
         }
       }
     }
@@ -510,9 +517,9 @@ export class VillageRetar {
     this.hamsterWinPath = 'village'
     const poss1 = originalPossibilities.cloneInstance()
     let path1Valid = true
-    const wolfCandidates = this.lastDeaths.filter(seat => poss1.hasRole(seat, wolfRole))
+    const wolfCandidates = this.lastDeaths.filter(seat => wolfRoles.some(r => poss1.hasRole(seat, r)))
     if (wolfCandidates.length === 1) {
-      path1Valid = poss1.fixRole(wolfCandidates[0], wolfRole)
+      path1Valid = poss1.fixRole(wolfCandidates[0], wolfRoles[0])
     } else if (wolfCandidates.length === 0) {
       path1Valid = false
     }
@@ -534,14 +541,21 @@ export class VillageRetar {
     for (const seat of this.lastDeaths) {
       if (poss2.isFixed(seat)) {
         // 確定席が狼/狐なら飽和パスの前提と矛盾 → 無効
-        if (poss2.hasRole(seat, wolfRole) || poss2.hasRole(seat, foxRole)) {
+        if (wolfRoles.some(r => poss2.hasRole(seat, r)) || foxRoles.some(r => poss2.hasRole(seat, r))) {
           path2Valid = false
           break
         }
         continue
       }
-      if (!poss2.denyRole(seat, wolfRole)) { path2Valid = false; break }
-      if (!poss2.denyRole(seat, foxRole)) { path2Valid = false; break }
+      let wolfDenied = true
+      for ( const r of wolfRoles ) {
+        if (!poss2.denyRole(seat, r)) { wolfDenied = false; break }
+      }
+      if (!wolfDenied) { path2Valid = false; break }
+      for ( const r of foxRoles ) {
+        if (!poss2.denyRole(seat, r)) { path2Valid = false; break }
+      }
+      if (!path2Valid) break
     }
     if (path2Valid) {
       this.initialPossibilities = poss2
@@ -645,13 +659,13 @@ export class VillageRetar {
     // 各ペア(A,B) → 「Aからwerewolf deny」or「Bからwerewolf deny」の2択
     const denyOneOf: { seat: Seat, role: SystemRole }[][] = []
     for ( const [seatA, seatB] of this.options.wolfPairDenyals ) {
-      const aCanBeWolf = this.context.possibilities.hasRole(seatA, wolfRole)
-      const bCanBeWolf = this.context.possibilities.hasRole(seatB, wolfRole)
+      const aCanBeWolf = wolfRoles.some(r => this.context.possibilities.hasRole(seatA, r))
+      const bCanBeWolf = wolfRoles.some(r => this.context.possibilities.hasRole(seatB, r))
       // 両方がwolf候補でなければ制約は既に満たされている
       if ( !aCanBeWolf || !bCanBeWolf ) continue
       denyOneOf.push([
-        { seat: seatA, role: wolfRole },
-        { seat: seatB, role: wolfRole },
+        { seat: seatA, role: wolfRoles[0] },
+        { seat: seatB, role: wolfRoles[0] },
       ])
     }
 
