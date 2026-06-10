@@ -725,9 +725,14 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   }
 
   function applyPinAssumption(seat: number, role: SystemRole, line: number): void {
-    if (spoilerDeniedRoles.has(seat)) {
+    // alias 由来の denied set に新 role が**含まれる**場合のみ矛盾。
+    // 例: `!Alice=人外` (hostile alias → village 役職を deny) の後に `!Alice=人狼` が来ても
+    // werewolf は denied set に含まれないため refinement として許容。
+    // 一方 `!Alice=人外` + `!Alice=seer` は seer ∈ denied(hostile) なので矛盾。
+    const deniedSet = spoilerDeniedRoles.get(seat)
+    if (deniedSet && deniedSet.has(role)) {
       const name = players.get(seat) ?? `#${seat}`
-      throw new Error(`spoiler: ${name} に対する矛盾する仮定 (alias vs ${role}) (line ${line})`)
+      throw new Error(`spoiler: ${name} に対する矛盾する仮定 (alias deny vs ${role}) (line ${line})`)
     }
     const existing = assumptions.get(seat)
     if (existing !== undefined && existing !== role) {
