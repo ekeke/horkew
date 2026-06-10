@@ -80,7 +80,7 @@ Horkew の `.howl` 形式ログを編集するための **CodeMirror ベース�
   import { onDestroy } from 'svelte'
   import {
     createAnalysisContext,
-    EditorPane, StatusPane, AnalysisTable, HatiPane,
+    EditorPane, AnalysisErrorBanner, StatusPane, AnalysisTable, HatiPane,
   } from 'horkew/lykaon'
   import 'horkew/lykaon/theme.css'
 
@@ -89,7 +89,10 @@ Horkew の `.howl` 形式ログを編集するための **CodeMirror ベース�
 </script>
 
 <div class="layout">
-  <EditorPane {ctx} />
+  <div class="editor-col">
+    <AnalysisErrorBanner {ctx} />
+    <EditorPane {ctx} />
+  </div>
   <div class="side">
     <StatusPane {ctx} />
     <AnalysisTable {ctx} />
@@ -102,6 +105,26 @@ EditorPane で `.howl` を編集すると Web Worker 経由で Retar が走り�
 `AnalysisTable` / `HatiPane` の表示が即時更新される。 ペイン → 行クリックで EditorPane が
 ジャンプする (`ctx.onJump` 経由)。
 
+### ⚠️ AnalysisErrorBanner は consumer 責務で配置すること
+
+`AnalysisErrorBanner` は preprocess / parse / bridge 段で throw された例外を赤 banner に
+出すペイン。 `LykaonLayout` を使う場合は右ペイン上部に自動配置されるが、
+**個別 pane を組む consumer (上の例 / `demo/App.svelte` / mirurou 等) は自分でこの Banner を
+任意の位置にマウントする責務を持つ**。 これを怠ると、 howl 構文エラーや spoiler 矛盾で
+`StatusPane` / `AnalysisTable` が黙って空になり、 ユーザーは原因に気付けない
+(`{#if ctx.villageStatus}` ガードで何も描画されないため)。
+
+**EditorPane の内側には組み込まない**こと。 CodeMirror は initial mount 時のサイズで
+内部レイアウトを計算するので、 動的に出現する Banner で `.editor-pane` の高さが変わると
+カーソル位置がジャンプして使い勝手が悪い (2026-06-10 に commit 7d2a35e で組み込んだら
+revert 指示が出た)。 Banner は `EditorPane` の **兄弟要素として外側**に置くこと。
+
+Banner は内部で `ctx.preprocessError` / `ctx.parseError` / `ctx.bridgeError` (いずれも
+`Error | null`) を読み、 上流の段から優先的に 1 件だけ表示する。 throw メッセージには
+`(line N)` / プレイヤー名 / 役職名が含まれるので、 ユーザーは編集画面の該当行を直せばよい。
+同時に `console.error('[lykaon] <stage> error:', err)` も吐くので、 API 利用 (DevTools) でも
+気付ける。
+
 ## エクスポート
 
 | 名前 | 役割 |
@@ -113,6 +136,7 @@ EditorPane で `.howl` を編集すると Web Worker 経由で Retar が走り�
 | `StatusPane` | 生存者・投票・襲撃・カミングアウト・死亡履歴の集約表示 |
 | `VerticalStatusPane` | 狭幅カラム用の縦長 StatusPane。 タブで集約/投票を切り替え、 役職セクションごとにリスト表示 |
 | `AnalysisTable` | 役職可能性 × 席 のテーブル + 仮説サイドバー |
+| `AnalysisErrorBanner` | preprocess / parse / bridge エラーを赤 banner に表示。 `LykaonLayout` 利用時は自動表示、 個別 pane 構成では consumer 責務で配置 (詳細は §解析ペインを足す) |
 | `HatiPane` | 詰み探索結果 |
 | `InspectPane` | fenrir/skoll の game ログ閲覧 (時系列・retar スナップショット) |
 
@@ -157,6 +181,9 @@ prepend など行数が変わる変換 (例: 解析用に setup/JOIN を K 行�
   `dict` / `analysisColumns`
 - 死亡カテゴリ: `deadSeats` / `nightKilledSeats` / `executedSeats` / `claimShortNames`
 - 解析完了判定: `allRolesDetermined`
+- パイプライン例外 (`Error | null`): `preprocessError` / `parseError` / `bridgeError` —
+  preprocess hook / howl parser / VillageStatus 構築が throw すると該当段の Error が入る。
+  上流の段から優先的に 1 件読みたいときは `AnalysisErrorBanner` が便利
 
 ### 解析結果 ($state、worker から書き込まれる)
 
