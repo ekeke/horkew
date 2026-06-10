@@ -21,7 +21,7 @@ import type {
   AttackStatement, LynchStatement, SuddenDeathStatement, CorpseFoundStatement,
   PeaceStatement, DayMarkStatement, CurseStatement, FollowStatement, ForecastStatement,
   OverStatement, AssertStatement, MasonStatement,
-  RevealStatement, SpoilerStatement, SpeechStatement,
+  RevealStatement, SpoilerStatement, AnnounceStatement, SpeechStatement,
   VideoSourceStatement, TimestampStatement, UnknownStatement,
   Species, GameResult, Role, Assertion,
 } from './statement.ts'
@@ -254,6 +254,7 @@ export function serializeStatement(stmt: Statement): string {
     case 'mason':      return serializeMason(stmt as MasonStatement)
     case 'reveal':     return serializeReveal(stmt as RevealStatement)
     case 'spoiler':    return serializeSpoiler(stmt as SpoilerStatement)
+    case 'announce':   return serializeAnnounce(stmt as AnnounceStatement)
     case 'speech':     return serializeSpeech(stmt as SpeechStatement)
     case 'videoSource':return (stmt as VideoSourceStatement).url
     case 'timestamp':  return `@${(stmt as TimestampStatement).raw}`
@@ -341,6 +342,12 @@ function serializeSpoiler(stmt: SpoilerStatement): string {
   }
   // role pin 形式 (例: `!Alice=占い`)。 parser 受理形に揃える。
   return `!${stmt.player}=${stmt.role}`
+}
+
+function serializeAnnounce(stmt: AnnounceStatement): string {
+  // 公式アナウンス (例: `※ Alice 契約者`、 `※ Alice、Bob 契約者`)。
+  // parser 受理形に揃える: 複数 target は全角カンマで連結.
+  return `※ ${stmt.targets.join('、')} ${stmt.role}`
 }
 
 function serializeSpeech(stmt: SpeechStatement): string {

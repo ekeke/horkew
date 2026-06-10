@@ -219,6 +219,20 @@ pub enum RoleTrait {
     ChannelWolfChat,
 }
 
+impl RoleTrait {
+    /// kind=passive な variant か (TS 側の `t.kind === 'passive'` 判定相当).
+    /// powered_village_roles_in 等で「能力 trait のみ抽出」するために使う.
+    pub(crate) fn is_passive(&self) -> bool {
+        matches!(self,
+            RoleTrait::PassiveAttackImmune
+            | RoleTrait::PassiveDieWhenDivined
+            | RoleTrait::PassiveVisibleAsFox
+            | RoleTrait::PassiveFoxWinCounter
+            | RoleTrait::PassivePairRequired
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CauseOfDeath {
