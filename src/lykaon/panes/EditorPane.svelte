@@ -89,6 +89,7 @@
     const setup = ctx.setup
     const dict = ctx.dict
     const cursorLine = ctx.cursorLine
+    const meta = ctx.meta
 
     const stmtInfo = statements.map(toStmtInfo)
     const allStmtInfo = fullStatements.map(toStmtInfo)
@@ -128,7 +129,14 @@
         mod.setPlayerList.of(playerList),
         mod.setSetup.of(setup),
         mod.setCurrentDay.of(vs?.day ?? 1),
-        mod.setGameStats.of({ day: vs?.day ?? 1, executions: vs?.executions.size ?? 0 }),
+        mod.setGameStats.of({
+          day: vs?.day ?? 1,
+          executions: vs?.executions.size ?? 0,
+          seerFirstSeek: (meta?.rules?.['role.seer.first-seek'] as 'none' | 'no-wolf' | 'all' | undefined) ?? 'all',
+          firstVictim: (meta?.rules?.['general.first-victim'] as 'none' | 'villager-only' | 'random' | undefined) ?? 'random',
+          omitFirstDay: meta?.rules?.['general.omitFirstDay'] === true,
+          bodyguardAllowContinuous: meta?.rules?.['role.bodyguard.allow-continuous-protection'] !== false,
+        }),
       ],
     })
   })

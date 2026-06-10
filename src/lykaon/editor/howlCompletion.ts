@@ -224,12 +224,35 @@ const currentDayField = StateField.define<number>({
 
 // ---- ゲーム進行統計 (CO report 数の上限算出用) ----
 
-export type GameStats = { day: number, executions: number }
+export type SeerFirstSeek = 'none' | 'no-wolf' | 'all'
+export type FirstVictim = 'none' | 'villager-only' | 'random'
+
+export type GameStats = {
+  day: number
+  executions: number
+  // role.seer.first-seek 規定 (デフォルト 'all'). 'none' のときは初夜の seer 行動が無効。
+  seerFirstSeek: SeerFirstSeek
+  // general.first-victim 規定 (デフォルト 'random'). 'none' 以外のとき engine は初夜の
+  // bodyguard 行動を無視して initial victim を強制するため、 Night 0 guard は事実上無効。
+  firstVictim: FirstVictim
+  // general.omitFirstDay 規定 (デフォルト false). true のとき howl の 1日目朝 = Night 0 後の
+  // 議論 (初夜結果がここで報告される). false のとき 1日目朝には過去夜が無い (= 報告不可).
+  omitFirstDay: boolean
+  // role.bodyguard.allow-continuous-protection 規定 (デフォルト true).
+  // false のとき 2 夜連続で同一プレイヤーを護衛できないので、 行内の直前護衛先を補完候補から除外する。
+  bodyguardAllowContinuous: boolean
+}
 
 export const setGameStats = StateEffect.define<GameStats>()
 
 const gameStatsField = StateField.define<GameStats>({
-  create() { return { day: 1, executions: 0 } },
+  create() {
+    return {
+      day: 1, executions: 0,
+      seerFirstSeek: 'all', firstVictim: 'random', omitFirstDay: false,
+      bodyguardAllowContinuous: true,
+    }
+  },
   update(stats, tr) {
     for (const e of tr.effects) {
       if (e.is(setGameStats)) return e.value
@@ -240,7 +263,7 @@ const gameStatsField = StateField.define<GameStats>({
 
 // ---- 候補型と文脈型 ----
 
-type Category = 'player' | 'player_start' | 'role' | 'action' | 'arrow' | 'co_role' | 'denial_co_role' | 'standalone' | 'result' | 'gameresult' | 'day'
+export type Category = 'player' | 'player_start' | 'role' | 'action' | 'arrow' | 'co_role' | 'denial_co_role' | 'standalone' | 'result' | 'gameresult' | 'day'
 
 type HowlCandidateDef = {
   label: string
@@ -381,10 +404,10 @@ const rightArrowRe = new RegExp(`^${V.rightArrow}$`)
 const leftArrowRe = new RegExp(`(?:${V.leftArrow})`)
 const actionLabels = new Set(actionCandidates.filter(c => c.category === 'action').map(c => c.label))
 const resultLabels = new Set(resultCandidates.map(c => c.label))
-const coRoleLabels = new Set(coRoleCandidates.map(c => c.label))
-
 /** CO宣言キーワード (占い師CO等、非COを除く) */
 const coKeywordLabels = new Set(coRoleCandidates.filter(c => c.category === 'co_role').map(c => c.label))
+/** 非CO 宣言キーワード (非占い師CO 等)。 宣言だけで完結する terminal */
+const denialCoLabels = new Set(coRoleCandidates.filter(c => c.category === 'denial_co_role').map(c => c.label))
 
 /** 行内にCOキーワード(占い師CO等)があるか — CO宣言行でのみ複数結果チェーンを許可 */
 function hasCoKeyword(lineText: string): boolean {
@@ -424,9 +447,27 @@ function detectCoType(lineText: string, players: PlayerEntry[]): CoType {
   return 'other'
 }
 
-// CO type ごとに、ゲーム進行状況から報告可能な結果数の上限を返す
+// CO type ごとに、 ゲーム進行状況から報告可能な結果数の上限を返す。
+//
+// 過去夜の数:
+//   pastNights = (day - 1) + (omitFirstDay ? 1 : 0)
+//   - omitFirstDay=false (default): 1日目朝には過去夜が無い (Day 2 朝で初夜結果が出る)
+//   - omitFirstDay=true:           1日目朝が Night 0 後 (= 初夜結果がそこで出る)
+//
+// seer: 初夜行動は role.seer.first-seek で制限される。 'none' のとき初夜結果が報告不可。
+// bodyguard: 初夜護衛は general.first-victim != 'none' のとき engine が initial victim を
+//   強制するため事実上無効。 'none' のときだけ Night 0 guard が機能する。
+// medium: 過去処刑数のみが上限。 omitFirstDay 等とは無関係。
 function maxReportable(coType: CoType, stats: GameStats): number {
-  if (coType === 'seer' || coType === 'bodyguard') return Math.max(0, stats.day - 1)
+  const pastNights = Math.max(0, (stats.day - 1) + (stats.omitFirstDay ? 1 : 0))
+  if (coType === 'seer') {
+    if (stats.seerFirstSeek === 'none' && pastNights >= 1) return pastNights - 1
+    return pastNights
+  }
+  if (coType === 'bodyguard') {
+    if (stats.firstVictim !== 'none' && pastNights >= 1) return pastNights - 1
+    return pastNights
+  }
   if (coType === 'medium') return stats.executions
   return Infinity // mason, other は上限なし
 }
@@ -453,7 +494,7 @@ function countReportedInCo(lineText: string, coType: CoType): number {
  * カーソル前の行テキストから、次に来るべき候補カテゴリを推定する。
  * null を返した場合、チェーン補完は起動しない。
  */
-function inferContext(beforeCursor: string, players: PlayerEntry[], stats: GameStats): Category[] | null {
+export function inferContext(beforeCursor: string, players: PlayerEntry[], stats: GameStats): Category[] | null {
   const trimmed = beforeCursor.trimEnd()
   if (trimmed === '') {
     // 行頭: プレイヤー名 + 行頭専用名 + アクション(転置記法) + スタンドアロンKW + 試合結果
@@ -499,8 +540,11 @@ function inferContext(beforeCursor: string, players: PlayerEntry[], stats: GameS
   // 矢印 → プレイヤー名
   if (arrowRe.test(lastToken)) return ['player']
 
-  // 役職名CO / 非役職名CO → CO種別に応じた候補
-  if (coRoleLabels.has(lastToken)) {
+  // 非役職名CO (denial) は宣言だけで完結 — terminal
+  if (denialCoLabels.has(lastToken)) return null
+
+  // 役職名CO → CO種別に応じた候補
+  if (coKeywordLabels.has(lastToken)) {
     const coType = detectCoType(trimmed, players)
     // 役職行動を含まないCO (村人/人狼/狐/狂人/狂信者/背徳者/猫又) は宣言だけで完結
     if (coType === 'other') return null
@@ -553,14 +597,27 @@ function inferContext(beforeCursor: string, players: PlayerEntry[], stats: GameS
       }
     }
 
-    // 行頭のプレイヤー名 → CO済みなら役職に応じた候補を優先
+    // 行頭のプレイヤー名 → CO済みなら役職に応じた候補を優先。
+    // 報告系 (day / player / result) は capReached のとき除外し、 投票/CO/アクション等
+    // の汎用候補のみ返す。 これにより初日CO 狩人 (= pastNights=0 で cap=0) で「行頭 +
+    // 空白」 直後に 「player」 候補が誤って出るのを防ぐ。
     if (beforeLastToken === '') {
       const firstPlayer = players.find(p => p.name === lastToken || p.shortName === lastToken)
       const firstCoType = coTypeOf(firstPlayer?.claimingRole)
-      if (firstCoType === 'seer') return ['day', 'player', 'arrow', 'co_role', 'denial_co_role', 'action', 'result']
-      if (firstCoType === 'medium') return ['day', 'result', 'arrow', 'co_role', 'denial_co_role', 'action']
-      if (firstCoType === 'bodyguard') return ['day', 'player', 'arrow', 'co_role', 'denial_co_role', 'action']
-      if (firstCoType === 'mason') return ['player', 'arrow', 'co_role', 'denial_co_role', 'action']
+      const baseCategories: Category[] = ['arrow', 'co_role', 'denial_co_role', 'action']
+      if (firstCoType === 'seer') {
+        if (capReached('seer')) return baseCategories
+        return ['day', 'player', ...baseCategories, 'result']
+      }
+      if (firstCoType === 'medium') {
+        if (capReached('medium')) return baseCategories
+        return ['day', 'result', ...baseCategories]
+      }
+      if (firstCoType === 'bodyguard') {
+        if (capReached('bodyguard')) return baseCategories
+        return ['day', 'player', ...baseCategories]
+      }
+      if (firstCoType === 'mason') return ['player', ...baseCategories]
     }
     return ['arrow', 'co_role', 'denial_co_role', 'action', 'result']
   }
@@ -619,6 +676,31 @@ function candidatesToCompletions(candidates: HowlCandidate[]): Completion[] {
 
 function filterByCategories(candidates: HowlCandidate[], categories: Category[]): HowlCandidate[] {
   return candidates.filter(c => categories.includes(c.category))
+}
+
+/**
+ * 連続護衛禁止 (role.bodyguard.allow-continuous-protection=false) のとき、
+ * bodyguard CO 行内の直前護衛先を補完候補から除外するためのラベル名を返す。
+ *
+ * 行頭プレイヤーが bodyguard claim、 もしくは行内に bodyguard CO キーワードがある行で
+ * のみ機能する。 beforeCursor を末尾から走査して最初に見つかったプレイヤー名トークン
+ * (= 直前護衛先) を返す。 「同じ夜の同じ人を再指定する」 ケースは想定しない。
+ */
+export function getContinuousProtectionExclusion(
+  beforeCursor: string, lineText: string, players: PlayerEntry[]
+): string | null {
+  if (detectCoType(lineText, players) !== 'bodyguard') return null
+  const tokens = beforeCursor.split(/[\s,;:、，；：]+/).filter(t => t.length > 0)
+  // 行頭プレイヤー (= CO 主体) は除外対象に含めない。 後ろから 1 つ前まで走査。
+  for (let i = tokens.length - 1; i >= 1; i--) {
+    const t = tokens[i]
+    for (const p of players) {
+      if (p.name === t || p.shortName === t || p.aliases.includes(t)) {
+        return p.shortName || p.name
+      }
+    }
+  }
+  return null
 }
 
 /** ←行から除外すべき名前 (被投票者 + 既出投票者 + 死亡者) を返す */
@@ -731,6 +813,12 @@ const howlCompletionSource: CompletionSource = (context) => {
       }
     }
 
+    // 連続護衛禁止: 行内の直前護衛先を player 候補から除外
+    if (!gameStats.bodyguardAllowContinuous && categories.includes('player')) {
+      const exclude = getContinuousProtectionExclusion(beforeCursor, line.text, players)
+      if (exclude) filtered = filtered.filter(c => c.label !== exclude)
+    }
+
     if (filtered.length === 0) return null
 
     const options = candidatesToCompletions(filtered)
@@ -777,6 +865,12 @@ const howlCompletionSource: CompletionSource = (context) => {
     if (excluded.size > 0) {
       candidates = candidates.filter(c => !excluded.has(c.label))
     }
+  }
+
+  // 連続護衛禁止: 行内の直前護衛先を player 候補から除外
+  if (!gameStats.bodyguardAllowContinuous && categories.includes('player')) {
+    const exclude = getContinuousProtectionExclusion(beforeWord, line.text, players)
+    if (exclude) candidates = candidates.filter(c => c.label !== exclude)
   }
 
   // テキストマッチフィルタ (先頭一致を優先、substring は後段)
