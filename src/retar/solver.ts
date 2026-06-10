@@ -2,7 +2,6 @@ import type { SystemRole, Seat } from '../types/index.ts'
 import { dumpSolveResult } from './dump.ts'
 import {
   Possibilities,
-  RoleSignatureBits,
   popCount,
   combinationWithReplacementBit,
   bitIndicesFromMask,

@@ -4,7 +4,7 @@ import { generateCombinations } from './combinatorics.ts'
 import { testRole as runRoleTest, saveContext, restoreContext } from './roleTesters.ts'
 import type { AnalyzeContext, RoleTesterEnv } from './roleTesters.ts'
 import { buildRoleTestPlan } from './planBuilder.ts'
-import { humanRolesIn, liarRolesIn, poweredVillageRolesIn, hasTrait, singleRoleByTrait, singleRoleByPredicate, rolesByTrait, rolesBySeerResult } from './role-sets.ts'
+import { humanRolesIn, liarRolesIn, poweredVillageRolesIn, hasTrait, singleRoleByPredicate, rolesByTrait, rolesBySeerResult } from './role-sets.ts'
 import { systemRoles } from '../types/index.ts'
 
 // 単一役職 const (役職追加時に他役職が新規に該当しなければ自動追従).

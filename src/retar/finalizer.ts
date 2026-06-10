@@ -5,7 +5,6 @@ import type { AnalyzeContext } from './roleTesters.ts'
 import { solvePossibilities } from './solver.ts'
 import { dumpFinalizePre } from './dump.ts'
 import {
-  singleRoleByTrait,
   rolesBySeerResult,
   countByTraitIn,
   countBySeerResultIn,
