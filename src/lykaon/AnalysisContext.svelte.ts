@@ -15,9 +15,17 @@ import type { SystemRole, SeatStatus, VillageStatus, CauseOfDeath } from '../typ
 import { systemRoles } from '../types/index.ts'
 import type { Statement } from '../howl/statement.ts'
 import type { FlexibleDictionary } from '../howl/flexibleDictionary.ts'
-import { parse } from '../howl/parser.ts'
-import { buildVillageStatus } from '../howl/bridge.ts'
 import { statementsToPublicEvents } from '../howl/events-bridge.ts'
+import {
+  safeParse,
+  safeBuildVillage,
+  normalizePreprocess,
+  type ParsedResult,
+  type BridgeResult,
+  type Bridge,
+  type PreprocessResult,
+  type HowlPreprocessor,
+} from './parseHelpers.ts'
 import type { GameEvent } from '../lupa/index.ts'
 import { serializeVillageStatus } from '../retar/wasm-helpers.ts'
 import { stringifyStatements, type StringifiedLine } from './stringify.ts'
@@ -82,20 +90,9 @@ function isMainCoRole(claimingRole: string): boolean {
  * prepend 等で行数が変わる変換は { text, lineOffset } を返すこと。
  * lineOffset = parse 入力の先頭に増えた行数 (editor 座標 → parse 座標の +オフセット)。
  */
-export type PreprocessResult = { text: string, lineOffset: number }
-
-/**
- * editor のテキストを parse 直前に変換するフック。
- * 返した文字列が howl parser への入力になる。 editor 表示自体は変えない。
- *
- * 用途: マクロ展開、 consumer 固有のショートカット記法、テンプレ注入など。
- * 例外を投げた場合は元の text にフォールバックする (safeParse と同じ方針)。
- *
- * prepend など行数が変わる変換を入れる場合は string ではなく PreprocessResult を返し、
- * lineOffset に前置した行数 K を入れること。 AnalysisContext は cursor と statement.line /
- * sourceLines を K だけシフトしてエディタ座標と parse 座標のズレを吸収する。
- */
-export type HowlPreprocessor = (text: string) => string | PreprocessResult
+// PreprocessResult / HowlPreprocessor は parseHelpers.ts に移動 (test 用に独立 module 化)。
+// 後方互換のため re-export する。
+export type { PreprocessResult, HowlPreprocessor } from './parseHelpers.ts'
 
 /**
  * createAnalysisContext / new AnalysisContext のオプション。
@@ -187,38 +184,8 @@ function buildSourceLines(statements: Statement[], dict: FlexibleDictionary): So
   return { survivor, claimRow, claimCell, kill, exec, vote }
 }
 
-type ParsedResult = { meta: Record<string, unknown>, statements: Statement[] }
-
-function safeParse(text: string, cursorLine?: number): ParsedResult {
-  try {
-    const result = cursorLine != null
-      ? parse(text, { cursorLine })
-      : parse(text)
-    return { meta: result.meta as Record<string, unknown>, statements: result.statements }
-  } catch {
-    return { meta: {}, statements: [] }
-  }
-}
-
-/**
- * preprocess フックの戻り値を PreprocessResult に正規化する。
- * - undefined / 例外時は元の text + lineOffset 0 にフォールバック (safeParse と同じ方針)
- * - string 戻りは lineOffset 0 に揃える (後方互換)
- * - lineOffset は非負整数に丸める (防御)
- */
-function normalizePreprocess(
-  preprocess: HowlPreprocessor | undefined,
-  text: string,
-): PreprocessResult {
-  if (!preprocess) return { text, lineOffset: 0 }
-  try {
-    const out = preprocess(text)
-    if (typeof out === 'string') return { text: out, lineOffset: 0 }
-    return { text: out.text, lineOffset: Math.max(0, Math.floor(out.lineOffset)) }
-  } catch {
-    return { text, lineOffset: 0 }
-  }
-}
+// safeParse / safeBuildVillage / normalizePreprocess / ParsedResult / BridgeResult / Bridge は
+// parseHelpers.ts に移動。 test 用に独立 module 化したため。
 
 /**
  * statement.line を parse 座標 → editor 座標へシフトする。
@@ -246,17 +213,6 @@ function shiftSourceLines(src: SourceLines, offset: number): SourceLines {
     kill:      shiftNum(src.kill),
     exec:      shiftNum(src.exec),
     vote:      shiftNum(src.vote),
-  }
-}
-
-type Bridge = ReturnType<typeof buildVillageStatus>
-
-function safeBuildVillage(parsed: ParsedResult): Bridge | null {
-  if (parsed.statements.length === 0) return null
-  try {
-    return buildVillageStatus(parsed.statements, parsed.meta)
-  } catch {
-    return null
   }
 }
 
@@ -293,10 +249,11 @@ export class AnalysisContext {
 
   #preprocess: HowlPreprocessor | undefined
 
-  // editor 座標 ↔ parse 座標 の橋渡し。 #pre は preprocess の戻り値を正規化したもの。
+  // editor 座標 ↔ parse 座標 の橋渡し。 #preWrapped は preprocess の戻り値を正規化したもの。
   // cursor を parse へ渡すときに +lineOffset、 statement.line / sourceLines を
   // editor へ公開するときに -lineOffset することで両座標系のズレを吸収する。
-  #pre = $derived.by<PreprocessResult>(() => normalizePreprocess(this.#preprocess, this.howlText))
+  #preWrapped = $derived.by(() => normalizePreprocess(this.#preprocess, this.howlText))
+  #pre = $derived.by<PreprocessResult>(() => this.#preWrapped.result)
   #parseSource = $derived.by<string>(() => this.#pre.text)
   /** preprocess の lineOffset (= prefix 行数 K)。デバッグ用に公開。 */
   lineOffset = $derived.by<number>(() => this.#pre.lineOffset)
@@ -309,7 +266,25 @@ export class AnalysisContext {
       this.cursorLine > 0 ? this.cursorLine + this.#pre.lineOffset : this.cursorLine,
     )
   )
-  #bridge = $derived.by<Bridge | null>(() => safeBuildVillage(this.#parsed))
+  #bridgeResult = $derived.by<BridgeResult>(() => safeBuildVillage(this.#parsed))
+  #bridge = $derived.by<Bridge | null>(() => this.#bridgeResult.bridge)
+
+  /**
+   * preprocess / parse / bridge の例外を保持する公開 state。
+   *
+   * いずれかの段階で throw された場合、 該当段階の Error が入る。 UI 側 ( [AnalysisErrorBanner](panes/AnalysisErrorBanner.svelte) )
+   * で「どこを直すべきか」 をユーザーに見せるために使う。 throw メッセージには `(line N)` 等の
+   * 位置ヒントが含まれている前提 (bridge / parser はその規約)。
+   *
+   * - `preprocessError`: consumer が渡した preprocess フック内で throw された Error
+   * - `parseError`: howl parser が throw した Error (構文エラー等)
+   * - `bridgeError`: VillageStatus 構築段階で throw された Error (matrix 不整合・spoiler 矛盾等)
+   *
+   * いずれも null のときはエラー無し。 解析結果が空でも error が null なら 「入力空」 (= 何も書かれていない)。
+   */
+  preprocessError = $derived<Error | null>(this.#preWrapped.error)
+  parseError = $derived<Error | null>(this.#parsed.error)
+  bridgeError = $derived<Error | null>(this.#bridgeResult.error)
 
   meta = $derived(this.#parsed.meta)
   // 公開する statements は editor 座標 (-lineOffset)。 内部消費 (#bridge / currentEvents /
