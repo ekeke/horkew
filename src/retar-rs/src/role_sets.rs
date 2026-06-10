@@ -127,6 +127,16 @@ pub fn single_role_by_trait(t: RoleTrait) -> SystemRole {
     matched[0]
 }
 
+/// seerResult が指定種別の役職を systemRoles から全て返す (setup 非依存).
+/// roles_by_seer_result_in の setup フィルタ無し版.
+pub fn roles_by_seer_result(result: EnumSpecies) -> Vec<SystemRole> {
+    SystemRole::ALL
+        .iter()
+        .copied()
+        .filter(|&r| r.seer_result() == result)
+        .collect()
+}
+
 /// seerResult が指定種別の役職を systemRoles から 1 つだけ返す (setup 非依存).
 pub fn single_role_by_seer_result(result: EnumSpecies) -> SystemRole {
     let matched: Vec<SystemRole> = SystemRole::ALL

@@ -60,6 +60,14 @@ export function singleRoleByTrait(kind: RoleTrait['kind'], sub: RoleTrait['sub']
 }
 
 /**
+ * seerResult が指定種別の役職を systemRoles から全て返す (setup 非依存).
+ * rolesBySeerResultIn の setup フィルタ無し版.
+ */
+export function rolesBySeerResult(result: EnumSpecies): SystemRole[] {
+  return allKnownRoles().filter(r => systemRoles.get(r)!.seerResult === result)
+}
+
+/**
  * seerResult が指定種別の役職を systemRoles から 1 つだけ返す (setup 非依存).
  * 0 件 or 複数件で throw.
  * 例: seerResult='wolf' → werewolf.

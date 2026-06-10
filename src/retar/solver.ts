@@ -10,13 +10,13 @@ import {
   ROLE_COUNT,
 } from './possibilities.ts'
 import type { RolePossibility } from './possibilities.ts'
-import { singleRoleBySeerResult } from './role-sets.ts'
+import { rolesBySeerResult } from './role-sets.ts'
 import { systemRoles } from '../types/index.ts'
 
-// 「seerResult='wolf' な役職」 = werewolf 1 種.
-const wolfRole = singleRoleBySeerResult('wolf')
-const WOLF_BIT = RoleBitIndex[wolfRole]
-const WOLF_SIGNATURE = RoleSignatureBits[wolfRole]
+// 「seerResult='wolf' な役職」 全集合 (現状は werewolf 1 種、 将来複数化に対応).
+// HAMSTER_BITS / FOX_SIGNATURES と同パターン.
+const WOLF_BITS: number[] = rolesBySeerResult('wolf').map(r => RoleBitIndex[r])
+const WOLF_SIGNATURES: number[] = WOLF_BITS.map(bit => 1 << bit)
 
 // 狐陣営勝利の生存カウント対象 = passive:fox-win-counter trait を持つ全役職 (妖狐 + 子狐 + 将来追加).
 // passive:die-when-divined (= 妖狐のみ) で数えると子狐生存パスが棄却される.
@@ -214,11 +214,13 @@ function backtrackForRoleAssignment(
     if (ok) {
       let addedHamsters = 0
       for (const bit of HAMSTER_BITS) addedHamsters += v[bit]
+      let addedWolves = 0
+      for (const bit of WOLF_BITS) addedWolves += v[bit]
       const res = backtrackForRoleAssignment(
         config,
         roleCount,
         index + 1,
-        selectedWolves + v[WOLF_BIT],
+        selectedWolves + addedWolves,
         selectedHamsters + addedHamsters,
         path,
         all,
@@ -269,7 +271,7 @@ export function solvePossibilities(
         fixedMap.set(possibility, [])
       }
       fixedMap.get(possibility)!.push(i)
-      if (possibility === WOLF_SIGNATURE && !survivors.get(i)) {
+      if (WOLF_SIGNATURES.includes(possibility) && !survivors.get(i)) {
         fixedDiedWolves++
       }
       if (!survivors.get(i) && FOX_SIGNATURES.includes(possibility)) {

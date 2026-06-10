@@ -1,9 +1,9 @@
 import type { CauseOfDeath, SeatStatus, VillageStatus, SystemRole, Seat, Day } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 import type { Possibilities } from './possibilities.ts'
-import { rolesByTrait, singleRoleBySeerResult, allKnownRoles, hasTrait } from './role-sets.ts'
+import { rolesByTrait, rolesBySeerResult, allKnownRoles, hasTrait } from './role-sets.ts'
 
-const wolfRole = singleRoleBySeerResult('wolf')
+const wolfRoles = rolesBySeerResult('wolf')
 const foxRoles = rolesByTrait('passive', 'die-when-divined')
 
 type DeathChronicle = {
@@ -252,7 +252,7 @@ function verifyDivineAbility(env: RoleTesterEnv, context: AnalyzeContext, select
       }
       if ( species === 'wolf' ) {
         // 占い結果が wolf → 対象は seerResult='wolf' な役職に固定 (現状は werewolf 1 種のみ).
-        if ( ! context.possibilities.fixRole(targetSeat, wolfRole) ) {
+        if ( ! context.possibilities.fixRole(targetSeat, wolfRoles[0]) ) {
           return false
         }
         const targetStatus = getStatus(env, targetSeat)
@@ -335,7 +335,7 @@ function verifyMediumshipAbility(env: RoleTesterEnv, context: AnalyzeContext, se
 
     for (const [, { target: targetSeat, species }] of self.assertions) {
       if ( species === 'wolf' ) {
-        if ( ! context.possibilities.fixRole(targetSeat, wolfRole) ) {
+        if ( ! context.possibilities.fixRole(targetSeat, wolfRoles[0]) ) {
           return false
         }
       }
@@ -450,7 +450,7 @@ function verifyNekomataCurse(env: RoleTesterEnv, context: AnalyzeContext, select
         else {
           ok = true
           if ( targetStatus.causeOfDeath === 'cursed_by_killed_nekomata' ) {
-            if ( ! context.possibilities.fixRole(targetSeat, wolfRole) ) {
+            if ( ! context.possibilities.fixRole(targetSeat, wolfRoles[0]) ) {
               return false
             }
           }
@@ -462,7 +462,7 @@ function verifyNekomataCurse(env: RoleTesterEnv, context: AnalyzeContext, select
   }
   if ( possibleCursed.length ) {
     context.requireOneOf.push(
-      possibleCursed.map(targetSeat => ({ seat: targetSeat, role: wolfRole as SystemRole }))
+      possibleCursed.map(targetSeat => ({ seat: targetSeat, role: wolfRoles[0] as SystemRole }))
     )
   }
 

@@ -6,14 +6,14 @@ import { solvePossibilities } from './solver.ts'
 import { dumpFinalizePre } from './dump.ts'
 import {
   singleRoleByTrait,
-  singleRoleBySeerResult,
+  rolesBySeerResult,
   countByTraitIn,
   countBySeerResultIn,
   rolesWithTraitIn,
 } from './role-sets.ts'
 
 // hot path で繰り返し呼ばれるため module-level 解決.
-const wolfRole = singleRoleBySeerResult('wolf')
+const wolfRoles = rolesBySeerResult('wolf')
 
 /**
  * seat が夜 `day` の時点で行動可能 (alive) かどうか.
@@ -314,7 +314,7 @@ export function finalize(
     // Count surviving wolves and hamsters
     let survWolves = 0, survHamsters = 0
     for (const seat of survivors) {
-      if (context.possibilities.isActualRole(seat, wolfRole)) survWolves++
+      if (wolfRoles.some(r => context.possibilities.isActualRole(seat, r))) survWolves++
       if (hamsterWinRoles.some(r => context.possibilities.isActualRole(seat, r))) survHamsters++
     }
     const checkCondition = (minW: number, maxW: number, minH: number, maxH: number) =>

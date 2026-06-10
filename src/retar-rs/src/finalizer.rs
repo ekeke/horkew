@@ -2,15 +2,14 @@ use crate::types::{CauseOfDeath, EnumSpecies, RoleTrait, SeatStatus, VillageStat
 use crate::possibilities::Possibilities;
 use crate::role_testers::{AnalyzeContext, DivineTarget};
 use crate::role_sets::{
-    count_by_seer_result_in, count_by_trait_in, roles_with_trait_in,
-    single_role_by_seer_result,
+    count_by_seer_result_in, count_by_trait_in, roles_by_seer_result, roles_with_trait_in,
 };
 use crate::solver::solve_possibilities;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 // hot path で繰り返し参照するため module-level lazy 解決. TS finalizer.ts:14-17 と同じ pattern.
-static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
+static WOLF_ROLES: LazyLock<Vec<SystemRole>> = LazyLock::new(|| roles_by_seer_result(EnumSpecies::Wolf));
 
 /// seat が夜 `day` の時点で行動可能 (alive) かどうか.
 /// 夜 D の cause_of_death = NightKill は「その夜に襲撃で死亡」 = その夜の行動は可能, とみなす
@@ -374,7 +373,7 @@ pub fn finalize(
         let mut surv_wolves = 0u32;
         let mut surv_hamsters = 0u32;
         for &seat in survivors {
-            if context.possibilities.is_actual_role(seat, *WOLF_ROLE) {
+            if WOLF_ROLES.iter().any(|&r| context.possibilities.is_actual_role(seat, r)) {
                 surv_wolves += 1;
             }
             if hamster_win_roles

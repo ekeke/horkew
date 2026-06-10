@@ -1,11 +1,11 @@
 use crate::types::{CauseOfDeath, EnumSpecies, RoleTrait, SeatStatus, VillageStatus, SystemRole, Seat, Day};
 use crate::possibilities::{Possibilities, ROLE_COUNT};
-use crate::role_sets::{has_trait, roles_by_trait, single_role_by_seer_result};
+use crate::role_sets::{has_trait, roles_by_seer_result, roles_by_trait};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 // hot path で繰り返し参照するため module-level lazy 解決. TS roleTesters.ts:6-7 と同じ pattern.
-static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
+static WOLF_ROLES: LazyLock<Vec<SystemRole>> = LazyLock::new(|| roles_by_seer_result(EnumSpecies::Wolf));
 static FOX_ROLES: LazyLock<Vec<SystemRole>> = LazyLock::new(|| roles_by_trait(RoleTrait::PassiveDieWhenDivined));
 
 pub struct DeathChronicle {
@@ -337,7 +337,7 @@ fn verify_divine_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
         // Process assertions
         for (&assertion_night, assertion) in &self_status.assertions {
             if assertion.species == Some(crate::types::EnumSpecies::Wolf) {
-                if !ctx.possibilities.fix_role(assertion.target, *WOLF_ROLE) {
+                if !ctx.possibilities.fix_role(assertion.target, WOLF_ROLES[0]) {
                     return false;
                 }
                 let target_status = get_status(env, assertion.target);
@@ -458,7 +458,7 @@ fn verify_mediumship_ability(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, sele
         let self_status = get_status(env, seat);
         for (_, assertion) in &self_status.assertions {
             if assertion.species == Some(crate::types::EnumSpecies::Wolf) {
-                if !ctx.possibilities.fix_role(assertion.target, *WOLF_ROLE) {
+                if !ctx.possibilities.fix_role(assertion.target, WOLF_ROLES[0]) {
                     return false;
                 }
             } else {
@@ -588,7 +588,7 @@ fn verify_nekomata_curse(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
                 } else {
                     ok = true;
                     if target_status.cause_of_death == CauseOfDeath::CursedByKilledNekomata {
-                        if !ctx.possibilities.fix_role(target_seat, *WOLF_ROLE) {
+                        if !ctx.possibilities.fix_role(target_seat, WOLF_ROLES[0]) {
                             return false;
                         }
                     }
@@ -607,7 +607,7 @@ fn verify_nekomata_curse(env: &RoleTesterEnv, ctx: &mut AnalyzeContext, selected
                 .iter()
                 .map(|&seat| SeatRole {
                     seat,
-                    role: *WOLF_ROLE,
+                    role: WOLF_ROLES[0],
                 })
                 .collect(),
         );
