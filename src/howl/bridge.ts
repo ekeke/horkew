@@ -157,7 +157,18 @@ export type BridgeResult = {
   shortNames: Map<number, string>
   dict: FlexibleDictionary
   rules: Regulation
+  /**
+   * 役職 pin の集約。 announce (公式公開情報) + spoiler 行 (`!Alice=seer`) +
+   * frontmatter `spoilers.roles` をひとまとめにした「実効 pin 一覧」。
+   * 出所別の内訳は [announceAssumptions](#announceAssumptions) を参照。
+   */
   assumptions: Map<number, SystemRole>
+  /**
+   * `assumptions` のうち announce 行 (`※ Alice 契約者` 等) 由来の subset。
+   * spoiler 非表示トグルの影響を受けず常に有効、 という性質を持たせるため
+   * lykaon 側で「公開 pin」 と 「秘匿 pin」 を切り分けるのに使う。
+   */
+  announceAssumptions: Map<number, SystemRole>
   spoilerActions: SpoilerActionRecord[]
   /**
    * spoiler faction alias (`!Alice=人外` 等) 由来で deny された SystemRole を席ごとに記録。
@@ -688,6 +699,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
   // spoilerDeniedRoles と seat.deniedRoles、 秘匿行動 (action あり) → spoilerActions に分離。
   // 同一プレイヤーに対して異なる役職の spoiler が存在する場合はエラー（同じ役職の重複は許容）。
   const assumptions = new Map<number, SystemRole>()
+  const announceAssumptions = new Map<number, SystemRole>()
   const spoilerDeniedRoles = new Map<number, Set<SystemRole>>()
   const spoilerActions: SpoilerActionRecord[] = []
 
@@ -756,9 +768,10 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
 
   // 公式アナウンス (`※ Alice、Bob 契約者` 等) を assumptions に集約する。
   // spoiler は「視点配信メモ = 観戦者向けの秘匿情報」 であるのに対し、 announce は
-  // 「進行中に村全員が共有する公式情報」 という性質差があるが、 retar への影響
-  // (= 該当 seat の役職確定) は同じなので applyPinAssumption を再利用する。
-  // 出所による UI 区別が必要になったら sub-index (公示由来 Map) を追加する。
+  // 「進行中に村全員が共有する公式情報」 という性質差がある。 retar への影響
+  // (= 該当 seat の役職確定) は同じなので applyPinAssumption を再利用するが、
+  // 出所を区別する副インデックス announceAssumptions にも記録しておき、
+  // lykaon 側で spoiler 非表示トグル時に announce 由来分だけを残せるようにする。
   for (const stmt of statements) {
     if (stmt.type !== 'announce') continue
     const a = stmt as AnnounceStatement
@@ -773,6 +786,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         throw new Error(`announce: 未知のプレイヤー "${playerName}" (line ${a.line})`)
       }
       applyPinAssumption(seat, role, a.line)
+      announceAssumptions.set(seat, role)
     }
   }
 
@@ -804,5 +818,5 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
     }
   }
 
-  return { vs, setup, players, shortNames, dict, rules, assumptions, spoilerActions, spoilerDeniedRoles }
+  return { vs, setup, players, shortNames, dict, rules, assumptions, announceAssumptions, spoilerActions, spoilerDeniedRoles }
 }

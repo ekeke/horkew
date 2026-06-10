@@ -990,6 +990,60 @@ spoilers:
   })
 })
 
+describe('bridge: announce assumptions', () => {
+  test('announce rolePin populates both assumptions and announceAssumptions', () => {
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
+※ アリス、ボブ 契約者`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, announceAssumptions, players } = buildVillageStatus(statements, meta)
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+
+    assert.strictEqual(assumptions.get(seatOf('アリス')), 'contractor')
+    assert.strictEqual(assumptions.get(seatOf('ボブ')), 'contractor')
+    assert.strictEqual(announceAssumptions.get(seatOf('アリス')), 'contractor')
+    assert.strictEqual(announceAssumptions.get(seatOf('ボブ')), 'contractor')
+    assert.strictEqual(announceAssumptions.size, 2)
+  })
+
+  test('spoiler-only pins do not appear in announceAssumptions', () => {
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
+!アリス=seer
+※ ボブ 契約者`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, announceAssumptions, players } = buildVillageStatus(statements, meta)
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+
+    assert.strictEqual(assumptions.size, 2)
+    assert.strictEqual(announceAssumptions.size, 1)
+    assert.strictEqual(announceAssumptions.get(seatOf('ボブ')), 'contractor')
+    assert.strictEqual(announceAssumptions.has(seatOf('アリス')), false)
+  })
+
+  test('announce same role as existing spoiler is allowed and recorded as announce', () => {
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
+!アリス=契約者
+※ アリス 契約者`
+
+    const { statements, meta } = parse(howl)
+    const { assumptions, announceAssumptions, players } = buildVillageStatus(statements, meta)
+    const seatOf = (n: string) => [...players.entries()].find(([, x]) => x === n)![0]
+
+    assert.strictEqual(assumptions.get(seatOf('アリス')), 'contractor')
+    assert.strictEqual(announceAssumptions.get(seatOf('アリス')), 'contractor')
+  })
+
+  test('announce conflicting with spoiler throws', () => {
+    const howl = `++アリス、ボブ、チャーリー、デイブ、エミリー
+!アリス=seer
+※ アリス 契約者`
+
+    const { statements, meta } = parse(howl)
+    assert.throws(() => buildVillageStatus(statements, meta), /矛盾する仮定/)
+  })
+})
+
 describe('bridge: seat number references', () => {
   test('seat number resolves alongside player name in vote', () => {
     const howl = `++Alice,Bob,Charlie
