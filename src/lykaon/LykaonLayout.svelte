@@ -11,7 +11,7 @@
   import EditorPane from './panes/EditorPane.svelte'
   import StatusPane from './panes/StatusPane.svelte'
   import AnalysisTable from './panes/AnalysisTable.svelte'
-  import AnalysisErrorBanner from './panes/AnalysisErrorBanner.svelte'
+  // AnalysisErrorBanner は EditorPane 内に組み込み済み (個別 pane 構成の consumer にも自動伝播)
   import type { Snippet } from 'svelte'
   import type { AnalysisContext } from './AnalysisContext.svelte.ts'
 
@@ -60,7 +60,6 @@
     {/if}
   </div>
   <div class="layout-right" style:flex="{rightFlex}">
-    <AnalysisErrorBanner {ctx} />
     <div class="layout-right-top">
       <StatusPane {ctx} />
     </div>

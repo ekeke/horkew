@@ -6,6 +6,7 @@
   import type { StatementInfo } from '../editor/howlLanguage.ts'
   import type { Statement } from '../../howl/statement.ts'
   import { buildPlayerNames } from '../editor/playerNames.ts'
+  import AnalysisErrorBanner from './AnalysisErrorBanner.svelte'
 
   let { ctx, readonly = false, extraExtensions }: {
     ctx: AnalysisContext
@@ -156,11 +157,21 @@
   })
 </script>
 
-<div class="editor-pane lyk-pane" bind:this={editorParent}></div>
+<div class="editor-pane lyk-pane">
+  <AnalysisErrorBanner {ctx} />
+  <div class="editor-host" bind:this={editorParent}></div>
+</div>
 
 <style>
   .editor-pane {
+    display: flex;
+    flex-direction: column;
     height: 100%;
+    overflow: hidden;
+  }
+  .editor-host {
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
   }
 </style>
