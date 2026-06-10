@@ -1,7 +1,7 @@
 import * as V from './vocabulary.ts'
 import { systemRoles, type SystemRole } from '../types/index.ts'
 
-export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'corpseFound' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'dayMark' | 'reveal' | 'spoiler' | 'speech' | 'videoSource' | 'timestamp' | 'unknown'
+export type StatementType = 'setup' | 'join' | 'joinMulti' | 'vote' | 'multiVote' | 'attack' | 'lynch' | 'suddenDeath' | 'corpseFound' | 'grelan' | 'curse' | 'follow' | 'forecast' | 'revote' | 'over' | 'assert' | 'mason' | 'peace' | 'dayMark' | 'reveal' | 'spoiler' | 'announce' | 'speech' | 'videoSource' | 'timestamp' | 'unknown'
 
 export type GameResult = 'villageWin' | 'wolfWin' | 'hamsterWin' | 'draw'
 export type Species = 'isHuman' | 'isWolf' | 'isKogitsune'
@@ -72,6 +72,20 @@ export type SuddenDeathStatement = Statement & {
 export type CorpseFoundStatement = Statement & {
     type: 'corpseFound'
     target: string
+}
+
+// 公式アナウンス (GM / システム発の公開情報)。 現セッションでは役職公示
+// (「※ Alice 契約者」「※ Alice、Bob 契約者」 等) のみサポート。
+// 複数 target は全員が同一役職であることを公示する (= 契約者ペア公開の主用途)。
+// 将来「※ Alice 生存」 のような生存公示 (パン屋系) を別 variant として拡張予定。
+export type AnnounceStatement = Statement & {
+    type: 'announce'
+    /** 公示の種類。 現状は role pin のみ。 将来 'alive' 等を追加予定。 */
+    kind: 'rolePin'
+    /** 公示対象のプレイヤー名 (複数可、 全員同一役職であることを示す)。 */
+    targets: string[]
+    /** 公示された役職の raw 文字列。 bridge 側で SystemRole に解決する。 */
+    role: string
 }
 
 export type RevoteStatement = Statement & {
@@ -405,6 +419,26 @@ export function parseLynchStatement(text: string, line: number): LynchStatement 
   return { type: 'lynch', line, target: reverseMatch[1].trim() }
 }
 
+// 公式アナウンス (GM 公示)。 現状は役職公示のみ。
+// 構文: <marker> <name>(<delimiter><name>)* <delimiter> <role>
+// 例: `※ Alice 契約者`、 `※ Alice、Bob 契約者`、 `GM: Alice 契約者`
+export function parseAnnounceStatement(text: string, line: number): AnnounceStatement | null {
+  const announceRolePinRegex = new RegExp([
+    `^${V.optionalSpace}${V.announce}${V.optionalSpace}`,
+    `(?<targets>${V.possibleName}(?:${V.optionalSpace}${V.delimiter}${V.possibleName})*)`,
+    `${V.delimiter}`,
+    `(?<role>${V.anyRole})${V.optionalSpace}$`,
+  ].join(''))
+  const m = announceRolePinRegex.exec(text)
+  if (!m || !m.groups) return null
+  const targets = m.groups.targets
+    .split(new RegExp(`(?:${V.delimiter})+?`))
+    .map(t => t.trim())
+    .filter(t => t.length > 0)
+  if (targets.length === 0) return null
+  return { type: 'announce', line, kind: 'rolePin', targets, role: m.groups.role.trim() }
+}
+
 export function parseCorpseFoundStatement(text: string, line: number): CorpseFoundStatement | null {
   const forwardRegex = new RegExp(`^${V.optionalSpace}${V.corpseFound}(?:${V.delimiter})?${V.optionalSpace}(${V.possibleName})${V.optionalSpace}$`)
   const fm = forwardRegex.exec(text)
@@ -707,6 +741,7 @@ export function parseStatement (text: string, line: number): Statement {
     parseVideoSourceStatement,
     parseTimestampStatement,
     parseSpoilerStatement,
+    parseAnnounceStatement,
     parseSpeechStatement,
     parseSetupStatement,
     parseJoinMultiStatement,

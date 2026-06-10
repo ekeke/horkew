@@ -569,4 +569,40 @@ describe('renamePlayer preservation', () => {
       assert.strictEqual(lines[4], 'ボブ→チャーリー')
     })
   })
+
+  // ---------------------------------------------------------------- 行末コメント保持
+  describe('行末 `[ws]#` コメントの保持', () => {
+    test('rename 対象の vote 行: 本体だけ rename、`# コメント` は原文保持', () => {
+      const input = [
+        '+ アリス',
+        '+ ボブ',
+        'アリス→ボブ # アリスの初手',
+      ].join('\n')
+      const out = renamePlayer(input, 'アリス', 'Alice')
+      const lines = out.split('\n')
+      assert.strictEqual(lines[2], 'Alice→ボブ # アリスの初手')
+    })
+
+    test('rename 非対象の vote 行: コメントごと原文保持', () => {
+      const input = [
+        '+ アリス',
+        '+ ボブ',
+        'ボブ→アリス # 適当',
+      ].join('\n')
+      const out = renamePlayer(input, 'チャーリー', 'Charlie')
+      const lines = out.split('\n')
+      assert.strictEqual(lines[2], 'ボブ→アリス # 適当')
+    })
+
+    test('全角空白 + `#` でも保持される', () => {
+      const input = [
+        '+ アリス',
+        '+ ボブ',
+        'アリス→ボブ　# 全角コメント',
+      ].join('\n')
+      const out = renamePlayer(input, 'アリス', 'Alice')
+      const lines = out.split('\n')
+      assert.strictEqual(lines[2], 'Alice→ボブ　# 全角コメント')
+    })
+  })
 })

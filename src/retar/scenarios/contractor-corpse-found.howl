@@ -24,9 +24,11 @@ setup:
 
 ++Alice、Bob、Carol、Dave、Eve、Frank、Grace、Hank、Ivy、Jack、Kate
 
-# 契約者ペアは公開情報。 「契」短縮形が spoiler で解決できることも兼ねて確認。
-!Alice=契
-!Bob=契約者
+# 契約者ペアは公式アナウンス (GM 公示) で全員に公開される。
+# spoiler (`!Alice=...`) は視点配信の秘匿メモであり、 村の公式情報とは
+# 性質が違うため、 ここでは ※ 公示マーカーで宣言する (記号 / ラベル / 全角 ASCII
+# どれでも受ける)。
+※ Alice、Bob 契約者
 
 # Day 1 夜: 契約者 Bob が初日犠牲
 Bob 死亡
@@ -47,3 +49,16 @@ Carol 死体で発見
 # @expect Alice: [contractor]
 # @expect Bob: [contractor]
 # @expect Carol: [!contractor, ...]
+
+# Day 3 朝: Alice が宇理炎を発動し、 Carol (= 前夜の焔薙退場者) の正体を村に公表。
+# contractor.traits の auto-info/execution-species により、 既存 medium 経路の
+# verifyMediumshipAbility が Alice の assertions を取り込み、 Carol を
+# markAsMediumHuman で werewolf 候補から除外する (= 「Alice Carol○」 = 白判定)。
+# claim 無し / target + 結果 のみ の assert は actor.claiming に触らないので、
+# Alice は公示由来の contractor 確定のまま、 assertions のみが拡張される。
+Alice Carol○
+
+# Checkpoint 3: 宇理炎の白結果が retar に取り込まれ、 Carol は werewolf 不可に絞られる
+# @expect Alice: [contractor]
+# @expect Bob: [contractor]
+# @expect Carol: [!contractor, !werewolf, ...]

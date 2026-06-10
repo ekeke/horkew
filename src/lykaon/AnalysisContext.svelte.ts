@@ -365,11 +365,18 @@ export class AnalysisContext {
   })
 
   /**
-   * .howl の spoiler 行 (`!Alice=seer` / frontmatter `spoilers.roles`) から派生する assumption。
-   * 「実 spoiler」 (= .howl に書かれた値、 トグル状態に依存しない)。 UI でボタン表示
-   * の有無を判定するときに参照する。 解析・表示に効くのは [spoilerAssumptions](#spoilerAssumptions)。
+   * .howl の spoiler 行 (`!Alice=seer` / frontmatter `spoilers.roles`) + announce 行
+   * (`※ Alice 契約者`) から派生する assumption をまとめた「実 pin 一覧」。
+   * トグル状態に依存しない生値。 bridge.assumptions と同じ集合 (announce + spoiler)。
+   * 解析・表示に効くのは [spoilerAssumptions](#spoilerAssumptions)。
    */
   rawSpoilerAssumptions = $derived<Map<number, SystemRole>>(this.#bridge?.assumptions ?? new Map())
+
+  /**
+   * 公式アナウンス (`※ Alice 契約者` 等) 由来の assumption。 公開情報のため
+   * spoilerEnabled トグルの影響を受けず常に有効。 rawSpoilerAssumptions の subset。
+   */
+  rawAnnounceAssumptions = $derived<Map<number, SystemRole>>(this.#bridge?.announceAssumptions ?? new Map())
 
   /**
    * spoiler faction alias 由来の deny。 「実値」 (トグル状態に依存しない)。
@@ -378,12 +385,13 @@ export class AnalysisContext {
   rawSpoilerDeniedRoles = $derived<Map<number, Set<SystemRole>>>(this.#bridge?.spoilerDeniedRoles ?? new Map())
 
   /**
-   * spoiler 行から派生する assumption (= 解析・UI で実効的に使われる値)。
-   * spoilerEnabled が false なら空 Map になる。 bridge が解析済みなので read-only。
+   * spoiler / announce 行から派生する assumption (= 解析・UI で実効的に使われる値)。
+   * spoilerEnabled が true なら spoiler + announce 全部、 false なら announce のみ
+   * (announce は公開情報なのでトグルで消さない)。 bridge が解析済みなので read-only。
    * UI からは toggle できない (toggleAssumption がガード)。
    */
   spoilerAssumptions = $derived<Map<number, SystemRole>>(
-    this.spoilerEnabled ? this.rawSpoilerAssumptions : new Map()
+    this.spoilerEnabled ? this.rawSpoilerAssumptions : this.rawAnnounceAssumptions
   )
 
   /**
@@ -404,9 +412,14 @@ export class AnalysisContext {
     this.spoilerEnabled ? this.rawSpoilerDeniedRoles : new Map()
   )
 
-  /** .howl 内に spoiler 行があるか (= UI トグルボタンを表示すべきか)。 */
+  /**
+   * .howl 内に spoiler 行があるか (= UI トグルボタンを表示すべきか)。
+   * announce 由来分はトグル対象ではないので除外する (公開情報のみのファイルでは
+   * 「隠す/見せる」 の概念が無いためボタン非表示)。
+   */
   hasSpoilers = $derived<boolean>(
-    this.rawSpoilerAssumptions.size > 0 || this.rawSpoilerDeniedRoles.size > 0
+    this.rawSpoilerAssumptions.size > this.rawAnnounceAssumptions.size
+      || this.rawSpoilerDeniedRoles.size > 0
   )
 
   // -----------------------------------------------------------------
@@ -697,18 +710,6 @@ export class AnalysisContext {
           this.baseAnalysisSeats = []
           this.analysisStats = null
           this.analysisError = ''
-          this.wolfPairSuggestions = []
-          return
-        }
-
-        // 突然死は Retar 非対応
-        const hasSuddenDeath = [...vs.statuses.values()]
-          .some(s => !s.surviving && s.causeOfDeath === ('sudden_death' as CauseOfDeath))
-        if (hasSuddenDeath) {
-          this.analysisSeats = []
-          this.baseAnalysisSeats = []
-          this.analysisError = '突然死を含む盤面は解析できません'
-          this.analysisStats = null
           this.wolfPairSuggestions = []
           return
         }

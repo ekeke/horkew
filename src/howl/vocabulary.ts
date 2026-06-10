@@ -30,6 +30,14 @@ export const suddenDeath = `(?:突然死|suddenDeath)`
 // 生存者は焔薙退場だと知る。 retar には sudden_death と同じ「制約無し離脱」
 // として渡す (bridge.ts で causeOfDeath = 'sudden_death' にマップ)。
 export const corpseFound = `(?:死体で?発見)`
+
+// 公式アナウンス (= GM / システム発の公開情報) を表す行頭マーカー。
+// spoiler (`!Alice=...`、 視点配信メモ) や reveal (`Alice=...`、 終了時正体公開) と
+// 異なり、 進行中に村全員が共有する公式・確定情報を表現する。
+// 例: 契約者ペアの公開、 (将来) パン屋の生存アナウンス等。
+// 入力者の好み・媒体に合わせて記号系 (※ * ＊) と日本語ラベル系 (GM / システム /
+// アナウンス + 全/半角コロン) のいずれも受ける。
+export const announce = `(?:[※*＊]|(?:GM|システム|アナウンス|announcement)[:：])`
 export const revote = `(?:再投票|\-\-+|==+|ーー+|＝＝+)`
 export const guard  = `(?:護衛?|ガード)`
 export const peace  = `(?:平和)`

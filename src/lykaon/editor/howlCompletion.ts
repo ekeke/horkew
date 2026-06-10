@@ -23,9 +23,10 @@
 //
 // ============================================================================
 
-import { StateEffect, StateField, type Extension } from '@codemirror/state'
-import { EditorView } from '@codemirror/view'
-import { autocompletion, startCompletion, type CompletionSource, type Completion } from '@codemirror/autocomplete'
+import { Prec, StateEffect, StateField, type Extension } from '@codemirror/state'
+import { EditorView, keymap } from '@codemirror/view'
+import { autocompletion, startCompletion, completionStatus, acceptCompletion, type CompletionSource, type Completion } from '@codemirror/autocomplete'
+import { insertNewlineAndIndent } from '@codemirror/commands'
 import * as V from '../../howl/vocabulary.ts'
 
 // ---- カナ→ローマ字変換 ----
@@ -266,6 +267,20 @@ function buildStaticCandidates(defs: HowlCandidateDef[]): HowlCandidate[] {
 
 // ---- 静的候補 ----
 
+// CO種別 — seer/medium/bodyguard/mason は CO 後に結果/対象/ペア宣言が続く。
+// それ以外 ('other'; villager/werewolf/possessed/fanatic/werehamster/immoralist/nekomata)
+// は宣言だけで終わるため後続の補完を起動しない。
+type CoType = 'seer' | 'medium' | 'bodyguard' | 'mason' | 'other'
+
+const claimingRoleToCoType: Partial<Record<SystemRole, CoType>> = {
+  seer: 'seer', medium: 'medium', bodyguard: 'bodyguard', mason: 'mason',
+}
+
+function coTypeOf(role: string | undefined): CoType {
+  if (role === undefined) return 'other'
+  return claimingRoleToCoType[role as SystemRole] ?? 'other'
+}
+
 const roleCandidates = buildStaticCandidates([
   { label: '占い師', reading: 'うらないし', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'seer' },
   { label: '霊媒師', reading: 'れいばいし', type: 'type', category: 'role', categoryLabel: '役職', terminal: false, requiredRole: 'medium' },
@@ -290,7 +305,9 @@ const coRoleCandidates: HowlCandidate[] = roleCandidates.flatMap(r => [
     type: 'keyword',
     category: 'co_role' as Category,
     categoryLabel: 'CO',
-    terminal: false,
+    // 役職行動を含まないCO (村人/人狼/妖狐/狂人/狂信者/背徳者/猫又) は宣言だけで完結するため、
+    // 確定時に半角空白を入れずチェーン補完を起動させない
+    terminal: coTypeOf(r.requiredRole) === 'other',
     requiredRole: r.requiredRole,
     info: `${r.label}を名乗り出る`,
   },
@@ -379,12 +396,6 @@ function hasCoKeyword(lineText: string): boolean {
 
 // ---- CO種別検出 ----
 
-type CoType = 'seer' | 'medium' | 'bodyguard' | 'mason' | 'other'
-
-const claimingRoleToCoType: Record<string, CoType> = {
-  seer: 'seer', medium: 'medium', bodyguard: 'bodyguard', mason: 'mason',
-}
-
 /**
  * 行の先頭プレイヤーのCO種別を判定する。
  * まずVillageStatusのCO情報を参照し、未登録なら行テキストのCOキーワードで判定する。
@@ -401,7 +412,7 @@ function detectCoType(lineText: string, players: PlayerEntry[]): CoType {
   if (firstToken) {
     const player = players.find(p => p.name === firstToken || p.shortName === firstToken)
     if (player?.claimingRole) {
-      return claimingRoleToCoType[player.claimingRole] ?? 'other'
+      return coTypeOf(player.claimingRole)
     }
   }
 
@@ -491,6 +502,8 @@ function inferContext(beforeCursor: string, players: PlayerEntry[], stats: GameS
   // 役職名CO / 非役職名CO → CO種別に応じた候補
   if (coRoleLabels.has(lastToken)) {
     const coType = detectCoType(trimmed, players)
+    // 役職行動を含まないCO (村人/人狼/狐/狂人/狂信者/背徳者/猫又) は宣言だけで完結
+    if (coType === 'other') return null
     if (capReached(coType)) return null
     if (coType === 'medium') return ['day', 'result']
     return ['day', 'player']
@@ -543,7 +556,7 @@ function inferContext(beforeCursor: string, players: PlayerEntry[], stats: GameS
     // 行頭のプレイヤー名 → CO済みなら役職に応じた候補を優先
     if (beforeLastToken === '') {
       const firstPlayer = players.find(p => p.name === lastToken || p.shortName === lastToken)
-      const firstCoType = firstPlayer?.claimingRole ? claimingRoleToCoType[firstPlayer.claimingRole] : undefined
+      const firstCoType = coTypeOf(firstPlayer?.claimingRole)
       if (firstCoType === 'seer') return ['day', 'player', 'arrow', 'co_role', 'denial_co_role', 'action', 'result']
       if (firstCoType === 'medium') return ['day', 'result', 'arrow', 'co_role', 'denial_co_role', 'action']
       if (firstCoType === 'bodyguard') return ['day', 'player', 'arrow', 'co_role', 'denial_co_role', 'action']
@@ -814,6 +827,33 @@ const atCompletionTrigger = EditorView.updateListener.of(update => {
   if (typedAt) queueMicrotask(() => startCompletion(update.view))
 })
 
+// Enter が補完計算 (pending) 中に押されると改行になってしまう問題への対策。
+// pending を観測したら Enter を消費し、rAF で状態遷移 (active/null) を待ってから
+// accept または改行を実行する。 PENDING_WAIT_TIMEOUT_MS は保険のタイムアウト。
+const PENDING_WAIT_TIMEOUT_MS = 200
+
+const enterWaitForPending = keymap.of([{
+  key: 'Enter',
+  run: (view) => {
+    if (completionStatus(view.state) !== 'pending') return false
+    const start = performance.now()
+    const tick = () => {
+      const s = completionStatus(view.state)
+      if (s === 'active') {
+        acceptCompletion(view)
+        return
+      }
+      if (s === null || performance.now() - start > PENDING_WAIT_TIMEOUT_MS) {
+        insertNewlineAndIndent(view)
+        return
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+    return true
+  },
+}])
+
 export const howlCompletionExtension: Extension = [
   playerListField,
   setupField,
@@ -824,5 +864,6 @@ export const howlCompletionExtension: Extension = [
     activateOnTyping: true,
     activateOnCompletion: (c) => typeof c.apply === 'string' && c.apply.endsWith(' '),
   }),
+  Prec.highest(enterWaitForPending),
   atCompletionTrigger,
 ]

@@ -308,9 +308,19 @@ export const systemRoles: Map<SystemRole, Role> = new Map([
   ["contractor", {
     name: "契約者", shortName: "契", systemName: "contractor",
     alignment: "villager", faction: "village", category: "other",
-    description: "必ず二人組で参加する特殊な村人。\n参加者全員が、誰と誰が契約者かを知っている。\n契約者の一人は必ず初日犠牲者となり、残った一人が「神代の血」「宇理炎」「焔薙」の能力を得る。\n(現バージョンでは能力は未実装 — howl / retar まで対応、 lupa engine 非対応)",
+    description: "必ず二人組で参加する特殊な村人。\n参加者全員が、誰と誰が契約者かを知っている。\n契約者の一人は必ず初日犠牲者となり、残った一人が「神代の血」「宇理炎」「焔薙」の能力を得る。\n宇理炎: 生存中に一度だけ霊能力を発動し、 前夜の退場者の正体を村に公表できる。\n(lupa engine は契約者を非対応のままだが、 howl / retar は宇理炎の霊結果を既存霊媒経路で取り込む)",
     humanCount: 1, wolfCount: 0, seerResult: "human", mediumResult: "human",
-    traits: [{ kind: "passive", sub: "pair-required" }],
+    traits: [
+      { kind: "passive", sub: "pair-required" },
+      // 宇理炎の能力。 retar 上は medium と同じ trait に乗せ、 verifyMediumshipAbility
+      // で contractor の assertions (= 「Alice Carol白」 等) を target species で確定する。
+      // ただし poweredVillageRolesIn は非 passive trait を持つ村陣営役職を全て含めるため、
+      // この trait 追加で contractor が通常 plan に再加入してしまう (= HocusPocus 不具合
+      // 再発)。 これを避けるため、 role-sets.ts は contractor を明示除外し、
+      // planBuilder の announce-fixed 動的追加経路 (= 全席公示確定 + claim 0 のみ) で
+      // planning に乗せる構成。
+      { kind: "auto-info", sub: "execution-species" },
+    ],
     howlPattern: "(?:契約?者?|contractor)",
     lupaSupported: false,
   }],

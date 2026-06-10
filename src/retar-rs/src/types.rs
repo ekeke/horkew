@@ -154,7 +154,14 @@ impl SystemRole {
                 RoleTrait::PassiveFoxWinCounter,
                 RoleTrait::ActionDivineImperfect,
             ],
-            SystemRole::Contractor => &[RoleTrait::PassivePairRequired],
+            SystemRole::Contractor => &[
+                RoleTrait::PassivePairRequired,
+                // 宇理炎の能力 (retar 上は medium と同 trait に乗せ、 verify_mediumship_ability
+                // で contractor の assertions を target species で確定する)。
+                // 通常 planning からは role_sets の powered_village_roles_in が除外し、
+                // plan_builder の announce-fixed 動的追加経路で planning に乗る構成。
+                RoleTrait::AutoInfoExecutionSpecies,
+            ],
         }
     }
 
@@ -217,6 +224,20 @@ pub enum RoleTrait {
     ReactiveFollowFoxDeath,
     AutoInfoExecutionSpecies,
     ChannelWolfChat,
+}
+
+impl RoleTrait {
+    /// kind=passive な variant か (TS 側の `t.kind === 'passive'` 判定相当).
+    /// powered_village_roles_in 等で「能力 trait のみ抽出」するために使う.
+    pub(crate) fn is_passive(&self) -> bool {
+        matches!(self,
+            RoleTrait::PassiveAttackImmune
+            | RoleTrait::PassiveDieWhenDivined
+            | RoleTrait::PassiveVisibleAsFox
+            | RoleTrait::PassiveFoxWinCounter
+            | RoleTrait::PassivePairRequired
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

@@ -46,16 +46,42 @@ pub fn build_role_test_plan(
     multiple_victims: &[Seat],
     _initial_possibilities: Option<&Possibilities>,
     hocus_pocus: Option<&BTreeMap<Seat, bool>>,
+    assumptions: Option<&BTreeMap<Seat, SystemRole>>,
 ) -> BuildPlanResult {
     let hocus_seats: Vec<Seat> = hocus_pocus
         .map(|m| m.keys().cloned().collect())
         .unwrap_or_default();
-    let has_hocus_pocus = !hocus_seats.is_empty();
 
     // setup 駆動で派生. 役職追加で自動追従.
     // 村陣営の能力持ち + divine trait を持つ liar role (paparazzi 等) を planning 対象に.
     let mut planning_roles = powered_village_roles_in(setup);
     planning_roles.extend(divine_liar_roles_in(setup));
+
+    // announce-fixed 動的追加: 公示で全席が assumption 確定された村陣営役職を
+    // planning_roles に追加する経路 (powered_village_roles_in から除外されている
+    // contractor 等の公示専用役職用)。 既に planning_roles にある役職は触らず、
+    // setup count == assumption seat count の役職のみ追加.
+    if let Some(asm) = assumptions {
+        if !asm.is_empty() {
+            let planning_set: BTreeSet<SystemRole> = planning_roles.iter().copied().collect();
+            for (&role, &num) in setup.iter() {
+                if num == 0 {
+                    continue;
+                }
+                if planning_set.contains(&role) {
+                    continue;
+                }
+                if role.faction() != Faction::Village {
+                    continue;
+                }
+                let assumed_count = asm.values().filter(|&&r| r == role).count() as u32;
+                if assumed_count == num {
+                    planning_roles.push(role);
+                }
+            }
+        }
+    }
+
     let planning_roles_set: BTreeSet<SystemRole> = planning_roles.iter().copied().collect();
     let liar_roles_set: BTreeSet<SystemRole> = liar_roles_in(setup).into_iter().collect();
     let fox_roles = roles_with_trait_in(setup, RoleTrait::PassiveDieWhenDivined);
@@ -164,12 +190,44 @@ pub fn build_role_test_plan(
         let has_curse_on_executed = has_trait(role, RoleTrait::ReactiveCurseOnExecuted);
         // divine trait 同士は CO 席を pool 共有 (seer ↔ paparazzi).
         let role_claims = get_divine_claim_pool(role);
-        if !has_curse_on_executed && role_claims.is_empty() && !has_hocus_pocus {
+
+        // announce-fixed fast-path: 公示で全席が assumption 確定済み かつ claim 0 役職
+        // (= contractor 等の公示専用役職) は、 既存 combinatorics を bypass して
+        // selected = 公示席のみの 1 通り plan を直接登録する.
+        if let Some(asm) = assumptions {
+            if !asm.is_empty() && role_claims.is_empty() {
+                let assumed_seats: Vec<Seat> = asm
+                    .iter()
+                    .filter_map(|(&s, &r)| if r == role { Some(s) } else { None })
+                    .collect();
+                let num = setup.get(&role).copied().unwrap_or(0) as usize;
+                if assumed_seats.len() == num && num > 0 {
+                    let assumed_set: BTreeSet<Seat> = assumed_seats.iter().cloned().collect();
+                    let rest: Vec<Seat> = village
+                        .statuses
+                        .keys()
+                        .cloned()
+                        .filter(|s| !assumed_set.contains(s))
+                        .collect();
+                    role_tests.push(vec![RoleTest {
+                        role: RoleTestRole::Role(role),
+                        selected: assumed_seats,
+                        rest,
+                    }]);
+                    continue;
+                }
+            }
+        }
+
+        // HocusPocus は「CO 在り役職への潜伏候補追加」に絞る (= 早期 skip 条件は HocusPocus と独立).
+        // CO ゼロ役職に HocusPocus 在りで plan を強制生成すると、 contractor 確定 assumption 等と
+        // 矛盾する無駄 plan を全 depth で並べてしまい、 結果として全 world fail で盤面が破綻する.
+        if !has_curse_on_executed && role_claims.is_empty() {
             continue;
         }
         let has_execution_curse = has_curse_on_executed
             && village.statuses.values().any(|s| s.cause_of_death == CauseOfDeath::CursedByExecutedNekomata);
-        if role_claims.is_empty() && multiple_victims.is_empty() && !has_execution_curse && !has_hocus_pocus {
+        if role_claims.is_empty() && multiple_victims.is_empty() && !has_execution_curse {
             continue;
         }
         let num = setup.get(&role).copied().unwrap_or(0);

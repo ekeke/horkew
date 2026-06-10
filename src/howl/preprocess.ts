@@ -1,5 +1,31 @@
 import { parseFrontmatter } from './frontmatter.ts'
-import { whiteSpace } from './vocabulary.ts'
+import { whiteSpace, whiteSpaceClass } from './vocabulary.ts'
+
+// 行末コメント: 空白 (半角 / 全角 / タブ) に続く `#` 以降を行末まで除去する。
+// 行頭の `#` (trim 後 startsWith) は別途フルライン除去するため、 ここでは
+// 「空白 + `#`」のみを対象にして、 ハッシュタグ的トークン (例: `#1` 席番号) と
+// の衝突を避ける。
+const trailingCommentRegex = new RegExp(`[${whiteSpaceClass}]#.*$`)
+
+/**
+ * 行から行末コメント (`[ws]# ...`) を剥がして返す。 行頭フルラインコメント
+ * (`#` で始まる行) はこの関数では落とさない (呼び出し側で `.trim().startsWith('#')`
+ * 判定してください)。 preprocess と rename の両経路で同一仕様にするため共通化。
+ */
+export function stripTrailingHashComment(line: string): string {
+  return line.replace(trailingCommentRegex, '')
+}
+
+/**
+ * 行を本体と行末コメント部 (空白 + `#` ...) に分割する。 コメントが無ければ
+ * `comment` は空文字列。 rename のように本体だけ parse して comment は原文のまま
+ * 保持したいケース向け。
+ */
+export function splitTrailingHashComment(line: string): { body: string, comment: string } {
+  const m = trailingCommentRegex.exec(line)
+  if (!m) return { body: line, comment: '' }
+  return { body: line.slice(0, m.index), comment: line.slice(m.index) }
+}
 
 export type Line = {
   number: number  // 元のテキストの行番号
@@ -27,7 +53,8 @@ export function preprocess(input: string, cursorLine?: number): PreprocessResult
 
   rawLines.forEach((rawLine, idx) => {
     const lineNumber = idx + numLines // 行番号は1ベース
-    const line = rawLine.trim()
+    const stripped = stripTrailingHashComment(rawLine)
+    const line = stripped.trim()
     if (line.length === 0 || line.startsWith('#')) {
       // 空行とハッシュコメント行は除去
       return
