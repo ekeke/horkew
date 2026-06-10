@@ -154,7 +154,14 @@ impl SystemRole {
                 RoleTrait::PassiveFoxWinCounter,
                 RoleTrait::ActionDivineImperfect,
             ],
-            SystemRole::Contractor => &[RoleTrait::PassivePairRequired],
+            SystemRole::Contractor => &[
+                RoleTrait::PassivePairRequired,
+                // 宇理炎の能力 (retar 上は medium と同 trait に乗せ、 verify_mediumship_ability
+                // で contractor の assertions を target species で確定する)。
+                // 通常 planning からは role_sets の powered_village_roles_in が除外し、
+                // plan_builder の announce-fixed 動的追加経路で planning に乗る構成。
+                RoleTrait::AutoInfoExecutionSpecies,
+            ],
         }
     }
 

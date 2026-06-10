@@ -35,6 +35,7 @@ export function buildRoleTestPlan(
   multipleVictims: Seat[],
   _initialPossibilities?: Possibilities,
   hocusPocus?: Map<Seat, boolean>,
+  assumptions?: Map<Seat, SystemRole>,
 ): BuildPlanResult {
   const hocusSeats: Seat[] = hocusPocus ? [...hocusPocus.keys()] : []
   // 露呈人外数の管理の準備
@@ -43,6 +44,28 @@ export function buildRoleTestPlan(
   // setup 駆動で派生. 役職追加で自動追従.
   // 村陣営の能力持ち + divine trait を持つ liar role (paparazzi 等) を planning 対象に.
   const planningRoles = [...poweredVillageRolesIn(setup), ...divineLiarRolesIn(setup)]
+
+  // announce-fixed 動的追加: 公示で全席が assumption 確定された村陣営役職を planningRoles に
+  // 追加する経路。 poweredVillageRolesIn から除外されている contractor (= 公示専用役職) を、
+  // 公示が完了したケースに限って planning に乗せ、 verifier (verifyMediumshipAbility 等) を
+  // 動かす目的。 既存挙動への影響を避けるため、 既に planningRoles に含まれている役職は
+  // 触らず、 setup count == assumption seat count + claim 0 の役職のみ追加する。
+  if (assumptions && assumptions.size > 0) {
+    const planningSet = new Set<SystemRole>(planningRoles)
+    for (const [role, num] of setup.entries()) {
+      if (num <= 0) continue
+      if (planningSet.has(role)) continue
+      const r = systemRoles.get(role)
+      if (!r || r.faction !== 'village') continue
+      let assumedCount = 0
+      for (const [, assumedRole] of assumptions.entries()) {
+        if (assumedRole === role) assumedCount++
+      }
+      if (assumedCount !== num) continue
+      planningRoles.push(role)
+    }
+  }
+
   const planningRolesSet = new Set<SystemRole>(planningRoles)
   const liarRolesSet = new Set<SystemRole>(liarRolesIn(setup))
 
@@ -124,6 +147,25 @@ export function buildRoleTestPlan(
     // divine trait 同士は CO 席を pool 共有 (seer ↔ paparazzi).
     const claimSeats = getDivineClaimPool(role)
     const minDay = getMinClaimDay(role)
+
+    // announce-fixed fast-path: 公示で全席が assumption 確定済み かつ claim 0 役職
+    // (= contractor 等の公示専用役職) は、 既存 combinatorics を bypass して
+    // selected = 公示席のみの 1 通り plan を直接登録する。
+    // 上の planningRoles 動的追加と対をなす経路で、 verifier が走るための plan を最小限に確保する。
+    if (assumptions && assumptions.size > 0 && claimSeats.length === 0) {
+      const assumedSeats: Seat[] = []
+      for (const [seat, assumedRole] of assumptions.entries()) {
+        if (assumedRole === role) assumedSeats.push(seat)
+      }
+      const num = setup.get(role) ?? 0
+      if (assumedSeats.length === num && num > 0) {
+        const allSeats = Array.from(village.statuses.keys())
+        const rest = allSeats.filter(s => !assumedSeats.includes(s))
+        roleTests.push([{ role, selected: assumedSeats, rest }])
+        continue
+      }
+    }
+
     // HocusPocus は「CO 在り役職への潜伏候補追加」に絞る (= 早期 skip 条件は HocusPocus と独立).
     // CO ゼロ役職に HocusPocus 在りで plan を強制生成すると、 contractor 確定 assumption 等と
     // 矛盾する無駄 plan を全 depth で並べてしまい、 結果として全 world fail で盤面が破綻する.

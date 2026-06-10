@@ -142,7 +142,7 @@ export class VillageRetar {
     else this.initFromScratch(village)
 
     // 共通後処理
-    const plan = buildRoleTestPlan(village, setup, multipleVictims, this.initialPossibilities, this.options.hocusPocus)
+    const plan = buildRoleTestPlan(village, setup, multipleVictims, this.initialPossibilities, this.options.hocusPocus, this.options.assumptions)
     this.roleTests = plan.roleTests
     this.totalLiarRoles = plan.totalLiarRoles
     this.knownFakeClaimCount = plan.knownFakeClaimCount
