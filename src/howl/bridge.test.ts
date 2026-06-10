@@ -975,6 +975,21 @@ describe('bridge: spoiler faction alias', () => {
     assert.throws(() => buildVillageStatus(statements, meta), /矛盾する仮定/)
   })
 
+  test('!Alice=人外 → !Alice=人狼 は refinement として許容 (alias の denied に含まれない pin)', () => {
+    // hostile alias は village 役職のみ deny、 werewolf は denied set に含まれないため
+    // 後続の `!Alice=人狼` は矛盾せず assumptions に werewolf を追加する。
+    const howl = `+アリス
++ボブ
+!アリス=人外
+!アリス=人狼`
+    const { statements, meta } = parse(howl)
+    const { assumptions, spoilerDeniedRoles, players } = buildVillageStatus(statements, meta)
+    const aliceSeat = seatOf(players, 'アリス')
+    assert.strictEqual(assumptions.get(aliceSeat), 'werewolf')
+    assert.ok(spoilerDeniedRoles.get(aliceSeat)!.has('seer' as SystemRole), 'hostile alias の deny は残る')
+    assert.ok(!spoilerDeniedRoles.get(aliceSeat)!.has('werewolf' as SystemRole), 'werewolf は denied set に入らない')
+  })
+
   test('frontmatter spoilers.roles でも alias が使える', () => {
     const howl = `---
 spoilers:
