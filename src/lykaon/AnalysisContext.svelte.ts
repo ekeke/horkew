@@ -701,18 +701,6 @@ export class AnalysisContext {
           return
         }
 
-        // 突然死は Retar 非対応
-        const hasSuddenDeath = [...vs.statuses.values()]
-          .some(s => !s.surviving && s.causeOfDeath === ('sudden_death' as CauseOfDeath))
-        if (hasSuddenDeath) {
-          this.analysisSeats = []
-          this.baseAnalysisSeats = []
-          this.analysisError = '突然死を含む盤面は解析できません'
-          this.analysisStats = null
-          this.wolfPairSuggestions = []
-          return
-        }
-
         const players = this.players
         const mergedAssumptions = this.mergedAssumptions
         const hocusPocusSeats = this.hocusPocusSeats
