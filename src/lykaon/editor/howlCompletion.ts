@@ -461,8 +461,12 @@ function detectCoType(lineText: string, players: PlayerEntry[]): CoType {
 function maxReportable(coType: CoType, stats: GameStats): number {
   const pastNights = Math.max(0, (stats.day - 1) + (stats.omitFirstDay ? 1 : 0))
   if (coType === 'seer') {
-    if (stats.seerFirstSeek === 'none' && pastNights >= 1) return pastNights - 1
-    return pastNights
+    // first-seek='none' は初夜の seer 行動が無効 → pastNights から Night 0 分を除く
+    if (stats.seerFirstSeek === 'none') {
+      return pastNights >= 1 ? pastNights - 1 : 0
+    }
+    // first-seek != 'none': 行動日 0 (= Day 0 の夜 = 先制占い結果) も報告対象 → +1
+    return pastNights + 1
   }
   if (coType === 'bodyguard') {
     if (stats.firstVictim !== 'none' && pastNights >= 1) return pastNights - 1

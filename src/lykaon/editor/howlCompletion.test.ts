@@ -99,10 +99,17 @@ describe('inferContext — 矢印 / アクション', () => {
 // ----------------------------------------------------------------------------
 
 describe('inferContext — 占い師CO チェーン (規定マトリクス)', () => {
-  // ---- omitFirstDay=false (default): Day 1 朝には過去夜なし ----
-  test('Day 1 + omitFirstDay=false: pastNights=0 → 上限 0 → null', () => {
+  // ---- omitFirstDay=false (default): Day 1 朝には過去夜なし、 ただし first-seek != 'none' なら 0日目 結果が報告可 ----
+  test('Day 1 + omitFirstDay=false + first-seek=all (default): 0日目 結果 1件報告可 → day + player', () => {
     const r = inferContext('エケケ 占い師CO ', SEER_CLAIM, STATS_DAY1)
-    assert.strictEqual(r, null, 'omitFirstDay=false なら 1日目朝はまだ夜行動が起きていない')
+    assert.ok(r !== null, 'first-seek != none なら Day 1 朝に 0日目 (= 行動日 0 = Day 0 の夜) の結果を 1 件報告可')
+    assert.ok(hasCategory(r, 'day'))
+    assert.ok(hasCategory(r, 'player'))
+  })
+
+  test('Day 1 + omitFirstDay=false + first-seek=none: pastNights=0 → 上限 0 → null', () => {
+    const r = inferContext('エケケ 占い師CO ', SEER_CLAIM, stats({ day: 1, seerFirstSeek: 'none' }))
+    assert.strictEqual(r, null, 'first-seek=none なら Day 1 朝に報告可能な結果は無い')
   })
 
   test('Day 2 + first-seek=all: pastNights=1 → day + player', () => {
@@ -148,10 +155,17 @@ describe('inferContext — 占い師CO チェーン (規定マトリクス)', ()
     assert.ok(hasCategory(r, 'result'))
   })
 
-  // omitFirstDay=false + first-seek=all + Day 2: pastNights=1 → 1 件で上限
-  test('Day 2 + first-seek=all: 1 件報告済み → 上限到達 → null', () => {
+  // omitFirstDay=false + first-seek=all + Day 2: pastNights=1 + 1 (= 0日目) = 上限 2 → 1 件報告済みでさらに 1 件報告可
+  test('Day 2 + first-seek=all: 1 件報告済み → 0日目 結果がまだ報告可 → day + player', () => {
     const r = inferContext('エケケ 占い師CO 2日目 ヒトミ ● ', SEER_CLAIM, STATS_DAY2)
-    assert.strictEqual(r, null, 'pastNights=1 なので 1 件で上限')
+    assert.ok(r !== null, 'first-seek != none で行動日 0 の結果も報告可なので 1 件目で上限に達しない')
+    assert.ok(hasCategory(r, 'day'))
+    assert.ok(hasCategory(r, 'player'))
+  })
+
+  test('Day 2 + first-seek=none: 1 件報告済み → 上限到達 → null', () => {
+    const r = inferContext('エケケ 占い師CO 2日目 ヒトミ ● ', SEER_CLAIM, stats({ day: 2, seerFirstSeek: 'none' }))
+    assert.strictEqual(r, null, 'first-seek=none で pastNights=1 - 1 = 0 なので 1 件目で上限。 ただし実際は 1 件報告済み → 過去夜カウントずれだが null は維持')
   })
 
   // omitFirstDay=true + first-seek=all + Day 2: pastNights=2 → 2 件まで OK
@@ -365,10 +379,11 @@ describe('inferContext — 行頭プレイヤー名のみ', () => {
     assert.ok(hasCategory(r, 'player'))
   })
 
-  // ★ Day 1 + omitFirstDay=false の cap=0 で 報告系候補 (day / player / result) が
+  // ★ Day 1 + first-seek=none の cap=0 で 報告系候補 (day / player / result) が
   //   出ないことを担保。 汎用候補 (arrow / co_role / action) は残る。
-  test('★ 初日CO 占い師 (Day 1 + cap=0) → 報告系 (day/player/result) を出さない', () => {
-    const r = inferContext('エケケ ', SEER_CLAIM, STATS_DAY1)
+  // first-seek != 'none' のときは 0日目 結果が 1 件報告可なので別途許容される。
+  test('★ 初日CO 占い師 (Day 1 + first-seek=none + cap=0) → 報告系 (day/player/result) を出さない', () => {
+    const r = inferContext('エケケ ', SEER_CLAIM, stats({ day: 1, seerFirstSeek: 'none' }))
     assert.ok(r !== null)
     assert.ok(!hasCategory(r, 'day'), 'day 候補は cap=0 で除外')
     assert.ok(!hasCategory(r, 'player'), 'player 候補は cap=0 で除外')
