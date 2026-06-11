@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert'
 import {
-  inferContext, getContinuousProtectionExclusion,
+  inferContext, getContinuousProtectionExclusion, buildDayCandidates,
   type PlayerEntry, type GameStats, type Category,
 } from './howlCompletion.ts'
 
@@ -422,5 +422,42 @@ describe('inferContext — 行頭プレイヤー名のみ', () => {
     assert.ok(!hasCategory(r, 'day'))
     assert.ok(!hasCategory(r, 'result'))
     assert.ok(hasCategory(r, 'arrow'))
+  })
+})
+
+// ----------------------------------------------------------------------------
+// buildDayCandidates: 0日目 拡張 (first-seek 連動)
+// ----------------------------------------------------------------------------
+
+describe('buildDayCandidates — 0日目 (first-seek 連動)', () => {
+  test('first-seek = none: 0日目 候補は出ない (= 通常通り 1日目〜)', () => {
+    const candidates = buildDayCandidates(3, 'none')
+    const labels = candidates.map(c => c.label)
+    assert.deepStrictEqual(labels, ['1日目', '2日目', '3日目'])
+  })
+
+  test('first-seek = no-wolf: 0日目 候補が含まれる', () => {
+    const candidates = buildDayCandidates(3, 'no-wolf')
+    const labels = candidates.map(c => c.label)
+    assert.deepStrictEqual(labels, ['0日目', '1日目', '2日目', '3日目'])
+  })
+
+  test('first-seek = all: 0日目 候補が含まれる', () => {
+    const candidates = buildDayCandidates(2, 'all')
+    const labels = candidates.map(c => c.label)
+    assert.deepStrictEqual(labels, ['0日目', '1日目', '2日目'])
+  })
+
+  test('currentDay = 1: first-seek 規定下では 0日目 + 1日目', () => {
+    const candidates = buildDayCandidates(1, 'no-wolf')
+    const labels = candidates.map(c => c.label)
+    assert.deepStrictEqual(labels, ['0日目', '1日目'])
+  })
+
+  test('0日目 候補の info 表示は first-seek 由来を明示', () => {
+    const candidates = buildDayCandidates(1, 'no-wolf')
+    const day0 = candidates.find(c => c.label === '0日目')
+    assert.ok(day0)
+    assert.match(day0!.info ?? '', /first-seek/)
   })
 })

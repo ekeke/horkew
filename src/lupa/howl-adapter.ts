@@ -113,10 +113,12 @@ export function buildLupaScenario(input: AdapterInput): AdapterOutput {
         const role = status.claimingRole
         if (role === 'seer') {
           const results: Array<{ day: number, target: number, result: 'human' | 'wolf' }> = []
-          for (const [night, a] of status.assertions) {
-            if (night < 0) continue
+          for (const [actionDay, a] of status.assertions) {
+            // status.assertions の key は 1-indexed の行動日。 mason key (= 負値) を弾く。
+            // lupa engine API の seer_co.results[].day は 0-indexed Night index のため変換する。
+            if (actionDay < 1) continue
             if (a.species !== 'human' && a.species !== 'wolf') continue
-            results.push({ day: night, target: a.target, result: a.species })
+            results.push({ day: actionDay - 1, target: a.target, result: a.species })
           }
           claims.set(seat, { type: 'seer_co', results })
         } else if (role === 'medium') {

@@ -340,10 +340,20 @@ export function parsePeaceStatement(text: string, line: number): PeaceStatement 
 const dayMarkAsciiRegex = new RegExp(`^${V.optionalSpace}[dDｄＤ][aAａＡ][yYｙＹ]${V.whiteSpaces}(${V.dayNumber})${V.optionalSpace}[:：]${V.optionalSpace}$`)
 const dayMarkJapaneseRegex = new RegExp(`^${V.optionalSpace}(${V.dayNumber})${V.dayUnit}${V.optionalSpace}[:：]${V.optionalSpace}$`)
 export function parseDayMarkStatement(text: string, line: number): DayMarkStatement | null {
+  // dayMark の Day 0 は reject (= ゲーム上の進行 day は 1 始まり、 Day 0 という section は存在しない)。
+  // 0 を表現するのは role.seer.first-seek 由来の assertion 内 `0日目` ラベルのみ。
   const ascii = dayMarkAsciiRegex.exec(text)
-  if (ascii) return { type: 'dayMark', line, day: Number(ascii[1]) }
+  if (ascii) {
+    const day = Number(ascii[1])
+    if (day < 1) return null
+    return { type: 'dayMark', line, day }
+  }
   const ja = dayMarkJapaneseRegex.exec(text)
-  if (ja) return { type: 'dayMark', line, day: Number(ja[1]) }
+  if (ja) {
+    const day = Number(ja[1])
+    if (day < 1) return null
+    return { type: 'dayMark', line, day }
+  }
   return null
 }
 
@@ -598,9 +608,10 @@ export function parseAssertStatement(text: string, line: number): AssertStatemen
         const assertion: Assertion = { player: actor }
         if (target) assertion.target = target
         if (m.groups.day !== undefined) {
-          // 日数プレフィックス (1D, 2日目 等) を 0-indexed の夜番号に正規化
+          // 日数プレフィックス (0D, 1D, 2日目 等) を 1-indexed の行動日として保存。
+          // 0 は role.seer.first-seek 由来の「Day 0 の夜の占い結果」 として許可される。
           const n = parseInt(m.groups.day.replace(/[０-９]/g, c => String(c.charCodeAt(0) - 0xFEE0)), 10)
-          if (!Number.isNaN(n) && n >= 1) assertion.day = n - 1
+          if (!Number.isNaN(n) && n >= 0) assertion.day = n
         }
         if (new RegExp(V.guard).test(actionText)) {
           assertion.action = 'guard'

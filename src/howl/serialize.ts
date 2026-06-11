@@ -372,8 +372,8 @@ function serializeAssert(stmt: AssertStatement): string {
         }
       }
     } else if (a.target) {
-      // 夜番号を 1-indexed の "{N}D " プレフィックスで出力 (howl パーサは dayNumber+dayUnit を受理)
-      const dayPrefix = a.day !== undefined ? `${a.day + 1}D ` : ''
+      // 行動日 (1-indexed) を "{N}D " プレフィックスで出力 (howl パーサは dayNumber+dayUnit を受理)
+      const dayPrefix = a.day !== undefined ? `${a.day}D ` : ''
       if (a.action === 'guard') {
         historyParts.push(`${dayPrefix}${a.target}護衛`)
       } else if (a.result) {

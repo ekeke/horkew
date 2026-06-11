@@ -1091,3 +1091,86 @@ setup:
     assert.strictEqual(seat1.causeOfDeath, 'execution')
   })
 })
+
+describe('bridge labeled mode (day ラベル付き assertion)', () => {
+  function setup(howl: string) {
+    const { statements, meta } = parse(howl)
+    return buildVillageStatus(statements, meta)
+  }
+
+  function seat(players: Map<number, string>, name: string): number {
+    return [...players.entries()].find(([, n]) => n === name)![0]
+  }
+
+  test('全 day ラベル付き: assertion.day を直接 key として投入 (= 0日目 + 1日目)', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
+
+アリス: 占いCO 0日目 ボブ白 1日目 チャーリー黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const charSeat = seat(players, 'チャーリー')
+    const assertions = vs.statuses.get(aliceSeat)!.assertions
+
+    assert.strictEqual(assertions.size, 2)
+    assert.deepStrictEqual(assertions.get(0), { target: bobSeat, species: 'human' })
+    assert.deepStrictEqual(assertions.get(1), { target: charSeat, species: 'wolf' })
+  })
+
+  test('順序逆転 day ラベル: 並び順無視、 assertion.day で投入', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
+
+アリス: 占いCO 2日目 ボブ白 1日目 チャーリー黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const charSeat = seat(players, 'チャーリー')
+    const assertions = vs.statuses.get(aliceSeat)!.assertions
+
+    // 並び順とは無関係に day で配置: 1日目 = チャーリー黒、 2日目 = ボブ白
+    assert.deepStrictEqual(assertions.get(1), { target: charSeat, species: 'wolf' })
+    assert.deepStrictEqual(assertions.get(2), { target: bobSeat, species: 'human' })
+  })
+
+  test('混在 (一部だけ day ラベル): silent right-align fallback', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
+
+吊り デイブ
+
+噛み エミリー
+
+アリス: 占いCO 1日目 ボブ白 チャーリー黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const charSeat = seat(players, 'チャーリー')
+    const assertions = vs.statuses.get(aliceSeat)!.assertions
+
+    // mixed → right-align fallback (= day=2, lastActionDay=1, 2 結果 → 行動日 0, 1)
+    assert.deepStrictEqual(assertions.get(0), { target: bobSeat, species: 'human' })
+    assert.deepStrictEqual(assertions.get(1), { target: charSeat, species: 'wolf' })
+  })
+
+  test('重複 day: 後勝ち (= Map.set 上書き、 previousAssertions にスライド記録)', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
+
+アリス: 占いCO 1日目 ボブ白 1日目 チャーリー黒`)
+    const aliceSeat = seat(players, 'アリス')
+    const charSeat = seat(players, 'チャーリー')
+    const status = vs.statuses.get(aliceSeat)!
+
+    // 後勝ち: 行動日 1 = チャーリー黒
+    assert.deepStrictEqual(status.assertions.get(1), { target: charSeat, species: 'wolf' })
+    // ボブ白 → チャーリー黒 のスライドが previousAssertions に記録される
+    assert.ok(status.previousAssertions?.has(1))
+  })
+
+  test('0日目 単独 CO: first-seek 由来の先制占い結果として行動日 0 に投入', () => {
+    const { vs, players } = setup(`++アリス、ボブ、チャーリー、デイブ、エミリー
+
+アリス: 占いCO 0日目 ボブ白`)
+    const aliceSeat = seat(players, 'アリス')
+    const bobSeat = seat(players, 'ボブ')
+    const assertions = vs.statuses.get(aliceSeat)!.assertions
+
+    assert.strictEqual(assertions.size, 1)
+    assert.deepStrictEqual(assertions.get(0), { target: bobSeat, species: 'human' })
+  })
+})

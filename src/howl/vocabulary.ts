@@ -10,8 +10,8 @@ export const plus            = `(?:\\+|\\＋)`
 export const delimiterClass  = `,;:\\u3001\\uFF0C\\uFF1B\\uFF1A` // full-width comma, full-width semicolon, full-width colon
 export const delimiter       = `[${delimiterClass}${whiteSpaceClass}]${optionalSpace}`
 export const possibleName    = `[^${whiteSpaceClass}${delimiterClass}]+` // Name (not including white space, full-width comma, full-width semicolon, full-width colon)
-export const dayNumber       = `[1-9１-９][0-9０-９]*?`
-export const dayUnit         = `(?:日目?|[dDｄＤ](?:[aAａＡ][yYｙＹ])?)` // Day (1-9, 1-9 in full-width)
+export const dayNumber       = `(?:[0０]|[1-9１-９][0-9０-９]*?)`
+export const dayUnit         = `(?:日目?|[dDｄＤ](?:[aAａＡ][yYｙＹ])?)` // Day (0-9, 0-9 in full-width); leading zeros for multi-digit not allowed
 
 
 // ********************************* Basic Gaming Vocabulary

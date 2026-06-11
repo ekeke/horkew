@@ -142,6 +142,7 @@ describe('day', () => {
   const regex = new RegExp(`(?<day>${Vocabulary.dayNumber})${Vocabulary.dayUnit}`)
 
   it('should match day terms', () => {
+    assert.match('0日目', regex, '0日目 should match (Day 0 = first-seek 由来の行動日 0)')
     assert.match('1日目', regex, '1日目 should match')
     assert.match('2d', regex, '2d should match')
     assert.match('3日', regex, '3日 should match')
@@ -150,7 +151,6 @@ describe('day', () => {
   })
 
   it('should not match non-day terms', () => {
-    assert.doesNotMatch('0日目', regex, '0日目 should not match')
     assert.doesNotMatch('日', regex, '日 should not match')
     assert.doesNotMatch('10', regex, '10 should not match')
   })

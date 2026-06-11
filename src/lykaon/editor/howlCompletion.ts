@@ -398,7 +398,7 @@ const allStaticCandidates = [
 
 // ---- ラベルセットを事前計算 (文脈推定用) ----
 
-const dayTokenRe = /^[1-9１-９][0-9０-９]*(?:日目?|[dDｄＤ](?:[aAａＡ][yYｙＹ])?)$/
+const dayTokenRe = /^[0-9０-９]+(?:日目?|[dDｄＤ](?:[aAａＡ][yYｙＹ])?)$/
 const arrowRe = new RegExp(`^(?:${V.rightArrow}|${V.leftArrow})$`)
 const rightArrowRe = new RegExp(`^${V.rightArrow}$`)
 const leftArrowRe = new RegExp(`(?:${V.leftArrow})`)
@@ -628,10 +628,14 @@ export function inferContext(beforeCursor: string, players: PlayerEntry[], stats
 
 // ---- 候補の構築 ----
 
-/** 日付候補を動的に生成 (1日目〜currentDay日目) */
-function buildDayCandidates(currentDay: number): HowlCandidate[] {
+/**
+ * 日付候補を動的に生成。
+ * role.seer.first-seek != 'none' のとき `0日目` (= Day 0 の夜 = first-seek 由来の先制占い結果) も候補に含める。
+ */
+export function buildDayCandidates(currentDay: number, seerFirstSeek: SeerFirstSeek): HowlCandidate[] {
   const candidates: HowlCandidate[] = []
-  for (let d = 1; d <= currentDay; d++) {
+  const startDay = seerFirstSeek === 'none' ? 1 : 0
+  for (let d = startDay; d <= currentDay; d++) {
     candidates.push({
       label: `${d}日目`,
       reading: `${d}`,
@@ -640,7 +644,7 @@ function buildDayCandidates(currentDay: number): HowlCandidate[] {
       category: 'day',
       categoryLabel: '日付',
       terminal: false,
-      info: `${d}日目の結果`,
+      info: d === 0 ? '0日目の結果 (first-seek 由来の先制占い)' : `${d}日目の結果`,
     })
   }
   return candidates
@@ -782,7 +786,7 @@ const howlCompletionSource: CompletionSource = (context) => {
   const currentDay = context.state.field(currentDayField)
   const gameStats = context.state.field(gameStatsField)
   const playerCandidates = buildPlayerCandidates(players)
-  const dayCandidates = buildDayCandidates(currentDay)
+  const dayCandidates = buildDayCandidates(currentDay, gameStats.seerFirstSeek)
 
   // 配役に応じて候補をフィルタ (setupが空の場合は全候補を表示)
   const staticFiltered = setup.size === 0

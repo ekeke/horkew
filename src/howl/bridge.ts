@@ -529,7 +529,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
         if (actorSeat === null) break
         const actorStatus = statuses.get(actorSeat)!
         const guardTargets: number[] = []
-        const divinationResults: { target: number, species: EnumSpecies }[] = []
+        const divinationResults: { target: number, species: EnumSpecies, day?: number }[] = []
 
         const villageRoles: SystemRole[] = ['villager', 'seer', 'medium', 'bodyguard', 'mason', 'nekomata']
 
@@ -580,7 +580,7 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
             const targetSeat = resolveSeat(assertion.target)
             if (targetSeat === null) continue
             if (assertion.result) {
-              divinationResults.push({ target: targetSeat, species: speciesMap[assertion.result]! })
+              divinationResults.push({ target: targetSeat, species: speciesMap[assertion.result]!, day: assertion.day })
             }
             if (assertion.action === 'guard') {
               guardTargets.push(targetSeat)
@@ -588,30 +588,39 @@ export function buildVillageStatus(statements: Statement[], meta?: Record<string
           }
         }
 
-        // Right-align divination results: last result = previous night, counting backwards
+        // Divination results の key 決定:
+        //   - 全 assertion に day ラベル (1日目 等) があれば Labeled mode: assertion.day を直接 key として投入
+        //   - 全部 day ラベル無しなら Right-align fallback: last = today-1 の暗黙補完 (= 直前夜の報告)
+        //   - 混在は labeled mode と right-align どちらの意図か曖昧なため、 silent で right-align fallback に倒す
         if (divinationResults.length > 0) {
-          const lastNight = day - 1
+          const allLabeled = divinationResults.every(r => r.day !== undefined)
+          const assignActionDay = (i: number): number => {
+            if (allLabeled) return divinationResults[i].day!
+            // Right-align: last result = previous action day (= day-1), counting backwards
+            const lastActionDay = day - 1
+            return lastActionDay - (divinationResults.length - 1 - i)
+          }
           for (let i = 0; i < divinationResults.length; i++) {
-            const night = lastNight - (divinationResults.length - 1 - i)
-            const existing = actorStatus.assertions.get(night)
+            const actionDay = assignActionDay(i)
+            const existing = actorStatus.assertions.get(actionDay)
             const next = divinationResults[i]
             // Only treat as slide (push to previousAssertions) when the new result actually differs
             // from the existing one. Identical re-statements (same target + same species) are no-ops.
             if (existing && (existing.target !== next.target || existing.species !== next.species)) {
               if (!actorStatus.previousAssertions) actorStatus.previousAssertions = new Map()
-              if (!actorStatus.previousAssertions.has(night)) actorStatus.previousAssertions.set(night, [])
-              actorStatus.previousAssertions.get(night)!.push(existing)
+              if (!actorStatus.previousAssertions.has(actionDay)) actorStatus.previousAssertions.set(actionDay, [])
+              actorStatus.previousAssertions.get(actionDay)!.push(existing)
             }
-            actorStatus.assertions.set(night, next)
+            actorStatus.assertions.set(actionDay, { target: next.target, species: next.species })
           }
         }
 
-        // Assign guard actions: last guard = previous night (day-1), counting backwards
+        // Assign guard actions: last guard = previous action day (= day-1), counting backwards
         if (guardTargets.length > 0) {
-          const lastNight = day - 1
+          const lastActionDay = day - 1
           for (let i = 0; i < guardTargets.length; i++) {
-            const night = lastNight - (guardTargets.length - 1 - i)
-            actorStatus.actions.set(night, guardTargets[i])
+            const actionDay = lastActionDay - (guardTargets.length - 1 - i)
+            actorStatus.actions.set(actionDay, guardTargets[i])
           }
         }
         break

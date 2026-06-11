@@ -968,3 +968,52 @@ setup:
     assert.deepStrictEqual(parsed.meta.warnings ?? [], [])
   })
 })
+
+describe('assertion day label (1-indexed 行動日)', () => {
+  function findAsserts(text: string) {
+    return parse(text).statements
+      .filter((s: any) => s.type === 'assert')
+      .map((s: any) => ({ actor: s.actor, assertions: s.assertions }))
+  }
+
+  test('`1日目 X ○` → assertion.day === 1 (行動日 1 = 初夜)', () => {
+    const text = `++Alice,Bob,Charlie
+Alice: 占CO 1日目 Bob白`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts[0].assertions[1].day, 1)
+    assert.strictEqual(asserts[0].assertions[1].target, 'Bob')
+  })
+
+  test('`2日目 X ○` → assertion.day === 2 (行動日 2 = Day 2 の夜)', () => {
+    const text = `++Alice,Bob,Charlie
+Alice: 占CO 2日目 Bob白`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts[0].assertions[1].day, 2)
+  })
+
+  test('`0日目 X ○` → assertion.day === 0 (行動日 0 = Day 0 の夜 = first-seek 由来)', () => {
+    const text = `++Alice,Bob,Charlie
+Alice: 占CO 0日目 Bob白`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts[0].assertions[1].day, 0)
+    assert.strictEqual(asserts[0].assertions[1].target, 'Bob')
+    assert.strictEqual(asserts[0].assertions[1].result, 'isHuman')
+  })
+
+  test('`0d X ○` も assertion.day === 0', () => {
+    const text = `++Alice,Bob,Charlie
+Alice: 占CO 0d Bob白`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts[0].assertions[1].day, 0)
+  })
+
+  test('複数 day ラベル: 0日目 と 1日目 が同 CO に並ぶ (first-seek 由来 + 初夜)', () => {
+    const text = `++Alice,Bob,Charlie,Dave
+Alice: 占CO 0日目 Bob白 1日目 Charlie黒`
+    const asserts = findAsserts(text)
+    assert.strictEqual(asserts[0].assertions[1].day, 0)
+    assert.strictEqual(asserts[0].assertions[1].target, 'Bob')
+    assert.strictEqual(asserts[0].assertions[2].day, 1)
+    assert.strictEqual(asserts[0].assertions[2].target, 'Charlie')
+  })
+})

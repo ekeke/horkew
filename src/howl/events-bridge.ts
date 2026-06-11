@@ -60,15 +60,19 @@ function processAssert(stmt: AssertStatement, dict: FlexibleDictionary, currentD
   for (const role of claimAssertion.roles) {
     if (role === 'seer') {
       const results: Array<{ day: number, target: number, result: EnumSpecies }> = []
-      // assertion に明示的な day (1D/2日目 等) があればそれを、無ければ statement day - 1 を fallback.
+      // a.day は 1-indexed の行動日。 lupa engine API は 0-indexed Night index を要求するため変換する。
+      // a.day === 0 (= 0日目、 first-seek 由来) は lupa engine の Night index に対応しないため event 化しない。
+      // assertion に明示的な day (1D/2日目 等) が無い場合は statement day - 1 を 0-indexed fallback として使う。
       const fallbackDay = Math.max(0, currentDay - 1)
       for (const a of restAssertions) {
         if (!a.target || !a.result) continue
+        if (a.day === 0) continue
         const targetSeat = resolveSeat(dict, a.target)
         if (targetSeat === null) continue
         const resolved = SPECIES_MAP[a.result]
         if (!resolved) continue
-        results.push({ day: a.day ?? fallbackDay, target: targetSeat, result: resolved })
+        const dayValue = a.day !== undefined ? a.day - 1 : fallbackDay
+        results.push({ day: dayValue, target: targetSeat, result: resolved })
       }
       events.push({ type: 'seer_claim', actor, results })
     } else if (role === 'medium') {
