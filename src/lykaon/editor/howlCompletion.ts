@@ -465,8 +465,10 @@ function maxReportable(coType: CoType, stats: GameStats): number {
     if (stats.seerFirstSeek === 'none') {
       return pastNights >= 1 ? pastNights - 1 : 0
     }
-    // first-seek != 'none': 行動日 0 (= Day 0 の夜 = 先制占い結果) も報告対象 → +1
-    return pastNights + 1
+    // first-seek='no-wolf' のみ Day 0 の夜の先制占い結果を持つ規定 → +1
+    // (= 本来は別軸の「Day 0 の夜の行動有無」 設定だが、 便宜上 no-wolf 値で代用)
+    if (stats.seerFirstSeek === 'no-wolf') return pastNights + 1
+    return pastNights
   }
   if (coType === 'bodyguard') {
     if (stats.firstVictim !== 'none' && pastNights >= 1) return pastNights - 1
@@ -634,11 +636,12 @@ export function inferContext(beforeCursor: string, players: PlayerEntry[], stats
 
 /**
  * 日付候補を動的に生成。
- * role.seer.first-seek != 'none' のとき `0日目` (= Day 0 の夜 = first-seek 由来の先制占い結果) も候補に含める。
+ * role.seer.first-seek='no-wolf' のとき `0日目` (= Day 0 の夜 = 先制占い結果) も候補に含める。
+ * (本来は「Day 0 の夜の行動有無」 という別軸の設定だが、 便宜上 no-wolf 値で代用している。)
  */
 export function buildDayCandidates(currentDay: number, seerFirstSeek: SeerFirstSeek): HowlCandidate[] {
   const candidates: HowlCandidate[] = []
-  const startDay = seerFirstSeek === 'none' ? 1 : 0
+  const startDay = seerFirstSeek === 'no-wolf' ? 0 : 1
   for (let d = startDay; d <= currentDay; d++) {
     candidates.push({
       label: `${d}日目`,
@@ -648,7 +651,7 @@ export function buildDayCandidates(currentDay: number, seerFirstSeek: SeerFirstS
       category: 'day',
       categoryLabel: '日付',
       terminal: false,
-      info: d === 0 ? '0日目の結果 (first-seek 由来の先制占い)' : `${d}日目の結果`,
+      info: d === 0 ? '0日目の結果 (Day 0 夜の先制占い)' : `${d}日目の結果`,
     })
   }
   return candidates

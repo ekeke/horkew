@@ -207,6 +207,8 @@ The notation and vocabulary support dual Japanese/ASCII syntax:
 
 ユーザー記法 `0日目 X ○` 等の `0日目` ラベルは、 **行動日 0** (= Day 0 の夜) を指す。 これは通常 Day 軸 (1, 2, 3, ...) の N=0 への自然な拡張であり、 新規概念ではない。 `1日目` (= 行動日 1 = 初夜) と `0日目` は**別の夜の出来事**であり、 同じ Night に混同してはならない。
 
+「Day 0 の夜の占い結果を持ってゲーム開始する」 規定は、 現状 `role.seer.first-seek=no-wolf` のときに発生する慣習として扱う (= 補完で 0日目 候補を出す、 maxReportable に +1 する条件)。 本来は「Day 0 の夜の行動有無」 という別軸の設定だが、 便宜上 first-seek の `no-wolf` 値で代用している。 別ルール (例: `role.seer.day0-divine: true`) として正式分離する余地あり。
+
 ## Development Stage
 
 このプロジェクトはブートストラップ段階を抜け、**コンシューマ向け整備段階**に入った。GitHub Actions は以下が稼働している:

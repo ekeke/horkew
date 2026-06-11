@@ -99,10 +99,15 @@ describe('inferContext — 矢印 / アクション', () => {
 // ----------------------------------------------------------------------------
 
 describe('inferContext — 占い師CO チェーン (規定マトリクス)', () => {
-  // ---- omitFirstDay=false (default): Day 1 朝には過去夜なし、 ただし first-seek != 'none' なら 0日目 結果が報告可 ----
-  test('Day 1 + omitFirstDay=false + first-seek=all (default): 0日目 結果 1件報告可 → day + player', () => {
+  // ---- omitFirstDay=false (default): Day 1 朝には過去夜なし ----
+  test('Day 1 + omitFirstDay=false + first-seek=all (default): pastNights=0 → 上限 0 → null', () => {
     const r = inferContext('エケケ 占い師CO ', SEER_CLAIM, STATS_DAY1)
-    assert.ok(r !== null, 'first-seek != none なら Day 1 朝に 0日目 (= 行動日 0 = Day 0 の夜) の結果を 1 件報告可')
+    assert.strictEqual(r, null, 'first-seek=all のときは Day 1 朝はまだ夜行動が起きていない')
+  })
+
+  test('Day 1 + omitFirstDay=false + first-seek=no-wolf: 0日目 (= Day 0 夜の先制占い) 結果 1件報告可 → day + player', () => {
+    const r = inferContext('エケケ 占い師CO ', SEER_CLAIM, stats({ day: 1, seerFirstSeek: 'no-wolf' }))
+    assert.ok(r !== null, 'first-seek=no-wolf のみ Day 0 夜の先制占い結果を持つ規定なので 1 件報告可')
     assert.ok(hasCategory(r, 'day'))
     assert.ok(hasCategory(r, 'player'))
   })
@@ -155,17 +160,18 @@ describe('inferContext — 占い師CO チェーン (規定マトリクス)', ()
     assert.ok(hasCategory(r, 'result'))
   })
 
-  // omitFirstDay=false + first-seek=all + Day 2: pastNights=1 + 1 (= 0日目) = 上限 2 → 1 件報告済みでさらに 1 件報告可
-  test('Day 2 + first-seek=all: 1 件報告済み → 0日目 結果がまだ報告可 → day + player', () => {
+  // omitFirstDay=false + first-seek=all + Day 2: pastNights=1 → 1 件で上限
+  test('Day 2 + first-seek=all: 1 件報告済み → 上限到達 → null', () => {
     const r = inferContext('エケケ 占い師CO 2日目 ヒトミ ● ', SEER_CLAIM, STATS_DAY2)
-    assert.ok(r !== null, 'first-seek != none で行動日 0 の結果も報告可なので 1 件目で上限に達しない')
-    assert.ok(hasCategory(r, 'day'))
-    assert.ok(hasCategory(r, 'player'))
+    assert.strictEqual(r, null, 'first-seek=all のときは pastNights=1 なので 1 件で上限')
   })
 
-  test('Day 2 + first-seek=none: 1 件報告済み → 上限到達 → null', () => {
-    const r = inferContext('エケケ 占い師CO 2日目 ヒトミ ● ', SEER_CLAIM, stats({ day: 2, seerFirstSeek: 'none' }))
-    assert.strictEqual(r, null, 'first-seek=none で pastNights=1 - 1 = 0 なので 1 件目で上限。 ただし実際は 1 件報告済み → 過去夜カウントずれだが null は維持')
+  // omitFirstDay=false + first-seek=no-wolf + Day 2: pastNights=1 + 1 (= 0日目) = 上限 2 → 1 件報告済みでさらに 1 件報告可
+  test('Day 2 + first-seek=no-wolf: 1 件報告済み → 0日目 結果がまだ報告可 → day + player', () => {
+    const r = inferContext('エケケ 占い師CO 2日目 ヒトミ ● ', SEER_CLAIM, stats({ day: 2, seerFirstSeek: 'no-wolf' }))
+    assert.ok(r !== null, 'first-seek=no-wolf で行動日 0 の結果も報告可なので 1 件目で上限に達しない')
+    assert.ok(hasCategory(r, 'day'))
+    assert.ok(hasCategory(r, 'player'))
   })
 
   // omitFirstDay=true + first-seek=all + Day 2: pastNights=2 → 2 件まで OK
@@ -444,11 +450,17 @@ describe('inferContext — 行頭プレイヤー名のみ', () => {
 // buildDayCandidates: 0日目 拡張 (first-seek 連動)
 // ----------------------------------------------------------------------------
 
-describe('buildDayCandidates — 0日目 (first-seek 連動)', () => {
+describe('buildDayCandidates — 0日目 (first-seek=no-wolf 限定)', () => {
   test('first-seek = none: 0日目 候補は出ない (= 通常通り 1日目〜)', () => {
     const candidates = buildDayCandidates(3, 'none')
     const labels = candidates.map(c => c.label)
     assert.deepStrictEqual(labels, ['1日目', '2日目', '3日目'])
+  })
+
+  test('first-seek = all: 0日目 候補は出ない (= 通常通り 1日目〜)', () => {
+    const candidates = buildDayCandidates(2, 'all')
+    const labels = candidates.map(c => c.label)
+    assert.deepStrictEqual(labels, ['1日目', '2日目'])
   })
 
   test('first-seek = no-wolf: 0日目 候補が含まれる', () => {
@@ -457,22 +469,16 @@ describe('buildDayCandidates — 0日目 (first-seek 連動)', () => {
     assert.deepStrictEqual(labels, ['0日目', '1日目', '2日目', '3日目'])
   })
 
-  test('first-seek = all: 0日目 候補が含まれる', () => {
-    const candidates = buildDayCandidates(2, 'all')
-    const labels = candidates.map(c => c.label)
-    assert.deepStrictEqual(labels, ['0日目', '1日目', '2日目'])
-  })
-
-  test('currentDay = 1: first-seek 規定下では 0日目 + 1日目', () => {
+  test('currentDay = 1 + no-wolf: 0日目 + 1日目', () => {
     const candidates = buildDayCandidates(1, 'no-wolf')
     const labels = candidates.map(c => c.label)
     assert.deepStrictEqual(labels, ['0日目', '1日目'])
   })
 
-  test('0日目 候補の info 表示は first-seek 由来を明示', () => {
+  test('0日目 候補の info 表示は先制占いを明示', () => {
     const candidates = buildDayCandidates(1, 'no-wolf')
     const day0 = candidates.find(c => c.label === '0日目')
     assert.ok(day0)
-    assert.match(day0!.info ?? '', /first-seek/)
+    assert.match(day0!.info ?? '', /先制占い/)
   })
 })
