@@ -26,13 +26,21 @@
   let masonGroup = $derived(groups.find(g => g.role === 'mason'))
   let nekomataGroup = $derived(groups.find(g => g.role === 'nekomata'))
 
-  // Column range: nights 1 to maxDay-1, extended if forecasts exist beyond
+  // Column range: 表示 Day 1 〜 maxDay-1。 forecasts や assertions / actions に書かれた
+  // 行動日 N があれば Day N+1 まで列を延長する (= 行動日 N → 表示 Day N+1 欄に表示する
+  // CLAUDE.md「Day 軸プリンシプル」 の慣習に従う)。
   let maxNight = $derived.by(() => {
     let m = maxDay - 1
     for (const group of tableGroups) {
       for (const row of group.rows) {
         for (const night of row.forecasts.keys()) {
           if (night > m) m = night
+        }
+        for (const actionDay of row.assertions.keys()) {
+          if (actionDay >= 0 && actionDay + 1 > m) m = actionDay + 1
+        }
+        for (const actionDay of row.actions.keys()) {
+          if (actionDay >= 0 && actionDay + 1 > m) m = actionDay + 1
         }
       }
     }
