@@ -38,12 +38,14 @@ type Checkpoint = {
   solve?: boolean
   roles: Map<string, RoleExpectation>
   assumptions: Map<string, string>
+  wolfPairDenyals: [string, string][]
 }
 
 const expectPattern = /^#\s*@expect(?:-skip)?\s+(.+)$/
 const expectSkipPattern = /^#\s*@expect-skip\s/
 const assumePattern = /^#\s*@assume\s+(.+)$/
 const endAssumePattern = /^#\s*@end-assume\s*$/
+const denyWolfPairPattern = /^#\s*@deny-wolf-pair\s+(.+)$/
 
 function extractCheckpoints(rawText: string) {
   const fmMatch = rawText.match(/^(---\n[\s\S]*?\n---\n)/)
@@ -58,9 +60,10 @@ function extractCheckpoints(rawText: string) {
     const line = bodyLines[i].trim()
     const expectMatch = expectPattern.exec(line)
     const assumeMatch = assumePattern.exec(line)
+    const denyMatch = denyWolfPairPattern.exec(line)
     const isEndAssume = endAssumePattern.test(line)
 
-    if (expectMatch || assumeMatch || isEndAssume) {
+    if (expectMatch || assumeMatch || denyMatch || isEndAssume) {
       if (isEndAssume) {
         if (current !== null) {
           checkpoints.push(current)
@@ -69,7 +72,7 @@ function extractCheckpoints(rawText: string) {
         continue
       }
       if (current === null) {
-        current = { lineNumber: i, skip: false, roles: new Map(), assumptions: new Map() }
+        current = { lineNumber: i, skip: false, roles: new Map(), assumptions: new Map(), wolfPairDenyals: [] }
       }
       if (expectMatch) {
         if (expectSkipPattern.test(line)) {
@@ -82,6 +85,12 @@ function extractCheckpoints(rawText: string) {
         const colonIdx = content.indexOf(':')
         if (colonIdx >= 0) {
           current.assumptions.set(content.slice(0, colonIdx).trim(), content.slice(colonIdx + 1).trim())
+        }
+      }
+      if (denyMatch) {
+        const names = denyMatch[1].split(',').map(n => n.trim()).filter(Boolean)
+        if (names.length === 2) {
+          current.wolfPairDenyals.push([names[0], names[1]])
         }
       }
     } else {
@@ -242,6 +251,24 @@ function runCheckpoint(
       merged.set(seat, role as SystemRole)
     }
     options = { ...options, assumptions: merged }
+  }
+
+  // @deny-wolf-pair <A>, <B> 構文を options.wolfPairDenyals に merge (TS integration と同じ).
+  if (checkpoint.wolfPairDenyals.length > 0) {
+    const resolveSeat = (playerName: string): Seat => {
+      const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
+      if (seat == null) {
+        throw new Error(`@deny-wolf-pair: player "${playerName}" not found in game`)
+      }
+      return seat
+    }
+    options = {
+      ...options,
+      wolfPairDenyals: [
+        ...options.wolfPairDenyals,
+        ...checkpoint.wolfPairDenyals.map(([a, b]): [Seat, Seat] => [resolveSeat(a), resolveSeat(b)]),
+      ],
+    }
   }
 
   const { result: wasmResult, error } = analyzeViaWasm(vs, setup, options)

@@ -22,6 +22,7 @@ use std::sync::LazyLock;
 // hot path で繰り返し参照するため module-level lazy 解決. TS index.ts:11-18 と同じ pattern.
 static WOLF_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_seer_result(EnumSpecies::Wolf));
 static FOX_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::PassiveDieWhenDivined));
+static GUARD_ROLE: LazyLock<SystemRole> = LazyLock::new(|| single_role_by_trait(RoleTrait::ActionGuard));
 static VILLAGER_ROLE: LazyLock<SystemRole> = LazyLock::new(|| {
     single_role_by_predicate(|r| r.faction() == Faction::Village && r.traits().is_empty())
 });
@@ -430,6 +431,39 @@ impl VillageRetar {
                 SeatRole { seat: seat_a, role: *WOLF_ROLE },
                 SeatRole { seat: seat_b, role: *WOLF_ROLE },
             ]);
+        }
+
+        // 護衛先整合性: 狐不在の平和夜は護衛成功で説明される ⇒ 真狩人の護衛先 = 襲撃先 = 非狼。
+        // よって「S=bodyguard かつ T=wolf」(S=狩人CO席, T=その平和夜の護衛先) の世界を否定する。
+        // これも「S≠bodyguard または T≠wolf」= denyOneOf 制約 (要素 role は heterogeneous)。
+        // 狐がいると平和を狐が説明しうるため、setup の狐数が 0 のときのみ発火させる (健全側に倒す)。
+        if self.setup.get(&*FOX_ROLE).copied().unwrap_or(0) == 0 {
+            let guard_role_str = GUARD_ROLE.to_string();
+            for (&day, killed) in &self.night_kills_by_day {
+                if !killed.is_empty() {
+                    continue; // 平和夜 (夜死体なし) のみ対象
+                }
+                for (&seat, status) in &self.vs.statuses {
+                    if !status.claiming || status.claiming_role != guard_role_str {
+                        continue;
+                    }
+                    let target = match status.actions.get(&day) {
+                        Some(&t) => t,
+                        None => continue,
+                    };
+                    // 両方まだ可能なときだけ追加 (片方が既に不可能なら制約は満たされている)
+                    if !ctx.possibilities.has_role(seat, *GUARD_ROLE) {
+                        continue;
+                    }
+                    if !ctx.possibilities.has_role(target, *WOLF_ROLE) {
+                        continue;
+                    }
+                    deny_one_of.push(vec![
+                        SeatRole { seat, role: *GUARD_ROLE },
+                        SeatRole { seat: target, role: *WOLF_ROLE },
+                    ]);
+                }
+            }
         }
 
         let ctx = self.context.as_ref().unwrap();

@@ -1,0 +1,36 @@
+---
+title: 護衛成功（狐不在の平和夜）⇒ 確定狩人の護衛先は非狼
+tags: [bodyguard, guard, peace]
+setup:
+  werewolf: 1
+  bodyguard: 1
+  villager: 2
+rules:
+  general.first-victim: none
+---
+
+# 狩狼村村 (4 人)。 A だけが狩人CO。
+++A、B、C、D
+
+# Day 1 昼: B 処刑 (無CO)。
+B 処刑
+
+# Day 1 夜: 平和 (護衛成功)。
+平和
+
+# A は Day 1 夜に C を護衛したと主張 (right-align → Day 1)。
+A 狩人CO C護衛
+
+# 推理:
+# - 狩人は CO 必須なので、 唯一の狩人CO A は確定狩人 (A=狼なら真狩人不在で setup 矛盾)。
+# - 狼 1 匹が B処刑で全滅するなら村勝ち終了のはずだが継続中 → B は非狼 (=villager)。
+# - 残る狼は C か D。
+# 護衛先整合性 (本テストの対象):
+# - 狐不在の平和夜は護衛成功で説明される ⇒ 確定狩人 A の護衛先 C = 襲撃先 = 非狼。
+# - よって C=villager、 残る狼は D=werewolf に一意決定する。
+#
+# 修正前は C/D が {villager, werewolf} のまま (護衛先未使用) で fail。
+# @expect A: [bodyguard]
+# @expect B: [villager]
+# @expect C: [villager]
+# @expect D: [werewolf]

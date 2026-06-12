@@ -10,6 +10,7 @@ import { systemRoles } from '../types/index.ts'
 // 単一役職 const (役職追加時に他役職が新規に該当しなければ自動追従).
 const wolfRole = singleRoleBySeerResult('wolf')
 const foxRole = singleRoleByTrait('passive', 'die-when-divined')
+const guardRole = singleRoleByTrait('action', 'guard')
 const villagerRole = singleRoleByPredicate(r => {
   const x = systemRoles.get(r)!
   return x.faction === 'village' && x.traits.length === 0
@@ -655,6 +656,28 @@ export class VillageRetar {
       ])
     }
 
+    // 護衛先整合性: 狐不在の平和夜は護衛成功で説明される ⇒ 真狩人の護衛先 = 襲撃先 = 非狼。
+    // よって「S=bodyguard かつ T=wolf」(S=狩人CO席, T=その平和夜の護衛先) の世界を否定する。
+    // これも「S≠bodyguard または T≠wolf」= denyOneOf 制約 (要素 role は heterogeneous)。
+    // 狐がいると平和を狐が説明しうるため、setup の狐数が 0 のときのみ発火させる (健全側に倒す)。
+    if ( (this.setup.get(foxRole) ?? 0) === 0 ) {
+      for ( const [day, killed] of this.nightKillsByDay ) {
+        if ( killed.length > 0 ) continue   // 平和夜 (夜死体なし) のみ対象
+        for ( const [seat, status] of this.vs.statuses.entries() ) {
+          if ( !status.claiming || status.claimingRole !== guardRole ) continue
+          const target = status.actions.get(day)
+          if ( target == null ) continue
+          // 両方まだ可能なときだけ追加 (片方が既に不可能なら制約は満たされている)
+          if ( !this.context.possibilities.hasRole(seat, guardRole) ) continue
+          if ( !this.context.possibilities.hasRole(target, wolfRole) ) continue
+          denyOneOf.push([
+            { seat, role: guardRole },
+            { seat: target, role: wolfRole },
+          ])
+        }
+      }
+    }
+
     if ( this.context.requireOneOf.length > 0 || denyOneOf.length > 0 ) {
       const snapshot = saveContext(this.context)
       // requireOneOf（fixRole）とdenyOneOf（denyRole）の全組み合わせを列挙
@@ -665,10 +688,12 @@ export class VillageRetar {
 
       VARIATION:
       for ( const fixVariation of fixVariations ) {
+        DENYVAR:
         for ( const denyVariation of denyVariations ) {
           if (this.isAborted()) break VARIATION
           restoreContext(this.context, snapshot)
           if ( fixVariation ) {
+            // fixVariation 適用失敗は、 この fix では全 deny 組合せが無効 → 次の fixVariation へ
             for ( const {seat, role} of fixVariation ) {
               if ( ! this.context.possibilities.fixRole(seat, role) ) {
                 continue VARIATION
@@ -676,10 +701,12 @@ export class VillageRetar {
             }
           }
           if ( denyVariation ) {
+            // deny 組合せ適用失敗は、 この deny 組合せのみ無効 → 次の denyVariation を試す
+            // (continue VARIATION で fix へ戻すと、 同 fix 配下の他の有効な deny 組合せを取りこぼす)
             for ( const {seat, role} of denyVariation ) {
               this.context.possibilities.denyRole(seat, role)
               if ( ! this.context.possibilities.fix(seat) ) {
-                continue VARIATION
+                continue DENYVAR
               }
             }
           }

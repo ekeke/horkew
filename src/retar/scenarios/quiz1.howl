@@ -1,0 +1,56 @@
+---
+setup:
+  villager: 6
+  seer: 1
+  medium: 1
+  bodyguard: 1
+  werewolf: 3
+  possessed: 1
+rules:
+  general.first-victim: none
+  role.seer.first-seek: no-wolf
+  vote.final: final
+  vote.tiebreaker: no-lynch
+  role.bodyguard.allow-continuous-protection: false
+---
++ 高田健志(神) 高田健志 たかだけんし 神
++ うめけん うめけん
++ さかな さかな
++ kenken kenken けんけん
++ 古川洋平(古川) 古川洋平 ふるかわようへい 古川
++ しんたろー しんたろー
++ けーすけ けーすけ
++ いまき いまき
++ つかさ つかさ
++ もるてん もるてん
++ シャル シャル
++ HybridSense(ハイブリ) HybridSense はいぶりっどせんす ハイブリ
++ プテラたかはし(プテはし) プテラたかはし プテはし
+プテはし  処刑 
+平和
+
+神 占いCO うめけん○ 古川○
+うめけん 占いCO 神○ しんたろー○
+さかな 占いCO 古川○ つかさ○
+kenken 霊媒師CO ○ 
+古川 霊媒師CO ● 
+しんたろー 狩人CO もるてん
+けーすけ 狩人CO うめけん
+
+# 条件なし: 狩人 (しんたろー/けーすけ) は護衛先整合性だけで既に決まる
+#   (けーすけ=bodyguard なら護衛先 うめけん=非狼のはずだが、 その世界は他制約と両立せず棄却される)。
+#   一方、 高田/古川 (werewolf/possessed) と うめけん/さかな (seer/werewolf) は未確定のまま。
+# @expect しんたろー: [bodyguard]
+# @expect けーすけ: [werewolf]
+# @expect 高田健志: [werewolf, possessed]
+# @expect うめけん: [seer, werewolf]
+
+# 「古川とけーすけが両方狼はありえない」を追加すると、 残りも一意決定する:
+#   うめけん=werewolf 確定、 さかな=真seer、 古川=possessed、 高田=werewolf。
+# @deny-wolf-pair 古川洋平, けーすけ
+# @expect 高田健志: [werewolf]
+# @expect うめけん: [werewolf]
+# @expect さかな: [seer]
+# @expect 古川洋平: [possessed]
+# @expect しんたろー: [bodyguard]
+# @expect けーすけ: [werewolf]

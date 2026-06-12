@@ -14,6 +14,7 @@
  * - `@expect-deniedRoles <player>: [roles]`
  * - `@expect solve: true|false`
  * - `@assume <player>: <role>` ... `@end-assume`  checkpoint 用の前提条件
+ * - `@deny-wolf-pair <playerA>, <playerB>`  「2 人が両方狼」を否定する解析前提 (wolfPairDenyals)
  *
  * 生存/死亡のアサーションは retar の興味外 (ゲーム処理の結果) なので扱わない。
  * 必要なら lupa engine 側の `@expect-status` (src/lupa/expectations.ts) を使う。
@@ -27,7 +28,7 @@ import { VillageRetar } from './index.ts'
 import type { AnalyzeOptions } from './index.ts'
 import { defaultAnalyzeRegulation } from './defaults.ts'
 import { resolveRegulation } from '../howl/ruleset.ts'
-import type { SystemRole, Faction } from '../types/index.ts'
+import type { SystemRole, Faction, Seat } from '../types/index.ts'
 import { systemRoles } from '../types/index.ts'
 
 export const defaultAnalyzeOptions: AnalyzeOptions = {
@@ -59,11 +60,13 @@ export type Checkpoint = {
   claims: Map<string, string>
   deniedRoles: Map<string, RoleExpectation>
   assumptions: Map<string, string>
+  wolfPairDenyals: [string, string][]
 }
 
 const expectPattern = /^#\s*@expect(?:-(skip|faction|alignment|claim|deniedRoles))?\s+(.+)$/
 const assumePattern = /^#\s*@assume\s+(.+)$/
 const endAssumePattern = /^#\s*@end-assume\s*$/
+const denyWolfPairPattern = /^#\s*@deny-wolf-pair\s+(.+)$/
 
 function makeCheckpoint(lineNumber: number): Checkpoint {
   return {
@@ -75,6 +78,7 @@ function makeCheckpoint(lineNumber: number): Checkpoint {
     claims: new Map(),
     deniedRoles: new Map(),
     assumptions: new Map(),
+    wolfPairDenyals: [],
   }
 }
 
@@ -91,9 +95,10 @@ export function extractCheckpoints(rawText: string): { frontmatter: string, body
     const line = bodyLines[i].trim()
     const expectMatch = expectPattern.exec(line)
     const assumeMatch = assumePattern.exec(line)
+    const denyMatch = denyWolfPairPattern.exec(line)
     const isEndAssume = endAssumePattern.test(line)
 
-    if (expectMatch || assumeMatch || isEndAssume) {
+    if (expectMatch || assumeMatch || denyMatch || isEndAssume) {
       if (isEndAssume) {
         if (current !== null) {
           checkpoints.push(current)
@@ -110,6 +115,9 @@ export function extractCheckpoints(rawText: string): { frontmatter: string, body
         }
         if (assumeMatch) {
           parseAssume(current, assumeMatch[1])
+        }
+        if (denyMatch) {
+          parseDenyWolfPair(current, denyMatch[1])
         }
       }
     } else {
@@ -195,6 +203,12 @@ function parseAssume(checkpoint: Checkpoint, content: string) {
   checkpoint.assumptions.set(playerName, role)
 }
 
+function parseDenyWolfPair(checkpoint: Checkpoint, content: string) {
+  const names = content.split(',').map(n => n.trim()).filter(Boolean)
+  if (names.length !== 2) return
+  checkpoint.wolfPairDenyals.push([names[0], names[1]])
+}
+
 export function buildAnalyzeOptions(meta: Record<string, any>): AnalyzeOptions {
   // meta.rules があれば retar default に上乗せして regulation を解決する。
   // meta.options で regulation が明示指定されていれば最終的にそちらが優先される (spread 順)。
@@ -244,6 +258,23 @@ export function runCheckpointTests(
       merged.set(seat, role as SystemRole)
     }
     options = { ...options, assumptions: merged }
+  }
+
+  if (checkpoint.wolfPairDenyals.length > 0) {
+    const resolveSeat = (playerName: string): Seat => {
+      const seat = [...players.entries()].find(([, n]) => n === playerName)?.[0]
+      if (seat == null) {
+        throw new Error(`@deny-wolf-pair: player "${playerName}" not found in game`)
+      }
+      return seat
+    }
+    options = {
+      ...options,
+      wolfPairDenyals: [
+        ...options.wolfPairDenyals,
+        ...checkpoint.wolfPairDenyals.map(([a, b]): [Seat, Seat] => [resolveSeat(a), resolveSeat(b)]),
+      ],
+    }
   }
 
   const retar = new VillageRetar(vs, setup, options)
